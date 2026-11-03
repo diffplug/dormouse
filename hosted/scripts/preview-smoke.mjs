@@ -374,7 +374,7 @@ export async function relaySmoke(
   sha,
   {
     fetcher = fetch,
-    oneTime = (relay, page) => oneTimeSmoke(relay, page),
+    oneTime = oneTimeSmoke,
     attempts = 1,
     retryMs = 10_000,
     wait = delay,
@@ -401,7 +401,7 @@ export async function smokeAll(
     fetcher = fetch,
     preview = false,
     providers = [],
-    oneTime = (relay, page) => oneTimeSmoke(relay, page),
+    oneTime,
     attempts = 1,
     retryMs = 10_000,
     wait = delay,
@@ -431,9 +431,10 @@ if (
 ) {
   const [origins, sha] = process.argv.slice(2);
   assert.match(sha ?? "", /^[a-f0-9]{40}$/);
-  const { account, relay, voice, connect } = JSON.parse(origins);
+  const parsed = JSON.parse(origins);
+  const { account, voice, connect } = parsed;
   // A just-uploaded Worker may take a short time to become reachable everywhere.
-  await smokeAll({ account, relay, voice, connect }, sha, { preview: true, attempts: 6 });
+  await smokeAll(parsed, sha, { preview: true, attempts: 6 });
   console.log(
     `Preview smoke checks passed: ${account}/login, ${connect}/connect/, ${voice} (${sha})`,
   );

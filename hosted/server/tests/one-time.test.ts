@@ -50,10 +50,13 @@ const UNHASHED_SCRIPT = `${ONE_TIME_PAGE_PATH}assets/plain.js`;
 const PAGE_SHELL = `<!doctype html><script type="module" crossorigin src="${PAGE_SCRIPT}"></script>`;
 const POCKET_SHELL = "<!doctype html><title>Pocket</title>";
 
+const relayBundle = bundleWorker(ENTRIES.relay);
+
 async function start(connectEntry: string) {
+  const [connectBundle, relayScript] = await Promise.all([bundleWorker(connectEntry), relayBundle]);
   const mf = new Miniflare(
     together(
-      miniflareOptions("connect", (await bundleWorker(connectEntry)).outputFiles[0].text, {
+      miniflareOptions("connect", connectBundle.outputFiles[0].text, {
         bindings: { APP_ORIGIN: origin },
         routes: [`${new URL(origin).host}/*`],
         serviceBindings: {
@@ -73,7 +76,7 @@ async function start(connectEntry: string) {
           },
         },
       }),
-      miniflareOptions("relay", (await bundleWorker(ENTRIES.relay)).outputFiles[0].text, {
+      miniflareOptions("relay", relayScript.outputFiles[0].text, {
         bindings: { APP_ORIGIN: relay, CONNECT_ORIGIN: origin },
         routes: [`${new URL(relay).host}/*`],
         // Pocket's shell for every path, so a path the relay left to it shows.

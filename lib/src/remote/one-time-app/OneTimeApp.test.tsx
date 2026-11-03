@@ -65,7 +65,7 @@ vi.mock('../client/install-state', () => ({ isInstalledWebApp: () => true }));
 vi.mock('../pocket-app/remote-wall', () => ({
   mountRemoteWall: (client: unknown, capabilities?: unknown) => fake.mount(client, capabilities),
 }));
-vi.mock('../pocket-app/deployment', () => ({ oneTimeFrameDomainFor: () => fake.frameDomain }));
+vi.mock('../pocket-app/deployment', () => ({ frameDomainFor: () => fake.frameDomain }));
 vi.mock('../pocket-app/PocketWall', () => ({
   PocketWall: (props: { persist?: boolean; onError?: (error: unknown) => void; sessionsHeader?: ReactNode; browsers?: { session: unknown; frameDomain: string; transport: unknown; salt: () => Uint8Array } }) => {
     fake.wall = props;

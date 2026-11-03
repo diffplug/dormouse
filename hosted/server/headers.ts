@@ -71,21 +71,14 @@ export const NO_PAGE_RULES: PathRules = {
 };
 
 /**
- * Which of the relay's two kinds a path is: a non-page prefix, or Pocket's
- * (`docs/specs/pocket-app.md` -> "Serving the built bundle") — every other path.
- */
-export function relayPathKind(path: string): "api" | "pocket" {
-  return RELAY_NON_PAGE_PREFIXES.some((prefix) => under(path, prefix)) ? "api" : "pocket";
-}
-
-/**
- * The relay's rules: Pocket's (with the camera) on Pocket's paths, and the
- * runs-nothing policy on the non-page prefixes. Pocket needs `APP_ORIGIN`, and
+ * The relay's rules: the runs-nothing policy on the non-page prefixes, and
+ * Pocket's (with the camera) on every other path
+ * (`docs/specs/pocket-app.md` -> "Serving the built bundle"). Pocket needs `APP_ORIGIN`, and
  * a value that is not exactly an http(s) origin could write a directive of its
  * own into the header: the runs-nothing policy answers instead.
  */
 export const relayRules: RulesFor = (path, appOrigin) => {
-  if (relayPathKind(path) === "api") return NO_PAGE_RULES;
+  if (RELAY_NON_PAGE_PREFIXES.some((prefix) => under(path, prefix))) return NO_PAGE_RULES;
   const origin = exactOrigin(appOrigin);
   return {
     policy: origin ? pocketContentSecurityPolicy(origin, HOSTED_FRAME_DOMAIN) : RUNS_NOTHING_POLICY,

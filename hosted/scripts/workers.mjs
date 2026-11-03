@@ -16,15 +16,13 @@ const hosted = new URL("../", import.meta.url);
  * may outrun it.
  */
 export const APP_WORKERS = {
+  // Without a `previewMain`, a preview runs the production entry: neither of the
+  // next two mappers passes anything a preview lacks.
   connect: {
     config: "wrangler.connect.jsonc",
-    // The production entry: it holds no secret and no database a preview lacks.
-    previewMain: "server/connect-worker.ts",
   },
   relay: {
     config: "wrangler.relay.jsonc",
-    // The production entry: its mapper passes nothing a preview lacks.
-    previewMain: "server/relay-worker.ts",
     secrets: () => ["RELAY_ENROLL_SECRET", "RELAY_VAPID_PUBLIC_KEY", "RELAY_VAPID_PRIVATE_KEY"],
     previewSecret: "RELAY_ENROLL_SECRET",
     /** Its preview also gets a VAPID pair, so push works with no production credential. */
@@ -64,6 +62,17 @@ export const WORKERS = {
   frames: { config: "wrangler.frames.jsonc" },
   ...APP_WORKERS,
 };
+
+/**
+ * `durableObjects` with each binding to another Worker's class renamed, so a
+ * preview or dev Worker never binds a deployed script's namespace.
+ */
+export const renameBoundScripts = (durableObjects, rename) => ({
+  ...durableObjects,
+  bindings: durableObjects.bindings.map((binding) =>
+    binding.script_name ? { ...binding, script_name: rename(binding.script_name) } : binding,
+  ),
+});
 
 /** A Wrangler config: JSON, plus `//` comments on lines of their own. */
 export const parseConfig = (text) => JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""));

@@ -3,7 +3,7 @@ import { writeFile, mkdir, appendFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { vapidKeysFrom } from "./vapid.mjs";
-import { APP_WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
+import { APP_WORKERS, deployWorkers, fromStage, readConfigs, renameBoundScripts } from "./workers.mjs";
 
 export function required(env, name, section = "Provision PR previews") {
   if (!env[name])
@@ -37,7 +37,7 @@ export function previewConfig(base, env, worker, hyperdriveId) {
     throw new Error("BUILD_SHA must be a commit SHA");
   const config = {
     name,
-    main: fromStage(APP_WORKERS[worker].previewMain),
+    main: fromStage(APP_WORKERS[worker].previewMain ?? base.main),
     compatibility_date: base.compatibility_date,
     compatibility_flags: base.compatibility_flags,
     workers_dev: true,
@@ -61,13 +61,10 @@ export function previewConfig(base, env, worker, hyperdriveId) {
   // production's. Migrations travel only with the Durable Objects a Worker
   // implements: one that implements none starts with none to delete.
   if (base.durable_objects) {
-    const bindings = base.durable_objects.bindings.map((binding) =>
-      binding.script_name
-        ? { ...binding, script_name: previewName(env.PR_NUMBER, binding.script_name) }
-        : binding,
+    config.durable_objects = renameBoundScripts(base.durable_objects, (script) =>
+      previewName(env.PR_NUMBER, script),
     );
-    config.durable_objects = { ...base.durable_objects, bindings };
-    if (base.migrations && bindings.some((binding) => !binding.script_name))
+    if (base.migrations && base.durable_objects.bindings.some((binding) => !binding.script_name))
       config.migrations = base.migrations;
   }
   if (base.ratelimits)

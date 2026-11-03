@@ -104,12 +104,13 @@ export function hostedOrigin(relay: RelayBuild): string | null {
 }
 
 /**
- * Where a Hosted build's one-time link sends a phone:
+ * Where this build's one-time link sends a phone:
  * {@link HOSTED_ONE_TIME_ORIGIN}, or in a dev Hosted build its own relay origin,
  * whose old page path redirects to the page that local or preview Worker pairs
- * with. Only {@link hostedOrigin} says whether this build makes links at all.
+ * with; `null` in a self-host build.
  */
-export function oneTimeLinkOrigin(relay: RelayBuild): string {
+export function oneTimeLinkOrigin(relay: RelayBuild): string | null {
+  if (relay.mode !== 'hosted') return null;
   return isDevHostedBuild(relay) ? relay.origin : HOSTED_ONE_TIME_ORIGIN;
 }
 

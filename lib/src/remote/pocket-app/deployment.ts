@@ -37,19 +37,13 @@ export function parsePocketDeployment(body: unknown): PocketDeployment {
 
 /**
  * The parent of this page's frame origins, or `null` where it frames nothing:
- * the frame Worker lets only Hosted's production Pocket frame it, and a preview
- * serves the same bundle at another origin.
+ * the frame Worker lets only Hosted's production Pocket and one-time page frame
+ * it, and a preview serves the same bundles at other origins.
  */
 export function frameDomainFor(deployment: PocketDeployment | null, origin: string): string | null {
-  return deployment === 'hosted' && origin === DEFAULT_RELAY_ORIGIN ? HOSTED_FRAME_DOMAIN : null;
-}
-
-/**
- * The parent of the one-time page's frame origins, or `null` where it frames
- * nothing, by {@link frameDomainFor}'s rule: only Hosted's production page.
- */
-export function oneTimeFrameDomainFor(origin: string): string | null {
-  return origin === HOSTED_ONE_TIME_ORIGIN ? HOSTED_FRAME_DOMAIN : null;
+  return deployment === 'hosted' && (origin === DEFAULT_RELAY_ORIGIN || origin === HOSTED_ONE_TIME_ORIGIN)
+    ? HOSTED_FRAME_DOMAIN
+    : null;
 }
 
 /**

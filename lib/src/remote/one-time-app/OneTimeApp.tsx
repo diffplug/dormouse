@@ -29,7 +29,7 @@ import {
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import type { RemoteWebSocket } from '../ws';
 import { disposeAllSessions } from '../../lib/terminal-registry';
-import { oneTimeFrameDomainFor } from '../pocket-app/deployment';
+import { frameDomainFor } from '../pocket-app/deployment';
 import { PocketWall, type PocketBrowsers } from '../pocket-app/PocketWall';
 import type { FrameSession } from '../client/frame-client';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
@@ -392,7 +392,7 @@ export function OneTimeConnecting({ onCancel }: { onCancel: () => void }): React
 }
 
 /** Where this page frames pages: Hosted's own, as Pocket's. */
-const pageFrameDomain = () => oneTimeFrameDomainFor(location.origin);
+const pageFrameDomain = () => frameDomainFor('hosted', location.origin);
 /** In a frame's origin where Pocket names a Burrow; the salt alone keeps it apart. */
 const ONE_TIME_FRAME_SCOPE = 'one-time';
 

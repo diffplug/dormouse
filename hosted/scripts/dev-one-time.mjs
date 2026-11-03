@@ -4,7 +4,7 @@ import { request } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ONE_TIME_BASE } from "../../lib/scripts/assert-pocket-worker.mjs";
-import { parseConfig } from "./workers.mjs";
+import { parseConfig, renameBoundScripts } from "./workers.mjs";
 
 /**
  * The one-time rendezvous and phone page on loopback (`docs/specs/one-time.md`
@@ -82,62 +82,48 @@ export const LOCAL_HYPERDRIVE_ID = "local-development";
 const devName = (name) => `${name}-dev`;
 
 /**
- * The connect Worker's Wrangler config, written beside the staged page.
- * Allowlisted from `hosted/wrangler.connect.jsonc` like the preview's: its
- * entry, the room, its migration and rate limit, and the assets binding over the
- * staging folder — never a route, so it cannot answer for production.
+ * A Worker's Wrangler config, written beside the staged page. Allowlisted from
+ * its checked-in config like the preview's: its entry, its Durable Objects,
+ * another Worker's under its dev name, its migrations and rate limits, and the
+ * assets binding over `assets` — never a route or a production secret, so it
+ * cannot answer for production.
  */
-export function devConnectConfig(base, port) {
-  return {
-    name: devName(base.name),
-    main: "../../server/connect-worker.ts",
-    compatibility_date: base.compatibility_date,
-    compatibility_flags: base.compatibility_flags,
-    assets: { ...base.assets, directory: "./connect-assets" },
-    vars: { APP_ORIGIN: devOrigin(port) },
-    durable_objects: base.durable_objects,
-    migrations: base.migrations,
-    ratelimits: base.ratelimits,
-  };
-}
+const devWorkerConfig = (base, assets, vars) => ({
+  name: devName(base.name),
+  main: `../../${base.main}`,
+  compatibility_date: base.compatibility_date,
+  compatibility_flags: base.compatibility_flags,
+  assets: { ...base.assets, directory: assets },
+  vars,
+  durable_objects: renameBoundScripts(base.durable_objects, devName),
+  migrations: base.migrations,
+  ratelimits: base.ratelimits,
+});
+
+/** The connect Worker's, over the folder the page rebuilds into. */
+export const devConnectConfig = (base, port) =>
+  devWorkerConfig(base, "./connect-assets", { APP_ORIGIN: devOrigin(port) });
 
 /**
- * The relay Worker's Wrangler config, allowlisted from
- * `hosted/wrangler.relay.jsonc` the same way: its entry, its Durable Objects,
- * the connect Worker's under its dev name, its migrations and rate limits, and
- * assets holding nothing, since the loop builds no Pocket — never a route or a
- * production secret. Its enrollment secret is {@link DEV_ENROLL_SECRET}, fixed
- * and public. Attached to the Hosted dev loop ({@link hostedAttachment}), it
- * also names that account origin and reaches its database through a local
- * Hyperdrive, never production's.
+ * The relay Worker's, over assets holding nothing, since the loop builds no
+ * Pocket. Its enrollment secret is {@link DEV_ENROLL_SECRET}, fixed and public.
+ * Attached to the Hosted dev loop ({@link hostedAttachment}), it also names that
+ * account origin and reaches its database through a local Hyperdrive, never
+ * production's.
  */
-export function devRelayConfig(base, port, connectPort, attached = null) {
-  return {
-    name: devName(base.name),
-    main: "../../server/relay-worker.ts",
-    compatibility_date: base.compatibility_date,
-    compatibility_flags: base.compatibility_flags,
-    assets: { ...base.assets, directory: "./relay-assets" },
-    vars: {
-      APP_ORIGIN: devOrigin(port),
-      CONNECT_ORIGIN: devOrigin(connectPort),
-      RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
-      ...(attached && { ACCOUNT_ORIGIN: attached.accountOrigin }),
-    },
-    ...(attached && {
-      hyperdrive: [
-        { binding: "HYPERDRIVE", id: LOCAL_HYPERDRIVE_ID, localConnectionString: attached.databaseUrl },
-      ],
-    }),
-    durable_objects: {
-      bindings: base.durable_objects.bindings.map((binding) =>
-        binding.script_name ? { ...binding, script_name: devName(binding.script_name) } : binding,
-      ),
-    },
-    migrations: base.migrations,
-    ratelimits: base.ratelimits,
-  };
-}
+export const devRelayConfig = (base, port, connectPort, attached = null) => ({
+  ...devWorkerConfig(base, "./relay-assets", {
+    APP_ORIGIN: devOrigin(port),
+    CONNECT_ORIGIN: devOrigin(connectPort),
+    RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
+    ...(attached && { ACCOUNT_ORIGIN: attached.accountOrigin }),
+  }),
+  ...(attached && {
+    hyperdrive: [
+      { binding: "HYPERDRIVE", id: LOCAL_HYPERDRIVE_ID, localConnectionString: attached.databaseUrl },
+    ],
+  }),
+});
 
 /** One GET through the Worker, as a browser on the loopback origin sends it. */
 function status(port, path) {

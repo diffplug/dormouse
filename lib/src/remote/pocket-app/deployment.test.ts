@@ -16,7 +16,6 @@ import {
   deploymentDirectPeer,
   deploymentUnreachableMessage,
   frameDomainFor,
-  oneTimeFrameDomainFor,
   parsePocketDeployment,
   pocketDeploymentSource,
   readPocketDeployment,
@@ -187,19 +186,12 @@ describe('Pocket’s direct-peer factory', () => {
   });
 });
 
-describe('oneTimeFrameDomainFor', () => {
-  it('names the frame domain only at the one-time page\'s production origin', () => {
-    expect(oneTimeFrameDomainFor('https://connect.dormouse.sh')).toBe('dormouseusercontent.com');
-    expect(oneTimeFrameDomainFor('https://dormouse-connect-pr-7.example.workers.dev')).toBeNull();
-    expect(oneTimeFrameDomainFor('http://localhost:8788')).toBeNull();
-    // Nothing of a stranger's renders at Pocket's origin any more, framed or not.
-    expect(oneTimeFrameDomainFor('https://relay.dormouse.sh')).toBeNull();
-  });
-});
-
 describe('frameDomainFor', () => {
   it('names the frame domain only to Hosted at the origin the frame Worker lets frame it', () => {
     expect(frameDomainFor('hosted', 'https://relay.dormouse.sh')).toBe('dormouseusercontent.com');
+    expect(frameDomainFor('hosted', 'https://connect.dormouse.sh')).toBe('dormouseusercontent.com');
+    expect(frameDomainFor('hosted', 'https://dormouse-connect-pr-7.example.workers.dev')).toBeNull();
+    expect(frameDomainFor('hosted', 'http://localhost:8788')).toBeNull();
     expect(frameDomainFor('hosted', 'https://dormouse-relay-pr-7.example.workers.dev')).toBeNull();
     expect(frameDomainFor('self-host', 'https://relay.dormouse.sh')).toBeNull();
     expect(frameDomainFor(null, 'https://relay.dormouse.sh')).toBeNull();
