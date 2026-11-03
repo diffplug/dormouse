@@ -445,6 +445,25 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     return c.json(res);
   });
 
+  // --- Which of the Burrow's passkeys went -------------------------------
+
+  // Of the ids the Burrow names, those its own account no longer holds: another
+  // account's passkey reads as removed, as an id that never existed does.
+  app.post(API_ROUTES.burrowPasskeysRemoved, requireBurrow, async (c) => {
+    const { db, burrow } = c.var;
+    const asked = passkeyQueryIds(await readJson(c));
+    if (!asked) return c.json({ error: MALFORMED_PASSKEY_QUERY_ERROR }, 400);
+    const { rows } = await db.query<{ credentialId: string }>(
+      `SELECT "credentialId" FROM dormouse_relay_passkeys
+      WHERE "userId" = $1 AND "credentialId" = ANY($2::text[])`,
+      [burrow.userId, asked],
+    );
+    const res: PasskeysRemovedResponse = {
+      removed: removedPasskeyIds(asked, rows.map((row) => row.credentialId)),
+    };
+    return c.json(res);
+  });
+
   // --- Discovery and the Burrow's setup tokens ------------------------------
 
   app.get(API_ROUTES.burrows, requireSession, async (c) => {
@@ -460,23 +479,6 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     ]);
     const res: BurrowsResponse = {
       burrows: rows.map(({ burrowId }) => ({ burrowId, online: online.includes(burrowId) })),
-    };
-    return c.json(res);
-  });
-
-  // Of the ids the Burrow names, those its own account no longer holds: another
-  // account's passkey reads as removed, as an id that never existed does.
-  app.post(API_ROUTES.burrowPasskeysRemoved, requireBurrow, async (c) => {
-    const { db, burrow } = c.var;
-    const asked = passkeyQueryIds(await readJson(c));
-    if (!asked) return c.json({ error: MALFORMED_PASSKEY_QUERY_ERROR }, 400);
-    const { rows } = await db.query<{ credentialId: string }>(
-      `SELECT "credentialId" FROM dormouse_relay_passkeys
-      WHERE "userId" = $1 AND "credentialId" = ANY($2::text[])`,
-      [burrow.userId, asked],
-    );
-    const res: PasskeysRemovedResponse = {
-      removed: removedPasskeyIds(asked, rows.map((row) => row.credentialId)),
     };
     return c.json(res);
   });
