@@ -1852,7 +1852,7 @@ describe('Paired phones and the access log', () => {
 
     await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
     await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
-    expect(service.link.command).toHaveBeenCalledWith('revokeDevice', { id: target.id, by: 'settings' });
+    expect(service.link.command).toHaveBeenCalledWith('revokeDevice', { id: target.id });
     // No `access` event fired: the section re-read on its own.
     expect(text()).not.toContain(target.id);
     expect(text()).toContain(service.devices[0]!.id);
@@ -1886,12 +1886,12 @@ describe('Paired phones and the access log', () => {
     await openAccessLog();
     expect(logLines()).toHaveLength(service.log.length);
 
-    // Revoked from `dor`, in another process: only the event says so.
+    // Revoked from another window: only the event says so.
     const [kept, gone] = service.devices;
     service.devices = [kept!];
     service.log = [
       ...service.log,
-      { at: Date.now(), event: 'revoked', device: gone!.label, deviceId: gone!.id, by: 'dor' },
+      { at: Date.now(), event: 'revoked', device: gone!.label, deviceId: gone!.id, by: 'settings' },
     ];
     await act(async () => {
       service.link.emit('access', { name: 'access' });
@@ -1899,7 +1899,7 @@ describe('Paired phones and the access log', () => {
     const rows = [...container.querySelectorAll('ul:not([aria-label]) > li')].map((li) => li.textContent);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toContain(kept!.id);
-    expect(logLines()[0]).toContain('revoked from dor');
+    expect(logLines()[0]).toContain('revoked from Settings');
 
     // Named by the Relay: the log says so, in fixed copy.
     service.log = [
@@ -1910,6 +1910,18 @@ describe('Paired phones and the access log', () => {
       service.link.emit('access', { name: 'access' });
     });
     expect(logLines()[0]).toContain('its passkey was removed from the account');
+  });
+
+  it('reads a revocation by a requester it does not know as plain revoked', async () => {
+    const service = accessService();
+    const [device] = service.devices;
+    service.log = [{ at: Date.now(), event: 'revoked', device: device!.label, deviceId: device!.id, by: 'someone-else' }];
+    platform = { burrow: service.link };
+    await render();
+    await openAccessLog();
+    expect(logLines()[0]).toContain('revoked');
+    expect(logLines()[0]).not.toContain('revoked from');
+    expect(logLines()[0]).not.toContain('someone-else');
   });
 
   it('folds the access log, then lists it newest first in fixed copy', async () => {

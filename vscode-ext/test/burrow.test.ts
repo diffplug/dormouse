@@ -611,7 +611,7 @@ describe('burrow state store', () => {
     const { VsCodeBurrowStateStore, ACCESS_LOG_KEY } = await import('../src/burrow-store');
     const { context, store } = fakeContext();
     const target = new VsCodeBurrowStateStore(context);
-    const entry = { at: 1, event: 'revoked', device: 'Unknown device', deviceId: '00ff', by: 'dor' } as const;
+    const entry = { at: 1, event: 'revoked', device: 'Unknown device', deviceId: '00ff', by: 'settings' } as const;
 
     expect(await target.loadAccessLog()).toEqual([]);
     await target.saveAccessLog([entry]);
