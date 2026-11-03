@@ -1211,8 +1211,8 @@ describe('paired browsers, from a Burrow row', () => {
 
   it('on revoking this browser, ends the session and says why the row now offers Pair again', async () => {
     fake.listDevices.mockResolvedValue({ ok: true, devices: [OWN] });
+    const record = await knownBurrow('h1');
     fake.revokeDevice.mockImplementation(async () => {
-      const record = await knownBurrow('h1');
       fake.listKnownBurrows.mockResolvedValue([{ ...record, authorization: { state: 'pairing-required' } }]);
       return { ok: true, self: true };
     });

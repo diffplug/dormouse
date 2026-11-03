@@ -1200,11 +1200,15 @@ export class PocketClient {
 
   // --- Remote-api v1 (see ClientSessionCore) --------------------------------
 
-  async hello(capabilities?: HelloCapabilities): Promise<HelloResult> {
+  hello(capabilities?: HelloCapabilities): Promise<HelloResult> {
     const route = this.#core.establishedRoute;
-    const result = await this.#core.hello(capabilities);
-    if (result.devices === true) this.#devicesServedOn = route;
-    return result;
+    const answer = this.#core.hello(capabilities);
+    // The caller's own promise, so a hello costs its answer no turn behind the
+    // messages that follow it. A rejection is the caller's to read.
+    answer.then((result) => {
+      if (result.devices === true) this.#devicesServedOn = route;
+    }, () => {});
+    return answer;
   }
 
   // --- Paired browsers (`docs/specs/remote-api.md` -> "Paired browsers") ----
