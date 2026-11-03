@@ -129,8 +129,8 @@ export async function pushEndpointFingerprint(
  *
  * The label is ultimately terminal-supplied — `OSC 0`/`2`/`9` titles reach the
  * Pane label (`docs/specs/alert.md` -> Text And Security) — so beyond bounding
- * the length this strips control characters and the Unicode bidi and
- * zero-width format characters, which can visually reorder or hide text on a
+ * the length this strips control characters and every Unicode format and
+ * default-ignorable code point, which can visually reorder or hide text on a
  * lock screen.
  *
  * Note this deliberately keeps angle brackets. Stripping those is a
@@ -145,11 +145,9 @@ export function boundedPushText(
   const cleaned = value
     // C0, DEL, and C1 control characters.
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-    // The Arabic letter mark, zero-width and joiner characters, bidi
-    // embedding/override marks, bidi isolates, and the BOM. Dropped rather
-    // than spaced: they carry no width, so replacing them would invent gaps
-    // in an otherwise fine title.
-    .replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '')
+    // Dropped rather than spaced: they carry no width, so replacing them would
+    // invent gaps in an otherwise fine title.
+    .replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
   // Capped in code points, not UTF-16 units: a `.slice` landing mid-surrogate

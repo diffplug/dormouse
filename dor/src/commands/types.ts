@@ -332,6 +332,8 @@ export interface ToolSurfaceResponse {
 /** The error a preview answers with when a newer one replaced it while no
  *  slot exists: superseded, as the `superseded` status is, not failed. */
 export const PREVIEW_SUPERSEDED_ERROR = 'superseded by a newer preview';
+/** The user declined a question an open waited on: a choice, not a failure. */
+export const NAVIGATION_CANCELLED_ERROR = 'Navigation cancelled.';
 
 /** `dor tool --list`: the Tools `dor tool <name>` would resolve from `cwd`. */
 export interface ToolListRequest {
