@@ -142,6 +142,7 @@ test("preview configuration keeps its own Durable Objects and rate-limit namespa
   const config = previewConfig(
     {
       name: "dormouse-relay",
+      main: "server/relay-worker.ts",
       compatibility_date: "2026-01-01",
       assets: { directory: "./dist/relay" },
       durable_objects,
