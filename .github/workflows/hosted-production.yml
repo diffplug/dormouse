@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       promote:
-        description: Deploy the account, relay, and voice Workers after verification
+        description: Deploy the Workers after verification
         type: boolean
         default: false
 permissions:
@@ -100,7 +100,7 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate && pnpm --filter dormouse-hosted db:validate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      - name: Deploy the relay and verify its readiness and rendezvous, then the voice and account Workers
+      - name: Deploy the frame and connect Workers, the relay with its readiness and rendezvous verified, then the voice and account Workers
         run: node hosted/scripts/production.mjs deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
