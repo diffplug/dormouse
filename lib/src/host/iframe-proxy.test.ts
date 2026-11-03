@@ -1007,6 +1007,35 @@ describe('iframe proxy leases', () => {
     expect(await isListening(portOf(urls[0]))).toBe(false);
   }, 30_000);
 
+  it('refuses a service worker script on a local grant, and sends it nothing upstream', async () => {
+    const seen: string[] = [];
+    const port = await upstream((q, s) => { seen.push(q.url!); s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
+    const url = await frame(`http://127.0.0.1:${port}/`, leased(lease()));
+    for (const headers of [{ 'Service-Worker': 'script' }, { 'Sec-Fetch-Dest': 'serviceworker' }, { 'Service-Worker': 'script', 'Sec-Fetch-Dest': 'serviceworker' }]) {
+      expect((await request(`${url}sw.js`, { headers })).status).toBe(403);
+    }
+    expect(seen).toEqual([]);
+    // Any other script is the page's own.
+    expect((await request(`${url}app.js`, { headers: { 'Sec-Fetch-Dest': 'script' } })).status).toBe(200);
+    expect((await request(`${url}worker.js`, { headers: { 'Sec-Fetch-Dest': 'worker' } })).status).toBe(200);
+    expect(seen).toEqual(['/app.js', '/worker.js']);
+  });
+
+  it('refuses a service worker script on an allowed external grant too', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
+    const url = await frame(`http://docs.example:${port}/`, {
+      ...NO_LOG, allowExternal: true, interfaceAddresses: () => [],
+      resolve: async () => [{ address: '127.0.0.1', family: 4 }],
+    });
+    expect((await request(`${url}sw.js`, { headers: { 'Service-Worker': 'script' } })).status).toBe(403);
+  });
+
+  it('passes a service worker script through a tunneled grant, whose page is not at this port', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
+    const url = await frame(`http://127.0.0.1:${port}/`, { ...leased(lease()), tunneled: true });
+    expect((await request(`${url}sw.js`, { headers: { 'Service-Worker': 'script' } })).status).toBe(200);
+  });
+
   it('clears site data on a freshly minted grant’s first response only', async () => {
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<head></head>'); });
     const l = lease();
