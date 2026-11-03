@@ -982,7 +982,7 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // --- Setup tokens: the credential behind a Burrow's QR -------------------
+  // --- Which of the Burrow's passkeys went -------------------------------
 
   // Answered from the file a hand edit removes a passkey from, so a removal
   // leaves no tombstone. **No file is no answer, not "every passkey went"**: its
@@ -1002,6 +1002,8 @@ export function createApp(config: AppConfig): CreatedApp {
     };
     return c.json(res);
   });
+
+  // --- Setup tokens: the credential behind a Burrow's QR -------------------
 
   app.post(API_ROUTES.burrowSetupToken, requireBurrow, (c) => {
     // The token only; the Burrow composes the QR's URL (`SetupTokenResponse`)

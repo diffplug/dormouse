@@ -3,6 +3,7 @@ import { modalActionButton } from './design';
 import { FIELD_LABEL, own } from './remote-control-shared';
 import type { PairedDevice } from '../host/remote/service-protocol';
 import type { AccessEvent, AccessLogEntry } from '../remote/burrow/access-log';
+import type { RevocationRequester } from '../remote/burrow/acl';
 import {
   describeBurrowError,
   loadAccessLog,
@@ -185,17 +186,20 @@ export function AccessLogDisclosure({ entries }: { entries: AccessLogEntry[] }) 
 }
 
 /**
- * What each event reads as. Exhaustive over {@link AccessEvent}, so a new event
- * cannot render as nothing; the store already dropped any this build does not
- * know, and {@link own} stops a prototype name all the same.
+ * What a `revoked` entry says of who asked. Exhaustive over
+ * {@link RevocationRequester}, so a new requester cannot log as a bare `revoked`.
  */
-/** What a `revoked` entry says of who asked, from a member of `REVOCATION_REQUESTERS`. */
-const REVOKED_BY: Record<string, string> = {
+const REVOKED_BY: Record<RevocationRequester, string> = {
   dor: 'revoked from dor',
   settings: 'revoked from Settings',
   relay: 'revoked: its passkey was removed from the account',
 };
 
+/**
+ * What each event reads as. Exhaustive over {@link AccessEvent}, so a new event
+ * cannot render as nothing; the store already dropped any this build does not
+ * know, and {@link own} stops a prototype name all the same.
+ */
 const ACCESS_EVENT_COPY: Record<AccessEvent, (entry: AccessLogEntry) => string> = {
   paired: () => 'paired',
   'pairing-denied': (entry) => `pairing refused${because(entry.reason)}`,
