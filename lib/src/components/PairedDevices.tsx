@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { modalActionButton } from './design';
 import { FIELD_LABEL, own } from './remote-control-shared';
-import type { PairedDevice } from '../host/remote/service-protocol';
+import type { PairedDevice, UnsavedRevocation } from '../host/remote/service-protocol';
 import type { AccessEvent, AccessLogEntry } from '../remote/burrow/access-log';
 import type { RevocationRequester } from '../remote/burrow/acl';
 import {
@@ -19,6 +19,7 @@ import {
  */
 export function useAccessRecords(burrowId: string | null) {
   const [devices, setDevices] = useState<PairedDevice[] | null>(null);
+  const [unsavedRevocations, setUnsavedRevocations] = useState<UnsavedRevocation[]>([]);
   const [log, setLog] = useState<AccessLogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The newest read wins: an event can land while a revoke's re-read is still out. */
@@ -29,7 +30,8 @@ export function useAccessRecords(burrowId: string | null) {
     try {
       const [nextDevices, nextLog] = await Promise.all([loadPairedDevices(), loadAccessLog()]);
       if (mine !== seq.current) return;
-      setDevices(nextDevices);
+      setDevices(nextDevices.devices);
+      setUnsavedRevocations(nextDevices.unsavedRevocations);
       setLog(nextLog);
       setError(null);
     } catch (caught) {
@@ -47,7 +49,34 @@ export function useAccessRecords(burrowId: string | null) {
     };
   }, [reload, burrowId]);
 
-  return { devices, log, error, reload };
+  return { devices, unsavedRevocations, log, error, reload };
+}
+
+/** A phone's name and id, with the one action its row offers. */
+function DeviceRowHead({
+  device,
+  action,
+  busy,
+  onAction,
+}: {
+  device: { label: string; id: string };
+  action: string | null;
+  busy: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <div className="min-w-0">
+        <span className="text-foreground">{device.label}</span>{' '}
+        <span className="font-mono text-xs text-muted">{device.id}</span>
+      </div>
+      {action === null ? null : (
+        <button type="button" disabled={busy} className={`shrink-0 ${modalActionButton()}`} onClick={onAction}>
+          {action}
+        </button>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -76,22 +105,12 @@ export function PairedDeviceList({
       <ul>
         {devices.map((device) => (
           <li key={device.id} className="mt-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="min-w-0">
-                <span className="text-foreground">{device.label}</span>{' '}
-                <span className="font-mono text-xs text-muted">{device.id}</span>
-              </div>
-              {confirming === device.id ? null : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className={`shrink-0 ${modalActionButton()}`}
-                  onClick={() => setConfirming(device.id)}
-                >
-                  Revoke
-                </button>
-              )}
-            </div>
+            <DeviceRowHead
+              device={device}
+              action={confirming === device.id ? null : 'Revoke'}
+              busy={busy}
+              onAction={() => setConfirming(device.id)}
+            />
             <div className="text-xs text-muted">
               Paired {dayOf(device.pairedAt, now)} · {seenText(device, now)}
             </div>
@@ -124,6 +143,43 @@ export function PairedDeviceList({
                 </button>
               </div>
             ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Each phone revoked and refused whose revocation is not on disk yet, with the
+ * one thing the person can do about it besides wait for the retry.
+ */
+export function UnsavedRevocationList({
+  revocations,
+  busy,
+  onRetry,
+}: {
+  revocations: UnsavedRevocation[];
+  busy: boolean;
+  onRetry: (id: string) => Promise<boolean>;
+}) {
+  if (revocations.length === 0) return null;
+  return (
+    <div className="mt-1.5">
+      <div className={FIELD_LABEL}>Revocations not saved</div>
+      <ul>
+        {revocations.map((revocation) => (
+          <li key={revocation.id} className="mt-1">
+            <DeviceRowHead
+              device={revocation}
+              action="Save again"
+              busy={busy}
+              onAction={() => void onRetry(revocation.id)}
+            />
+            <div className="text-xs text-error">
+              Refused now, but this computer could not save that. Dormouse keeps trying; if it closes before a save
+              lands, this phone can connect again.
+            </div>
           </li>
         ))}
       </ul>

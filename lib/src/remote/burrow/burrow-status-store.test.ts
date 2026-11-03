@@ -373,7 +373,7 @@ describe('paired phones and the access log', () => {
       notify: () => {},
       on: () => () => {},
     };
-    expect(await loadPairedDevices()).toEqual([]);
+    expect(await loadPairedDevices()).toEqual({ devices: [], unsavedRevocations: [] });
     expect(await loadAccessLog()).toEqual([
       { at: 1, event: 'connected', device: 'Dormouse Pocket (browser)', presence: 'window' },
     ]);

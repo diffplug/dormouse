@@ -282,7 +282,7 @@ async function shutdown() {
   // inside Rust's `shutdown_sidecar_and_wait` grace (~2.5s) in lib.rs.
   try {
     await Promise.race([
-      browserHost.close(),
+      Promise.all([browserHost.close(), host.saveBeforeExit()]),
       new Promise((resolve) => setTimeout(resolve, 1500).unref?.()),
     ]);
   } catch {}

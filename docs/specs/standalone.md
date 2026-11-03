@@ -90,7 +90,7 @@ Source of truth: `standalone/src-tauri/src/pe_subsystem.rs`; `withoutGuiNodeDir`
 
 Source of truth: `standalone/sidecar/main.js`. Browser cleanup is pinned by `standalone/sidecar/shutdown.test.js`.
 
-**Shutdown** (`sidecar:shutdown`, stdin EOF, or SIGTERM) **is idempotent**, and **its browser-host cleanup must finish inside Rust's `shutdown_sidecar_and_wait` grace**, after which Rust kills the process group (`docs/specs/dor-browser.md` owns the teardown contract).
+**Shutdown** (`sidecar:shutdown`, stdin EOF, or SIGTERM) **is idempotent**, and **its browser-host cleanup and the Burrow's last revocation save must finish inside Rust's `shutdown_sidecar_and_wait` grace**, after which Rust kills the process group (`docs/specs/dor-browser.md` owns the teardown contract).
 
 **A parent-PID watchdog self-triggers shutdown if the Tauri process disappears**: stdin EOF is not always delivered on a force-kill, and an orphaned sidecar blocks the NSIS installer (`docs/specs/auto-update.md` → "Sidecar teardown on Windows").
 
