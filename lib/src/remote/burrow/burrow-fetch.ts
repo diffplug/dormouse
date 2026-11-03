@@ -1,8 +1,9 @@
 /**
  * The Burrow's authenticated HTTP calls to its own Relay — push delivery
  * (`push-delivery.ts`), setup-token minting (`lib/src/host/remote/service.ts`
- * → `#setupQr`), and the standing probe ({@link probeBurrowStanding}) — under
- * one transport policy, so none can drift from it.
+ * → `#setupQr`), the standing probe ({@link probeBurrowStanding}), and asking
+ * which passkeys went (`passkey-sync.ts`) — under one transport policy, so none
+ * can drift from it.
  *
  * Not the enrollment exchange: that one proves a different credential and has no
  * `burrowToken` yet (`enrollment.ts`). It shares only {@link BURROW_REQUEST_TIMEOUT_MS}.
@@ -120,7 +121,7 @@ export interface BurrowFetchOptions {
  * as JSON, authenticated as this Burrow, answered whatever its status. An
  * endpoint whose only input is the bearer still posts, with `{}`.
  */
-function burrowRequest(options: BurrowFetchOptions, route: string, body?: unknown): Promise<Response> {
+export function burrowRequest(options: BurrowFetchOptions, route: string, body?: unknown): Promise<Response> {
   return options.fetch(`${options.enrollment.relayUrl}${route}`, {
     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
     // The service replaced a webview whose CSP checked every redirect target,
