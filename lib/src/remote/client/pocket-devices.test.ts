@@ -16,6 +16,7 @@ import { deviceIdFor } from '../burrow/access-log';
 import type { BurrowOptions } from '../burrow/burrow-runtime';
 import { RemoteApiSession } from '../burrow/remote-api';
 import {
+  DEVICES_SESSION_OVER_MESSAGE,
   DEVICES_UNSUPPORTED_MESSAGE,
   DEVICE_REFUSAL_MESSAGES,
   RELAY_TOO_OLD_FOR_PROOF_MESSAGE,
@@ -97,13 +98,45 @@ describe('paired browsers, from Pocket', () => {
     expect(harness.clientTransportFrames()).toHaveLength(sentBefore);
   });
 
-  it('forgets what a hello said when the session goes', async () => {
-    const { harness } = await pairedHarness();
+  it('reads a session closed here as over, never as a Burrow too old, and sends nothing', async () => {
+    const { harness, revoked } = await pairedHarness();
     await harness.client.hello();
     expect(await harness.client.listDevices()).toMatchObject({ ok: true });
 
     harness.client.close();
-    expect(await harness.client.listDevices()).toMatchObject({ ok: false, unsupported: true });
+
+    expect(await harness.client.listDevices()).toEqual({
+      ok: false,
+      message: DEVICES_SESSION_OVER_MESSAGE,
+      unsupported: false,
+    });
+    expect(await harness.client.revokeDevice(THEIRS.id)).toEqual({ ok: false, message: DEVICES_SESSION_OVER_MESSAGE });
+    expect(revoked).toEqual([]);
+  });
+
+  it('reads an older Burrow’s ended session as over too: its age is for a live session’s hello to say', async () => {
+    const harness = await makeE2eHarness();
+    await harness.connectPaired();
+    await harness.client.hello();
+    harness.sessions.at(-1)!.end();
+    await waitFor(() => harness.client.connectedBurrowId === null, 'the goodbye');
+
+    expect(await harness.client.listDevices()).toMatchObject({ message: DEVICES_SESSION_OVER_MESSAGE, unsupported: false });
+    expect(await harness.client.revokeDevice(THEIRS.id)).toEqual({ ok: false, message: DEVICES_SESSION_OVER_MESSAGE });
+  });
+
+  it('reads a replacing session whose hello has not answered as not ready, whatever the last one said', async () => {
+    const harness = await makeE2eHarness();
+    await harness.connectPaired();
+    await harness.client.hello();
+    expect(await harness.client.listDevices()).toMatchObject({ unsupported: true });
+
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
+
+    expect(await harness.client.listDevices()).toMatchObject({ message: DEVICES_SESSION_OVER_MESSAGE, unsupported: false });
+    expect(await harness.client.revokeDevice(THEIRS.id)).toEqual({ ok: false, message: DEVICES_SESSION_OVER_MESSAGE });
+    await harness.client.hello();
+    expect(await harness.client.listDevices()).toMatchObject({ unsupported: true });
   });
 
   it('lists without a prompt on a session that rode a window, each label mapped again, and still prompts to revoke', async () => {
@@ -255,11 +288,18 @@ describe('paired browsers, from Pocket', () => {
     expect(harness.burrow.pendingChallengeCount).toBe(before);
   });
 
-  it('sends no verb on a session the Burrow has ended', async () => {
-    const { harness } = await pairedHarness();
+  it('reads a session the Burrow has ended as over, and sends nothing on it', async () => {
+    const { harness, revoked } = await pairedHarness();
     await harness.client.hello();
     harness.sessions.at(-1)!.end();
     await waitFor(() => harness.client.connectedBurrowId === null, 'the goodbye');
-    expect(await harness.client.listDevices()).toMatchObject({ ok: false, unsupported: true });
+
+    expect(await harness.client.listDevices()).toEqual({
+      ok: false,
+      message: DEVICES_SESSION_OVER_MESSAGE,
+      unsupported: false,
+    });
+    expect(await harness.client.revokeDevice(THEIRS.id)).toEqual({ ok: false, message: DEVICES_SESSION_OVER_MESSAGE });
+    expect(revoked).toEqual([]);
   });
 });

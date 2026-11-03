@@ -418,6 +418,12 @@ export const DEVICE_REFUSAL_MESSAGES: Record<DeviceRefusalCode, string> = {
 export const DEVICES_UNSUPPORTED_MESSAGE =
   'This computer’s Dormouse is too old to list its paired browsers here. Update it, or use Settings → Network on the computer.';
 
+/**
+ * A `devices.*` verb with no session to send it on, whatever ended that session:
+ * the Burrow's age is not in question, and connecting again mends it.
+ */
+export const DEVICES_SESSION_OVER_MESSAGE = 'The connection to the computer ended. Connect again to continue.';
+
 /** A Relay older than `session` proofs, which refuses the binding. */
 export const RELAY_TOO_OLD_FOR_PROOF_MESSAGE =
   'This Relay is too old to ask for your passkey here, so nothing changed. Update the Relay, or use Settings → Network on the computer.';
@@ -468,8 +474,8 @@ export class PocketClient {
     readonly handshakeHash: string;
     readonly record: KnownBurrowV1;
   } | null = null;
-  /** The session whose hello said it serves `devices.*`. */
-  #devicesServedOn: E2eRoute | null = null;
+  /** The session whose hello last answered, and whether it serves `devices.*`. */
+  #hello: { readonly route: E2eRoute; readonly devices: boolean } | null = null;
 
   #ws: PocketSocket | null = null;
   /** The open relay socket's heartbeat, or null while none is open. */
@@ -1206,7 +1212,7 @@ export class PocketClient {
     // The caller's own promise, so a hello costs its answer no turn behind the
     // messages that follow it. A rejection is the caller's to read.
     answer.then((result) => {
-      if (result.devices === true) this.#devicesServedOn = route;
+      if (route) this.#hello = { route, devices: result.devices === true };
     }, () => {});
     return answer;
   }
@@ -1215,7 +1221,8 @@ export class PocketClient {
 
   /** The paired browsers of the connected Burrow. Never prompts. */
   async listDevices(): Promise<DeviceListing> {
-    if (!this.#servesDevices()) return { ok: false, message: DEVICES_UNSUPPORTED_MESSAGE, unsupported: true };
+    const blocked = this.#devicesBlocked();
+    if (blocked) return { ok: false, message: blocked.message, unsupported: blocked.unsupported };
     const value: unknown = await this.#core.request(REMOTE_METHODS.devicesList, {});
     const answer = isDevicesListResult(value) ? value : null;
     if (answer?.outcome === 'devices') return { ok: true, devices: answer.devices.map(mapDeviceLabel) };
@@ -1230,7 +1237,8 @@ export class PocketClient {
    * does; the session's goodbye is right behind the answer.
    */
   async revokeDevice(id: string): Promise<DeviceRevocation> {
-    if (!this.#servesDevices()) return { ok: false, message: DEVICES_UNSUPPORTED_MESSAGE };
+    const blocked = this.#devicesBlocked();
+    if (blocked) return { ok: false, message: blocked.message };
     const session = this.#sessionProof;
     let answer: DevicesRevokeResult | null;
     try {
@@ -1257,9 +1265,17 @@ export class PocketClient {
     return { ok: true, self: answer.self };
   }
 
-  #servesDevices(): boolean {
+  /**
+   * Why no `devices.*` can go out, or `null`. **Only this session's own hello
+   * can say the Burrow is too old**: no session, or none whose hello answered,
+   * says nothing about the Burrow.
+   */
+  #devicesBlocked(): { readonly message: string; readonly unsupported: boolean } | null {
     const route = this.#core.establishedRoute;
-    return route !== null && route === this.#devicesServedOn;
+    if (this.#hello?.route !== route) {
+      return { message: DEVICES_SESSION_OVER_MESSAGE, unsupported: false };
+    }
+    return this.#hello.devices ? null : { message: DEVICES_UNSUPPORTED_MESSAGE, unsupported: true };
   }
 
   /** `null` is an answer this build cannot read. */
