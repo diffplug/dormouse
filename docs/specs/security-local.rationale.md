@@ -90,6 +90,10 @@ The viewer allows inline and granted scripts for interactive local reports. CSP 
 
 Why a document cannot loosen mermaid (mermaid 11.17.2, read 2026-10). Its config `sanitize` deletes every key in `secure` (which holds `securityLevel` and `secure` itself) from each `%%{init}%%` directive before merging it, and `sanitizeDirective` drops any key outside the default config, which `dompurifyConfig` is not. Under `strict`, each label passes DOMPurify as the diagram is built, and the serialized SVG passes a final DOMPurify call whose options are fixed in `render`, never read from config, so a directive's `htmlLabels` changes layout, not what survives the final pass. `render` draws the SVG into a temporary element on the page's own `document.body` before that final pass, so the per-label pass is what covers that window.
 
+## Terminal context directory actions
+
+Explore's availability uses the directory text the terminal reported; the webview cannot resolve local links. The host resolves each component with `lstat` and `readlink` and refuses a share or device target before following it. A local-looking link can therefore offer Explore and receive an unavailable-directory error. A separate availability probe would still need that validation when opening, because a link can change between the probe and the action.
+
 ## Spawned programs
 
 Why a bare name runs a planted file. On Windows, libuv's `search_path` (Node's `spawn` and `execFile`) and cross-spawn's `which` both look in the working directory before `PATH` (`docs/specs/dor-cli.rationale.md` -> "Spawning External Binaries"). A 2026-10-07 review after the nightly audit found `powershell`, `netstat`, `clip`, and `explorer.exe` spawned by bare name in the sidecar and in VS Code's extension host and pty host, and `git` in `lib/src/host/git-cli.ts`; the pty host inherited the extension host's cwd, which can be a workspace folder. The tests assert the path each spawn receives, run off Windows; none of this was exercised on a Windows machine (2026-10).
