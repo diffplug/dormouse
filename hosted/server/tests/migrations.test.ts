@@ -63,7 +63,11 @@ const PINNED: Record<string, string> = {
     "90033b32e63e8716b7622c55ae0a326a92949766c9bc9fe4eb79606c0fb07ae0",
   "025_voice_supplier.sql":
     "2f309acf773194c5a6c314c28e42f69ebb0fb45977361558fc92e3cd888bf595",
-  "026_billing_alerts.sql":
+  "026_consent_evidence.sql":
+    "161bee3780e5b6050e38b1cb44111220e5635e6556ef3c3beae94a806397f46e",
+  "027_purchase_notices.sql":
+    "022b1636fbbd6e24eb64d46776a96cc73a70fdb287313d96d8e248af93634c53",
+  "028_billing_alerts.sql":
     "1ef723bd2e37de6a5e129d6218d145d79f1f098ab62b248c23d54ee4d8a0f456",
 };
 

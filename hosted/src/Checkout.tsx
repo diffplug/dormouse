@@ -6,39 +6,25 @@ import {
   LINK_CLASS,
   MUTED_TEXT_CLASS,
 } from "dormouse-lib/site/docs-tokens";
-import { TERMS_VERSION, VOICE_DAILY_CAP, type Plan } from "../server/policy-constants";
+import { disclosure, renewalAgreement } from "../server/disclosure";
+import { TERMS_VERSION, termsArchiveUrl, type Plan } from "../server/policy-constants";
 import { planInterval, type Tier } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
-import { planOffers, refundWindow } from "./billing";
+import { planOffers } from "./billing";
 import { CHECK_CLASS, HELP_CLASS, PRIMARY_CLASS } from "./classes";
 import { WithdrawalRight } from "./Withdrawal";
-
-const TERMS_URL = "https://dormouse.sh/terms/";
 
 /** `$50/year`. */
 export const perInterval = (price: number, interval: "month" | "year") => `$${price}/${interval}`;
 
 /**
  * What the buyer agrees to beside the purchase action
- * (docs/specs/pricing.md -> "Checkout and entitlement"): price and tax,
- * renewal, cancellation, refunds, and material limits, for the chosen plan.
+ * (docs/specs/pricing.md -> "Checkout and entitlement"), for the chosen plan.
  */
 function Terms({ offer }: { offer: Tier }) {
-  const interval = planInterval(offer.id);
-  const every = interval === "year" ? "every year" : "every month";
   return (
     <ul className={`mt-6 text-sm ${MUTED_TEXT_CLASS}`}>
-      {[
-        `$${offer.price} a ${interval}, plus any applicable tax. Stripe shows the total before you pay.`,
-        `Renews automatically ${every} at $${offer.price} until you cancel.${
-          offer.id === "founding" ? " Your founding price stays for as long as your subscription does." : ""
-        }`,
-        "Cancel any time from your account page. You keep Hosted until the end of the period you paid for.",
-        `Ask within ${refundWindow(offer.id)} for a full refund, which ends the plan.${
-          offer.id === "monthly" ? " Monthly renewals are outside this guarantee." : ""
-        }`,
-        `For one person, including work use, with no device limit. Natural Voice speaks up to ${VOICE_DAILY_CAP} alarms a day; past that, alarms use the system voice.`,
-      ].map((line) => (
+      {Object.values(disclosure(offer.id, offer.price)).map((line) => (
         <li key={line} className={`py-2 leading-snug ${DASHED_ROW_CLASS}`}>
           {line}
         </li>
@@ -131,7 +117,7 @@ export function Checkout({
         />
         <span>
           I agree to the{" "}
-          <a className={LINK_CLASS} href={TERMS_URL} target="_blank" rel="noreferrer">
+          <a className={LINK_CLASS} href={termsArchiveUrl(TERMS_VERSION)} target="_blank" rel="noreferrer">
             Dormouse Hosted Terms
           </a>{" "}
           (version {TERMS_VERSION}).
@@ -146,10 +132,7 @@ export function Checkout({
           disabled={!!busy}
           onChange={(event) => setRenewal(event.target.checked)}
         />
-        <span>
-          I agree that my subscription renews automatically {planInterval(offer.id) === "year" ? "every year" : "every month"} at $
-          {offer.price} plus any applicable tax until I cancel.
-        </span>
+        <span>{renewalAgreement(offer.id, offer.price)}</span>
       </label>
       <button className={PRIMARY_CLASS} type="submit" disabled={!!busy || !terms || !renewal}>
         {busy === "checkout" ? "Opening checkout…" : "Continue to payment"}

@@ -5,14 +5,16 @@ import type { Context, Hono } from "hono";
 import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
-import { END_REASONS, foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
+import { END_REASONS, foundingCohort, idOf, run, stripeHoldsPrice, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
 import { entitledSql, subscribedSql } from "./entitlement";
 import { ACCOUNT_CLOSING, accountClosing, endAfterClosure } from "./closure";
+import { presentedLines } from "./disclosure";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
-import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
-import { sendNotices, type NoticeContext } from "./notices";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, VOICE_DAILY_CAP, isFounderName, isPlan, type Plan } from "./policy-constants";
+import { sendNotices } from "./notices";
+import type { NoticeContext } from "./notice-message";
 import { recordWithdrawal, recordedWithdrawal, settleWithdrawal, withdrawalOffer, type Contact } from "./withdrawal";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import type { EmailSender } from "pgstencil";
@@ -21,7 +23,7 @@ import type { EmailSender } from "pgstencil";
 export interface BillingHost extends AccountHost {
   /** The deployment's billing setup, null while billing is closed; throws when misconfigured. */
   setup(): BillingSetup | null;
-  /** The account's mail, which a withdrawal's acknowledgement and a dispute's notices go out by. */
+  /** The account's mail, which a purchase's confirmation, a withdrawal's acknowledgement, and a dispute's notices go out by. */
   mail(): EmailSender;
 }
 
@@ -30,6 +32,9 @@ export const CONSENT_REQUIRED = "Agree to the terms and to automatic renewal fir
 
 /** Checkout's answer to agreement with a terms version no longer current. */
 export const TERMS_CHANGED = "The terms have changed. Reload this page to read them.";
+
+/** Checkout's answer when Stripe would not charge the price the page shows, or cannot say. */
+export const CHECKOUT_UNAVAILABLE = `Checkout is unavailable right now, and nothing was charged. Try again later, or email ${SUPPORT_EMAIL}.`;
 
 /** The founders row's answer to an account not subscribed on a founding Price. */
 export const FOUNDERS_ONLY = "Only a founding subscription can join the founders row.";
@@ -200,12 +205,36 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         await billing.cancelCheckout(userId);
         return c.json({ message: ACCOUNT_CLOSING }, 409);
       }
-      // Recorded before the URL is answered, for the Price the buyer was shown.
+      // `expectPrice` held the body's `price` to the catalog's, which is not
+      // Stripe's: a Price set up at another amount never charges it.
+      const shownUsd = catalog.prices.get(priceId)!.usd;
+      const charges = await stripeHoldsPrice(billing, priceId, shownUsd, plan).catch((error: unknown) => {
+        console.error(`Reading Stripe's ${priceId} failed`, error);
+        return false;
+      });
+      if (!charges) {
+        console.error(`Checkout refused: Stripe's ${priceId} does not charge the published ${shownUsd} USD for ${plan}`);
+        await billing.cancelCheckout(userId);
+        return c.json({ message: CHECKOUT_UNAVAILABLE }, 503);
+      }
+      // Recorded before the URL is answered, for the Price the buyer was shown
+      // and what the page says at it, all from this server's own values, never
+      // the body's.
       await run(
         billing.db,
-        `INSERT INTO public.dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId")
-        VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-        [id, TERMS_VERSION, userId, plan, priceId],
+        `INSERT INTO public.dormouse_checkout_consents
+          ("checkoutId", "termsVersion", "userId", plan, "priceId", "shownUsd", "voiceDailyCap", "presentedText")
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`,
+        [
+          id,
+          TERMS_VERSION,
+          userId,
+          plan,
+          priceId,
+          shownUsd,
+          VOICE_DAILY_CAP,
+          presentedLines(plan, shownUsd, TERMS_VERSION).join("\n"),
+        ],
       );
       recordMetric(c, host(c).databaseUrl, "checkout.started", `${plan}:${ref}`);
       return c.json({ url });
@@ -302,10 +331,11 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 
 /**
  * One event, verified once: pgstencil's synchronization, and in its
- * transaction the counts, dispute suspensions, and their notices' records, so
- * a redelivery repeats none. A full refund or a lost dispute then ends the
- * subscription in Stripe, after the commit and on every delivery until it
- * has; a dispute's notice is then sent, and the cron retries one that fails.
+ * transaction the counts, dispute suspensions, a completed checkout's
+ * confirmation, and their notices' records, so a redelivery repeats none. A
+ * full refund or a lost dispute then ends the subscription in Stripe, after
+ * the commit and on every delivery until it has; a dispute's or a purchase's
+ * notice is then sent, and the cron retries one that fails.
  * Last, any subscription its owner still holds once their account is closed
  * ends ({@link endAfterClosure}).
  */
@@ -329,13 +359,25 @@ async function processEvent(
   // Set by `apply`, which pgstencil runs inside the event's transaction, and
   // skips for an event already processed.
   let owner = null as string | null;
+  let purchased = false as boolean;
   await billing.webhook(event, async (verified, trx, { ownerId, subscription: synced }) => {
     owner = ownerId;
     const count = (event: MetricEvent, label: string) =>
       countMetricInTransaction((text, values) => run(trx, text, values), event, label);
     const completed = await billing.completedCheckout(verified, trx);
-    if (completed && isPlan(completed.plan))
+    if (completed && isPlan(completed.plan)) {
       await count("checkout.completed", `${completed.plan}:${checkoutRef(completed.ref)}`);
+      const subscription = idOf((verified.data.object as Stripe.Checkout.Session).subscription);
+      if (subscription) {
+        await run(
+          trx,
+          `INSERT INTO public.dormouse_billing_notices (id, "userId", kind, "subscriptionId", "checkoutId", "createdAt")
+          VALUES (gen_random_uuid()::text, $1, 'purchase', $2, $3, $4) ON CONFLICT DO NOTHING`,
+          [completed.ownerId, subscription, completed.operation, billing.time.now()],
+        );
+        purchased = true;
+      }
+    }
     if (verified.type === "customer.subscription.deleted") {
       const subscription = verified.data.object as Stripe.Subscription;
       const plan = billing.planOf(subscription.items.data[0]?.price.id);
@@ -355,9 +397,9 @@ async function processEvent(
   // A redelivery after a failed end runs no `apply`: the charge names the owner.
   if (reversed || dispute) owner ??= await billing.ownerOfCustomer(idOf((reversed ?? dispute!.charge).customer));
   if (owner && reversed) await endForRefund(billing, owner, reversed);
-  if (owner && dispute)
+  if (owner && (dispute || purchased))
     for (const error of await sendNotices(billing, mail, context, { userId: owner }))
-      console.error("A dispute notice is recorded but not sent; the cron retries it", error);
+      console.error("A notice is recorded but not sent; the cron retries it", error);
   // A subscription for an account already closed, such as one a checkout
   // started before the closure paid for after it, ends and is refunded; a
   // failed end fails the event, so the redelivery, which runs no `apply`,

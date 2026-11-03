@@ -1,8 +1,7 @@
 // Rules: docs/specs/hosted.md -> "Billing alert".
-import { escape } from "@pgstencil/auth/email";
-import { SystemTime, type EmailMessage, type EmailSender, type Time } from "pgstencil";
+import { SystemTime, type EmailSender, type Time } from "pgstencil";
 import { queryDatabase } from "pgstencil/postgres";
-import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
+import { alertMessage, type AlertLine } from "./billing-alert-message";
 
 /** A failure that says a promised acknowledgement or settlement is overdue; the alert leads with these. */
 export class BillingOverdue extends Error {}
@@ -14,8 +13,7 @@ const ALERT_EVERY_MS = DAY_MS;
 const LEASE_MS = 5 * 60 * 1000;
 /** The account cron's period (`hosted/wrangler.jsonc`): without the table, only the run in the day's first such window mails. */
 const CRON_PERIOD_MS = 10 * 60 * 1000;
-/** How many lines one mail carries, and how long each may be. */
-const MAX_LINES = 50;
+/** How long a line a mail carries may be. */
 const MAX_LINE_CHARS = 500;
 
 /**
@@ -31,11 +29,6 @@ function scrubbed(text: string): string {
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s/]*:[^\s/]*@\S*/gi, "[connection url]")
     .replace(/(?<![\w-])(?:\d[ -]?){12,18}\d(?![\w-])/g, "[number]")
     .slice(0, MAX_LINE_CHARS);
-}
-
-interface AlertLine {
-  text: string;
-  overdue: boolean;
 }
 
 /**
@@ -56,31 +49,6 @@ const fingerprint = async (text: string) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-
-function alertMessage(lines: readonly AlertLine[], now: Date, recorded: boolean): EmailMessage {
-  const shown = lines.slice(0, MAX_LINES);
-  const overdue = shown.filter((line) => line.overdue).map((line) => line.text);
-  const errors = shown.filter((line) => !line.overdue).map((line) => line.text);
-  const sections = [
-    ...(overdue.length ? [["Overdue", overdue] as const] : []),
-    ...(errors.length ? [["Errors", errors] as const] : []),
-  ];
-  const intro = `The account Worker's billing cron failed at ${now.toISOString()}. It tries again every 10 minutes; each distinct error is mailed at most once a day.`;
-  const notes = [
-    ...(lines.length > shown.length ? [`${lines.length - shown.length} more are not listed here.`] : []),
-    ...(recorded ? [] : ["The database could not be reached to limit this alert, so it goes in the day's first run only."]),
-    `What to do: hosted/README.md -> "Billing alert".`,
-  ];
-  return {
-    from: `Dormouse Hosted <${SUPPORT_EMAIL}>`,
-    to: [SUPPORT_EMAIL],
-    subject: overdue.length ? `Dormouse Hosted billing: ${overdue.length} overdue, cron failing` : "Dormouse Hosted billing: cron failing",
-    text: [intro, ...sections.map(([title, items]) => `${title}:\n${items.map((item) => `- ${item}`).join("\n")}`), ...notes].join("\n\n"),
-    html: `<html lang="en"><body><p>${escape(intro)}</p>${sections
-      .map(([title, items]) => `<h2>${title}</h2><ul>${items.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>`)
-      .join("")}${notes.map((note) => `<p>${escape(note)}</p>`).join("")}</body></html>`,
-  };
-}
 
 /**
  * Mails `failure`'s lines to support when any has not gone out in the last

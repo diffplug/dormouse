@@ -3,7 +3,7 @@ import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe
 import { CompiledQuery, type Kysely } from "kysely";
 import { SecureRandom, SystemTime, type EmailSender, type Time } from "pgstencil";
 import { connectDatabase } from "pgstencil/postgres";
-import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
+import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY, planInterval } from "../../website/src/lib/hosted-pricing";
 import type { BillingEnv } from "./bindings";
 import { resyncDisputes } from "./billing-routes";
 import { retryClosures } from "./closure";
@@ -140,6 +140,33 @@ export function priceCatalog(setup: BillingSetup, changes: readonly PriceChange[
     usable,
     refused,
   };
+}
+
+/** Prices a Stripe client confirmed, by id, amount, plan interval, and mode: Stripe never changes a Price's amount or interval. */
+const confirmedPrices = new WeakMap<Stripe, Set<string>>();
+
+/**
+ * Whether Stripe holds Price `id` at `usd` whole US dollars every `plan`
+ * interval, in this deployment's mode. A catalog's amounts are the published
+ * prices and an operator's rows, so only this reaches what Stripe would charge.
+ */
+export async function stripeHoldsPrice(billing: Billing<Plan>, id: string, usd: number, plan: Plan) {
+  const interval = planInterval(plan);
+  let confirmed = confirmedPrices.get(billing.stripe);
+  if (!confirmed) confirmedPrices.set(billing.stripe, (confirmed = new Set()));
+  const key = `${id} ${usd} ${interval} ${billing.config.live}`;
+  if (confirmed.has(key)) return true;
+  const price = await billing.stripe.prices.retrieve(id);
+  if (
+    price.currency !== "usd" ||
+    price.unit_amount !== usd * 100 ||
+    price.recurring?.interval !== interval ||
+    price.recurring.interval_count !== 1 ||
+    price.livemode !== billing.config.live
+  )
+    return false;
+  confirmed.add(key);
+  return true;
 }
 
 /** The open cohort and its seats left; null once founding has closed. */

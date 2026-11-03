@@ -1,7 +1,7 @@
 // Node-side only: StripeDev runs an HTTP server, so no Worker entry imports this.
 import { createStripeDev } from "@pgstencil/stripe/testing";
 import type { RandomSource, Time } from "pgstencil";
-import { FOUNDING_LADDER } from "../../website/src/lib/hosted-pricing";
+import { FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing";
 import type { BillingSetup } from "./billing";
 
 /** StripeDev's founding Prices, one per ladder step. */
@@ -21,6 +21,24 @@ export async function stripeDevBilling(
   const dev = await createStripeDev(time, random, statePath, {
     recurring: { ...Object.fromEntries(DEV_FOUNDING_PRICES.map((price) => [price, "year" as const])), ...recurring },
   });
+  // StripeDev models no Price retrieval, which checkout reads what it would
+  // charge from; its Prices are the published ones.
+  const published = new Map<string, [number, "month" | "year"]>([
+    [dev.prices.monthly, [LIST_MONTHLY, "month"]],
+    [dev.prices.yearly, [LIST_ANNUAL, "year"]],
+    ...DEV_FOUNDING_PRICES.map((price, step) => [price, [FOUNDING_LADDER[step]!, "year"]] as [string, [number, "year"]]),
+  ]);
+  dev.stripe.prices.retrieve = (async (id: string) => {
+    const [usd, interval] = published.get(id) ?? [];
+    if (!usd) throw new Error(`StripeDev holds no Price ${id}`);
+    return { id, currency: "usd", unit_amount: usd * 100, livemode: false, recurring: { interval, interval_count: 1 } };
+  }) as never;
+  // Nor a customer's, which every Hosted notice reads its address from.
+  dev.stripe.customers.retrieve = (async (id: string) => {
+    const customer = dev.customers.get(id);
+    if (!customer) throw new Error(`StripeDev holds no customer ${id}`);
+    return customer;
+  }) as never;
   const setup: BillingSetup = {
     secretKey: "sk_test_dormouse_local_only",
     webhookSecret: dev.webhookSecret,

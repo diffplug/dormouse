@@ -8,9 +8,10 @@ import * as api from "./api";
 import type { Enrollment } from "./enrollment";
 import type { BillingSummary } from "../server/billing-summary";
 import type { CheckoutIntent } from "./billing";
-import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
+import { presentedLines } from "../server/disclosure";
+import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION, VOICE_DAILY_CAP, termsArchiveUrl } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
-import { WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
+import { MODEL_WITHDRAWAL_FORM, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 
 vi.mock("./api", async (original) => ({
   ...await original<typeof import("./api")>(),
@@ -363,6 +364,7 @@ describe("checkout", () => {
     expect(text()).toContain("42 left at this price");
     const go = () => button("Continue to payment");
     expect(go().disabled).toBe(true);
+    expect(container.querySelector("#agree-terms")!.closest("label")!.querySelector("a")!.href).toBe(termsArchiveUrl(TERMS_VERSION));
     await tick("agree-terms");
     expect(go().disabled).toBe(true);
     await tick("agree-renewal");
@@ -375,6 +377,25 @@ describe("checkout", () => {
     await tick("agree-renewal");
     await click("Continue to payment");
     expect(api.startCheckout).toHaveBeenCalledWith("monthly", 10, "hosted-no-plan");
+  });
+
+  it.each([
+    ["monthly", "$10 a month in US dollars", "first payment for a full refund, which ends the plan. Monthly renewals are outside this guarantee."],
+    ["yearly", "$100 a year in US dollars", "first payment or of a yearly renewal for a full refund, which ends the plan."],
+    ["founding", "$50 a year in US dollars", "first payment or of a yearly renewal for a full refund, which ends the plan."],
+  ] as const)("discloses %s's price in US dollars, its refund, limits, and withdrawal, and everything its consent records", async (plan, usd, refund) => {
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    await mount(null, { checkout: { plan, ref: null } });
+    expect(text()).toContain(`${usd}, plus any applicable tax.`);
+    expect(text()).toContain(`Ask within 30 days of your ${refund}`);
+    if (plan !== "monthly") expect(text()).not.toContain("Monthly renewals are outside");
+    expect(text()).toContain(`For one person, including work use, with no device limit. Natural Voice speaks up to ${VOICE_DAILY_CAP} alarms a day`);
+    expect(text()).toContain("you can withdraw within 14 days of buying");
+    expect(text()).toContain("Use Withdraw from contract on your billing page, or email support@dormouse.sh");
+    expect(text()).toContain(MODEL_WITHDRAWAL_FORM);
+    const price = Number(/\$(\d+)/.exec(usd)![1]);
+    for (const line of presentedLines(plan, price, TERMS_VERSION)) expect(text()).toContain(line);
   });
 
   it("reads the new price when the cohort sold out meanwhile, and asks for agreement again", async () => {
@@ -437,6 +458,9 @@ describe("billing", () => {
     expect(location.pathname).toBe("/billing");
     expect(container.querySelector("h1")?.textContent).toBe("You’re subscribed");
     expect(text()).toContain(`To the Terms (version ${TERMS_VERSION}) and to automatic renewal`);
+    expect(container.querySelector<HTMLAnchorElement>(`a[href="${termsArchiveUrl(TERMS_VERSION)}"]`)?.textContent).toBe(
+      `Terms (version ${TERMS_VERSION})`,
+    );
     expect(text()).toContain("at $50 plus any applicable tax");
     vi.mocked(api.getBilling).mockResolvedValue(FOUNDING);
     await act(async () => window.dispatchEvent(new Event("focus")));
