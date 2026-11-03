@@ -35,11 +35,11 @@ const CONNECT = { kind: 'dormouse-frame-connect' };
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the bootstrap page', () => {
-  it('expires what it can see on the parent domain alone, nameless cookies included, before the frame page loads', async () => {
+  it('expires what it can see on the parent domain alone, nameless and partitioned cookies included, before the frame page loads', async () => {
     const { written } = await load('left=by-a-sibling; a=b=c; nameless');
-    expect(written).toEqual(['left', 'a', ''].map(
-      (name) => `${name}=; Domain=frames.example; Path=/; Max-Age=0; Secure; SameSite=None`,
-    ));
+    expect(written).toEqual(['left', 'a', ''].flatMap((name) => ['', '; Partitioned'].map(
+      (jar) => `${name}=; Domain=frames.example; Path=/; Max-Age=0; Secure; SameSite=None${jar}`,
+    )));
   });
 
   it('takes its port from the parent alone, and only the first', async () => {

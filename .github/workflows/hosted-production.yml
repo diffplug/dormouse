@@ -28,19 +28,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:hosted
       - run: pnpm build:hosted
-      - name: Require accepted package provenance
-        run: node --input-type=module -e 'import { verifyPackages } from "./hosted/scripts/production.mjs"; await verifyPackages();'
       # npm exits nonzero for a failure anywhere in Hosted's tree; only pgstencil's packages gate here.
-      - name: Require npm's registry signature and provenance attestation on each pgstencil package
+      - name: Require each pgstencil package's provenance, npm signature, signer, and source commit, and that commit on main with a passing audit
         working-directory: hosted
         run: |
           npm audit signatures --json --include-attestations > "$RUNNER_TEMP/signatures.json" || true
-          jq -e '["pgstencil", "@pgstencil/auth", "@pgstencil/stripe"] as $ours
-            | [.invalid[], .missing[] | select(.name as $name | $ours | index($name))] == []
-            and ($ours - [.verified[] | select(.attestations.provenance) | .name] == [])' \
-            "$RUNNER_TEMP/signatures.json"
-      - name: Require each pgstencil package's signer and source commit, and that commit on main with a passing audit
-        run: node hosted/scripts/pgstencil-provenance.mjs "$RUNNER_TEMP/signatures.json"
+          node scripts/pgstencil-provenance.mjs "$RUNNER_TEMP/signatures.json"
         env:
           GH_TOKEN: ${{ github.token }}
       # Every Worker's static files, each under its own `dist/<worker>/`.

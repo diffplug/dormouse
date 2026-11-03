@@ -82,6 +82,14 @@ test("verifyAttestations refuses a package with no verified provenance", () => {
     return edited;
   };
   assert.throws(() => verifyAttestations({}, COMMIT), /pgstencil has no verified attestation/);
+  for (const refusal of ["invalid", "missing"]) {
+    assert.throws(
+      () => verifyAttestations({ ...report(), [refusal]: [{ name: "@pgstencil/auth" }] }, COMMIT),
+      new RegExp(`npm reports @pgstencil/auth ${refusal}`),
+    );
+  }
+  // Another package's trouble in Hosted's tree does not gate here.
+  verifyAttestations({ ...report(), invalid: [{ name: "left-pad" }], missing: [{ name: "left-pad" }] }, COMMIT);
   assert.throws(
     () => verifyAttestations({ verified: report().verified.slice(0, 2) }, COMMIT),
     /@pgstencil\/stripe has no verified attestation/,

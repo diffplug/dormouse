@@ -15,12 +15,16 @@ import type { BootstrapConnect, BootstrapReady, RelayMessage } from './protocol'
  * loads before the frame's own, so that page starts without them, and a cookie
  * of the same name on this origin alone stays, since naming a `Domain` touches
  * only that domain's. A cookie on a deeper path stays too: this page cannot see it.
+ * Partitioned cookies are a jar of their own, so each name goes from both. Once
+ * browsers carry the domain's Public Suffix List entry, none of this has work to do.
  */
 function dropParentDomainCookies(): void {
   const parent = location.hostname.slice(location.hostname.indexOf('.') + 1);
-  for (const cookie of document.cookie.split('; ')) {
+  for (const cookie of document.cookie.split('; ').filter(Boolean)) {
     const name = cookie.slice(0, Math.max(cookie.indexOf('='), 0));
-    document.cookie = `${name}=; Domain=${parent}; Path=/; Max-Age=0; Secure; SameSite=None`;
+    for (const jar of ['', '; Partitioned']) {
+      document.cookie = `${name}=; Domain=${parent}; Path=/; Max-Age=0; Secure; SameSite=None${jar}`;
+    }
   }
 }
 

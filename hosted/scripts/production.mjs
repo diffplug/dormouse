@@ -196,15 +196,19 @@ export async function productionSmoke(configs, sha, options = {}) {
     ...options,
   });
 }
-/** Each pgstencil package Hosted installs, by an entrypoint beside its `dist/provenance.json`. */
-const PGSTENCIL_PACKAGES = ["pgstencil", "@pgstencil/auth/better-auth", "@pgstencil/stripe"];
+/** Each pgstencil package Hosted installs: its npm name, and an entrypoint beside its `dist/provenance.json`. */
+export const PGSTENCIL_PACKAGES = [
+  { name: "pgstencil", entrypoint: "pgstencil" },
+  { name: "@pgstencil/auth", entrypoint: "@pgstencil/auth/better-auth" },
+  { name: "@pgstencil/stripe", entrypoint: "@pgstencil/stripe" },
+];
 /** The installed package's `dist/provenance.json`, read beside its resolved entrypoint. */
 const installedProvenance = (name) =>
   readFile(new URL("./provenance.json", import.meta.resolve(name)), "utf8");
 export async function verifyPackages(readProvenance = installedProvenance) {
   const commits = [];
-  for (const name of PGSTENCIL_PACKAGES) {
-    const provenance = JSON.parse(await readProvenance(name));
+  for (const { entrypoint } of PGSTENCIL_PACKAGES) {
+    const provenance = JSON.parse(await readProvenance(entrypoint));
     assert.match(
       provenance.commit,
       /^[a-f0-9]{40}$/,

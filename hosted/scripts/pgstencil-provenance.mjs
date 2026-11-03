@@ -11,9 +11,8 @@ import { X509Certificate } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { verifyPackages } from "./production.mjs";
+import { PGSTENCIL_PACKAGES, verifyPackages } from "./production.mjs";
 
-const NPM_PACKAGES = ["pgstencil", "@pgstencil/auth", "@pgstencil/stripe"];
 const REPOSITORY = "diffplug/pgstencil";
 const WORKFLOW = ".github/workflows/release.yml";
 const REF = "refs/heads/main";
@@ -55,45 +54,47 @@ function sourceDigestOf(certificate) {
 }
 
 const certificateOf = ({ verificationMaterial: material }) =>
-  Buffer.from(
-    material?.certificate?.rawBytes ?? material?.x509CertificateChain?.certificates?.[0]?.rawBytes ?? "",
-    "base64",
-  );
+  Buffer.from(material.certificate?.rawBytes ?? material.x509CertificateChain?.certificates[0].rawBytes, "base64");
 
 const purlOf = (name, version) => `pkg:npm/${name.replace("@", "%40")}@${version}`;
 
+/** Holds one verified provenance `bundle` of `name@version` to `commit`. */
+function verifyProvenance(name, version, bundle, commit) {
+  const release = `${name}@${version}`;
+  const der = certificateOf(bundle);
+  assert.equal(new X509Certificate(der).subjectAltName, SIGNER, `${release} was signed by another identity`);
+  assert.equal(sourceDigestOf(der), commit, `${release}'s certificate names another commit`);
+  const { subject, predicate } = JSON.parse(Buffer.from(bundle.dsseEnvelope.payload, "base64").toString("utf8"));
+  assert.deepEqual(subject.map((one) => one.name), [purlOf(name, version)], `${release}'s provenance names another package`);
+  const { externalParameters, resolvedDependencies } = predicate.buildDefinition;
+  const { ref, repository, path } = externalParameters.workflow;
+  assert.deepEqual(
+    { ref, repository, path },
+    { ref: REF, repository: `https://github.com/${REPOSITORY}`, path: WORKFLOW },
+    `${release}'s provenance names another workflow`,
+  );
+  const sources = resolvedDependencies.map((one) => one.digest?.gitCommit).filter(Boolean);
+  assert.ok(sources.length && sources.every((source) => source === commit), `${release}'s provenance names another commit`);
+}
+
 /**
  * Holds `report`, what `npm audit signatures --json --include-attestations`
- * printed, to `commit`, the one `dist/provenance.json` names. npm has verified
- * each bundle's signature, chain, and subject digest; who signed is not its
- * question, and the payload's workflow is only the signer's own claim.
+ * printed, to `commit`, the one `dist/provenance.json` names. A package counts
+ * only from `verified`, and never with an entry in `invalid` or `missing`. npm
+ * has verified each bundle's signature, chain, and subject digest; who signed is
+ * not its question, and the payload's workflow is only the signer's own claim.
  */
 export function verifyAttestations(report, commit) {
-  for (const name of NPM_PACKAGES) {
+  for (const { name } of PGSTENCIL_PACKAGES) {
+    for (const refusal of ["invalid", "missing"]) {
+      assert.ok(!report[refusal]?.some((entry) => entry.name === name), `npm reports ${name} ${refusal}`);
+    }
     const entries = (report.verified ?? []).filter((entry) => entry.name === name);
     assert.ok(entries.length, `${name} has no verified attestation`);
     for (const { version, attestationBundles = [] } of entries) {
       const provenance = attestationBundles.filter(({ predicateType }) => predicateType === PROVENANCE_PREDICATE);
       assert.ok(provenance.length, `${name}@${version} has no verified provenance attestation`);
-      for (const { bundle } of provenance) {
-        const der = certificateOf(bundle);
-        assert.equal(new X509Certificate(der).subjectAltName, SIGNER, `${name}@${version} was signed by another identity`);
-        assert.equal(sourceDigestOf(der), commit, `${name}@${version}'s certificate names another commit`);
-        const { subject, predicate } = JSON.parse(Buffer.from(bundle.dsseEnvelope.payload, "base64").toString("utf8"));
-        assert.deepEqual(subject.map((one) => one.name), [purlOf(name, version)], `${name}@${version}'s provenance names another package`);
-        const { externalParameters, resolvedDependencies } = predicate.buildDefinition;
-        const { ref, repository, path } = externalParameters.workflow;
-        assert.deepEqual(
-          { ref, repository, path },
-          { ref: REF, repository: `https://github.com/${REPOSITORY}`, path: WORKFLOW },
-          `${name}@${version}'s provenance names another workflow`,
-        );
-        const sources = resolvedDependencies.map((one) => one.digest?.gitCommit).filter(Boolean);
-        assert.ok(
-          sources.length && sources.every((source) => source === commit),
-          `${name}@${version}'s provenance names another commit`,
-        );
-      }
+      for (const { bundle } of provenance) verifyProvenance(name, version, bundle, commit);
     }
   }
 }
@@ -102,6 +103,7 @@ export function verifyAttestations(report, commit) {
 const githubJson = async (path, fetcher, token) => {
   const response = await fetcher(`https://api.github.com/${path}`, {
     headers: { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    signal: AbortSignal.timeout(60_000),
   });
   assert.equal(response.status, 200, `GitHub answered ${path} with ${response.status}`);
   return response.json();

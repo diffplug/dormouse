@@ -499,8 +499,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const expiresAtS = Math.floor((Date.now() + ENROLLMENT_TTL_MS) / 1000);
     const bytes = crypto.getRandomValues(new Uint8Array(RELAY_BEARER_BYTE_LENGTH));
     new DataView(bytes.buffer).setUint32(0, expiresAtS);
-    await signEnrollDeviceCode(enrollKey(c.env, purpose), bytes);
-    const userCode = await userCodeOf(c.env, bytes, purpose);
+    const key = enrollKey(c.env, purpose);
+    await signEnrollDeviceCode(key, bytes);
+    const userCode = await enrollUserCode(key, bytes);
     const res: BurrowEnrollBeginResponse = {
       purpose,
       deviceCode: toBase64Url(bytes),
@@ -525,11 +526,12 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     if (!isRelayBearer(deviceCode)) return answer({ status: "expired" });
     const bytes = fromBase64Url(deviceCode);
     // Expired by its own clock, or never issued for this purpose: neither reaches
-    // the database, so a poll only ever looks up a user code Hosted handed out.
+    // the database, so a poll looks up only a user code begin handed out.
     const expiresAtS = new DataView(bytes.buffer, bytes.byteOffset, DEVICE_CODE_EXPIRY_BYTES).getUint32(0);
     if (expiresAtS * 1000 <= Date.now()) return answer({ status: "expired" });
-    if (!(await isSignedEnrollDeviceCode(enrollKey(c.env, purpose), bytes))) return answer({ status: "expired" });
-    const userCode = await userCodeOf(c.env, bytes, purpose);
+    const key = enrollKey(c.env, purpose);
+    if (!(await isSignedEnrollDeviceCode(key, bytes))) return answer({ status: "expired" });
+    const userCode = await enrollUserCode(key, bytes);
     const confirmDigits = await enrollConfirmDigits(enrollSecret(c.env), userCode);
     return database(c, async (db) => {
       // The read stamps a live, unredeemed approval typed with other digits,
@@ -805,10 +807,5 @@ function enrollSecret(env: RelayEnv): string {
 function enrollKey(env: RelayEnv, purpose: "remote" | "voice") {
   const secret = enrollSecret(env);
   return purpose === "voice" ? `${secret}:voice` : secret;
-}
-
-/** A device code's user code, under its purpose's key. */
-function userCodeOf(env: RelayEnv, deviceCode: Uint8Array, purpose: "remote" | "voice") {
-  return enrollUserCode(enrollKey(env, purpose), deviceCode);
 }
 const invalidSetup = (c: Context) => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
