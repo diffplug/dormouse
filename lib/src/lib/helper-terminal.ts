@@ -11,8 +11,7 @@ import { getDefaultShellOpts } from './shell-defaults';
 import { getInheritableCwd, getTerminalPaneState, seedTerminalManualCwd } from './terminal-state-store';
 import type { HelperIdentity } from './terminal-context-types';
 
-export interface HelperTerminal extends HelperIdentity { id: string; exited?: boolean; promoting?: boolean; timer?: ReturnType<typeof setInterval> }
-const STATUS_POLL_MS = 100;
+export interface HelperTerminal extends HelperIdentity { id: string; promoting?: boolean; timer?: ReturnType<typeof setInterval> }
 const WORK_INSPECTION_MS = 2000;
 const helpers = new Map<string, HelperTerminal>();
 const pending = new Map<string, Promise<HelperTerminal>>();
@@ -38,28 +37,25 @@ export function setHelperVisible(parentId: string, visible: boolean): void {
   }
 }
 
-/** One poll per helper publishes its exit and refreshes the host work inspection. */
+/** While visible, publishes a helper's exit and refreshes the host work inspection. */
 function watchHelper(helper: HelperTerminal): void {
   clearInterval(helper.timer);
   if (!visibleParents.has(helper.parentId) || helper.promoting) return;
-  let lastInspection = 0;
   let inspecting = false;
-  helper.timer = setInterval(() => {
+  const check = () => {
     const entry = registry.get(helper.id);
-    // A replaced helper's poll stops here.
+    // A replaced helper's watch stops here.
     if (!entry || helpers.get(helper.parentId) !== helper) { clearInterval(helper.timer); return; }
-    if (entry.exited) {
-      clearInterval(helper.timer);
-      if (!helper.exited) { helper.exited = true; notifyHelpers(); }
-      return;
-    }
-    if (inspecting || Date.now() - lastInspection < WORK_INSPECTION_MS) return;
-    inspecting = true; lastInspection = Date.now();
+    if (entry.exited) { clearInterval(helper.timer); notifyHelpers(); return; }
+    if (inspecting) return;
+    inspecting = true;
     void helperHasWork(helper).catch(() => { entry.helperBusy = true; }).finally(() => {
       inspecting = false;
       if (!visibleParents.has(helper.parentId)) entry.helperBusy = undefined;
     });
-  }, STATUS_POLL_MS);
+  };
+  helper.timer = setInterval(check, WORK_INSPECTION_MS);
+  check();
 }
 
 /** Recover a live helper PTY whose source also survived. */

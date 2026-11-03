@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { registry } from '../../lib/terminal-store';
 import { messageOf } from '../../lib/errors';
 import { wallHandleOwning } from './wall-handles';
 import { MoveWorkspaceAction } from './MoveWorkspaceAction';
@@ -64,7 +65,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     navigation={tool ? <ToolNavigationButtons id={id} params={params} /> : undefined}
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
-    status={tool ? (state.currentCommand ? 'running' : 'idle') : helper?.exited ? 'exited' : 'idle'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : undefined} warning={warning}
+    status={tool ? (state.currentCommand ? 'running' : 'idle') : helper && registry.get(helper.id)?.exited ? 'exited' : 'idle'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : undefined} warning={warning}
     explorerLabel={IS_MAC ? 'Reveal in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
     browserProviders={hostBrowserProviders()} canIframe={!!platform.createIframeProxyUrl}
     onClose={onClose} onCopyId={() => copy(id)} onCopyPath={() => copy(cwd?.path ?? '')}

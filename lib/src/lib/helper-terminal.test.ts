@@ -177,6 +177,20 @@ describe('helper lifecycle', () => {
     expect(await openHelper('parent')).toBe(helper);
   });
 
+  it('publishes the exit of a helper it is watching, once', async () => {
+    const helper = await openHelper('parent');
+    setHelperVisible('parent', true);
+    const notified = vi.fn();
+    const unsubscribe = subscribeHelpers(notified);
+    try {
+      registry.get(helper.id)!.exited = true;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(notified).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(notified).toHaveBeenCalledOnce();
+    } finally { unsubscribe(); }
+  });
+
   it('retains an exited helper on reopening, publishing the exit and never restarting it', async () => {
     const helper = await openHelper('parent');
     setHelperVisible('parent', false);
@@ -186,8 +200,6 @@ describe('helper lifecycle', () => {
     try {
       setHelperVisible('parent', true);
       expect(await openHelper('parent')).toBe(helper);
-      await vi.advanceTimersByTimeAsync(100);
-      expect(helper.exited).toBe(true);
       expect(notified).toHaveBeenCalledOnce();
       await vi.advanceTimersByTimeAsync(10_000);
       expect(await openHelper('parent')).toBe(helper);
