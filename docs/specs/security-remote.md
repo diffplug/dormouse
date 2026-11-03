@@ -135,7 +135,7 @@ Pocket uses relative API URLs at the configured origin; Burrow HTTP runs in Node
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **The self-host HTTPS origin may be public; its plaintext backend may not.** Terminal access still needs local Burrow approval. | Self-hosted Relay | `relay/test/config.test.mjs`, `scripts/deploy-lint.mjs` |
+| **Under a self-host installer, the HTTPS origin may be public; its plaintext backend may not.** Terminal access still needs local Burrow approval. A Relay started by hand with no bind host listens on every interface and warns that it does. | Self-hosted Relay | `relay/test/config.test.mjs`, `relay/test/bind-host.test.mjs`, `scripts/deploy-lint.mjs` |
 
 `scripts/deploy-lint.mjs` checks that every installer still holds the controls this section and "Credentials at rest" name (`AGENTS.md` lint table); whether each is *correct* is this audit's (rationale).
 
@@ -160,7 +160,7 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 | --- | --- | --- |
 | **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | Hosted phone, Self-hosted Relay | `lib/src/remote/pocket-app/App.push.test.tsx`, `relay/test/push.test.mjs`, `remote-lib-common/test/push-seal.test.mjs` |
 | **Push, when enabled, cannot be aimed back into the tailnet.** | Self-hosted Relay | `relay/test/push-endpoint.test.mjs`, `relay/test/push.test.mjs` |
-| **A phone reaches only pages on the laptop itself, and only ones it already shows.** A frame opens at the page a browser pane or Tool embeds, never at an address the phone names and never one off that machine, through the same proxy rules as that pane, and closes when the page goes. | One-time link, Hosted phone, Self-hosted Relay | `lib/src/remote/burrow/frame-tunnel.test.ts`, `lib/src/host/remote/frame-host.test.ts`, `lib/src/host/iframe-proxy.test.ts` |
+| **A phone reaches only pages on the laptop itself, and only at origins it already shows.** A frame opens at the page a browser pane or Tool embeds, never at an address the phone names and never one off that machine, through the same proxy rules as that pane, and closes when its surface leaves that page's origin. | One-time link, Hosted phone, Self-hosted Relay | `lib/src/remote/burrow/frame-tunnel.test.ts`, `lib/src/host/remote/frame-host.test.ts`, `lib/src/host/iframe-proxy.test.ts` |
 | **Only a phone this computer paired adds a push registration; a revoked one can keep or re-add a row that never receives a push.** A signed-in session that never paired cannot register, or displace a paired phone's registration. | Hosted phone, Self-hosted Relay | `relay/test/push.test.mjs`, `hosted/server/tests/relay.test.ts` |
 
 **The relay is a dumb ciphertext pipe**: it routes `e2e` envelopes within one Client↔Burrow binding and decodes nothing. Once a Burrow has decrypted them, both directions carry untrusted bytes — inbound, `terminal.write` is keystrokes into a real shell and the ACL is the entire gate; outbound, notification text is Pane-derived, so it is **bounded on the Burrow before sealing and re-bounded at the render sink** (rationale).
@@ -182,7 +182,7 @@ The HTTPS origin may be public. Tailnet-only Serve is the installer default and 
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **Under Local networks only, terminal traffic crosses only the networks you allow.** Handshakes, pairing, alerts, and managed voice still pass through Hosted from any network. | One-time link, Hosted phone | `lib/src/host/remote/local-networks.test.ts`, `lib/src/remote/burrow/burrow-direct-only.test.ts`, `lib/src/host/remote/outbound.test.ts`, `scripts/outbound-lint.mjs` |
+| **Under Local networks only, terminal traffic crosses only the address ranges you allow.** Handshakes, pairing, alerts, and managed voice still pass through Hosted from any network. | One-time link, Hosted phone | `lib/src/host/remote/local-networks.test.ts`, `lib/src/remote/burrow/burrow-direct-only.test.ts`, `lib/src/host/remote/outbound.test.ts`, `scripts/outbound-lint.mjs` |
 | **Under Anywhere, a paired phone may relay through Hosted, end-to-end encrypted.** Cloudflare STUN sees this computer's public address as a phone connects. | One-time link, Hosted phone | `lib/src/remote/burrow/burrow-direct-only.test.ts`, `lib/src/host/remote/service.test.ts`, `lib/src/host/remote/outbound.test.ts`, `scripts/outbound-lint.mjs` |
 
 **An authorized session can leave the Relay for a WebRTC data channel, carrying what it already carried**: the same Noise session, counters, and bounds. `docs/specs/remote-api.md` -> "Direct path" owns the design and `docs/specs/remote-security-model.md` -> "Direct path" why it adds no trust layer.

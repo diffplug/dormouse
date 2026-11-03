@@ -10,6 +10,7 @@ import {
   isRelayBearer,
   HOSTED_FRAME_DOMAIN,
   pocketContentSecurityPolicy,
+  signEnrollDeviceCode,
   toBase64Url,
 } from "remote-lib-common";
 import { RUNS_NOTHING_POLICY, oneTimePagePolicy } from "../headers";
@@ -198,9 +199,14 @@ test("only a Node Burrow begins or polls an enrollment, per-address limited, and
   expect(isRelayBearer(deviceCode) && isEnrollUserCode(userCode)).toBe(true);
   const expired = fromBase64Url(deviceCode);
   expired.set([0, 0, 0, 1]);
-  expect(
-    await (await post(API_ROUTES.burrowEnrollPoll, { deviceCode: toBase64Url(expired) }, { "cf-connecting-ip": "192.0.2.4" })).json(),
-  ).toEqual({ status: "expired" });
+  await signEnrollDeviceCode(TEST_ENROLL_SECRET, expired);
+  const untagged = fromBase64Url(deviceCode);
+  untagged[31] ^= 1;
+  for (const refused of [expired, untagged]) {
+    expect(
+      await (await post(API_ROUTES.burrowEnrollPoll, { deviceCode: toBase64Url(refused) }, { "cf-connecting-ip": "192.0.2.4" })).json(),
+    ).toEqual({ status: "expired" });
+  }
   // Neither answer below reads the database either. A mismatched origin spends
   // the address's budget, and a matching one is refused once it is spent.
   const beginLimit = limitOf("RELAY_ENROLL_BEGIN_LIMIT");
