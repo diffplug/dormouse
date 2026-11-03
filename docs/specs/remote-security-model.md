@@ -27,7 +27,7 @@ Non-goals: a compromised browser runtime or operating system; a user intentional
 
 ## Passkeys
 
-Every pairing carries one WebAuthn assertion, verified by the Burrow inside the encrypted channel, and so does every connection outside a [presence window](#presence-window).
+Every pairing carries one WebAuthn assertion, verified by the Burrow inside the encrypted channel, and so does every connection outside a [presence window](#presence-window) and every [revocation from Pocket](#revocation-from-pocket).
 
 > **Passkeys are user credentials, not device identities** — synchronization puts one passkey on many physical devices and changes nothing here (rationale).
 
@@ -65,12 +65,12 @@ Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and `Burrow
 
 ## Presence proofs
 
-**Use one verifier for pairing and connection.**
+**Use one verifier for pairing, connection, and a session's own proofs.**
 
-- **The WebAuthn challenge is derived, not random.** `presenceChallenge(binding, relayNonce)` is base64url `SHA-256(lengthPrefixedConcat(domain, kind, binding fields in declared order, relayNonce))` under `dormouse/presence/v1`. **One encoding rule: a base64url field is hashed as the bytes it encodes and everything else as UTF-8** — decoded are `connectionId`, `burrowChallenge`, `handshakeHash`, and the nonce; text are the domain, the kind, `burrowId`, and `passkeyCredentialId`. Relay mints; Pocket and the Burrow each recompute, one builder, Pocket before its authenticator prompt (`docs/specs/security-remote.md` -> "Trust boundary"). `isPresenceBinding` takes **exactly one kind's fields, each bounded** — anything the challenge does not cover must not reach the Burrow inside a verified binding.
+- **The WebAuthn challenge is derived, not random.** `presenceChallenge(binding, relayNonce)` is base64url `SHA-256(lengthPrefixedConcat(domain, kind, binding fields in declared order, relayNonce))` under `dormouse/presence/v1`. **One encoding rule: a base64url field is hashed as the bytes it encodes and everything else as UTF-8** — decoded are `connectionId`, `burrowChallenge`, `handshakeHash`, and the nonce; text are the domain, the kind, `burrowId`, and `passkeyCredentialId`. A `session` binding names a connection's fields, its own kind keeping the two apart. Relay mints; Pocket and the Burrow each recompute, one builder, Pocket before its authenticator prompt (`docs/specs/security-remote.md` -> "Trust boundary"). `isPresenceBinding` takes **exactly one kind's fields, each bounded** — anything the challenge does not cover must not reach the Burrow inside a verified binding.
 - **`POST /api/reauth/begin` takes a required, kind-tagged binding** and answers the derived challenge over a one-use Relay nonce ([relay.md](./relay.md) owns both routes). **No binding, or no nonce to `finish`, is a 400** (rationale). `finish` consumes the nonce, recomputes the challenge, verifies the assertion against the **stored** key for that exact credential, and **extends nothing** — not the session's life, not the relay socket.
-- **`PresenceProofV1` travels only inside the first Client→Burrow transport payload**, carrying the binding, the Relay nonce, `accountId` (as the Relay answered sign-in), the passkey credential id, its canonical SPKI public key, and the assertion. The Burrow recomputes the challenge with the same builder, requires **every binding field to equal what it built from its own state**, verifies RP ID, origin, presence/verification policy, and signature against the *presented* key, and hashes that key for the ACL. **A Relay success flag is never evidence**, and **the verifier never throws**, including missing WebCrypto or rejected digest operations — a rejection is an ordinary denial (rationale).
-- **Every proof is fresh and single-use**: any restart — dropped transport, consumed challenge, failed handshake, later attempt — needs a new handshake, Burrow challenge, Relay nonce, and authenticator operation; one prompt per pairing, one per connection outside a [presence window](#presence-window), two on a self-hosted first run (rationale). A window ride replays no proof; it carries none.
+- **`PresenceProofV1` travels only inside the first Client→Burrow transport payload**, or for a `session` binding inside the one `devices.*` request it answers, carrying the binding, the Relay nonce, `accountId` (as the Relay answered sign-in), the passkey credential id, its canonical SPKI public key, and the assertion. The Burrow recomputes the challenge with the same builder, requires **every binding field to equal what it built from its own state**, verifies RP ID, origin, presence/verification policy, and signature against the *presented* key, and hashes that key for the ACL. **A Relay success flag is never evidence**, and **the verifier never throws**, including missing WebCrypto or rejected digest operations — a rejection is an ordinary denial (rationale).
+- **Every proof is fresh and single-use**: any restart — dropped transport, consumed challenge, failed handshake, later attempt — needs a new handshake, Burrow challenge, Relay nonce, and authenticator operation; one prompt per pairing, one per connection outside a [presence window](#presence-window), one per [revocation from Pocket](#revocation-from-pocket), two on a self-hosted first run (rationale). A window ride replays no proof; it carries none.
 - **A sign-in assertion is never a presence assertion.** Pocket signs `signinChallenge(challenge)`, base64url `SHA-256(lengthPrefixedConcat(domain, challenge's bytes))` under `dormouse/signin/v1`, never `POST /api/signin/begin`'s challenge as given, and `finish` names that challenge beside the assertion; both Relays verify against the derivation (`docs/specs/security-remote.md` -> "Trust boundary").
 - **The Relay session is authentication-plane only.** Its bearer token ([relay.md](./relay.md)) is never reusable proof of presence for a Burrow, and **has no app-session signing key beside it** (rationale).
 
@@ -80,7 +80,7 @@ Source of truth: `presenceChallenge` / `signinChallenge` / `isPresenceBinding` i
 
 **A connection may skip the assertion only on a proof this Burrow verified itself.** A presence window is Burrow memory keyed by the IK-authenticated Client static (rationale), naming the identities — account, passkey credential, key hash — that proof was verified for.
 
-- **Only a Burrow-verified proof for an active record opens or refreshes one**: a pairing proof once its record is committed, replacing any window for that static; a connection proof once the conjunction holds. **A connection that rode a window never refreshes its proof time.** Pairing always requires a proof.
+- **Only a Burrow-verified proof for an active record opens or refreshes one**: a pairing proof once its record is committed, replacing any window for that static; a connection proof once the conjunction holds. **A connection that rode a window never refreshes its proof time, and neither does a `session` proof.** Pairing always requires a proof.
 - **Open means under `PRESENCE_WINDOW_IDLE_MS` since the static's last activity and under `PRESENCE_WINDOW_MAX_MS` since the proof** ([Burrow bounds](#burrow-bounds); rationale). Activity is the proof itself or any decrypted Client→Burrow message, keepalives included, on an established session of that static (rationale).
 - **The offer is binding.** Message 2 carries it ([Connection](#connection)); a redeem consumes the challenge, is `presence-rejected` when the challenge is spent or no window was offered, and otherwise rides the offered window without evaluating it again, running the conjunction against that window's identities (a miss: `pairing-required`; rationale).
 - **The Relay can neither mint nor extend a window**: one opens only on a proof the Burrow verified, keyed by a static the Relay never sees, and only messages the Burrow decrypts count as activity.
@@ -150,9 +150,7 @@ Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`
 
 ## Revocation
 
-**Only the Burrow revokes, and revoking only narrows.** `BurrowService.revoke` is the one entry point: it takes a target — one browser's Client static, retiring every active record it holds, or one passkey credential, retiring every record paired with it — and who asked (`REVOCATION_REQUESTERS`): Settings → Remote control's paired-phone list ([relay.md](./relay.md) -> "Remote control, in the Settings dialog"), `dor remote revoke` (`docs/specs/dor-cli.md`), or the Relay ([Relay-named revocation](#relay-named-revocation)). **No command, `dor` verb, or webview message adds or restores a record**, which stays [Pairing](#pairing)'s, **or claims the Relay asked**.
-
-Reserved: a Pocket-initiated revocation calls this entry point with a requester of its own (`remote-trust-followups` -> [Account-wide devices](#account-wide-devices)).
+**Only the Burrow revokes, and revoking only narrows.** `BurrowService.revoke` is the one entry point: it takes a target — one browser's Client static, retiring every active record it holds, or one passkey credential, retiring every record paired with it — and who asked (`REVOCATION_REQUESTERS`): Settings → Remote control's paired-phone list ([relay.md](./relay.md) -> "Remote control, in the Settings dialog"), `dor remote revoke` (`docs/specs/dor-cli.md`), the Relay ([Relay-named revocation](#relay-named-revocation)), or a paired session ([Revocation from Pocket](#revocation-from-pocket)). **No command, `dor` verb, or webview message adds or restores a record**, which stays [Pairing](#pairing)'s, **or claims the Relay or a session asked**.
 
 - **A running Burrow's revocation takes effect before its save**: the live ACL drops the records, every established session no active record still authorizes ends with the goodbye, every pending connection whose Client static it left unpaired is refused `pairing-required`, and those statics' [presence windows](#presence-window) close. It queues with approvals, so neither overwrites the other's snapshot. A failed save rejects with the phone already refused, and the service applies the revocation to every ACL it reads for that Burrow, so a network-policy change that restarts the runtime keeps it; the next ACL write carries it, and the service stopping before one undoes it — Dormouse quitting, or in VS Code the broker window closing (`docs/specs/vscode.md` -> "Which window: bind-as-lease"), since the next broker loads the stored ACL (rationale).
 - **A stopped Burrow's revocation is its save**, on the service's lifecycle chain, so a Burrow starting meanwhile loads the ACL after it.
@@ -178,6 +176,27 @@ A passkey removed from a Relay's account (`docs/specs/hosted.md` -> "Burrow enro
 
 Source of truth: `createPasskeySync` in `lib/src/remote/burrow/passkey-sync.ts`, wired in `BurrowService.#startBurrow`; `passkeyQueryIds` and `removedPasskeyIds` in `remote-lib-common/src/remote/relay-common.ts`.
 
+### Revocation from Pocket
+
+A paired session reads its Burrow's paired browsers and revokes one over protocol-v1 ([remote-api.md](./remote-api.md) -> "Paired browsers"); [Relay-named revocation](#relay-named-revocation) is the lever for a Burrow out of reach. **The managed identities are the two the model has, and nothing merges them into a "device"** (rationale):
+
+| Identity | Held by | Removing it cuts |
+| --- | --- | --- |
+| Passkey | the Relay, per account; synchronized onto many devices ([Passkeys](#passkeys)) | every browser that signs in with it, on every Burrow |
+| ACL record | one Burrow, for one Client static ([Client statics](#client-statics)) | that browser on that Burrow |
+
+- **Revoking takes a fresh presence proof, never a window ride**, nor a proof shown at the connection or for an earlier request (rationale): the Burrow answers a bare request with a challenge of its own, which the proof binds in a `session` binding built from this session's id and handshake hash, and which only that request, for that id, may spend. **One live challenge per session**, on `ChallengeIssuer`'s TTL, spent before the proof is verified whatever the verdict, and voided by a newer one.
+- **The proof must be the session's own record's**: the Burrow builds the binding from its own state with that record's credential, then requires the [conjunction](#burrow-authorization) on the IK-authenticated static. A UV raise voids one still verifying ([Passkeys](#passkeys)). A refusal leaves the session up and logs `proof-denied`.
+- **Must name a browser by its `deviceIdFor` id alone, never a static or `deliveryId`**, resolved as [Revocation](#revocation) resolves one, so an id that matches nothing or more than one Client static revokes nothing. The requester is `pocket`, set by the service: **a Client names none, and `revocationRequester` never answers `pocket` or `relay` for a command.**
+- **A session revoking its own record is answered before the revocation runs**, since the goodbye then ends it and nothing after that is read ([remote-api.md](./remote-api.md) -> Transport). Pocket drops its authorization on that answer as on an authenticated `pairing-required`, keeping the pin ([pocket-app.md](./pocket-app.md) -> "Paired browsers").
+- **The list reaches only a paired session that has shown a proof**: its connection's, or one over a challenge a bare `devices.list` is answered with, which the rest of that session keeps. A window ride has shown none (rationale). Each entry is a record's mapped label, its id, approval time, last seen ([Access log](#access-log)), and whether it is the session's own, and nothing else (`docs/specs/security-remote.md` -> "Trust boundary").
+- **Must serve neither verb to a [one-time session](#one-time-connection)**, which has no passkey to prove presence with and no record: its runtime hands the session no presence.
+- **The Relay holds no device directory**: both verbs travel inside the Noise session, and a `session` binding is closed to its five fields, so the target stays Burrow memory, never in what the Relay derives the challenge from ([Residual metadata](#residual-metadata); rationale).
+- **An unreachable Burrow is shown as unreachable**: Pocket reaches only a Burrow it holds a session on.
+- **Pocket marks only its own record on each Burrow, from that Burrow's answer; nothing else is grouped**: one Pocket profile is a record per Burrow, and a phone's tab and its Home Screen install are two profiles.
+
+Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, `BurrowRuntime.#sessionPresence` in `lib/src/remote/burrow/burrow-runtime.ts`, `BurrowService.#sessionDevices` in `lib/src/host/remote/service.ts`, `PresenceBinding` in `remote-lib-common/src/security/presence.ts`.
+
 ## Access log
 
 **The Burrow records who reached it, on this machine, and never what they did.** One bounded, append-only log per machine, not per enrollment, since a one-time connection needs none; past `ACCESS_LOG_MAX_ENTRIES` the oldest entry goes (rationale).
@@ -187,13 +206,14 @@ Source of truth: `createPasskeySync` in `lib/src/remote/burrow/passkey-sync.ts`,
 | `paired`, `pairing-denied` | a pairing's ending, with its outcome code |
 | `connected` | a promotion, with how presence was shown: a proof or the window |
 | `connection-denied` | every refusal, with the specific ACL miss or presence failure the outcome never carries ([Connection](#connection)) |
+| `proof-denied` | a [session's proof](#revocation-from-pocket) refused, with why |
 | `attached` | an attach that succeeded, with its surface id |
 | `ended` | a session's end, with its path (relayed or direct) and duration |
 | `revoked` | each browser a [revocation](#revocation) cut off, with who asked, the Relay included |
 | `one-time-connected`, `one-time-denied`, `one-time-ended` | a [one-time connection](#one-time-connection)'s confirmation, refusal, and end |
 
 - **Never terminal content**: an entry holds a time, an event, the device's mapped label and id, and at most a path, presence kind, duration, refusal reason, surface id, and requester.
-- **It stays on this machine**: persisted beside the ACL (`docs/specs/security-remote.md` -> "Credentials at rest"), read only by this machine's webviews, through `accessLog` and the `access` event that says it changed, and by `dor remote log`. Last seen, on the paired-phone list, is its newest entry for that device.
+- **It stays on this machine**: persisted beside the ACL (`docs/specs/security-remote.md` -> "Credentials at rest"), read only by this machine's webviews, through `accessLog` and the `access` event that says it changed, and by `dor remote log`. Last seen, on the paired-phone list and in `devices.list`, is its newest entry for that device, and the one thing of it a Client reads ([Revocation from Pocket](#revocation-from-pocket)).
 - **It informs and authorizes nothing**: a log that cannot be read starts over, and a failed save costs entries, never an access decision.
 
 Source of truth: `lib/src/remote/burrow/access-log.ts`, `BurrowService.#logAccess` in `lib/src/host/remote/service.ts`.
@@ -311,7 +331,7 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 
 ## Residual metadata
 
-**No traffic-analysis resistance, per-Burrow unlinkability, or metadata anonymity is claimed.** The Relay still observes account and passkey authentication data, IPs, Burrow IDs and online state, routing relationships, every session's reauth exchange, push endpoints, timing, ciphertext sizes, and volume — **the last three only while the Relay is carrying the session**, since a session that has switched to the [direct path](#direct-path) leaves it the fact of the session and each end's liveness and nothing else. Two leaks follow and are accepted rather than closed (rationale): Client→Burrow timing exposes inter-keystroke timing on a relayed session while keystroke *values* stay encrypted, ending at the switch — which in exchange shows each paired peer the other's addresses, until then known only to the Relay — and one `PushSubscription` per worker scope lets a shared endpoint correlate every `deliveryId` one Pocket profile registers across Burrows. A push carries no counter, so a Relay that kept an envelope can re-deliver it ([Push sealing](#push-sealing)). A connection that rode a [presence window](#presence-window) makes no reauth exchange and answers sooner, so the Relay can tell it from one that proved. A [Relay-named revocation](#relay-named-revocation)'s question shows it which of the account's passkeys a Burrow has paired.
+**No traffic-analysis resistance, per-Burrow unlinkability, or metadata anonymity is claimed.** The Relay still observes account and passkey authentication data, IPs, Burrow IDs and online state, routing relationships, every session's reauth exchange, push endpoints, timing, ciphertext sizes, and volume — **the last three only while the Relay is carrying the session**, since a session that has switched to the [direct path](#direct-path) leaves it the fact of the session and each end's liveness and nothing else. Two leaks follow and are accepted rather than closed (rationale): Client→Burrow timing exposes inter-keystroke timing on a relayed session while keystroke *values* stay encrypted, ending at the switch — which in exchange shows each paired peer the other's addresses, until then known only to the Relay — and one `PushSubscription` per worker scope lets a shared endpoint correlate every `deliveryId` one Pocket profile registers across Burrows. A push carries no counter, so a Relay that kept an envelope can re-deliver it ([Push sealing](#push-sealing)). A connection that rode a [presence window](#presence-window) makes no reauth exchange and answers sooner, so the Relay can tell it from one that proved. A [Relay-named revocation](#relay-named-revocation)'s question shows it which of the account's passkeys a Burrow has paired. A `session` proof's reauth exchange shows it that a session asked for a prompt, never what for.
 
 **Hosted's Relay observes what the self-host Relay does**, each account's in its own `RelayRoom` ([hosted.md](./hosted.md) -> "Relay sockets"), **and keeps the label each computer enrolled under** for the account page ([hosted.md](./hosted.md) -> "Burrow enrollment"); a Client never reads it from a Relay.
 
@@ -319,23 +339,8 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 
 ## Future
 
-**Scope: remote-trust-followups** — [Device verification](#device-verification) and [Account-wide devices](#account-wide-devices).
+**Scope: remote-trust-followups** — [Device verification](#device-verification).
 
 ### Device verification
 
 `getUserMedia` inside a Home Screen web app is observable only on a real iOS device, and without it the install has only the paste field. The Client-static storage format surviving an app and phone restart is no longer open: the v3 Home Screen report is in [Client statics](#client-statics)'s rationale and in [pocket-app.rationale.md](./pocket-app.rationale.md).
-
-### Account-wide devices
-
-The account's view of its paired browsers, with [Relay-named revocation](#relay-named-revocation) as the lever for a Burrow out of reach: a list nobody can act on and a revocation with no list are halves of one feature. It is a new caller of `BurrowService.revoke` under a requester of its own ([Revocation](#revocation)).
-
-**The managed identities are the two the model has; nothing merges them into a "device"** (rationale):
-
-| Identity | Held by | Removing it cuts |
-| --- | --- | --- |
-| Passkey | the Relay, per account; synchronized onto many devices ([Passkeys](#passkeys)) | every browser that signs in with it, on every Burrow |
-| ACL record | one Burrow, for one Client static ([Client statics](#client-statics)) | that browser on that Burrow |
-
-One Pocket profile is a record per Burrow, and a phone's tab and its Home Screen install are two profiles. Pocket may mark the records that are its own, from its `KnownBurrowV1`s; nothing else is grouped.
-
-**Per-record list and revoke from Pocket**, on each online Burrow it is paired with, over protocol-v1 (`docs/specs/remote-api.md` -> "10. Paired-browser list and revoke"), which the Relay sees only as ciphertext: each record's mapped label, `deviceIdFor` id, approval time, last seen ([Access log](#access-log)), and whether it is the caller's, revoked by that id as `dor remote revoke` is, never by a static or `deliveryId`. **Revoking takes a fresh presence proof, never a window ride.** An unreachable Burrow is shown as one, Relay-named revocation being the lever that reaches it.

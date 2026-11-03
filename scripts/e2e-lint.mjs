@@ -172,7 +172,7 @@ const PHONE_PERSISTENCE =
  * the proof it checks, and the enrollment that owns all of them.
  */
 const GRANT_NAME =
-  /\b(?:BurrowAcl\w*|loadBurrowAcl|loadAcl|saveAcl|deliveryId|DELIVERY_ID_\w+|verifyPresenceProof|PresenceProofV1|BurrowEnrollment)\b/g;
+  /\b(?:BurrowAcl\w*|loadBurrowAcl|loadAcl|saveAcl|deliveryId|DELIVERY_ID_\w+|verifyPresenceProof|PresenceProofV1|SessionPresence|BurrowEnrollment)\b/g;
 
 /**
  * Every spelling of the one-time family's names: its types and guards
@@ -429,7 +429,7 @@ export const RULES = [
     // file that knows what a `DirectoryEntry` is has started to care what it is
     // carrying.
     pattern:
-      /\b(?:RemoteRequest|RemoteResponse|RemoteEventMsg|DirectoryEntry|DirectorySnapshot|TerminalDataEvent|TerminalClosedEvent|TerminalSemanticEvent|AttachParams|TerminalAttachResult|TerminalWriteParams|TerminalResizeParams|HelloParams|HelloResult|HelloCapabilities|SurfaceCloseParams|SurfaceCloseResult|REMOTE_METHODS|REMOTE_EVENTS|MAX_TERMINAL_DIMENSION|clampTerminalDimension|FRAME_METHODS|FRAME_EVENTS|DirectoryBrowser|FrameOpenParams|FrameOpenResult|HttpRequestParams|HttpResponseHead|WsOpenParams|WsMessageFragment)\b/g,
+      /\b(?:RemoteRequest|RemoteResponse|RemoteEventMsg|DirectoryEntry|DirectorySnapshot|TerminalDataEvent|TerminalClosedEvent|TerminalSemanticEvent|AttachParams|TerminalAttachResult|TerminalWriteParams|TerminalResizeParams|HelloParams|HelloResult|HelloCapabilities|SurfaceCloseParams|SurfaceCloseResult|PairedBrowserV1|DevicesListParams|DevicesListResult|DevicesRevokeParams|DevicesRevokeResult|DevicePresenceRequired|DeviceRefused|REMOTE_METHODS|REMOTE_EVENTS|MAX_TERMINAL_DIMENSION|clampTerminalDimension|FRAME_METHODS|FRAME_EVENTS|DirectoryBrowser|FrameOpenParams|FrameOpenResult|HttpRequestParams|HttpResponseHead|WsOpenParams|WsMessageFragment)\b/g,
     violationFile: 'relay/src/relay.ts',
     violation: "\nimport type { DirectoryEntry } from 'remote-lib-common';\n",
   },
@@ -678,6 +678,17 @@ export const RULES = [
     pattern: GRANT_NAME,
     violationFile: ONE_TIME_RUNTIME,
     violation: "\nimport { BurrowAcl } from 'remote-lib-common';\n",
+  },
+  {
+    rule: 'The one-time phone reaches no paired-browser verb',
+    security: 'no `devices.*` verb reachable from a one-time session',
+    kind: 'forbid',
+    // A one-time session has no passkey to prove presence with and no record of
+    // its own; its page offering the list would be the first sign of one.
+    files: ['lib/src/remote/client/one-time-client.ts', ...sourceFilesUnder([ONE_TIME_PAGE_TREE])],
+    pattern: /\bPairedBrowsers\w*|\blistDevices\b|\brevokeDevice\b|\bdevicesList\b|\bdevicesRevoke\b|['"]devices\.\w+['"]/g,
+    violationFile: 'lib/src/remote/one-time-app/OneTimeApp.tsx',
+    violation: "\nimport { PairedBrowsers } from '../pocket-app/PairedBrowsers';\n",
   },
   {
     rule: 'No presence window outside the Burrow',

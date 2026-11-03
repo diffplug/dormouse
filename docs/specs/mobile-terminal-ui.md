@@ -100,7 +100,7 @@ Source of truth: `hardwareKeySequence` and `isHardwareKeyTarget` in `lib/src/com
 
 ## Sessions screen
 
-Tapping the Session title in the `MobileWall` header asks the consumer to show the Sessions screen over the whole composition; the terminal stays mounted beneath at its size. Choosing a row shows that Session. A consumer's `settings` (`MobileSettings`: theme, and font size over a sample) open from the screen's Settings button. **A consumer's `sessionsHeader` heads the screen, not the wall**: the wall keeps one header row, so what a connection is and how to leave it live here. **Must offer the Sessions screen with no Session too**, since no header is there to tap.
+Tapping the Session title in the `MobileWall` header asks the consumer to show the Sessions screen over the whole composition; the terminal stays mounted beneath at its size. Choosing a row shows that Session. A consumer's `settings` (`MobileSettings`: theme, font size over a sample, then any sections of the consumer's own) open from the screen's Settings button. **A consumer's `sessionsHeader` heads the screen, not the wall**: the wall keeps one header row, so what a connection is and how to leave it live here. **Must offer the Sessions screen with no Session too**, since no header is there to tap.
 
 * **The font size applies to every terminal in the page, live ones refit**, so a remote Session's PTY resizes with it; **must hand it back to the theme when the composition unmounts**.
 * **Must save Settings choices only when the consumer persists them**; the one-time page does not (`docs/specs/one-time.md` -> "Phone page").

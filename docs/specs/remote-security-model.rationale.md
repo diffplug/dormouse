@@ -183,7 +183,7 @@ Loss stays recoverable by re-pairing, so this changes the advice, not the model.
 
 **Why the Burrow asks about its own ids.** The Relay names removed ids out of the ones the Burrow sends, rather than handing over the account's live set, so a Relay answering nothing revokes nothing, and a self-host `account.json` hand-edit needs no tombstone.
 
-**Why a revocation needs no signature.** Revocation fails safe, unlike approving a connection, which fails dangerously (Ned's decision, 2026-10): a forged revocation denies access and never grants it. A Relay can already refuse every session; making a refusal durable adds only the cost of re-pairing. A signed request would need an assertion for the passkeys' RP ID, the relay origin's hostname, which the account page on `hosted.` cannot make, so the lost-phone case would still need Pocket on another device. Passkey granularity has its own cost: a synchronized passkey lives on the user's other devices too, so removing it cuts them as well, and each pairs every Burrow again under a new passkey; the per-record list ([Account-wide devices](./remote-security-model.md#account-wide-devices)) is to be the finer lever wherever a paired Burrow is reachable.
+**Why a revocation needs no signature.** Revocation fails safe, unlike approving a connection, which fails dangerously (Ned's decision, 2026-10): a forged revocation denies access and never grants it. A Relay can already refuse every session; making a refusal durable adds only the cost of re-pairing. A signed request would need an assertion for the passkeys' RP ID, the relay origin's hostname, which the account page on `hosted.` cannot make, so the lost-phone case would still need Pocket on another device. Passkey granularity has its own cost: a synchronized passkey lives on the user's other devices too, so removing it cuts them as well, and each pairs every Burrow again under a new passkey; the per-record list ([Revocation from Pocket](./remote-security-model.md#revocation-from-pocket)) is the finer lever wherever a paired Burrow is reachable.
 
 **Why the question is HTTP and only the nudge a frame.** The route both Relays already gate on a `burrowToken` reads the passkey rows where they live. Hosted's `RelayRoom` opens no database connection and reads no Burrow frame but the routing envelope (`docs/specs/security-hosted.md` -> "Relay boundary"), so a question over the socket would have to be answered somewhere that may not hold the answer.
 
@@ -191,8 +191,16 @@ Loss stays recoverable by re-pairing, so this changes the advice, not the model.
 
 **Why a missing `account.json` answers nothing on the self-host Relay.** Hand-editing is the mechanism, and `burrows.json` already reads an absent file as no answer (`docs/specs/relay.md` -> "Guardrails"), because reading it as an empty list would turn a moved-aside file into a Relay that de-pairs every phone on every Burrow.
 
-## Account-wide devices
+## Revocation from Pocket
 
 **Why Pocket alone is not enough.** Pocket reaches only the Burrows it is paired with, and only while they are online; "cut this phone off everywhere" is wanted most when a Burrow is asleep.
+
+**Why revoking takes a proof when a Relay-named revocation takes none.** A Relay's word needs nothing because the Relay could already refuse every session. A session's word is a person's choice made on a phone, and a window ride may be nobody at all: script in the Pocket origin, or whoever holds the unlocked phone (`docs/specs/security.md` -> "What is not defended"). Ned's decision, 2026-11. It guards this verb only: an authorized session is a person at the keyboard (`docs/specs/security-remote.md` -> "Remote Control"), and an attached terminal can type `dor remote revoke`.
+
+**Why the list asks for a proof too.** The design left who may read other devices' metadata open, so the first cut took the conservative reading: a window ride lists nothing until it proves (2026-11, a decision for Ned). The same keyboard argument says it protects little, since `dor remote list` in an attached terminal reads the same; relaxing it to any paired session is deleting one branch.
+
+**Why the target is not in the binding.** `POST /api/reauth/begin` takes the binding in the clear, so a device id in it would hand the Relay exactly the record field it must not hold. The challenge stands in: the Burrow remembers which request it answered with it, and the assertion signs the challenge.
+
+**Why a self-revocation is answered first.** The runtime's revoke sends the goodbye before its save, and a Client reads nothing after a goodbye, so an answer afterwards never arrives and the phone would have to spend a prompt on a Connect to learn what it just did. A failed save at that point still leaves the phone refused ([Revocation](./remote-security-model.md#revocation)).
 
 **Why nothing is grouped.** Per-Burrow statics are unlinkable by construction, and iOS gives a Safari tab and the Home Screen install separate storage. The one cross-Burrow link, a profile's shared push endpoint, is an accepted leak ([Residual metadata](#residual-metadata)) that covers only profiles with push on — not evidence to build on.

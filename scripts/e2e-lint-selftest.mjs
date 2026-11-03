@@ -161,6 +161,7 @@ for (const violation of [
   '\nconst __selftest = DELIVERY_ID_BYTE_LENGTH;\n',
   '\nconst __selftest = verifyPresenceProof;\n',
   '\ntype __Selftest = PresenceProofV1;\n',
+  '\ntype __Selftest = SessionPresence;\n',
   '\ntype __Selftest = BurrowEnrollment;\n',
 ]) {
   selftest.withAppended(
@@ -168,6 +169,14 @@ for (const violation of [
     violation,
     `a grant name in lib/src/remote/burrow/one-time-runtime.ts stays green: ${violation.trim()}`,
   );
+}
+
+// The paired-browser rule, for the phone's client and each spelling of a verb.
+for (const [file, violation] of [
+  ['lib/src/remote/client/one-time-client.ts', "\nconst __selftest = 'devices.list';\n"],
+  ['lib/src/remote/one-time-app/OneTimeApp.tsx', '\nconst __selftest = REMOTE_METHODS.devicesRevoke;\n'],
+]) {
+  selftest.withAppended(file, violation, `a paired-browser verb in ${file} stays green: ${violation.trim()}`);
 }
 
 // The presence-window rule must redden in every scope it names, not just the

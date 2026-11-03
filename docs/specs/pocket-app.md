@@ -66,7 +66,7 @@ flowchart TD
 * **An absent `terminal.closed` exit code maps to `-1`, not `0`** — the local path's sentinel.
 * **Exited surfaces stay in the directory** with `alive:false`, so the wall filters them out of selectable sessions and the active-pane default.
 
-**The pinned record picks a row's primary action.** The Burrows view lists the `KnownBurrowV1` records (no record, no row), stamped online from `GET /api/burrows`, offering Connect alone or **Pair again** alone. **Nothing asks the Burrow**: only an authenticated `pairing-required` outcome moves a row, dropping local authorization without discarding the pin (rationale).
+**The pinned record picks a row's primary action.** The Burrows view lists the `KnownBurrowV1` records (no record, no row), stamped online from `GET /api/burrows`, offering Connect alone or **Pair again** alone. **Nothing asks the Burrow**: only an authenticated `pairing-required` outcome, or the answer to this browser's own [revoke](#paired-browsers), moves a row, dropping local authorization without discarding the pin (rationale).
 
 **A record of the signed-in account the Relay's list no longer names is removed**, marked only off a `GET /api/burrows` that succeeded; a listed offline Burrow, and another account's record, keep the offline row. **Must bind removal checks to the account that started the list read.** Its row reads `BURROW_REMOVED_COPY` for the deployment Pocket read (`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone, which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the list**, showing that copy instead where the Burrow is gone; a failed re-read keeps the original.
 
@@ -138,6 +138,18 @@ Source of truth: `getPushAvailability` / `subscribeToPushInBrowser` in `lib/src/
 **Sign out and forget this phone asks first, then runs Remove for every record, of every account**, draining the deletion queue once; then it clears the `:passkey:` cache and the push digest, unsubscribes the scope's `PushSubscription` (rationale), and signs out, so the next launch is a first visit. **It reaches nothing on a Burrow**: each counts this phone among its paired phones until that Burrow revokes it or disconnects ([remote-security-model.md](./remote-security-model.md) → Revocation).
 
 Source of truth: `PocketClient.forgetThisPhone` in `lib/src/remote/client/pocket-client.ts`; `requirePocketKeyStorage` in `lib/src/remote/client/pocket-db.ts`; `generatePocketKeyPair` in `lib/src/remote/client/pocket-private-key.ts`.
+
+## Paired browsers
+
+**Pocket lists and revokes a Burrow's paired browsers from that Burrow's row, on a session with no wall behind it, and from the wall's Settings, on the session it has**; the protocol is [remote-api.md](./remote-api.md) -> "Paired browsers", the rules [remote-security-model.md](./remote-security-model.md) -> "Revocation from Pocket". The one-time page offers neither.
+
+- **The row offers it only on a Burrow it can authorize on**: paired, of the signed-in account, and listed; an offline row keeps it disabled and says Offline, which is all Pocket can reach of that Burrow.
+- **Every step that may prompt starts on a tap**: Settings lists nothing until asked, and a row's tap carries through its connect to the list. A revoke confirms inline first, saying what it cuts, since the prompt names none of it.
+- **Must leave everything as it was when the person dismisses the prompt**, and word that itself, never in the browser's text.
+- **A browser revoking itself ends its session and returns to the list**, whose row then offers Pair again, saying why.
+- **A dead Relay session or cached passkey drops to sign-in**, as [An expired session](#an-expired-session-drops-to-sign-in) does.
+
+Source of truth: `PairedBrowsers` in `lib/src/remote/pocket-app/PairedBrowsers.tsx`, `PocketClient.revokeDevice` in `lib/src/remote/client/pocket-client.ts`.
 
 ## Serving the built bundle
 

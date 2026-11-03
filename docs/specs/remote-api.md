@@ -9,7 +9,7 @@
 
 ## v1 scope
 
-**Scope: protocol-v1** — the shipped protocol, the smallest that lets a phone (Dormouse Pocket) **sign in, pick a pane, see it live, and type into it**. **Must restrict it to the directory, one terminal attachment per session, terminal input/resize, and the [frame tunnel](#frames); never layout operations.** Everything else, screencast browsers and the VR headset included, is staged in [Future](#future).
+**Scope: protocol-v1** — the shipped protocol, the smallest that lets a phone (Dormouse Pocket) **sign in, pick a pane, see it live, and type into it**. **Must restrict it to the directory, one terminal attachment per session, terminal input/resize, the [frame tunnel](#frames), and a paired session's [paired browsers](#paired-browsers); never layout operations.** Everything else, screencast browsers and the VR headset included, is staged in [Future](#future).
 
 Source of truth: `remote-lib-common/src/remote/wire.ts` and `remote-lib-common/src/remote/frame-wire.ts` (every wire type and shared constant named below), `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts` (the Burrow implementation).
 
@@ -105,7 +105,7 @@ Requests are correlated by `requestId`, events by `subId` (`RemoteRequest`, `Rem
 
 First exchange on the control channel; establishes version and viewer kind (`HelloParams` / `HelloResult`), and returns the flat `grants` ([Input authority](#input-authority-and-multiple-viewers)). **The Burrow does not *gate* other methods on it** — authorization already happened at connect time, so skipping hello grants nothing.
 
-**`capabilities.frames` decides what the directory names**: the Burrow lists browser entries and `browser` fields only to a session whose latest hello declared it, re-listing when a hello changes that. `HelloResult.frames` says the Burrow serves the tunnel.
+**`capabilities.frames` decides what the directory names**: the Burrow lists browser entries and `browser` fields only to a session whose latest hello declared it, re-listing when a hello changes that. `HelloResult.frames` says the Burrow serves the tunnel, and `HelloResult.devices` that it serves [paired browsers](#paired-browsers) to this session.
 
 Reserved: further `capabilities` fields (screencast formats, window support) land additively; see [Future](#future).
 
@@ -220,6 +220,17 @@ A Client shows an embedded page by framing it at an origin of its own, the *fram
 - An absolute-origin subresource the page names (`http://localhost:5173/...`) never reaches the tunnel.
 
 Source of truth: `remote-lib-common/src/remote/frame-wire.ts`, `FrameTunnel` in `lib/src/remote/burrow/frame-tunnel.ts`, `createBurrowFrameHost` in `lib/src/host/remote/frame-host.ts`, `FrameClient` in `lib/src/remote/client/frame-client.ts`.
+
+## Paired browsers
+
+`devices.list` reads the Burrow's paired browsers and `devices.revoke { id }` revokes one, Client→Burrow. [remote-security-model.md](./remote-security-model.md) -> "Revocation from Pocket" owns who may, what a revoke must prove, and what the list carries.
+
+- **A request is sent bare, and sent again with `proof` when answered `presence-required { challenge }`**, the proof's `session` binding naming that challenge. A list needs none once the session has shown a proof; a revoke always does.
+- **Every answer is an outcome, never free text**: `devices` or `revoked { self }`, `presence-required`, or `refused` with one of `DeviceRefusalCode`, which a Client words itself. **`self` means the goodbye follows.**
+- **Must keep "not supported" apart from "no devices"**: a session whose hello carried no `devices` is an older Burrow or a one-time session, whose `devices.*` is an unknown method, so a Client sends it neither and says so. An older Client never sends one, and ignores the hello field.
+- **A Relay older than the `session` binding answers `MALFORMED_BINDING_ERROR` at `POST /api/reauth/begin`**, which Pocket reports as that, having changed nothing.
+
+Source of truth: `DevicesListResult` and `DevicesRevokeResult` in `remote-lib-common/src/remote/wire.ts`; `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`; `PocketClient.listDevices` in `lib/src/remote/client/pocket-client.ts`.
 
 ## Input authority and multiple viewers
 
@@ -382,10 +393,6 @@ A session surviving relay loss remains unstaged.
 ### 9. Audio
 
 Browser surfaces can produce audio; VR will want it (spatial, per-panel).
-
-### 10. Paired-browser list and revoke
-
-A Client lists the Burrow's paired browsers and revokes one: the wire half of `docs/specs/remote-security-model.md` -> "Account-wide devices", which owns what the list carries and what a revoke must prove. Like layout operations, it lies outside protocol-v1's terminal-only scope.
 
 ### QoS hardening (phone-first, orthogonal to the stages above)
 

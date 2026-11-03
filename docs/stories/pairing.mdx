@@ -189,7 +189,7 @@ This screen is not on a first run's path. A phone that has just scanned goes sca
 
 <Canvas of={BurrowsView.MixedList} />
 
-One row per machine **this phone holds a key for** — a Burrow enrolled on the Relay but never paired with this browser is not a row at all. The label comes from the record, which learned it inside an encrypted pairing outcome; only the online dot comes from the Relay. The card above them is push, which §7 comes back to.
+One row per machine **this phone holds a key for** — a Burrow enrolled on the Relay but never paired with this browser is not a row at all. The label comes from the record, which learned it inside an encrypted pairing outcome; only the online dot comes from the Relay. The card above them is push, which §7 comes back to. **Paired browsers**, on an online row, connects to that one machine and lists every browser paired with it, this one marked; Revoke asks first, then for a passkey, whichever browser it names. A machine that is offline stays dimmed, since nothing here can reach it.
 
 The local record and Relay presence choose each row's primary action. A machine removed from the account offers **Forget**; otherwise **Connect** is offered where this browser holds an authorized record, and **Pair again** where an authenticated denial took that authorization away — which is the only thing that can move a row, and which keeps the pinned Burrow key while dropping the authorization. **Remove** forgets the machine locally, and queues the deletion of its push mapping first, because the id in the record is the only handle that can name that row again.
 
