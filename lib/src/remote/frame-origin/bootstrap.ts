@@ -20,10 +20,13 @@ import type { BootstrapConnect, BootstrapReady, RelayMessage } from './protocol'
  */
 function dropParentDomainCookies(): void {
   const parent = location.hostname.slice(location.hostname.indexOf('.') + 1);
-  for (const cookie of document.cookie.split('; ').filter(Boolean)) {
-    const name = cookie.slice(0, Math.max(cookie.indexOf('='), 0));
+  // `name=` for a named cookie. A nameless one is any value with no `=`, since an
+  // empty name and value is no cookie at all, and is always tried: its value may
+  // hold an `=` of its own and read here as a name.
+  const named = document.cookie.split('; ').filter((cookie) => cookie.includes('=')).map((cookie) => `${cookie.slice(0, cookie.indexOf('='))}=`);
+  for (const pair of new Set(['-', ...named])) {
     for (const jar of ['', '; Partitioned']) {
-      document.cookie = `${name}=; Domain=${parent}; Path=/; Max-Age=0; Secure; SameSite=None${jar}`;
+      document.cookie = `${pair}; Domain=${parent}; Path=/; Max-Age=0; Secure; SameSite=None${jar}`;
     }
   }
 }
