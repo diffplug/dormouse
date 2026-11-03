@@ -313,7 +313,7 @@ describe('isBlockedAddress', () => {
     ['NAT64', '64:ff9b::a9fe:a9fe'],
     ['NAT64, dotted', '64:ff9b::169.254.169.254'],
     ['NAT64, a fixed address', '64:ff9b::a83f:8110'],
-    ['local NAT64 /48', '64:ff9b:1:a9fe:a9:fe00::'],
+    ['local NAT64 /48', '64:ff9b:1:a83f:81:1000::'],
     ['local NAT64 /56', '64:ff9b:1:a9:fe:a9fe::'],
     ['local NAT64 /64', '64:ff9b:1:0:a9:fea9:fe00:0'],
     ['local NAT64 /96', '64:ff9b:1::a9fe:a9fe'],
