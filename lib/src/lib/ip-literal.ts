@@ -96,27 +96,23 @@ function embeddedIPv4(h: string): number | null {
 }
 
 /**
- * Every IPv4 address an IPv6 literal's bytes hand to a router or translator, by
- * the transition forms that carry one. For a guard: a literal may match a form
- * only by its shape, so these name where it could end up, not where it does.
+ * Every IPv4 address an IPv6 literal's bytes name or hand to a translator, where
+ * an IPv6 connection ends at an IPv4 service. For a guard: a literal may match a
+ * form only by its shape, so these name where it could end up, not where it does.
  */
 export function ipv4sCarriedByIPv6(b: readonly number[]): number[] {
   const carried: number[] = [];
   const [prefix, iid, low] = [u32(b, 0), u32(b, 8), u32(b, 12)];
   // The low 32 bits: under any /96 ending in zeros (IPv4-compatible and every
   // NAT64 prefix of that shape, RFC 6052, 64:ff9b::/96 among them), mapped,
-  // translated, and ISATAP's interface identifier on any prefix.
+  // and translated.
   const mappedOrTranslated = high64Zero(b) && (iid === 0xffff || iid === 0xffff0000);
-  if (iid === 0 || mappedOrTranslated || (iid & ~0x02000000) === 0x5efe) carried.push(low);
+  if (iid === 0 || mappedOrTranslated) carried.push(low);
   // Local-use NAT64 64:ff9b:1::/48 at RFC 6052's shorter lengths, which skip byte 8.
   if (prefix === 0x0064ff9b && b[4] === 0 && b[5] === 1) {
     const v4s = [...b.slice(6, 8), ...b.slice(9)];
     carried.push(u32(v4s, 0), u32(v4s, 1), u32(v4s, 2));
   }
-  // 6to4, 2002::/16.
-  if (prefix >>> 16 === 0x2002) carried.push(u32(b, 2));
-  // Teredo, 2001::/32: the server's address, then the client's with its bits flipped.
-  if (prefix === 0x20010000) carried.push(u32(b, 4), ~low >>> 0);
   return carried;
 }
 

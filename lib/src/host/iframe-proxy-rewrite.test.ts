@@ -305,7 +305,7 @@ describe('isBlockedAddress', () => {
   ])('blocks the cloud metadata address %s', (address) => {
     expect(isBlockedAddress(address)).toBe(true);
   });
-  // Each form hands the embedded address to a router or translator, so the
+  // Each form names the embedded address or hands it to a translator, so the
   // connection ends at the IPv4 address however the IPv6 literal reads.
   it.each([
     ['mapped, in full', '0:0:0:0:0:ffff:a9fe:a9fe'],
@@ -319,12 +319,6 @@ describe('isBlockedAddress', () => {
     ['local NAT64 /96', '64:ff9b:1::a9fe:a9fe'],
     ['a network-specific NAT64 /96', '2001:db8:64:1::a9fe:a9fe'],
     ['Oracle Cloud’s IPv6 metadata', 'fd00:c1::a9fe:a9fe'],
-    ['6to4', '2002:a9fe:a9fe::'],
-    ['6to4, with a host', '2002:a9fe:a9fe:1::1'],
-    ['Teredo server', '2001:0:a9fe:a9fe::1'],
-    ['Teredo client', '2001:0:808:808::5601:5601'],
-    ['ISATAP', '2001:db8::5efe:a9fe:a9fe'],
-    ['ISATAP, global', '2001:db8::200:5efe:a9fe:a9fe'],
   ])('blocks a metadata address embedded in IPv6: %s', (_form, address) => {
     expect(isBlockedAddress(address)).toBe(true);
   });
@@ -336,9 +330,6 @@ describe('isBlockedAddress', () => {
     '192.0.0.193',
     '168.63.129.17',
     '64:ff9b::808:808', // a public address through NAT64
-    '2002:808:808::',
-    '2001:0:808:808::f7f7:f7f7',
-    '2001:db8::5efe:808:808',
     '2001:db8::1',
     '2001:db8:1:2:3:4:a9fe:a9fe', // low bits that merely look like one
     'fe7f::1',

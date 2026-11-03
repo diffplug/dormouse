@@ -412,7 +412,7 @@ function isBlockedIPv4(value: number): boolean {
 /**
  * Whether a host names a link-local or cloud-metadata address, in any spelling:
  * every IPv4 encoding (decimal/octal/hex, short forms), and every IPv6 literal
- * that is one, or that carries one through a transition form. The WHATWG URL
+ * that names one or reaches one through a translator. The WHATWG URL
  * parser collapses the numeric IPv4 spellings before this guard runs, but a
  * resolver's answer and a caller that did not parse have not been through it.
  */

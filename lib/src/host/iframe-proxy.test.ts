@@ -158,7 +158,7 @@ describe('createIframeProxyUrl — admission', () => {
 
   it('refuses a metadata address the user allowed, by literal or by name', async () => {
     const allowed = { ...NO_LOG, allowExternal: true, interfaceAddresses: () => [] };
-    for (const literal of ['[fd00:ec2::254]', '[fd20:ce::254]', '[2002:a9fe:a9fe::]', '100.100.100.200']) {
+    for (const literal of ['[fd00:ec2::254]', '[fd20:ce::254]', '[64:ff9b::a9fe:a9fe]', '100.100.100.200']) {
       expect(await createIframeProxyUrl(`http://${literal}/`, allowed)).toMatchObject({ ok: false, reason: 'scheme' });
     }
     const resolve = async () => [{ address: 'fd00:ec2::254', family: 6 }];
