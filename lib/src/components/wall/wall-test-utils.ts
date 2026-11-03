@@ -28,6 +28,7 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
     onZoom: vi.fn(),
     onClickPanel: vi.fn(),
     onEnterPanel: vi.fn(),
+    onFramePointerDown: vi.fn(),
     onFocusPane: vi.fn(),
     onStartRename: vi.fn(),
     onFinishRename: vi.fn(() => ({ accepted: true })),

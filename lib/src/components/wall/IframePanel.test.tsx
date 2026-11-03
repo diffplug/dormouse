@@ -375,9 +375,9 @@ describe('IframePanel', () => {
   // escaped one, the webview itself. Only this panel's own proxy origin speaks
   // for its frame (docs/specs/security-local.md -> "Browser panes").
   it('acts on no message from any origin but its own proxy', async () => {
-    const onClickPanel = vi.fn();
+    const onFramePointerDown = vi.fn();
     proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
-    await renderPanel(stubActions({ onClickPanel }), paneProps('iframe-foreign'));
+    await renderPanel(stubActions({ onFramePointerDown }), paneProps('iframe-foreign'));
     const chrome = () => getAgentBrowserScreenController('iframe-foreign')?.chrome().url;
     const before = chrome();
     const send = (origin: string, data: unknown) => act(async () => {
@@ -390,12 +390,23 @@ describe('IframePanel', () => {
       await send(origin, { __dormouse: 'open-window', url: `${PROXY}/docs` });
       await send(origin, { __dormouse: 'navigate', url: 'http://localhost:5173/elsewhere' });
     }
-    expect(onClickPanel).not.toHaveBeenCalled();
+    expect(onFramePointerDown).not.toHaveBeenCalled();
     expect(chrome()).toBe(before);
     expect(container.textContent).not.toContain('Open in new pane');
 
     await send(PROXY, { __dormouse: 'pointerdown' });
-    expect(onClickPanel).toHaveBeenCalledWith('iframe-foreign');
+    expect(onFramePointerDown).toHaveBeenCalledWith('iframe-foreign');
+  });
+
+  // A frame nobody can see, nobody can click.
+  it('hears no press from a parked frame', async () => {
+    const onFramePointerDown = vi.fn();
+    proxyPlatform();
+    await renderPanel(stubActions({ onFramePointerDown }), { ...paneProps('iframe-parked'), parked: true });
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'pointerdown' } }));
+    });
+    expect(onFramePointerDown).not.toHaveBeenCalled();
   });
 
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {

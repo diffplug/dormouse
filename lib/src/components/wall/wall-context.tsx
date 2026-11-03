@@ -60,6 +60,10 @@ export interface WallActions {
   /** DOM focus reached a pane with no gesture seen — a raw cross-origin frame:
    *  enter passthrough on it, acknowledging nothing. */
   onEnterPanel: (id: string) => void;
+  /** A framed page's shim reported a press in its frame. The page can send this
+   *  itself, so it moves selection and mode and acknowledges the pane's own
+   *  Session, but never DOM focus: the frame takes focus for a real press. */
+  onFramePointerDown: (id: string) => void;
   /** Jump to/focus an arbitrary pane by id (visible or minimized) as a click on
    *  it would: passthrough, reattaching a Door, acknowledging its Session
    *  without input. Used by the browser header's dev-server chip to surface the
@@ -101,6 +105,7 @@ export const WallActionsContext = createContext<WallActions>({
   onZoom: () => {},
   onClickPanel: () => {},
   onEnterPanel: () => {},
+  onFramePointerDown: () => {},
   onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),

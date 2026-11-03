@@ -32,7 +32,8 @@ function shimFrame(parentOrigin: string, deliver: (data: unknown) => void) {
       if (target === parentOrigin) deliver(JSON.parse(JSON.stringify(data)));
     },
   };
-  const window = { parent, open: undefined as unknown };
+  const focus = { held: false, calls: 0 };
+  const window = { parent, open: undefined as unknown, focus() { focus.held = true; focus.calls++; } };
   const properties = new Map<string, string>();
   const classes = new Set<string>();
   const root = {
@@ -43,7 +44,7 @@ function shimFrame(parentOrigin: string, deliver: (data: unknown) => void) {
   runInNewContext(IFRAME_SHIM, {
     window,
     location: { origin: PROXY, href: `${PROXY}/story` },
-    document: { readyState: 'loading', documentElement: root, body: root },
+    document: { readyState: 'loading', documentElement: root, body: root, hasFocus: () => focus.held },
     CustomEvent: class { constructor(public type: string) {} },
     dispatchEvent: (event: { type: string }) => dispatched.push(event.type),
     history: {},
@@ -52,7 +53,7 @@ function shimFrame(parentOrigin: string, deliver: (data: unknown) => void) {
     URL,
   });
   return {
-    parent, properties, classes, root, dispatched,
+    parent, properties, classes, root, dispatched, focus,
     emit(type: string, event: Record<string, unknown>) {
       for (const listener of listeners.get(type) ?? []) listener(event);
     },
@@ -189,6 +190,17 @@ describe('the shim addresses the grant and app, not the world', () => {
       { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
       { __dormouse: 'location', url: `${PROXY}/story` },
     ]);
+  });
+
+  // The app does not focus a frame for this message, and a page that cancels the
+  // press gets no focus from the browser, so the frame takes it itself. Focusing
+  // a frame that holds focus can blank it on WebKit.
+  it('takes focus from inside on a press, only when the frame lacks it', () => {
+    const frame = shimFrame(APP, () => {});
+    frame.emit('pointerdown', {});
+    expect(frame.focus.calls).toBe(1);
+    frame.emit('pointerdown', {});
+    expect(frame.focus.calls).toBe(1);
   });
 
   it('relays pane-level messages but not nested locations through same-origin frames', () => {

@@ -121,8 +121,9 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 //     frame focused.
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
 //     only the frame, so the Wall can't see it; this lets it select the pane /
-//     enter passthrough. It's genuine user input, so it can't loop with the
-//     parent's programmatic focus.
+//     enter passthrough. The app never focuses a frame for this message, which
+//     the page can forge, so the frame takes focus itself: a page that cancels
+//     the press would otherwise keep the keyboard out of its own frame.
 //   - `location`: the proxied frame's current URL. The parent converts it back
 //     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
 //     honest.
@@ -190,7 +191,7 @@ export function iframeShim(embedderOrigin: string): string {
   // Bound by position: a minifier may rename the function itself.
   var dualTap=${dualTap},taps=(${newDualTapState})();
   addEventListener('keydown',function(e){if(dualTap(taps,e))post('leader');},true);
-  addEventListener('pointerdown',function(){post('pointerdown');},true);
+  addEventListener('pointerdown',function(){if(!document.hasFocus())window.focus();post('pointerdown');},true);
   addEventListener('click',function(e){
     var a=anchorHref(e);
     if(!a||a.hasAttribute('download'))return;
