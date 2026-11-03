@@ -89,7 +89,7 @@ Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`; `parseOneTimeF
 
 - **Must open the socket through the host's factory with no `Origin` header**, on the origin's Burrow route.
 - **The first message must be one `OneTimeRoomFrame`, the keypair minted and the frame read within `ONE_TIME_OPEN_TIMEOUT_MS`**, else `unreachable`. The link's expiry is the earlier of the runtime's own `now + ONE_TIME_LINK_TTL_MS` and the room's `expiresAt`, floored to whole seconds.
-- **Must guard and count every later message** after the [length check](#wire-contract): past `MAX_ONE_TIME_FORWARDED` the runtime stops reading the room.
+- **Must discard `RELAY_PONG` keepalive replies and guard and count every other later message** after the [length check](#wire-contract): past `MAX_ONE_TIME_FORWARDED` the runtime stops reading the room.
 - Reserving the link: `docs/specs/remote-security-model.md` -> "One-time connection".
 - **Must spend an `E2E_INIT_BURST` `TokenBucket` token before an `init`'s WebCrypto.** The first non-keepalive transport message must be `OneTimeRequestV1`, else `burrow-error`. **Its label passes `knownOneTimeDeviceLabel` before the approval request or any state carries it**, so anything not exactly a member of `ONE_TIME_DEVICE_LABELS` is `Phone browser` (the rule: `docs/specs/remote-security-model.md` -> "One-time connection").
 - **Promotion reuses the same Noise session** in an `EstablishedE2eSession` whose `hello.burrowId` is the room id, and arms the direct deadline. A decline the Burrow sends reaches the phone before the rendezvous closes.
