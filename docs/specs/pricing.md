@@ -65,13 +65,17 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 - **Must support EEA and UK consumer withdrawal**; the voluntary guarantee is additional (rationale):
   - **Must disclose the statutory withdrawal right, where the online withdrawal is, the support path, and the model form at checkout and in the `/billing` confirmation.**
   - **Must offer an online withdrawal function on `/billing` throughout the statutory period, distinct from cancelling renewal**: it names the contract and where the acknowledgement goes, takes a confirmation, and gives a durable acknowledgement with the statement and its date and time, on the page and by email (rationale).
-  - **Must end a withdrawn contract at once and refund every payment for it in full, tax included, within 14 days**, with no use deduction or waiver for immediate access. An unambiguous notice by email or post needs no account access; support refunds it in Stripe, which ends it as a full refund does.
+  - **Must end a withdrawn contract at once and refund every payment for it in full, tax included, within 14 days**, with no use deduction or waiver for immediate access. An unambiguous notice by email or post needs no account access; support records it (`hosted/README.md` -> "Withdrawal by email or post"), and it settles as an online withdrawal does.
+- **Every plan auto-renews; a member may cancel any time, and access runs to period end.**
 - **Must let a member cancel without account recovery**: in the customer portal, or by email to support when access is lost.
+- **Must offer a full refund within 30 days of the first Hosted payment or any yearly renewal**, including collected tax, by email to support; monthly renewals, plan changes, and resubscriptions do not restart this voluntary first-payment guarantee. **Must preserve mandatory legal remedies.**
+- **Must refund unused prepaid service, including corresponding collected tax, on permanent discontinuation or termination unrelated to customer breach**, and offer the same remedy for a material service reduction or rejected material terms change during a prepaid term; the 30-day window never limits it. Support computes it by hand and ends the plan, which a partial refund does not.
+- **Must preserve a founder's lock through billing-provider migrations and failures caused by DiffPlug, allowing payment restoration**, by a subscription support creates on the locked Price.
 - **Must email renewal notices, annual reminders, and price-change notices with cancellation instructions to the billing email, each recorded before it is sent, inside California's windows**; a price change applies only from a renewal its notice reached in time, never to a founding Price (`docs/specs/hosted.md` -> "Billing notices"; rationale).
 - **Must email the customer when a payment dispute suspends the subscription and when it is restored**, preserving refund and dispute rights.
 - **Closing an account cancels its subscription at once** (`docs/specs/hosted.md` -> "Account closure"). **Closing within 30 days of a subscription's first payment, or of a yearly renewal payment, refunds that payment in full.** **Must say before closing** that access ends now and renewal stops, which payment it refunds, that withdrawal stays open through support, and that cancelling renewal keeps access instead.
 
-Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `Checkout` in `hosted/src/Checkout.tsx`; `PlanConfirmation` in `hosted/src/Plan.tsx`; `WithdrawalFunction` in `hosted/src/Withdrawal.tsx`; `closureTerms` in `hosted/src/Closure.tsx`; `docs/specs/hosted.md` -> "Billing" owns the rest.
+Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `Checkout` in `hosted/src/Checkout.tsx`; `PlanConfirmation` in `hosted/src/Plan.tsx`; `WithdrawalFunction` in `hosted/src/Withdrawal.tsx`; `closureTerms` in `hosted/src/Closure.tsx`; the support paths in `hosted/README.md` -> "Support runbooks"; `docs/specs/hosted.md` -> "Billing" owns the rest.
 
 ## Future
 
@@ -79,7 +83,7 @@ Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `
 
 1. **Opening checkout** ("Checkout"): production's Stripe bindings, then `CHECKOUT_OPEN`.
 2. **Managed voice for members**: one voice per Pane.
-3. **Renewal, cancellation, and refund** paths.
+3. **Renewal and transfer**: a failed founding renewal's grace.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
 
@@ -88,7 +92,7 @@ Team and enterprise tiers are never sold through this page. A free hosted tier i
 What each plan grants once checkout can sell it; [Published prices](#published-prices) is the ladder as the page prints it today.
 
 - **Founding grants the Individual plan plus a founding badge**; monthly and yearly grant the plan alone.
-- **Must lock the founding base yearly price in USD while the subscription remains active**, excluding applicable taxes; a lapsed founder re-subscribes at list. **Must preserve the lock through billing-provider migrations and failures caused by DiffPlug**, allowing payment restoration.
+- **Must lock the founding base yearly price in USD while the subscription remains active**, excluding applicable taxes; a lapsed founder re-subscribes at list.
 - **List may rise while founding is open, and never falls.** Monthly and yearly move together the same day, so list is always a price someone can buy at; the ladder keeps climbing $10 per cohort toward the new list; every founder's lock and the struck price they were shown are unchanged.
 - **Founding badges are cosmetic**: in-app and on the credits page, never a capability.
 
@@ -120,10 +124,8 @@ What is built — the endpoint, what a request carries, the daily cap, and the f
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.
 - **Pocket speaks only in the foreground** — a web app cannot voice a background push — so the desktop is the primary voice sink. A native Pocket is out of scope here.
 
-### Renewal, cancellation, refund
+### Renewal and transfer
 
-- **Every plan auto-renews; cancel any time; access runs to period end.**
-- **Must offer a full refund within 30 days of the first Hosted payment or any yearly renewal**, including collected tax; monthly renewals, plan changes, and resubscriptions do not restart this voluntary first-payment guarantee. **Must preserve mandatory legal remedies.**
 - **A failed founding renewal gets 30 days of grace before the lock is lost.**
 - **A subscription is personal and non-transferable.**
 
@@ -137,7 +139,8 @@ EEA/UK representative appointment is excluded from the internal release gate by 
 - **Must turn on cancellation in Stripe's customer portal before charging**, the online cancellation "Checkout and entitlement" relies on.
 - **Must confirm the built notices ("Checkout and entitlement") meet each sales territory's rules beyond California's**, and provide any additional legally required notice or consent process (rationale).
 - **Must send notices other than subscription notices to the account contact email, or show them at sign-in when none exists**, recording delivery or presentation before a notice period starts.
-- **Must refund unused prepaid service, including corresponding collected tax, on permanent discontinuation or termination unrelated to customer breach**, and offer the same remedy for a material service reduction or rejected material terms change during a prepaid term. **Must give at least 30 days' advance notice of discontinuation, material reductions, or material terms changes**, except urgent legal or security requirements; no retroactive terms changes for disputes.
+- **Must give at least 30 days' advance notice of discontinuation, material reductions, or material terms changes**, except urgent legal or security requirements; no retroactive terms changes for disputes. Nothing sends or records these; `hosted/README.md` -> "Notices the first time" is the by-hand path, which cannot reach an account without an email.
+- **Must name the support owner and exercise each of `hosted/README.md` -> "Support runbooks", with a monitored `support@dormouse.sh` and collected post, before charging**: they are written against the code and Terms, not yet run on a release candidate.
 - **Must verify the permitted sales territories and tax setup before accepting payment**, and confirm refund, cancellation, failed-payment, and founder-lock behavior against the published offer. Stripe Billing does not transfer the seller's tax obligations.
 - **Must support worldwide sales only where lawful**; EEA and UK withdrawal is "Checkout and entitlement".
 - **Must complete the EEA and UK provider privacy arrangements before launch**: execute applicable processor agreements, document provider transfer safeguards and assessments, and publish the applicable contacts and means to obtain the safeguards. **Never claim a transfer certification, contract, or representative that has not been verified** (rationale).

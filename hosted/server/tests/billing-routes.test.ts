@@ -1951,6 +1951,21 @@ test("closed, the public cohort read answers 503 and no picture is served", asyn
   expect((await f.visit(FOUNDER_AVATAR_PREFIX + "0".repeat(64))).status).toBe(404);
 });
 
+const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+/**
+ * The statements in the sql block under `heading` in hosted/README.md, each
+ * `'<placeholder>'` filled from `values`, so a runbook's SQL is what runs here.
+ */
+function runbook(heading: string, values: Record<string, string>) {
+  const section = readme.split(/^#{2,3} /m).find((part) => part.startsWith(`${heading}\n`));
+  const sql = section && /```sql\n([\s\S]*?)```/.exec(section)?.[1];
+  if (!sql) throw new Error(`hosted/README.md has no SQL under "${heading}"`);
+  return sql.trim().replace(/'<([^>]+)>'/g, (_, name: string) => {
+    if (!(name in values)) throw new Error(`No value for <${name}>`);
+    return `'${values[name]}'`;
+  });
+}
+
 /** The billing cron's alerts in the local inbox, as the development server's are. */
 const alerts = (f: Awaited<ReturnType<typeof fixture>>) => f.email.all().filter((mail) => mail.to[0] === SUPPORT_EMAIL);
 /** A price change the catalog refuses, naming a founding Price: it changes nothing, and fails every cron run until deleted. */
@@ -2159,4 +2174,102 @@ test("the cron's alert covers a broken setup and an unreachable database, and bi
   f.time.set(new Date(midnight + 15 * 60 * 1000).toISOString());
   await expect(accountCron(down, origin)).rejects.toThrow();
   expect(alerts(f)).toHaveLength(2);
+});
+
+test("hosted/README.md's alert exercise fails the cron, and deleting its row clears it", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const [insert, remove] = runbook("Billing alert", { "a founding Price": f.setup.founding[0]! }).split("\n");
+  await f.sql(insert!);
+  await expect(accountCron(f.host, origin)).rejects.toThrow("1 billing resyncs failed");
+  expect(alerts(f)[0]!.text).toContain(refusedLine("alert-test"));
+  await f.sql(remove!);
+  await accountCron(f.host, origin);
+});
+
+test("hosted/README.md's withdrawal by email: the cron ends it, refunds every payment, and acknowledges it, closed account or not", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const received = "2026-01-01T09:00:00+01:00";
+  for (const closedFirst of [false, true]) {
+    const member = await f.account();
+    const { session, subscription } = await f.buy(member, "yearly");
+    const [first, renewal] = [`pi_w_first_${closedFirst}`, `pi_w_renewal_${closedFirst}`];
+    f.paidInvoices.set(first, subscription.id);
+    f.paidInvoices.set(renewal, subscription.id);
+    f.invoiceFacts.set(renewal, { reason: "subscription_cycle", paidAt: new Date(f.time.now().getTime() - 90 * DAY_MS) });
+    if (closedFirst) expect((await member.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+    const before = f.refunds.length;
+    await f.sql(
+      runbook("Withdrawal by email or post", {
+        "monthly, yearly, or founding": "yearly",
+        country: "DE",
+        "received at": received,
+        "subscription id": subscription.id,
+      }),
+    );
+    const [row] = await f.sql<{ id: string; settledAt: Date | null }>(
+      `SELECT id, "settledAt" FROM dormouse_withdrawals WHERE "subscriptionId" = $1`,
+      [subscription.id],
+    );
+    expect(row!.settledAt).toBeNull();
+    await accountCron(f.host, origin);
+
+    expect(await f.sql(`SELECT status FROM pgstencil_billing.subscriptions WHERE id = $1`, [subscription.id])).toEqual([
+      { status: "canceled" },
+    ]);
+    expect(f.cancels.filter((cancel) => cancel.subscription === subscription.id)).toHaveLength(1);
+    // Every payment, the renewal too; what closing already refunded is not paid twice.
+    expect(f.refunds.slice(before).map((refund) => refund.paymentIntent)).toEqual(closedFirst ? [renewal] : [first, renewal]);
+    expect(f.refunds.filter((refund) => refund.paymentIntent === first)).toHaveLength(1);
+    const [settled] = await f.sql<{ settledAt: Date | null }>(`SELECT "settledAt" FROM dormouse_withdrawals WHERE id = $1`, [row!.id]);
+    expect(settled!.settledAt).not.toBeNull();
+    const billingEmail = f.dev.customers.get(session.customer as string)!.email;
+    const acknowledged = f.email.all().filter((mail) => mail.to[0] === billingEmail && mail.subject.startsWith("We received your withdrawal"));
+    expect(acknowledged).toHaveLength(1);
+    expect(acknowledged[0]!.text).toContain(`Reference: ${row!.id}`);
+    expect(acknowledged[0]!.text).toContain("1 January 2026 at 08:00:00 UTC");
+  }
+});
+
+test("hosted/README.md's closure by email: the cron refunds what closing owes, and the account is gone", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  f.paidInvoices.set("pi_hand_close", subscription.id);
+  await f.setup.stripe!.subscriptions.cancel(subscription.id, { prorate: false, invoice_now: false });
+  await f.deliver();
+  const [ended] = await f.sql<{ ended_at: Date | null }>(`SELECT ended_at FROM pgstencil_billing.subscriptions WHERE id = $1`, [subscription.id]);
+  expect(ended!.ended_at).not.toBeNull();
+
+  const close = (id: string, subscriptions: string) => f.sql(runbook("Close an account by email", { "account id": id, "subscription ids": subscriptions }));
+  await close(member.id, `{${subscription.id}}`);
+  expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [member.id])).toEqual([]);
+  expect(f.refunds).toEqual([]);
+  await accountCron(f.host, origin);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_hand_close", withdrawal: null, closure: subscription.id }]);
+  const stamped = (id: string) => f.sql<{ settled: boolean }>(`SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`, [id]);
+  expect(await stamped(member.id)).toEqual([{ settled: true }]);
+
+  // An account with no subscription closes settled, with nothing for the cron to do.
+  const free = await f.account();
+  await close(free.id, "{}");
+  expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [free.id])).toEqual([]);
+  expect(await stamped(free.id)).toEqual([{ settled: true }]);
+});
+
+test("hosted/README.md's cancellation by hand keeps access through the period and stops renewal notices", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  await f.send(f.dev.transition(subscription.id, "cancel-at-period-end"));
+  const lookup = runbook("Find and verify the customer", {
+    "customer id": (await f.sql<{ customer_id: string }>(`SELECT customer_id FROM pgstencil_billing.accounts WHERE owner_id = $1`, [member.id]))[0]!.customer_id,
+  });
+  expect(await f.sql(lookup)).toMatchObject([{ owner_id: member.id, id: subscription.id, status: "active", cancel_at_period_end: true }]);
+  expect(await member.summary()).toMatchObject({ plan: "yearly", active: true, renews: false, entitled: true });
 });

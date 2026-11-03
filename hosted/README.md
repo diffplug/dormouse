@@ -1,8 +1,8 @@
 # Dormouse Hosted
 
-Four Hono/Cloudflare Workers and the frame Worker `dormouse-frames` on `*.dormouseusercontent.com` are built from this package: the account frontend and auth at `https://hosted.dormouse.sh` (`dormouse-hosted`), the Hosted Relay's account-scoped routes with Pocket at the root and the one-time connection's Burrow route at `https://relay.dormouse.sh` (`dormouse-relay`), the one-time `/connect/` phone page and its client route at `https://try.dormouse.sh` (`dormouse-try`; [the one-time spec](../docs/specs/one-time.md)), and managed-voice speech at `https://voice.dormouse.sh` (`dormouse-voice`). The marketing website is a separate application. Managed voice and the Relay admit only the admin account; device-code Burrow enrollment and account-scoped encrypted terminal routing are implemented. Real-provider and live production acceptance remain separate release gates. See [the spec](../docs/specs/hosted.md), whose "Application boundary" owns what each Worker serves.
+Four Hono/Cloudflare Workers and the frame Worker `dormouse-frames` on `*.dormouseusercontent.com` are built from this package: the account frontend and auth at `https://hosted.dormouse.sh` (`dormouse-hosted`), the Hosted Relay's account-scoped routes with Pocket at the root and the one-time connection's Burrow route at `https://relay.dormouse.sh` (`dormouse-relay`), the one-time `/connect/` phone page and its client route at `https://try.dormouse.sh` (`dormouse-try`; [the one-time spec](../docs/specs/one-time.md)), and managed-voice speech at `https://voice.dormouse.sh` (`dormouse-voice`). The marketing website is a separate application. Managed voice and the Relay admit a subscribed account, and the admin account as a standing comp (`docs/specs/hosted.md` -> "Entitlement"); billing stays closed until the account Worker holds its Stripe bindings, so until then only the admin gets them. Device-code Burrow enrollment and account-scoped encrypted terminal routing are implemented. Real-provider and live production acceptance remain separate release gates. See [the spec](../docs/specs/hosted.md), whose "Application boundary" owns what each Worker serves.
 
-This file is the whole operator runbook, in the order an operator works: run locally, update packages, set up GitHub, provision previews, provision production, release, accept, recover. Marketing, desktop releases, Hosted production, and PR previews have separate deployment credentials. A passing local test implies no cloud resource and no real-provider acceptance.
+This file is the whole operator runbook, in the order an operator works: run locally, update packages, set up GitHub, provision previews, provision production, support customers, release, accept, recover. Marketing, desktop releases, Hosted production, and PR previews have separate deployment credentials. A passing local test implies no cloud resource and no real-provider acceptance.
 
 ## Run locally
 
@@ -273,6 +273,138 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
    UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE "withdrawalId" = '<withdrawal id>' AND "sentAt" IS NULL;
    ```
 
+## Support runbooks
+
+Owner: (to be named before launch). Monitored address: `support@dormouse.sh`.
+
+SQL runs as the migration role. `stripe` commands run from the Stripe CLI logged in to the live account (add `--live`), or the Dashboard's Workbench shell.
+
+### Find and verify the customer
+
+The Terms let us verify ownership, and forbid requiring account recovery. Most runbooks below start here.
+
+1. Find the Stripe customer by the sender's email in the Dashboard's search, or by a charge they describe (`last4:4242`). Its `metadata.pgstencil_owner` is the Hosted account id.
+2. Take either as proof, and nothing more: a reply from the Stripe customer's email to a message you sent it, or the last4, date, and amount of a charge on that customer. Never ask for a full card number, a password, or a sign-in. Say nothing to an unverified sender about whether an address has an account.
+3. Read the account's subscriptions; a current one has a status of `active`, `trialing`, `past_due`, `unpaid`, `paused`, or `incomplete`:
+
+   ```sql
+   SELECT s.owner_id, a.customer_id, s.id, s.price_id, s.status, s.started_at, s.ended_at, s.period_end, s.cancel_at_period_end, s.end_reason FROM pgstencil_billing.accounts a JOIN pgstencil_billing.subscriptions s ON s.owner_id = a.owner_id WHERE a.customer_id = '<customer id>' ORDER BY s.started_at;
+   ```
+
+### Cancel for someone who cannot sign in
+
+Deadline: the Terms state no number of days, but the cancellation must land before the next renewal, so do it the day the email arrives. If a renewal charged after their request arrived, refund it in full, which also ends the plan.
+
+1. [Find and verify the customer](#find-and-verify-the-customer).
+2. Stop the renewal, keeping access through the period they paid for. Use this command rather than the Dashboard's button: Stripe's portal was seen to set `cancel_at` instead (sandbox, 2026-11-03), and Hosted reads only `cancel_at_period_end`, so its billing page and renewal notices would still say it renews.
+
+   ```sh
+   stripe subscriptions update <subscription id> -d cancel_at_period_end=true
+   ```
+
+   A `past_due`, `unpaid`, or `paused` subscription has no paid period left, so cancel it at once: `stripe subscriptions cancel <subscription id> -d prorate=false -d invoice_now=false`.
+3. Confirm the webhook arrived: step 3 of finding the customer shows `cancel_at_period_end` true, or the status `canceled`.
+4. Email them, at the address they proved: no further charge, and the date access ends. Mention the 30-day refund if a payment is inside it.
+
+### Close an account by email
+
+Deadline: the Terms state no number of days. Closing takes effect at once once they confirm, so act that day. The refunds are the cron's.
+
+1. [Find and verify the customer](#find-and-verify-the-customer). An account with no Stripe customer has only its sign-in email to reply from (`SELECT id FROM "user" WHERE email = '...' AND "emailVerified";`). A provider-only account with neither has nothing to verify against: send it to the owner, and never delete on an unverified request.
+2. Explain, then wait for their yes, as the account page does before it closes (`closureTerms` in `hosted/src/Closure.tsx`): the plan ends now and never renews; a first payment, or a yearly or founding renewal, inside the last 30 days is refunded in full with tax, and otherwise the time left is not; withdrawal and the 30-day guarantee for an earlier payment stay open by email; cancelling renewal instead keeps access through the period.
+3. End each current subscription in Stripe, without a refund or a final invoice, then confirm with step 3 of finding the customer that it shows `ended_at`:
+
+   ```sh
+   stripe subscriptions cancel <subscription id> -d prorate=false -d invoice_now=false
+   ```
+
+4. Record the closure and delete the account in one statement, as the route does. `<subscription ids>` is an array literal of what step 3 ended, `{sub_a,sub_b}`, or `{}` for none:
+
+   ```sql
+   WITH recorded AS (INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt") VALUES ('<account id>', '<subscription ids>'::text[], CASE WHEN cardinality('<subscription ids>'::text[]) = 0 THEN now() END)) DELETE FROM "user" WHERE id = '<account id>';
+   ```
+
+5. Within 10 minutes the cron refunds what closing owes and stamps `settledAt`; a failure reaches the [billing alert](#billing-alert). The account's Relay sockets close at the Relay's next sweep. Email them what ended and what was refunded.
+
+### Voluntary 30-day refund
+
+Deadline: they must ask within 30 days of the payment, counted to the day their email arrived. The Terms state no number of days for paying it. Pay it that day: a founding seat returns only if the subscription ends within 30 days of its start.
+
+| Payment | Refund it? |
+| --- | --- |
+| The first payment of the customer's first subscription | Yes |
+| A yearly or founding renewal | Yes |
+| A monthly renewal | No: the guarantee excludes it, though a statutory right may not |
+| The first payment of a later subscription, after a cancel or plan change | No: that does not restart the window |
+
+1. [Find and verify the customer](#find-and-verify-the-customer). If they are in the EEA or UK inside 14 days, tell them withdrawal refunds every payment. Find the payment on the customer's page in the Dashboard; the invoice shows why it was billed and when it was paid.
+2. Refund the full charge in the Dashboard (**Refund payment**, full amount, reason **Requested by customer**). The charge includes its tax, and Stripe Tax reverses that with it.
+3. Stripe's `charge.refunded` ends the subscription at once. Confirm within a minute that it shows `canceled` and `end_reason` `refund`. No cron pass repairs a lost event, so if it still shows current after Stripe's retries, run the cancel command from the closure runbook. A refund of an earlier subscription's charge ends nothing; if they want the current plan ended too, cancel it the same way.
+4. Email them: the plan has ended, the amount refunded with tax, and that their bank decides when the credit appears.
+
+A founding refund on a renewal, or one ending after the subscription's 30th day, does not return the seat, because Hosted counts it as a kept purchase. A refund of a whole charge ends the plan whatever it was for, so a billing correction must stay below the charge's full amount.
+
+### Withdrawal by email or post
+
+Deadline: refund every payment for the subscription within 14 days after **receiving** the notice, by the original payment method, with no fee or deduction for use. The clock starts when the email or letter arrives, not when someone reads it, so post to DiffPlug's address must be collected well inside that.
+
+They may withdraw within 14 days after the contract, ending at the end of the 14th day in their time zone and later if that is a weekend or public holiday; a notice sent inside that counts, however late it arrives. It needs only to be an unambiguous statement: no reason, no particular form, no account access. If the period has passed or they are outside the EEA and UK, the 30-day refund may still apply, and doubt resolves toward honoring it.
+
+1. Locate the purchase with [Find and verify the customer](#find-and-verify-the-customer), by whatever the notice gives. Ask for more only if you cannot tell whose contract it is; asking does not move the deadline.
+2. Record it, so the cron does what the online function does. `<received at>` is when the notice arrived, with its zone, and `<country>` is the customer's billing country, or use `NULL`. This works on an account already closed:
+
+   ```sql
+   WITH recorded AS (INSERT INTO dormouse_withdrawals (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", country, "submittedAt") SELECT gen_random_uuid()::text, owner_id, id, '<monthly, yearly, or founding>', price_id, started_at, '<country>', '<received at>'::timestamptz FROM pgstencil_billing.subscriptions WHERE id = '<subscription id>' RETURNING id, "userId", "submittedAt") INSERT INTO dormouse_billing_notices (id, "userId", kind, "withdrawalId", "createdAt") SELECT gen_random_uuid()::text, "userId", 'withdrawal', id, "submittedAt" FROM recorded;
+   ```
+
+3. In Stripe, do nothing by hand: within 10 minutes the cron ends the subscription at once, refunds every paid invoice with its tax, emails the acknowledgement to the billing email, and stamps `settledAt`. Check that the subscription shows `canceled` and each payment shows refunded. A refund already made by hand counts toward it, so nothing is paid twice.
+4. Reply to the sender, whatever address they wrote from: their statement in their own words, when it arrived, that the plan has ended, and the refund. The emailed acknowledgement quotes the online function's statement and goes only to the billing email.
+5. From a day after the notice, the [billing alert](#billing-alert) names the withdrawal and its deadline until it settles. A payment Stripe cannot refund is [Refund by hand](#refund-by-hand), by the withdrawal id it names. An acknowledgement that cannot send is [Acknowledgement by hand](#acknowledgement-by-hand).
+
+### Unused-period refund
+
+Owed if we permanently discontinue Hosted, end paid access for a reason other than the customer's material breach, or, during a prepaid term, materially reduce the paid service or materially change the Terms and they choose to end instead of accepting.
+
+Deadline: the Terms state no number of days; the refund runs from when paid access ends, so pay it then. The 30-day window does not apply: this is a separate promise for time we no longer provide, and the Terms say the guarantee does not limit it. No code computes it.
+
+1. End the plan by hand first, as in the closure runbook, without proration: a partial refund leaves a subscription running, and Hosted ends one only when a charge is refunded in full (seen in the sandbox, 2026-11-03). Its `ended_at` is when paid access ended.
+2. Compute it from the latest paid invoice alone, as earlier periods were used. On that invoice in the Dashboard, `paid` is the amount paid in cents, tax included, and the period is its line's start and end:
+
+   ```text
+   refund = round(paid × (period end − ended_at) / (period end − period start))
+   ```
+
+   For example, $119.00 paid with VAT for a 365-day period, ended with 183 days left: 11900 × 183 / 365 = 5966, so $59.66. Subtract nothing for use, and refund no more than the payment has left after any earlier refund.
+3. Refund that amount of the invoice's payment in the Dashboard (**Refund payment**, partial, reason **Requested by customer**), never a tax-only amount: Stripe Tax splits a refund between net and tax in proportion, which is the corresponding tax the Terms promise.
+4. Email them: when access ended, the arithmetic, and the amount with tax. On discontinuation, do this for every current subscription and leave the Stripe bindings in place until the last refund succeeds and the last event is delivered.
+
+### Restore a founding lock
+
+For a billing-provider migration or a payment failure DiffPlug caused; a founder who cancelled, or whose own failed renewal ran out, subscribes again at list. Deadline: the Terms promise "a reasonable opportunity to restore payment", with no number of days. Offer at least the 30 days a founder gets to fix their own failed renewal, and say the date in writing. Checkout may refuse founding to a lapsed founder, so this is by hand. Try it once in a Stripe sandbox before its first real use.
+
+1. [Find and verify the customer](#find-and-verify-the-customer). Their locked Price is the old subscription's `price_id`, which must be in `STRIPE_PRICES_FOUNDING`; after moving to a new Stripe account, those are the new account's Prices at the same ladder steps. Confirm no subscription is current: `owner_access` grants access only for exactly one.
+2. Email the offer, plan, base price, renewal date, and how to cancel, and get their written yes: this starts an automatically renewing charge.
+3. Create it on that Price. The metadata key is what makes Hosted see it, on the customer `pgstencil_billing.accounts` holds, and the Dashboard's **Create subscription** can set the same fields:
+
+   ```sh
+   stripe subscriptions create -d customer=<customer id> -d "items[0][price]=<locked Price>" -d "items[0][quantity]=1" -d "metadata[pgstencil_owner]=<account id>" -d "automatic_tax[enabled]=true" -d payment_behavior=default_incomplete -d "payment_settings[save_default_payment_method]=on_subscription" -d "expand[0]=latest_invoice"
+   ```
+
+   Send them the answer's `latest_invoice.hosted_invoice_url`, where they pay and save a card; Stripe expires an unpaid first invoice after about 23 hours (`incomplete_expired`), and you then create it again. To charge a card they agreed to keep, use `-d default_payment_method=<payment method id> -d payment_behavior=error_if_incomplete` instead. If they already paid through a date, as in a migration, use that card and add `-d billing_cycle_anchor=<period end, Unix time> -d proration_behavior=none`: nothing is charged until then, and it must be under a year away.
+4. Verify webhook acceptance. In Developers → Webhooks, `customer.subscription.created` for it must have answered 200: a Price Hosted does not recognize, a quantity other than 1, or the wrong mode makes it, and every later event for that owner, answer 503. Then step 3 of finding the customer must show the new subscription on the locked Price, `active` once paid.
+5. Email them the renewal date and price. The new subscription counts as one more purchase at its cohort, an overcount of one seat that is accepted.
+
+### Notices the first time
+
+We must give at least 30 days' notice before we permanently discontinue Hosted, materially reduce paid service during a prepaid term, or materially change the Terms, unless an urgent legal or security requirement prevents it, then as soon as reasonably possible. Nothing sends these yet: the billing notices have no such kind, and sign-in shows no notice to an account without a contact email.
+
+Before the first one, either build a recorded notice to the billing and contact emails, with sign-in presentation for accounts without one, or do this by hand:
+
+1. List who it reaches. A subscriber's goes to the Stripe customer's email. Every account's also goes to its contact email: `SELECT id, email FROM "user" WHERE "emailVerified";`.
+2. An account with no contact email and no subscription can only be told at sign-in, which is not built, and a notice not shown starts no period for it. Build the sign-in presentation first, or leave that account on its previous terms.
+3. Send each one through Postmark, from `support@dormouse.sh`: what changes, the effective date, how to end the subscription, and the unused-period refund if they do. Record per account the id, address, time, and Postmark message id in private storage; Postmark's own history expires. Resend or follow up a bounce, as an undelivered notice starts nothing.
+4. Set the effective date at least 30 days after the last notice actually went out. A new version's date never backdates: `TERMS_VERSION` and the page's date are its revision, publishing it replaces nothing for an existing account, and that account stays on its previous terms until the effective date, or until it expressly agrees sooner. A change never applies to a dispute already begun.
+
 ## Release
 
 1. Review the exact package provenance and code revision. Run `pnpm test:hosted`, `pnpm build:hosted`, and the repository lints. Validate production migrations.
@@ -297,7 +429,7 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
 4. Start with email, attempt the same-address provider from another browser, and confirm no automatic linking. Connect it from the signed-in account, then confirm both methods return the same account ID. Connect Apple with its different relay address. Confirm an identity belonging to another account does not transfer, and that a connection started before logout fails on return.
 5. Log in on two devices and confirm both remain signed in. Log out on one; the other must remain signed in. Provider-only accounts display no email and repeat login preserves their account ID.
 6. Sign in as the admin address, turn on Natural Voice from Dormouse desktop, and speak one short phrase. Turn it off on the account page and confirm the next alarm uses the system voice and Settings offers to turn it on again. Turn it on again, then off from Dormouse, and confirm the account page says it is off. Confirm another account sees no Natural Voice section.
-7. Confirm the voice Worker alone registers its two Cron Triggers: the deploy log lists `schedule: */5 * * * *` (the history sweep) and `schedule: 0 4 * * *` (idle tokens), the dashboard shows it under Workers & Pages -> `dormouse-voice` -> Settings -> Trigger Events, and `dormouse-hosted` lists none. After the speak in step 6, the ElevenLabs console's speech history should be empty within a few minutes. The Worker's Cron Events list each run; a failed run means the key cannot list or delete history. Recheck them for failed runs after any key change.
+7. Confirm the voice Worker alone registers its two Cron Triggers: the deploy log lists `schedule: */5 * * * *` (the history sweep) and `schedule: 0 4 * * *` (idle tokens), the dashboard shows it under Workers & Pages -> `dormouse-voice` -> Settings -> Trigger Events, and `dormouse-hosted` lists only billing's `schedule: */10 * * * *`. After the speak in step 6, the ElevenLabs console's speech history should be empty within a few minutes. The Worker's Cron Events list each run; a failed run means the key cannot list or delete history. Recheck them for failed runs after any key change.
 8. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and check the live responses against the origin, caching, and cookie rules in `docs/specs/security-hosted.md` -> "Origin boundary".
 9. Confirm the release smoke's one-time half passed: `https://try.dormouse.sh/connect/` answers the page under its own policy with its script beside it, `https://relay.dormouse.sh/connect/` answers only the 308 to it, and the rendezvous mints a room on the relay, is refused with a browser `Origin`, refuses a join from the relay's origin, joins from the try origin, crosses a frame each way, and is refused a second phone. Load `https://try.dormouse.sh/connect/` in a browser and confirm no injected script or third-party request, and that `https://relay.dormouse.sh/` answers Pocket's shell under Pocket's policy.
 10. With a desktop build pointed at this origin, open a one-time link on a real iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi as the laptop and each by scanning the QR code with the native camera, which must keep the fragment. Connect, type the digits, run a command, and End from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends report the end. On a guest or client-isolated network the attempt ends on the same-Wi-Fi copy.
@@ -308,4 +440,4 @@ Do not mark all five login methods complete until email and all four providers p
 
 A failed migration or deployment may already have changed production state; workflow failure does not automatically reverse it. Use the Worker's deployment history for code rollback and investigate database compatibility first; `docs/specs/hosted.md` -> "Production releases" owns what a code rollback does not undo. Cloudflare refuses a rollback of `dormouse-relay` past its `OneTimeRoom` migration, or of `dormouse-hosted` past the deletion of its own; every relay deploy or rollback drops the one-time links still open, and established sessions run directly and are unaffected. Restore a backup only after an explicit operator decision, into a separate database first.
 
-Current provisioning status is discoverable with `gh secret list --env NAME`, `gh variable list --env NAME`, and each provider console. Configuration presence alone is not acceptance. The account limitations an operator will be asked about — login lifetime, no device revocation or sign-out-everywhere, no merge or recovery, admin-only managed voice, no paid-service activation — are in `docs/specs/hosted.md`.
+Current provisioning status is discoverable with `gh secret list --env NAME`, `gh variable list --env NAME`, and each provider console. Configuration presence alone is not acceptance. The account limitations an operator will be asked about — login lifetime, no device revocation or sign-out-everywhere, no merge or recovery — and billing, closed until its bindings are set, are in `docs/specs/hosted.md`.

@@ -65,8 +65,8 @@ function alertMessage(lines: readonly AlertLine[], now: Date, recorded: boolean)
     ...(overdue.length ? [["Overdue", overdue] as const] : []),
     ...(errors.length ? [["Errors", errors] as const] : []),
   ];
-  const paragraphs = [
-    `The account Worker's billing cron failed at ${now.toISOString()}. It tries again every 10 minutes; each distinct error is mailed at most once a day.`,
+  const intro = `The account Worker's billing cron failed at ${now.toISOString()}. It tries again every 10 minutes; each distinct error is mailed at most once a day.`;
+  const notes = [
     ...(lines.length > shown.length ? [`${lines.length - shown.length} more are not listed here.`] : []),
     ...(recorded ? [] : ["The database could not be reached to limit this alert, so it goes in the day's first run only."]),
     `What to do: hosted/README.md -> "Billing alert".`,
@@ -75,17 +75,10 @@ function alertMessage(lines: readonly AlertLine[], now: Date, recorded: boolean)
     from: `Dormouse Hosted <${SUPPORT_EMAIL}>`,
     to: [SUPPORT_EMAIL],
     subject: overdue.length ? `Dormouse Hosted billing: ${overdue.length} overdue, cron failing` : "Dormouse Hosted billing: cron failing",
-    text: [
-      paragraphs[0],
-      ...sections.map(([title, items]) => `${title}:\n${items.map((item) => `- ${item}`).join("\n")}`),
-      ...paragraphs.slice(1),
-    ].join("\n\n"),
-    html: `<html lang="en"><body><p>${escape(paragraphs[0]!)}</p>${sections
+    text: [intro, ...sections.map(([title, items]) => `${title}:\n${items.map((item) => `- ${item}`).join("\n")}`), ...notes].join("\n\n"),
+    html: `<html lang="en"><body><p>${escape(intro)}</p>${sections
       .map(([title, items]) => `<h2>${title}</h2><ul>${items.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>`)
-      .join("")}${paragraphs
-      .slice(1)
-      .map((paragraph) => `<p>${escape(paragraph)}</p>`)
-      .join("")}</body></html>`,
+      .join("")}${notes.map((note) => `<p>${escape(note)}</p>`).join("")}</body></html>`,
   };
 }
 
