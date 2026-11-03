@@ -477,14 +477,17 @@ jobs:
       # failed them while pwsh and cmd.exe stayed fast. Pay it here, unbounded
       # by any test, and log each start so a slow runner shows in this step.
       # The step itself runs in pwsh, as the tests do, so even its first 5.1
-      # start is timed rather than spent starting the step.
+      # start is timed rather than spent starting the step. Each start also
+      # calls ConvertTo-Json, as the shell-escape tests do: its module's first
+      # load is a separate cold cost (1.2-3s after a warm start, and 10s on a
+      # runner whose first start took 11s).
       - name: Warm Windows PowerShell
         if: runner.os == 'Windows'
         shell: pwsh
         timeout-minutes: 5
         run: |
           foreach ($start in 1..10) {
-            $ms = [int](Measure-Command { powershell.exe -NoProfile -NonInteractive -Command '& node -e 0' }).TotalMilliseconds
+            $ms = [int](Measure-Command { powershell.exe -NoProfile -NonInteractive -Command '& node -e 0; $null = ConvertTo-Json 0' }).TotalMilliseconds
             "Windows PowerShell start ${start}: $ms ms"
             if ($ms -lt 1000) { exit 0 }
           }
