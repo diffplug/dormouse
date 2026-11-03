@@ -152,8 +152,6 @@ Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`
 
 **Only the Burrow revokes, and revoking only narrows.** `BurrowService.revoke` is the one entry point: it takes a target — one browser's Client static, retiring every active record it holds, or one passkey credential, retiring every record paired with it — and who asked (`RevocationRequester`): Settings → Remote control's paired-phone list ([relay.md](./relay.md) -> "Remote control, in the Settings dialog"), or the Relay ([Relay-named revocation](#relay-named-revocation)), and a message never names it. **No command or webview message adds or restores a record**, which stays [Pairing](#pairing)'s, **or claims the Relay asked**.
 
-Reserved: a Pocket-initiated revocation calls this entry point with a requester of its own (`remote-trust-followups` -> [Account-wide devices](#account-wide-devices)).
-
 - **A running Burrow's revocation takes effect at once, on neither the service's lifecycle chain nor the approval queue**: the live ACL drops the records, every established session no active record still authorizes ends with the goodbye, every pending connection whose Client static it left unpaired is refused `pairing-required`, and those statics' [presence windows](#presence-window) close. **Only its save queues, with approvals**, so neither overwrites the other's snapshot.
 - **An approval the revocation overtook never brings a record back.** At publish it re-applies every revocation since its snapshot. One whose identities a revocation since the digits were typed names is refused `user-denied`: before its write if still queued, after it if mid-write, opening no window either way.
 - **A stopped Burrow's revocation reads the store on the service's lifecycle chain**, then is held and saved the same way.
@@ -325,23 +323,8 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `isEnrollment` / `pe
 
 ## Future
 
-**Scope: remote-trust-followups** — [Device verification](#device-verification) and [Account-wide devices](#account-wide-devices).
+**Scope: remote-trust-followups** — [Device verification](#device-verification).
 
 ### Device verification
 
 `getUserMedia` inside a Home Screen web app is observable only on a real iOS device, and without it the install has only the paste field. The Client-static storage format surviving an app and phone restart is no longer open: the v3 Home Screen report is in [Client statics](#client-statics)'s rationale and in [pocket-app.rationale.md](./pocket-app.rationale.md).
-
-### Account-wide devices
-
-The account's view of its paired browsers, with [Relay-named revocation](#relay-named-revocation) as the lever for a Burrow out of reach: a list nobody can act on and a revocation with no list are halves of one feature. It is a new caller of `BurrowService.revoke` under a requester of its own ([Revocation](#revocation)).
-
-**The managed identities are the two the model has; nothing merges them into a "device"** (rationale):
-
-| Identity | Held by | Removing it cuts |
-| --- | --- | --- |
-| Passkey | the Relay, per account; synchronized onto many devices ([Passkeys](#passkeys)) | every browser that signs in with it, on every Burrow |
-| ACL record | one Burrow, for one Client static ([Client statics](#client-statics)) | that browser on that Burrow |
-
-One Pocket profile is a record per Burrow, and a phone's tab and its Home Screen install are two profiles. Pocket may mark the records that are its own, from its `KnownBurrowV1`s; nothing else is grouped.
-
-**Per-record list and revoke from Pocket**, on each online Burrow it is paired with, over protocol-v1 (`docs/specs/remote-api.md` -> "10. Paired-browser list and revoke"), which the Relay sees only as ciphertext: each record's mapped label, `deviceIdFor` id, approval time, last seen ([Access log](#access-log)), and whether it is the caller's, revoked by that id as Settings revokes one, never by a static or `deliveryId`. **Revoking takes a fresh presence proof, never a window ride.** An unreachable Burrow is shown as one, Relay-named revocation being the lever that reaches it.
