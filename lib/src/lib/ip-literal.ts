@@ -39,9 +39,36 @@ function parseIPv4(host: string): number | null {
   return value >>> 0 === value ? value : null;
 }
 
-/** A literal's 16 bytes, in any IPv6 spelling, bracketed or zoned or not, or null. */
+/** An address without brackets or a zone, lowercased. */
+export const bareAddress = (address: string): string => address.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
+
+/**
+ * IPv6 as `new URL` serializes it (RFC 5952: lower case, the longest zero run
+ * compressed, an embedded IPv4 tail in hex), or `null` for text that is not one.
+ */
+export function serializeIpv6(address: string): string | null {
+  try {
+    return new URL(`http://[${address}]/`).hostname.slice(1, -1);
+  } catch {
+    return null;
+  }
+}
+
+/** The eight 16-bit groups of an IPv6 address {@link serializeIpv6} spelled. */
+export function ipv6Groups(serialized: string): number[] {
+  const [head, tail] = serialized.split('::') as [string, string | undefined];
+  const parse = (part: string | undefined) => (part ? part.split(':').map((group) => parseInt(group, 16)) : []);
+  const front = parse(head);
+  const back = parse(tail);
+  return [...front, ...new Array<number>(8 - front.length - back.length).fill(0), ...back];
+}
+
+/**
+ * A literal's 16 bytes, in any IPv6 spelling, bracketed or zoned or not, or null.
+ * An IPv4 tail reads as `inet_aton` would, which the URL parser alone refuses.
+ */
 export function ipv6Bytes(hostname: string): number[] | null {
-  let h = hostname.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
+  let h = bareAddress(hostname);
   if (!h.includes(':')) return null;
   const tail = h.slice(h.lastIndexOf(':') + 1);
   if (tail.includes('.')) {
@@ -49,34 +76,23 @@ export function ipv6Bytes(hostname: string): number[] | null {
     if (v4 === null) return null;
     h = `${h.slice(0, -tail.length)}${(v4 >>> 16).toString(16)}:${(v4 & 0xffff).toString(16)}`;
   }
-  const sides = h.split('::');
-  if (sides.length > 2) return null;
-  const [head, rest] = sides.map((side) => (side ? side.split(':') : []));
-  const missing = 8 - head.length - (rest?.length ?? 0);
-  if (rest ? missing < 1 : missing !== 0) return null;
-  const groups = [...head, ...Array<string>(missing).fill('0'), ...(rest ?? [])];
-  if (!groups.every((group) => /^[0-9a-f]{1,4}$/.test(group))) return null;
-  return groups.flatMap((group) => {
-    const value = parseInt(group, 16);
-    return [value >> 8, value & 0xff];
-  });
+  const serialized = serializeIpv6(h);
+  return serialized === null ? null : ipv6Groups(serialized).flatMap((group) => [group >> 8, group & 0xff]);
 }
 
 const u32 = (b: readonly number[], at: number): number =>
   ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0;
 
-const allZero = (b: readonly number[], from: number, to: number): boolean =>
-  b.slice(from, to).every((byte) => byte === 0);
+const high64Zero = (b: readonly number[]): boolean => u32(b, 0) === 0 && u32(b, 4) === 0;
 
 // The 32-bit IPv4 address an IPv4-mapped or IPv4-compatible IPv6 literal names
 // (::ffff:169.254.169.254, ::ffff:a9fe:a9fe, ::169.254.169.254), or null if this
 // isn't such an address. `::` and `::1` are themselves, not IPv4 compatible.
 function embeddedIPv4(h: string): number | null {
   const b = ipv6Bytes(h);
-  if (!b || !allZero(b, 0, 10)) return null;
-  const v4 = u32(b, 12);
-  if (b[10] === 0xff && b[11] === 0xff) return v4;
-  return b[10] === 0 && b[11] === 0 && v4 > 0xffff ? v4 : null;
+  if (!b || !high64Zero(b)) return null;
+  const [iid, v4] = [u32(b, 8), u32(b, 12)];
+  return iid === 0xffff || (iid === 0 && v4 > 0xffff) ? v4 : null;
 }
 
 /**
@@ -86,26 +102,21 @@ function embeddedIPv4(h: string): number | null {
  */
 export function ipv4sCarriedByIPv6(b: readonly number[]): number[] {
   const carried: number[] = [];
-  const [g0, g1] = [(b[0] << 8) | b[1], (b[2] << 8) | b[3]];
-  // The low 32 bits under any /96 ending in zeros: IPv4-compatible and every NAT64
-  // prefix of that shape (RFC 6052), 64:ff9b::/96 among them; then mapped and
-  // translated, which spend those zeros on ffff.
-  if (allZero(b, 8, 12)) carried.push(u32(b, 12));
-  if (allZero(b, 0, 10) && b[10] === 0xff && b[11] === 0xff) carried.push(u32(b, 12));
-  if (allZero(b, 0, 8) && b[8] === 0xff && b[9] === 0xff && allZero(b, 10, 12)) carried.push(u32(b, 12));
+  const [prefix, iid, low] = [u32(b, 0), u32(b, 8), u32(b, 12)];
+  // The low 32 bits: under any /96 ending in zeros (IPv4-compatible and every
+  // NAT64 prefix of that shape, RFC 6052, 64:ff9b::/96 among them), mapped,
+  // translated, and ISATAP's interface identifier on any prefix.
+  const mappedOrTranslated = high64Zero(b) && (iid === 0xffff || iid === 0xffff0000);
+  if (iid === 0 || mappedOrTranslated || (iid & ~0x02000000) === 0x5efe) carried.push(low);
   // Local-use NAT64 64:ff9b:1::/48 at RFC 6052's shorter lengths, which skip byte 8.
-  if (g0 === 0x64 && g1 === 0xff9b && b[4] === 0 && b[5] === 1) {
-    for (const start of [6, 7, 9]) {
-      const bytes = b.filter((_, i) => i >= start && i !== 8).slice(0, 4);
-      carried.push(u32(bytes, 0));
-    }
+  if (prefix === 0x0064ff9b && b[4] === 0 && b[5] === 1) {
+    const v4s = [...b.slice(6, 8), ...b.slice(9)];
+    carried.push(u32(v4s, 0), u32(v4s, 1), u32(v4s, 2));
   }
   // 6to4, 2002::/16.
-  if (g0 === 0x2002) carried.push(u32(b, 2));
+  if (prefix >>> 16 === 0x2002) carried.push(u32(b, 2));
   // Teredo, 2001::/32: the server's address, then the client's with its bits flipped.
-  if (g0 === 0x2001 && g1 === 0) carried.push(u32(b, 4), ~u32(b, 12) >>> 0);
-  // ISATAP's interface identifier on any prefix.
-  if ((b[8] & ~0x02) === 0 && b[9] === 0 && b[10] === 0x5e && b[11] === 0xfe) carried.push(u32(b, 12));
+  if (prefix === 0x20010000) carried.push(u32(b, 4), ~low >>> 0);
   return carried;
 }
 

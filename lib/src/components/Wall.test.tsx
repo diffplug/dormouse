@@ -3756,41 +3756,27 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const { id } = await dispatchIframe('http://localhost:5173/');
       await flushFrame();
-      const frame = container.querySelector<HTMLIFrameElement>(`[data-lath-leaf="${id}"] iframe`)!;
-      return { id, frame, focus: vi.spyOn(frame, 'focus') };
+      return container.querySelector<HTMLIFrameElement>(`[data-lath-leaf="${id}"] iframe`)!;
     }
 
-    it('selects the pane in passthrough without moving DOM focus into the frame', async () => {
-      const { frame, focus } = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
-      expect(focusOf('surface:a')).toBe('true');
+    it('changes nothing from a frame without focus', async () => {
+      const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
+      const focus = vi.spyOn(frame, 'focus');
       await press();
       await flushFrame();
       expect(focus).not.toHaveBeenCalled();
       expect(document.activeElement).not.toBe(frame);
-      // The terminal that had the keyboard no longer does: the pane took selection.
+      expect(focusOf('surface:a')).toBe('true');
+    });
+
+    it('enters the pane for a press from the frame holding focus, without focusing it again', async () => {
+      const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
+      frame.focus();
+      const focus = vi.spyOn(frame, 'focus');
+      await press();
+      await flushFrame();
+      expect(focus).not.toHaveBeenCalled();
       expect(focusOf('surface:a')).toBe('false');
-    });
-
-    it('focuses the frame for a click the Wall itself sees', async () => {
-      const { id, focus } = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
-      await act(async () => {
-        container.querySelector<HTMLElement>(`[data-lath-leaf="${id}"] [tabindex="-1"]`)!
-          .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      });
-      await flushFrame();
-      expect(focus).toHaveBeenCalled();
-    });
-
-    it('hears no press from a frame in a hidden Workspace', async () => {
-      const { frame, focus } = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
-      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" active={false} />));
-      await flushFrame();
-      await press();
-      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
-      await flushFrame();
-      expect(focus).not.toHaveBeenCalled();
-      expect(document.activeElement).not.toBe(frame);
-      expect(focusOf('surface:a')).toBe('true');
     });
   });
 

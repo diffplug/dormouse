@@ -847,21 +847,16 @@ export function Wall({
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
-  /** Select the panel in passthrough, leaving DOM focus where it is. */
-  const selectInPassthrough = useCallback((id: string) => {
-    selectPane(id);
-    modeRef.current = 'passthrough';
-    setMode('passthrough');
-  }, [selectPane]);
-
   /** Enter terminal mode for the given panel. This only moves focus there: the
    *  human gestures acknowledge at their own handlers, and spawns, reveals, and
    *  embeds focusing themselves never do. */
   const enterTerminalMode = useCallback((id: string) => {
-    selectInPassthrough(id);
+    selectPane(id);
+    modeRef.current = 'passthrough';
+    setMode('passthrough');
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
-  }, [selectInPassthrough]);
+  }, [selectPane]);
   const enterTerminalModeRef = useRef(enterTerminalMode);
   enterTerminalModeRef.current = enterTerminalMode;
 
@@ -2133,11 +2128,6 @@ export function Wall({
     onEnterPanel: (id: string) => {
       setConfirmKill(null);
       enterTerminalMode(id);
-    },
-    onFramePointerDown: (id: string) => {
-      setConfirmKill(null);
-      selectInPassthrough(id);
-      acknowledgeSession(id);
     },
     onFocusPane: (id: string) => {
       setConfirmKill(null);

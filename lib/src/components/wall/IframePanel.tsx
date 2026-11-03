@@ -8,7 +8,6 @@ import type { IframeProxyResult } from '../../lib/platform/types';
 import { IFRAME_HTTP_ONLY } from '../../lib/platform/iframe-proxy-types';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
-import { useSurfaceVisibility } from './use-surface-visibility';
 import { PaneWriteContext, WallActionsContext } from './wall-context';
 import {
   openAgentBrowserScreenModal,
@@ -105,7 +104,7 @@ function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, prox
   }
 }
 
-export function IframePanel({ id, title, params, parked, onReady }: PaneProps & {
+export function IframePanel({ id, title, params, onReady }: PaneProps & {
   /** A frame after a document loads. */
   onReady?: () => void;
 }) {
@@ -378,19 +377,17 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
   // A cross-origin click reaches only the frame, so the Wall never sees the
   // mousedown — and on WebKit the iframe element's own `focus` event doesn't
   // fire for it either. The shim posts `pointerdown` from inside the frame;
-  // adopt it as selecting the pane in passthrough. The page shares the shim's
-  // origin and can post this with no click, so it never moves DOM focus (the
-  // shim takes focus from inside for a real press), and a frame out of sight,
-  // which no one can click, is not heard: selecting it would hand it focus when
-  // its Workspace comes back.
-  const onScreen = useSurfaceVisibility(parked, id);
+  // adopt it as clicking the pane. The page shares the shim's origin and can post
+  // this with no click, so it counts only from the frame that holds focus: the
+  // shim takes focus before it posts, and focus reaches this document first. The
+  // message then adds no focus, and a frame without focus moves nothing.
   useEffect(() => {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
       const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown; from?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
-        if (onScreen) actions.onFramePointerDown(id);
+        if (document.activeElement === iframeRef.current) actions.onClickPanel(id);
         return;
       }
       if (data?.__dormouse === 'open-window' && typeof data.url === 'string') {
@@ -425,7 +422,7 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [id, proxyOrigin, onScreen, actions, liveUrl, sourceUrl, observeFrameUrl, followRedirect]);
+  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, followRedirect]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains

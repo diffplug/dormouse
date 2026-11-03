@@ -10,7 +10,7 @@
  */
 
 import { dualTap, newDualTapState } from '../lib/dual-tap';
-import { ipv4Value, ipv4sCarriedByIPv6, ipv6Bytes, isLoopbackHostname } from '../lib/ip-literal';
+import { bareAddress, ipv4Value, ipv4sCarriedByIPv6, ipv6Bytes, isLoopbackHostname } from '../lib/ip-literal';
 
 /** Header bag shape both `http.IncomingHttpHeaders` and a plain map satisfy. */
 export type ProxyHeaders = Record<string, string | string[] | undefined>;
@@ -121,9 +121,9 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 //     frame focused.
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
 //     only the frame, so the Wall can't see it; this lets it select the pane /
-//     enter passthrough. The app never focuses a frame for this message, which
-//     the page can forge, so the frame takes focus itself: a page that cancels
-//     the press would otherwise keep the keyboard out of its own frame.
+//     enter passthrough. The app hears it only from a frame holding focus, since
+//     the page can post it too, so the frame takes focus first: a page that
+//     cancels the press would otherwise get none from the browser.
 //   - `location`: the proxied frame's current URL. The parent converts it back
 //     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
 //     honest.
@@ -372,11 +372,7 @@ function prologueEnd(html: string): number {
   return at;
 }
 
-// 169.254.0.0/16 — IPv4 link-local, incl. the 169.254.169.254 cloud-metadata
-// endpoint — as a numeric range so every equivalent encoding is caught.
-const LINK_LOCAL_V4_START = 0xa9fe0000; // 169.254.0.0
-const LINK_LOCAL_V4_END = 0xa9feffff; // 169.254.255.255
-// Metadata endpoints outside that range, each one host in a block that also
+// Metadata endpoints outside IPv4 link-local, each one host in a block that also
 // holds ordinary machines, so the address and not the block.
 const CLOUD_METADATA_V4 = new Set([
   '100.100.100.200', // Alibaba Cloud
@@ -388,8 +384,6 @@ const CLOUD_METADATA_V6 = new Set([
   'fd20:ce::254', // Google Cloud
 ].map((address) => ipv6Bytes(address)!.join()));
 
-/** An address without brackets or a zone, lowercased. */
-const bareAddress = (address: string) => address.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
 
 /** One spelling per address: an IPv4 one, mapped into IPv6 or not, as its number. */
 function addressKey(address: string): string | number {
@@ -411,7 +405,8 @@ export function isThisMachineAddress(address: string, interfaceAddresses: readon
 }
 
 function isBlockedIPv4(value: number): boolean {
-  return (value >= LINK_LOCAL_V4_START && value <= LINK_LOCAL_V4_END) || CLOUD_METADATA_V4.has(value);
+  // 169.254.0.0/16, the cloud-metadata endpoint's own range among them.
+  return value >>> 16 === 0xa9fe || CLOUD_METADATA_V4.has(value);
 }
 
 /**
@@ -423,14 +418,12 @@ function isBlockedIPv4(value: number): boolean {
  */
 export function isBlockedAddress(hostname: string): boolean {
   const v6 = ipv6Bytes(hostname);
-  if (!v6) {
-    const v4 = ipv4Value(hostname);
-    return v4 !== null && isBlockedIPv4(v4);
+  if (v6) {
+    const linkLocal = v6[0] === 0xfe && (v6[1] & 0xc0) === 0x80; // fe80::/10
+    return linkLocal || CLOUD_METADATA_V6.has(v6.join()) || ipv4sCarriedByIPv6(v6).some(isBlockedIPv4);
   }
-  // IPv6 link-local (fe80::/10).
-  if (v6[0] === 0xfe && (v6[1] & 0xc0) === 0x80) return true;
-  if (CLOUD_METADATA_V6.has(v6.join())) return true;
-  return ipv4sCarriedByIPv6(v6).some(isBlockedIPv4);
+  const v4 = ipv4Value(hostname);
+  return v4 !== null && isBlockedIPv4(v4);
 }
 
 // --- Served error / diagnostic pages ----------------------------------------

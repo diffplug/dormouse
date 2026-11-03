@@ -8,6 +8,7 @@
 
 import { BlockList, isIP } from 'node:net';
 import { networkInterfaces, type NetworkInterfaceInfo as OsAddress } from 'node:os';
+import { ipv6Groups, serializeIpv6 } from '../../lib/ip-literal';
 import type { NetworkInterfaceInfo } from '../../remote/network-policy';
 
 interface Cidr {
@@ -18,18 +19,6 @@ interface Cidr {
 }
 
 /**
- * IPv6 as `new URL` serializes it (RFC 5952: lower case, the longest zero run
- * compressed, an embedded IPv4 tail in hex), or `null` for text that is not one.
- */
-function serializeIpv6(address: string): string | null {
-  try {
-    return new URL(`http://[${address}]/`).hostname.slice(1, -1);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * An IP literal's one spelling — IPv4 as a dotted quad, IPv6 as
  * {@link serializeIpv6} writes it — or `null` for a name or a zoned address.
  */
@@ -37,15 +26,6 @@ export function canonicalAddress(address: string): string | null {
   if (address.includes('%')) return null;
   const family = isIP(address);
   return family === 4 ? address : family === 6 ? serializeIpv6(address) : null;
-}
-
-/** The eight 16-bit groups of an IPv6 address {@link serializeIpv6} spelled. */
-function ipv6Groups(serialized: string): number[] {
-  const [head, tail] = serialized.split('::') as [string, string | undefined];
-  const parse = (part: string | undefined) => (part ? part.split(':').map((group) => parseInt(group, 16)) : []);
-  const front = parse(head);
-  const back = parse(tail);
-  return [...front, ...new Array<number>(8 - front.length - back.length).fill(0), ...back];
 }
 
 /** Zero every bit past `prefix` in big-endian `units` of `width` bits each. */

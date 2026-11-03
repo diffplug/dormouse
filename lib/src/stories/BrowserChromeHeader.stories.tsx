@@ -45,7 +45,6 @@ const loggingActions: WallActions = {
   onZoom: () => console.log('[story] zoom'),
   onClickPanel: () => console.log('[story] click panel'),
   onEnterPanel: () => console.log('[story] enter panel'),
-  onFramePointerDown: () => console.log('[story] frame pointer down'),
   onFocusPane: (id) => console.log('[story] focus pane', id),
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
