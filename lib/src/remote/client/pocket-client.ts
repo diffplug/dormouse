@@ -16,6 +16,8 @@
 
 import {
   API_ROUTES,
+  MALFORMED_BINDING_ERROR,
+  REMOTE_METHODS,
   DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
   DIRECT_ONLY_DEADLINE_MS,
@@ -33,10 +35,13 @@ import {
   fromBase64Url,
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
+  isDevicesListResult,
+  isDevicesRevokeResult,
   isE2eRelayToClientFrame,
   isNoisePublicKey,
   isPairingOutcomeV1,
   isRelayBearer,
+  knownPairingDeviceLabel,
   pairingInvitationPrologue,
   presenceChallenge,
   pushEndpointFingerprint,
@@ -47,6 +52,10 @@ import {
   toBase64Url,
   type ConnectionDenialCode,
   type ConnectionRequestV1,
+  type DeviceRefusalCode,
+  type DevicesListResult,
+  type DevicesRevokeResult,
+  type PairedBrowserV1,
   type DirectPath,
   type DirectRelayCause,
   type DirectoryEntry,
@@ -392,9 +401,49 @@ export type PairingResult =
   | { readonly ok: false; readonly message: string };
 
 /** Where a connection attempt ended, as the UI reports it. */
+/** A `devices.*` refusal, in fixed copy, for the same reason a denial is. */
+export const DEVICE_REFUSAL_MESSAGES: Record<DeviceRefusalCode, string> = {
+  'presence-rejected': 'The computer could not verify your passkey, so nothing changed. Try again.',
+  'unknown-device': 'That browser is no longer paired with this computer.',
+  'ambiguous-device': 'More than one paired browser has that id, so none was revoked. Revoke it on the computer.',
+  'burrow-error': 'The computer could not do that. Check its Settings → Network.',
+};
+
+/** A Burrow older than `devices.*`: never read as a computer with no browsers. */
+export const DEVICES_UNSUPPORTED_MESSAGE =
+  'This computer’s Dormouse is too old to list its paired browsers here. Update it, or use Settings → Network on the computer.';
+
+/** A Relay older than `session` proofs, which refuses the binding. */
+export const RELAY_TOO_OLD_FOR_PROOF_MESSAGE =
+  'This Relay is too old to ask for your passkey here, so nothing changed. Update the Relay, or use Settings → Network on the computer.';
+
+/** `unsupported` is the Burrow's age, which no retry on this phone mends. */
+export type DeviceListing =
+  | { readonly ok: true; readonly devices: readonly PairedBrowserV1[] }
+  | { readonly ok: false; readonly message: string; readonly unsupported: boolean };
+
+/** `self`: this browser's own pairing, whose local authorization has gone with it. */
+export type DeviceRevocation =
+  | { readonly ok: true; readonly self: boolean }
+  | { readonly ok: false; readonly message: string };
+
 export type ConnectResult =
   | { readonly ok: true; readonly burrowLabel: string }
   | { readonly ok: false; readonly message: string; readonly pairingRequired: boolean };
+
+function deviceRefusalMessage(answer: { outcome: string; code?: DeviceRefusalCode } | null): string {
+  return DEVICE_REFUSAL_MESSAGES[answer?.code ?? 'burrow-error'];
+}
+
+/** Mapped again, as the Burrow's own display does: a record may predate the closed set. */
+function mapDeviceLabel(device: PairedBrowserV1): PairedBrowserV1 {
+  return { ...device, label: knownPairingDeviceLabel(device.label) };
+}
+
+/** A Relay that does not know a `session` binding answers it as malformed. */
+function isOutdatedRelayRefusal(err: unknown): boolean {
+  return err instanceof RelayRefusalError && err.status === 400 && err.message === MALFORMED_BINDING_ERROR;
+}
 
 export class PocketClient {
   readonly #baseUrl: string;
@@ -411,6 +460,14 @@ export class PocketClient {
   readonly #core: ClientSessionCore<E2eRoute>;
   /** Whether a direct-only connect is waiting for its switch, reporting its endings itself. */
   #awaitingDirect = false;
+  /** What the established session's own proofs bind, for that session alone. */
+  #sessionProof: {
+    readonly route: E2eRoute;
+    readonly handshakeHash: string;
+    readonly record: KnownBurrowV1;
+  } | null = null;
+  /** The session whose hello said it serves `devices.*`. */
+  #devicesServedOn: E2eRoute | null = null;
 
   #ws: PocketSocket | null = null;
   /** The open relay socket's heartbeat, or null while none is open. */
@@ -1050,6 +1107,7 @@ export class PocketClient {
       // path, and a peer connection that existed ahead of authorization would
       // be one an unauthorized party had steered.
       this.#core.establish(route, session);
+      this.#sessionProof = { route, handshakeHash: toBase64Url(session.handshakeHash), record };
       // **A direct-only session sends no protocol-v1 before the switch**: the
       // Burrow ends one whose application message crosses the relay, so the
       // wall mounts only once the direct path carries both directions.
@@ -1140,8 +1198,98 @@ export class PocketClient {
 
   // --- Remote-api v1 (see ClientSessionCore) --------------------------------
 
-  hello(capabilities?: HelloCapabilities): Promise<HelloResult> {
-    return this.#core.hello(capabilities);
+  async hello(capabilities?: HelloCapabilities): Promise<HelloResult> {
+    const route = this.#core.establishedRoute;
+    const result = await this.#core.hello(capabilities);
+    if (result.devices === true) this.#devicesServedOn = route;
+    return result;
+  }
+
+  // --- Paired browsers (`docs/specs/remote-api.md` -> "Paired browsers") ----
+
+  /** The paired browsers of the connected Burrow, with one prompt where it asks for a proof. */
+  async listDevices(): Promise<DeviceListing> {
+    if (!this.#servesDevices()) return { ok: false, message: DEVICES_UNSUPPORTED_MESSAGE, unsupported: true };
+    let answer: DevicesListResult | null;
+    try {
+      answer = await this.#deviceRequest(REMOTE_METHODS.devicesList, {}, isDevicesListResult);
+    } catch (err) {
+      if (!isOutdatedRelayRefusal(err)) throw err;
+      return { ok: false, message: RELAY_TOO_OLD_FOR_PROOF_MESSAGE, unsupported: false };
+    }
+    if (answer?.outcome === 'devices') return { ok: true, devices: answer.devices.map(mapDeviceLabel) };
+    return { ok: false, message: deviceRefusalMessage(answer), unsupported: false };
+  }
+
+  /**
+   * Revoke one paired browser of the connected Burrow by its id, always with
+   * one prompt (`docs/specs/remote-security-model.md` -> "Revocation"). A
+   * revocation of this browser's own pairing, which the Burrow's answer alone
+   * can say, drops its authorization as an authenticated `pairing-required`
+   * does; the session's goodbye is right behind the answer.
+   */
+  async revokeDevice(id: string): Promise<DeviceRevocation> {
+    if (!this.#servesDevices()) return { ok: false, message: DEVICES_UNSUPPORTED_MESSAGE };
+    const proof = this.#sessionProof;
+    let answer: DevicesRevokeResult | null;
+    try {
+      answer = await this.#deviceRequest(REMOTE_METHODS.devicesRevoke, { id }, isDevicesRevokeResult);
+    } catch (err) {
+      if (!isOutdatedRelayRefusal(err)) throw err;
+      return { ok: false, message: RELAY_TOO_OLD_FOR_PROOF_MESSAGE };
+    }
+    if (answer?.outcome !== 'revoked') return { ok: false, message: deviceRefusalMessage(answer) };
+    if (answer.self && proof) {
+      // Best-effort, as at a `pairing-required`: a store that throws leaves the
+      // record `paired`, and the next Connect earns that denial and retries.
+      try {
+        await this.#dropAuthorization(proof.record);
+      } catch {
+        this.#core.disposeSession();
+      }
+    }
+    return { ok: true, self: answer.self };
+  }
+
+  #servesDevices(): boolean {
+    const route = this.#core.establishedRoute;
+    return route !== null && route === this.#devicesServedOn;
+  }
+
+  /**
+   * One `devices.*` request: sent bare, and again with a proof over the
+   * challenge it is answered with, if it is. `null` is an answer this build
+   * cannot read, or a second demand for the proof it just sent.
+   */
+  async #deviceRequest<T extends { outcome: string }>(
+    method: string,
+    params: Record<string, unknown>,
+    isResult: (value: unknown) => value is T,
+  ): Promise<T | null> {
+    const read = async (body: Record<string, unknown>): Promise<T | null> => {
+      const value: unknown = await this.#core.request(method, body);
+      return isResult(value) ? value : null;
+    };
+    const first = await read(params);
+    if (first?.outcome !== 'presence-required') return first;
+    const { challenge } = first as unknown as { challenge: string };
+    const proof = await this.#proveSession(challenge);
+    const second = await read({ ...params, proof });
+    return second?.outcome === 'presence-required' ? null : second;
+  }
+
+  /** One authenticator prompt over the established session's own transcript. */
+  #proveSession(burrowChallenge: string): Promise<PresenceProofV1> {
+    const proof = this.#sessionProof;
+    if (!proof || proof.route !== this.#core.establishedRoute) throw new Error(BURROW_SESSION_ENDED_MESSAGE);
+    return this.#provePresence({
+      kind: 'session',
+      burrowId: proof.route.burrowId,
+      connectionId: proof.route.id,
+      burrowChallenge,
+      handshakeHash: proof.handshakeHash,
+      passkeyCredentialId: proof.record.passkeyCredentialId,
+    });
   }
 
   watchDirectory(onSnapshot: (entries: DirectoryEntry[]) => void): Promise<string> {

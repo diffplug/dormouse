@@ -51,6 +51,7 @@ import {
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { disposeAllSessions } from '../../lib/terminal-registry';
 import { frameSalt } from './frame-salt';
+import { PairedBrowsers, PairedBrowsersScreen } from './PairedBrowsers';
 import { PocketWall, type PocketBrowsers } from './PocketWall';
 import { ScanInvitation, type StartScan } from './ScanInvitation';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
@@ -79,7 +80,9 @@ type Phase =
   /** `code` is null for the moment between the handshake and the sampled code. */
   | { readonly at: 'pairing'; readonly code: string | null }
   | { readonly at: 'burrows' }
-  | { readonly at: 'wall'; readonly burrow: BurrowView };
+  | { readonly at: 'wall'; readonly burrow: BurrowView }
+  /** Connected for its paired browsers alone, with no wall behind them. */
+  | { readonly at: 'devices'; readonly burrow: BurrowView };
 
 /** One row of the Burrows view: a pinned record, plus what the Relay knows. */
 export interface BurrowView {
@@ -335,6 +338,17 @@ export default function App({
     client.close();
   }, [client, teardownAdapter]);
 
+  // A dead session is not reportable, it is actionable: the token is already
+  // discarded, so every view above sign-in would fail the same way, and an
+  // installed Pocket has no reload affordance to escape with. Drop to sign-in,
+  // where one passkey prompt restores everything — the pinned Burrows and push
+  // registration both outlive the session.
+  const dropToSignIn = useCallback((err: Error) => {
+    endSession();
+    setPhase({ at: 'auth' });
+    setError(err.message);
+  }, [endSession]);
+
   const run = useCallback(
     async (label: string, fn: () => Promise<unknown>) => {
       setError(null);
@@ -342,15 +356,8 @@ export default function App({
       try {
         await fn();
       } catch (err) {
-        // A dead session is not reportable, it is actionable: the token is
-        // already discarded, so every view above sign-in would fail the same
-        // way, and an installed Pocket has no reload affordance to escape with.
-        // Drop to sign-in, where one passkey prompt restores everything —
-        // the pinned Burrows and push registration both outlive the session.
         if (err instanceof SessionExpiredError || err instanceof PasskeyUnavailableError) {
-          endSession();
-          setPhase({ at: 'auth' });
-          setError(err.message);
+          dropToSignIn(err);
           return;
         }
         setError(err instanceof Error ? err.message : String(err));
@@ -358,7 +365,7 @@ export default function App({
         setBusy(null);
       }
     },
-    [endSession],
+    [dropToSignIn],
   );
 
   /**
@@ -428,8 +435,8 @@ export default function App({
     return () => client.setOnTransportChanged(null);
   }, [client]);
 
-  /** The connect half, shared so a fresh pairing can continue straight into it. */
-  const connectTo = useCallback(
+  /** The session half of a Connect: established, or a throw with the row re-read. */
+  const establish = useCallback(
     async (burrow: BurrowView) => {
       const which = await requireDeployment();
       const decision: ConnectResult = await client.connect(burrow.burrowId);
@@ -448,6 +455,14 @@ export default function App({
         }
         throw new Error(decision.message);
       }
+    },
+    [client, loadBurrows, requireDeployment],
+  );
+
+  /** The connect half, shared so a fresh pairing can continue straight into it. */
+  const connectTo = useCallback(
+    async (burrow: BurrowView) => {
+      await establish(burrow);
       try {
         // Past `requireDeployment`, so this reads the answer it just got.
         adapterRef.current = await mountRemoteWall(
@@ -466,10 +481,37 @@ export default function App({
 
       setPhase({ at: 'wall', burrow });
     },
-    [client, deploymentSource, endSession, loadBurrows, requireDeployment],
+    [client, deploymentSource, endSession, establish],
   );
 
   const onConnect = (burrow: BurrowView) => run('connect', () => connectTo(burrow));
+
+  /** A session for one Burrow's paired browsers: no wall, so nothing holds a pane. */
+  const onDevices = (burrow: BurrowView) =>
+    run(DEVICES_OP, async () => {
+      await establish(burrow);
+      try {
+        await client.hello();
+      } catch (err) {
+        endSession();
+        throw err;
+      }
+      setPhase({ at: 'devices', burrow });
+    });
+
+  /**
+   * This browser revoked its own pairing: the session is over, and its row now
+   * offers Pair again. Last, so it outruns the goodbye's own report.
+   */
+  const onSelfRevoked = useCallback(
+    (burrow: BurrowView) => {
+      endSession();
+      void loadBurrows()
+        .catch(() => setPhase({ at: 'burrows' }))
+        .then(() => setError(selfRevokedMessage(burrow)));
+    },
+    [endSession, loadBurrows],
+  );
 
   const onWallError = useCallback((error: unknown) => {
     endSession();
@@ -763,6 +805,13 @@ export default function App({
           transport={transport}
           onLeave={leaveWall}
           onError={onWallError}
+          devices={(
+            <PairedBrowsers
+              session={client}
+              onSelfRevoked={() => onSelfRevoked(phase.burrow)}
+              onAccountLost={dropToSignIn}
+            />
+          )}
           browsers={frameDomain ? {
             session: client,
             burrowId: phase.burrow.burrowId,
@@ -778,6 +827,20 @@ export default function App({
       ) : (
         <Waiting />
       );
+    case 'devices':
+      return (
+        <PairedBrowsersScreen
+          title={phase.burrow.label || phase.burrow.burrowId}
+          leading={(
+            <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={leaveWall}>
+              ‹ {BURROWS_TITLE}
+            </button>
+          )}
+          session={client}
+          onSelfRevoked={() => onSelfRevoked(phase.burrow)}
+          onAccountLost={dropToSignIn}
+        />
+      );
     case 'burrows':
       return (
         <BurrowsView
@@ -791,6 +854,7 @@ export default function App({
           onRefresh={() => run('refresh', loadBurrows)}
           onScan={openScanner}
           onConnect={onConnect}
+          onDevices={onDevices}
           onForget={onForget}
           onEnablePush={onEnablePush}
           onRetryPushConfig={onRetryPushConfig}
@@ -889,6 +953,7 @@ export function ConnectedView({
   onLeave,
   onError,
   browsers,
+  devices,
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
@@ -898,12 +963,15 @@ export function ConnectedView({
   onError?: (error: unknown) => void;
   /** Where this phone frames pages. */
   browsers?: PocketBrowsers;
+  /** This Burrow's paired browsers, at the foot of Settings. */
+  devices?: React.ReactNode;
 }): React.ReactElement {
   return (
     <PocketWall
       adapter={adapter}
       browsers={browsers}
       onError={onError}
+      settingsSection={devices}
       sessionsHeader={(
         <ConnectionHeader
           title={burrow.label || burrow.burrowId}
@@ -1124,6 +1192,17 @@ const PUSH_OP = 'push';
 
 const FORGET_PHONE_OP = 'forget-phone';
 
+/** The `run` label reaching a Burrow's paired browsers; its row's button selects its spinner on it. */
+const DEVICES_OP = 'devices';
+
+/** The row's way to a Burrow's paired browsers. */
+export const DEVICES_LABEL = 'Paired browsers';
+
+/** What the list says once this browser has revoked its own pairing. */
+export function selfRevokedMessage(burrow: BurrowView): string {
+  return `This browser is no longer paired with ${burrow.label || burrow.burrowId}. Scan a new code to pair again.`;
+}
+
 /** Plain Sign out keeps every record; this is the one that does not. */
 export const FORGET_PHONE_LABEL = 'Sign out and forget this phone';
 export const FORGET_PHONE_TITLE = 'Forget this phone?';
@@ -1287,6 +1366,7 @@ export function BurrowsView({
   onRefresh,
   onScan,
   onConnect,
+  onDevices,
   onForget,
   onEnablePush,
   onRetryPushConfig,
@@ -1308,6 +1388,8 @@ export function BurrowsView({
   onRefresh: () => void;
   onScan: () => void;
   onConnect: (burrow: BurrowView) => void;
+  /** Connect to one Burrow to manage its paired browsers; absent, no row offers it. */
+  onDevices?: (burrow: BurrowView) => void;
   /** Remove this phone's record for one computer, tombstoning its delivery id. */
   onForget: (burrow: BurrowView) => void;
   /** Registers every paired Burrow at once — see {@link pushNoticeState}. */
@@ -1382,6 +1464,20 @@ export function BurrowsView({
                 <div className={PK.rowMain}>
                   <div className={PK.rowTitle}>{burrow.label || burrow.burrowId}</div>
                   <div className={PK.rowSecondary}>{status}</div>
+                  {/* Only a Burrow this phone can still authorize on. An offline
+                      one stays dimmed, its status saying why: nothing here can
+                      reach it. */}
+                  {onDevices && isPushTarget(burrow) ? (
+                    <button
+                      type="button"
+                      className={clsx(pkButton({ tone: 'ghost', size: 'sm' }), '-ml-3')}
+                      disabled={busy !== null || !burrow.online}
+                      aria-label={`${DEVICES_LABEL} on ${burrow.label || burrow.burrowId}`}
+                      onClick={() => onDevices(burrow)}
+                    >
+                      {busy === DEVICES_OP ? '…' : DEVICES_LABEL}
+                    </button>
+                  ) : null}
                 </div>
                 <div className={PK.rowActions}>
                   <button

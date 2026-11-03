@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { MinusIcon, PlusIcon } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 import { getTerminalFontSize, setTerminalFontSize } from '../lib/terminal-registry';
@@ -25,9 +25,9 @@ const PREVIEW_TEXT = [
  * The mobile Sessions screen's Settings page: theme, then terminal font size
  * over a sample in the terminal's own font and colors. Without `persist` (the
  * one-time page, which keeps nothing) a choice holds for this page alone and
- * only bundled themes are offered.
+ * only bundled themes are offered. `children` are the consumer's own sections.
  */
-export function MobileSettings({ persist }: { persist: boolean }) {
+export function MobileSettings({ persist, children }: { persist: boolean; children?: ReactNode }) {
   const [fontSize, setFontSize] = useState(getTerminalFontSize);
 
   const stepFontSize = (delta: number) => {
@@ -77,6 +77,7 @@ export function MobileSettings({ persist }: { persist: boolean }) {
           {PREVIEW_TEXT}
         </pre>
       </section>
+      {children}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   BURROWS_EMPTY,
   CAMERA_BOOTSTRAP_MESSAGE,
   BurrowsView,
+  DEVICES_LABEL,
   PUSH_RELAY_DISABLED,
   SCAN_LABEL,
   SetupOrSignin,
@@ -52,6 +53,7 @@ function renderBurrows(
     pushConfigStatus?: PushConfigStatus;
     onScan?: () => void;
     onConnect?: (burrow: BurrowView) => void;
+    onDevices?: (burrow: BurrowView) => void;
     onForget?: (burrow: BurrowView) => void;
     onEnablePush?: () => void;
     onRetryPushConfig?: () => void;
@@ -74,6 +76,7 @@ function renderBurrows(
           onRefresh={() => undefined}
           onScan={overrides.onScan ?? (() => undefined)}
           onConnect={overrides.onConnect ?? (() => undefined)}
+          onDevices={overrides.onDevices}
           onForget={overrides.onForget ?? (() => undefined)}
           onEnablePush={overrides.onEnablePush ?? (() => undefined)}
           onRetryPushConfig={overrides.onRetryPushConfig ?? (() => undefined)}
@@ -339,6 +342,29 @@ describe('the two-digit waiting screen', () => {
 });
 
 describe('BurrowsView actions', () => {
+  it('reaches paired browsers only on a row it can authorize on, and shows an offline one as out of reach', () => {
+    const onDevices = vi.fn();
+    const burrows: BurrowView[] = [
+      { burrowId: 'on', label: 'Online', online: true, needsPairing: false },
+      { burrowId: 'off', label: 'Asleep', online: false, needsPairing: false },
+      { burrowId: 'gone', label: 'Depaired', online: true, needsPairing: true },
+      { burrowId: 'removed', label: 'Removed', online: false, needsPairing: false, removed: true },
+      { burrowId: 'other', label: 'Other account', online: false, needsPairing: false, otherAccount: true },
+    ];
+    renderBurrows({ burrows, onDevices });
+    const reach = (label: string) =>
+      rowFor(label).querySelector<HTMLButtonElement>(`button[aria-label="${DEVICES_LABEL} on ${label}"]`);
+
+    expect(rowFor('Asleep').textContent).toContain('Offline');
+    expect(reach('Asleep')!.disabled).toBe(true);
+    expect(reach('Depaired')).toBeNull();
+    expect(reach('Removed')).toBeNull();
+    expect(reach('Other account')).toBeNull();
+
+    act(() => reach('Online')!.click());
+    expect(onDevices).toHaveBeenCalledWith(burrows[0]);
+  });
+
   it('offers Connect on a paired row and Pair again where authorization is gone', () => {
     renderBurrows({ burrows: NEEDS_PAIRING });
 

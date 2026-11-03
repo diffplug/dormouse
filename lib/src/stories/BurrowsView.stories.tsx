@@ -50,6 +50,7 @@ const meta: Meta<typeof BurrowsView> = {
     onRefresh: () => {},
     onScan: () => {},
     onConnect: () => {},
+    onDevices: () => {},
     onForget: () => {},
     onEnablePush: () => {},
     onRetryPushConfig: () => {},

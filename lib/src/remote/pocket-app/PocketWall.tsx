@@ -54,12 +54,14 @@ export interface PocketBrowsers {
   onReconnect: () => void;
 }
 
-export function PocketWall({ adapter, browsers, onError, persist = true, sessionsHeader }: {
+export function PocketWall({ adapter, browsers, onError, persist = true, sessionsHeader, settingsSection }: {
   adapter: RemotePtyAdapter;
   browsers?: PocketBrowsers;
   onError?: (error: unknown) => void;
   /** What this connection is and how to leave it, which heads the Sessions screen. */
   sessionsHeader?: React.ReactNode;
+  /** A section of this consumer's own at the foot of Settings. */
+  settingsSection?: React.ReactNode;
   /**
    * Whether the theme and Settings choices are restored and saved. The one-time
    * page passes false: it keeps nothing, so the theme is Pocket's default.
@@ -246,7 +248,7 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
       sessions={sessionItems}
       onSessionSelect={setActivePaneId}
       sessionsHeader={sessionsHeader}
-      settings={<MobileSettings persist={persist} />}
+      settings={<MobileSettings persist={persist}>{settingsSection}</MobileSettings>}
       onSendInput={handleSendInput}
       onPaste={handlePaste}
     />

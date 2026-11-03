@@ -25,6 +25,8 @@ import App, {
   CAMERA_BOOTSTRAP_MESSAGE,
   BURROWS_EMPTY,
   BURROWS_TITLE,
+  DEVICES_LABEL,
+  selfRevokedMessage,
   FORGET_PHONE_CONFIRM,
   FORGET_PHONE_LABEL,
   FORGET_PHONE_TITLE,
@@ -35,7 +37,7 @@ import {
   TRANSPORT_RELAY_CAUSES,
   UNSUPPORTED_BROWSER_TITLE,
 } from './views';
-import type { ConnectResult, PairingResult } from '../client/pocket-client';
+import type { ConnectResult, DeviceListing, DeviceRevocation, PairingResult } from '../client/pocket-client';
 import {
   BURROW_UNAVAILABLE_MESSAGE,
   PAIRING_DENIAL_MESSAGES,
@@ -57,6 +59,7 @@ import {
 } from './app-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 import { POCKET_DEPLOYMENT_PATH, deploymentUnreachableMessage } from './deployment';
+import { CONFIRM_REVOKE_LABEL, REVOKE_LABEL, SHOW_PAIRED_BROWSERS, THIS_BROWSER } from './PairedBrowsers';
 
 const fake = vi.hoisted(() => ({
   keyStorage: vi.fn<() => Promise<void>>(),
@@ -85,6 +88,8 @@ const fake = vi.hoisted(() => ({
   >(),
   connect: vi.fn<(burrowId: string) => Promise<ConnectResult>>(),
   forgetBurrow: vi.fn<(burrowId: string) => Promise<void>>(),
+  listDevices: vi.fn<() => Promise<DeviceListing>>(),
+  revokeDevice: vi.fn<(id: string) => Promise<DeviceRevocation>>(),
   forgetThisPhone: vi.fn<() => Promise<void>>(),
   unsubscribePush: vi.fn<() => Promise<void>>(),
   clientClose: vi.fn<() => void>(),
@@ -148,6 +153,8 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     listKnownBurrows = () => fake.listKnownBurrows();
     listBurrows = () => fake.listBurrows();
     forgetBurrow = (burrowId: string) => fake.forgetBurrow(burrowId);
+    listDevices = () => fake.listDevices();
+    revokeDevice = (id: string) => fake.revokeDevice(id);
     forgetThisPhone = () => fake.forgetThisPhone();
     pair = (
       invitation: PairingInvitation,
@@ -173,9 +180,10 @@ vi.mock('../client/webauthn', async (importOriginal) => ({
   browserWebAuthn: {},
 }));
 vi.mock('./PocketWall', () => ({
-  PocketWall: ({ onError, sessionsHeader }: { onError?: (error: unknown) => void; sessionsHeader?: React.ReactNode }) => (
+  PocketWall: ({ onError, sessionsHeader, settingsSection }: { onError?: (error: unknown) => void; sessionsHeader?: React.ReactNode; settingsSection?: React.ReactNode }) => (
     <>
       {sessionsHeader}
+      {settingsSection}
       <button onClick={() => onError?.(new Error('terminal attach refused'))}>Fail attachment</button>
     </>
   ),
@@ -257,6 +265,8 @@ beforeEach(() => {
   fake.pair.mockReset();
   fake.connect.mockReset().mockResolvedValue({ ok: true, burrowLabel: 'First laptop' });
   fake.forgetBurrow.mockReset().mockResolvedValue(undefined);
+  fake.listDevices.mockReset().mockResolvedValue({ ok: true, devices: [] });
+  fake.revokeDevice.mockReset().mockResolvedValue({ ok: true, self: false });
   fake.forgetThisPhone.mockReset().mockImplementation(async () => {
     fake.hasPriorUse = false;
     fake.sessionToken = null;
@@ -1000,7 +1010,7 @@ describe('a Burrow the Relay no longer lists', () => {
     expect(actionsIn(rowFor(container, 'Second laptop'))).toEqual(['Forget']);
     expect(rowFor(container, 'First laptop').textContent).toContain('Offline');
     expect(rowFor(container, 'First laptop').textContent).not.toContain(REMOVED);
-    expect(actionsIn(rowFor(container, 'First laptop'))).toEqual(['Connect', 'Remove']);
+    expect(actionsIn(rowFor(container, 'First laptop'))).toEqual([DEVICES_LABEL, 'Connect', 'Remove']);
 
     await click(container, 'Forget');
     expect(fake.forgetBurrow).toHaveBeenCalledWith('burrow-2');
@@ -1134,5 +1144,93 @@ describe('forgetting this phone', () => {
     expect(fake.unsubscribePush).not.toHaveBeenCalled();
     expect(container.textContent).toContain(BURROWS_TITLE);
     expect(buttonNamed(container, FORGET_PHONE_CONFIRM)).not.toBeNull();
+  });
+});
+
+describe('paired browsers, from a Burrow row', () => {
+  const OWN = { id: 'aaaaaaaaaaaaaaaa', label: DEVICE_LABEL, approvedAt: 1, lastSeenAt: null, self: true };
+
+  async function openDevices(): Promise<void> {
+    fake.sessionToken = 'tok';
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('h1')]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'h1', label: 'First laptop', online: true }]);
+    await boot();
+    await click(container, DEVICES_LABEL);
+  }
+
+  it('connects without a wall, greets, and lists at once', async () => {
+    fake.listDevices.mockResolvedValue({ ok: true, devices: [OWN] });
+    await openDevices();
+
+    expect(fake.connect).toHaveBeenCalledWith('h1');
+    expect(fake.hello).toHaveBeenCalledOnce();
+    expect(fake.adapterInit).not.toHaveBeenCalled();
+    expect(fake.listDevices).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain(THIS_BROWSER);
+  });
+
+  it('offers them on the wall’s Settings too, on the session it has, asking nothing before a tap', async () => {
+    fake.sessionToken = 'tok';
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('h1')]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'h1', label: 'First laptop', online: true }]);
+    await boot();
+    await click(container, 'Connect');
+    expect(fake.connect).toHaveBeenCalledOnce();
+    expect(fake.listDevices).not.toHaveBeenCalled();
+
+    await click(container, SHOW_PAIRED_BROWSERS);
+
+    expect(fake.listDevices).toHaveBeenCalledOnce();
+    expect(fake.connect).toHaveBeenCalledOnce();
+  });
+
+  it('ends the session on the way back to the list', async () => {
+    await openDevices();
+    await click(container, `‹ ${BURROWS_TITLE}`);
+
+    expect(fake.clientClose).toHaveBeenCalled();
+    expect(buttonNamed(container, 'Connect')).not.toBeNull();
+  });
+
+  it('closes a session whose hello failed, reporting on the list', async () => {
+    fake.hello.mockRejectedValue(new Error('no hello'));
+    await openDevices();
+
+    expect(fake.clientClose).toHaveBeenCalled();
+    expect(alertText(container)).toBe('no hello');
+    expect(buttonNamed(container, 'Connect')).not.toBeNull();
+  });
+
+  it('reports a Burrow it cannot reach as that, without listing anything', async () => {
+    fake.connect.mockResolvedValue({ ok: false, message: BURROW_UNAVAILABLE_MESSAGE, pairingRequired: false });
+    await openDevices();
+
+    expect(alertText(container)).toBe(BURROW_UNAVAILABLE_MESSAGE);
+    expect(fake.listDevices).not.toHaveBeenCalled();
+  });
+
+  it('on revoking this browser, ends the session and says why the row now offers Pair again', async () => {
+    fake.listDevices.mockResolvedValue({ ok: true, devices: [OWN] });
+    fake.revokeDevice.mockImplementation(async () => {
+      const record = await knownBurrow('h1');
+      fake.listKnownBurrows.mockResolvedValue([{ ...record, authorization: { state: 'pairing-required' } }]);
+      return { ok: true, self: true };
+    });
+    await openDevices();
+    await click(container, new RegExp(`^${REVOKE_LABEL}$`));
+    await click(container, CONFIRM_REVOKE_LABEL);
+
+    expect(fake.revokeDevice).toHaveBeenCalledWith(OWN.id);
+    expect(fake.clientClose).toHaveBeenCalled();
+    expect(alertText(container)).toBe(selfRevokedMessage({ burrowId: 'h1', label: 'First laptop', online: true, needsPairing: false }));
+    expect(buttonNamed(container, 'Pair again')).not.toBeNull();
+  });
+
+  it('drops to sign-in when the Relay session died under a proof', async () => {
+    fake.listDevices.mockRejectedValue(new SessionExpiredError());
+    await openDevices();
+
+    expect(fake.clientClose).toHaveBeenCalled();
+    expect(buttonNamed(container, /Sign in with passkey/)).not.toBeNull();
   });
 });
