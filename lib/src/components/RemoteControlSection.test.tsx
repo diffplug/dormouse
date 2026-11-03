@@ -53,6 +53,7 @@ import {
   type BurrowConsoleStatus,
   type HostedEnrollmentState,
   type PairedDevice,
+  type UnsavedRevocation,
   type SetupQrResult,
 } from '../host/remote/service-protocol';
 import type { AccessLogEntry } from '../remote/burrow/access-log';
@@ -1757,24 +1758,27 @@ function accessService({
   status = enrolled({ pairedClients: 2 }),
   devices = pairedDevices(2),
   log = accessLogEntries(devices),
+  unsavedRevocations = [],
   revokeError,
 }: {
   status?: BurrowConsoleStatus;
   devices?: PairedDevice[];
   log?: AccessLogEntry[];
+  unsavedRevocations?: UnsavedRevocation[];
   revokeError?: string;
 } = {}) {
-  const held = { devices, log };
+  const held = { devices, log, unsavedRevocations };
   const link = makeLink(async (cmd, params) => {
     switch (cmd) {
       case 'pairedDevices':
-        return { devices: held.devices };
+        return { devices: held.devices, unsavedRevocations: held.unsavedRevocations };
       case 'accessLog':
         return { entries: held.log };
       case 'revokeDevice': {
         if (revokeError) throw new Error(revokeError);
         const { id } = params as { id: string };
         held.devices = held.devices.filter((device) => device.id !== id);
+        held.unsavedRevocations = held.unsavedRevocations.filter((revocation) => revocation.id !== id);
         return { revoked: 1, labels: [] };
       }
       default:
@@ -1877,6 +1881,19 @@ describe('Paired phones and the access log', () => {
     await act(async () => buttonIn(deviceRow(target.id), 'Revoke')!.click());
     expect(text()).toContain('No paired phone has the id 3f2a9c01d47e6b01.');
     expect(buttonIn(deviceRow(target.id), 'Cancel')).toBeTruthy();
+  });
+
+  it('shows a revocation not saved yet, and saves it again from its row', async () => {
+    const unsaved = { id: '7f2a9c01d47e6b02', label: 'Dormouse Pocket' };
+    const service = accessService({ unsavedRevocations: [unsaved] });
+    platform = { burrow: service.link };
+    await render();
+    expect(deviceRow(unsaved.id).textContent).toContain('this phone can connect again');
+
+    await act(async () => buttonIn(deviceRow(unsaved.id), 'Save again')!.click());
+
+    expect(service.link.command).toHaveBeenCalledWith('revokeDevice', { id: unsaved.id, by: 'settings' });
+    expect(text()).not.toContain(unsaved.id);
   });
 
   it('re-reads the list and the log on an access event', async () => {
