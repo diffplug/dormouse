@@ -75,7 +75,7 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
     );
   }
 
-  const { app, injectWebSocket, sweepRevokedBurrows, sweepRelaySockets } = createApp({
+  const { app, injectWebSocket, sweepRevokedBurrows, sweepRemovedPasskeys, sweepRelaySockets } = createApp({
     ...appConfig,
     setupPassword,
     // Both together or neither: advertising a key the Relay has no subject to
@@ -166,6 +166,8 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
       // A `burrows.json` caught mid-edit is an expected state (State files); the
       // next sweep reads it again.
     });
+    // The same again for `account.json`: a removed passkey's Burrows are nudged.
+    void sweepRemovedPasskeys().catch(() => {});
   }, BURROW_REVOCATION_SWEEP_MS).unref();
 
   // The socket-level sweep, on the same terms and for the same reason: the

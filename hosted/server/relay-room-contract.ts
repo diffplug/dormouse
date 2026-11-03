@@ -51,6 +51,8 @@ export interface RelayRoomRpc {
   closeBurrow(account: string, burrowId: string): Promise<boolean>;
   /** Close every Client socket opened by a session hashed `tokenHashes` as unauthorized (1008), each Burrow told `client-gone`; how many. */
   closeSessions(account: string, tokenHashes: string[]): Promise<number>;
+  /** Tell every held Burrow to ask which of its passkeys went (`passkeys-changed`); how many. */
+  nudgeBurrows(account: string): Promise<number>;
   /** Every Burrow holding a live socket: what `GET /api/burrows` reports online. */
   onlineBurrows(account: string): Promise<string[]>;
 }
@@ -62,6 +64,7 @@ export function relayRoom(namespace: DurableObjectNamespace<RelayRoomRpc>, accou
     fetch: (request: Request) => stub.fetch(request),
     closeBurrow: (burrowId: string) => stub.closeBurrow(account, burrowId),
     closeSessions: (tokenHashes: string[]) => stub.closeSessions(account, tokenHashes),
+    nudgeBurrows: () => stub.nudgeBurrows(account),
     onlineBurrows: () => stub.onlineBurrows(account),
   };
 }
