@@ -23,6 +23,7 @@ export const ACCESS_EVENTS = [
   'pairing-denied',
   'connected',
   'connection-denied',
+  'proof-denied',
   'attached',
   'closed',
   'ended',

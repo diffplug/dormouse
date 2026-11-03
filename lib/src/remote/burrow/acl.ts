@@ -64,15 +64,17 @@ export type RevocationTarget =
 const COMMAND_REQUESTERS = ['settings', 'dor'] as const;
 
 /**
- * Who asked, as the access log records it: a command's, or the Relay naming a
- * passkey its account no longer holds. A closed set.
+ * Who asked, as the access log records it: a command's, the Relay naming a
+ * passkey its account no longer holds, or a Client's `devices.revoke`. A closed
+ * set.
  */
-export const REVOCATION_REQUESTERS = [...COMMAND_REQUESTERS, 'relay'] as const;
+export const REVOCATION_REQUESTERS = [...COMMAND_REQUESTERS, 'relay', 'pocket'] as const;
 export type RevocationRequester = (typeof REVOCATION_REQUESTERS)[number];
 
 /**
  * The requester an untrusted command names, anything else read as `settings`:
- * no message can claim `relay`, which only the service's own asking logs.
+ * no message can claim `relay` or `pocket`, which only the service's own Relay
+ * asking and `devices.revoke` log.
  */
 export function revocationRequester(value: unknown): RevocationRequester {
   return COMMAND_REQUESTERS.find((known) => known === value) ?? 'settings';

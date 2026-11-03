@@ -38,10 +38,10 @@ function bounded(value: unknown): value is string {
 // The presence proof
 
 /**
- * What a Client presents to prove fresh user presence inside a ceremony. It
- * travels only inside the first Client→Burrow transport payload, so it is
- * confidential to the pair and bound to their transcript through
- * {@link PresenceBinding}.
+ * What a Client presents to prove fresh user presence. It travels only inside
+ * the Noise channel — a ceremony's first Client→Burrow transport payload, or
+ * for a `session` binding one protocol-v1 request — so it is confidential to
+ * the pair and bound to their transcript through {@link PresenceBinding}.
  */
 export interface PresenceProofV1 {
   readonly binding: PresenceBinding;
@@ -102,8 +102,8 @@ export type PresenceProofResult =
   | { readonly ok: false; readonly reason: PresenceProofFailure };
 
 /**
- * The one presence verifier both ceremonies run — pairing and connection differ
- * only in the binding they pass as `expected`, which the caller must have built
+ * The one presence verifier every proof meets — pairing, connection, and a
+ * session's own verbs differ only in the binding they pass as `expected`, which the caller must have built
  * from its own state (`docs/specs/remote-security-model.md` → Presence proofs).
  *
  * **Never throws**, so a caller may treat every rejection as an ordinary denial.
@@ -160,7 +160,7 @@ function bindingEquals(left: PresenceBinding, right: PresenceBinding): boolean {
       left.passkeyCredentialId === right.passkeyCredentialId
     );
   }
-  if (left.kind === 'connection' && right.kind === 'connection') {
+  if (left.kind !== 'pairing' && right.kind !== 'pairing') {
     return (
       left.burrowId === right.burrowId &&
       left.connectionId === right.connectionId &&

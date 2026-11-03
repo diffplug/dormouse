@@ -25,7 +25,7 @@ import type {
   SurfaceHandle,
   SurfaceHold,
 } from './burrow-surface-provider';
-import { RemoteApiSession } from './remote-api';
+import { RemoteApiSession, type SessionDevices } from './remote-api';
 
 type SentPayload = RemoteResponse | RemoteEventMsg;
 
@@ -1569,5 +1569,155 @@ describe('RemoteApiSession size holds', () => {
 
     session.dispose();
     expect(provider.unstreamed).toEqual(['pty-1']);
+  });
+});
+
+describe('devices.*', () => {
+  const HELLO = { protocolVersion: 1, viewer: 'phone' };
+  const flush = () => new Promise((resolve) => setTimeout(resolve));
+  const answerTo = (sent: SentPayload[], requestId: string) =>
+    sent.find((payload): payload is RemoteResponse => 'requestId' in payload && payload.requestId === requestId);
+
+  function makeDevices(over: Partial<SessionDevices> = {}, provedAtConnection = false) {
+    const presence = {
+      provedAtConnection,
+      issueChallenge: vi.fn(() => 'the-challenge'),
+      verifyProof: vi.fn(async (_proof: unknown) => true),
+    };
+    const devices: SessionDevices = {
+      presence,
+      list: vi.fn(async () => []),
+      resolve: vi.fn(async (id: string) => ({ self: id === 'mine' })),
+      revoke: vi.fn(async () => 'revoked' as const),
+      ...over,
+    };
+    return { devices, presence };
+  }
+
+  function makeDeviceSession(devices?: SessionDevices) {
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({
+      burrowId: 'burrow-1',
+      send: (payload) => void sent.push(payload),
+      provider: new FakeProvider(),
+      holder: HOLDER,
+      devices,
+    });
+    return { session, sent };
+  }
+
+  it('is an unknown method, and absent from hello, without devices: an older Burrow and a one-time session alike', async () => {
+    const { session, sent } = makeDeviceSession();
+    session.handle({ requestId: 'h', method: REMOTE_METHODS.hello, params: HELLO });
+    session.handle({ requestId: 'l', method: REMOTE_METHODS.devicesList });
+    session.handle({ requestId: 'r', method: REMOTE_METHODS.devicesRevoke, params: { id: 'x' } });
+    await flush();
+
+    expect(answerTo(sent, 'h')!.result).toEqual({
+      protocolVersion: 1,
+      burrowId: 'burrow-1',
+      grants: { input: true, layout: false },
+    });
+    expect(answerTo(sent, 'l')).toEqual({ requestId: 'l', ok: false, error: 'unknown method: devices.list' });
+    expect(answerTo(sent, 'r')).toEqual({ requestId: 'r', ok: false, error: 'unknown method: devices.revoke' });
+  });
+
+  it('adds only `devices` to the hello an older Client reads', () => {
+    const { session, sent } = makeDeviceSession(makeDevices().devices);
+    session.handle({ requestId: 'h', method: REMOTE_METHODS.hello, params: HELLO });
+    expect(answerTo(sent, 'h')!.result).toEqual({
+      protocolVersion: 1,
+      burrowId: 'burrow-1',
+      grants: { input: true, layout: false },
+      devices: true,
+    });
+  });
+
+  it('answers a session revoking itself before the revocation runs, its goodbye being next', async () => {
+    const order: string[] = [];
+    const { devices } = makeDevices({
+      revoke: vi.fn(async () => {
+        order.push('revoke');
+        return 'revoked' as const;
+      }),
+    });
+    const sent: SentPayload[] = [];
+    const session = new RemoteApiSession({
+      burrowId: 'burrow-1',
+      send: (payload) => {
+        order.push('answer');
+        sent.push(payload);
+      },
+      provider: new FakeProvider(),
+      holder: HOLDER,
+      devices,
+    });
+
+    session.handle({ requestId: 'c', method: REMOTE_METHODS.devicesRevoke, params: { id: 'mine' } });
+    await flush();
+    order.length = 0;
+    session.handle({ requestId: 'r', method: REMOTE_METHODS.devicesRevoke, params: { id: 'mine', proof: {} } });
+    await flush();
+
+    expect(order).toEqual(['answer', 'revoke']);
+    expect(answerTo(sent, 'r')!.result).toEqual({ outcome: 'revoked', self: true });
+  });
+
+  it('answers another browser only once the revocation has run, and says so when it failed', async () => {
+    const { devices } = makeDevices({
+      revoke: vi.fn(async () => {
+        throw new Error('disk full at /secret/path');
+      }),
+    });
+    const { session, sent } = makeDeviceSession(devices);
+    session.handle({ requestId: 'c', method: REMOTE_METHODS.devicesRevoke, params: { id: 'theirs' } });
+    await flush();
+    session.handle({ requestId: 'r', method: REMOTE_METHODS.devicesRevoke, params: { id: 'theirs', proof: {} } });
+    await flush();
+
+    // No store's text on the wire.
+    expect(answerTo(sent, 'r')!.result).toEqual({ outcome: 'refused', code: 'burrow-error' });
+  });
+
+  it('answers a list that failed in fixed words too', async () => {
+    const { devices } = makeDevices(
+      {
+        list: vi.fn(async () => {
+          throw new Error('/secret/path');
+        }),
+      },
+      true,
+    );
+    const { session, sent } = makeDeviceSession(devices);
+    session.handle({ requestId: 'l', method: REMOTE_METHODS.devicesList });
+    await flush();
+    expect(answerTo(sent, 'l')!.result).toEqual({ outcome: 'refused', code: 'burrow-error' });
+  });
+
+  it('revokes nothing, and answers nothing, for a session disposed while its proof verified', async () => {
+    let finishVerify!: (ok: boolean) => void;
+    const { devices, presence } = makeDevices();
+    presence.verifyProof.mockImplementation(() => new Promise((resolve) => (finishVerify = resolve)));
+    const { session, sent } = makeDeviceSession(devices);
+    session.handle({ requestId: 'c', method: REMOTE_METHODS.devicesRevoke, params: { id: 'theirs' } });
+    await flush();
+    session.handle({ requestId: 'r', method: REMOTE_METHODS.devicesRevoke, params: { id: 'theirs', proof: {} } });
+    await flush();
+
+    session.dispose();
+    finishVerify(true);
+    await flush();
+
+    expect(devices.revoke).not.toHaveBeenCalled();
+    expect(answerTo(sent, 'r')).toBeUndefined();
+  });
+
+  it('names the id it asks about exactly: nothing unbounded reaches the service', async () => {
+    const { devices } = makeDevices();
+    const { session, sent } = makeDeviceSession(devices);
+    session.handle({ requestId: 'r', method: REMOTE_METHODS.devicesRevoke, params: { id: 'x'.repeat(129) } });
+    await flush();
+    expect(answerTo(sent, 'r')!.result).toEqual({ outcome: 'refused', code: 'unknown-device' });
+    expect(devices.resolve).not.toHaveBeenCalled();
   });
 });

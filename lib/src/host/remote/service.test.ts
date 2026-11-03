@@ -68,6 +68,9 @@ import {
   RELAY_BEARER_LENGTH,
   UNAUTHORIZED_ERROR,
   WS_CLOSE_BURROW_REVOKED,
+  DEFAULT_CHALLENGE_TTL_MS,
+  fromBase64Url,
+  hashPasskeyPublicKey,
   mintNoiseStaticKeyPair,
   parseOneTimeLinkUrl,
   parsePairingInvitationUrl,
@@ -76,6 +79,12 @@ import {
   utf8Encode,
   type EnrollmentOffer,
   type BurrowAclRecord,
+  type DevicesListResult,
+  type NoiseKeyPair,
+  type NoiseTransportSession,
+  type PairedBrowserV1,
+  type PresenceProofV1,
+  type RemoteResponse,
 } from 'remote-lib-common';
 import { ACCESS_LOG_MAX_ENTRIES, deviceIdFor, type AccessLogEntry } from '../../remote/burrow/access-log';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
@@ -92,8 +101,12 @@ import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
   createTestAuthenticator,
+  e2eFramesFor,
   flushUntil,
+  openConnectionSession,
   openPairingSession,
+  presenceProofFor,
+  sendE2eFrame,
   openReceipt,
   pairThroughSocket,
   readOutcome,
@@ -1887,6 +1900,488 @@ describe('paired devices and revocation', () => {
   });
 });
 
+describe('paired browsers, over a session', () => {
+  let clock: number;
+  let authenticator: TestAuthenticator;
+  let own: NoiseKeyPair;
+  let ownRecord: BurrowAclRecord;
+  const OTHER = { ...aclRecord('other', HOME_SCREEN), approvedAt: 7 };
+  const otherId = deviceIdFor(OTHER.clientStaticPublicKey);
+
+  /** One protocol-v1 session on the Burrow's relay socket, as Pocket's would be. */
+  interface PairedSession {
+    connectionId: string;
+    session: NoiseTransportSession;
+    handshakeHash: string;
+    /** Every Burrow→Client message this session has opened, in order. */
+    opened(): unknown[];
+    request(method: string, params?: unknown): Promise<Record<string, unknown>>;
+    proofFor(challenge: unknown, over?: Parameters<typeof presenceProofFor>[2]): Promise<PresenceProofV1>;
+  }
+
+  async function seedPaired(): Promise<void> {
+    clock = 1_000_000;
+    authenticator = await createTestAuthenticator({ rpId: ENROLLMENT.rpId, origin: ORIGIN });
+    own = await generateNoiseKeyPair();
+    ownRecord = {
+      ...aclRecord('own'),
+      accountId: 'owner',
+      passkeyCredentialId: authenticator.credentialId,
+      passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
+      clientStaticPublicKey: toBase64Url(own.publicKey),
+      approvedAt: 5,
+    };
+    createService(
+      {
+        enrollment: ENROLLMENT,
+        acl: { [BURROW_ID]: [OTHER, ownRecord] },
+        accessLog: [{ at: 50, event: 'ended', device: BROWSER, deviceId: otherId, path: 'direct', durationMs: 9 }],
+      },
+      { now: () => clock },
+    );
+    await service.start();
+    sockets[0]!.open();
+    await settle();
+  }
+
+  /** Noise, then the connection request: a fresh proof, or a ride on the window offered. */
+  async function connect(presence: 'proof' | 'window', clientId = testRoutingId()): Promise<PairedSession> {
+    const socket = sockets[0]!;
+    const connectionId = testRoutingId();
+    const { session, burrowChallenge, offer } = await openConnectionSession({
+      socket,
+      burrowId: BURROW_ID,
+      clientId,
+      connectionId,
+      clientStatic: own,
+      burrowStaticPublicKey: ENROLLMENT.noiseStaticPublicKey,
+    });
+    if (presence === 'window') expect(offer).toBe('window');
+    const handshakeHash = toBase64Url(session.handshakeHash);
+    const send = (ct: Uint8Array): void =>
+      sendE2eFrame(socket, { clientId, burrowId: BURROW_ID, kind: 'connection', id: connectionId, step: 'transport', ct: toBase64Url(ct) });
+    send(
+      session.sendControl({
+        presence:
+          presence === 'window'
+            ? 'window'
+            : await presenceProofFor(authenticator, {
+                kind: 'connection',
+                burrowId: BURROW_ID,
+                connectionId,
+                burrowChallenge,
+                handshakeHash,
+                passkeyCredentialId: authenticator.credentialId,
+              }),
+      }),
+    );
+    await expect(readOutcome(socket, session, 'connection', connectionId, 0)).resolves.toMatchObject({ ok: true });
+    let read = 1;
+    let requests = 0;
+    const answers = new Map<string, Record<string, unknown>>();
+    const opened: unknown[] = [];
+    const drain = (): void => {
+      const frames = e2eFramesFor(socket, 'connection', connectionId, 'transport');
+      for (; read < frames.length; read++) {
+        const receipt = openReceipt(session, fromBase64Url(frames[read]!.ct as string));
+        for (const message of Array.isArray(receipt) ? (receipt as RemoteResponse[]) : [receipt]) {
+          opened.push(message);
+          const { requestId } = message as RemoteResponse;
+          if (requestId) answers.set(requestId, message as unknown as Record<string, unknown>);
+        }
+      }
+    };
+    return {
+      connectionId,
+      session,
+      handshakeHash,
+      opened: () => {
+        drain();
+        return opened;
+      },
+      request: async (method, params) => {
+        const requestId = `r-${++requests}`;
+        for (const ct of session.sendApp(utf8Encode(JSON.stringify({ requestId, method, params })))) send(ct);
+        return flushUntil(() => {
+          drain();
+          return answers.get(requestId);
+        });
+      },
+      proofFor: (challenge, over) =>
+        presenceProofFor(
+          authenticator,
+          {
+            kind: 'session',
+            burrowId: BURROW_ID,
+            connectionId,
+            burrowChallenge: challenge as string,
+            handshakeHash,
+            passkeyCredentialId: authenticator.credentialId,
+          },
+          over,
+        ),
+    };
+  }
+
+  /** The bare request's challenge. */
+  async function challengeFor(paired: PairedSession, method: string, params?: unknown): Promise<string> {
+    const { result } = await paired.request(method, params);
+    expect(result).toMatchObject({ outcome: 'presence-required' });
+    return (result as { challenge: string }).challenge;
+  }
+
+  const LIST = 'devices.list';
+  const REVOKE = 'devices.revoke';
+
+  function otherIsActive(): boolean {
+    return store.acl[BURROW_ID]!.some((record) => record.deliveryId === OTHER.deliveryId && record.revokedAt === null);
+  }
+
+  it('says it serves the verbs in its hello, on a paired session', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    expect((await paired.request('hello', { protocolVersion: 1, viewer: 'phone' })).result).toMatchObject({
+      devices: true,
+    });
+  });
+
+  it('lists each record to a session that proved presence, its own marked, and holding nothing else', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const ownId = deviceIdFor(ownRecord.clientStaticPublicKey);
+    const { result } = await paired.request(LIST);
+    expect(result).toEqual({
+      outcome: 'devices',
+      devices: [
+        { id: otherId, label: HOME_SCREEN, approvedAt: 7, lastSeenAt: 50, self: false },
+        // Its own connection is in the log by now.
+        { id: ownId, label: BROWSER, approvedAt: 5, lastSeenAt: clock, self: true },
+      ],
+    });
+    const text = JSON.stringify(result);
+    for (const record of [OTHER, ownRecord]) {
+      expect(text).not.toContain(record.clientStaticPublicKey);
+      expect(text).not.toContain(record.deliveryId);
+      expect(text).not.toContain(record.passkeyCredentialId);
+    }
+  });
+
+  it('asks a session that rode a window for a proof before it lists, and once', async () => {
+    await seedPaired();
+    await connect('proof');
+    // A newer session from this static replaces it, riding what that proof opened.
+    const paired = await connect('window');
+
+    const challenge = await challengeFor(paired, LIST);
+    // Listing nothing until it proves: the list holds other devices' metadata.
+    const proof = await paired.proofFor(challenge);
+    expect((await paired.request(LIST, { proof })).result).toMatchObject({ outcome: 'devices' });
+    // Single use, and shown: a re-read after a revoke costs no second prompt.
+    expect((await paired.request(LIST)).result).toMatchObject({ outcome: 'devices' });
+  });
+
+  it('never lets a window ride revoke, nor a proof shown at connection or for the list', async () => {
+    await seedPaired();
+    const proved = await connect('proof');
+    expect((await proved.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
+
+    const rode = await connect('window');
+    expect((await rode.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
+
+    const proof = await rode.proofFor(await challengeFor(rode, LIST));
+    expect((await rode.request(LIST, { proof })).result).toMatchObject({ outcome: 'devices' });
+    expect((await rode.request(REVOKE, { id: otherId })).result).toMatchObject({ outcome: 'presence-required' });
+
+    expect(otherIsActive()).toBe(true);
+    expect(store.accessLog.some((entry) => entry.event === 'revoked')).toBe(false);
+  });
+
+  it('refuses a proof whose challenge was issued for the list, and spends it', async () => {
+    await seedPaired();
+    await connect('proof');
+    const paired = await connect('window');
+    const challenge = await challengeFor(paired, LIST);
+    const proof = await paired.proofFor(challenge);
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual({
+      outcome: 'refused',
+      code: 'presence-rejected',
+    });
+    expect(otherIsActive()).toBe(true);
+    // Spent: the same proof buys the list nothing now either.
+    expect((await paired.request(LIST, { proof })).result).toEqual({ outcome: 'refused', code: 'presence-rejected' });
+  });
+
+  it('revokes by id on a fresh proof, through the service, logged under its own requester whatever the Client says', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const challenge = await challengeFor(paired, REVOKE, { id: otherId });
+    const proof = await paired.proofFor(challenge);
+
+    const { result } = await paired.request(REVOKE, { id: otherId, proof, by: 'relay' });
+
+    expect(result).toEqual({ outcome: 'revoked', self: false });
+    expect(otherIsActive()).toBe(false);
+    await settle();
+    expect(store.accessLog).toContainEqual(
+      expect.objectContaining({ event: 'revoked', deviceId: otherId, device: HOME_SCREEN, by: 'pocket' }),
+    );
+    // The session goes on, and its list has moved.
+    const listed = (await paired.request(LIST)).result as DevicesListResult & { devices: PairedBrowserV1[] };
+    expect(listed.devices.map((device) => device.id)).toEqual([deviceIdFor(ownRecord.clientStaticPublicKey)]);
+  });
+
+  it('spends a proof on its first showing', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const proof = await paired.proofFor(await challengeFor(paired, REVOKE, { id: otherId }));
+
+    const answers = await Promise.all([
+      paired.request(REVOKE, { id: otherId, proof }),
+      paired.request(REVOKE, { id: otherId, proof }),
+    ]);
+
+    expect(answers.map(({ result }) => result)).toEqual(
+      expect.arrayContaining([
+        { outcome: 'revoked', self: false },
+        { outcome: 'refused', code: 'presence-rejected' },
+      ]),
+    );
+  });
+
+  it('refuses a stale proof: one over a challenge past its TTL', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const challenge = await challengeFor(paired, REVOKE, { id: otherId });
+    const proof = await paired.proofFor(challenge);
+    // In two steps, with a message between, so only the challenge goes stale
+    // and not the session's idle clock.
+    clock += DEFAULT_CHALLENGE_TTL_MS - 1;
+    await paired.request('hello', { protocolVersion: 1, viewer: 'phone' });
+    clock += 2;
+
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual({
+      outcome: 'refused',
+      code: 'presence-rejected',
+    });
+    expect(otherIsActive()).toBe(true);
+    await settle();
+    expect(store.accessLog).toContainEqual(
+      expect.objectContaining({ event: 'proof-denied', reason: 'challenge-invalid' }),
+    );
+  });
+
+  it('refuses a proof over a challenge issued for another id, or superseded by a newer one', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const ownId = deviceIdFor(ownRecord.clientStaticPublicKey);
+    const forOwn = await paired.proofFor(await challengeFor(paired, REVOKE, { id: ownId }));
+    expect((await paired.request(REVOKE, { id: otherId, proof: forOwn })).result).toEqual({
+      outcome: 'refused',
+      code: 'presence-rejected',
+    });
+    const superseded = await paired.proofFor(await challengeFor(paired, REVOKE, { id: otherId }));
+    await challengeFor(paired, REVOKE, { id: otherId });
+    expect((await paired.request(REVOKE, { id: otherId, proof: superseded })).result).toEqual({
+      outcome: 'refused',
+      code: 'presence-rejected',
+    });
+    expect(otherIsActive()).toBe(true);
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+  });
+
+  it('refuses a proof of the wrong kind, another session, another key, another account, or no shape at all', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const elsewhere = await createTestAuthenticator({ rpId: ENROLLMENT.rpId, origin: ORIGIN });
+    const refusal = { outcome: 'refused', code: 'presence-rejected' };
+    const bases = async () => {
+      const challenge = await challengeFor(paired, REVOKE, { id: otherId });
+      return {
+        challenge,
+        binding: {
+          kind: 'session' as const,
+          burrowId: BURROW_ID,
+          connectionId: paired.connectionId,
+          burrowChallenge: challenge,
+          handshakeHash: paired.handshakeHash,
+          passkeyCredentialId: authenticator.credentialId,
+        },
+      };
+    };
+    // A connection proof, the very values a `session` one names.
+    let { binding } = await bases();
+    let proof = await presenceProofFor(authenticator, { ...binding, kind: 'connection' });
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual(refusal);
+    // Another session's transcript.
+    ({ binding } = await bases());
+    proof = await presenceProofFor(authenticator, { ...binding, handshakeHash: toBase64Url(new Uint8Array(32)) });
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual(refusal);
+    // A signature that does not cover the binding sent.
+    ({ binding } = await bases());
+    proof = await presenceProofFor(authenticator, binding, {
+      assertionBinding: { ...binding, burrowChallenge: toBase64Url(new Uint8Array(32)) },
+    });
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual(refusal);
+    // A passkey the record does not hold, naming itself.
+    ({ binding } = await bases());
+    proof = await presenceProofFor(elsewhere, { ...binding, passkeyCredentialId: elsewhere.credentialId });
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual(refusal);
+    // The record's credential, signed by another key: the conjunction's hash.
+    ({ binding } = await bases());
+    proof = await presenceProofFor(authenticator, binding);
+    const swapped = await presenceProofFor(authenticator, binding);
+    proof = { ...swapped, passkeyPublicKey: elsewhere.publicKey };
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual(refusal);
+    // Another account's word on a good proof.
+    ({ binding } = await bases());
+    proof = await presenceProofFor(authenticator, binding, { accountId: 'not-the-owner' });
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual(refusal);
+    // No shape at all.
+    await bases();
+    expect((await paired.request(REVOKE, { id: otherId, proof: 'window' })).result).toEqual(refusal);
+
+    expect(otherIsActive()).toBe(true);
+    await settle();
+    expect(store.accessLog.filter((entry) => entry.event === 'proof-denied')).toHaveLength(7);
+    // And after all that the session itself is untouched.
+    expect((await paired.request(LIST)).result).toMatchObject({ outcome: 'devices' });
+  });
+
+  it('refuses a proof the UV raise voided mid-verification', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const proof = await paired.proofFor(await challengeFor(paired, REVOKE, { id: otherId }));
+    const verify = globalThis.crypto.subtle.verify.bind(globalThis.crypto.subtle);
+    const spy = vi.spyOn(globalThis.crypto.subtle, 'verify').mockImplementation(((...args: Parameters<typeof verify>) => {
+      sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+      return verify(...args);
+    }) as typeof verify);
+    try {
+      expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual({
+        outcome: 'refused',
+        code: 'presence-rejected',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(otherIsActive()).toBe(true);
+    await settle();
+    expect(store.accessLog).toContainEqual(expect.objectContaining({ event: 'proof-denied', reason: 'policy-raised' }));
+  });
+
+  it('refuses an unknown id at both steps, revoking nothing and asking no prompt', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const unknown = { outcome: 'refused', code: 'unknown-device' };
+    expect((await paired.request(REVOKE, { id: '0000000000000000' })).result).toEqual(unknown);
+    // A static and a delivery id are not names for a record here.
+    expect((await paired.request(REVOKE, { id: OTHER.clientStaticPublicKey })).result).toEqual(unknown);
+    expect((await paired.request(REVOKE, { id: OTHER.deliveryId })).result).toEqual(unknown);
+    expect((await paired.request(REVOKE, { id: 7 })).result).toEqual(unknown);
+    expect((await paired.request(REVOKE, {})).result).toEqual(unknown);
+    const proof = await paired.proofFor(await challengeFor(paired, REVOKE, { id: otherId }));
+    expect((await paired.request(REVOKE, { id: '0000000000000000', proof })).result).toEqual(unknown);
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+  });
+
+  it('refuses an id two statics share, naming neither', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    // The same first 64 bits, a different key.
+    const twinStatic = fromBase64Url(OTHER.clientStaticPublicKey);
+    twinStatic[20]! ^= 1;
+    const twin = {
+      ...OTHER,
+      deliveryId: aclRecord('twin').deliveryId,
+      clientStaticPublicKey: toBase64Url(twinStatic),
+    };
+    expect(deviceIdFor(twin.clientStaticPublicKey)).toBe(otherId);
+    await seedTwin(twin);
+    const fresh = await connect('proof');
+    expect((await fresh.request(REVOKE, { id: otherId })).result).toEqual({
+      outcome: 'refused',
+      code: 'ambiguous-device',
+    });
+    expect(paired.connectionId).not.toBe(fresh.connectionId);
+    expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
+  });
+
+  async function seedTwin(twin: BurrowAclRecord): Promise<void> {
+    store.acl[BURROW_ID] = [...store.acl[BURROW_ID]!, twin];
+    await setPolicy(NOTHING);
+    await setPolicy(RELAY_ON);
+    sockets.at(-1)!.open();
+    await settle();
+    sockets[0] = sockets.at(-1)!;
+  }
+
+  it('answers a session revoking itself before its goodbye, and leaves it nothing to connect on', async () => {
+    await seedPaired();
+    const socket = sockets[0]!;
+    const paired = await connect('proof');
+    const ownId = deviceIdFor(ownRecord.clientStaticPublicKey);
+    const proof = await paired.proofFor(await challengeFor(paired, REVOKE, { id: ownId }));
+
+    const answer = await paired.request(REVOKE, { id: ownId, proof });
+
+    expect(answer.result).toEqual({ outcome: 'revoked', self: true });
+    await settle();
+    // The goodbye comes after the answer, on the same session.
+    expect(paired.opened().slice(-2)).toEqual([answer, { v: 1, t: 'session-end' }]);
+    expect(store.acl[BURROW_ID]!.find((record) => record.deliveryId === ownRecord.deliveryId)!.revokedAt).not.toBeNull();
+    expect(store.accessLog).toContainEqual(expect.objectContaining({ event: 'revoked', deviceId: ownId, by: 'pocket' }));
+
+    // Its window closed with it: the next connect offers none, and a proof is refused.
+    const { offer } = await openConnectionSession({
+      socket,
+      burrowId: BURROW_ID,
+      clientId: testRoutingId(),
+      connectionId: testRoutingId(),
+      clientStatic: own,
+      burrowStaticPublicKey: ENROLLMENT.noiseStaticPublicKey,
+    });
+    expect(offer).toBe('none');
+  });
+
+  it('puts no record field on the Relay: its frames carry only ciphertext, and its routes see none of them', async () => {
+    await seedPaired();
+    const socket = sockets[0]!;
+    const paired = await connect('proof');
+    await paired.request(LIST);
+    const proof = await paired.proofFor(await challengeFor(paired, REVOKE, { id: otherId }));
+    await paired.request(REVOKE, { id: otherId, proof });
+    await settle();
+
+    const toRelay = JSON.stringify(socket.frames());
+    const fromBurrowHttp = JSON.stringify(requests.map(({ url, init }) => [url, init?.body]));
+    const ownId = deviceIdFor(ownRecord.clientStaticPublicKey);
+    for (const leak of [
+      otherId,
+      ownId,
+      HOME_SCREEN,
+      BROWSER,
+      OTHER.deliveryId,
+      ownRecord.deliveryId,
+      OTHER.clientStaticPublicKey,
+      ownRecord.clientStaticPublicKey,
+      'approvedAt',
+      'devices',
+      'revoked',
+    ]) {
+      expect(toRelay).not.toContain(leak);
+      expect(fromBurrowHttp).not.toContain(leak);
+    }
+  });
+
+  it('lets no webview command claim the requester a session logs under', async () => {
+    await seedPaired();
+    await command('revokeDevice', { id: otherId, by: 'pocket' });
+    await settle();
+    expect(store.accessLog).toContainEqual(expect.objectContaining({ event: 'revoked', by: 'settings' }));
+    expect(store.accessLog.some((entry) => entry.by === 'pocket')).toBe(false);
+  });
+});
+
 describe('Relay-named revocation', () => {
   const PHONE = { ...aclRecord('a-phone'), passkeyCredentialId: 'cred-phone' };
   const TAB = { ...aclRecord('a-tab'), passkeyCredentialId: 'cred-phone' };
@@ -2143,6 +2638,30 @@ describe('one-time connection', () => {
   async function connectPhone(): Promise<void> {
     await switchDirect(await approvedPhone());
   }
+
+  it('serves a one-time session no paired-browser verb: its hello says so, and each is an unknown method', async () => {
+    createHostedService();
+    const phone = await approvedPhone();
+    const { peer, inbound } = await negotiateOneTimeDirect(phone, network);
+    phone.sendControl({ v: 1, t: 'direct-switch' });
+    await settleUntil(() => oneTimeStates().at(-1)?.status === 'connected');
+    const before = inbound.length;
+    const send = (requestId: string, method: string, params?: unknown): void => {
+      for (const ct of phone.session.sendApp(utf8Encode(JSON.stringify({ requestId, method, params })))) peer.send(ct);
+    };
+    send('h', 'hello', { protocolVersion: 1, viewer: 'phone' });
+    send('l', 'devices.list');
+    send('r', 'devices.revoke', { id: '0000000000000000' });
+    await settleUntil(() => inbound.length >= before + 3);
+
+    const answers = inbound
+      .slice(before)
+      .flatMap((ct) => openReceipt(phone.session, ct) as Array<Record<string, unknown>>);
+    const answer = (requestId: string) => answers.find((message) => message.requestId === requestId);
+    expect(answer('h')!.result).not.toHaveProperty('devices');
+    expect(answer('l')).toEqual({ requestId: 'l', ok: false, error: 'unknown method: devices.list' });
+    expect(answer('r')).toEqual({ requestId: 'r', ok: false, error: 'unknown method: devices.revoke' });
+  });
 
   it('is idle on a machine that never enrolled, serving nothing', async () => {
     createHostedService();

@@ -20,6 +20,7 @@
 
 import {
   DEFAULT_PAIRING_TTL_MS,
+  MALFORMED_BINDING_ERROR,
   PAIRING_DEVICE_LABELS,
   REMOTE_EVENTS,
   REMOTE_METHODS,
@@ -49,7 +50,7 @@ import type {
   PendingDeliveryDeletionV1,
 } from './pocket-db';
 import type { WebAuthnClient } from './webauthn';
-import { BurrowRuntime } from '../burrow/burrow-runtime';
+import { BurrowRuntime, type BurrowOptions } from '../burrow/burrow-runtime';
 import type { BurrowEnrollment } from '../burrow/enrollment';
 import type { PendingPairing } from '../burrow/pairing-approval';
 import type { DirectPathPolicy, DirectPeerLike } from '../direct/direct-peer';
@@ -298,6 +299,10 @@ export async function makeE2eHarness(
     burrowDirect?: () => DirectPeerLike | null;
     /** The path policy the Burrow holds each attempt to — Local networks', which makes it direct-only. */
     burrowPathPolicy?: DirectPathPolicy;
+    /** The real remote-api handler to drive, in place of the one that answers every request alike. */
+    createSession?: BurrowOptions['createSession'];
+    /** Answer `/api/reauth/begin` as a Relay that predates a binding kind answers it. */
+    refuseBinding?: (binding: PresenceBinding) => boolean;
   } = {},
 ): Promise<E2eHarness> {
   const burrowId = options.burrowId ?? randomBase64Url(16);
@@ -335,8 +340,10 @@ export async function makeE2eHarness(
     },
     requestApproval: (pending) => approvals.push(pending),
     dismissApproval: () => {},
-    createSession: ({ send, label, end }) => {
+    createSession: (context) => {
+      const { send, label, end } = context;
       sessions.push({ label, end });
+      if (options.createSession) return options.createSession(context);
       return {
         // Enough protocol-v1 to prove the byte stream: every request is answered
         // with its own `requestId`, which is what `hello` correlates on.
@@ -383,6 +390,7 @@ export async function makeE2eHarness(
     }),
     '/api/reauth/begin': async (body) => {
       const binding = (body as { binding: PresenceBinding }).binding;
+      if (options.refuseBinding?.(binding)) return { status: 400, json: { error: MALFORMED_BINDING_ERROR } };
       const relayNonce = secret();
       nonces.set(relayNonce, binding);
       return {

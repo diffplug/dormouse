@@ -34,8 +34,11 @@ export const PRESENCE_FIELD_LIMIT = 1024;
 
 /**
  * What one presence assertion is bound to. Kind-tagged and closed: `pairing`
- * has no connection to name yet, and a `connection` binding that could omit
- * its Burrow challenge would be a pairing proof replayed at connect time.
+ * has no connection to name yet, a `connection` binding that could omit its
+ * Burrow challenge would be a pairing proof replayed at connect time, and a
+ * `session` binding names a challenge an established session asked for, under
+ * a kind of its own so neither it nor a connection proof can stand in for the
+ * other.
  */
 export type PresenceBinding =
   | {
@@ -55,6 +58,17 @@ export type PresenceBinding =
       /** Noise's final handshake hash, base64url. */
       readonly handshakeHash: string;
       readonly passkeyCredentialId: string;
+    }
+  | {
+      readonly kind: 'session';
+      readonly burrowId: string;
+      /** The established session's connection id, base64url. */
+      readonly connectionId: string;
+      /** The single-use challenge this session's request was answered with, base64url. */
+      readonly burrowChallenge: string;
+      /** The established session's Noise handshake hash, base64url. */
+      readonly handshakeHash: string;
+      readonly passkeyCredentialId: string;
     };
 
 /**
@@ -72,7 +86,11 @@ export function isPresenceBinding(value: unknown): value is PresenceBinding {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   const fields =
-    v.kind === 'pairing' ? PAIRING_FIELDS : v.kind === 'connection' ? CONNECTION_FIELDS : null;
+    v.kind === 'pairing'
+      ? PAIRING_FIELDS
+      : v.kind === 'connection' || v.kind === 'session'
+        ? CHALLENGED_FIELDS
+        : null;
   if (!fields) return false;
   const keys = Object.keys(v);
   return keys.length === fields.length && fields.every((field) => bounded(v[field]));
@@ -80,7 +98,8 @@ export function isPresenceBinding(value: unknown): value is PresenceBinding {
 
 /** Every key one binding may carry, `kind` included, in declared order. */
 const PAIRING_FIELDS = ['burrowId', 'handshakeHash', 'passkeyCredentialId', 'kind'] as const;
-const CONNECTION_FIELDS = [
+/** A `connection` binding's and a `session` binding's alike; the kind tells them apart. */
+const CHALLENGED_FIELDS = [
   'burrowId',
   'connectionId',
   'burrowChallenge',

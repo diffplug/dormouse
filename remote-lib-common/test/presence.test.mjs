@@ -36,6 +36,9 @@ const CONNECTION = {
   passkeyCredentialId: 'cred-1',
 };
 
+/** The same fields as a connection's, as a session's own proof names them. */
+const SESSION = { ...CONNECTION, kind: 'session' };
+
 /**
  * The expected bytes, built here from `node:crypto` and `Buffer` alone — no
  * helper this package ships. The point of a vector is that it fails when the
@@ -83,13 +86,36 @@ test('the connection challenge is the documented bytes, in declared order', asyn
   assert.equal(await presenceChallenge(CONNECTION, RELAY_NONCE), expected);
 });
 
-test('the two kinds never collide', async () => {
+test('the session challenge is the documented bytes, in declared order', async () => {
+  const expected = expectedChallenge([
+    utf8(PRESENCE_DOMAIN),
+    utf8('session'),
+    utf8('burrow-1'),
+    b64u(CONNECTION_ID),
+    b64u(BURROW_CHALLENGE),
+    b64u(HANDSHAKE_HASH),
+    utf8('cred-1'),
+    b64u(RELAY_NONCE),
+  ]);
+  assert.equal(await presenceChallenge(SESSION, RELAY_NONCE), expected);
+});
+
+test('the kinds never collide', async () => {
   // A pairing proof presented at connect time must not verify, which starts
-  // with the kind being part of the hashed statement.
-  assert.notEqual(
-    await presenceChallenge(PAIRING, RELAY_NONCE),
-    await presenceChallenge(CONNECTION, RELAY_NONCE),
+  // with the kind being part of the hashed statement; a session's proof names
+  // a connection's very fields, so the kind alone keeps those two apart.
+  const challenges = new Set(
+    await Promise.all([PAIRING, CONNECTION, SESSION].map((binding) => presenceChallenge(binding, RELAY_NONCE))),
   );
+  assert.equal(challenges.size, 3);
+});
+
+test('a session binding takes exactly its own fields', () => {
+  assert.equal(isPresenceBinding(SESSION), true);
+  assert.equal(isPresenceBinding({ ...SESSION, deviceId: 'abcd' }), false);
+  const { burrowChallenge: _burrowChallenge, ...missing } = SESSION;
+  assert.equal(isPresenceBinding(missing), false);
+  assert.equal(isPresenceBinding({ ...PAIRING, kind: 'session' }), false);
 });
 
 test('every field and the nonce change the challenge', async () => {

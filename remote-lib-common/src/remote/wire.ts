@@ -15,6 +15,7 @@ import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import { isEnrollConfirmDigits, isEnrollUserCode } from './enroll-code.js';
 import { isManagedVoiceToken } from './managed-voice.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
+import type { PresenceProofV1 } from '../security/e2e-ceremony.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
 import type { DirectoryBrowser, HelloCapabilities } from './frame-wire.js';
@@ -1053,6 +1054,8 @@ export const REMOTE_METHODS = {
   terminalWrite: 'terminal.write',
   terminalResize: 'terminal.resize',
   surfaceClose: 'surface.close',
+  devicesList: 'devices.list',
+  devicesRevoke: 'devices.revoke',
 } as const;
 
 // Events are dispatched by name, so future events (size-authority notify,
@@ -1085,6 +1088,87 @@ export type SurfaceCloseResult =
   /** Nothing closed, for the reason a person at the Burrow would read. */
   | { outcome: 'refused'; message: string };
 
+/**
+ * One paired browser as a Client reads it (`docs/specs/remote-api.md` ->
+ * "Paired browsers"): never its static, its `deliveryId`, or its passkey.
+ */
+export interface PairedBrowserV1 {
+  /** `deviceIdFor` its Client static: what `devices.revoke` names it by. */
+  id: string;
+  /** The record's label as the Burrow mapped it, a member of a closed set. */
+  label: string;
+  approvedAt: number;
+  /** The access log's newest entry for it; null where it holds none. */
+  lastSeenAt: number | null;
+  /** This session's own record. */
+  self: boolean;
+}
+
+/**
+ * A `devices.*` request is sent bare, then again with `proof` once it is
+ * answered with {@link DevicePresenceRequired}. The answer's challenge is bound
+ * to that one request, on the Burrow.
+ */
+export type DevicesListParams = Record<string, never> | { proof: PresenceProofV1 };
+export type DevicesRevokeParams = { id: string } | { id: string; proof: PresenceProofV1 };
+/** Sign this challenge in a `session` binding, then ask again with the proof. */
+export interface DevicePresenceRequired {
+  outcome: 'presence-required';
+  challenge: string;
+}
+
+/** The longest `devices.*` id, label, or challenge: every real one is far shorter. */
+export const MAX_DEVICE_FIELD_LENGTH = 128;
+
+/** Why a `devices.*` request did nothing; the Client words each itself. */
+const DEVICE_REFUSALS = ['presence-rejected', 'unknown-device', 'ambiguous-device', 'burrow-error'] as const;
+export type DeviceRefusalCode = (typeof DEVICE_REFUSALS)[number];
+export interface DeviceRefused {
+  outcome: 'refused';
+  code: DeviceRefusalCode;
+}
+
+export type DevicesListResult =
+  | { outcome: 'devices'; devices: PairedBrowserV1[] }
+  | DevicePresenceRequired
+  | DeviceRefused;
+export type DevicesRevokeResult =
+  /** `self`: the session's own record, so its goodbye follows this answer. */
+  | { outcome: 'revoked'; self: boolean }
+  | DevicePresenceRequired
+  | DeviceRefused;
+
+function isPairedBrowserV1(value: unknown): value is PairedBrowserV1 {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    isBoundedString(entry.id, MAX_DEVICE_FIELD_LENGTH) &&
+    isBoundedString(entry.label, MAX_DEVICE_FIELD_LENGTH) &&
+    typeof entry.approvedAt === 'number' &&
+    (entry.lastSeenAt === null || typeof entry.lastSeenAt === 'number') &&
+    typeof entry.self === 'boolean'
+  );
+}
+
+function isDeviceAnswer(value: Record<string, unknown>): boolean {
+  if (value.outcome === 'presence-required') return isBoundedString(value.challenge, MAX_DEVICE_FIELD_LENGTH);
+  return value.outcome === 'refused' && DEVICE_REFUSALS.includes(value.code as DeviceRefusalCode);
+}
+
+export function isDevicesListResult(value: unknown): value is DevicesListResult {
+  if (!value || typeof value !== 'object') return false;
+  const answer = value as Record<string, unknown>;
+  if (answer.outcome === 'devices') return Array.isArray(answer.devices) && answer.devices.every(isPairedBrowserV1);
+  return isDeviceAnswer(answer);
+}
+
+export function isDevicesRevokeResult(value: unknown): value is DevicesRevokeResult {
+  if (!value || typeof value !== 'object') return false;
+  const answer = value as Record<string, unknown>;
+  if (answer.outcome === 'revoked') return typeof answer.self === 'boolean';
+  return isDeviceAnswer(answer);
+}
+
 export interface HelloParams {
   protocolVersion: 1;
   viewer: 'phone' | 'vr' | 'desktop';
@@ -1097,6 +1181,11 @@ export interface HelloResult {
   grants: { input: boolean; layout: boolean };
   /** The Burrow serves the frame tunnel to this session (`frame-wire.ts`). */
   frames?: boolean;
+  /**
+   * The Burrow serves `devices.*` to this session. Absent is a Burrow older
+   * than them or a one-time session, which is not the same as no devices.
+   */
+  devices?: boolean;
 }
 
 /**

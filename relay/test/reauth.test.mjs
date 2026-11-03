@@ -85,6 +85,27 @@ test('begin answers the challenge derived from the binding, and only that creden
   assert.match(body.relayNonce, /^[A-Za-z0-9_-]{43}$/, '32 bytes, base64url');
 });
 
+test('a session proof takes the same routes, with no record field for the Relay to keep', async () => {
+  const { app } = await freshApp();
+  const { authenticator, sessionToken } = await ownerSession(app);
+  const binding = {
+    kind: 'session',
+    burrowId: 'burrow-1',
+    connectionId: randomSecret(),
+    burrowChallenge: randomSecret(),
+    handshakeHash: randomSecret(),
+    passkeyCredentialId: authenticator.credentialId,
+  };
+  const proof = await proveFor(app, sessionToken, authenticator, binding);
+  assert.equal(proof.challenge, await presenceChallenge(binding, proof.relayNonce));
+  const res = await finish(app, sessionToken, { relayNonce: proof.relayNonce, assertion: proof.assertion });
+  assert.equal(res.status, 200);
+
+  // The binding is closed: an id a Client added would be refused, never kept.
+  const named = await begin(app, sessionToken, { binding: { ...binding, deviceId: 'abcdef0123456789' } });
+  assert.equal(named.status, 400);
+});
+
 test('begin refuses a binding naming a credential this account never registered', async () => {
   const { app } = await freshApp();
   const { authenticator, sessionToken } = await ownerSession(app);

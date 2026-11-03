@@ -59,6 +59,7 @@ import {
   type PairingInvitation,
   type PairingOutcomeV1,
   type PresenceBinding,
+  type PresenceProofV1,
   type PresenceWindowEntry,
   type PresenceWindowRecord,
   type SealedPushV1,
@@ -92,6 +93,7 @@ import {
   type DirectOnlyBreak,
   type RemoteApiSessionContext,
   type RemoteApiSessionLike,
+  type SessionPresence,
 } from './established-session';
 import type { PendingPairing } from './pairing-approval';
 
@@ -257,9 +259,13 @@ interface PendingConnectionSession {
  */
 interface EstablishedSession {
   readonly connectionId: string;
+  /** Noise's final handshake hash, base64url: what a `session` proof binds. */
+  readonly handshakeHash: string;
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
   readonly e2e: EstablishedE2eSession;
+  /** The one challenge this session's next `session` proof must bind, or `null`. */
+  challenge: string | null;
   /** The record's label, mapped, for the access log's `ended`. */
   readonly label: string;
   /** The record's passkey credential: what a revocation by passkey ends it by. */
@@ -1854,9 +1860,9 @@ export class BurrowRuntime {
       return;
     }
     // Destructured, so the session's closures retain only what an established
-    // session is — the id and the two cipher states — and not the pending
-    // record, whose handshake hash, Client static and challenge are spent.
-    const { connectionId, session, clientStaticPublicKey } = pending;
+    // session is — the id, the transcript's hash, and the two cipher states —
+    // and not the pending record, whose challenge is spent.
+    const { connectionId, handshakeHash, session, clientStaticPublicKey } = pending;
     const createSession = this.#createSession;
     // Mapped again rather than trusted: a record off disk may predate the
     // closed set or have been written by hand, and this is shown on a pane.
@@ -1873,6 +1879,7 @@ export class BurrowRuntime {
           isDirect,
           label: device,
           deviceId,
+          presence: this.#sessionPresence(clientId, () => e2e, presence === 'proof'),
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),
       directPeering: this.#directPeering,
@@ -1884,9 +1891,88 @@ export class BurrowRuntime {
       now: this.#now,
       setTimer: this.#setTimer,
     });
-    state.established = { connectionId, clientStaticPublicKey, e2e, label: device, passkeyCredentialId, since };
+    state.established = {
+      connectionId,
+      handshakeHash,
+      clientStaticPublicKey,
+      e2e,
+      challenge: null,
+      label: device,
+      passkeyCredentialId,
+      since,
+    };
     this.#logAccess({ at: since, event: 'connected', device, deviceId, presence });
     this.#armReaper();
+  }
+
+  /**
+   * What a session's own verbs prove presence through
+   * (`docs/specs/remote-security-model.md` -> "Presence proofs"). `e2e` names
+   * the session meant, so a verb still running once it has been replaced or
+   * ended neither mints nor spends for what took its place.
+   */
+  #sessionPresence(clientId: string, e2e: () => EstablishedE2eSession, provedAtConnection: boolean): SessionPresence {
+    const held = (): EstablishedSession | null => {
+      const established = this.#clients.get(clientId)?.established;
+      return established?.e2e === e2e() ? established : null;
+    };
+    return {
+      provedAtConnection,
+      issueChallenge: () => {
+        const established = held();
+        if (!established) throw new Error('this session has ended');
+        if (established.challenge !== null) this.#challenges.consume(established.challenge);
+        established.challenge = this.#challenges.issue().challenge;
+        return established.challenge;
+      },
+      verifyProof: async (proof) => {
+        const established = held();
+        if (!established) return false;
+        const refuse = (why: string): false => {
+          console.warn(`[burrow] a session's presence proof was refused: ${why}`);
+          this.#logAccess({
+            at: this.#now(),
+            event: 'proof-denied',
+            device: established.label,
+            deviceId: deviceIdFor(established.clientStaticPublicKey),
+            reason: why,
+          });
+          return false;
+        };
+        // Spent before any other work, as a connection's is, so no proof is
+        // ever checked against a challenge that can be presented again.
+        const challenge = established.challenge;
+        established.challenge = null;
+        if (challenge === null || !this.#challenges.consume(challenge)) return refuse('challenge-invalid');
+        const policy = this.#policy;
+        // Every field from this session's own state, the credential included:
+        // the proof must be its own record's passkey, not the proof's choice.
+        const result = await verifyPresenceProof(
+          proof,
+          {
+            kind: 'session',
+            burrowId: this.#enrollment.burrowId,
+            connectionId: established.connectionId,
+            burrowChallenge: challenge,
+            handshakeHash: established.handshakeHash,
+            passkeyCredentialId: established.passkeyCredentialId,
+          },
+          policy,
+        );
+        if (held() !== established) return false;
+        if (!result.ok) return refuse(result.reason);
+        // A UV raise during verification: the proof met only the weaker demand.
+        if (this.#policy !== policy) return refuse('policy-raised');
+        const authorized = this.#aclRecord(
+          established.passkeyCredentialId,
+          established.clientStaticPublicKey,
+          (proof as PresenceProofV1).accountId,
+          result.passkeyPublicKeyHash,
+        );
+        if (typeof authorized === 'string') return refuse(authorized);
+        return true;
+      },
+    };
   }
 
   /**
@@ -2031,7 +2117,9 @@ export class BurrowRuntime {
    */
   #clearEstablished(state: ClientState, goodbye: Goodbye = false): void {
     if (!state.established) return;
-    const { e2e, clientStaticPublicKey, label, since } = state.established;
+    const { e2e, clientStaticPublicKey, label, since, challenge } = state.established;
+    // A challenge dies with the record that named it, as a pending connection's does.
+    if (challenge !== null) this.#challenges.consume(challenge);
     this.#presenceWindows.noteActivity(clientStaticPublicKey, e2e.lastClientActivityAt);
     const at = this.#now();
     this.#logAccess({

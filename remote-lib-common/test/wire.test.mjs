@@ -17,6 +17,8 @@ import {
   MAX_TERMINAL_DIMENSION,
   NOISE_MAX_MESSAGE_LENGTH,
   clampTerminalDimension,
+  isDevicesListResult,
+  isDevicesRevokeResult,
   isE2eCiphertext,
   isE2eClientFrame,
   isE2eBurrowFrame,
@@ -428,4 +430,40 @@ test('reduceBurrowLabel keeps a machine name, strips what could hide or reorder 
   assert.equal(reduceBurrowLabel(`${'a'.repeat(MAX_BURROW_LABEL_LENGTH - 1)} b`), 'a'.repeat(MAX_BURROW_LABEL_LENGTH - 1));
   // Nothing left, or no string, is no label.
   for (const none of ['', ' \u200b\n', undefined, null, 7, ['x']]) assert.equal(reduceBurrowLabel(none), null);
+});
+
+test('the devices.* answers are closed: a Client reads only what it has copy for', () => {
+  const entry = { id: 'abcd', label: 'Dormouse Pocket (browser)', approvedAt: 1, lastSeenAt: null, self: true };
+  assert.equal(isDevicesListResult({ outcome: 'devices', devices: [entry, { ...entry, lastSeenAt: 2 }] }), true);
+  assert.equal(isDevicesRevokeResult({ outcome: 'revoked', self: false }), true);
+  for (const guard of [isDevicesListResult, isDevicesRevokeResult]) {
+    assert.equal(guard({ outcome: 'presence-required', challenge: 'abc' }), true);
+    assert.equal(guard({ outcome: 'refused', code: 'presence-rejected' }), true);
+    assert.equal(guard({ outcome: 'refused', code: 'unknown-device' }), true);
+    for (const wrong of [
+      null,
+      'devices',
+      {},
+      { outcome: 'presence-required' },
+      { outcome: 'presence-required', challenge: 'x'.repeat(129) },
+      { outcome: 'refused', code: 'free text from the wire' },
+      { outcome: 'refused' },
+      { outcome: 'future' },
+    ]) {
+      assert.equal(guard(wrong), false, JSON.stringify(wrong));
+    }
+  }
+  for (const wrong of [
+    { outcome: 'devices' },
+    { outcome: 'devices', devices: [{ ...entry, id: 7 }] },
+    { outcome: 'devices', devices: [{ ...entry, label: 'x'.repeat(129) }] },
+    { outcome: 'devices', devices: [{ ...entry, approvedAt: 'soon' }] },
+    { outcome: 'devices', devices: [{ ...entry, lastSeenAt: undefined }] },
+    { outcome: 'devices', devices: [{ ...entry, self: 'yes' }] },
+    { outcome: 'revoked', self: false },
+  ]) {
+    assert.equal(isDevicesListResult(wrong), false, JSON.stringify(wrong));
+  }
+  assert.equal(isDevicesRevokeResult({ outcome: 'revoked' }), false);
+  assert.equal(isDevicesRevokeResult({ outcome: 'devices', devices: [] }), false);
 });

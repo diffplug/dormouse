@@ -68,6 +68,24 @@ export interface RemoteApiSessionLike {
 }
 
 /**
+ * The presence a paired session's own verbs demand
+ * (`docs/specs/remote-security-model.md` -> "Presence proofs"): the proofs its
+ * Burrow verifies after promotion. A one-time session has no passkey, so its
+ * owner supplies none.
+ */
+export interface SessionPresence {
+  /** This session's connection carried a proof, not a window ride. */
+  readonly provedAtConnection: boolean;
+  /** Mint the one challenge this session's next proof must bind, voiding any earlier one. */
+  issueChallenge(): string;
+  /**
+   * Spend that challenge and verify `proof` over it, against this session's
+   * binding and its own ACL record. A refusal is `false`, never a throw.
+   */
+  verifyProof(proof: unknown): Promise<boolean>;
+}
+
+/**
  * What an owner hands the remote-api handler it builds for one authorized
  * session — the argument of both runtimes' `createSession`.
  */
@@ -93,6 +111,8 @@ export interface RemoteApiSessionContext {
    * identity.
    */
   readonly deviceId?: string;
+  /** Absent on a one-time session, which therefore serves no `devices.*`. */
+  readonly presence?: SessionPresence;
   /**
    * End this session on purpose, the way its owner ends one: the Client hears
    * the goodbye ({@link EstablishedE2eSession.end}), then everything the

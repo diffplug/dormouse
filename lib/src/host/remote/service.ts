@@ -57,9 +57,9 @@ import {
   PUSH_TEST_TITLE,
   type AlertPushDeps,
 } from '../../remote/burrow/push-delivery';
-import type { RemoteApiSessionContext } from '../../remote/burrow/established-session';
+import type { RemoteApiSessionContext, SessionPresence } from '../../remote/burrow/established-session';
 import type { PathRefusal } from '../../remote/direct/path-refusal';
-import { RemoteApiSession } from '../../remote/burrow/remote-api';
+import { RemoteApiSession, type SessionDevices } from '../../remote/burrow/remote-api';
 import {
   BurrowRuntime,
   type InvitationState,
@@ -1164,15 +1164,56 @@ export class BurrowService {
     const id = typeof params?.id === 'string' ? params.id.trim().toLowerCase() : '';
     if (!id) throw new Error('Name the paired phone to revoke by its id.');
     if (!this.#enrollment) throw new Error('This computer has no paired phones: it is not enrolled.');
+    const found = await this.#deviceStatic(id);
+    if (found === 'unknown-device') throw new Error(`No paired phone has the id ${id}.`);
+    if (found === 'ambiguous-device') throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
+    return this.#revoke({ clientStaticPublicKey: found.clientStaticPublicKey }, revocationRequester(params?.by));
+  }
+
+  /** The one Client static a device id names among the active records, or why not one. */
+  async #deviceStatic(
+    id: string,
+  ): Promise<{ clientStaticPublicKey: string } | 'unknown-device' | 'ambiguous-device'> {
     const statics = new Set(
       (await this.#activeRecords())
         .map((record) => record.clientStaticPublicKey)
         .filter((clientStatic) => deviceIdFor(clientStatic) === id),
     );
-    if (statics.size === 0) throw new Error(`No paired phone has the id ${id}.`);
-    if (statics.size > 1) throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
+    if (statics.size === 0) return 'unknown-device';
+    if (statics.size > 1) return 'ambiguous-device';
     const [clientStaticPublicKey] = [...statics] as [string];
-    return this.#revoke({ clientStaticPublicKey }, revocationRequester(params?.by));
+    return { clientStaticPublicKey };
+  }
+
+  /**
+   * The paired browsers as a paired session reaches them
+   * (`docs/specs/remote-api.md` -> "Paired browsers"): each entry built field by
+   * field, and every revocation under `pocket`, which the session cannot name
+   * and no command can claim.
+   */
+  #sessionDevices(presence: SessionPresence, ownId: string): SessionDevices {
+    return {
+      presence,
+      list: async () =>
+        (await this.#pairedDevices()).devices.map(({ id, label, pairedAt, lastSeenAt }) => ({
+          id,
+          label,
+          approvedAt: pairedAt,
+          lastSeenAt,
+          self: id === ownId,
+        })),
+      resolve: async (id) => {
+        const found = await this.#deviceStatic(id);
+        return typeof found === 'string' ? found : { self: id === ownId };
+      },
+      revoke: (id) =>
+        this.#serialize(async () => {
+          const found = await this.#deviceStatic(id);
+          if (typeof found === 'string') return found;
+          await this.#revoke({ clientStaticPublicKey: found.clientStaticPublicKey }, 'pocket');
+          return 'revoked' as const;
+        }),
+    };
   }
 
   /**
@@ -1736,6 +1777,9 @@ export class BurrowService {
       provider: this.#provider,
       ...(this.#frames ? { frames: { host: this.#frames, isDirect: context.isDirect } } : {}),
       holder: { id: holder, label: context.label, serviceId: this.#serviceId },
+      ...(context.presence && context.deviceId
+        ? { devices: this.#sessionDevices(context.presence, context.deviceId) }
+        : {}),
       onDispose: () => this.#holders.delete(holder),
       onAttach: (surfaceId) =>
         this.#logAccess({

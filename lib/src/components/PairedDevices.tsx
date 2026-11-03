@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { modalActionButton } from './design';
+import { dayOf, lastSeenText } from './device-seen-copy';
 import { FIELD_LABEL, own } from './remote-control-shared';
 import type { PairedDevice } from '../host/remote/service-protocol';
 import type { AccessEvent, AccessLogEntry } from '../remote/burrow/access-log';
@@ -194,6 +195,7 @@ const REVOKED_BY: Record<string, string> = {
   dor: 'revoked from dor',
   settings: 'revoked from Settings',
   relay: 'revoked: its passkey was removed from the account',
+  pocket: 'revoked from Pocket',
 };
 
 const ACCESS_EVENT_COPY: Record<AccessEvent, (entry: AccessLogEntry) => string> = {
@@ -206,6 +208,7 @@ const ACCESS_EVENT_COPY: Record<AccessEvent, (entry: AccessLogEntry) => string> 
         ? 'connected (passkey)'
         : 'connected',
   'connection-denied': (entry) => `connection refused${because(entry.reason)}`,
+  'proof-denied': (entry) => `passkey proof refused${because(entry.reason)}`,
   attached: (entry) => (entry.surface ? `attached ${entry.surface}` : 'attached a terminal'),
   closed: (entry) => `closed ${entry.surface ?? 'a surface'}`,
   ended: (entry) => `session ended${after(entry.durationMs)}${entry.path ? `, ${entry.path}` : ''}`,
@@ -235,27 +238,7 @@ function after(durationMs: number | undefined): string {
 }
 
 function seenText(device: PairedDevice, now: number): string {
-  if (device.connected) return 'Connected now';
-  // `null` is a log with nothing about this phone — one paired before the log
-  // existed, or since trimmed out of it — not proof it never connected.
-  if (device.lastSeenAt === null) return 'Not in the access log';
-  const ago = now - device.lastSeenAt;
-  if (ago < 60_000) return 'Last seen just now';
-  if (ago < 60 * 60_000) return `Last seen ${Math.floor(ago / 60_000)} min ago`;
-  if (ago < 24 * 60 * 60_000) return `Last seen ${Math.floor(ago / (60 * 60_000))} h ago`;
-  return `Last seen ${dayOf(device.lastSeenAt, now)}`;
-}
-
-/** `today`, or a short date — with its year only when it is not this one. */
-function dayOf(at: number, now: number): string {
-  const date = new Date(at);
-  const today = new Date(now);
-  if (date.toDateString() === today.toDateString()) return 'today';
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    ...(date.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }),
-  });
+  return device.connected ? 'Connected now' : lastSeenText(device.lastSeenAt, now);
 }
 
 /** The time alone for today's entries, else its date before it. */
