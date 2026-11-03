@@ -5,7 +5,7 @@ import type { Context, Hono } from "hono";
 import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
-import { END_REASONS, foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
+import { END_REASONS, foundingCohort, foundingLapsed, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
 import { entitledSql, subscribedSql } from "./entitlement";
 import { ACCOUNT_CLOSING, accountClosing, endAfterClosure } from "./closure";
@@ -105,7 +105,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     catalog: PriceCatalog,
     userId: string,
   ) => {
-    const [status, [account], founding] = await Promise.all([
+    const [status, [account], founding, lapsed] = await Promise.all([
       billing.status(userId),
       accountQuery<{
         entitled: boolean;
@@ -134,6 +134,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         [userId, setup.founding],
       ),
       foundingCohort(billing, setup.founding),
+      foundingLapsed(billing, userId, setup.founding),
     ]);
     // A subscription Stripe still holds, paid up or not: its owner manages it
     // in the portal (a failed card included) and cannot check out again.
@@ -151,7 +152,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       renews: !!held && !held.cancel_at_period_end,
       entitled: account?.entitled === true,
       suspended: account?.suspended === true,
-      founding,
+      founding: lapsed ? null : founding,
+      foundingLapsed: lapsed,
       // Offered while a founding subscription grants access; `name` while shown.
       founder: { offered: account?.founder === true, name: account?.name ?? null },
       consent: held ? (account?.consent ?? null) : null,
@@ -179,11 +181,14 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const plan = body?.plan;
     if (!isPlan(plan)) return c.json({ message: "Choose monthly, yearly, or founding." }, 400);
     const ref = checkoutRef(body?.ref);
-    return billed(c, async (billing, _setup, catalog) => {
+    return billed(c, async (billing, setup, catalog) => {
       // `price` is what the page showed beside the renewal the buyer agreed to.
       if (typeof body?.terms !== "string" || body.autoRenew !== true || !Number.isSafeInteger(body.price))
         return c.json({ message: CONSENT_REQUIRED }, 400);
       if (body.terms !== TERMS_VERSION) return c.json({ message: TERMS_CHANGED }, 409);
+      // A page read before the lapse: it rereads its offers, and founding is gone.
+      if (plan === "founding" && (await foundingLapsed(billing, userId, setup.founding)))
+        return c.json({ message: PRICE_CHANGED }, 409);
       // Without an email, Stripe Checkout asks for one. A checkout left open
       // for another plan gives way to this one; one that would charge a
       // Price the buyer was not shown, a cohort sold out since the page

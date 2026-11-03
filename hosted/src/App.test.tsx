@@ -256,6 +256,15 @@ describe("an account with no plan", () => {
     expect(container.querySelectorAll('a[href="https://dormouse.sh/self-host/"]').length).toBe(purpose === "remote" ? 2 : 0);
   });
 
+  it("offers a lapsed founder the list price, never founding", async () => {
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: null, foundingLapsed: true });
+    await mount(ENROLLMENT);
+    expect(noPlanShown()).toBe(true);
+    expect(container.textContent).not.toContain("Founding price");
+    expect(container.textContent).toContain("$100/year");
+  });
+
   it("is told when the approval is refused for want of a plan", async () => {
     vi.mocked(api.approveEnrollment).mockRejectedValue(new api.NoPlanError(NOT_ENTITLED_ERROR));
     await mount(ENROLLMENT);
@@ -327,7 +336,7 @@ describe("approveEnrollment", () => {
 
 const NO_PLAN: BillingSummary = {
   plan: null, price: null, active: false, until: null, renews: false, entitled: false, suspended: false,
-  founding: { cohort: 0, seatsLeft: 42 }, founder: { offered: false, name: null }, consent: null, withdrawal: null, withdrawn: null,
+  founding: { cohort: 0, seatsLeft: 42 }, foundingLapsed: false, founder: { offered: false, name: null }, consent: null, withdrawal: null, withdrawn: null,
 };
 const FOUNDING: BillingSummary = {
   ...NO_PLAN, plan: "founding", price: 50, active: true, until: "2027-10-21T12:00:00Z", renews: true, entitled: true,
@@ -375,6 +384,16 @@ describe("checkout", () => {
     await tick("agree-renewal");
     await click("Continue to payment");
     expect(api.startCheckout).toHaveBeenCalledWith("monthly", 10, "hosted-no-plan");
+  });
+
+  it("offers a lapsed founder the list plans, saying why, on a link that named founding", async () => {
+    history.replaceState(null, "", "/checkout");
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: null, foundingLapsed: true });
+    await mount(null, { checkout: { plan: "founding", ref: null } });
+    expect(container.querySelector("#founding-plan")).toBeNull();
+    expect(container.querySelector<HTMLInputElement>("#yearly-plan")!.checked).toBe(true);
+    expect(text()).toContain("subscribing again is at the list price");
   });
 
   it("reads the new price when the cohort sold out meanwhile, and asks for agreement again", async () => {

@@ -82,7 +82,7 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds; closed, 200 `{ closed: true }` |
+| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, foundingLapsed, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds; closed, 200 `{ closed: true }` |
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew, price }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
@@ -104,11 +104,12 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must offer the online withdrawal only from the held subscription while `withdrawalOffer` holds**, once per subscription; else withdraw answers 409 `WITHDRAWAL_CLOSED`. A withdrawal (`dormouse_withdrawals`) is recorded with its acknowledgement, a `withdrawal` notice, then settled: its subscription ended at once (reason `withdrawal`), every paid invoice payment refunded in full, stamped once done; the cron retries every unsettled one, however old, least recently tried first, and fails while one does (`hosted/README.md` -> "Refund by hand"). **Never stamp a withdrawal or closure settled while a payment it refunds was paid outside Stripe, or the refunds Stripe lists for it as `succeeded` fall short of it**, whatever a create answered. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`, which outlives the account); closing in the account's favor restores it.
 - **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
+- **Never open a founding checkout for an account `foundingLapsed` answers true**, the rule `docs/specs/pricing.md` -> "Checkout and entitlement" states: it answers 409 `PRICE_CHANGED`, so a stale page rereads, and `GET` answers `founding` null beside it.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
-Source of truth: `billingSetup`, `withBilling`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
+Source of truth: `billingSetup`, `withBilling`, `foundingLapsed`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
 
 ## Billing notices
 
