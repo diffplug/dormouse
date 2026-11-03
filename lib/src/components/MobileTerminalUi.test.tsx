@@ -9,6 +9,7 @@ import { setNativeFieldValue } from '../lib/dom';
 import { pointerEvent, PortalAnchoredButton } from './wall/wall-test-utils';
 import * as registry from '../lib/terminal-registry';
 import * as activity from '../lib/session-activity-store';
+import * as gestureMenu from '../lib/mobile-gesture-menu';
 import { beginClipboardAttempt, dismissClipboardFailure, reportClipboardFailure } from '../lib/clipboard-failure';
 import type { Terminal } from '@xterm/xterm';
 
@@ -314,6 +315,22 @@ describe('MobileTerminalUi physical keyboard', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput, defaultView: 'sessions' });
     keydown(document.body, { key: 'a' });
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
+  it('types nothing while a gesture\'s confirmation is open', () => {
+    const onSendInput = vi.fn();
+    const { container, terminal } = renderUi({ onSendInput });
+    vi.spyOn(gestureMenu, 'finishMobileGesture').mockReturnValue({
+      state: gestureMenu.MOBILE_GESTURE_IDLE_STATE,
+      action: { kind: 'confirm', confirmation: 'ctrlC', action: { kind: 'input', input: 'ctrlC' } },
+    });
+    act(() => {
+      terminal.dispatchEvent(pointerEvent('pointerdown'));
+      terminal.dispatchEvent(pointerEvent('pointerup'));
+    });
+    expect(container.querySelector('[data-mobile-gesture-dialog]')).not.toBeNull();
+    expect(keydown(document.body, { key: 'Enter' }).defaultPrevented).toBe(false);
     expect(onSendInput).not.toHaveBeenCalled();
   });
 });

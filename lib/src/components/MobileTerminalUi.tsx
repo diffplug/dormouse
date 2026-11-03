@@ -824,10 +824,12 @@ export function MobileTerminalUi({
   }, [closeComposer, interactive, onPaste, sendInput]);
 
   // A physical keyboard types straight into the terminal while the composer is
-  // closed. No soft keyboard reaches here: one opens only for a focused field.
-  // Its Command+V comes back from the page as a `paste` on the same targets.
+  // closed and no gesture confirmation is asking. No soft keyboard reaches
+  // here: one opens only for a focused field. Its Command+V comes back from
+  // the page as a `paste` on the same targets.
+  const confirming = pendingGestureConfirmation !== null;
   useEffect(() => {
-    if (!terminalInteractive || composing || view !== 'terminal') return;
+    if (!terminalInteractive || composing || confirming || view !== 'terminal') return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const root = rootRef.current;
       if (!root || event.defaultPrevented || isComposingKey(event)) return;
@@ -851,7 +853,7 @@ export function MobileTerminalUi({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('paste', onNativePaste);
     };
-  }, [composing, onPaste, sendInput, terminalInteractive, view]);
+  }, [composing, confirming, onPaste, sendInput, terminalInteractive, view]);
 
   useEffect(() => {
     if (!terminalInteractive || view !== 'terminal') closeComposer();
