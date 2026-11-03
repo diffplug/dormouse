@@ -308,7 +308,7 @@ Deadline: the Terms state no number of days, but the cancellation must land befo
 
 ### Close an account by email
 
-Deadline: the Terms state no number of days. Closing takes effect at once once they confirm, so act that day. The refunds are the cron's.
+Deadline: the Terms state no number of days. Closing takes effect as soon as they confirm, so act that day. The refunds are the cron's.
 
 1. [Find and verify the customer](#find-and-verify-the-customer). An account with no Stripe customer has only its sign-in email to reply from (`SELECT id FROM "user" WHERE email = '...' AND "emailVerified";`). A provider-only account with neither has nothing to verify against: send it to the owner, and never delete on an unverified request.
 2. Explain, then wait for their yes, as the account page does before it closes (`closureTerms` in `hosted/src/Closure.tsx`): the plan ends now and never renews; a first payment, or a yearly or founding renewal, inside the last 30 days is refunded in full with tax, and otherwise the time left is not; withdrawal and the 30-day guarantee for an earlier payment stay open by email; cancelling renewal instead keeps access through the period.
