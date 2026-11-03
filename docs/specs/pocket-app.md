@@ -207,7 +207,9 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 - **Never count on a framed page's own browser storage surviving a relaunch** (rationale); a built-in Tool keeps none (`docs/specs/dor-tools-builtin.md` -> "Editing files").
 - **The page's `WebSocket` is shimmed by a tunneled grant alone, ahead of the page's own scripts**, since no worker sees a socket: a same-origin one goes as a message to the controlling worker, and any other stays native. **A shimmed socket must take a send's bytes at the call, keep its close behind them, and close when its page goes away**, since nothing else tells the session.
 
-**The frame origins sit on a registrable domain of their own, `HOSTED_FRAME_DOMAIN`**, so a framed page cannot set a cookie on `dormouse.sh`.
+**The frame origins sit on a registrable domain of their own, `HOSTED_FRAME_DOMAIN`**, so a framed page cannot set a cookie on `dormouse.sh`. They share that domain with one another until it is on the Public Suffix List (`docs/specs/security.md` -> "Known gaps").
+
+- **The bootstrap page must expire every cookie it can see on the parent domain before the frame's page loads**, leaving this origin's own.
 
 - **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`), from Pocket and the one-time page alike: the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on.
 - **Must let frames in through Pocket's and the one-time page's CSPs only for that domain**; a self-host Relay's Pocket names none. The one-time page's own CSP sandbox must grant what `IFRAME_SANDBOX` does, since a frame's is at most its parent's.

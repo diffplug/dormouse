@@ -18,6 +18,8 @@ import {
   UNMINTED_DELIVERY_ID_ERROR,
   enrollConfirmDigits,
   enrollUserCode,
+  signEnrollDeviceCode,
+  RELAY_BEARER_BYTE_LENGTH,
   fromBase64Url,
   generateNoiseKeyPair,
   mintPushDeliveryId,
@@ -1027,10 +1029,17 @@ test("every unauthenticated route that reads or writes a row is rate limited per
   }
 });
 
-/** `deviceCode` with its expiry set to `expiresAtS`, the rest kept. */
+/** `deviceCode` with its expiry set to `expiresAtS`, tag left as it was. */
 function withExpiry(deviceCode: string, expiresAtS: number) {
   const bytes = fromBase64Url(deviceCode);
   new DataView(bytes.buffer, bytes.byteOffset).setUint32(0, expiresAtS);
+  return toBase64Url(bytes);
+}
+
+/** A device code Hosted issued, past its expiry: its tag is good, its clock is not. */
+async function issuedAndExpired(deviceCode: string) {
+  const bytes = fromBase64Url(withExpiry(deviceCode, Math.floor(Date.now() / 1000) - 1));
+  await signEnrollDeviceCode(TEST_ENROLL_SECRET, bytes);
   return toBase64Url(bytes);
 }
 
@@ -1057,7 +1066,7 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals`)).toEqual([{ n: 0 }]);
 
   expect(await f.poll(begun.deviceCode)).toMatchObject({ status: 200, json: { status: "pending" } });
-  for (const unknown of ["short", undefined, withExpiry(begun.deviceCode, Math.floor(Date.now() / 1000) - 1)])
+  for (const unknown of ["short", undefined, await issuedAndExpired(begun.deviceCode)])
     expect(await f.poll(unknown)).toMatchObject({ status: 200, json: { status: "expired" } });
 
   await f.approve(begun.userCode, owner);
@@ -1164,15 +1173,24 @@ test("an approval redeems only the device code its user code is derived from", a
   await f.approve(a.userCode, owner);
   // Code A's approval never redeems device code B.
   expect((await f.poll(b.deviceCode)).json).toEqual({ status: "pending" });
-  // A forged code of the minted shape: A with a later expiry, A with a flipped
-  // random byte, and a code whose user code is A's under another secret.
-  const flipped = fromBase64Url(a.deviceCode);
-  flipped[31] ^= 1;
-  const forged = [withExpiry(a.deviceCode, Math.floor(a.expiresAt / 1000) + 60), toBase64Url(flipped)];
+  // A code of the minted shape Hosted did not issue is expired, by its tag, even
+  // with an approval waiting on the user code it derives: A with a later expiry,
+  // A with a flipped random or tag byte, and a code from nowhere.
+  const flip = (index: number) => {
+    const bytes = fromBase64Url(a.deviceCode);
+    bytes[index] ^= 1;
+    return toBase64Url(bytes);
+  };
+  const nowhere = crypto.getRandomValues(new Uint8Array(RELAY_BEARER_BYTE_LENGTH));
+  new DataView(nowhere.buffer).setUint32(0, Math.floor(a.expiresAt / 1000));
+  const forged = [withExpiry(a.deviceCode, Math.floor(a.expiresAt / 1000) + 60), flip(10), flip(31), toBase64Url(nowhere)];
   for (const deviceCode of forged) {
     expect(isRelayBearer(deviceCode)).toBe(true);
-    expect((await f.poll(deviceCode)).json, deviceCode).toEqual({ status: "pending" });
+    await f.approve(await enrollUserCode(TEST_ENROLL_SECRET, fromBase64Url(deviceCode)), owner);
+    expect((await f.poll(deviceCode)).json, deviceCode).toEqual({ status: "expired" });
   }
+  // Issued for one purpose, it is no code for the other.
+  expect((await f.poll(b.deviceCode, "voice")).json).toEqual({ status: "expired" });
   const other = await f.begin();
   const underWrongSecret = await enrollUserCode(`${TEST_ENROLL_SECRET}-wrong`, fromBase64Url(other.deviceCode));
   await f.approve(underWrongSecret, owner);
@@ -2062,7 +2080,7 @@ test("voice approval is independent of remote enrollment and cannot be redeemed 
   expect((await f.poll(voice.deviceCode, "voice")).json).toEqual({ status: "pending" });
   await f.sql(`DELETE FROM dormouse_relay_enrollment_approvals`);
   await f.approve(voice.userCode, owner, "voice");
-  expect((await f.poll(voice.deviceCode)).json).toEqual({ status: "pending" });
+  expect((await f.poll(voice.deviceCode)).json).toEqual({ status: "expired" });
   const outcomes = await Promise.all([f.poll(voice.deviceCode, "voice"), f.poll(voice.deviceCode, "voice")]);
   expect(outcomes.map((r) => r.json!.status).sort()).toEqual(["enabled", "redeemed"]);
   const token = outcomes.find((r) => r.json!.status === "enabled")!.json!.voiceToken as string;
