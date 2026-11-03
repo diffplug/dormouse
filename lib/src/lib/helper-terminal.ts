@@ -224,13 +224,13 @@ function requireHelperMutable(parentId: string): void {
  * it cannot read (Windows, a failed read). A directory that is only reported
  * still opens, as a split there would, but nothing is typed into it.
  */
-async function helperDirectory(parentId: string): Promise<{ cwd: string | undefined; confirmed: boolean }> {
+async function helperDirectory(parentId: string): Promise<{ cwd: string | undefined; mayAutorun: boolean }> {
   const processCwd = await getPlatform().getCwd(parentId).catch(() => null);
-  if (processCwd) return { cwd: processCwd, confirmed: true };
+  if (processCwd) return { cwd: processCwd, mayAutorun: true };
   // A remote parent reports nothing here: the helper takes the host default
-  // rather than claiming the ssh path, and that default is confirmed.
+  // rather than claiming the ssh path, which no terminal output chose.
   const reported = getInheritableCwd(parentId);
-  return { cwd: reported, confirmed: reported === undefined };
+  return { cwd: reported, mayAutorun: reported === undefined };
 }
 
 export async function openHelper(parentId: string): Promise<HelperTerminal> {
@@ -258,12 +258,12 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     }
     const platform = getPlatform();
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
-    const [settings, { cwd, confirmed }] = await Promise.all([platform.terminalContext({ op: 'settings' }), helperDirectory(parentId)]);
+    const [settings, { cwd, mayAutorun }] = await Promise.all([platform.terminalContext({ op: 'settings' }), helperDirectory(parentId)]);
     requireHelperMutable(parentId);
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
     const id = mintSurfaceId();
     const command = settings.command ?? DEFAULT_HELPER_COMMAND;
-    const helper: HelperTerminal = { id, parentId, command, status: !command ? 'off' : confirmed ? 'waiting' : 'unconfirmed' };
+    const helper: HelperTerminal = { id, parentId, command, status: !command ? 'off' : mayAutorun ? 'waiting' : 'unconfirmed' };
     helpers.set(parentId, helper);
     setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd, helper: { parentId, command } });
     getOrCreateTerminal(id);

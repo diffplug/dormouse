@@ -197,8 +197,6 @@ test('directory opening touches the path only through the host resolver', async 
   assert.equal(realpath.mock.callCount(), 0);
 });
 
-// A WSL pane reports Linux directories and Git Bash MSYS ones; the Windows
-// host's browsers and Explorer need the Windows path to the same directory.
 test('settings answer an empty autorun until the user saves one, which then persists', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-helper-settings-'));
   const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -218,6 +216,8 @@ test('settings answer an empty autorun until the user saves one, which then pers
   }
 });
 
+// A WSL pane reports Linux directories and Git Bash MSYS ones; the Windows
+// host's Explorer needs the Windows path to the same directory.
 test('a Windows pane\'s reported directory reaches the host as a Windows path', async () => {
   const asked = [];
   const manager = create(() => {}, {
@@ -226,16 +226,16 @@ test('a Windows pane\'s reported directory reaches the host as a Windows path', 
   manager.spawn('wsl', { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] });
   manager.spawn('gitbash', { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: [] });
   manager.spawn('pwsh', { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: [] });
-  const hostDirectory = async (id, path) => {
+  const openedPath = async (id, path) => {
     await manager.context({ op: 'openDirectory', id, path }, 'host');
     return asked.at(-1);
   };
-  assert.equal(await hostDirectory('wsl', '/home/me/app'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
-  assert.equal(await hostDirectory('wsl', '/mnt/c/Users/me'), 'C:\\Users\\me');
-  assert.equal(await hostDirectory('wsl', '/mnt/d'), 'D:\\');
-  assert.equal(await hostDirectory('gitbash', '/c/Users/me'), 'C:\\Users\\me');
-  assert.equal(await hostDirectory('gitbash', 'C:\\Users\\me'), 'C:\\Users\\me');
-  assert.equal(await hostDirectory('pwsh', '/home/me'), '/home/me');
-  assert.equal(await hostDirectory('missing', '/home/me'), '/home/me');
+  assert.equal(await openedPath('wsl', '/home/me/app'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
+  assert.equal(await openedPath('wsl', '/mnt/c/Users/me'), 'C:\\Users\\me');
+  assert.equal(await openedPath('wsl', '/mnt/d'), 'D:\\');
+  assert.equal(await openedPath('gitbash', '/c/Users/me'), 'C:\\Users\\me');
+  assert.equal(await openedPath('gitbash', 'C:\\Users\\me'), 'C:\\Users\\me');
+  assert.equal(await openedPath('pwsh', '/home/me'), '/home/me');
+  assert.equal(await openedPath('missing', '/home/me'), '/home/me');
   manager.killAll();
 });

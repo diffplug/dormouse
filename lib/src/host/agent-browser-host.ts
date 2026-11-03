@@ -223,9 +223,9 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       DEFAULT_AGENT_BROWSER_BIN,
     ].filter((c): c is string => !!c))];
 
-    // Only what is set. Never the host's own cwd, which the CLI would read
-    // project config from and in VS Code can be a workspace folder.
-    const given = Object.fromEntries(Object.entries({ cwd: neutralBrowserCwd(), ...options, env: b.env }).filter(([, value]) => value !== undefined));
+    // Never the host's own cwd, which the CLI would read project config from
+    // and in VS Code can be a workspace folder.
+    const given = { ...options, cwd: options.cwd ?? neutralBrowserCwd(), env: b.env };
     let lastError = '';
     for (const candidate of candidates) {
       const binary = resolveBinaryPath(candidate, env);
@@ -626,7 +626,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
     async open(b, url, headed) {
       // A binding's directory, which only that `dor` names, so agent-browser
       // reads its `./agent-browser.json`, while that directory still exists.
-      const cwd = b.cwd !== undefined && isDirectory(b.cwd) ? b.cwd : neutralBrowserCwd();
+      const cwd = b.cwd !== undefined && isDirectory(b.cwd) ? b.cwd : undefined;
       if (headed) headedSessions.add(b.session);
       else headedSessions.delete(b.session);
       const result = await run(b, ['open', url ?? 'about:blank'], { cwd });

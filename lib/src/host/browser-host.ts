@@ -17,6 +17,7 @@ import {
   BROWSER_PROVIDERS,
   isBrowserProvider,
   isUncOrDevicePath,
+  isWslSharePath,
   sessionForKey,
   type BrowserAutomationProvider,
   type BrowserBinding,
@@ -38,7 +39,7 @@ import {
   type BrowserResult,
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
-import { neutralBrowserCwd } from './browser-neutral-cwd';
+import { neutralBrowserCwdPath } from './browser-neutral-cwd';
 import { createCaptureBudget, type CaptureClaim } from './browser-capture-budget';
 import { createViewportSync, type FixedSize } from './browser-sync';
 import type { WebSocket } from 'ws';
@@ -195,8 +196,9 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
     binding.session = given.session;
   }
   // No filesystem call below may reach a share: the providers and the launch
-  // shell stat this path. Without one they run in the neutral directory.
-  if (typeof given.cwd === 'string' && path.isAbsolute(given.cwd) && !isUncOrDevicePath(given.cwd)) binding.cwd = given.cwd;
+  // shell stat this path. Without one they run in the neutral directory. A WSL
+  // caller's own directory is the one this machine's distro serves.
+  if (typeof given.cwd === 'string' && (isWslSharePath(given.cwd) || (path.isAbsolute(given.cwd) && !isUncOrDevicePath(given.cwd)))) binding.cwd = given.cwd;
   // Checked against the provider's allowlist where it is spawned.
   if (typeof given.binaryPath === 'string') binding.binaryPath = given.binaryPath;
   const op = parseOp(r);
@@ -743,7 +745,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (deps.launchEnv) {
         // Keyed on the cwd a provider defaults to, so the one it answers with
         // finds the same environment.
-        const envCwd = binding.cwd ?? neutralBrowserCwd();
+        const envCwd = binding.cwd ?? neutralBrowserCwdPath();
         envKey = JSON.stringify([r.provider, binding.session, envCwd]);
         let entry = launchEnvs.get(envKey);
         if (r.op === 'close') {

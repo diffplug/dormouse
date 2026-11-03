@@ -730,6 +730,16 @@ describe('sync-to-pane', () => {
 
 describe('launch environment', () => {
   const envRequest = { provider: 'agent-browser', binding: { session: 'shell-test' }, op: 'launch', headed: false, url: 'https://example.com' } as const;
+  it('keeps the directory a WSL caller\'s dor translated, which this machine serves', async () => {
+    const fake = fakeProvider();
+    const bind = vi.spyOn(fake.provider, 'bind');
+    const cwd = '\\\\wsl.localhost\\Ubuntu\\home\\me\\app';
+    const host = createBrowserHost({ writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      await host.request({ ...envRequest, binding: { ...envRequest.binding, cwd } });
+      expect(bind.mock.calls.at(-1)?.[0].cwd).toBe(cwd);
+    } finally { await host.close(); }
+  });
   it('resolves a binding with no directory in the neutral one, not the host\'s', async () => {
     const launchEnv = vi.fn(async () => ({}));
     const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fakeProvider().provider } });
@@ -738,7 +748,7 @@ describe('launch environment', () => {
       expect(launchEnv).toHaveBeenCalledExactlyOnceWith(neutralBrowserCwd());
     } finally { await host.close(); }
   });
-  it.each(['\\\\host\\share\\repo', '//host/share/repo', '\\\\?\\C:\\repo'])('never hands %s to a provider or the launch shell', async (cwd) => {
+  it.each(['\\\\host\\share\\repo', '//host/share/repo', '\\\\?\\C:\\repo', '\\\\wsl.localhost.example\\Ubuntu\\repo', '\\\\wsl.localhost\\Ubuntu\\..\\..\\host\\share'])('never hands %s to a provider or the launch shell', async (cwd) => {
     const fake = fakeProvider();
     const bind = vi.spyOn(fake.provider, 'bind');
     const launchEnv = vi.fn(async () => ({}));

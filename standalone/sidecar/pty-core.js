@@ -308,7 +308,6 @@ function hostDirectory(dir, { platform, shell, wslDistro }) {
   if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] || '').replace(/\//g, '\\')}`;
   return stem === 'wsl' && wslDistro ? `\\\\wsl.localhost\\${wslDistro}${dir.replace(/\//g, '\\')}` : dir;
 }
-module.exports.hostDirectory = hostDirectory;
 
 // Enable OSC 633 shell integration for shells that support reliable injection,
 // returning possibly-modified { env, shellArgs }. The keystroke-based command
@@ -1919,7 +1918,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     return '';
   }
   const shellBasename = (value) => path.basename(value).replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
-  const hostDirectoryOf = (id, dir) => hostDirectory(dir, { platform, shell: sessions.get(id)?.shell, wslDistro: sessions.get(id)?.wslDistro });
   async function context(request, requestId) {
     const result = { requestId };
     try {
@@ -1951,7 +1949,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       } else if (request.op === 'openDirectory') {
         // The resolver is the only thing that touches the path: a `stat` or
         // `realpath` here would follow a link to a share and reach its host.
-        const nativePath = await canonicalDirectory(hostDirectoryOf(request.id, request.path));
+        const nativePath = await canonicalDirectory(hostDirectory(request.path, { platform, shell: sessions.get(request.id)?.shell, wslDistro: sessions.get(request.id)?.wslDistro }));
         if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {
