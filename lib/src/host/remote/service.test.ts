@@ -1764,7 +1764,7 @@ describe('paired devices and revocation', () => {
     await service.start();
     sockets[0]!.open();
 
-    expect((await command('revokeDevice', { id: phoneId.toUpperCase(), by: 'dor' })).result).toEqual({
+    expect((await command('revokeDevice', { id: phoneId.toUpperCase() })).result).toEqual({
       revoked: 1,
       labels: [BROWSER],
     });
@@ -1774,7 +1774,7 @@ describe('paired devices and revocation', () => {
     expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
     expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toHaveLength(1);
     expect(store.accessLog).toEqual([
-      expect.objectContaining({ event: 'revoked', deviceId: phoneId, device: BROWSER, by: 'dor' }),
+      expect.objectContaining({ event: 'revoked', deviceId: phoneId, device: BROWSER, by: 'settings' }),
     ]);
     expect(accessEvents()).toBeGreaterThan(0);
   });
@@ -1783,13 +1783,13 @@ describe('paired devices and revocation', () => {
     createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] } });
     await service.start();
 
-    expect((await command('revokeDevice', { id: phoneId, by: 'not-a-requester' })).result).toMatchObject({
+    expect((await command('revokeDevice', { id: phoneId, by: 'someone-else' })).result).toMatchObject({
       revoked: 1,
     });
     await settle();
 
     expect(store.acl[BURROW_ID]![0]!.revokedAt).not.toBeNull();
-    // A requester outside the closed set is read as the Settings list.
+    // The service names the requester; a message cannot.
     expect(store.accessLog).toEqual([expect.objectContaining({ event: 'revoked', by: 'settings' })]);
     // The next start loads the revocation, not the snapshot before it.
     await setPolicy(RELAY_ON);
