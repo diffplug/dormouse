@@ -16,7 +16,7 @@ import type {
   ParseResult,
   ToolSurfaceResponse,
 } from 'dor/commands/types';
-import { hasBrowser, hasTerminal, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
+import { hasBrowser, hasTerminal, NAVIGATION_CANCELLED_ERROR, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import { pendingSurfaceRefusal } from '../../lib/pending-kills';
 import type { OpenPort, PtyDataDetail } from '../../lib/platform/types';
@@ -1505,16 +1505,20 @@ export function useDorControl({
         // the user confirms its full path here, in host UI the page cannot
         // reach. An anchor in the document already shown loads nothing new.
         // Back/Forward asks again: re-asking costs one click, and no rule then
-        // depends on how a history entry got there.
-        if (documentLink && openTarget !== undefined
-          && !(sourceParams!.toolTarget === openTarget && sourceParams!.toolName === toolName && sourceParams!.toolScope === toolScope)
+        // depends on how a history entry got there. A terminal link's target is
+        // whatever the output printed, an empty host claiming this machine, so
+        // it asks too. Asked of the resolved target, so a symlink and a user's
+        // inert handler both answer for what would really open.
+        const terminalLink = params.terminalLink === true;
+        if (openTarget !== undefined
+          && (terminalLink || (documentLink && !(sourceParams!.toolTarget === openTarget && sourceParams!.toolName === toolName && sourceParams!.toolScope === toolScope)))
           && documentLinkNeedsConfirmation(toolScope, toolName, openTarget)) {
           // Nothing placed yet: every placement below reads the Wall afresh,
           // and `sourceChanged` notices a source that moved on meanwhile.
-          const confirmed = await released(confirmDocumentLinkOpen(openTarget, detail.signal));
-          if (unavailable()) return;
+          const confirmed = await released(confirmDocumentLinkOpen(openTarget, previewSignal ?? detail.signal, terminalLink ? 'terminal' : 'document'));
+          if (unavailable() || answeredSuperseded()) return;
           if (!confirmed) {
-            detail.respond({ ok: false, error: 'Navigation cancelled.' });
+            detail.respond({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
             return;
           }
         }
@@ -1578,7 +1582,7 @@ export function useDorControl({
           if (nextCommand === null) return false;
           const current = toolLocation(source, history?.entries[history.index]?.cwd ?? stringParam(source.cwd) ?? cwd)!;
           if (!sameDocument && !await released(confirmToolEditorsClose([id]))) {
-            detail.respond({ ok: false, error: 'Navigation cancelled.' });
+            detail.respond({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
             return true;
           }
           if (unavailable() || sourceChanged()) return true;

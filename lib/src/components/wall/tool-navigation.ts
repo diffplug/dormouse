@@ -35,8 +35,8 @@ export function toolHandlerName(scope: unknown, name: unknown): string | undefin
 }
 
 /**
- * Whether a document-link open of `target`, resolved to the handler `scope` and
- * `name` name, waits for the user to confirm it in host UI: the target is a
+ * Whether a document or terminal link's open of `target`, resolved to the handler
+ * `scope` and `name` name, waits for the user to confirm it in host UI: the target is a
  * format whose built-in preview runs the file's own script, and the handler is
  * not a built-in that shows it inertly. A user or repository Tool given such a
  * file is assumed to render it too. A link may climb with `..` to anywhere on

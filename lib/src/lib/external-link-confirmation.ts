@@ -39,29 +39,32 @@ export function requestExternalLinkConfirmation(uri: string, displayText: string
   });
 }
 
-/** What the dialog shows for a document link to the local file `path`. */
-export function documentLinkRequest(path: string): Omit<PendingExternalLink, 'id' | 'answer'> {
+/** Where a link that asks before opening was clicked. */
+export type LinkOrigin = 'document' | 'terminal';
+
+/** What the dialog shows for a link to the local file `path`. */
+export function documentLinkRequest(path: string, origin: LinkOrigin = 'document'): Omit<PendingExternalLink, 'id' | 'answer'> {
   return {
     uri: path,
     displayText: '',
     verdict: 'match',
     decision: { status: 'openable', rawUri: path, uri: path, scheme: 'file', displayUri: path, otherApp: false },
-    note: 'A link in the document you are viewing opens this file, which runs its own scripts and can read files beside it. Open it only if you expected this file.',
+    note: `A link in ${origin === 'terminal' ? 'this terminal' : 'the document you are viewing'} opens this file, which runs its own scripts and can read files beside it. Open it only if you expected this file.`,
   };
 }
 
 /**
- * Ask, in the same dialog, before a Tool's document link opens the local file
- * `path`, shown in full; resolves whether the user confirmed. The caller does
- * the open. Aborting `signal` withdraws the question.
+ * Ask, in the same dialog, before a document or terminal link opens the local
+ * file `path`, shown in full; resolves whether the user confirmed. The caller
+ * does the open. Aborting `signal` withdraws the question.
  */
-export function confirmDocumentLinkOpen(path: string, signal?: AbortSignal): Promise<boolean> {
+export function confirmDocumentLinkOpen(path: string, signal?: AbortSignal, origin?: LinkOrigin): Promise<boolean> {
   return new Promise(resolve => {
     if (signal?.aborted) return resolve(false);
     let answered = false;
     const request: PendingExternalLink = {
       id: ++nextId,
-      ...documentLinkRequest(path),
+      ...documentLinkRequest(path, origin),
       answer: confirmed => {
         if (answered) return;
         answered = true;

@@ -19,6 +19,7 @@ import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
 import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
 import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
+import { NAVIGATION_CANCELLED_ERROR } from 'dor/commands/types';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import { applyLiveToolEvents } from '../../lib/tool-events';
 import { openSequence } from 'dor-tools-lib/osc';
@@ -1341,6 +1342,77 @@ describe('Tool document navigation', () => {
   });
 });
 
+
+describe('a terminal link to a page that runs its own script', () => {
+  const click = (file: string, preview = true) => request({ file, preview, terminalLink: true });
+  const dialogButton = (label: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === label)!;
+  const asking = (uri: string) => waitUntil(() => getExternalLinkConfirmationSnapshot()?.uri === uri);
+
+  it('waits for the user to confirm its full path, and a cancel runs nothing', async () => {
+    await mountSlot();
+    const respond = await click('/elsewhere/page.html');
+    await asking('/elsewhere/page.html');
+    expect(document.body.textContent).toContain('A link in this terminal opens this file');
+    await flush();
+    expect(typed['surface:slot']).toEqual([]);
+
+    act(() => dialogButton('Cancel').click());
+    await waitUntil(() => respond.mock.calls.length > 0);
+    expect(respond.mock.calls[0][0]).toMatchObject({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
+    expect(typed['surface:slot']).toEqual([]);
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+  });
+
+  it('opens once confirmed', async () => {
+    await mountSlot();
+    const respond = await click('/elsewhere/diagram.svg');
+    await asking('/elsewhere/diagram.svg');
+    act(() => dialogButton('Open file').click());
+    expect(await answer(respond)).toMatchObject({ surfaceId: 'surface:slot' });
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/elsewhere/diagram.svg');
+  });
+
+  it('asks of the resolved target, not the name printed', async () => {
+    const toolControl = await mountSlot();
+    const answerLookup = toolControl.getMockImplementation()!;
+    toolControl.mockImplementation(async call => answerLookup(call.target === 'notes.md' ? { ...call, target: '/elsewhere/page.html' } : call));
+    await click('notes.md');
+    await asking('/elsewhere/page.html');
+  });
+
+  it('keeps one question through a double-click, the pin replacing the preview', async () => {
+    await mountSlot();
+    const preview = await click('/elsewhere/page.html');
+    await asking('/elsewhere/page.html');
+    const pin = await click('/elsewhere/page.html', false);
+    await waitUntil(() => preview.mock.calls.length > 0);
+    expect(preview.mock.calls[0][0]).toMatchObject({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
+    await asking('/elsewhere/page.html');
+    act(() => dialogButton('Open file').click());
+    await answer(pin);
+  });
+
+  it('withdraws the question when a newer preview supersedes it', async () => {
+    await mountSlot();
+    const stale = await click('/elsewhere/page.html');
+    await asking('/elsewhere/page.html');
+    await click('/repo/b.md');
+    await waitUntil(() => stale.mock.calls.length > 0);
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
+
+  it('opens an inert target on the click alone', async () => {
+    await mountSlot();
+    expect(await answer(await click('/elsewhere/notes.md'))).toMatchObject({ surfaceId: 'surface:slot' });
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
+
+  it('does not ask for an open that is not a link click', async () => {
+    await mountSlot();
+    await answer(await request({ file: '/elsewhere/page.html' }));
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
+});
 
 describe('a document link to a page that runs its own script', () => {
   /** The Tool in `surface:slot` follows a document link, as its OSC 367 `open`. */

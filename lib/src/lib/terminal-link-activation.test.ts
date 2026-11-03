@@ -7,7 +7,7 @@
  * confirmation dialog.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
+import { NAVIGATION_CANCELLED_ERROR, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { SURFACE_CONTROL_METHODS, type DorControlResult } from 'dor/protocol';
 import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from './external-link-confirmation';
 import { setPlatform } from './platform';
@@ -43,7 +43,7 @@ describe('activateTerminalLink', () => {
     expect(requests).toEqual([expect.objectContaining({
       surfaceId: SESSION,
       method: SURFACE_CONTROL_METHODS.tool,
-      params: { file: URI, preview: true, cwd: '/work' },
+      params: { file: URI, preview: true, cwd: '/work', terminalLink: true },
     })]);
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });
@@ -113,6 +113,12 @@ describe('activateTerminalLink', () => {
     requests[0].respond({ ok: true, result: { status: 'created' } });
     requests[1].respond({ ok: false, error: 'tool launch cancelled' });
     expect(getExternalLinkConfirmationSnapshot()).toMatchObject({ uri: URI, displayText: 'docs/README.md' });
+  });
+
+  it('opens no dialog after the user declines the question an open waited on', () => {
+    click(1);
+    requests[0].respond({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });
 
   it('leaves a superseded preview alone', () => {
