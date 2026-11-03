@@ -1116,12 +1116,13 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect((await rideWindow('c1', clientStatic)).outcome).toEqual(success);
     expect(burrow.establishedSessionCount).toBe(1);
 
-    const revoked = await burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
+    const revoked = burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
 
     expect(revoked).toHaveLength(1);
     expect(burrow.establishedSessionCount).toBe(0);
     expect(sessions[0]!.disposed).toBe(true);
     expect(burrow.activeRecords).toEqual([]);
+    await burrow.saveRevocations();
     expect(savedRecords).toEqual([expect.objectContaining({ revokedAt: clock })]);
     // Its window went with it, so the next connect is offered none.
     const again = await rideWindow('c2', clientStatic);
@@ -1144,7 +1145,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
   it('a revoked phone that proves presence afresh is refused, with the ACL miss logged and never sent', async () => {
     makeBurrow();
     const { authenticator, clientStatic, record } = await pairedClient();
-    await burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
+    burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
     const connectionId = testRoutingId();
     const { session, burrowChallenge } = await openConnection('c1', clientStatic, connectionId);
     const binding = connectionBinding(connectionId, burrowChallenge, session, authenticator.credentialId);
@@ -1169,13 +1170,13 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     const { clientStatic, record } = await pairedClient();
     expect((await rideWindow('c1', clientStatic)).outcome).toEqual(success);
 
-    expect(await burrow.revoke({ passkeyCredentialId: record.passkeyCredentialId }, 'settings')).toHaveLength(1);
+    expect(burrow.revoke({ passkeyCredentialId: record.passkeyCredentialId }, 'settings')).toHaveLength(1);
 
     expect(burrow.establishedSessionCount).toBe(0);
     expect(burrow.activeRecords).toEqual([]);
   });
 
-  it('a revocation whose save fails still refuses the phone, and rejects', async () => {
+  it('a revocation whose save fails still refuses the phone, and the save rejects', async () => {
     const saveAcl = vi
       .fn<NonNullable<BurrowOptions['saveAcl']>>()
       .mockImplementationOnce((_burrowId, records) => {
@@ -1186,23 +1187,190 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     const { clientStatic, record } = await pairedClient();
     expect((await rideWindow('c1', clientStatic)).outcome).toEqual(success);
 
-    await expect(burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings')).rejects.toThrow(
-      'disk full',
-    );
+    burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
 
+    await expect(burrow.saveRevocations()).rejects.toThrow('disk full');
     expect(burrow.establishedSessionCount).toBe(0);
     expect(burrow.activeRecords).toEqual([]);
   });
 
-  it('revoking what is not paired changes and saves nothing', async () => {
+  it('revoking what is not paired changes nothing', async () => {
     makeBurrow();
     const { record } = await pairedClient();
-    const saves = savedRecords;
 
-    expect(await burrow.revoke({ passkeyCredentialId: 'someone-else' }, 'settings')).toEqual([]);
+    expect(burrow.revoke({ passkeyCredentialId: 'someone-else' }, 'settings')).toEqual([]);
 
-    expect(savedRecords).toBe(saves);
     expect(burrow.activeRecords).toEqual([record]);
+  });
+
+  it('applies a revocation at once while an earlier ACL write is stuck', async () => {
+    const write = Promise.withResolvers<void>();
+    const saveAcl = vi
+      .fn<NonNullable<BurrowOptions['saveAcl']>>()
+      .mockImplementationOnce((_burrowId, records) => {
+        savedRecords = [...records];
+      })
+      .mockImplementationOnce(() => write.promise)
+      .mockImplementation((_burrowId, records) => {
+        savedRecords = [...records];
+      });
+    makeBurrow(undefined, { saveAcl });
+    const { clientStatic, record, authenticator } = await pairedClient();
+    expect((await rideWindow('c1', clientStatic)).outcome).toEqual(success);
+    const pairing = await requestPairing('c2', await newAuthenticator());
+    const approved = approvals.at(-1)!.approve(pairing.code);
+    await settle();
+
+    expect(burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings')).toHaveLength(1);
+
+    // Nothing above has awaited: the first write has not returned.
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(burrow.activeRecords).toEqual([]);
+    expect(await attemptConnection('c3', clientStatic, authenticator)).toEqual({
+      ok: false,
+      code: 'pairing-required',
+    });
+
+    // The approval's snapshot predates the revocation, and does not bring it back.
+    const saved = burrow.saveRevocations();
+    write.resolve();
+    await Promise.all([approved, saved]);
+    expect(burrow.activeRecords.map((active) => active.clientStaticPublicKey)).toEqual([
+      toBase64Url(pairing.clientStatic.publicKey),
+    ]);
+    expect(await outcome(pairing.session, 'pairing', pairing.invitation.inviteId)).toMatchObject({ ok: true });
+    // And the write queued after that approval carries both.
+    expect(savedRecords.map(({ revokedAt }) => revokedAt !== null)).toEqual([true, false]);
+  });
+
+  it('a revocation during an approval write of the same phone leaves it unpaired, and says so', async () => {
+    const write = Promise.withResolvers<void>();
+    const saveAcl = vi
+      .fn<NonNullable<BurrowOptions['saveAcl']>>()
+      .mockImplementationOnce((_burrowId, records) => {
+        savedRecords = [...records];
+      })
+      .mockImplementationOnce(() => write.promise);
+    makeBurrow(undefined, { saveAcl });
+    const { clientStatic, record, authenticator } = await pairedClient();
+    const again = await requestPairing('c2', authenticator, { clientStatic });
+    const approved = approvals.at(-1)!.approve(again.code);
+    await settle();
+
+    burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
+    write.resolve();
+    await approved;
+
+    expect(burrow.activeRecords).toEqual([]);
+    expect(await outcome(again.session, 'pairing', again.invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'user-denied',
+    });
+    // No window opened for a record that never went live.
+    expect((await rideWindow('c3', clientStatic)).offer).toBe('none');
+  });
+
+  it('refuses an approval still queued when its phone was revoked, writing nothing for it', async () => {
+    const write = Promise.withResolvers<void>();
+    const saveAcl = vi
+      .fn<NonNullable<BurrowOptions['saveAcl']>>()
+      .mockImplementationOnce((_burrowId, records) => {
+        savedRecords = [...records];
+      })
+      .mockImplementationOnce(() => write.promise);
+    makeBurrow(undefined, { saveAcl });
+    const { clientStatic, record, authenticator } = await pairedClient();
+    const other = await requestPairing('c2', await newAuthenticator());
+    const again = await requestPairing('c3', authenticator, { clientStatic });
+    const stuck = approvals[1]!.approve(other.code);
+    const queued = approvals[2]!.approve(again.code);
+    await settle();
+
+    burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
+    write.resolve();
+    await Promise.all([stuck, queued]);
+
+    expect(saveAcl).toHaveBeenCalledTimes(2);
+    expect(burrow.activeRecords.map((active) => active.clientStaticPublicKey)).toEqual([
+      toBase64Url(other.clientStatic.publicKey),
+    ]);
+    expect(await outcome(again.session, 'pairing', again.invitation.inviteId)).toEqual({
+      ok: false,
+      code: 'user-denied',
+    });
+  });
+
+  // --- Who the log names (`docs/specs/remote-security-model.md` -> "Access log") ---
+
+  /** Run the reaper past a dead deadline; an `init` naming no invitation is refused by its id. */
+  async function expirePending(ttl: number): Promise<void> {
+    clock += ttl + 1;
+    sendE2e('reaper', 'pairing', testRoutingId(), 'init', toBase64Url(new Uint8Array(96)));
+    await settle();
+  }
+
+  it('names no device for a connection that expires with no Client transport message', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    const entriesBefore = accessEntries.length;
+    await openConnection('c1', clientStatic, testRoutingId());
+
+    await expirePending(DEFAULT_CHALLENGE_TTL_MS);
+
+    expect(burrow.trackedClientCount).toBe(0);
+    expect(accessEntries).toHaveLength(entriesBefore);
+  });
+
+  it('names the device once a Client transport message decrypted, even if only a keepalive', async () => {
+    makeBurrow();
+    const { clientStatic, record } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session } = await openConnection('c1', clientStatic, connectionId);
+    sendE2e('c1', 'connection', connectionId, 'transport', toBase64Url(session.sendKeepalive()));
+    await settle();
+
+    await expirePending(DEFAULT_CHALLENGE_TTL_MS);
+
+    expect(accessEntries.at(-1)).toMatchObject({
+      event: 'connection-denied',
+      deviceId: deviceIdFor(record.clientStaticPublicKey),
+      reason: 'presence-rejected',
+    });
+  });
+
+  it('names no device for a pending connection a revocation refuses before it spoke', async () => {
+    makeBurrow();
+    const { clientStatic, record } = await pairedClient();
+    await openConnection('c1', clientStatic, testRoutingId());
+
+    burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
+
+    expect(accessEntries.map(({ event }) => event)).toEqual(['paired', 'revoked']);
+  });
+
+  it('names the device of a pairing refused after its request', async () => {
+    makeBurrow();
+    const { clientStatic, code } = await requestPairing('c1', await newAuthenticator());
+
+    await approvals[0]!.approve(code === '42' ? '13' : '42');
+
+    expect(accessEntries.at(-1)).toMatchObject({
+      event: 'pairing-denied',
+      deviceId: deviceIdFor(toBase64Url(clientStatic.publicKey)),
+      reason: 'confirmation-mismatch',
+    });
+  });
+
+  it('names no device for a pairing that expires before its request', async () => {
+    makeBurrow();
+    const session = await openPairing('c1', await mintInvitation(), await generateNoiseKeyPair());
+    expect(session).not.toBeNull();
+
+    await expirePending(DEFAULT_PAIRING_TTL_MS);
+
+    expect(burrow.trackedClientCount).toBe(0);
+    expect(accessEntries).toEqual([]);
   });
 
   it('opens a window at pairing, so the first connect verifies no assertion', async () => {

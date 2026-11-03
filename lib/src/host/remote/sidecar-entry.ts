@@ -441,6 +441,8 @@ export interface SidecarHost {
    * as the events this emits, so `main.js` must not forward it itself.
    */
   onPtyEvent(event: string, data: unknown): void;
+  /** Saves what only memory holds that must outlive this process. Never rejects; bound it, since a store can hang. */
+  saveBeforeExit(): Promise<void>;
   dispose(): void;
 }
 
@@ -640,6 +642,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     },
 
     onPtyEvent: bridge.onPtyEvent,
+
+    saveBeforeExit: () => service.saveRevocations(),
 
     dispose() {
       for (const stop of stops) stop();

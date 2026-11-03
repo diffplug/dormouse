@@ -11,8 +11,16 @@
 
 import { fromBase64Url } from 'remote-lib-common';
 
-/** Entries kept; the oldest goes when one more arrives. */
+/** Entries kept at most: {@link ACCESS_LOG_MAX_REFUSALS} refusals, and the rest for everything else. */
 export const ACCESS_LOG_MAX_ENTRIES = 500;
+
+/**
+ * Refusals kept at most, in a share of their own: a refusal costs whoever sends
+ * it almost nothing, so one evicts only an older refusal, never a record of what
+ * did reach this machine. By event, since a device id is whatever key the sender
+ * made this time.
+ */
+export const ACCESS_LOG_MAX_REFUSALS = 100;
 
 /** The longest `reason` or `surface` an entry keeps, so a hand-edited file stays bounded too. */
 const MAX_FIELD_LENGTH = 128;
@@ -32,6 +40,8 @@ export const ACCESS_EVENTS = [
   'one-time-ended',
 ] as const;
 export type AccessEvent = (typeof ACCESS_EVENTS)[number];
+
+const REFUSAL_EVENTS: ReadonlySet<AccessEvent> = new Set(['pairing-denied', 'connection-denied', 'one-time-denied']);
 
 export interface AccessLogEntry {
   /** Epoch ms, this machine's clock. */
@@ -74,10 +84,21 @@ export function deviceIdFor(clientStaticPublicKey: string): string {
   return Array.from(bytes.subarray(0, DEVICE_ID_BYTES), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** `entries` with `entry` appended and the oldest dropped past the bound; never mutates `entries`. */
+/** The newest refusals and the newest of everything else that fit their shares, in their order. */
+function boundAccessLog(entries: readonly AccessLogEntry[]): AccessLogEntry[] {
+  let refusals = ACCESS_LOG_MAX_REFUSALS;
+  let others = ACCESS_LOG_MAX_ENTRIES - ACCESS_LOG_MAX_REFUSALS;
+  const newestFirst: AccessLogEntry[] = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
+    if (REFUSAL_EVENTS.has(entry.event) ? refusals-- > 0 : others-- > 0) newestFirst.push(entry);
+  }
+  return newestFirst.reverse();
+}
+
+/** `entries` with `entry` appended and the oldest of its kind dropped past the bound; never mutates `entries`. */
 export function appendAccessLog(entries: readonly AccessLogEntry[], entry: AccessLogEntry): AccessLogEntry[] {
-  const next = [...entries, entry];
-  return next.length > ACCESS_LOG_MAX_ENTRIES ? next.slice(next.length - ACCESS_LOG_MAX_ENTRIES) : next;
+  return boundAccessLog([...entries, entry]);
 }
 
 function boundedString(value: unknown): string | undefined {
@@ -110,9 +131,8 @@ export function parseAccessLogEntry(value: unknown): AccessLogEntry | null {
   return entry;
 }
 
-/** A stored log, oldest first: what is not an entry is dropped, and the newest {@link ACCESS_LOG_MAX_ENTRIES} kept. */
+/** A stored log, oldest first: what is not an entry is dropped, and the rest bounded as an append bounds it. */
 export function parseAccessLog(value: unknown): AccessLogEntry[] {
   if (!Array.isArray(value)) return [];
-  const entries = value.map(parseAccessLogEntry).filter((entry): entry is AccessLogEntry => entry !== null);
-  return entries.slice(Math.max(0, entries.length - ACCESS_LOG_MAX_ENTRIES));
+  return boundAccessLog(value.map(parseAccessLogEntry).filter((entry): entry is AccessLogEntry => entry !== null));
 }

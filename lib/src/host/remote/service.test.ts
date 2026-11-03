@@ -77,7 +77,12 @@ import {
   type EnrollmentOffer,
   type BurrowAclRecord,
 } from 'remote-lib-common';
-import { ACCESS_LOG_MAX_ENTRIES, deviceIdFor, type AccessLogEntry } from '../../remote/burrow/access-log';
+import {
+  ACCESS_LOG_MAX_ENTRIES,
+  ACCESS_LOG_MAX_REFUSALS,
+  deviceIdFor,
+  type AccessLogEntry,
+} from '../../remote/burrow/access-log';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import type {
@@ -117,6 +122,7 @@ import {
   BurrowService,
   enqueuePending,
   enrollVerificationUrl,
+  REVOCATION_SAVE_RETRY_MS,
   suggestedBurrowLabel,
   type BurrowServiceOptions,
 } from './service';
@@ -1316,6 +1322,39 @@ describe('pairing queue', () => {
     expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
   });
 
+  it('lets go of no revocation an approval\'s write took its snapshot before', async () => {
+    const phone = aclRecord('a-phone');
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [phone] } });
+    await service.start();
+    const socket = sockets[0]!;
+    socket.open();
+    const { item, code } = await pair(socket, 'c1');
+    const write = Promise.withResolvers<void>();
+    const persist = store.saveAcl.bind(store);
+    vi.spyOn(store, 'saveAcl')
+      .mockImplementationOnce(async (burrowId, records) => {
+        await write.promise;
+        await persist(burrowId, records);
+      })
+      .mockRejectedValueOnce(new Error('disk full'));
+    const approval = command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
+    await settle();
+    const revoking = command('revokeDevice', { id: deviceIdFor(phone.clientStaticPublicKey) });
+    await settle();
+    write.resolve();
+    await approval;
+    expect((await revoking).error).toMatch(/disk full/);
+    // The approval's write landed, with the phone as it read before the revocation.
+    expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt)).toEqual([null, null]);
+
+    await setPolicy(NOTHING);
+    await setPolicy(RELAY_ON);
+
+    const { devices } = (await command('pairedDevices')).result as PairedDevicesResult;
+    expect(devices.map(({ id }) => id)).not.toContain(deviceIdFor(phone.clientStaticPublicKey));
+    expect(devices).toHaveLength(1);
+  });
+
   it('a mistyped code denies, writes nothing, and spends the one attempt', async () => {
     const socket = await running();
     const { item, session, invitation, code } = await pair(socket, 'c1', { code: '13' });
@@ -1802,7 +1841,7 @@ describe('paired devices and revocation', () => {
     sockets[0]!.open();
     vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
 
-    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused until Dormouse quits.*disk full/);
+    expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/refused.*disk full.*if Dormouse quits/);
   });
 
   it('keeps a revocation whose save failed across a network-policy restart, until a save lands', async () => {
@@ -1813,7 +1852,7 @@ describe('paired devices and revocation', () => {
 
     // VS Code's next broker window loads the stored ACL, so the hold ends with this window.
     expect((await command('revokeDevice', { id: phoneId })).error).toMatch(
-      /refused until the window running remote control closes.*disk full/,
+      /refused.*disk full.*if the window running remote control closes/,
     );
     expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
     // The hold covers every record of the target approved by the failure — one
@@ -1838,6 +1877,233 @@ describe('paired devices and revocation', () => {
     save.mockRestore();
     await command('revokeDevice', { id: deviceIdFor(TABLET.clientStaticPublicKey) });
     expect(store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null)).toEqual([true, true, true, false]);
+  });
+
+  describe('a revocation no save has carried', () => {
+    const tabletId = deviceIdFor(TABLET.clientStaticPublicKey);
+
+    function pairedResult(): Promise<PairedDevicesResult> {
+      return command('pairedDevices').then(({ result }) => result as PairedDevicesResult);
+    }
+
+    function revokedInStore(): boolean[] {
+      return store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null);
+    }
+
+    async function afterFailedSave(seed: Partial<Seed> = {}, unrevoked = [false, false]): Promise<void> {
+      createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] }, ...seed });
+      await service.start();
+      sockets[0]?.open();
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+      expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/disk full/);
+      expect(revokedInStore()).toEqual(unrevoked);
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('is saved again on a timer until one lands, with nothing else asked', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await afterFailedSave();
+      const save = vi.spyOn(store, 'saveAcl').mockClear().mockRejectedValueOnce(new Error('still full'));
+
+      await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS);
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(revokedInStore()).toEqual([false, false]);
+
+      await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS);
+      expect(revokedInStore()).toEqual([true, false]);
+      expect((await pairedResult()).unsavedRevocations).toBeUndefined();
+
+      // Nothing left to retry.
+      save.mockClear();
+      await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS * 2);
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it('is shown once a save failed, and the id it lists saves it again', async () => {
+      await afterFailedSave();
+      const eventsBefore = accessEvents();
+      expect(await pairedResult()).toMatchObject({
+        devices: [{ id: tabletId }],
+        unsavedRevocations: [{ id: phoneId, label: BROWSER }],
+      });
+
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('still full'));
+      expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/still full/);
+      expect((await pairedResult()).unsavedRevocations).toHaveLength(1);
+
+      expect((await command('revokeDevice', { id: phoneId })).result).toEqual({
+        revoked: 1,
+        labels: [BROWSER],
+      });
+      expect(revokedInStore()).toEqual([true, false]);
+      expect((await pairedResult()).unsavedRevocations).toBeUndefined();
+      expect(accessEvents()).toBeGreaterThan(eventsBefore);
+      await settle();
+      // Saving it again is not a second revocation.
+      expect(store.accessLog.filter(({ event }) => event === 'revoked')).toHaveLength(1);
+    });
+
+    it('holds a Relay-named revocation the same way, and its id in Settings saves it again', async () => {
+      const otherPasskey = { ...TABLET, passkeyCredentialId: 'cred-other' };
+      createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, otherPasskey] } });
+      await service.start();
+      sockets[0]!.open();
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+      await expect(service.revoke({ passkeyCredentialId: PHONE.passkeyCredentialId }, 'relay')).rejects.toThrow(
+        /disk full/,
+      );
+      expect(revokedInStore()).toEqual([false, false]);
+      expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
+
+      expect((await command('revokeDevice', { id: phoneId })).result).toEqual({ revoked: 1, labels: [BROWSER] });
+      expect(revokedInStore()).toEqual([true, false]);
+      expect((await pairedResult()).unsavedRevocations).toBeUndefined();
+      await settle();
+      expect(store.accessLog.filter(({ event }) => event === 'revoked')).toEqual([
+        expect.objectContaining({ deviceId: phoneId, by: 'relay' }),
+      ]);
+    });
+
+    it('is saved again by a revoke attempt that finds nothing to do', async () => {
+      await afterFailedSave();
+
+      expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
+      await settle();
+      expect(revokedInStore()).toEqual([true, false]);
+    });
+
+    it('is saved again by a revoke of an id two phones share', async () => {
+      const twins = [aclRecord('twin-phone-1'), aclRecord('twin-phone-2')];
+      await afterFailedSave({ acl: { [BURROW_ID]: [PHONE, TABLET, ...twins] } }, [false, false, false, false]);
+
+      const id = deviceIdFor(twins[0]!.clientStaticPublicKey);
+      expect((await command('revokeDevice', { id })).error).toMatch(/More than one/);
+      await settle();
+      expect(revokedInStore()).toEqual([true, false, false, false]);
+    });
+
+    it('is saved again by a revoke of a target naming nothing, which answers for itself', async () => {
+      await afterFailedSave();
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('still full'));
+
+      await expect(service.revoke({ passkeyCredentialId: 'someone-else' }, 'settings')).resolves.toEqual({
+        revoked: 0,
+        labels: [],
+      });
+      await settle();
+      expect(revokedInStore()).toEqual([false, false]);
+
+      await service.revoke({ passkeyCredentialId: 'someone-else' }, 'settings');
+      await settle();
+      expect(revokedInStore()).toEqual([true, false]);
+    });
+
+    it('never answers an id naming no phone with another phone\'s failed or stuck save', async () => {
+      await afterFailedSave();
+
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('still full'));
+      expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
+      await settle();
+      expect(revokedInStore()).toEqual([false, false]);
+
+      const write = Promise.withResolvers<void>();
+      vi.spyOn(store, 'saveAcl').mockImplementationOnce(() => write.promise);
+      const stuck = service.saveRevocations();
+      await settle();
+      expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
+      write.resolve();
+      await stuck;
+    });
+
+    it('is saved again at dispose, so the next service loads it', async () => {
+      await afterFailedSave();
+
+      service.dispose();
+      await settle();
+
+      expect(revokedInStore()).toEqual([true, false]);
+    });
+
+    it('is saved again by what a host awaits before it exits, which never rejects', async () => {
+      await afterFailedSave();
+
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('still full'));
+      await expect(service.saveRevocations()).resolves.toBeUndefined();
+      expect(revokedInStore()).toEqual([false, false]);
+
+      await service.saveRevocations();
+      expect(revokedInStore()).toEqual([true, false]);
+    });
+
+    it('holds a stopped Burrow\'s revocation the same way, across the start that follows', async () => {
+      await afterFailedSave({ network: NOTHING });
+      expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
+
+      await setPolicy(RELAY_ON);
+      expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
+
+      await command('revokeDevice', { id: phoneId });
+      expect(revokedInStore()).toEqual([true, false]);
+    });
+
+    it('applies at once while an earlier write is stuck, and only the save waits', async () => {
+      createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] } });
+      await service.start();
+      sockets[0]!.open();
+      const write = Promise.withResolvers<void>();
+      const persist = store.saveAcl.bind(store);
+      vi.spyOn(store, 'saveAcl').mockImplementation(async (burrowId, records) => {
+        await write.promise;
+        await persist(burrowId, records);
+      });
+
+      const first = command('revokeDevice', { id: phoneId });
+      await settle();
+      const second = command('revokeDevice', { id: tabletId });
+      await settle();
+
+      expect((await pairedResult()).devices).toEqual([]);
+      expect((await command('status')).result).toMatchObject({ pairedClients: 0 });
+      expect(revokedInStore()).toEqual([false, false]);
+
+      write.resolve();
+      await Promise.all([first, second]);
+      expect(revokedInStore()).toEqual([true, true]);
+    });
+
+    it('answers and is shown once a stuck write has outlasted its bound, then lands', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE] } });
+      await service.start();
+      sockets[0]!.open();
+      const write = Promise.withResolvers<void>();
+      const persist = store.saveAcl.bind(store);
+      vi.spyOn(store, 'saveAcl').mockImplementationOnce(async (burrowId, records) => {
+        await write.promise;
+        await persist(burrowId, records);
+      });
+
+      const revoking = command('revokeDevice', { id: phoneId });
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await pairedResult()).unsavedRevocations).toBeUndefined();
+
+      const eventsBefore = accessEvents();
+      await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS);
+      expect((await revoking).error).toMatch(/refused.*has not finished/);
+      expect(accessEvents()).toBeGreaterThan(eventsBefore);
+      expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
+
+      const eventsBeforeLanding = accessEvents();
+      write.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(revokedInStore()).toEqual([true]);
+      expect(accessEvents()).toBeGreaterThan(eventsBeforeLanding);
+      expect((await pairedResult()).unsavedRevocations).toBeUndefined();
+    });
   });
 
   it('revokes nothing for an id that names no phone, or none at all', async () => {
@@ -1880,9 +2146,10 @@ describe('paired devices and revocation', () => {
     await service.start();
     await command('revokeDevice', { id: phoneId });
 
+    // The rest of the bound is the share refusals keep to themselves.
     const { entries } = (await command('accessLog')).result as AccessLogResult;
-    expect(entries).toHaveLength(ACCESS_LOG_MAX_ENTRIES);
-    expect(entries[0]!.at).toBe(1);
+    expect(entries).toHaveLength(ACCESS_LOG_MAX_ENTRIES - ACCESS_LOG_MAX_REFUSALS);
+    expect(entries[0]!.at).toBe(ACCESS_LOG_MAX_REFUSALS + 1);
     expect(entries.at(-1)!.event).toBe('revoked');
   });
 });

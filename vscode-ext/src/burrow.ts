@@ -599,6 +599,11 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
   }
 }
 
+/** One more try at what only this window's Burrow holds, as VS Code shuts down. Never rejects. */
+export function saveBurrowBeforeExit(): Promise<void> {
+  return service?.saveRevocations() ?? Promise.resolve();
+}
+
 /**
  * Whether the network policy lets this window reach Hosted on its own, for
  * managed voice: the service's answer in the broker, else the policy every

@@ -29,6 +29,7 @@ import {
   type InvitationEvent,
   type BurrowConsoleStatus,
   type PairedDevice,
+  type UnsavedRevocation,
   type SetupQrResult,
 } from './service-protocol';
 import type { AccessLogEntry } from '../../remote/burrow/access-log';
@@ -314,6 +315,8 @@ export interface PrimedBurrow {
    * the list it shows.
    */
   devices?: PairedDevice[];
+  /** What `pairedDevices` answers beside the list; absent by default. */
+  unsavedRevocations?: UnsavedRevocation[];
   /** What `accessLog` answers; empty by default. */
   accessLog?: AccessLogEntry[];
   /** Make `revokeDevice` reject — the id names no phone any more, or the save failed. */
@@ -371,7 +374,10 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
       if (cmd === 'oneTimeEnd') return {};
       if (cmd === 'pairedDevices') {
         const status = primed.status ?? UNENROLLED_STATUS;
-        return { devices: primed.devices ?? (status.enrolled ? pairedDevices(status.pairedClients) : []) };
+        return {
+          devices: primed.devices ?? (status.enrolled ? pairedDevices(status.pairedClients) : []),
+          unsavedRevocations: primed.unsavedRevocations,
+        };
       }
       if (cmd === 'accessLog') return { entries: primed.accessLog ?? [] };
       if (cmd === 'revokeDevice') {

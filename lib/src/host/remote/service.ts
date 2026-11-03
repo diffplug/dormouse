@@ -24,10 +24,12 @@ import {
 } from 'remote-lib-common';
 import {
   firstPerClientStatic,
+  revocationNames,
   revokeTarget,
   type RevocationRequester,
   type RevocationTarget,
 } from '../../remote/burrow/acl';
+import { messageOf } from '../../lib/errors';
 import {
   appendAccessLog,
   deviceIdFor,
@@ -131,6 +133,7 @@ import {
   type PairedDevicesResult,
   type RevokeDeviceParams,
   type RevokeDeviceResult,
+  type UnsavedRevocation,
 } from './service-protocol';
 
 export interface BurrowServiceOptions {
@@ -378,6 +381,24 @@ const HOLDER_ID_BYTES = 16;
 /** Bytes of the random id that names one service instance to the webviews. */
 const SERVICE_ID_BYTES = 16;
 
+/** How long a revocation goes unsaved before the next try, and how long a person waits on a write that has not failed. */
+export const REVOCATION_SAVE_RETRY_MS = 30_000;
+
+/** One entry of `BurrowService.#unsavedRevocations`. */
+interface HeldRevocation {
+  readonly target: RevocationTarget;
+  /** When it applied: a record approved after this is a new pairing, which it never touches. */
+  readonly at: number;
+  /** The browsers it cut off, as the paired-phone list names them. */
+  readonly devices: readonly UnsavedRevocation[];
+  /** The person who revoked was told it did not save: Settings shows it. */
+  overdue: boolean;
+}
+
+function heldRevocationNames(held: HeldRevocation, record: BurrowAclRecord): boolean {
+  return record.approvedAt <= held.at && revocationNames(held.target, record);
+}
+
 /** Which app a Burrow is. Standalone and VS Code enroll separately. */
 export type BurrowKind = 'standalone' | 'vscode';
 
@@ -539,16 +560,18 @@ export class BurrowService {
    */
   #oneTimeSeen: { runtime: OneTimeRuntime; label?: string; since?: number } | null = null;
   /**
-   * Revocations a running Burrow made whose save failed, by `burrowId`: the
-   * target, and when the save failed. Every ACL this service reads from
-   * the store has them applied ({@link #loadAcl}) — a network-policy change
-   * restarts the runtime from the store, and must not re-admit a phone the
-   * person just cut off — until an ACL save for that Burrow succeeds, which
-   * carries them. Memory only: stopping this service first undoes them — quitting
-   * Dormouse, or in VS Code closing the broker window, whose successor loads
-   * the stored ACL.
+   * Revocations applied that no ACL save has carried yet, by `burrowId`, entered
+   * the moment they apply. Every ACL this service reads from the store has them
+   * applied ({@link #loadAcl}) — a network-policy change restarts the runtime
+   * from the store, and must not re-admit a phone the person just cut off —
+   * until a save carries them ({@link #saveAcl}). {@link #saveHeldRevocations}
+   * retries on {@link REVOCATION_SAVE_RETRY_MS}, on every revoke attempt, and at
+   * dispose. Memory only: this service stopping before a save lands undoes them
+   * — quitting Dormouse, or in VS Code closing the broker window, whose successor
+   * loads the stored ACL.
    */
-  readonly #unsavedRevocations = new Map<string, Array<{ target: RevocationTarget; at: number }>>();
+  readonly #unsavedRevocations = new Map<string, HeldRevocation[]>();
+  #revocationRetry: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -639,6 +662,21 @@ export class BurrowService {
     const oneTime = this.#oneTime;
     this.#oneTime = null;
     oneTime?.end('user-ended');
+    if (this.#revocationRetry !== null) clearTimeout(this.#revocationRetry);
+    void this.saveRevocations();
+  }
+
+  /**
+   * The last chance before this process exits, which a host awaits within its
+   * shutdown budget: one more try at every unsaved revocation, or nothing. Never
+   * rejects.
+   */
+  async saveRevocations(): Promise<void> {
+    try {
+      await this.#saveHeldRevocations();
+    } catch (error) {
+      console.warn('[burrow] could not save a revocation', error);
+    }
   }
 
   async handleCommand(raw: unknown): Promise<void> {
@@ -652,7 +690,7 @@ export class BurrowService {
       if (this.#disposed) return;
       this.#sendToUi(BURROW_RESULT_EVENT, {
         burrowRequestId: command.burrowRequestId,
-        error: error instanceof Error ? error.message : String(error),
+        error: messageOf(error),
       });
     }
   }
@@ -715,10 +753,8 @@ export class BurrowService {
         return this.#takeBack(params as TakeBackParams | undefined);
       case 'pairedDevices':
         return this.#pairedDevices();
-      // On the chain, with approvals: a Burrow starting meanwhile must load
-      // the ACL after the revocation, never before it.
       case 'revokeDevice':
-        return this.#serialize(() => this.#revokeDevice(params as RevokeDeviceParams | undefined));
+        return this.#revokeDevice(params as RevokeDeviceParams | undefined);
       case 'accessLog':
         return this.#readAccessLog();
       default:
@@ -923,7 +959,7 @@ export class BurrowService {
         });
       });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = messageOf(error);
       throw new Error(
         saved
           ? `${detail} This computer saved its enrollment; restart Dormouse to try connecting again.`
@@ -1102,8 +1138,7 @@ export class BurrowService {
 
   /**
    * The stored ACL with every {@link #unsavedRevocations} entry applied: each
-   * active record its target names that was approved by the time the save
-   * failed, so a pairing approved since is never touched.
+   * active record it names, so a pairing approved since is never touched.
    */
   async #loadAcl(burrowId: string): Promise<BurrowAclRecord[]> {
     const records = await this.#store.loadAcl(burrowId);
@@ -1111,21 +1146,26 @@ export class BurrowService {
     if (!unsaved) return records;
     return records.map((record) => {
       if (record.revokedAt !== null) return record;
-      const held = unsaved.find(
-        ({ target, at }) =>
-          record.approvedAt <= at &&
-          ('clientStaticPublicKey' in target
-            ? record.clientStaticPublicKey === target.clientStaticPublicKey
-            : record.passkeyCredentialId === target.passkeyCredentialId),
-      );
+      const held = unsaved.find((entry) => heldRevocationNames(entry, record));
       return held ? { ...record, revokedAt: held.at } : record;
     });
   }
 
-  /** Save an ACL this service read or a runtime built, which carries every unsaved revocation. */
+  /**
+   * Save an ACL this service read or a runtime built, and let go of the
+   * revocations it carries — not all of them: an approval's write can have taken
+   * its snapshot before one applied.
+   */
   async #saveAcl(burrowId: string, records: readonly BurrowAclRecord[]): Promise<void> {
     await this.#store.saveAcl(burrowId, records);
-    this.#unsavedRevocations.delete(burrowId);
+    const held = this.#unsavedRevocations.get(burrowId);
+    if (!held) return;
+    const left = held.filter((entry) =>
+      records.some((record) => record.revokedAt === null && heldRevocationNames(entry, record)),
+    );
+    if (left.length > 0) this.#unsavedRevocations.set(burrowId, left);
+    else this.#unsavedRevocations.delete(burrowId);
+    if (held.some((entry) => entry.overdue && !left.includes(entry))) this.#emit({ name: 'access' });
   }
 
   /** Every paired browser, newest pairing first, with when the access log last saw it. */
@@ -1152,89 +1192,179 @@ export class BurrowService {
         connected: connected.has(clientStatic),
       };
     });
-    return { devices: devices.sort((a, b) => b.pairedAt - a.pairedAt) };
+    const result: PairedDevicesResult = { devices: devices.sort((a, b) => b.pairedAt - a.pairedAt) };
+    const unsaved = this.#heldDevices({ overdueOnly: true });
+    if (unsaved.length > 0) result.unsavedRevocations = unsaved;
+    return result;
+  }
+
+  /** The browsers an unsaved revocation of this enrollment cut off, one per id. */
+  #heldDevices({ overdueOnly }: { overdueOnly: boolean }): UnsavedRevocation[] {
+    const byId = new Map<string, UnsavedRevocation>();
+    const burrowId = this.#enrollment?.burrowId;
+    for (const held of (burrowId && this.#unsavedRevocations.get(burrowId)) || []) {
+      if (overdueOnly && !held.overdue) continue;
+      for (const device of held.devices) byId.set(device.id, device);
+    }
+    return [...byId.values()];
   }
 
   /**
    * `revokeDevice`: resolve `params.id` to the one paired browser it names,
-   * then revoke it as {@link revoke} does. An id that names no paired phone,
-   * or more than one, revokes nothing. **Runs on `#serialize`.**
+   * then revoke it as {@link revoke} does. A browser already cut off whose
+   * revocation is unsaved has no active record left, and is the one this attempt
+   * saves again. An id that names no paired phone, or more than one, revokes
+   * nothing, and answers for itself: another phone's unsaved revocation is tried
+   * again behind it, never waited on or reported here.
    */
   async #revokeDevice(params: RevokeDeviceParams | undefined): Promise<RevokeDeviceResult> {
     const id = typeof params?.id === 'string' ? params.id.trim().toLowerCase() : '';
     if (!id) throw new Error('Name the paired phone to revoke by its id.');
-    if (!this.#enrollment) throw new Error('This computer has no paired phones: it is not enrolled.');
+    const records = this.#burrow?.activeRecords ?? (await this.#serialize(() => this.#enrolledActiveRecords()));
     const statics = new Set(
-      (await this.#activeRecords())
-        .map((record) => record.clientStaticPublicKey)
-        .filter((clientStatic) => deviceIdFor(clientStatic) === id),
+      records.map((record) => record.clientStaticPublicKey).filter((clientStatic) => deviceIdFor(clientStatic) === id),
     );
-    if (statics.size === 0) throw new Error(`No paired phone has the id ${id}.`);
-    if (statics.size > 1) throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
-    const [clientStaticPublicKey] = [...statics] as [string];
-    return this.#revoke({ clientStaticPublicKey }, 'settings');
+    if (statics.size > 1) {
+      void this.saveRevocations();
+      throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
+    }
+    const [clientStaticPublicKey] = [...statics];
+    if (clientStaticPublicKey !== undefined) return this.revoke({ clientStaticPublicKey }, 'settings');
+    const held = this.#heldDevices({ overdueOnly: false }).find((device) => device.id === id);
+    if (!held) {
+      void this.saveRevocations();
+      throw new Error(`No paired phone has the id ${id}.`);
+    }
+    await this.#retryRevocationSave();
+    return { revoked: 1, labels: [held.label] };
+  }
+
+  /** On `#serialize`, so a Burrow starting meanwhile answers from itself. */
+  async #enrolledActiveRecords(): Promise<BurrowAclRecord[]> {
+    if (!this.#enrollment) throw new Error('This computer has no paired phones: it is not enrolled.');
+    return this.#activeRecords();
   }
 
   /**
    * **The Burrow's one revocation entry point** (`docs/specs/remote-security-model.md`
    * -> "Revocation"): every active record `target` names — one browser's
    * Client static, or a passkey credential — whether or not the Burrow is
-   * running, logged with who asked. Serialized with lifecycle changes and
-   * approvals, so a Burrow starting meanwhile loads the ACL after it.
+   * running, logged with who asked. A running Burrow applies it on the spot, off
+   * the lifecycle chain, so an earlier write that is stuck holds up nothing but
+   * this one's save; a stopped one reads the store on the chain. Either way it is
+   * held from that moment ({@link #unsavedRevocations}), which is what refuses
+   * the phone across later runtimes, and only the save waits its turn.
    */
-  revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
-    return this.#serialize(() => this.#revoke(target, by));
-  }
-
-  /**
-   * {@link revoke}, on `#serialize`. A running Burrow ends the revoked
-   * phones' sessions and closes their presence windows before its save
-   * (`BurrowRuntime.revoke`), so a failed save still leaves them refused,
-   * and {@link #unsavedRevocations} keeps them refused across every later
-   * runtime until a save lands; a stopped one has nothing live, so the save is
-   * the whole of it, and one that fails revokes nothing.
-   */
-  async #revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
-    const enrollment = this.#enrollment;
-    if (!enrollment) throw new Error('This computer has no paired phones: it is not enrolled.');
-    const burrow = this.#burrow;
-    let revoked: BurrowAclRecord[];
-    if (burrow) {
-      try {
-        revoked = await burrow.revoke(target, by);
-      } catch (error) {
-        // Taken after the failure, so it covers every record the runtime
-        // revoked, an approval queued ahead of the revocation included.
-        const held = this.#unsavedRevocations.get(enrollment.burrowId) ?? [];
-        this.#unsavedRevocations.set(enrollment.burrowId, [...held, { target, at: this.#now() }]);
-        const detail = error instanceof Error ? error.message : String(error);
-        const until = this.#kind === 'vscode' ? 'the window running remote control closes' : 'Dormouse quits';
-        throw new Error(
-          `The phone is disconnected and refused until ${until}, but the revocation could not be saved: ${detail}`,
-        );
-      }
-    } else {
-      const acl = BurrowAcl.fromRecords(enrollment.burrowId, await this.#loadAcl(enrollment.burrowId), {
-        now: this.#now,
-      });
-      revoked = revokeTarget(acl, target);
-      if (revoked.length > 0) await this.#saveAcl(enrollment.burrowId, acl.records());
-      const at = this.#now();
-      for (const record of firstPerClientStatic(revoked)) {
-        this.#logAccess({
-          at,
-          event: 'revoked',
-          device: knownPairingDeviceLabel(record.label),
-          deviceId: deviceIdFor(record.clientStaticPublicKey),
-          by,
-        });
-      }
+  async revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
+    const apply = async () => (this.#burrow ? this.#revokeRunning(target, by) : this.#revokeStored(target, by));
+    const revoked = await (this.#burrow ? apply() : this.#serialize(apply));
+    if (revoked.length === 0) {
+      void this.saveRevocations();
+      return { revoked: 0, labels: [] };
     }
-    if (revoked.length > 0) this.#emit({ name: 'access' });
+    this.#emit({ name: 'access' });
+    await this.#retryRevocationSave();
     return {
       revoked: revoked.length,
       labels: firstPerClientStatic(revoked).map((record) => knownPairingDeviceLabel(record.label)),
     };
+  }
+
+  #revokeRunning(target: RevocationTarget, by: RevocationRequester): BurrowAclRecord[] {
+    const revoked = this.#burrow!.revoke(target, by);
+    this.#holdRevocation(this.#enrollment!.burrowId, target, revoked);
+    return revoked;
+  }
+
+  /** On `#serialize`: no runtime holds this ACL, so a Burrow starting meanwhile waits for the hold. */
+  async #revokeStored(target: RevocationTarget, by: RevocationRequester): Promise<BurrowAclRecord[]> {
+    const enrollment = this.#enrollment;
+    if (!enrollment) throw new Error('This computer has no paired phones: it is not enrolled.');
+    const acl = BurrowAcl.fromRecords(enrollment.burrowId, await this.#loadAcl(enrollment.burrowId), {
+      now: this.#now,
+    });
+    const revoked = revokeTarget(acl, target);
+    this.#holdRevocation(enrollment.burrowId, target, revoked);
+    const at = this.#now();
+    for (const record of firstPerClientStatic(revoked)) {
+      this.#logAccess({
+        at,
+        event: 'revoked',
+        device: knownPairingDeviceLabel(record.label),
+        deviceId: deviceIdFor(record.clientStaticPublicKey),
+        by,
+      });
+    }
+    return revoked;
+  }
+
+  #holdRevocation(burrowId: string, target: RevocationTarget, revoked: readonly BurrowAclRecord[]): void {
+    if (revoked.length === 0) return;
+    const devices = firstPerClientStatic(revoked).map((record) => ({
+      id: deviceIdFor(record.clientStaticPublicKey),
+      label: knownPairingDeviceLabel(record.label),
+    }));
+    const held = this.#unsavedRevocations.get(burrowId) ?? [];
+    this.#unsavedRevocations.set(burrowId, [...held, { target, at: this.#now(), devices, overdue: false }]);
+    this.#armRevocationRetry();
+  }
+
+  /**
+   * {@link #saveHeldRevocations} for a person waiting on the answer: bounded,
+   * since a store write has no deadline, and any failure in the words they read.
+   * From then on Settings shows what is still held. A write that outlasts the
+   * bound keeps its place on the chain, where nothing can overlap it.
+   */
+  async #retryRevocationSave(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.#saveHeldRevocations(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('the write has not finished')), REVOCATION_SAVE_RETRY_MS);
+          timer.unref?.();
+        }),
+      ]);
+    } catch (error) {
+      for (const held of [...this.#unsavedRevocations.values()].flat()) held.overdue = true;
+      this.#emit({ name: 'access' });
+      const until = this.#kind === 'vscode' ? 'the window running remote control closes' : 'Dormouse quits';
+      throw new Error(
+        `The phone is disconnected and refused, but the revocation could not be saved: ${messageOf(error)}. Dormouse keeps trying; if ${until} before a save lands, the phone can connect again.`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * One try at every unsaved revocation, on `#serialize`: through the running
+   * Burrow whose ACL it is, so the write queues with its approvals, else from the
+   * store.
+   */
+  #saveHeldRevocations(): Promise<void> {
+    if (this.#unsavedRevocations.size === 0) return Promise.resolve();
+    return this.#serialize(async () => {
+      try {
+        for (const burrowId of [...this.#unsavedRevocations.keys()]) {
+          const burrow = this.#enrollment?.burrowId === burrowId ? this.#burrow : null;
+          if (burrow) await burrow.saveRevocations();
+          else await this.#saveAcl(burrowId, await this.#loadAcl(burrowId));
+        }
+      } finally {
+        this.#armRevocationRetry();
+      }
+    });
+  }
+
+  /** One timer at most, and none past disposal, whose last try is its own. */
+  #armRevocationRetry(): void {
+    if (this.#disposed || this.#revocationRetry !== null || this.#unsavedRevocations.size === 0) return;
+    this.#revocationRetry = setTimeout(() => {
+      this.#revocationRetry = null;
+      void this.saveRevocations();
+    }, REVOCATION_SAVE_RETRY_MS);
+    this.#revocationRetry.unref?.();
   }
 
   /** The whole log, after every append already queued. */
