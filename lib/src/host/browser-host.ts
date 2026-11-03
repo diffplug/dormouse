@@ -16,6 +16,8 @@ import { readToolViewPosition } from 'dor-tools-lib/protocol';
 import {
   BROWSER_PROVIDERS,
   isBrowserProvider,
+  isUncOrDevicePath,
+  isWslSharePath,
   sessionForKey,
   type BrowserAutomationProvider,
   type BrowserBinding,
@@ -37,6 +39,7 @@ import {
   type BrowserResult,
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
+import { neutralBrowserCwdPath } from './browser-neutral-cwd';
 import { createCaptureBudget, type CaptureClaim } from './browser-capture-budget';
 import { createViewportSync, type FixedSize } from './browser-sync';
 import type { WebSocket } from 'ws';
@@ -120,7 +123,7 @@ export interface BrowserProvider<B = unknown> {
 
 export interface BrowserHostDeps {
   /** Trusted host callback; the returned environment is never serialized. */
-  launchEnv?(cwd: string | undefined): Promise<NodeJS.ProcessEnv>;
+  launchEnv?(cwd: string): Promise<NodeJS.ProcessEnv>;
   /** Write text to the OS clipboard (copy/cut land here). VS Code passes
    *  `vscode.env.clipboard.writeText`; the sidecar shells out (pbcopy/clip/…). */
   writeClipboardText(text: string): void | Promise<void>;
@@ -192,7 +195,10 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
     if (!BROWSER_PROVIDERS[provider].isSessionName(given.session)) return 'a valid session name is required';
     binding.session = given.session;
   }
-  if (typeof given.cwd === 'string' && path.isAbsolute(given.cwd)) binding.cwd = given.cwd;
+  // No filesystem call below may reach a share: the providers and the launch
+  // shell stat this path. Without one they run in the neutral directory. A WSL
+  // caller's own directory is the one this machine's distro serves.
+  if (typeof given.cwd === 'string' && (isWslSharePath(given.cwd) || (path.isAbsolute(given.cwd) && !isUncOrDevicePath(given.cwd)))) binding.cwd = given.cwd;
   // Checked against the provider's allowlist where it is spawned.
   if (typeof given.binaryPath === 'string') binding.binaryPath = given.binaryPath;
   const op = parseOp(r);
@@ -739,7 +745,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (deps.launchEnv) {
         // Keyed on the cwd a provider defaults to, so the one it answers with
         // finds the same environment.
-        envKey = JSON.stringify([r.provider, binding.session, binding.cwd ?? process.cwd()]);
+        const envCwd = binding.cwd ?? neutralBrowserCwdPath();
+        envKey = JSON.stringify([r.provider, binding.session, envCwd]);
         let entry = launchEnvs.get(envKey);
         if (r.op === 'close') {
           // Cleanup never starts or waits for a shell. A restored binding can
@@ -750,7 +757,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
             forgetEnv(envKey, entry);
           }
         } else {
-          if (!entry) launchEnvs.set(envKey, entry = created = { promise: deps.launchEnv(binding.cwd), closing: false });
+          if (!entry) launchEnvs.set(envKey, entry = created = { promise: deps.launchEnv(envCwd), closing: false });
           binding.env = entry.env = await entry.promise;
           if (closed || ((r.op === 'launch' || r.op === 'attach') && (entry.closing || wasCancelled(r.requestId)))) {
             forgetEnv(envKey, entry);

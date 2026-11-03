@@ -52,6 +52,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   /** The deterministic demo shell behind each helper (docs/specs/terminal-context.md). */
   private helpers = new Map<string, { cwd: string; busy: boolean }>();
   private helperCommand = DEFAULT_HELPER_COMMAND;
+  private processCwds = new Map<string, string>();
   /** Placement stories release each helper after fitting its mounted terminal. */
   deferHelperStartup = false;
   private pendingHelperPrompts = new Map<string, () => void>();
@@ -332,7 +333,12 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.exitHandlers.delete(handler);
   }
 
-  async getCwd(id: string): Promise<string | null> { return this.helpers.get(id)?.cwd ?? null; }
+  async getCwd(id: string): Promise<string | null> { return this.helpers.get(id)?.cwd ?? this.processCwds.get(id) ?? null; }
+
+  /** The process directory a test wants a host read of `id` to answer. */
+  setProcessCwd(id: string, cwd: string): void {
+    this.processCwds.set(id, cwd);
+  }
 
   /** Ports the playground/tests want a given terminal to report. */
   setOpenPorts(id: string, ports: OpenPort[]): void {
