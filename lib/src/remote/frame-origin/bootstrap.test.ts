@@ -3,8 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 type Listener = (event: unknown) => void;
 
-async function load() {
+async function load(cookies = '') {
   vi.resetModules();
+  const written: string[] = [];
+  vi.stubGlobal('location', { hostname: 'aaaa1111.frames.example' });
+  vi.stubGlobal('document', {
+    get cookie() { return cookies; },
+    set cookie(value: string) { written.push(value); },
+  });
   const parentWindow = {};
   const listeners: { window?: Listener; worker?: Listener } = {};
   vi.stubGlobal('window', {
@@ -20,7 +26,7 @@ async function load() {
     },
   });
   await import('./bootstrap');
-  return { parentWindow, connect: listeners.window!, fromWorker: listeners.worker! };
+  return { parentWindow, connect: listeners.window!, fromWorker: listeners.worker!, written };
 }
 
 const port = () => ({ postMessage: vi.fn(), close: vi.fn() });
@@ -29,6 +35,13 @@ const CONNECT = { kind: 'dormouse-frame-connect' };
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the bootstrap page', () => {
+  it('expires what it can see on the parent domain alone, nameless cookies included, before the frame page loads', async () => {
+    const { written } = await load('left=by-a-sibling; a=b=c; nameless');
+    expect(written).toEqual(['left', 'a', ''].map(
+      (name) => `${name}=; Domain=frames.example; Path=/; Max-Age=0; Secure; SameSite=None`,
+    ));
+  });
+
   it('takes its port from the parent alone, and only the first', async () => {
     const { parentWindow, connect, fromWorker } = await load();
     const foreign = port();

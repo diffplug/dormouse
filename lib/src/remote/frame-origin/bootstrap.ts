@@ -9,6 +9,23 @@
 import { FRAME_WORKER_PATH } from 'remote-lib-common';
 import type { BootstrapConnect, BootstrapReady, RelayMessage } from './protocol';
 
+/**
+ * Every frame origin sits under one domain, so a page can leave cookies there for
+ * its siblings' pages to read and its siblings' requests to carry. This page
+ * loads before the frame's own, so that page starts without them, and a cookie
+ * of the same name on this origin alone stays, since naming a `Domain` touches
+ * only that domain's. A cookie on a deeper path stays too: this page cannot see it.
+ */
+function dropParentDomainCookies(): void {
+  const parent = location.hostname.slice(location.hostname.indexOf('.') + 1);
+  for (const cookie of document.cookie.split('; ')) {
+    const name = cookie.slice(0, Math.max(cookie.indexOf('='), 0));
+    document.cookie = `${name}=; Domain=${parent}; Path=/; Max-Age=0; Secure; SameSite=None`;
+  }
+}
+
+dropParentDomainCookies();
+
 let connected: MessagePort | null = null;
 const ready = navigator.serviceWorker.register(FRAME_WORKER_PATH).then(() => navigator.serviceWorker.ready);
 
