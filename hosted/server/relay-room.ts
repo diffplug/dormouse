@@ -137,6 +137,13 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
     return held.length;
   }
 
+  async nudgeBurrows(account: string): Promise<number> {
+    if (!(await this.#serves(account))) return 0;
+    const burrows = this.#held("burrow");
+    for (const { ws } of burrows) send(ws, PASSKEYS_CHANGED);
+    return burrows.length;
+  }
+
   async onlineBurrows(account: string): Promise<string[]> {
     if (!(await this.#serves(account))) return [];
     return this.#held("burrow")
@@ -351,9 +358,9 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
   /**
    * The backstop to `closeBurrow`: every held Burrow whose row is gone or is
    * another account's closes 4001, and one whose owner is no longer entitled
-   * 4002, its Clients told `burrow-gone`. One query for them all, begun at
-   * `start`; whether it was read, a failed or timed-out one leaving them to
-   * `#closeUnchecked`.
+   * 4002, its Clients told `burrow-gone`; the rest are nudged, the backstop to
+   * `nudgeBurrows`. One query for them all, begun at `start`; whether it was
+   * read, a failed or timed-out one leaving them to `#closeUnchecked`.
    */
   async #sweepBurrows(account: string | undefined, start: number): Promise<boolean> {
     const burrowIds = this.#held("burrow").map(({ conn }) => conn.burrowId);
@@ -375,6 +382,8 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
       if (!held) continue;
       if (entitled) {
         this.#checked(held, start);
+        // The backstop to `nudgeBurrows`, whose call may never have arrived.
+        send(held.ws, PASSKEYS_CHANGED);
       } else if (entitled === false) {
         this.#retire(held, WS_CLOSE_BURROW_NOT_ENTITLED, WS_CLOSE_BURROW_NOT_ENTITLED_REASON);
       } else {
@@ -540,6 +549,8 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
 }
 
 const clientGone = (clientId: string): RelayToBurrowFrame => ({ t: "client-gone", clientId });
+
+const PASSKEYS_CHANGED: RelayToBurrowFrame = { t: "passkeys-changed" };
 
 /** Serialize and send, swallowing errors from a socket that is mid-close. */
 function send(ws: WorkerWebSocket, frame: RelayToClientFrame | RelayToBurrowFrame) {
