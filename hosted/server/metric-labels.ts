@@ -55,6 +55,21 @@ export interface MetricRow {
   count: number;
 }
 
+/** The ElevenLabs plan the voice Worker last read; each date is `YYYY-MM-DD`, UTC. */
+export interface VoiceSupplierReading {
+  tier: string;
+  status: string;
+  /** Credits spent this period, as ElevenLabs reports `character_count`. */
+  used: number;
+  /** The period's credits, as ElevenLabs reports `character_limit`. */
+  limit: number;
+  resetsOn: string | null;
+  /** The plan a pending change moves to, or `cancellation`. */
+  changeTo: string | null;
+  changeOn: string | null;
+  checkedOn: string;
+}
+
 /** `GET /api/admin/metrics`. */
 export interface AdminMetricsBody {
   days: number;
@@ -64,4 +79,6 @@ export interface AdminMetricsBody {
   recent: MetricRow[];
   /** Each event and label's all-time count. */
   totals: Omit<MetricRow, "day">[];
+  /** Null until the voice Worker's first read succeeds. */
+  supplier: VoiceSupplierReading | null;
 }

@@ -129,6 +129,16 @@ async function fixture(
     requests: [] as { url: string; key: string | null; body: unknown }[],
     /** History list calls; the simulated history is always empty. */
     sweeps: [] as string[],
+    /** The plan's body, or the status a failed read answers. */
+    plan: {
+      tier: "grant_tier_1_2025_07_23",
+      status: "active",
+      character_count: 1200,
+      character_limit: 33000000,
+      next_character_count_reset_unix: 1798761600,
+      pending_change: { kind: "change", next_tier: "free", timestamp_seconds: 1798761600 },
+    } as unknown,
+    planKeys: [] as (string | null)[],
     respond: (): WorkerResponse | Promise<WorkerResponse> =>
       new WorkerResponse(new Uint8Array([0xff, 0xfb, 0x90, 0x64]), {
         headers: { "content-type": "audio/mpeg" },
@@ -179,6 +189,12 @@ async function fixture(
     if (url.href.startsWith("https://api.elevenlabs.io/v1/history?")) {
       elevenLabs.sweeps.push(url.href);
       return WorkerResponse.json({ history: [] });
+    }
+    if (url.href === "https://api.elevenlabs.io/v1/user/subscription") {
+      elevenLabs.planKeys.push(request.headers.get("xi-api-key"));
+      return typeof elevenLabs.plan === "number"
+        ? new WorkerResponse("upstream secret text", { status: elevenLabs.plan })
+        : WorkerResponse.json(elevenLabs.plan);
     }
     if (url.origin === "https://api.elevenlabs.io") {
       elevenLabs.requests.push({
@@ -1147,6 +1163,7 @@ test("the admin page: its read answers only the verified admin, from this origin
   expect(await response.json()).toEqual({
     days: 30,
     today,
+    supplier: null,
     recent: [{ day: today, event: "push.sent", label: "", count: 4 }],
     totals: [{ event: "push.sent", label: "", count: 4 }],
   });
@@ -1197,6 +1214,62 @@ test("the voice Worker's daily cron deletes only tokens a year idle and counters
     ),
   ).toEqual([{ ago: 0, accounts: 2 }, { ago: kept, accounts: 2 }]);
   expect(f.elevenLabs.sweeps).toEqual([]);
+});
+
+test("the daily pass stores the ElevenLabs plan as the voice role; a failed read fails it, keeps the reading, and still sweeps", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("ok");
+  expect(f.elevenLabs.planKeys).toEqual(["test-elevenlabs-key"]);
+  const row = `SELECT tier, status, used::integer AS used, "limit"::integer AS "limit", "changeTo",
+      to_char("resetsAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS resets,
+      to_char("changeAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS change
+    FROM dormouse_voice_supplier`;
+  const stored = {
+    tier: "grant_tier_1_2025_07_23",
+    status: "active",
+    used: 1200,
+    limit: 33000000,
+    changeTo: "free",
+    resets: "2027-01-01",
+    change: "2027-01-01",
+  };
+  expect(await queryDatabase(f.database.url, row)).toEqual([stored]);
+
+  // The next read replaces the one row, a change no longer pending included.
+  f.elevenLabs.plan = { tier: "scale", status: "active", character_count: 5, character_limit: 10 };
+  expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("ok");
+  expect(await queryDatabase(f.database.url, row)).toEqual([
+    { tier: "scale", status: "active", used: 5, limit: 10, changeTo: null, resets: null, change: null },
+  ]);
+
+  await queryDatabase(f.database.url, `DELETE FROM dormouse_voice_usage`);
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
+      VALUES ('swept', 'Swept', 'swept@example.test', true, now(), now())`,
+  );
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_voice_usage ("userId", day, count)
+      VALUES ('swept', (now() AT TIME ZONE 'UTC')::date - ${VOICE_USAGE_RETENTION_DAYS}, 1)`,
+  );
+  f.elevenLabs.plan = 403;
+  expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("exception");
+  expect(await queryDatabase(f.database.url, row)).toEqual([
+    { tier: "scale", status: "active", used: 5, limit: 10, changeTo: null, resets: null, change: null },
+  ]);
+  expect(await queryDatabase(f.database.url, `SELECT 1 FROM dormouse_voice_usage`)).toEqual([]);
+});
+
+test("the daily pass reads no plan without an ElevenLabs key", async ({ onTestFinished }) => {
+  const f = await fixture(true, "", { ELEVENLABS_API_KEY: "" });
+  onTestFinished(f.close);
+  expect((await f.voiceCron(TOKEN_SWEEP_CRON)).outcome).toBe("ok");
+  expect(f.elevenLabs.planKeys).toEqual([]);
+  expect(await queryDatabase(f.database.url, `SELECT 1 FROM dormouse_voice_supplier`)).toEqual([]);
 });
 
 test("managed voice fails closed in production without an ElevenLabs key", async ({
