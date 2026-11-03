@@ -237,7 +237,7 @@ flowchart TD
   R -- no --> KC["kill confirmation → stray-key prompt"]
   KC --> DL{"dialog lease held?"}
   DL -- no --> W["Workspace shortcuts → pane shortcuts → pane navigation → stray key"]
-  M["iframe shim leader message, from the focused frame on a proxy origin"] --> MA{"Wall active and passthrough?"}
+  M["iframe shim leader message, accepted by IframePanel"] --> MA{"passthrough?"}
   MA -- yes --> CM["command mode"]
 ```
 

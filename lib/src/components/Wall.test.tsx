@@ -3782,6 +3782,32 @@ describe('Wall on the Lath engine', () => {
       expect(focusOf('surface:a')).toBe('true');
     });
 
+    const leader = (source: Window | null) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, source, data: { __dormouse: 'leader' } }));
+    });
+
+    it('keeps the terminal in passthrough for a leader chord from a frame without focus', async () => {
+      const onEvent = vi.fn();
+      const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" onEvent={onEvent} />);
+      onEvent.mockClear();
+      await leader(frame.contentWindow);
+      await flushFrame();
+      expect(focusOf('surface:a')).toBe('true');
+      expect(onEvent).not.toHaveBeenCalledWith({ type: 'modeChange', mode: 'command' });
+    });
+
+    it('leaves passthrough for a leader chord from the frame holding focus', async () => {
+      const onEvent = vi.fn();
+      const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" onEvent={onEvent} />);
+      frame.focus();
+      await press(frame.contentWindow);
+      await flushFrame();
+      await leader(frame.contentWindow);
+      await flushFrame();
+      expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'command' });
+      expect(document.activeElement).not.toBe(frame);
+    });
+
     it('enters the pane for a press from the frame holding focus, without focusing it again', async () => {
       const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
       frame.focus();

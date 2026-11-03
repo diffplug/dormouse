@@ -28,6 +28,7 @@ const noopActions: WallActions = {
   onZoom: () => {},
   onClickPanel: () => {},
   onEnterPanel: () => {},
+  onFrameLeader: () => {},
   onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),

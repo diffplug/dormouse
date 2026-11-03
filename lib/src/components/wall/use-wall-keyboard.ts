@@ -10,7 +10,6 @@ import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
 import { handleStrayKey, handleStrayKeyPrompt } from './keyboard/handle-stray-key';
 import { dualTap, newDualTapState } from '../../lib/dual-tap';
-import { isFromFocusedFrame, isProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { chromeKeyboardHeld } from './chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 
@@ -87,28 +86,11 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       handleStrayKey(e, c);
     };
 
-    // A focused cross-origin iframe owns the keyboard, so its keystrokes never
-    // reach the capturing window listener above. The proxy shim posts our
-    // reserved leader chord back out (docs/specs/dor-browser.md → "Iframe
-    // Shim"); feed it into the same dispatch the in-document dual-tap would,
-    // once it is the frame holding the keyboard that sent it, on a live proxy
-    // origin. Any other page could turn what is being typed into shortcuts.
-    const onMessage = (e: MessageEvent) => {
-      const data = e.data as { __dormouse?: unknown } | null;
-      if (!data || data.__dormouse !== 'leader') return;
-      if (!isProxyOrigin(e.origin) || !isFromFocusedFrame(e)) return;
-      const c = ctxRef.current;
-      if (!c.activeRef.current) return;
-      if (c.modeRef.current === 'passthrough') c.exitTerminalMode();
-    };
-
     window.addEventListener('keydown', handler, true);
     window.addEventListener('keyup', onKeyUp, true);
-    window.addEventListener('message', onMessage);
     return () => {
       window.removeEventListener('keydown', handler, true);
       window.removeEventListener('keyup', onKeyUp, true);
-      window.removeEventListener('message', onMessage);
     };
   }, []);
 }

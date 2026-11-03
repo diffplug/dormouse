@@ -60,6 +60,9 @@ export interface WallActions {
   /** DOM focus reached a pane with no gesture seen — a raw cross-origin frame:
    *  enter passthrough on it, acknowledging nothing. */
   onEnterPanel: (id: string) => void;
+  /** The leader chord, reported by a frame holding focus: leave passthrough as
+   *  an in-document dual-tap would. */
+  onFrameLeader: () => void;
   /** Jump to/focus an arbitrary pane by id (visible or minimized) as a click on
    *  it would: passthrough, reattaching a Door, acknowledging its Session
    *  without input. Used by the browser header's dev-server chip to surface the
@@ -101,6 +104,7 @@ export const WallActionsContext = createContext<WallActions>({
   onZoom: () => {},
   onClickPanel: () => {},
   onEnterPanel: () => {},
+  onFrameLeader: () => {},
   onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
