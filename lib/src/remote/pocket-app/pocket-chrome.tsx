@@ -79,6 +79,8 @@ export const PK = {
   rowMain: 'min-w-0 flex-1',
   rowTitle: 'truncate text-[13px] font-semibold',
   rowSecondary: 'mt-0.5 truncate text-[11px] text-header-inactive-fg/70',
+  // The same line where cutting it short would lose the fact it states.
+  rowDetail: 'mt-0.5 text-[11px] text-header-inactive-fg/70',
   rowActions: 'flex shrink-0 items-center gap-2',
   // An actionable notice: the inactive-header pair, so it reads as a raised
   // block like a burrow row rather than as an error (which owns `text-error`).

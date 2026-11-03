@@ -161,7 +161,7 @@ function PairedBrowserRow({
             {device.self ? `${THIS_BROWSER} · ` : ''}
             <span className="font-mono">{device.id}</span>
           </div>
-          <div className={PK.rowSecondary}>
+          <div className={PK.rowDetail}>
             Paired {dayOf(device.approvedAt, now)} · {lastSeenText(device.lastSeenAt, now)}
           </div>
         </div>
