@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import type { DorControlResult } from 'dor/protocol';
-import { clearExternalLinkConfirmation, confirmDocumentLinkOpen, getExternalLinkConfirmationSnapshot, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
+import { clearExternalLinkConfirmation, confirmLinkOpen, getExternalLinkConfirmationSnapshot, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
 
 const mocks = vi.hoisted(() => ({ open: vi.fn(), toolControl: vi.fn(), confirm: () => {} }));
 vi.mock('../lib/platform', () => ({ getPlatform: () => ({ openExternal: mocks.open, toolControl: mocks.toolControl }) }));
@@ -206,7 +206,7 @@ describe('a document link\'s confirmation', () => {
   const path = '/elsewhere/page.html';
   const ask = (signal?: AbortSignal) => {
     let answer!: Promise<boolean>;
-    act(() => { answer = confirmDocumentLinkOpen(path, signal); });
+    act(() => { answer = confirmLinkOpen(path, 'document', signal); });
     return answer;
   };
 

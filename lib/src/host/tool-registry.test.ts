@@ -179,7 +179,8 @@ tools:
   const HIDDEN = [
     ['DEL', '\\x7f'], ['C0', '\\x15'], ['newline', '\\n'], ['tab', '\\t'], ['C1', '\\u009b'],
     ['right-to-left override', '\\u202e'], ['isolate', '\\u2067'], ['right-to-left mark', '\\u200f'],
-    ['zero-width space', '\\u200b'], ['byte order mark', '\\ufeff'],
+    ['zero-width space', '\\u200b'], ['byte order mark', '\\ufeff'], ['soft hyphen', '\\u00ad'],
+    ['Hangul filler', '\\u3164'], ['no-break space', '\\u00a0'], ['tag character', '\\U000E0041'], ['variation selector', '\\ufe0f'],
   ];
   it.each(HIDDEN)('refuses %s in a string run, an argument, a name, and a key', (_, escape) => {
     expect(() => parse(`tools:\n  t:\n    run: "echo \\"${escape}hi\\""\n`)).toThrow(/run cannot contain terminal control characters or invisible formatting/);
