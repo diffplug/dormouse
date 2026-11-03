@@ -2116,6 +2116,7 @@ export function Wall({
       setConfirmKill(null);
       enterTerminalMode(id);
     },
+    onFrameLeader: exitTerminalMode,
     onFocusPane: (id: string) => {
       setConfirmKill(null);
       // Visible pane → jump straight in; minimized (a door) → reattach first.

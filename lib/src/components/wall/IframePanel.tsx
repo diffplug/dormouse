@@ -2,7 +2,6 @@ import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState, u
 import { XIcon } from '@phosphor-icons/react';
 import { modalActionButton, PaneMessage, PopupButtonRow, popupButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
-import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import type { IframeProxyResult } from '../../lib/platform/types';
 import { IFRAME_HTTP_ONLY } from '../../lib/platform/iframe-proxy-types';
@@ -351,13 +350,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     registrationRef.current?.updateChrome({ url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null });
   }, [liveUrl, title]);
 
-  // Trust postMessage from this frame's origin (validated by the Wall's
-  // keyboard/focus/location channel) only while the proxied surface is live.
+  // Trust postMessage from this frame's origin only while the proxied surface is live.
   const proxyOrigin = resolution.kind === 'proxied' ? resolution.origin : null;
-  useEffect(() => {
-    if (!proxyOrigin) return;
-    return registerProxyOrigin(proxyOrigin);
-  }, [proxyOrigin]);
 
   // A new frame source starts over: no verdict until its shim reports.
   useEffect(() => {
@@ -374,20 +368,23 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     }, SHIM_REPORT_TIMEOUT_MS);
   }, [proxyOrigin]);
 
-  // A cross-origin click reaches only the frame, so the Wall never sees the
-  // mousedown — and on WebKit the iframe element's own `focus` event doesn't
-  // fire for it either. The shim posts `pointerdown` from inside the frame;
-  // adopt it as clicking the pane. The page shares the shim's origin and can post
-  // this with no click, so it counts only from the frame that holds focus: the
-  // shim takes focus before it posts, and focus reaches this document first. The
-  // message then adds no focus, and a frame without focus moves nothing.
+  // A focused cross-origin frame owns the keyboard and the mouse, so the Wall
+  // sees neither its clicks nor its dual-tap chord, and on WebKit the iframe
+  // element's own `focus` event doesn't fire for a click either. The shim posts
+  // `pointerdown` and `leader` out instead. The page shares the shim's origin and
+  // can post either with no gesture, so each counts only from this frame while it
+  // holds focus: the shim takes focus before it posts a press, and focus reaches
+  // this document first. A frame without focus moves no selection, mode, or focus.
   useEffect(() => {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
       const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown; from?: unknown } | null;
-      if (data?.__dormouse === 'pointerdown') {
-        if (document.activeElement === iframeRef.current) actions.onClickPanel(id);
+      if (data?.__dormouse === 'pointerdown' || data?.__dormouse === 'leader') {
+        const frame = iframeRef.current;
+        if (document.activeElement !== frame || e.source !== frame?.contentWindow) return;
+        if (data.__dormouse === 'leader') actions.onFrameLeader();
+        else actions.onClickPanel(id);
         return;
       }
       if (data?.__dormouse === 'open-window' && typeof data.url === 'string') {

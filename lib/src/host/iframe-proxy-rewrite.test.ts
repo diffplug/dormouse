@@ -212,6 +212,10 @@ describe('the shim addresses the grant and app, not the world', () => {
     inner.emit('pointerdown', {});
     expect(delivered).toEqual([{ __dormouse: 'pointerdown' }]);
 
+    outer.emit('message', { origin: PROXY, data: { __dormouse: 'leader', secret: 'x' } });
+    expect(delivered).toEqual([{ __dormouse: 'pointerdown' }, { __dormouse: 'leader' }]);
+    delivered.length = 1;
+
     outer.emit('message', { origin: PROXY, data: { __dormouse: 'unknown', secret: 'x' } });
     outer.emit('message', { origin: 'https://evil.example', data: { __dormouse: 'leader' } });
     expect(delivered).toHaveLength(1);

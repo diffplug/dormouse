@@ -376,27 +376,57 @@ describe('IframePanel', () => {
   // for its frame (docs/specs/security-local.md -> "Browser panes").
   it('acts on no message from any origin but its own proxy', async () => {
     const onClickPanel = vi.fn();
+    const onFrameLeader = vi.fn();
     proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
-    const frame = await renderPanel(stubActions({ onClickPanel }), paneProps('iframe-foreign'));
+    const frame = await renderPanel(stubActions({ onClickPanel, onFrameLeader }), paneProps('iframe-foreign'));
     frame.focus();
     const chrome = () => getAgentBrowserScreenController('iframe-foreign')?.chrome().url;
     const before = chrome();
     const send = (origin: string, data: unknown) => act(async () => {
-      window.dispatchEvent(new MessageEvent('message', { origin, data }));
+      window.dispatchEvent(new MessageEvent('message', { origin, source: frame.contentWindow, data }));
     });
 
     for (const origin of ['http://127.0.0.1:61235', 'http://localhost:61234', 'https://evil.example', window.location.origin, 'null']) {
       await send(origin, { __dormouse: 'pointerdown' });
+      await send(origin, { __dormouse: 'leader' });
       await send(origin, { __dormouse: 'location', url: `${PROXY}/other`, loaded: true });
       await send(origin, { __dormouse: 'open-window', url: `${PROXY}/docs` });
       await send(origin, { __dormouse: 'navigate', url: 'http://localhost:5173/elsewhere' });
     }
     expect(onClickPanel).not.toHaveBeenCalled();
+    expect(onFrameLeader).not.toHaveBeenCalled();
     expect(chrome()).toBe(before);
     expect(container.textContent).not.toContain('Open in new pane');
 
     await send(PROXY, { __dormouse: 'pointerdown' });
     expect(onClickPanel).toHaveBeenCalledWith('iframe-foreign');
+  });
+
+  it.each([
+    ['pointerdown', 'onClickPanel'],
+    ['leader', 'onFrameLeader'],
+  ] as const)('takes %s only from its own frame, while that frame holds focus', async (kind, action) => {
+    const acted = vi.fn();
+    proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
+    const frame = await renderPanel(stubActions({ [action]: acted }), paneProps('iframe-focus'));
+    const other = document.createElement('iframe');
+    document.body.appendChild(other);
+    const send = (source: Window | null) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, source, data: { __dormouse: kind } }));
+    });
+
+    await send(frame.contentWindow); // Nothing holds focus.
+    other.focus();
+    await send(frame.contentWindow); // Another frame holds it.
+    await send(other.contentWindow); // That frame, on this panel's origin.
+    frame.focus();
+    await send(other.contentWindow); // This frame holds it, but another sent.
+    await send(null);
+    other.remove();
+    expect(acted).not.toHaveBeenCalled();
+
+    await send(frame.contentWindow);
+    expect(acted).toHaveBeenCalledOnce();
   });
 
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {

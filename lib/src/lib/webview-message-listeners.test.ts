@@ -23,8 +23,6 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const WINDOW_LISTENERS: Record<string, { count: number; pinnedBy: string }> = {
   // origin is its own proxy origin
   'lib/src/components/wall/IframePanel.tsx': { count: 1, pinnedBy: 'lib/src/components/wall/IframePanel.test.tsx' },
-  // origin is a live proxy grant
-  'lib/src/components/wall/use-wall-keyboard.ts': { count: 1, pinnedBy: 'lib/src/components/wall/use-wall-keyboard.test.tsx' },
   // the per-boot host token
   'lib/src/lib/platform/vscode-adapter.ts': { count: 2, pinnedBy: 'lib/src/lib/platform/vscode-adapter.test.ts' },
   // origin and source are its own frame
