@@ -202,8 +202,7 @@ const ACCESS_EVENT_COPY: Record<AccessEvent, (entry: AccessLogEntry) => string> 
   attached: (entry) => (entry.surface ? `attached ${entry.surface}` : 'attached a terminal'),
   closed: (entry) => `closed ${entry.surface ?? 'a surface'}`,
   ended: (entry) => `session ended${after(entry.durationMs)}${entry.path ? `, ${entry.path}` : ''}`,
-  revoked: (entry) =>
-    entry.by === 'dor' ? 'revoked from dor' : entry.by === 'settings' ? 'revoked from Settings' : 'revoked',
+  revoked: (entry) => (entry.by === 'settings' ? 'revoked from Settings' : 'revoked'),
   'one-time-connected': () => 'connected by one-time link',
   'one-time-denied': (entry) => `one-time link refused${because(entry.reason)}`,
   'one-time-ended': (entry) =>

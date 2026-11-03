@@ -24,7 +24,6 @@ import {
 } from 'remote-lib-common';
 import {
   firstPerClientStatic,
-  revocationRequester,
   revokeTarget,
   type RevocationRequester,
   type RevocationTarget,
@@ -1169,7 +1168,7 @@ export class BurrowService {
     if (statics.size === 0) throw new Error(`No paired phone has the id ${id}.`);
     if (statics.size > 1) throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
     const [clientStaticPublicKey] = [...statics] as [string];
-    return this.#revoke({ clientStaticPublicKey }, revocationRequester(params?.by));
+    return this.#revoke({ clientStaticPublicKey }, 'settings');
   }
 
   /**

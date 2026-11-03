@@ -60,17 +60,8 @@ export type RevocationTarget =
   | { readonly clientStaticPublicKey: string }
   | { readonly passkeyCredentialId: string };
 
-/**
- * Who asked, as the access log records it: the Settings list, or `dor`. A
- * closed set; the service reads anything else as `settings`.
- */
-export const REVOCATION_REQUESTERS = ['settings', 'dor'] as const;
-export type RevocationRequester = (typeof REVOCATION_REQUESTERS)[number];
-
-/** The requester an untrusted message names, anything outside the set read as `settings`. */
-export function revocationRequester(value: unknown): RevocationRequester {
-  return REVOCATION_REQUESTERS.find((known) => known === value) ?? 'settings';
-}
+/** Who asked, as the access log records it: the Settings list. */
+export type RevocationRequester = 'settings';
 
 /**
  * Revoke what `target` names on `acl`, in place, answering the records it
