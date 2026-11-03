@@ -255,7 +255,7 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 `dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but agents cannot drive or read it. On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-grant loopback proxy URL; without it, a raw uninstrumented iframe. The desktop playground's `createIframeProxyUrl` fronts only its own viewers (`docs/specs/tutorial.md` → Playground filesystem).
 
-The proxy instruments any `http://` upstream it fronts, loopback and remote alike — a remote one only once allowed ([Iframe External Origins](#iframe-external-origins)): headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must connect a grant, over HTTP and WebSocket alike, only to the addresses its upstream resolved to when minted.** **Must refuse (`scheme`) an upstream resolving to any link-local / cloud-metadata address**, in any spelling; one that does not resolve is `unreachable`.
+The proxy instruments any `http://` upstream it fronts, loopback and remote alike — a remote one only once allowed ([Iframe External Origins](#iframe-external-origins)): headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must connect a grant, over HTTP and WebSocket alike, only to the addresses its upstream resolved to when minted.** **Must refuse (`scheme`) an upstream resolving to any link-local / cloud-metadata address**, in any spelling, including an IPv6 literal that carries one through a transition form (rationale); one that does not resolve is `unreachable`.
 
 **Must refuse `https://`, regardless of scheme casing, at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
 
@@ -274,12 +274,15 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 | request | `Host` | upstream host |
 | request | `Referer` | an exact parsed proxy origin replaced with the upstream origin, path and query kept |
 | request | `Accept-Encoding` | deleted on a document load (`Sec-Fetch-Dest` `document`, `iframe`, `frame`, `embed`, `object`, or none sent), so its HTML comes back identity; kept on every other request |
+| request | `Service-Worker: script` or `Sec-Fetch-Dest: serviceworker` | answered `403` without reaching the upstream, on every grant but a tunneled one |
 | response | `X-Dormouse-Preserve-CSP: 1` | consumed; preserves upstream CSP headers and meta policies |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy; any other origin on a frame load is [Iframe External Origins](#iframe-external-origins) |
 | response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
-| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream; never on a tunneled grant, whose page is not at that port |
+| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only, clearing what another upstream on its port left; never on a tunneled grant, whose page is not at that port |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
+
+**Must keep every service worker off a non-tunneled grant's origin**, so none survives its grant to answer the next one on that port ahead of the proxy and its `Clear-Site-Data` (rationale). A page previews without its worker.
 
 **Must instrument only an identity-encoded, ASCII-compatible HTML body, keeping its `content-type` as sent**, charset included; a compressed body, or a UTF-16 one (any WHATWG label, or a byte-order mark), passes through uninstrumented (rationale), except that a tunneled grant decodes every compressed body first (`docs/specs/remote-api.md` -> "Frames"). **Never place the shim ahead of the doctype, a `<meta charset>` or a UTF-8 BOM.**
 
@@ -322,7 +325,7 @@ The proxy's redirect page also posts `navigate` ([Iframe External Origins](#ifra
 
 **Must let only `http:` and `https:` reach a browser Surface, re-checked at the sink**: `open-window`, `navigate`, and the control socket's `surface.iframe` go through `browserSurfaceUrl`, and `IframePanel` checks `params.url` again before framing it, since the header's URL editor writes there too (rationale).
 
-Parent listeners check the message origin against live proxy grants (`docs/specs/security-local.md` -> "Browser panes"). A leader message exits passthrough like an in-document dual-tap; a `location` maps back to its upstream URL for chrome and history without reloading the frame; a new-tab request asks before opening an adjacent browser pane.
+Parent listeners check the message origin against live proxy grants (`docs/specs/security-local.md` -> "Browser panes", which also bounds `pointerdown`). A `pointerdown` selects its pane in passthrough and acknowledges that pane's Session; the shim focuses its own frame for the press, since a browser gives a page that cancels one no focus (rationale). A leader message exits passthrough like an in-document dual-tap; a `location` maps back to its upstream URL for chrome and history without reloading the frame; a new-tab request asks before opening an adjacent browser pane.
 
 A proxied frame whose shim has reported, then loads a document with no `location` report soon after, shows that document as uninstrumented (not HTML, off the proxy, refused, or its grant gone); a new frame source waits for its first report again (rationale).
 
