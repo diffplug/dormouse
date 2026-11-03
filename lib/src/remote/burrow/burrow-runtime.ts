@@ -62,6 +62,7 @@ import {
   type PresenceWindowEntry,
   type PresenceWindowRecord,
   type SealedPushV1,
+  type RelayPasskeysChangedFrame,
   type RelayPolicyFrame,
   type RelayToBurrowFrame,
 } from 'remote-lib-common';
@@ -377,6 +378,11 @@ export interface BurrowOptions {
   /** The Relay raised the UV demand ({@link RelayPolicyFrame}); already enforced, for the owner to persist. */
   onPolicyRaised?: () => void;
   /**
+   * A relay socket opened, or its Relay said a passkey may have left the account
+   * (`passkeys-changed`): time for the owner to ask which (`passkey-sync.ts`).
+   */
+  onPasskeysStale?: () => void;
+  /**
    * One access-log entry: a pairing, a connection, a denial, a session's end
    * (`access-log.ts`). The owner keeps and persists them; **never** sent to
    * the Relay or a Client.
@@ -384,8 +390,8 @@ export interface BurrowOptions {
   onAccess?: (entry: AccessLogEntry) => void;
 }
 
-/** What waits on the frame chain: the policy frame is applied on arrival. */
-type QueuedRelayFrame = Exclude<RelayToBurrowFrame, RelayPolicyFrame>;
+/** What waits on the frame chain: the policy frame and a passkey nudge are applied on arrival. */
+type QueuedRelayFrame = Exclude<RelayToBurrowFrame, RelayPolicyFrame | RelayPasskeysChangedFrame>;
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -394,6 +400,7 @@ export class BurrowRuntime {
   readonly #enrollment: BurrowEnrollment;
   #policy: ConnectionPolicy;
   readonly #onPolicyRaised: () => void;
+  readonly #onPasskeysStale: () => void;
   #acl: BurrowAcl;
   readonly #saveApproval = createSerialQueue();
   readonly #challenges: ChallengeIssuer;
@@ -527,6 +534,7 @@ export class BurrowRuntime {
       requireUserVerification: options.enrollment.requireUserVerification ?? false,
     };
     this.#onPolicyRaised = options.onPolicyRaised ?? (() => {});
+    this.#onPasskeysStale = options.onPasskeysStale ?? (() => {});
     this.#now = options.now ?? (() => Date.now());
     this.#initTokens = new TokenBucket({
       capacity: E2E_INIT_BURST,
@@ -994,6 +1002,7 @@ export class BurrowRuntime {
       this.#probed = false;
       this.#heartbeat = new RelayHeartbeat(ws, this.#setTimer, () => this.#abandonSocket());
       this.#reap();
+      this.#onPasskeysStale();
     });
     ws.addEventListener('message', (ev) => {
       if (this.#ws !== ws) return;
@@ -1190,6 +1199,10 @@ export class BurrowRuntime {
       // Applied on arrival rather than queued: it only ever tightens, so the
       // sooner it holds the better, and it is the first frame the Relay sends.
       this.#raisePolicy(frame);
+      return;
+    }
+    if (frame.t === 'passkeys-changed') {
+      this.#onPasskeysStale();
       return;
     }
     if (frame.t === 'client-gone') {

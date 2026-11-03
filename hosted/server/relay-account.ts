@@ -19,6 +19,8 @@ export type RelayAccountHost = AccountHost & {
   closeBurrow(userId: string, burrowId: string): Promise<unknown>;
   /** Close the live Client relay sockets of deleted sessions, by their token hashes (`RelayRoom.closeSessions`). */
   closeSessions(userId: string, tokenHashes: string[]): Promise<unknown>;
+  /** Tell the account's connected Burrows to ask which of their passkeys went (`RelayRoom.nudgeBurrows`). */
+  nudgeBurrows(userId: string): Promise<unknown>;
 };
 
 /** The 403 an approval from a login older than the recent-login window gets. */
@@ -149,9 +151,12 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
 
   // The row goes, and every session it signed in with it (their presence
   // nonces cascading from them), so it signs in to nothing again; then the
-  // relay sockets those sessions hold close. As with a Burrow, the removal is
-  // done once the row is: a close that fails is logged, and the object's
-  // sweep closes them instead.
+  // relay sockets those sessions hold close, and every connected Burrow of the
+  // account, whichever sessions there were, is told to ask which of its records
+  // that leaves without a passkey. After the commit, so a Burrow told, or one
+  // opening its socket later, reads the removal. As with a Burrow, the removal
+  // is done once the row is: a close or nudge that fails is logged, and the
+  // object's sweep does it instead.
   app.delete("/api/relay/passkeys/:credentialId", gate, async (c) => {
     const { userId } = c.get("login");
     const [removed] = await accountQuery<{ sessions: string[] }>(
@@ -168,6 +173,9 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
       await host(c)
         .closeSessions(userId, removed.sessions)
         .catch((error: unknown) => console.error("Closing a removed passkey's relay sockets failed; the sweep will", error));
+    await host(c)
+      .nudgeBurrows(userId)
+      .catch((error: unknown) => console.error("Nudging Burrows about a removed passkey failed; the sweep will", error));
     return c.body(null, 204);
   });
 }

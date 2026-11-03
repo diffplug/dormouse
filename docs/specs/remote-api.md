@@ -385,7 +385,7 @@ Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
 ### 10. Paired-browser list and revoke
 
-A Client lists the Burrow's paired browsers and revokes one: the wire half of `docs/specs/remote-security-model.md` -> "Account-wide devices" stage 2, which owns what the list carries and what a revoke must prove. Like layout operations, it lies outside protocol-v1's terminal-only scope.
+A Client lists the Burrow's paired browsers and revokes one: the wire half of `docs/specs/remote-security-model.md` -> "Account-wide devices", which owns what the list carries and what a revoke must prove. Like layout operations, it lies outside protocol-v1's terminal-only scope.
 
 ### QoS hardening (phone-first, orthogonal to the stages above)
 
