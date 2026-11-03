@@ -3,7 +3,7 @@ import type { PriceCatalog } from "../../server/billing";
 import { noticeMessage, type Kind, type NoticeContext, type Pending } from "../../server/notice-message";
 import type { Plan } from "../../server/policy-constants";
 import { EmailFrame } from "./EmailFrame";
-import { EMAIL_FROM, signInEmail } from "./email-fixtures";
+import { signInEmail } from "./email-fixtures";
 
 /**
  * Every email Hosted sends, one representative each. A new billing notice
@@ -55,7 +55,7 @@ const BLANK: Omit<Pending, "kind"> = {
 };
 
 const notice = (kind: Kind, plan: Plan | null, fields: Partial<Pending> = {}): Story => ({
-  args: { ...noticeMessage("buyer@example.test", { ...BLANK, ...fields, kind }, plan, CONTEXT), from: EMAIL_FROM },
+  args: noticeMessage("buyer@example.test", { ...BLANK, ...fields, kind }, plan, CONTEXT),
 });
 
 export const Purchase = notice("purchase", "founding", {

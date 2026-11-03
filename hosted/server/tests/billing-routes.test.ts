@@ -9,10 +9,12 @@ import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from
 import {
   DIFFPLUG_POSTAL_ADDRESS,
   MODEL_WITHDRAWAL_FORM,
+  SUPPORT_EMAIL,
   WITHDRAWAL_RIGHT,
   WITHDRAWAL_STATEMENT,
 } from "../../../website/src/lib/hosted-withdrawal";
 import { END_REASONS, resyncBilling, type BillingSetup } from "../billing";
+import { noticeMail } from "../notices";
 import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
 import {
   BILLING_WEBHOOK_PATH,
@@ -2111,4 +2113,16 @@ test("closed, the public cohort read answers 503 and no picture is served", asyn
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual({ message: CHECKOUT_CLOSED });
   expect((await f.visit(FOUNDER_AVATAR_PREFIX + "0".repeat(64))).status).toBe(404);
+});
+
+test("a notice goes out from support, not the sign-in sender", async () => {
+  const sent = vi.fn(async () => new Response(JSON.stringify({ ErrorCode: 0 })));
+  vi.stubGlobal("fetch", sent);
+  try {
+    await noticeMail("token").send({ from: "ignored@example.test", to: ["buyer@example.test"], subject: "s", text: "t", html: "<p>t</p>" });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  const [, init] = sent.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(init.body as string).From).toBe(`Dormouse Hosted <${SUPPORT_EMAIL}>`);
 });

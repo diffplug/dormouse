@@ -16,6 +16,9 @@ import type { PriceCatalog } from "./billing";
 import { disclosure, priceInUsd } from "./disclosure";
 import { BILLING_RETURN_PATH, isPlan, termsArchiveUrl, type Plan } from "./policy-constants";
 
+/** Who a notice is from, so a customer's reply and a sign-in code's sender stay apart. */
+export const NOTICE_FROM = `Dormouse Hosted <${SUPPORT_EMAIL}>`;
+
 export type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored" | "withdrawal" | "purchase";
 
 /** A notice to send, with what its text needs. */
@@ -156,7 +159,7 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
   }
   paragraphs.push(DIFFPLUG_POSTAL_ADDRESS);
   return {
-    from: `Dormouse Hosted <${SUPPORT_EMAIL}>`,
+    from: NOTICE_FROM,
     to: [to],
     replyTo: SUPPORT_EMAIL,
     subject,

@@ -1,12 +1,16 @@
 // Rules: docs/specs/hosted.md -> "Billing notices"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
 import type { Billing } from "@pgstencil/stripe";
+import { postmarkEmail } from "@pgstencil/auth/postmark";
 import type { EmailSender } from "pgstencil";
 import { planInterval } from "../../website/src/lib/hosted-pricing";
 import { DAY_MS, run, stripeHoldsPrice, type PriceCatalog, type PriceChange } from "./billing";
-import { noticeMessage, type NoticeContext, type Pending } from "./notice-message";
+import { NOTICE_FROM, noticeMessage, type NoticeContext, type Pending } from "./notice-message";
 import type { Plan } from "./policy-constants";
 import { billingContact, type Contact } from "./withdrawal";
+
+/** The mail a notice goes by: Postmark sends the address it is built with, whatever a message names. */
+export const noticeMail = (token: string): EmailSender => postmarkEmail(token, NOTICE_FROM);
 
 /**
  * A yearly plan's renewal notice, and a monthly plan's annual reminder, are

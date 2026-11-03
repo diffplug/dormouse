@@ -1,11 +1,11 @@
 import type { Context, ExecutionContext, Hono } from "hono";
-import { postmarkEmail } from "@pgstencil/auth/postmark";
 import type { EmailSender } from "pgstencil";
 import { openAuthRead, ownPageRead } from "./account-gate";
 import { accountCron, accountRoutes, type AccountRoutesHost } from "./account-routes";
 import { billingSetup } from "./billing";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
+import { noticeMail } from "./notices";
 import { relayRoom } from "./relay-room-contract";
 import { workerApp } from "./worker-app";
 
@@ -25,7 +25,7 @@ export function accountApp(
   bindings: (env: AccountEnv) => AccountEnv,
   configure?: (app: Hono<{ Bindings: AccountEnv }>) => void,
   /** The mail billing sends, a withdrawal's acknowledgement: Postmark unless a preview's inbox. */
-  mail: (env: AccountEnv) => EmailSender = (env) => postmarkEmail(env.POSTMARK_SERVER_TOKEN, env.EMAIL_FROM),
+  mail: (env: AccountEnv) => EmailSender = (env) => noticeMail(env.POSTMARK_SERVER_TOKEN),
 ) {
   return workerApp<AccountEnv>({
     bindings,
