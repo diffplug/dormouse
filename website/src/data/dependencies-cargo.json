@@ -107,7 +107,7 @@
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "declaredName": "tauri-plugin-shell",
       "versions": [
-        "2.5.0"
+        "2.6.0"
       ]
     },
     {
