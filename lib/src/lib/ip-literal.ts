@@ -39,19 +39,74 @@ function parseIPv4(host: string): number | null {
   return value >>> 0 === value ? value : null;
 }
 
-// Extract the 32-bit IPv4 address embedded in an IPv4-mapped or IPv4-compatible
-// IPv6 literal (::ffff:169.254.169.254, ::ffff:a9fe:a9fe, ::169.254.169.254),
-// or null if this isn't such an address.
-function embeddedIPv4(h: string): number | null {
-  const m = h.match(/^::(?:ffff:)?(.+)$/);
-  if (!m) return null;
-  const tail = m[1];
-  if (tail.includes('.')) return parseIPv4(tail.slice(tail.lastIndexOf(':') + 1));
-  const groups = tail.split(':');
-  if (groups.length === 2 && groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) {
-    return ((parseInt(groups[0], 16) << 16) >>> 0) + parseInt(groups[1], 16);
+/** A literal's 16 bytes, in any IPv6 spelling, bracketed or zoned or not, or null. */
+export function ipv6Bytes(hostname: string): number[] | null {
+  let h = hostname.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
+  if (!h.includes(':')) return null;
+  const tail = h.slice(h.lastIndexOf(':') + 1);
+  if (tail.includes('.')) {
+    const v4 = parseIPv4(tail);
+    if (v4 === null) return null;
+    h = `${h.slice(0, -tail.length)}${(v4 >>> 16).toString(16)}:${(v4 & 0xffff).toString(16)}`;
   }
-  return null;
+  const sides = h.split('::');
+  if (sides.length > 2) return null;
+  const [head, rest] = sides.map((side) => (side ? side.split(':') : []));
+  const missing = 8 - head.length - (rest?.length ?? 0);
+  if (rest ? missing < 1 : missing !== 0) return null;
+  const groups = [...head, ...Array<string>(missing).fill('0'), ...(rest ?? [])];
+  if (!groups.every((group) => /^[0-9a-f]{1,4}$/.test(group))) return null;
+  return groups.flatMap((group) => {
+    const value = parseInt(group, 16);
+    return [value >> 8, value & 0xff];
+  });
+}
+
+const u32 = (b: readonly number[], at: number): number =>
+  ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0;
+
+const allZero = (b: readonly number[], from: number, to: number): boolean =>
+  b.slice(from, to).every((byte) => byte === 0);
+
+// The 32-bit IPv4 address an IPv4-mapped or IPv4-compatible IPv6 literal names
+// (::ffff:169.254.169.254, ::ffff:a9fe:a9fe, ::169.254.169.254), or null if this
+// isn't such an address. `::` and `::1` are themselves, not IPv4 compatible.
+function embeddedIPv4(h: string): number | null {
+  const b = ipv6Bytes(h);
+  if (!b || !allZero(b, 0, 10)) return null;
+  const v4 = u32(b, 12);
+  if (b[10] === 0xff && b[11] === 0xff) return v4;
+  return b[10] === 0 && b[11] === 0 && v4 > 0xffff ? v4 : null;
+}
+
+/**
+ * Every IPv4 address an IPv6 literal's bytes hand to a router or translator, by
+ * the transition forms that carry one. For a guard: a literal may match a form
+ * only by its shape, so these name where it could end up, not where it does.
+ */
+export function ipv4sCarriedByIPv6(b: readonly number[]): number[] {
+  const carried: number[] = [];
+  const [g0, g1] = [(b[0] << 8) | b[1], (b[2] << 8) | b[3]];
+  // The low 32 bits under any /96 ending in zeros: IPv4-compatible and every NAT64
+  // prefix of that shape (RFC 6052), 64:ff9b::/96 among them; then mapped and
+  // translated, which spend those zeros on ffff.
+  if (allZero(b, 8, 12)) carried.push(u32(b, 12));
+  if (allZero(b, 0, 10) && b[10] === 0xff && b[11] === 0xff) carried.push(u32(b, 12));
+  if (allZero(b, 0, 8) && b[8] === 0xff && b[9] === 0xff && allZero(b, 10, 12)) carried.push(u32(b, 12));
+  // Local-use NAT64 64:ff9b:1::/48 at RFC 6052's shorter lengths, which skip byte 8.
+  if (g0 === 0x64 && g1 === 0xff9b && b[4] === 0 && b[5] === 1) {
+    for (const start of [6, 7, 9]) {
+      const bytes = b.filter((_, i) => i >= start && i !== 8).slice(0, 4);
+      carried.push(u32(bytes, 0));
+    }
+  }
+  // 6to4, 2002::/16.
+  if (g0 === 0x2002) carried.push(u32(b, 2));
+  // Teredo, 2001::/32: the server's address, then the client's with its bits flipped.
+  if (g0 === 0x2001 && g1 === 0) carried.push(u32(b, 4), ~u32(b, 12) >>> 0);
+  // ISATAP's interface identifier on any prefix.
+  if ((b[8] & ~0x02) === 0 && b[9] === 0 && b[10] === 0x5e && b[11] === 0xfe) carried.push(u32(b, 12));
+  return carried;
 }
 
 /** The 32-bit IPv4 address a hostname spells — in any inet_aton encoding, or

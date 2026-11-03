@@ -156,6 +156,15 @@ describe('createIframeProxyUrl — admission', () => {
     if (!r.ok) expect(r.reason).toBe('scheme');
   });
 
+  it('refuses a metadata address the user allowed, by literal or by name', async () => {
+    const allowed = { ...NO_LOG, allowExternal: true, interfaceAddresses: () => [] };
+    for (const literal of ['[fd00:ec2::254]', '[fd20:ce::254]', '[2002:a9fe:a9fe::]', '100.100.100.200']) {
+      expect(await createIframeProxyUrl(`http://${literal}/`, allowed)).toMatchObject({ ok: false, reason: 'scheme' });
+    }
+    const resolve = async () => [{ address: 'fd00:ec2::254', family: 6 }];
+    expect(await createIframeProxyUrl('http://docs.example/', { ...allowed, resolve })).toMatchObject({ ok: false, reason: 'scheme' });
+  });
+
   it('preserves the target path + query in the framed URL', async () => {
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<html><head></head><body>x</body></html>'); });
     const url = await frame(`http://127.0.0.1:${port}/app/page?q=1`);
@@ -178,7 +187,7 @@ describe('createIframeProxyUrl — the upstream address is fixed when the grant 
   };
 
   it('refuses a name that resolves to a link-local / metadata address', async () => {
-    for (const blocked of ['169.254.169.254', '::ffff:169.254.169.254', 'fe80::1']) {
+    for (const blocked of ['169.254.169.254', '::ffff:169.254.169.254', 'fe80::1', 'fd00:ec2::254', '64:ff9b::a9fe:a9fe', '168.63.129.16']) {
       const { resolve } = resolving(['127.0.0.1', blocked]);
       const r = await createIframeProxyUrl('http://rebind.test:8080/', { ...NO_LOG, resolve });
       expect(r).toMatchObject({ ok: false, reason: 'scheme' });

@@ -292,6 +292,66 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('[::ffff:169.254.169.254]')).toBe(true); // bracketed
     expect(isBlockedAddress('::169.254.169.254')).toBe(true); // compat form
   });
+  it.each([
+    'fd00:ec2::254', // AWS
+    'FD00:0EC2:0:0:0:0:0:0254', // the same, uppercase and in full
+    '[fd00:ec2::254%en0]',
+    'fd20:ce::254', // Google Cloud
+    '100.100.100.200', // Alibaba Cloud
+    '192.0.0.192', // Oracle Cloud
+    '168.63.129.16', // Azure
+    '0xa8.63.129.16',
+    '::ffff:100.100.100.200',
+  ])('blocks the cloud metadata address %s', (address) => {
+    expect(isBlockedAddress(address)).toBe(true);
+  });
+  // Each form hands the embedded address to a router or translator, so the
+  // connection ends at the IPv4 address however the IPv6 literal reads.
+  it.each([
+    ['mapped, in full', '0:0:0:0:0:ffff:a9fe:a9fe'],
+    ['translated (SIIT)', '::ffff:0:a9fe:a9fe'],
+    ['NAT64', '64:ff9b::a9fe:a9fe'],
+    ['NAT64, dotted', '64:ff9b::169.254.169.254'],
+    ['NAT64, a fixed address', '64:ff9b::a83f:8110'],
+    ['local NAT64 /48', '64:ff9b:1:a9fe:a9:fe00::'],
+    ['local NAT64 /56', '64:ff9b:1:a9:fe:a9fe::'],
+    ['local NAT64 /64', '64:ff9b:1:0:a9:fea9:fe00:0'],
+    ['local NAT64 /96', '64:ff9b:1::a9fe:a9fe'],
+    ['a network-specific NAT64 /96', '2001:db8:64:1::a9fe:a9fe'],
+    ['Oracle Cloud’s IPv6 metadata', 'fd00:c1::a9fe:a9fe'],
+    ['6to4', '2002:a9fe:a9fe::'],
+    ['6to4, with a host', '2002:a9fe:a9fe:1::1'],
+    ['Teredo server', '2001:0:a9fe:a9fe::1'],
+    ['Teredo client', '2001:0:808:808::5601:5601'],
+    ['ISATAP', '2001:db8::5efe:a9fe:a9fe'],
+    ['ISATAP, global', '2001:db8::200:5efe:a9fe:a9fe'],
+  ])('blocks a metadata address embedded in IPv6: %s', (_form, address) => {
+    expect(isBlockedAddress(address)).toBe(true);
+  });
+  it.each([
+    'fd00:ec2::253', // the neighbouring DNS resolver
+    'fd00:ec2::1',
+    'fd20:ce::253',
+    '100.100.100.199',
+    '192.0.0.193',
+    '168.63.129.17',
+    '64:ff9b::808:808', // a public address through NAT64
+    '2002:808:808::',
+    '2001:0:808:808::f7f7:f7f7',
+    '2001:db8::5efe:808:808',
+    '2001:db8::1',
+    '2001:db8:1:2:3:4:a9fe:a9fe', // low bits that merely look like one
+    'fe7f::1',
+    'fec0::1',
+    '::',
+    '::1',
+    '1:2:3',
+    '1:2:3:4:5:6:7:8:9',
+    '1::2::3',
+    'not:an:address',
+  ])('does not block %s', (address) => {
+    expect(isBlockedAddress(address)).toBe(false);
+  });
   it('allows ordinary hosts', () => {
     expect(isBlockedAddress('127.0.0.1')).toBe(false);
     expect(isBlockedAddress('localhost')).toBe(false);

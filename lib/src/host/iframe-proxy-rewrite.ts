@@ -10,7 +10,7 @@
  */
 
 import { dualTap, newDualTapState } from '../lib/dual-tap';
-import { ipv4Value, isLoopbackHostname } from '../lib/ip-literal';
+import { ipv4Value, ipv4sCarriedByIPv6, ipv6Bytes, isLoopbackHostname } from '../lib/ip-literal';
 
 /** Header bag shape both `http.IncomingHttpHeaders` and a plain map satisfy. */
 export type ProxyHeaders = Record<string, string | string[] | undefined>;
@@ -376,6 +376,17 @@ function prologueEnd(html: string): number {
 // endpoint — as a numeric range so every equivalent encoding is caught.
 const LINK_LOCAL_V4_START = 0xa9fe0000; // 169.254.0.0
 const LINK_LOCAL_V4_END = 0xa9feffff; // 169.254.255.255
+// Metadata endpoints outside that range, each one host in a block that also
+// holds ordinary machines, so the address and not the block.
+const CLOUD_METADATA_V4 = new Set([
+  '100.100.100.200', // Alibaba Cloud
+  '192.0.0.192', // Oracle Cloud
+  '168.63.129.16', // Azure
+].map((address) => ipv4Value(address)));
+const CLOUD_METADATA_V6 = new Set([
+  'fd00:ec2::254', // AWS
+  'fd20:ce::254', // Google Cloud
+].map((address) => ipv6Bytes(address)!.join()));
 
 /** An address without brackets or a zone, lowercased. */
 const bareAddress = (address: string) => address.replace(/^\[|\]$/g, '').replace(/%.*$/, '').toLowerCase();
@@ -399,19 +410,27 @@ export function isThisMachineAddress(address: string, interfaceAddresses: readon
   return interfaceAddresses.some((held) => addressKey(held) === key);
 }
 
+function isBlockedIPv4(value: number): boolean {
+  return (value >= LINK_LOCAL_V4_START && value <= LINK_LOCAL_V4_END) || CLOUD_METADATA_V4.has(value);
+}
+
+/**
+ * Whether a host names a link-local or cloud-metadata address, in any spelling:
+ * every IPv4 encoding (decimal/octal/hex, short forms), and every IPv6 literal
+ * that is one, or that carries one through a transition form. The WHATWG URL
+ * parser collapses the numeric IPv4 spellings before this guard runs, but a
+ * resolver's answer and a caller that did not parse have not been through it.
+ */
 export function isBlockedAddress(hostname: string): boolean {
+  const v6 = ipv6Bytes(hostname);
+  if (!v6) {
+    const v4 = ipv4Value(hostname);
+    return v4 !== null && isBlockedIPv4(v4);
+  }
   // IPv6 link-local (fe80::/10).
-  if (/^\[?fe[89ab][0-9a-f]:/i.test(hostname)) return true;
-  // Resolve the host to its 32-bit IPv4 value across every equivalent encoding
-  // (decimal/octal/hex, short forms, IPv4-mapped IPv6) and range-check the
-  // link-local / cloud-metadata block. The genuine end-to-end hole a literal
-  // 169.254.* match leaves is the IPv6-embedded form (::ffff:169.254.169.254),
-  // which the WHATWG URL parser normalizes to a hex-group spelling the regex
-  // can't see; the numeric-IPv4 spellings are collapsed by that same parser
-  // before the guard runs, so canonicalizing them here is defense-in-depth
-  // against callers that don't pre-normalize rather than a live bypass fix.
-  const v4 = ipv4Value(hostname);
-  return v4 !== null && v4 >= LINK_LOCAL_V4_START && v4 <= LINK_LOCAL_V4_END;
+  if (v6[0] === 0xfe && (v6[1] & 0xc0) === 0x80) return true;
+  if (CLOUD_METADATA_V6.has(v6.join())) return true;
+  return ipv4sCarriedByIPv6(v6).some(isBlockedIPv4);
 }
 
 // --- Served error / diagnostic pages ----------------------------------------
