@@ -2,6 +2,7 @@ import {
   METRIC_LABELS,
   type AdminMetricsBody,
   type MetricEvent,
+  type VoiceSupplierReading,
 } from "../server/metric-labels";
 
 /** One label's counts within an event. */
@@ -62,4 +63,34 @@ export function summarize(body: AdminMetricsBody): EventSummary[] {
       daily: days.map((day) => ({ day, count: sum(recent.filter((row) => row.day === day)) })),
     };
   });
+}
+
+/**
+ * Credits left, as a share of the period's, at which the page warns. The grant
+ * plan converts to Free at 10,000 left, and this leaves room before that for
+ * the 30 days' notice the terms promise on a material reduction.
+ */
+export const SUPPLIER_LOW_SHARE = 0.1;
+
+/**
+ * What the admin must act on in the reading. A failed read keeps the last one,
+ * so a reading older than yesterday's scheduled read says the read is failing.
+ */
+export function supplierWarnings(supplier: VoiceSupplierReading | null, today: string): string[] {
+  if (!supplier)
+    return ["No reading yet. Check that the voice Worker's key may read the ElevenLabs subscription."];
+  const { tier, status, used, limit, changeTo, changeOn, checkedOn } = supplier;
+  const left = limit - used;
+  return [
+    ...(checkedOn < dayBefore(today, 1)
+      ? [`This reading is from ${checkedOn}. The daily read is failing; check the voice Worker's cron and its key.`]
+      : []),
+    ...(tier === "free" || !["active", "trialing"].includes(status)
+      ? [`The plan is ${tier}, status ${status}. Natural Voice may stop for every subscriber.`]
+      : []),
+    ...(changeTo ? [`A plan change to ${changeTo} is pending${changeOn ? ` on ${changeOn}` : ""}.`] : []),
+    ...(left <= limit * SUPPLIER_LOW_SHARE
+      ? [`Only ${left.toLocaleString("en-US")} credits are left of ${limit.toLocaleString("en-US")}.`]
+      : []),
+  ];
 }

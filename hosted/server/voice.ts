@@ -15,7 +15,7 @@ export const VOICE_TOKEN_IDLE_DAYS = 365;
 export const LIVE_TOKEN = `coalesce(t."lastUsedAt", t."createdAt") > now() - interval '${VOICE_TOKEN_IDLE_DAYS} days'`;
 /** Daily counters for a UTC day this many days before today or earlier are deleted. */
 export const VOICE_USAGE_RETENTION_DAYS = 90;
-/** The daily database sweep's Cron Trigger; the voice Worker's other is the history sweep's. */
+/** The daily database pass's Cron Trigger; the voice Worker's other is the history sweep's. */
 export const TOKEN_SWEEP_CRON = "0 4 * * *";
 /** Speak's token lookup, its owner's entitlement joined, before its WHERE. */
 export const TOKEN_OWNER = `SELECT t.id, t."userId", ${entitledSql("u")} AS entitled
@@ -25,7 +25,7 @@ const MAX_BODY = 4096;
 /** Resolves to the upstream's response; any non-2xx or throw becomes 502. */
 export type Synthesize = (voiceId: string, text: string) => Promise<Response>;
 
-const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
+export const ELEVENLABS_API = "https://api.elevenlabs.io/v1";
 
 /**
  * `afterSpeech` receives the history sweep each successful call schedules,

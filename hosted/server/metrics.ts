@@ -8,6 +8,7 @@ import {
   type AdminMetricsBody,
   type MetricEvent,
   type MetricRow,
+  type VoiceSupplierReading,
 } from "./metric-labels";
 
 /**
@@ -95,8 +96,9 @@ export const recordMetric = (c: Context, databaseUrl: string, event: MetricEvent
   bestEffort(c, `Metric ${event}`, countMetric(databaseUrl, event, label, n));
 
 /**
- * The rows of the `METRICS_DAYS` UTC days to today, and every event's
- * all-time totals. Today is the database's, the clock every row was counted by.
+ * The rows of the `METRICS_DAYS` UTC days to today, every event's all-time
+ * totals, and the voice Worker's reading of the ElevenLabs plan. Today is the
+ * database's, the clock every row was counted by.
  */
 export async function readMetrics(databaseUrl: string): Promise<AdminMetricsBody> {
   const [{ today }] = await queryDatabase<{ today: string }>(
@@ -104,7 +106,7 @@ export async function readMetrics(databaseUrl: string): Promise<AdminMetricsBody
     `SELECT to_char((now() AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS today`,
     [],
   );
-  const [recent, totals] = await Promise.all([
+  const [recent, totals, [supplier]] = await Promise.all([
     queryDatabase<MetricRow>(
       databaseUrl,
       `SELECT to_char(day, 'YYYY-MM-DD') AS day, event, label, count::float8 AS count
@@ -119,6 +121,16 @@ export async function readMetrics(databaseUrl: string): Promise<AdminMetricsBody
       GROUP BY event, label ORDER BY event, label`,
       [],
     ),
+    queryDatabase<VoiceSupplierReading>(
+      databaseUrl,
+      `SELECT tier, status, used::float8 AS used, "limit"::float8 AS "limit",
+        to_char("resetsAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "resetsOn",
+        "changeTo",
+        to_char("changeAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "changeOn",
+        to_char("checkedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "checkedOn"
+      FROM dormouse_voice_supplier`,
+      [],
+    ),
   ]);
-  return { days: METRICS_DAYS, today, recent, totals };
+  return { days: METRICS_DAYS, today, recent, totals, supplier: supplier ?? null };
 }

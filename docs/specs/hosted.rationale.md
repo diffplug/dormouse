@@ -15,6 +15,12 @@ History sweep (sources checked 2026-09-22):
 - Endpoints: https://elevenlabs.io/docs/api-reference/history/list and https://elevenlabs.io/docs/api-reference/history/delete.
 - A failed cron pass fails its invocation because the sweep is a privacy control that nothing else watches. A key scoped to text-to-speech alone, or rotated later with that narrower scope, keeps speech working while every list is refused, and spoken text would pile up in ElevenLabs history unseen. `hosted/wrangler.voice.jsonc` disables observability and `productionConfig` in `hosted/scripts/production.mjs` requires it off (checked 2026-09-30), so production retains no logs; a failed invocation in the Worker's Cron Events is the signal. The after-speech pass runs in `waitUntil` on a request that already succeeded, and the next cron pass retries what it missed.
 
+## Supplier plan
+
+- The [Startup Grants page](https://elevenlabs.io/startup-grants), checked 2026-11-03: a plan converts to Free after the grant period "or once you have 10,000 credits left", "unless you have selected otherwise", so a calendar date alone cannot catch it.
+- The [subscription endpoint](https://elevenlabs.io/docs/api-reference/user/subscription/get), checked 2026-11-03, reports `character_count` and `character_limit` with no separate credit fields and does not say how they relate to credits, or which key scope it needs. Compare the first production reading against the workspace dashboard.
+- A failed read fails its invocation as the history sweep's does, but `hosted/wrangler.voice.jsonc` disables observability, so the page's old date is the signal the operator reads. The voice Worker sends no mail: `docs/specs/security-hosted.md` forbids it Postmark's token.
+
 ## Application boundary
 
 Three origins (decided 2026-09-30):

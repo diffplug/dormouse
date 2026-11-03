@@ -10,8 +10,8 @@ import {
   PAGE_TITLE_CLASS,
   STATUS_BAD_TEXT_CLASS,
 } from "dormouse-lib/site/docs-tokens";
-import type { AdminMetricsBody, MetricEvent } from "../server/metric-labels";
-import { summarize, type EventSummary } from "./admin-metrics";
+import type { AdminMetricsBody, MetricEvent, VoiceSupplierReading } from "../server/metric-labels";
+import { summarize, supplierWarnings, type EventSummary } from "./admin-metrics";
 import { getAdminMetrics } from "./api";
 import { HostedShell } from "./HostedShell";
 
@@ -111,6 +111,41 @@ function EventCard({ summary, days }: { summary: EventSummary; days: number }) {
   );
 }
 
+/** The ElevenLabs plan Natural Voice runs on, and what needs acting on. */
+function SupplierCard({ supplier, today }: { supplier: VoiceSupplierReading | null; today: string }) {
+  const warnings = supplierWarnings(supplier, today);
+  return (
+    <section className={`mb-4 ${CARD_CLASS}`} aria-label="ElevenLabs plan">
+      <h2 className="font-display text-xl">ElevenLabs plan</h2>
+      {warnings.length > 0 && (
+        <ul className={`mt-3 ${STATUS_BAD_TEXT_CLASS}`}>
+          {warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      )}
+      {supplier && (
+        <dl className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+          {(
+            [
+              ["Plan", supplier.tier],
+              ["Status", supplier.status],
+              ["Credits left", `${count(supplier.limit - supplier.used)} of ${count(supplier.limit)}`],
+              ["Read on", supplier.checkedOn],
+            ] as const
+          ).map(([term, value]) => (
+            <div key={term}>
+              <dt className={`text-sm ${MUTED_TEXT_CLASS}`}>{term}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {supplier?.resetsOn && <p className={`mt-3 text-sm ${MUTED_TEXT_CLASS}`}>Credits reset on {supplier.resetsOn}.</p>}
+    </section>
+  );
+}
+
 /** The admin's view of Hosted's daily counts (`docs/specs/hosted.md` -> "Metrics"). */
 export function AdminMetricsPage({
   state,
@@ -150,11 +185,14 @@ export function AdminMetricsPage({
           </button>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {summarize(state.body).map((summary) => (
-            <EventCard key={summary.event} summary={summary} days={state.body.days} />
-          ))}
-        </div>
+        <>
+          <SupplierCard supplier={state.body.supplier} today={state.body.today} />
+          <div className="grid gap-4 md:grid-cols-2">
+            {summarize(state.body).map((summary) => (
+              <EventCard key={summary.event} summary={summary} days={state.body.days} />
+            ))}
+          </div>
+        </>
       )}
     </HostedShell>
   );

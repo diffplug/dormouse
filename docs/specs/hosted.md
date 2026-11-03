@@ -186,6 +186,16 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 
 Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `mintVoiceToken` in `hosted/server/voice-token.ts`.
 
+### Supplier plan
+
+The admin sees the ElevenLabs plan Natural Voice runs on, so a grant conversion or low balance is caught in time for the notice `docs/specs/pricing.md` -> "Paid-launch requirements" owes subscribers.
+
+- **Must read `GET /v1/user/subscription` from the voice Worker's daily Cron Trigger and replace the one `dormouse_voice_supplier` row**, which holds only the plan's tier and status, credits spent and limit, reset time, pending change, and the read's time. Without `ELEVENLABS_API_KEY` nothing reads, so development and previews never do.
+- **Must keep the row when a read fails, and fail the invocation only after the daily sweep has run**, so `/admin/metrics` shows the old date and neither pass costs the other (rationale).
+- **Never store upstream text**: a body field outside those shapes refuses the whole read.
+
+Source of truth: `recordSupplierPlan` in `hosted/server/voice-supplier.ts`; `supplierWarnings` in `hosted/src/admin-metrics.ts`.
+
 ## Relay
 
 The relay Worker serves the self-host Relay's HTTP API to many accounts: the paths, shapes, statuses, and error strings of `docs/specs/relay.md` -> "HTTP API", "Setup tokens and the pairing QR", and "WebAuthn without a WebAuthn library", so a Burrow and Pocket cannot tell the two apart; both run the checks and bounds in `remote-lib-common/src/remote/relay-common.ts`. Assertions demand presence, not verification. Security checks: `docs/specs/security-hosted.md` -> "Relay boundary". Only the differences:

@@ -9,12 +9,14 @@ import {
   sweepOnCron,
   voiceBearerRoutes,
 } from "./voice";
+import { recordSupplierPlan } from "./voice-supplier";
 import { workerApp } from "./worker-app";
 
 /**
  * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech and
  * forgetting, and two Cron Triggers: the ElevenLabs history sweep, which never
- * touches the database, and the daily sweep of idle tokens and old counters.
+ * touches the database, and the daily pass: the sweep of idle tokens and old
+ * counters, and the read of the ElevenLabs plan.
  * No cookie, no auth, no assets.
  * `sweepDelayMs` exists for the test entry; production keeps the default.
  */
@@ -47,9 +49,18 @@ export function voiceApp(
     // Every other schedule is the history sweep's, and the mapper decides
     // whether a key reaches it.
     async scheduled(controller, env) {
-      if ((controller as { cron?: string }).cron === TOKEN_SWEEP_CRON)
-        await sweepVoiceRows(env.HYPERDRIVE.connectionString);
-      else if (env.ELEVENLABS_API_KEY) await sweepOnCron(env.ELEVENLABS_API_KEY);
+      const key = env.ELEVENLABS_API_KEY;
+      if ((controller as { cron?: string }).cron !== TOKEN_SWEEP_CRON) {
+        if (key) await sweepOnCron(key);
+        return;
+      }
+      // Neither may cost the other its pass, and either fails the invocation.
+      const database = env.HYPERDRIVE.connectionString;
+      const passes = await Promise.allSettled([
+        sweepVoiceRows(database),
+        ...(key ? [recordSupplierPlan(key, database)] : []),
+      ]);
+      for (const pass of passes) if (pass.status === "rejected") throw pass.reason;
     },
   });
 }

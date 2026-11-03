@@ -43,7 +43,17 @@ const totals = Object.values(
     return sums;
   }, {}),
 );
-const BODY: AdminMetricsBody = { days: 30, today: TODAY, recent, totals };
+const SUPPLIER: NonNullable<AdminMetricsBody["supplier"]> = {
+  tier: "grant_tier_1_2025_07_23",
+  status: "active",
+  used: 4_210_000,
+  limit: 33_000_000,
+  resetsOn: "2027-06-01",
+  changeTo: null,
+  changeOn: null,
+  checkedOn: TODAY,
+};
+const BODY: AdminMetricsBody = { days: 30, today: TODAY, recent, totals, supplier: SUPPLIER };
 
 function AdminMetricsStory({ state, phone, light }: { state: AdminMetricsState; phone?: boolean; light?: boolean }) {
   return (
@@ -68,7 +78,18 @@ type Story = StoryObj<typeof meta>;
 export const Counts: Story = {};
 export const Phone: Story = { args: { phone: true } };
 export const Light: Story = { args: { light: true } };
-export const NothingCounted: Story = { args: { state: { kind: "ok", body: { ...BODY, recent: [], totals: [] } } } };
+export const NothingCounted: Story = { args: { state: { kind: "ok", body: { ...BODY, recent: [], totals: [], supplier: null } } } };
+export const SupplierWarnings: Story = {
+  args: {
+    state: {
+      kind: "ok",
+      body: {
+        ...BODY,
+        supplier: { ...SUPPLIER, status: "past_due", used: 31_000_000, changeTo: "free", changeOn: "2026-11-20", checkedOn: "2026-10-20" },
+      },
+    },
+  },
+};
 export const Loading: Story = { args: { state: { kind: "loading" } } };
 export const SignedOut: Story = { args: { state: { kind: "signed-out" } } };
 export const NotFound: Story = { args: { state: { kind: "not-found" } } };

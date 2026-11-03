@@ -61,6 +61,8 @@ const PINNED: Record<string, string> = {
     "506feb90bc4b5105c08c0fd72072bff2ab27ab9271b53f7c5cca9edbdf320424",
   "024_account_closing.sql":
     "90033b32e63e8716b7622c55ae0a326a92949766c9bc9fe4eb79606c0fb07ae0",
+  "025_voice_supplier.sql":
+    "2f309acf773194c5a6c314c28e42f69ebb0fb45977361558fc92e3cd888bf595",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);

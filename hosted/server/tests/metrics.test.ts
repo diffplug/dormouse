@@ -146,6 +146,26 @@ test("readMetrics answers the window's rows, ending today, and all-time totals",
   });
 });
 
+test("readMetrics answers the stored ElevenLabs plan by UTC day, and null before any", async () => {
+  await queryDatabase(context.database.url, `DELETE FROM dormouse_voice_supplier`);
+  expect((await readMetrics(context.database.url)).supplier).toBeNull();
+  await queryDatabase(
+    context.database.url,
+    `INSERT INTO dormouse_voice_supplier (tier, status, used, "limit", "resetsAt", "checkedAt")
+    VALUES ('scale', 'active', 5, 10, '2027-01-01T23:30:00-05:00', '2026-11-03T23:30:00-05:00')`,
+  );
+  expect((await readMetrics(context.database.url)).supplier).toEqual({
+    tier: "scale",
+    status: "active",
+    used: 5,
+    limit: 10,
+    resetsOn: "2027-01-02",
+    changeTo: null,
+    changeOn: null,
+    checkedOn: "2026-11-04",
+  });
+});
+
 test("a metric's write never fails or delays the response it rides on, and its failure is only logged", async () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
   try {

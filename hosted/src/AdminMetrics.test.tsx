@@ -43,6 +43,7 @@ it("reads the counts as the page's own fetch, and shows each event", async () =>
       today: "2026-10-28",
       recent: [{ day: "2026-10-28", event: "push.sent", label: "", count: 1234 }],
       totals: [{ event: "push.sent", label: "", count: 1234 }],
+      supplier: null,
     }),
   );
   expect(fetch).toHaveBeenCalledWith("/api/admin/metrics", expect.objectContaining({ credentials: "same-origin" }));
@@ -50,6 +51,33 @@ it("reads the counts as the page's own fetch, and shows each event", async () =>
   expect(container.textContent).toContain("through 2026-10-28");
   const push = container.querySelector('section[aria-label="Push notifications delivered"]')!;
   expect(push.textContent).toContain("1,234");
+});
+
+it("shows the ElevenLabs plan and what needs acting on, or that it has no reading", async () => {
+  const body = { days: 30, today: "2026-10-28", recent: [], totals: [] };
+  await mount(() =>
+    Response.json({
+      ...body,
+      supplier: {
+        tier: "scale",
+        status: "active",
+        used: 9500,
+        limit: 10000,
+        resetsOn: "2026-11-01",
+        changeTo: null,
+        changeOn: null,
+        checkedOn: "2026-10-28",
+      },
+    }),
+  );
+  const card = () => container.querySelector('section[aria-label="ElevenLabs plan"]')!;
+  expect(card().textContent).toContain("500 of 10,000");
+  expect(card().querySelector("li")?.textContent).toBe("Only 500 credits are left of 10,000.");
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await mount(() => Response.json({ ...body, supplier: null }));
+  expect(card().textContent).toContain("No reading yet");
+  expect(card().querySelector("dl")).toBeNull();
 });
 
 it("asks a signed-out visitor to sign in, and tells anyone but the admin there is no page", async () => {
