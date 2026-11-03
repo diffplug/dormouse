@@ -39,7 +39,7 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exceptions: `ADMIN_EMAIL` ("Entitlement") and `SIGN_IN_ALLOWLIST` (below).
 
-**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on any read but a provider callback or the CSRF challenge, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
+**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on any read but a provider callback or the CSRF challenge, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, the page is `/checkout`, `/billing`, or `/closed`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
@@ -144,8 +144,9 @@ Errors are JSON `{ message }`; it needs no entitlement and works with billing cl
 - **Never answer a checkout URL for an account gone or under a hold younger than `CLOSING_HOLD_MINUTES`**: checked once it opened, the checkout is expired (409 `ACCOUNT_CLOSING`).
 - **Must end, and refund as closing does, a subscription the webhook finds current for an owner with no `"user"` row**, recorded unsettled on its closure first; a failed end fails the event.
 - **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done, as a withdrawal is ("Billing").
+- **Must land a closed account on `/closed` on this origin**, signed out and without the pre-launch notice; a login there goes to `/account`. What it says: `docs/specs/pricing.md` -> "Checkout and entitlement".
 
-Source of truth: `closureRoutes`, `accountClosing`, and `endAfterClosure` in `hosted/server/closure.ts`; `CloseAccount` in `hosted/src/Closure.tsx`.
+Source of truth: `closureRoutes`, `accountClosing`, and `endAfterClosure` in `hosted/server/closure.ts`; `CloseAccount` and `AccountClosed` in `hosted/src/Closure.tsx`.
 
 ## Managed voice
 

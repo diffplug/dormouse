@@ -563,7 +563,8 @@ describe("withdrawal and closure", () => {
     expect(container.querySelector("#withdraw")).toBeNull();
   });
 
-  it("explains what closing does to the plan before closing, then signs the page out", async () => {
+  it("explains what closing does to the plan before closing, then confirms it signed out", async () => {
+    const { origin } = location;
     vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
     vi.mocked(api.closeAccount).mockResolvedValue(undefined);
     await mount(null);
@@ -575,8 +576,35 @@ describe("withdrawal and closure", () => {
     vi.mocked(api.getSession).mockResolvedValue(null);
     await click("Close account");
     expect(api.closeAccount).toHaveBeenCalled();
-    expect(text()).toContain("Your account is closed.");
-    expect(heading()).toBe("Sign in to Dormouse Hosted");
+    // It stays there, on this origin: a later read of the account, signed out, never moves it.
+    for (const settle of [() => {}, () => window.dispatchEvent(new Event("focus"))]) {
+      await act(async () => {
+        settle();
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(heading()).toBe("Your account is closed");
+      expect(location.pathname).toBe("/closed");
+      expect(location.origin).toBe(origin);
+    }
+    for (const said of ["we refund that payment in full, including tax, to the original payment method", "Otherwise closing refunds nothing"])
+      expect(text()).toContain(said);
+  });
+
+  it("says the closure on a reload of its page, and gives way to an account signed in", async () => {
+    history.replaceState(null, "", "/closed");
+    vi.mocked(api.getSession).mockResolvedValue(null);
+    await mount(null);
+    expect(heading()).toBe("Your account is closed");
+    expect(location.pathname).toBe("/closed");
+    expect(container.querySelector("form")).toBeNull();
+
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(heading()).toBe("Your account");
+    expect(location.pathname).toBe("/account");
   });
 
   it("needs a recent login, and a plan it could read, to close", async () => {
