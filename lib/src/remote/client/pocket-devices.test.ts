@@ -130,8 +130,12 @@ describe('paired browsers, from Pocket', () => {
     const harness = await makeE2eHarness({
       createSession: ({ send }) => ({
         handle: (data) => {
-          const { requestId } = data as { requestId: string };
-          send({ requestId, ok: true, result: { protocolVersion: 1, devices: true, outcome: 'presence-required', challenge: 'x' } });
+          const { requestId, method } = data as { requestId: string; method: string };
+          const result =
+            method === REMOTE_METHODS.devicesList
+              ? { outcome: 'devices', devices: [{ id: 7, label: 'not an entry' }] }
+              : { protocolVersion: 1, devices: true };
+          send({ requestId, ok: true, result });
         },
         dispose: () => {},
       }),

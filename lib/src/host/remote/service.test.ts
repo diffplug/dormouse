@@ -2228,7 +2228,15 @@ describe('paired browsers, over a session', () => {
 
     expect(otherIsActive()).toBe(true);
     await settle();
-    expect(store.accessLog.filter((entry) => entry.event === 'proof-denied')).toHaveLength(7);
+    expect(store.accessLog.filter((entry) => entry.event === 'proof-denied').map((entry) => entry.reason)).toEqual([
+      'binding-mismatch',
+      'binding-mismatch',
+      'assertion-invalid',
+      'binding-mismatch',
+      'assertion-invalid',
+      'account-mismatch',
+      'malformed',
+    ]);
     // And after all that the session itself is untouched.
     expect((await paired.request(LIST)).result).toMatchObject({ outcome: 'devices' });
   });

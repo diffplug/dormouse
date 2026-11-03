@@ -195,9 +195,9 @@ Loss stays recoverable by re-pairing, so this changes the advice, not the model.
 
 **Why Pocket alone is not enough.** Pocket reaches only the Burrows it is paired with, and only while they are online; "cut this phone off everywhere" is wanted most when a Burrow is asleep.
 
-**Why revoking takes a proof when a Relay-named revocation takes none.** A Relay's word needs nothing because the Relay could already refuse every session. A session's word is a person's choice made on a phone, and a window ride may be nobody at all: script in the Pocket origin, or whoever holds the unlocked phone (`docs/specs/security.md` -> "What is not defended"). Ned's decision, 2026-11. It guards this verb only: an authorized session is a person at the keyboard (`docs/specs/security-remote.md` -> "Remote Control"), and an attached terminal can type `dor remote revoke`.
+**Why revoking takes a proof when a Relay-named revocation takes none.** A Relay's word needs nothing because the Relay could already refuse every session. A session's word is a person's choice made on a phone, and a window ride may be nobody at all: script in the Pocket origin, or whoever holds the unlocked phone (`docs/specs/security.md` -> "What is not defended"). Ned's decision, 2026-11.
 
-**Why the list asks for no proof.** Ned's decision, 2026-11. An authorized session already reads the same through `dor remote list` in an attached terminal, so a prompt on the list would cost a tap and protect nothing.
+**Why the list asks for no proof.** Ned's decision, 2026-11. An authorized session is a person at the keyboard (`docs/specs/security-remote.md` -> "Remote Control"), and a closed-set label, an id that authorizes nothing, and two times are little beside that, so a prompt on the list would cost a tap and protect next to nothing.
 
 **Why the target is not in the binding.** `POST /api/reauth/begin` takes the binding in the clear, so a device id in it would hand the Relay exactly the record field it must not hold. The challenge stands in: the Burrow remembers which request it answered with it, and the assertion signs the challenge.
 
