@@ -556,7 +556,7 @@ test("verifyPackages admits only clean pgstencil packages built from one commit"
   const reader = ({ all = {}, ...one } = {}) => async (name) =>
     JSON.stringify({ commit, dirty: false, ...all, ...one[name] });
   const refused = failure("Production requires accepted, clean pgstencil provenance");
-  await verifyPackages(reader());
+  assert.equal(await verifyPackages(reader()), commit);
   await assert.rejects(verifyPackages(reader({ all: { commit: "f".repeat(39) } })), refused);
   await assert.rejects(verifyPackages(reader({ all: { commit: "F".repeat(40) } })), refused);
   await assert.rejects(verifyPackages(reader({ all: { commit: undefined } })), refused);
