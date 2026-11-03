@@ -156,6 +156,15 @@ describe('createIframeProxyUrl — admission', () => {
     if (!r.ok) expect(r.reason).toBe('scheme');
   });
 
+  it('refuses a metadata address the user allowed, by literal or by name', async () => {
+    const allowed = { ...NO_LOG, allowExternal: true, interfaceAddresses: () => [] };
+    for (const literal of ['[fd00:ec2::254]', '[fd20:ce::254]', '[64:ff9b::a9fe:a9fe]', '100.100.100.200']) {
+      expect(await createIframeProxyUrl(`http://${literal}/`, allowed)).toMatchObject({ ok: false, reason: 'scheme' });
+    }
+    const resolve = async () => [{ address: 'fd00:ec2::254', family: 6 }];
+    expect(await createIframeProxyUrl('http://docs.example/', { ...allowed, resolve })).toMatchObject({ ok: false, reason: 'scheme' });
+  });
+
   it('preserves the target path + query in the framed URL', async () => {
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<html><head></head><body>x</body></html>'); });
     const url = await frame(`http://127.0.0.1:${port}/app/page?q=1`);
@@ -178,7 +187,7 @@ describe('createIframeProxyUrl — the upstream address is fixed when the grant 
   };
 
   it('refuses a name that resolves to a link-local / metadata address', async () => {
-    for (const blocked of ['169.254.169.254', '::ffff:169.254.169.254', 'fe80::1']) {
+    for (const blocked of ['169.254.169.254', '::ffff:169.254.169.254', 'fe80::1', 'fd00:ec2::254', '64:ff9b::a9fe:a9fe', '168.63.129.16']) {
       const { resolve } = resolving(['127.0.0.1', blocked]);
       const r = await createIframeProxyUrl('http://rebind.test:8080/', { ...NO_LOG, resolve });
       expect(r).toMatchObject({ ok: false, reason: 'scheme' });
@@ -997,6 +1006,35 @@ describe('iframe proxy leases', () => {
     releaseIframeProxyLease(owner);
     expect(await isListening(portOf(urls[0]))).toBe(false);
   }, 30_000);
+
+  it('refuses a service worker script on a local grant, and sends it nothing upstream', async () => {
+    const seen: string[] = [];
+    const port = await upstream((q, s) => { seen.push(q.url!); s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
+    const url = await frame(`http://127.0.0.1:${port}/`, leased(lease()));
+    for (const headers of [{ 'Service-Worker': 'script' }, { 'Sec-Fetch-Dest': 'serviceworker' }, { 'Service-Worker': 'script', 'Sec-Fetch-Dest': 'serviceworker' }]) {
+      expect((await request(`${url}sw.js`, { headers })).status).toBe(403);
+    }
+    expect(seen).toEqual([]);
+    // Any other script is the page's own.
+    expect((await request(`${url}app.js`, { headers: { 'Sec-Fetch-Dest': 'script' } })).status).toBe(200);
+    expect((await request(`${url}worker.js`, { headers: { 'Sec-Fetch-Dest': 'worker' } })).status).toBe(200);
+    expect(seen).toEqual(['/app.js', '/worker.js']);
+  });
+
+  it('refuses a service worker script on an allowed external grant too', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
+    const url = await frame(`http://docs.example:${port}/`, {
+      ...NO_LOG, allowExternal: true, interfaceAddresses: () => [],
+      resolve: async () => [{ address: '127.0.0.1', family: 4 }],
+    });
+    expect((await request(`${url}sw.js`, { headers: { 'Service-Worker': 'script' } })).status).toBe(403);
+  });
+
+  it('passes a service worker script through a tunneled grant, whose page is not at this port', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
+    const url = await frame(`http://127.0.0.1:${port}/`, { ...leased(lease()), tunneled: true });
+    expect((await request(`${url}sw.js`, { headers: { 'Service-Worker': 'script' } })).status).toBe(200);
+  });
 
   it('clears site data on a freshly minted grant’s first response only', async () => {
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<head></head>'); });

@@ -8,7 +8,7 @@ import { previousWorkspaceSession, setWorkspaceTransferPending } from '../lib/wi
  * geometry — the Wall on Lath live acceptance list in
  * TESTING_AND_MODIFICATION_GUIDE.md (§5) is the live gate.
  */
-import { act } from 'react';
+import { act, type ReactElement } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dispatchDorControlRequest } from '../lib/platform/dor-control-dispatch';
@@ -3756,6 +3756,42 @@ describe('Wall on the Lath engine', () => {
     await flush();
     return response;
   }
+
+  describe('a press reported from inside a proxied frame', () => {
+    const PROXY = 'http://127.0.0.1:61234';
+    const press = () => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'pointerdown' } }));
+    });
+
+    async function frameBeside(wall: ReactElement) {
+      fake.createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: `${PROXY}/app` }));
+      await act(async () => root.render(wall));
+      await flush();
+      const { id } = await dispatchIframe('http://localhost:5173/');
+      await flushFrame();
+      return container.querySelector<HTMLIFrameElement>(`[data-lath-leaf="${id}"] iframe`)!;
+    }
+
+    it('changes nothing from a frame without focus', async () => {
+      const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
+      const focus = vi.spyOn(frame, 'focus');
+      await press();
+      await flushFrame();
+      expect(focus).not.toHaveBeenCalled();
+      expect(document.activeElement).not.toBe(frame);
+      expect(focusOf('surface:a')).toBe('true');
+    });
+
+    it('enters the pane for a press from the frame holding focus, without focusing it again', async () => {
+      const frame = await frameBeside(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
+      frame.focus();
+      const focus = vi.spyOn(frame, 'focus');
+      await press();
+      await flushFrame();
+      expect(focus).not.toHaveBeenCalled();
+      expect(focusOf('surface:a')).toBe('false');
+    });
+  });
 
   it('dor split transfers focus to the new surface (passthrough)', async () => {
     await act(async () => {

@@ -377,17 +377,17 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // A cross-origin click reaches only the frame, so the Wall never sees the
   // mousedown — and on WebKit the iframe element's own `focus` event doesn't
   // fire for it either. The shim posts `pointerdown` from inside the frame;
-  // adopt it as entering the pane (select + passthrough), exactly like clicking
-  // any other pane. Only genuine clicks emit `pointerdown`, so command-mode
-  // arrow navigation never triggers it, and onClickPanel is idempotent for
-  // repeat clicks.
+  // adopt it as clicking the pane. The page shares the shim's origin and can post
+  // this with no click, so it counts only from the frame that holds focus: the
+  // shim takes focus before it posts, and focus reaches this document first. The
+  // message then adds no focus, and a frame without focus moves nothing.
   useEffect(() => {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
       const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown; from?: unknown } | null;
       if (data?.__dormouse === 'pointerdown') {
-        actions.onClickPanel(id);
+        if (document.activeElement === iframeRef.current) actions.onClickPanel(id);
         return;
       }
       if (data?.__dormouse === 'open-window' && typeof data.url === 'string') {
