@@ -24,7 +24,8 @@ import { entitledSql } from "../entitlement";
 import { WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
 import { DEV_FOUNDING_PRICES } from "../billing-dev";
-import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION } from "../policy-constants";
+import { presentedLines } from "../disclosure";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, VOICE_DAILY_CAP } from "../policy-constants";
 import { ORIGINS } from "./bundle";
 import { CHANGED_PRICES, CHANGED_USD, stripeFake } from "./stripe-fake";
 import { workerDatabases } from "./worker-roles";
@@ -370,8 +371,18 @@ test("checkout starts only after agreement to the current terms and to automatic
   onTestFinished(f.close);
   const member = await f.account();
   const consents = () =>
-    f.sql<{ checkoutId: string; termsVersion: string; userId: string; plan: string; priceId: string }>(
-      `SELECT "checkoutId", "termsVersion", "userId", plan, "priceId" FROM dormouse_checkout_consents ORDER BY "consentedAt"`,
+    f.sql<{
+      checkoutId: string;
+      termsVersion: string;
+      userId: string;
+      plan: string;
+      priceId: string;
+      shownUsd: number;
+      voiceDailyCap: number;
+      presentedText: string;
+    }>(
+      `SELECT "checkoutId", "termsVersion", "userId", plan, "priceId", "shownUsd", "voiceDailyCap", "presentedText"
+      FROM dormouse_checkout_consents ORDER BY "consentedAt"`,
     );
   const { price: _price, ...unpriced } = consent("yearly");
   for (const body of [
@@ -405,7 +416,15 @@ test("checkout starts only after agreement to the current terms and to automatic
     userId: member.id,
     plan: "yearly",
     priceId: f.setup.yearly,
+    shownUsd: LIST_ANNUAL,
+    voiceDailyCap: VOICE_DAILY_CAP,
+    presentedText: presentedLines("yearly", LIST_ANNUAL, TERMS_VERSION).join("\n"),
   });
+  for (const fact of ["$100 a year in US dollars", `up to ${VOICE_DAILY_CAP} alarms a day`, "withdraw within 14 days", `(version ${TERMS_VERSION})`])
+    expect((await consents())[1]!.presentedText).toContain(fact);
+  await expect(
+    f.sql(`INSERT INTO dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId") VALUES ('x', 'x', 'x', 'x', 'x')`),
+  ).rejects.toThrow(/dormouse_checkout_consents_evidence_check/);
   const [{ at }] = await f.sql<{ at: Date }>(`SELECT "consentedAt" AS at FROM dormouse_checkout_consents WHERE "checkoutId" = $1`, [
     operation,
   ]);

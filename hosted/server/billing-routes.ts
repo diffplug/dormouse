@@ -9,9 +9,10 @@ import { END_REASONS, foundingCohort, idOf, run, withBilling, type BillingSetup,
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
 import { entitledSql, subscribedSql } from "./entitlement";
 import { ACCOUNT_CLOSING, accountClosing, endAfterClosure } from "./closure";
+import { presentedLines } from "./disclosure";
 import { checkoutRef, type MetricEvent } from "./metric-labels";
 import { countMetricInTransaction, recordMetric } from "./metrics";
-import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, isFounderName, isPlan, type Plan } from "./policy-constants";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, REFUND_DAYS, TERMS_VERSION, VOICE_DAILY_CAP, isFounderName, isPlan, type Plan } from "./policy-constants";
 import { sendNotices, type NoticeContext } from "./notices";
 import { recordWithdrawal, recordedWithdrawal, settleWithdrawal, withdrawalOffer, type Contact } from "./withdrawal";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
@@ -200,12 +201,25 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         await billing.cancelCheckout(userId);
         return c.json({ message: ACCOUNT_CLOSING }, 409);
       }
-      // Recorded before the URL is answered, for the Price the buyer was shown.
+      // Recorded before the URL is answered, for the Price the buyer was shown
+      // and what the page says at it, all from this server's own values, never
+      // the body's: `expectPrice` held the body's `price` to the catalog's.
+      const shownUsd = catalog.prices.get(priceId)!.usd;
       await run(
         billing.db,
-        `INSERT INTO public.dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId")
-        VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-        [id, TERMS_VERSION, userId, plan, priceId],
+        `INSERT INTO public.dormouse_checkout_consents
+          ("checkoutId", "termsVersion", "userId", plan, "priceId", "shownUsd", "voiceDailyCap", "presentedText")
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`,
+        [
+          id,
+          TERMS_VERSION,
+          userId,
+          plan,
+          priceId,
+          shownUsd,
+          VOICE_DAILY_CAP,
+          presentedLines(plan, shownUsd, TERMS_VERSION).join("\n"),
+        ],
       );
       recordMetric(c, host(c).databaseUrl, "checkout.started", `${plan}:${ref}`);
       return c.json({ url });

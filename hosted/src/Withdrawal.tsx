@@ -1,6 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { CARD_ACCENT_CLASS, CARD_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
-import { MODEL_WITHDRAWAL_FORM, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
+import {
+  MODEL_FORM_INTRO,
+  MODEL_WITHDRAWAL_FORM,
+  SUPPORT_EMAIL,
+  WITHDRAWAL_RIGHT,
+  WITHDRAWAL_STATEMENT,
+} from "../../website/src/lib/hosted-withdrawal";
 import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
 import type { WithdrawalOffer, Withdrawn } from "../server/billing-summary";
 import { isPlan } from "../server/policy-constants";
@@ -52,7 +58,7 @@ export function ModelForm() {
   return (
     <details className="mt-2">
       <summary className={`cursor-pointer ${LINK_CLASS}`}>Model withdrawal form</summary>
-      <p className="mt-2">You may copy this into an email or a letter. Using it is optional.</p>
+      <p className="mt-2">{MODEL_FORM_INTRO}</p>
       <blockquote className="mt-2 border-l-2 border-[var(--color-text)]/25 pl-3 [overflow-wrap:anywhere]">
         {MODEL_WITHDRAWAL_FORM}
       </blockquote>
@@ -73,12 +79,13 @@ export function ModelForm() {
  * the online withdrawal is, the support path, and the model form.
  */
 export function WithdrawalRight() {
+  const [before, after] = WITHDRAWAL_RIGHT.split(SUPPORT_EMAIL);
   return (
     <div className={`mt-4 text-sm ${MUTED_TEXT_CLASS}`}>
       <p>
-        In the EEA or UK, you can withdraw within 14 days of buying without giving a reason, and we refund every payment,
-        including tax, with no deduction for the time you used. Use Withdraw from contract on your billing page, or email{" "}
-        <SupportLink />, even if you can no longer sign in.
+        {before}
+        <SupportLink />
+        {after}
       </p>
       <ModelForm />
     </div>

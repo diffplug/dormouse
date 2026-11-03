@@ -59,7 +59,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
 - **A full refund or a finally reversed payment ends the subscription it paid for**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it until it closes.
 - **Checkout starts from a Hosted account**: `/checkout` on the account origin asks for sign-in first, so the subscription belongs to an account from its first event.
-- **Must obtain affirmative agreement to the versioned terms and express consent to automatic renewal at the purchase action**, two unticked boxes, disclosing beside it the price and tax, the interval and renewal price, cancellation, the refund conditions, and the material limits: one individual including work use, no device limit, and managed voice's daily cap. Checkout refuses a Price other than the one shown and records the consent with it (`docs/specs/hosted.md` -> "Billing").
+- **Must obtain affirmative agreement to the versioned terms and express consent to automatic renewal at the purchase action**, two unticked boxes, disclosing beside it the price in US dollars and tax, the interval and renewal price, cancellation, the refund conditions, and the material limits: one individual including work use, no device limit, and managed voice's daily cap. Checkout refuses a Price other than the one shown and records the consent with it and with what it presented (`docs/specs/hosted.md` -> "Billing").
 - **Must keep a durable confirmation at `/billing` while the plan is held**: the plan and price, renewal, the terms version agreed and when, how to cancel, and refunds; Stripe's receipt emails carry each payment.
 - **Founding offers the founders-row opt-in, unticked, once bought**; the account can leave at any time.
 - **Must support EEA and UK consumer withdrawal**; the voluntary guarantee is additional (rationale):
@@ -71,7 +71,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 - **Must email the customer when a payment dispute suspends the subscription and when it is restored**, preserving refund and dispute rights.
 - **Closing an account cancels its subscription at once** (`docs/specs/hosted.md` -> "Account closure"). **Closing within 30 days of a subscription's first payment, or of a yearly renewal payment, refunds that payment in full.** **Must say before closing** that access ends now and renewal stops, which payment it refunds, that withdrawal stays open through support, and that cancelling renewal keeps access instead.
 
-Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `Checkout` in `hosted/src/Checkout.tsx`; `PlanConfirmation` in `hosted/src/Plan.tsx`; `WithdrawalFunction` in `hosted/src/Withdrawal.tsx`; `closureTerms` in `hosted/src/Closure.tsx`; `docs/specs/hosted.md` -> "Billing" owns the rest.
+Source of truth: `withBilling` and `openCohort` in `hosted/server/billing.ts`; `Checkout` in `hosted/src/Checkout.tsx`; `disclosure` in `hosted/server/disclosure.ts`; `PlanConfirmation` in `hosted/src/Plan.tsx`; `WithdrawalFunction` in `hosted/src/Withdrawal.tsx`; `closureTerms` in `hosted/src/Closure.tsx`; `docs/specs/hosted.md` -> "Billing" owns the rest.
 
 ## Future
 
