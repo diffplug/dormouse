@@ -1997,6 +1997,7 @@ describe('paired devices and revocation', () => {
       });
 
       const first = command('revokeDevice', { id: phoneId });
+      await settle();
       const second = command('revokeDevice', { id: tabletId });
       await settle();
 
@@ -2031,9 +2032,11 @@ describe('paired devices and revocation', () => {
       expect(accessEvents()).toBeGreaterThan(eventsBefore);
       expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
 
+      const eventsBeforeLanding = accessEvents();
       write.resolve();
       await vi.advanceTimersByTimeAsync(0);
       expect(revokedInStore()).toEqual([true]);
+      expect(accessEvents()).toBeGreaterThan(eventsBeforeLanding);
       expect((await pairedResult()).unsavedRevocations).toBeUndefined();
     });
   });

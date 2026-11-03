@@ -1349,6 +1349,19 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(accessEntries.map(({ event }) => event)).toEqual(['paired', 'revoked']);
   });
 
+  it('names the device of a pairing refused after its request', async () => {
+    makeBurrow();
+    const { clientStatic, code } = await requestPairing('c1', await newAuthenticator());
+
+    await approvals[0]!.approve(code === '42' ? '13' : '42');
+
+    expect(accessEntries.at(-1)).toMatchObject({
+      event: 'pairing-denied',
+      deviceId: deviceIdFor(toBase64Url(clientStatic.publicKey)),
+      reason: 'confirmation-mismatch',
+    });
+  });
+
   it('names no device for a pairing that expires before its request', async () => {
     makeBurrow();
     const session = await openPairing('c1', await mintInvitation(), await generateNoiseKeyPair());
