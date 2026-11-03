@@ -33,6 +33,8 @@ describe('normalizeExternalUri', () => {
     expect(normalizeExternalUri('https://example.com/\nnext')).toBeNull();
     expect(normalizeExternalUri('https://example.com/\u202etxt.exe')).toBeNull();
     expect(normalizeExternalUri('https://exa\u200bmple.com/')).toBeNull();
+    expect(normalizeExternalUri('https://exa\u00admple.com/')).toBeNull();
+    expect(normalizeExternalUri('https://example.com/\u{e0041}')).toBeNull();
     expect(normalizeExternalUri('')).toBeNull();
   });
 
