@@ -18,7 +18,7 @@ import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '
 import * as toolEditor from '../../lib/tool-editor';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { cfg } from '../../cfg';
-import { mountWallHarness, registerStubScreen, reportRunning, STUB_CHROME, type WallHarness } from './wall-test-utils';
+import { installBrowserHost, mountWallHarness, registerStubScreen, reportRunning, STUB_CHROME, waitUntil, type WallHarness } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -243,6 +243,22 @@ describe('Break', () => {
     } finally {
       screen.dispose();
     }
+  });
+
+  it('reopens a provider page with no directory of its own, whatever the terminal reports', async () => {
+    const host = installBrowserHost({ launch: async () => ({ ok: true, session: 'broken-out', stream: 1 }) });
+    fake = host.platform;
+    act(() => reportRunning(ID, COMMAND));
+    await mountTool({ ...SERVING, renderMode: 'agent-browser-screencast', toolRender: 'agent-browser-screencast' });
+    await events([{ type: 'cwd', cwd: { path: '/reported', pathKind: 'posix', isRemote: false, source: 'osc7', updatedAt: 1 } }]);
+    await clickBreak();
+    const pages = Object.entries(await leaves()).filter(([id]) => id !== ID);
+    expect(pages[0]?.[1]).toMatchObject({ component: 'browser', params: { renderMode: 'agent-browser-screencast' } });
+    expect(pages[0]?.[1].params).not.toHaveProperty('cwd');
+    // The Tool's own browser launched first, in its project.
+    await waitUntil(() => host.requests('launch').length === 2);
+    expect(host.requests('launch')[0].binding.cwd).toBe('/repo');
+    expect(host.requests('launch')[1].binding).not.toHaveProperty('cwd');
   });
 
   it('asks first, and Escape changes nothing', async () => {
