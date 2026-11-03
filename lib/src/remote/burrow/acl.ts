@@ -60,23 +60,12 @@ export type RevocationTarget =
   | { readonly clientStaticPublicKey: string }
   | { readonly passkeyCredentialId: string };
 
-/** The requesters a command to the service may name: the Settings list, or `dor`. */
-const COMMAND_REQUESTERS = ['settings', 'dor'] as const;
-
 /**
- * Who asked, as the access log records it: a command's, or the Relay naming a
- * passkey its account no longer holds. A closed set.
+ * Who asked, as the access log records it: the Settings list, or the Relay
+ * naming a passkey its account no longer holds. The service names it; no message
+ * does.
  */
-export const REVOCATION_REQUESTERS = [...COMMAND_REQUESTERS, 'relay'] as const;
-export type RevocationRequester = (typeof REVOCATION_REQUESTERS)[number];
-
-/**
- * The requester an untrusted command names, anything else read as `settings`:
- * no message can claim `relay`, which only the service's own asking logs.
- */
-export function revocationRequester(value: unknown): RevocationRequester {
-  return COMMAND_REQUESTERS.find((known) => known === value) ?? 'settings';
-}
+export type RevocationRequester = 'settings' | 'relay';
 
 /**
  * Revoke what `target` names on `acl`, in place, answering the records it

@@ -150,13 +150,13 @@ Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`
 
 ## Revocation
 
-**Only the Burrow revokes, and revoking only narrows.** `BurrowService.revoke` is the one entry point: it takes a target — one browser's Client static, retiring every active record it holds, or one passkey credential, retiring every record paired with it — and who asked (`REVOCATION_REQUESTERS`): Settings → Remote control's paired-phone list ([relay.md](./relay.md) -> "Remote control, in the Settings dialog"), `dor remote revoke` (`docs/specs/dor-cli.md`), or the Relay ([Relay-named revocation](#relay-named-revocation)). **No command, `dor` verb, or webview message adds or restores a record**, which stays [Pairing](#pairing)'s, **or claims the Relay asked**.
+**Only the Burrow revokes, and revoking only narrows.** `BurrowService.revoke` is the one entry point: it takes a target — one browser's Client static, retiring every active record it holds, or one passkey credential, retiring every record paired with it — and who asked (`RevocationRequester`): Settings → Remote control's paired-phone list ([relay.md](./relay.md) -> "Remote control, in the Settings dialog"), or the Relay ([Relay-named revocation](#relay-named-revocation)), and a message never names it. **No command or webview message adds or restores a record**, which stays [Pairing](#pairing)'s, **or claims the Relay asked**.
 
 Reserved: a Pocket-initiated revocation calls this entry point with a requester of its own (`remote-trust-followups` -> [Account-wide devices](#account-wide-devices)).
 
 - **A running Burrow's revocation takes effect before its save**: the live ACL drops the records, every established session no active record still authorizes ends with the goodbye, every pending connection whose Client static it left unpaired is refused `pairing-required`, and those statics' [presence windows](#presence-window) close. It queues with approvals, so neither overwrites the other's snapshot. A failed save rejects with the phone already refused, and the service applies the revocation to every ACL it reads for that Burrow, so a network-policy change that restarts the runtime keeps it; the next ACL write carries it, and the service stopping before one undoes it — Dormouse quitting, or in VS Code the broker window closing (`docs/specs/vscode.md` -> "Which window: bind-as-lease"), since the next broker loads the stored ACL (rationale).
 - **A stopped Burrow's revocation is its save**, on the service's lifecycle chain, so a Burrow starting meanwhile loads the ACL after it.
-- **A paired browser is named by `deviceIdFor`**: the first 64 bits of its Client static in hex, a name that authorizes nothing and the only identifier of a record that reaches a webview or `dor` (rationale). **An id that matches more than one Client static revokes nothing.**
+- **A paired browser is named by `deviceIdFor`**: the first 64 bits of its Client static in hex, a name that authorizes nothing and the only identifier of a record that reaches a webview (rationale). **An id that matches more than one Client static revokes nothing.**
 
 Source of truth: `BurrowService.revoke` in `lib/src/host/remote/service.ts`, `BurrowRuntime.revoke` in `lib/src/remote/burrow/burrow-runtime.ts`, `revokeTarget` in `lib/src/remote/burrow/acl.ts`.
 
@@ -193,7 +193,7 @@ Source of truth: `createPasskeySync` in `lib/src/remote/burrow/passkey-sync.ts`,
 | `one-time-connected`, `one-time-denied`, `one-time-ended` | a [one-time connection](#one-time-connection)'s confirmation, refusal, and end |
 
 - **Never terminal content**: an entry holds a time, an event, the device's mapped label and id, and at most a path, presence kind, duration, refusal reason, surface id, and requester.
-- **It stays on this machine**: persisted beside the ACL (`docs/specs/security-remote.md` -> "Credentials at rest"), read only by this machine's webviews, through `accessLog` and the `access` event that says it changed, and by `dor remote log`. Last seen, on the paired-phone list, is its newest entry for that device.
+- **It stays on this machine**: persisted beside the ACL (`docs/specs/security-remote.md` -> "Credentials at rest"), read only by this machine's webviews, through `accessLog` and the `access` event that says it changed. Last seen, on the paired-phone list, is its newest entry for that device.
 - **It informs and authorizes nothing**: a log that cannot be read starts over, and a failed save costs entries, never an access decision.
 
 Source of truth: `lib/src/remote/burrow/access-log.ts`, `BurrowService.#logAccess` in `lib/src/host/remote/service.ts`.
@@ -338,4 +338,4 @@ The account's view of its paired browsers, with [Relay-named revocation](#relay-
 
 One Pocket profile is a record per Burrow, and a phone's tab and its Home Screen install are two profiles. Pocket may mark the records that are its own, from its `KnownBurrowV1`s; nothing else is grouped.
 
-**Per-record list and revoke from Pocket**, on each online Burrow it is paired with, over protocol-v1 (`docs/specs/remote-api.md` -> "10. Paired-browser list and revoke"), which the Relay sees only as ciphertext: each record's mapped label, `deviceIdFor` id, approval time, last seen ([Access log](#access-log)), and whether it is the caller's, revoked by that id as `dor remote revoke` is, never by a static or `deliveryId`. **Revoking takes a fresh presence proof, never a window ride.** An unreachable Burrow is shown as one, Relay-named revocation being the lever that reaches it.
+**Per-record list and revoke from Pocket**, on each online Burrow it is paired with, over protocol-v1 (`docs/specs/remote-api.md` -> "10. Paired-browser list and revoke"), which the Relay sees only as ciphertext: each record's mapped label, `deviceIdFor` id, approval time, last seen ([Access log](#access-log)), and whether it is the caller's, revoked by that id as Settings revokes one, never by a static or `deliveryId`. **Revoking takes a fresh presence proof, never a window ride.** An unreachable Burrow is shown as one, Relay-named revocation being the lever that reaches it.

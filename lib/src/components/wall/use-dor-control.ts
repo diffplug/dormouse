@@ -134,8 +134,6 @@ export type DorControlParams = {
   setting?: unknown;
   initialViewport?: unknown;
   preview?: unknown;
-  /** `remote.revoke`: the paired phone's id. */
-  id?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
