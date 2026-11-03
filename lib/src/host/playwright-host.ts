@@ -9,6 +9,7 @@
 import { realpathSync } from 'node:fs';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
+import { neutralBrowserCwd } from './browser-neutral-cwd';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
@@ -345,7 +346,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   return {
     pollMs: 200,
 
-    bind: (binding) => bind(binding.session, binding.cwd ?? process.cwd(), resolvePlaywrightInstall(binding.binaryPath, binding.env), binding.env),
+    bind: (binding) => bind(binding.session, binding.cwd ?? neutralBrowserCwd(), resolvePlaywrightInstall(binding.binaryPath, binding.env), binding.env),
 
     // Installation, CLI project scope and session: a raw `--session` shares it
     // across one project's subdirectories.

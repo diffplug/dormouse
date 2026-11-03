@@ -204,19 +204,6 @@ function stageDefaultShell(id: string, cwd: string | undefined): void {
   if (defaults?.shell || cwd) setPendingShellOpts(id, { shell: defaults?.shell, args: defaults?.args, cwd });
 }
 
-/** The directory terminal `id` reported, as a path the host's browser
- *  providers open: a WSL pane reports Linux paths, Git Bash MSYS ones. */
-async function hostCwdOf(id: string): Promise<string | undefined> {
-  const cwd = getTerminalPaneState(id)?.cwd?.path;
-  const terminalContext = getPlatform().terminalContext;
-  if (!cwd || !terminalContext) return cwd;
-  try {
-    return (await terminalContext({ op: 'hostDirectory', id, path: cwd })).path ?? cwd;
-  } catch {
-    return cwd;
-  }
-}
-
 function ShellSpawnNotice({
   notice,
   paneElements,
@@ -2325,8 +2312,6 @@ export function Wall({
       && opening === terminalContextRef.current && opening?.id === id && !opening.closing
       && nav.hasPane(id) && !lath.isDying(id) && !isClosingSurface(id);
     const cancelledLaunch = () => new DOMException('Browser launch cancelled', 'AbortError');
-    const cwd = await hostCwdOf(id);
-    if (!current()) throw cancelledLaunch();
     const provider = parseRenderMode(mode).provider;
     // Keep the persisted agent-browser suffix from before multiple providers.
     const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
@@ -2340,8 +2325,11 @@ export function Wall({
     }
     let preparedId: string | undefined;
     let committed = false;
+    // No cwd: a provider CLI reads project config from where it runs, and this
+    // terminal's directory is only what it reported, so the host's neutral one
+    // serves (docs/specs/dor-browser.md -> "Pane Context Menu Connect").
     let params: Record<string, unknown> = {
-      surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: false, contextPortKey: key,
+      surfaceType: 'browser', renderMode: mode, url: entry.url, syncEngaged: false, contextPortKey: key,
     };
     // A prepared browser that never became a Pane closes, at once on cancel.
     // Cancelling bumps the generation first, so `current()` sees it too.
@@ -2389,7 +2377,6 @@ export function Wall({
     // host has it — as an ordinary browser Surface beside it.
     const params = lath.getMeta(id)?.params;
     if (!isToolParams(params) || toolFace(params) === 'pending-approval') return;
-    const cwd = await hostCwdOf(id);
     // Consent just before the document goes; any change while asking abandons the Break.
     if (!await confirmToolEditorsClose([id]) || transferRefusal(id) || lath.getMeta(id)?.params !== params) return;
     // Only an http(s) page reopens, as a swap judges it; a transient or error
@@ -2405,9 +2392,9 @@ export function Wall({
     const created = createContentSurface({
       minimized: false,
       preserveSource: true,
-      // A launch that fails takes its pane with it.
+      // A launch that fails takes its pane with it. No cwd, as openContextPort.
       params: provider && hostSupportsBrowser(provider)
-        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, cwd, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
         : { surfaceType: 'browser', renderMode: 'iframe', url: shownUrl },
       reference,
       title: hostPathDisplay(shownUrl, true),
