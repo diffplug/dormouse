@@ -2,6 +2,8 @@
 
 ## Terminal output
 
+Which replies echo printed bytes (read 2026-11, xterm.js 6.1.0-beta.336, addon-image 0.10.0-beta.331). Only the `OSC 99` id. Dormouse's other answers are a parsed theme color and a constant. xterm.js's device, mode, cursor, size, focus, color-scheme, and `DECRQSS` replies carry numbers or constants, `DECRQSS` answering `P0$r` for anything it does not know, and it has no title report. ImageAddon's Kitty replies carry parsed integers and fixed messages. The id alphabet is kitty's own for `i`, and the bound fits a UUID; an id outside it is dropped and the query still answered.
+
 What the `OSC 52` strip actually buys. The pinned `@xterm/xterm` registers OSC handlers for 0, 1, 2, 4, 8, 10, 11, 12, 104, 110, 111 and 112 only — no 52 — and no clipboard addon is a dependency, so an `OSC 52` reaching xterm today would be discarded rather than acted on. Dormouse's strip is therefore the barrier it controls, not the only one standing; xterm's handler table is not ours to keep, and an addon or a version bump could add 52 without a diff here.
 
 Why the OSC 633 command line carries two bounds. `COMMAND_LINE_LIMIT` (2048) is applied by `sanitizeText` *after* `decodeOsc633Value`, because the `\xNN` unescape re-introduces the control characters the emit side removed. A 4x bound holds the raw value before the unescape, so an emitter cannot make the decoder do unbounded work on the way to that cap.
