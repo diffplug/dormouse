@@ -168,11 +168,13 @@ async function mountSlot(options: { caller?: string; slot?: ShellOptions; title?
 
 type ToolResult = { status: string; surfaceId: string; command: string; minimized: boolean };
 
+const dialogButton = (label: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === label)!;
+
 /** Dispatch one control request from `caller`; its `respond` mock. */
-function dispatch(method: string, params: Record<string, unknown>, caller = 'surface:a') {
+function dispatch(method: string, params: Record<string, unknown>, caller = 'surface:a', origin: { terminalLink?: true } = {}) {
   const respond = vi.fn();
   window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-    requestId: crypto.randomUUID(), method, surfaceId: caller, params, signal: requests.signal, respond,
+    requestId: crypto.randomUUID(), method, surfaceId: caller, params, signal: requests.signal, respond, ...origin,
   } }));
   return respond;
 }
@@ -975,7 +977,7 @@ describe('an OSC 367 open', () => {
 });
 
 describe('a terminal link', () => {
-  const openFileButton = () => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
+  const openFileButton = () => dialogButton('Open file');
 
   it('confirms a labelled link through the real Wall and pins its existing preview', async () => {
     await mountSlot();
@@ -1344,8 +1346,11 @@ describe('Tool document navigation', () => {
 
 
 describe('a terminal link to a page that runs its own script', () => {
-  const click = (file: string, preview = true) => request({ file, preview, terminalLink: true });
-  const dialogButton = (label: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === label)!;
+  const click = async (file: string, preview = true) => {
+    let respond!: ReturnType<typeof vi.fn>;
+    await act(async () => { respond = dispatch(SURFACE_CONTROL_METHODS.tool, { cwd: '/repo', file, preview }, 'surface:a', { terminalLink: true }); });
+    return respond;
+  };
   const asking = (uri: string) => waitUntil(() => getExternalLinkConfirmationSnapshot()?.uri === uri);
 
   it('waits for the user to confirm its full path, and a cancel runs nothing', async () => {
@@ -1407,9 +1412,9 @@ describe('a terminal link to a page that runs its own script', () => {
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });
 
-  it('does not ask for an open that is not a link click', async () => {
+  it('does not ask for an open that is not a link click, nor take a request\'s word that it is', async () => {
     await mountSlot();
-    await answer(await request({ file: '/elsewhere/page.html' }));
+    await answer(await request({ file: '/elsewhere/page.html', terminalLink: true }));
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });
 });
@@ -1418,7 +1423,6 @@ describe('a document link to a page that runs its own script', () => {
   /** The Tool in `surface:slot` follows a document link, as its OSC 367 `open`. */
   const follow = (path: string) => act(async () => applyLiveToolEvents('surface:slot',
     [{ kind: 'toolOpen', open: { path, preview: false, disposition: 'current' } }]));
-  const dialogButton = (label: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === label)!;
   /** Wait for the slot to show `target`. */
   async function untilTarget(target: string): Promise<void> {
     for (let tries = 0; tries < 100; tries++) {

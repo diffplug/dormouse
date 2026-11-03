@@ -42,7 +42,7 @@ export function toolHandlerName(scope: unknown, name: unknown): string | undefin
  * file is assumed to render it too. A link may climb with `..` to anywhere on
  * disk under any link text, so the page cannot be the one that asks.
  */
-export function documentLinkNeedsConfirmation(scope: unknown, name: unknown, target: string): boolean {
+export function linkOpenNeedsConfirmation(scope: unknown, name: unknown, target: string): boolean {
   const format = fileViewerFormat(target);
   if (!format || !runsOwnScript(format)) return false;
   const handler = toolHandlerName(scope, name);

@@ -13,8 +13,6 @@ const PSEUDO_SCHEMES = new Set(['javascript:', 'vbscript:', 'data:', 'blob:', 'a
 const REFUSED_APP_SCHEMES = new Set([
   'ms-msdt:', 'search-ms:', 'search:', 'ms-officecmd:', 'ms-appinstaller:', 'ms-its:', 'its:', 'mk:', 'hcp:',
 ]);
-/** One DNS label, the source both host-shape patterns below are built from. */
-const DNS_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
 
 export type DisplayMatchVerdict = 'match' | 'plain' | 'deceptive';
 
@@ -95,12 +93,13 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
 
   if (normalizeForMatch(text) === normalizeForMatch(uri)) return 'match';
 
-  const shapedHost = extractUrlShapedHost(text);
-  if (shapedHost === null) return 'plain';
-
+  const shown = normalizeDisplayText(text);
   // `README.md:42` over `file:///x/README.md` names a file, not a host.
-  const fileName = decodeFileLink(uri)?.path.split('/').pop();
-  if (fileName && canonicalHost(fileName) === shapedHost) return 'plain';
+  const file = decodeFileLink(uri);
+  if (file && namesPath(file.path, shown.replace(LINE_SUFFIX_RE, ''))) return 'plain';
+
+  const shapedHost = extractUrlShapedHost(shown);
+  if (shapedHost === null) return 'plain';
 
   const actualHost = safeHost(uri);
   if (actualHost === null) return 'plain';
@@ -110,9 +109,17 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
 
 // A host the URL parser left as a plain DNS-style name: no IP literal brackets,
 // no port. Whether it names this machine is the host's decision.
+const DNS_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
 const PLAIN_HOSTNAME_RE = new RegExp(`^${DNS_LABEL}(?:\\.${DNS_LABEL})*$`, 'i');
 // One `ls -F` classifier, which may follow a name inside its link.
 const LS_CLASSIFIER_RE = /[/*@=|>]$/;
+// A compiler's `:line` or `:line:column` after a name.
+const LINE_SUFFIX_RE = /:\d+(?::\d+)?$/;
+
+/** Whether `text` equals `path` or is a whole-component suffix of it. */
+function namesPath(path: string, text: string): boolean {
+  return text !== '' && (path === text || path.endsWith(`/${text}`));
+}
 
 /**
  * The decoded absolute path of a `file:` link whose display text names its
@@ -127,9 +134,8 @@ export function localFileLinkPreviewPath(uri: string, displayText: string): stri
   if (!link || (link.host !== '' && !PLAIN_HOSTNAME_RE.test(link.host))) return null;
   const { path } = link;
   if (hasShellInputControls(path)) return null;
-  const names = (text: string) => text !== '' && (path === text || path.endsWith(`/${text}`));
   const text = displayText.trim();
-  return names(text) || names(text.replace(LS_CLASSIFIER_RE, '')) ? path : null;
+  return namesPath(path, text) || namesPath(path, text.replace(LS_CLASSIFIER_RE, '')) ? path : null;
 }
 
 /** A `file:` URI's host and decoded path, a folder's trailing `/` removed;
@@ -168,38 +174,33 @@ function safeHost(uri: string): string | null {
   }
 }
 
-/** A name as the URL parser resolves it: lowercased, IDN to punycode, no root
- *  dot. A lookalike therefore compares unequal to the host it imitates. */
-function canonicalHost(name: string): string | null {
-  try {
-    return new URL(`https://${name}`).hostname.replace(/\.$/, '');
-  } catch {
-    return null;
-  }
-}
-
 const HIDDEN_IN_DISPLAY = new RegExp(`[${FORMAT_CHARACTERS}]`, 'gu');
 // What may wrap a name in prose. Never `.`, `/`, `\`, or `~` before it: `./a.sh`
-// is a path, and `//host` is read below.
-const DISPLAY_WRAPPING = /^(?:(?![./\\~])[\p{P}\p{S}\p{Z}])+|[\p{P}\p{S}\p{Z}]+$/gu;
+// is a path, and `//host` is read below. The lookbehind scans each run once: the
+// text is as long as the link the output printed.
+const DISPLAY_WRAPPING = /^(?:(?![./\\~])[\p{P}\p{S}\p{Z}])+|(?<![\p{P}\p{S}\p{Z}])[\p{P}\p{S}\p{Z}]+$/gu;
 const DISPLAY_LABEL = '[\\p{L}\\p{N}](?:[\\p{L}\\p{N}\\p{M}-]*[\\p{L}\\p{N}\\p{M}])?';
 // "URL-shaped" without a scheme: `localhost` or a dotted name, with any root
 // dot, port, and path. Bare-domain detection is the classic phishing shape: a
 // terminal label that looks like a domain and links somewhere else.
 const BARE_DOMAIN_RE = new RegExp(`^(?://)?(localhost|${DISPLAY_LABEL}(?:\\.${DISPLAY_LABEL})+)\\.?(?::\\d{1,5})?(?:[/?#].*)?$`, 'iu');
 // A name ending in a number is an IPv4 address or not a host: `12.5` is a figure.
-const NUMERIC_LABEL_RE = /(?:^|\.)\d+$/;
-const IPV4_RE = /^\d+\.\d+\.\d+\.\d+$/;
+const FIGURE_RE = /^(?!\d+\.\d+\.\d+\.\d+$).*\.\d+$/;
 
-/** The host display text reads as, however spelled: compatibility forms and the
- *  ideographic full stop folded, invisible characters dropped, wrapping brackets
- *  and punctuation removed; null for text that names no host. */
+/** Display text however spelled: compatibility forms and the ideographic full
+ *  stop folded, separators read as spaces, invisible characters dropped, wrapping
+ *  brackets and punctuation removed. */
+function normalizeDisplayText(text: string): string {
+  return text.normalize('NFKC').replace(/\p{Z}/gu, ' ').replace(HIDDEN_IN_DISPLAY, '').replace(/\u3002/g, '.').replace(DISPLAY_WRAPPING, '');
+}
+
+/** The host normalized display text reads as, through the URL parser so a
+ *  lookalike's punycode compares unequal to the host it imitates; null for text
+ *  that names no host. */
 function extractUrlShapedHost(text: string): string | null {
-  const t = text.normalize('NFKC').replace(HIDDEN_IN_DISPLAY, '').replace(/\u3002/g, '.').replace(DISPLAY_WRAPPING, '');
-  if (t.includes('://')) return safeHost(t);
-  const name = BARE_DOMAIN_RE.exec(t)?.[1];
-  if (!name || (NUMERIC_LABEL_RE.test(name) && !IPV4_RE.test(name))) return null;
-  return canonicalHost(name);
+  if (text.includes('://')) return safeHost(text);
+  const name = BARE_DOMAIN_RE.exec(text)?.[1];
+  return !name || FIGURE_RE.test(name) ? null : safeHost(`https://${name}`);
 }
 
 function blocked(

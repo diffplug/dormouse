@@ -159,7 +159,18 @@ describe('classifyDisplayMatch', () => {
     expect(classifyDisplayMatch('file:///repo/README.md', 'README.md')).toBe('plain');
     expect(classifyDisplayMatch('file:///repo/README.md', 'README.md:42')).toBe('plain');
     expect(classifyDisplayMatch('file:///repo/README.md', '(./README.md)')).toBe('plain');
+    expect(classifyDisplayMatch('file:///repo/foo.js/README.md', 'foo.js/README.md:42')).toBe('plain');
     expect(classifyDisplayMatch('file:///repo/notes.txt', 'github.com:443')).toBe('deceptive');
+  });
+
+  it('reads a separator as a space, not as nothing', () => {
+    expect(classifyDisplayMatch('https://evil.example/login', 'Visit\u2028github.com')).toBe('plain');
+  });
+
+  it('classifies a long run of punctuation without backtracking over it', () => {
+    const started = performance.now();
+    expect(classifyDisplayMatch('https://evil.example/login', `a${'!'.repeat(200_000)}a`)).toBe('plain');
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 
   it('treats label with embedded URL as plain unless the bare-domain pattern matches', () => {

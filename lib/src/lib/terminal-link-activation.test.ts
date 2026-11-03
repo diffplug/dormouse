@@ -43,7 +43,8 @@ describe('activateTerminalLink', () => {
     expect(requests).toEqual([expect.objectContaining({
       surfaceId: SESSION,
       method: SURFACE_CONTROL_METHODS.tool,
-      params: { file: URI, preview: true, cwd: '/work', terminalLink: true },
+      params: { file: URI, preview: true, cwd: '/work' },
+      terminalLink: true,
     })]);
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });

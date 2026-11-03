@@ -40,10 +40,10 @@ export function requestExternalLinkConfirmation(uri: string, displayText: string
 }
 
 /** Where a link that asks before opening was clicked. */
-export type LinkOrigin = 'document' | 'terminal';
+type LinkOrigin = 'document' | 'terminal';
 
 /** What the dialog shows for a link to the local file `path`. */
-export function documentLinkRequest(path: string, origin: LinkOrigin = 'document'): Omit<PendingExternalLink, 'id' | 'answer'> {
+export function linkOpenRequest(path: string, origin: LinkOrigin): Omit<PendingExternalLink, 'id' | 'answer'> {
   return {
     uri: path,
     displayText: '',
@@ -58,13 +58,13 @@ export function documentLinkRequest(path: string, origin: LinkOrigin = 'document
  * file `path`, shown in full; resolves whether the user confirmed. The caller
  * does the open. Aborting `signal` withdraws the question.
  */
-export function confirmDocumentLinkOpen(path: string, signal?: AbortSignal, origin?: LinkOrigin): Promise<boolean> {
+export function confirmLinkOpen(path: string, origin: LinkOrigin, signal?: AbortSignal): Promise<boolean> {
   return new Promise(resolve => {
     if (signal?.aborted) return resolve(false);
     let answered = false;
     const request: PendingExternalLink = {
       id: ++nextId,
-      ...documentLinkRequest(path, origin),
+      ...linkOpenRequest(path, origin),
       answer: confirmed => {
         if (answered) return;
         answered = true;

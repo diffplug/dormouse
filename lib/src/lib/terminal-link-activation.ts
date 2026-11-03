@@ -47,12 +47,12 @@ export function activateTerminalLink(
     requestId: `link-${crypto.randomUUID()}`,
     surfaceId: id,
     method: SURFACE_CONTROL_METHODS.tool,
-    params: { file: uri, preview, cwd: source.cwd, terminalLink: true },
+    params: { file: uri, preview, cwd: source.cwd },
   }, (response) => {
     if (response.ok || response.error === PREVIEW_SUPERSEDED_ERROR || response.error === NAVIGATION_CANCELLED_ERROR || ownPreview?.failed) return;
     if (record) record.failed = true;
     requestExternalLinkConfirmation(uri, displayText, source);
-  });
+  }, { terminalLink: true });
 }
 
 /** The click's directory, kept across confirmation and viewer selection: the

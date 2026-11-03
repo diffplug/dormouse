@@ -1043,14 +1043,9 @@ function sanitizeOsc99Id(id: string | null): string | null {
   return sanitized || null;
 }
 
-function formatOsc99SupportResponse(rawId: string | null): string {
-  const id = normalizeOsc99ResponseId(rawId);
-  const metadata = id ? `i=${id}:p=?` : 'p=?';
+function formatOsc99SupportResponse(id: string | null): string {
+  const metadata = id && OSC99_RESPONSE_ID_RE.test(id) ? `i=${id}:p=?` : 'p=?';
   return `\x1b]99;${metadata};${OSC99_SUPPORT_PAYLOAD}\x1b\\`;
-}
-
-function normalizeOsc99ResponseId(id: string | null): string | null {
-  return id && OSC99_RESPONSE_ID_RE.test(id) ? id : null;
 }
 
 function decodeBase64(input: string): string | null {

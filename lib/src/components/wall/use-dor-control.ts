@@ -74,9 +74,9 @@ import { commitPreviewTransition, endPreviewTransition } from '../../lib/preview
 import { retireToolRun } from './use-tool-serving';
 import { validToolFragment } from 'dor-tools-lib/osc';
 import { confirmToolEditorsClose } from '../../lib/tool-editor';
-import { confirmDocumentLinkOpen } from '../../lib/external-link-confirmation';
+import { confirmLinkOpen } from '../../lib/external-link-confirmation';
 import { directoryOf } from '../../lib/tool-open-requests';
-import { commitToolHistory, documentLinkNeedsConfirmation, hasToolView, toolHandlerName, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
+import { commitToolHistory, linkOpenNeedsConfirmation, hasToolView, toolHandlerName, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
 
 import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
@@ -155,6 +155,9 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
    *  may make and whose failure shows in the preview slot. Never set by a
    *  control-socket request. */
   oscOpen?: true;
+  /** A click on a terminal link, which asks before a page that runs its own
+   *  script. Never set by a control-socket request. */
+  terminalLink?: true;
   /** The default placement reference when it is not the caller: a helper's
    *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
   placementSurfaceId?: string;
@@ -1509,13 +1512,13 @@ export function useDorControl({
         // whatever the output printed, an empty host claiming this machine, so
         // it asks too. Asked of the resolved target, so a symlink and a user's
         // inert handler both answer for what would really open.
-        const terminalLink = params.terminalLink === true;
-        if (openTarget !== undefined
-          && (terminalLink || (documentLink && !(sourceParams!.toolTarget === openTarget && sourceParams!.toolName === toolName && sourceParams!.toolScope === toolScope)))
-          && documentLinkNeedsConfirmation(toolScope, toolName, openTarget)) {
+        const leavesDocument = documentLink
+          && !(sourceParams!.toolTarget === openTarget && sourceParams!.toolName === toolName && sourceParams!.toolScope === toolScope);
+        if (openTarget !== undefined && (detail.terminalLink || leavesDocument)
+          && linkOpenNeedsConfirmation(toolScope, toolName, openTarget)) {
           // Nothing placed yet: every placement below reads the Wall afresh,
           // and `sourceChanged` notices a source that moved on meanwhile.
-          const confirmed = await released(confirmDocumentLinkOpen(openTarget, previewSignal ?? detail.signal, terminalLink ? 'terminal' : 'document'));
+          const confirmed = await released(confirmLinkOpen(openTarget, detail.terminalLink ? 'terminal' : 'document', previewSignal ?? detail.signal));
           if (unavailable() || answeredSuperseded()) return;
           if (!confirmed) {
             detail.respond({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
