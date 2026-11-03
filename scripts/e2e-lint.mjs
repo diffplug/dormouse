@@ -624,7 +624,7 @@ export const RULES = [
   },
   {
     rule:
-      'Five calls save a Burrow ACL: the runtime\'s approval and revocation, and the service\'s `#saveAcl`, its wiring to the runtime, and its stopped-Burrow revocation',
+      'Five calls save a Burrow ACL: the runtime\'s approval and revocation, and the service\'s `#saveAcl`, its wiring to the runtime, and its save of a stopped Burrow\'s revocations',
     security: 'an ACL is saved at five sites only',
     kind: 'exactly',
     trees: ACL_WRITER_TREES,

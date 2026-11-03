@@ -96,7 +96,7 @@ Source of truth: `PresenceWindows` in `remote-lib-common/src/security/presence-w
 
 - **IK against the invitation key**: Client initiator, fresh per-Burrow static as `s`, invitation public key as `rs`. **Both handshake payloads are empty**; `Split` yields the pairing channel, and no ACL, delivery ID, or resumable state exists yet.
 - **Reverse two-digit confirmation.** Pocket samples a uniform code `00`–`99` (rejection sampling) and sends it with its `PresenceProofV1` and device label in the first transport payload. After the proof verifies, the Burrow opens a modal with the label, an empty two-digit input, and **copy telling the person to cancel if the phone shows an error or no code** — a request with no code on the phone is what an injected one looks like. **The Burrow holds the expected code and never displays, mirrors, or retransmits it**, and compares the typed digits without early exit ([relay.md](./relay.md) owns the webview echo). **Exactly one attempt** (rationale).
-- **The pairing modal and the ACL record never carry text the phone chose.** The Burrow keeps a label only as a member of `PAIRING_DEVICE_LABELS`, any other as `Unknown device`, and maps a record's label again wherever it is shown (rationale).
+- **The pairing modal and the ACL record never carry display text the phone chose.** The Burrow keeps a label only as a member of `PAIRING_DEVICE_LABELS`, any other as `Unknown device`, and maps a record's label again wherever it is shown (rationale).
 - **Every terminal outcome consumes the invitation, erases handshake material, and is reported at both ends in fixed local copy, never text off the wire** ([relay.md](./relay.md) -> "Remote control, in the Settings dialog"): mismatch, denial, pairing-TTL timeout, replacement by a newer pairing from the same Client, malformed input, or a failed proof.
 - **Confirmation writes one record, then answers.** On a match the Burrow durably writes one active `BurrowAclRecord` binding `burrowId`, `accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`, **the Client static IK authenticated** — never one the payload merely claimed — and a fresh `deliveryId`, then sends `PairingOutcomeV1`: success carries the Burrow static public key, the local label, the paired passkey identifiers and hash, and the `deliveryId`; denial carries only `user-denied`, `confirmation-mismatch`, `presence-rejected`, `invitation-expired`, `superseded`, or `burrow-error`. **Both use the same fixed padded control message**, so approval and denial are one size on the wire ([relay.md](./relay.md) -> E2E framing).
 - **Must serialize approval snapshots and publish the ACL only after saving.** Service lifecycle changes await approval writes. A failed save denies `burrow-error` without changing the live ACL. Once the write starts, local consent is final: teardown can discard its transport but cannot cancel the write or announce denial; **pairing frames arriving during the write are not read**, so none, an undecryptable one included, ends the ceremony; completion never revives a retired ceremony.
@@ -154,8 +154,13 @@ Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`
 
 Reserved: a Pocket-initiated revocation calls this entry point with a requester of its own (`remote-trust-followups` -> [Account-wide devices](#account-wide-devices)).
 
-- **A running Burrow's revocation takes effect before its save**: the live ACL drops the records, every established session no active record still authorizes ends with the goodbye, every pending connection whose Client static it left unpaired is refused `pairing-required`, and those statics' [presence windows](#presence-window) close. It queues with approvals, so neither overwrites the other's snapshot. A failed save rejects with the phone already refused, and the service applies the revocation to every ACL it reads for that Burrow, so a network-policy change that restarts the runtime keeps it; the next ACL write carries it, and the service stopping before one undoes it — Dormouse quitting, or in VS Code the broker window closing (`docs/specs/vscode.md` -> "Which window: bind-as-lease"), since the next broker loads the stored ACL (rationale).
-- **A stopped Burrow's revocation is its save**, on the service's lifecycle chain, so a Burrow starting meanwhile loads the ACL after it.
+- **A running Burrow's revocation takes effect at once, on neither the service's lifecycle chain nor the approval queue**: the live ACL drops the records, every established session no active record still authorizes ends with the goodbye, every pending connection whose Client static it left unpaired is refused `pairing-required`, and those statics' [presence windows](#presence-window) close. **Only its save queues, with approvals**, so neither overwrites the other's snapshot.
+- **An approval the revocation overtook never brings a record back.** At publish it re-applies every revocation since its snapshot. One whose identities a revocation since the digits were typed names is refused `user-denied`: before its write if still queued, after it if mid-write, opening no window either way.
+- **A stopped Burrow's revocation reads the store on the service's lifecycle chain**, then is held and saved the same way.
+- **The service holds a revocation from the moment it applies until a saved ACL carries it**, applying it to every ACL it reads for that Burrow, so a network-policy change that restarts the runtime keeps it. A write whose snapshot predates it ends no hold; a record approved after it is a new pairing it never touches.
+- **Must retry the save until one lands**: every `REVOCATION_SAVE_RETRY_MS`, on every revoke attempt, one naming nothing included, and at service dispose and host shutdown. A failed save rejects with the phone already refused.
+- **A held revocation is reported once a save failed or the first retry passed**, in `pairedDevices`' optional `unsavedRevocations`, by the id and mapped label of each browser it cut off. **Revoking that id saves again**, and answers as the revocation did.
+- **A hold is memory only**: the service stopping before a save lands undoes it — Dormouse quitting, or in VS Code the broker window closing (`docs/specs/vscode.md` -> "Which window: bind-as-lease"), since the next broker loads the stored ACL (`docs/specs/security.md` -> "Known gaps"; rationale).
 - **A paired browser is named by `deviceIdFor`**: the first 64 bits of its Client static in hex, a name that authorizes nothing and the only identifier of a record that reaches a webview or `dor` (rationale). **An id that matches more than one Client static revokes nothing.**
 
 Source of truth: `BurrowService.revoke` in `lib/src/host/remote/service.ts`, `BurrowRuntime.revoke` in `lib/src/remote/burrow/burrow-runtime.ts`, `revokeTarget` in `lib/src/remote/burrow/acl.ts`.
@@ -180,19 +185,20 @@ Source of truth: `createPasskeySync` in `lib/src/remote/burrow/passkey-sync.ts`,
 
 ## Access log
 
-**The Burrow records who reached it, on this machine, and never what they did.** One bounded, append-only log per machine, not per enrollment, since a one-time connection needs none; past `ACCESS_LOG_MAX_ENTRIES` the oldest entry goes (rationale).
+**The Burrow records who reached it, on this machine, and never what they did.** One bounded, append-only log per machine, not per enrollment, since a one-time connection needs none. **A refusal evicts only an older refusal**: `pairing-denied`, `connection-denied`, and `one-time-denied` share `ACCESS_LOG_MAX_REFUSALS` of the `ACCESS_LOG_MAX_ENTRIES`, every other event the rest, and past its share a kind's oldest entry goes. **Never by device id**, which a sender makes fresh at will (rationale).
 
 | Event | Recorded |
 | --- | --- |
 | `paired`, `pairing-denied` | a pairing's ending, with its outcome code |
 | `connected` | a promotion, with how presence was shown: a proof or the window |
-| `connection-denied` | every refusal, with the specific ACL miss or presence failure the outcome never carries ([Connection](#connection)) |
+| `connection-denied` | a refusal, with the specific ACL miss or presence failure the outcome never carries ([Connection](#connection)) |
 | `attached` | an attach that succeeded, with its surface id |
 | `ended` | a session's end, with its path (relayed or direct) and duration |
 | `revoked` | each browser a [revocation](#revocation) cut off, with who asked, the Relay included |
 | `one-time-connected`, `one-time-denied`, `one-time-ended` | a [one-time connection](#one-time-connection)'s confirmation, refusal, and end |
 
 - **Never terminal content**: an entry holds a time, an event, the device's mapped label and id, and at most a path, presence kind, duration, refusal reason, surface id, and requester.
+- **A ceremony on which no Client transport message decrypted logs nothing**, so it names no device and moves no Last seen: message 1 alone can be a replay (rationale).
 - **It stays on this machine**: persisted beside the ACL (`docs/specs/security-remote.md` -> "Credentials at rest"), read only by this machine's webviews, through `accessLog` and the `access` event that says it changed, and by `dor remote log`. Last seen, on the paired-phone list, is its newest entry for that device.
 - **It informs and authorizes nothing**: a log that cannot be read starts over, and a failed save costs entries, never an access decision.
 
