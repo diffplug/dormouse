@@ -180,6 +180,7 @@ const SERVED: Record<Name, [string, string][]> = {
     ["POST", API_ROUTES.signinBegin],
     ["GET", API_ROUTES.burrows],
     ["POST", API_ROUTES.burrowSetupToken],
+    ["POST", API_ROUTES.burrowPasskeysRemoved],
     ["POST", API_ROUTES.burrowEnrollBegin],
     ["POST", API_ROUTES.burrowEnrollPoll],
     ["GET", API_ROUTES.pushConfig],
@@ -203,6 +204,7 @@ const RELAY_API: [string, string][] = [
   ["POST", API_ROUTES.reauthFinish],
   ["GET", API_ROUTES.burrows],
   ["POST", API_ROUTES.burrowSetupToken],
+  ["POST", API_ROUTES.burrowPasskeysRemoved],
   ["POST", API_ROUTES.burrowEnroll],
   ["GET", API_ROUTES.pushConfig],
   ["POST", API_ROUTES.pushSubscribe],
@@ -840,6 +842,9 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
       throw new Error("No approval removes a Burrow");
     },
     closeSessions: async () => {
+      throw new Error("No approval removes a passkey");
+    },
+    nudgeBurrows: async () => {
       throw new Error("No approval removes a passkey");
     },
   });

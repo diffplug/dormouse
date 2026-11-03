@@ -12,6 +12,7 @@ import { DELIVERY_ID_LENGTH } from '../security/acl.js';
 import {
   fromBase64Url,
   isBoundedBase64Url,
+  isBoundedString,
   isExactBase64Url,
   toBase64Url,
   utf8Decode,
@@ -159,6 +160,40 @@ export const MAX_PASSKEY_LABEL_LENGTH = 64;
  * is orders of magnitude above real use.
  */
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+
+// ---------------------------------------------------------------------------
+// Which of a Burrow's passkeys its account no longer holds
+// (`docs/specs/relay.md` -> "HTTP API").
+
+/**
+ * Credential ids one `POST /api/burrow/passkeys/removed` may name; a Burrow
+ * whose records hold more asks in batches. Each id is bounded at
+ * {@link CEREMONY_FIELD_LIMIT}, so a full query fits {@link MAX_REQUEST_BODY_BYTES}.
+ */
+export const MAX_PASSKEY_QUERY_IDS = 32;
+
+/** The 400 a query that is not `{ credentialIds }`, within its bounds, gets. */
+export const MALFORMED_PASSKEY_QUERY_ERROR = `credentialIds must be at most ${MAX_PASSKEY_QUERY_IDS} credential ids`;
+
+/** The credential ids a request body asks about, or `null` for anything else. */
+export function passkeyQueryIds(body: unknown): string[] | null {
+  const ids = (body as { credentialIds?: unknown } | null)?.credentialIds;
+  return Array.isArray(ids) &&
+    ids.length <= MAX_PASSKEY_QUERY_IDS &&
+    ids.every((id) => isBoundedString(id, CEREMONY_FIELD_LIMIT))
+    ? (ids as string[])
+    : null;
+}
+
+/**
+ * Those of `asked` not in `held`, the account's passkeys: the whole of a
+ * Relay's answer, so it names no id the Burrow did not send and lists none of
+ * the account's.
+ */
+export function removedPasskeyIds(asked: readonly string[], held: readonly string[]): string[] {
+  const holding = new Set(held);
+  return [...new Set(asked)].filter((id) => !holding.has(id));
+}
 
 // ---------------------------------------------------------------------------
 // Web Push bounds (`docs/specs/relay.md` -> "Web Push" and "State files").

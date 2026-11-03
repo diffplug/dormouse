@@ -76,6 +76,7 @@ async function fixture({ closed = false } = {}) {
     mail,
     closeBurrow: async (_userId: string, burrowId: string) => closedBurrows.push(burrowId),
     closeSessions: async (_userId: string, tokenHashes: string[]) => closedSessions.push(...tokenHashes),
+    nudgeBurrows: async () => {},
   };
   const app = new Hono();
   billingRoutes(app, () => host);

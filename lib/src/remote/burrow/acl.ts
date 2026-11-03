@@ -60,8 +60,12 @@ export type RevocationTarget =
   | { readonly clientStaticPublicKey: string }
   | { readonly passkeyCredentialId: string };
 
-/** Who asked, as the access log records it: the Settings list. */
-export type RevocationRequester = 'settings';
+/**
+ * Who asked, as the access log records it: the Settings list, or the Relay
+ * naming a passkey its account no longer holds. The service names it; no message
+ * does.
+ */
+export type RevocationRequester = 'settings' | 'relay';
 
 /**
  * Revoke what `target` names on `acl`, in place, answering the records it
