@@ -6,7 +6,7 @@
  * why a request was refused.
  *
  * Shared by the runtime that observes, the service that keeps and persists,
- * and the webview and `dor` that read.
+ * and the webview that reads.
  */
 
 import { fromBase64Url } from 'remote-lib-common';
@@ -51,7 +51,7 @@ export interface AccessLogEntry {
   reason?: string;
   /** The surface an `attached` entry attached. */
   surface?: string;
-  /** Who asked for a `revoked`: a member of `REVOCATION_REQUESTERS` (`acl.ts`). */
+  /** Who asked for a `revoked`: a `RevocationRequester` (`acl.ts`), or any name an older entry kept. */
   by?: string;
 }
 
@@ -59,11 +59,10 @@ export interface AccessLogEntry {
 const DEVICE_ID_BYTES = 8;
 
 /**
- * The short, stable name `dor` and the Settings list use for one paired
- * browser: the first {@link DEVICE_ID_BYTES} bytes of its Client static, in
- * hex, so it never starts with a `-` a command line would read as a flag. A
- * public key carries no authority, so neither does this; the service refuses a
- * revoke an id matches more than one Client static for.
+ * The short, stable name the Settings list uses for one paired browser: the
+ * first {@link DEVICE_ID_BYTES} bytes of its Client static, in hex. A public
+ * key carries no authority, so neither does this; the service refuses a revoke
+ * an id matches more than one Client static for.
  */
 export function deviceIdFor(clientStaticPublicKey: string): string {
   let bytes: Uint8Array;

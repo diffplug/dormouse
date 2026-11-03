@@ -148,7 +148,7 @@ Invariants:
 
 ```mermaid
 flowchart TD
-  R[request] --> AT{app.*, remote.*, tool.* or window.*?}
+  R[request] --> AT{app.*, tool.* or window.*?}
   AT -- yes --> WIN[the Window answers]
   AT -- no --> BAD{malformed or helper --surface, or another --window?}
   BAD -- yes --> REF[refuse]
@@ -244,16 +244,6 @@ Source of truth: `dor/src/commands/app.ts`, `handleAppControl` in `lib/src/compo
 - **A Dormouse older than the verb answers `unsupported Dormouse control method 'window.reopen'`**, which the CLI names as a host that predates it.
 
 Source of truth: `dor/src/commands/reopen.ts`, `handleReopenControl` in `lib/src/components/wall/reopen.ts`.
-
-## dor remote
-
-**`dor remote` verbs act on this machine's Burrow, so the webview's control router answers them first** ([Handle Model](#handle-model)) and relays them over the platform's Burrow link. They list paired phones, revoke one, and read the access log — never pair, restore, or widen (`docs/specs/remote-security-model.md` -> "Revocation"); the log is the Burrow's (`docs/specs/remote-security-model.md` -> "Access log").
-
-- **Must revoke as requester `dor`**, by the id `list` prints.
-- **A host with no Burrow link refuses** — the website playground.
-- **A Dormouse older than the verbs answers `unsupportedControlMethodMessage`**, which the CLI names as a host that predates them.
-
-Source of truth: `dor/src/commands/remote.ts`, `handleRemoteControl` in `lib/src/components/wall/remote-control.ts`.
 
 ## Browser Open Target Resolution
 

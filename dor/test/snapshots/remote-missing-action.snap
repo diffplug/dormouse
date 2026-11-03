@@ -1,5 +1,0 @@
-exitCode: 1
-stdout:
-
-stderr:
-Error: dor remote requires an action: list, revoke, log
