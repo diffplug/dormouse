@@ -950,10 +950,9 @@ export default function Home() {
               alt-tab and no second monitor.
             </p>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              <code className={SITE_CODE_CLASS}>dor agent-browser open surface:2</code>{" "}
-              aims a browser at the port that terminal is serving — the one from
-              the section above. Your agents run the same command, so when an
-              agent wants to see what it just built, it opens a pane you're
+              <code className={SITE_CODE_CLASS}>dor agent-browser open surface:3</code>{" "}
+              aims a browser at the port that terminal is serving. Your agents
+              run the same command, so when an agent wants to see what it just built, it opens a pane you're
               already watching. Pop it out to a real OS window when you need the
               real thing.
             </p>
