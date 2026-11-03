@@ -3,7 +3,7 @@ import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { OneTimeConnection } from './OneTimeConnection';
-import { AccessLogDisclosure, PairedDeviceList, useAccessRecords } from './PairedDevices';
+import { AccessLogDisclosure, PairedDeviceList, UnsavedRevocationList, useAccessRecords } from './PairedDevices';
 import {
   FIELD_HINT,
   FIELD_LABEL,
@@ -890,6 +890,7 @@ function EnrolledView({
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="font-mono break-all text-foreground">{relayOrigin}</div>
       <div className={`mt-0.5 ${TONE_CLASS[described.tone]}`}>{described.text}</div>
+      <UnsavedRevocationList revocations={access.unsavedRevocations} busy={busy} onRetry={revoke} />
       {access.devices ? <PairedDeviceList devices={access.devices} busy={busy} onRevoke={revoke} /> : null}
       {accountPageUrl ? (
         <div className="mt-0.5 text-muted">
