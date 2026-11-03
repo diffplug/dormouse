@@ -273,7 +273,7 @@ Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`; 
 
 ## Auxiliary helper metadata
 
-**Must carry helper parent identity and captured autorun command in live PTY metadata**, validating that the parent is owned and is not itself a helper. Promotion clears that association without restarting the PTY. Reconnect restores helper entries as helpers, outside the primary layout and its orphan-pane recovery; a missing parent recovers its helper as an ordinary Pane, and recovered helpers disable automatic refresh. Helper scrollback and editor buffers are never written to a Session snapshot.
+**Must carry helper parent identity in live PTY metadata**, validating that the parent is owned and is not itself a helper. Promotion clears that association without restarting the PTY. Reconnect restores helper entries as helpers, outside the primary layout and its orphan-pane recovery; a missing parent recovers its helper as an ordinary Pane. Helper scrollback and editor buffers are never written to a Session snapshot.
 
 **Must expose terminal context operations through correlated host requests**, reporting errors and timeouts: each adapter forwards every `TerminalContextRequest` to its PTY host and answers on the same correlation. The VS Code router checks Workspace ownership for per-terminal operations and helper parent metadata. Directory opening follows `docs/specs/security-local.md` → Terminal context directory actions, and inspection failure `docs/specs/terminal-context.md` → Helper lifecycle.
 

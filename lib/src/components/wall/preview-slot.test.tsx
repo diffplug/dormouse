@@ -560,7 +560,7 @@ describe('dor open --preview', () => {
   it('leaves one marked slot when a preview arrives during the slot\'s close and the close is refused', async () => {
     await mountSlot();
     // Running helper work refuses the close, once the held inspection answers.
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-slot', parentId: 'surface:slot', command: '', status: 'off' };
+    const helper: helpers.HelperTerminal = { id: 'surface:helper-slot', parentId: 'surface:slot' };
     vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:slot' ? helper : undefined);
     const inspection = Promise.withResolvers<boolean>();
     vi.spyOn(helpers, 'helperHasWork').mockReturnValue(inspection.promise);

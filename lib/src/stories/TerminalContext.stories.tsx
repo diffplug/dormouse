@@ -8,17 +8,16 @@ import { TerminalContextView } from '../components/wall/TerminalContextView';
 
 // Sample terminal output with the shared context presentation.
 // Local state switches fixtures and opens visual detail treatments.
-type Scenario = 'fresh' | 'noPorts' | 'running' | 'preserved' | 'editor' | 'differentDirectory' | 'multiplePorts' | 'notification' | 'autorunOff' | 'scanFailed' | 'launchPending' | 'launchFailed';
+type Scenario = 'fresh' | 'noPorts' | 'preserved' | 'editor' | 'differentDirectory' | 'multiplePorts' | 'notification' | 'exited' | 'scanFailed' | 'launchPending' | 'launchFailed';
 const SCENARIOS: { id: Scenario; label: string }[] = [
   { id: 'fresh', label: 'Common case' },
   { id: 'noPorts', label: 'No ports' },
-  { id: 'running', label: 'Autorun running' },
   { id: 'preserved', label: 'User input' },
   { id: 'editor', label: 'Editor open' },
   { id: 'differentDirectory', label: 'Different directory' },
   { id: 'multiplePorts', label: 'Multiple ports' },
   { id: 'notification', label: 'Notification' },
-  { id: 'autorunOff', label: 'Autorun off' },
+  { id: 'exited', label: 'Helper exited' },
   { id: 'scanFailed', label: 'Scan failed' },
   { id: 'launchPending', label: 'Opening browser' },
   { id: 'launchFailed', label: 'Browser launch failed' },
@@ -61,11 +60,7 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
       <span>^X Exit</span><span>^R Read File</span><span>^\ Replace</span><span>^U Paste</span>
     </div>
   </div>;
-  if (scenario === 'running') return <>
-    <Prompt>git status</Prompt>
-    <div className="text-muted">Refreshing index:  68% (816/1200)</div>
-  </>;
-  if (scenario === 'autorunOff') return <Prompt><Cursor /></Prompt>;
+  if (scenario === 'exited') return <Prompt>exit</Prompt>;
   if (scenario === 'differentDirectory') return <>
     <Prompt>cd ../dormouse-fix</Prompt>
     <Prompt directory={HELPER_DIR}>git log -3 --oneline</Prompt>
@@ -75,28 +70,25 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
     <br />
     <Prompt directory={HELPER_DIR}><Cursor /></Prompt>
   </>;
-  return <>
+  if (scenario === 'preserved') return <>
     <GitStatus />
     <br />
-    {scenario === 'preserved' && <>
-      <Prompt>cat .node-version</Prompt>
-      <div>24.18.0</div>
-      <Prompt>echo "check focus after split"</Prompt>
-      <div>check focus after split</div>
-      <br />
-    </>}
-    <Prompt>{scenario === 'preserved' && 'git diff --'}<Cursor /></Prompt>
+    <Prompt>cat .node-version</Prompt>
+    <div>24.18.0</div>
+    <Prompt>echo "check focus after split"</Prompt>
+    <div>check focus after split</div>
+    <br />
+    <Prompt>git diff --<Cursor /></Prompt>
   </>;
+  return <Prompt><Cursor /></Prompt>;
 }
 
-function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight, bothProviders = false }: { bothProviders?: boolean; scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number; paneHeight: number }) {
+function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight, bothProviders = false }: { bothProviders?: boolean; scenario: Scenario; initialDetail?: 'title' | 'reset' | null; paneWidth: number; paneHeight: number }) {
   const [side, setSide] = useState<ContextSide | undefined>();
   const bounds = { x: 0, y: 0, width: paneWidth, height: paneHeight };
   const placement = placeTerminalContext(bounds, bounds, false, side);
   const [watching, setWatching] = useState(false);
   const [todo, setTodo] = useState(scenario === 'notification');
-  const [command, setCommand] = useState(scenario === 'autorunOff' ? '' : 'git status');
-  const preserved = ['preserved', 'editor', 'differentDirectory'].includes(scenario);
   const ports = (scenario === 'multiplePorts' ? [5173, 6006, 9229] : [5173]).map(port => ({ port, host: 'localhost', url: `http://localhost:${port}/`, processName: port === 5173 ? 'vite' : port === 6006 ? 'storybook' : 'node inspector' }));
   return <div className="relative overflow-hidden rounded-lg bg-terminal-bg font-mono text-sm text-terminal-fg" style={{ width: paneWidth, height: paneHeight }}>
     <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
@@ -106,20 +98,20 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
-        status={preserved ? 'preserved' : scenario === 'running' ? 'running' : scenario === 'autorunOff' ? 'off' : 'completed'} command={command}
+        status={scenario === 'exited' ? 'exited' : 'idle'}
         explorerLabel="Reveal in Finder" canExplore browserProviders={bothProviders ? ['agent-browser', 'playwright'] : ['agent-browser']} canIframe initialDetail={initialDetail}
         onClose={() => {}} onCopyId={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {
           if (scenario === 'launchPending') return new Promise<void>(() => {});
           if (scenario === 'launchFailed') throw new Error("agent-browser binary not found ('agent-browser' was not found)");
         }}
-        onWatch={() => setWatching(!watching)} onTodo={() => setTodo(!todo)} onModify={async value => setCommand(value)} onReset={async () => {}} onPromote={async () => {}}>
+        onWatch={() => setWatching(!watching)} onTodo={() => setTodo(!todo)} onReset={async () => {}} onPromote={async () => {}}>
         <div className="h-full overflow-auto px-3 py-2" style={{ fontSize: 13, lineHeight: '20px', whiteSpace: 'pre-wrap' }}><TerminalOutput scenario={scenario} /></div>
       </TerminalContextView>
     </div>
   </div>;
 }
 
-function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false }: { bothProviders?: boolean; initialScenario?: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
+function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false }: { bothProviders?: boolean; initialScenario?: Scenario; initialDetail?: 'title' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
   const [scenario, setScenario] = useState(initialScenario);
   return <main className="min-h-screen bg-app-bg p-5 font-mono text-sm text-foreground">
     <div className="mb-3 w-[900px]">
@@ -195,14 +187,12 @@ type Story = StoryObj<typeof meta>;
 export const CommonCase: Story = {};
 export const NarrowHelperHeader: Story = { args: { initialScenario: 'preserved', paneWidth: 660 } };
 export const NoPorts: Story = { args: { initialScenario: 'noPorts' } };
-export const AutorunRunning: Story = { args: { initialScenario: 'running' } };
 export const DifferentDirectory: Story = { args: { initialScenario: 'differentDirectory' } };
 export const MultiplePorts: Story = { args: { initialScenario: 'multiplePorts' } };
 export const Notification: Story = { args: { initialScenario: 'notification' } };
-export const AutorunOff: Story = { args: { initialScenario: 'autorunOff' } };
+export const HelperExited: Story = { args: { initialScenario: 'exited' } };
 export const PortScanFailed: Story = { args: { initialScenario: 'scanFailed' } };
 export const TitleSources: Story = { args: { initialDetail: 'title' } };
-export const ModifyAutorun: Story = { args: { initialDetail: 'modify' } };
 export const ResetConfirmation: Story = { args: { initialScenario: 'editor', initialDetail: 'reset' } };
 
 export const MinimumWidth: Story = { args: { paneWidth: 280, paneHeight: 620 } };

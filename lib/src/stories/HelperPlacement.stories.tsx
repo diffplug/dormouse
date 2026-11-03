@@ -8,7 +8,6 @@ import { flushTerminal, getTerminalInstance, refitSession } from '../lib/termina
 import { FakePtyAdapter, getPlatform, flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
-import { DEFAULT_HELPER_COMMAND, SUGGESTED_HELPER_COMMAND } from '../lib/terminal-context-types';
 import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
 
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
@@ -76,9 +75,7 @@ async function openContext(source: string) {
   await rightClickSourceHeader(source);
   await settleTerminalContext();
   const helper = getHelper(source)!;
-  expect(helper.status).toBe('completed');
-  // Protocol completion precedes xterm's async parsing of the command echo.
-  // Drain that queue before the paint gate captures a wrapped narrow terminal.
+  // Drain xterm's async parsing before the paint gate captures a wrapped narrow terminal.
   let written = false;
   void flushTerminal(helper.id).then(() => { written = true; });
   await waitFor(() => expect(written).toBe(true), { timeout: 4000 });
@@ -86,9 +83,8 @@ async function openContext(source: string) {
   const input = terminal(helper.id);
   const text = Array.from({ length: input.buffer.active.length }, (_, i) =>
     input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
-  expect(text.match(/git status/g)).toHaveLength(1);
-  // Both prompts must survive, including the final wrapped cursor line.
-  expect(text.match(/\/home\/demo\/projects\/dormouse ❯/g)).toHaveLength(2);
+  // A helper starts its shell and runs nothing: one prompt, wrapped cursor line included.
+  expect(text.match(/\/home\/demo\/projects\/dormouse ❯/g)).toHaveLength(1);
   expect(input.buffer.active.viewportY).toBe(input.buffer.active.baseY);
 }
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
@@ -162,17 +158,12 @@ const meta = {
   title: 'App/Helper placement',
   component: PlacementWall,
   // Argos replays stories for capture; unfinished input from the preceding run
-  // must not turn this run's fresh-helper fixture into a preserved helper.
-  beforeEach: async ({ args }) => {
+  // must not turn this run's fresh-helper fixture into a used helper.
+  beforeEach: ({ args }) => {
     for (const role of roles(args)) disposeHelper(idOf(args, role));
     const platform = getPlatform() as FakePtyAdapter;
     platform.deferHelperStartup = true;
-    // The fixture wraps an autorun's echo, which the factory setting has none of.
-    await platform.terminalContext({ op: 'settings', command: SUGGESTED_HELPER_COMMAND });
-    return async () => {
-      platform.deferHelperStartup = false;
-      await platform.terminalContext({ op: 'settings', command: DEFAULT_HELPER_COMMAND });
-    };
+    return () => { platform.deferHelperStartup = false; };
   },
   args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) }, chromatic: { viewports: [1200] } },

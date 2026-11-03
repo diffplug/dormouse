@@ -18,7 +18,7 @@ vi.mock('./terminal-lifecycle', () => ({
 beforeEach(() => {
   vi.useFakeTimers(); host.writePty.mockReset(); host.terminalContext.mockReset(); host.getCwd.mockReset();
   host.getCwd.mockResolvedValue(null);
-  host.terminalContext.mockResolvedValue({ home: '/home/user', command: 'git status', busy: false });
+  host.terminalContext.mockResolvedValue({ home: '/home/user', busy: false });
   registry.set('parent', { untouched: true } as TerminalEntry); resetTerminalPaneState('parent');
   setHelperVisible('parent', true);
 });
@@ -39,33 +39,17 @@ describe('helper lifecycle', () => {
     } finally { setWorkspaceTransferPending('ws', false); if (getHelper('parent')?.promoting) await cancelPromotion('parent'); unregister(); }
   });
 
-  it('does not spawn a helper when its settings answer arrives during a transfer', async () => {
+  it('does not spawn a helper when its directory answer arrives during a transfer', async () => {
     const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: id => id === 'parent' }));
-    let answer!: (settings: object) => void;
-    host.terminalContext.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+    let answer!: (cwd: string | null) => void;
+    host.getCwd.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
     const opening = openHelper('parent');
     setWorkspaceTransferPending('ws', true);
     try {
-      answer({ command: 'git status' });
+      answer(null);
       await expect(opening).rejects.toThrow('Workspace is transferring');
       expect(getHelper('parent')).toBeUndefined();
       expect([...registry.keys()]).toEqual(['parent']);
-    } finally { setWorkspaceTransferPending('ws', false); unregister(); }
-  });
-
-  it('keeps the old helper when its refresh inspection finishes during a transfer', async () => {
-    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: id => id === 'parent' }));
-    const helper = await openHelper('parent');
-    helper.status = 'completed';
-    let inspected!: (info: object) => void;
-    host.terminalContext.mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
-    const opening = openHelper('parent');
-    setWorkspaceTransferPending('ws', true);
-    try {
-      inspected({ busy: false });
-      await expect(opening).rejects.toThrow('Workspace is transferring');
-      expect(getHelper('parent')).toBe(helper);
-      expect(registry.has(helper.id)).toBe(true);
     } finally { setWorkspaceTransferPending('ws', false); unregister(); }
   });
 
@@ -113,7 +97,7 @@ describe('helper lifecycle', () => {
       expect(promotes()).toEqual([
         { op: 'promote', id: old.id },
         { op: 'promote', id: fresh.id },
-        { op: 'promote', id: old.id, restore: { parentId: 'parent', command: old.command } },
+        { op: 'promote', id: old.id, restore: { parentId: 'parent' } },
       ]);
     } finally {
       pending._resetPendingKillsForTesting();
@@ -130,7 +114,7 @@ describe('helper lifecycle', () => {
       // VS Code's request timeout: the release never answers in time.
       host.terminalContext.mockImplementation(async (request: { op: string }) => {
         if (request.op === 'promote') throw new Error('timed out');
-        return { home: '/home/user', command: 'git status', busy: false };
+        return { home: '/home/user', busy: false };
       });
       await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell' })).rejects.toThrow('timed out');
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
@@ -173,12 +157,12 @@ describe('helper lifecycle', () => {
 
 
   it('rejects late helper startup while its closing parent remains registered for the fade', async () => {
-    let resolve!: (value: unknown) => void;
-    host.terminalContext.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    let resolve!: (cwd: string | null) => void;
+    host.getCwd.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
     const opening = openHelper('parent');
     closeHelperParent('parent');
     expect(registry.has('parent')).toBe(true);
-    resolve({ command: 'git status' });
+    resolve(null);
     await expect(opening).rejects.toThrow('The parent terminal has closed');
     expect(getHelper('parent')).toBeUndefined();
     expect([...registry.keys()]).toEqual(['parent']);
@@ -193,24 +177,22 @@ describe('helper lifecycle', () => {
     expect(await openHelper('parent')).toBe(helper);
   });
 
-  it.each(['exited', 'preserved', 'completed'] as const)('publishes %s on reopening before another polling tick', async status => {
+  it('retains an exited helper on reopening, publishing the exit and never restarting it', async () => {
     const helper = await openHelper('parent');
-    helper.status = 'running';
     setHelperVisible('parent', false);
-    const entry = registry.get(helper.id)!;
-    entry.exited = status === 'exited';
-    entry.untouched = status !== 'preserved';
-    prompt(helper.id);
-    // Preserve even an untouched completion so this asserts publication on
-    // reuse, rather than observing a replacement helper's creation event.
-    host.terminalContext.mockResolvedValue({ busy: true });
+    registry.get(helper.id)!.exited = true;
     const notified = vi.fn();
     const unsubscribe = subscribeHelpers(notified);
     try {
       setHelperVisible('parent', true);
       expect(await openHelper('parent')).toBe(helper);
-      expect(helper.status).toBe(status);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(helper.exited).toBe(true);
       expect(notified).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await openHelper('parent')).toBe(helper);
+      expect(notified).toHaveBeenCalledOnce();
+      expect(host.writePty).not.toHaveBeenCalled();
     } finally { unsubscribe(); }
   });
   it('stops hidden polling, invalidates idle, and still checks running work on demand', async () => {
@@ -232,20 +214,14 @@ describe('helper lifecycle', () => {
     expect(host.terminalContext.mock.calls.length).toBeGreaterThan(1);
   });
   it('does not start a polling loop when creation completes after the menu closes', async () => {
-    let resolve!: (value: unknown) => void;
-    host.terminalContext.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    let resolve!: (cwd: string | null) => void;
+    host.getCwd.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
     const opening = openHelper('parent');
     setHelperVisible('parent', false);
-    resolve({ command: 'git status' });
-    const helper = await opening;
-    prompt(helper.id);
+    resolve(null);
+    await opening;
     await vi.advanceTimersByTimeAsync(10_000);
     expect(vi.getTimerCount()).toBe(0);
-    expect(host.writePty).not.toHaveBeenCalled();
-    setHelperVisible('parent', true);
-    await openHelper('parent');
-    await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
   });
   it('keeps ownership stable when a reopened menu resets or promotes during promotion', async () => {
     const helper = await openHelper('parent');
@@ -278,115 +254,92 @@ describe('helper lifecycle', () => {
     await beginPromotion('parent');
     finishPromotion('parent');
   });
-  it('deduplicates opening and runs once only after a real prompt', async () => {
+  it('deduplicates opening and writes nothing to the helper, at any prompt', async () => {
     const [first, second] = await Promise.all([openHelper('parent'), openHelper('parent')]);
     expect(first).toBe(second);
-    await vi.advanceTimersByTimeAsync(1000); expect(host.writePty).not.toHaveBeenCalled();
+    expect(pendingShellOpts.get(first.id)?.helper).toEqual({ parentId: 'parent' });
+    await vi.advanceTimersByTimeAsync(1000);
     prompt(first.id); await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(first.id, 'git status\r', { launch: true });
-    prompt(first.id); await vi.advanceTimersByTimeAsync(500);
-    expect(first.status).toBe('completed'); expect(host.writePty).toHaveBeenCalledTimes(1);
+    prompt(first.id); await vi.advanceTimersByTimeAsync(10_000);
+    expect(host.writePty).not.toHaveBeenCalled();
+  });
+  // An earlier build saved a command, and its host answered it here.
+  it('ignores a command a host still answers', async () => {
+    host.terminalContext.mockResolvedValue({ home: '/home/user', command: 'git status', busy: false });
+    host.getCwd.mockResolvedValue('/process');
+    const helper = await openHelper('parent');
+    expect(pendingShellOpts.get(helper.id)?.helper).toEqual({ parentId: 'parent' });
+    prompt(helper.id); await vi.advanceTimersByTimeAsync(10_000);
+    expect(host.writePty).not.toHaveBeenCalled();
+    expect(getTerminalPaneState(helper.id).currentCommand).toBeFalsy();
   });
   const reporting = (path: string, isRemote = false) => resetTerminalPaneState('parent', { cwd: { path, pathKind: 'posix', isRemote, source: 'osc7', updatedAt: 0 } });
-  it('starts in the source PTY\'s process directory, whatever the source reports, and autoruns there', async () => {
+  it('starts in the source PTY\'s process directory, whatever the source reports', async () => {
     reporting('/reported');
     host.getCwd.mockResolvedValue('/process');
     const helper = await openHelper('parent');
     expect(host.getCwd).toHaveBeenCalledWith('parent');
     expect(pendingShellOpts.get(helper.id)?.cwd).toBe('/process');
-    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
     expect(getTerminalPaneState(helper.id).cwd?.path).toBe('/process');
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
   });
   it.each([
     ['answers nothing', () => host.getCwd.mockResolvedValue(null)],
     ['fails', () => host.getCwd.mockRejectedValue(new Error('no process table'))],
-  ])('opens in the reported directory and types nothing when the process read %s', async (_label, read) => {
+  ])('opens in the reported directory when the process read %s', async (_label, read) => {
     reporting('/reported');
     read();
     const helper = await openHelper('parent');
     expect(pendingShellOpts.get(helper.id)?.cwd).toBe('/reported');
-    expect(helper.status).toBe('unconfirmed');
-    prompt(helper.id); await vi.advanceTimersByTimeAsync(10_000);
-    expect(host.writePty).not.toHaveBeenCalled();
-    expect(helper.status).toBe('unconfirmed');
   });
-  it('takes the host default for a remote source it cannot read, where autorun may run', async () => {
+  it('takes the host default for a remote source it cannot read', async () => {
     reporting('/remote/path', true);
     const helper = await openHelper('parent');
     expect(pendingShellOpts.get(helper.id)?.cwd).toBeUndefined();
-    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
     expect(getTerminalPaneState(helper.id).cwd?.path).toBeUndefined();
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
   });
-  it('types nothing under the factory setting', async () => {
-    host.terminalContext.mockResolvedValue({ home: '/home/user', busy: false });
-    host.getCwd.mockResolvedValue('/process');
+  it('keeps an untouched helper on reopening, in the directory it opened in', async () => {
+    host.getCwd.mockResolvedValue('/first');
     const helper = await openHelper('parent');
-    expect(helper).toMatchObject({ command: '', status: 'off' });
-    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).not.toHaveBeenCalled();
+    prompt(helper.id); await vi.advanceTimersByTimeAsync(2000);
+    host.getCwd.mockResolvedValue('/moved');
+    expect(await openHelper('parent')).toBe(helper);
+    expect(registry.has(helper.id)).toBe(true);
+    expect(getTerminalPaneState(helper.id).cwd?.path).toBe('/first');
   });
-  it('refreshes an untouched helper it could not confirm, to follow the source on reopening', async () => {
-    reporting('/reported');
-    const first = await openHelper('parent');
-    prompt(first.id); await vi.advanceTimersByTimeAsync(100);
-    host.getCwd.mockResolvedValue('/process');
-    const second = await openHelper('parent');
-    expect(second).not.toBe(first);
-    expect(pendingShellOpts.get(second.id)?.cwd).toBe('/process');
+  it('resets into a fresh helper in the source\'s current directory', async () => {
+    host.getCwd.mockResolvedValue('/first');
+    const old = await openHelper('parent');
+    host.getCwd.mockResolvedValue('/moved');
+    await resetHelper('parent', { workspaceId: 'ws', title: 'shell' });
+    expect(registry.has(old.id)).toBe(false);
+    const next = await openHelper('parent');
+    expect(next.id).not.toBe(old.id);
+    expect(pendingShellOpts.get(next.id)?.cwd).toBe('/moved');
   });
-  it('keeps a directory reported during shell startup when autorun begins', async () => {
+  it('keeps a directory reported during shell startup', async () => {
     host.getCwd.mockResolvedValue('/source');
     const helper = await openHelper('parent');
     applyTerminalSemanticEvents(helper.id, [{ type: 'cwd', cwd: { path: '/startup', pathKind: 'posix', isRemote: false, source: 'osc7', updatedAt: 1 } }]);
     prompt(helper.id);
     await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
     expect(getTerminalPaneState(helper.id).cwd).toMatchObject({ path: '/startup', source: 'osc7' });
-    expect(getTerminalPaneState(helper.id).currentCommand?.cwdAtStart?.path).toBe('/startup');
-  });
-
-  it('user input during startup cancels autorun and remains preserved at idle', async () => {
-    const helper = await openHelper('parent'); registry.get(helper.id)!.untouched = false;
-    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).not.toHaveBeenCalled(); expect(helper.status).toBe('preserved');
-    expect(await openHelper('parent')).toBe(helper);
   });
   it('never assumes a prompt means background jobs have ended', async () => {
     const helper = await openHelper('parent'); prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
-    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
-    host.terminalContext.mockResolvedValue({ command: 'git status', busy: true });
-    expect(await helperHasWork(helper)).toBe(true); expect(await openHelper('parent')).toBe(helper);
-    host.terminalContext.mockResolvedValue({ command: 'git status', busy: false });
-    expect((await openHelper('parent')).id).not.toBe(helper.id);
+    host.terminalContext.mockResolvedValue({ busy: true });
+    expect(await helperHasWork(helper)).toBe(true);
   });
-  it('does not drop input received during an asynchronous idle check', async () => {
-    const helper = await openHelper('parent'); helper.status = 'completed'; prompt(helper.id);
-    let resolve!: (value: unknown) => void;
-    host.terminalContext.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
-    const reopened = openHelper('parent'); registry.get(helper.id)!.untouched = false;
-    resolve({ busy: false }); expect(await reopened).toBe(helper);
-  });
-  it('reset cancels stale autorun callbacks and uses the latest global command', async () => {
-    const old = await openHelper('parent'); disposeHelper('parent');
-    host.terminalContext.mockResolvedValue({ command: 'echo next', busy: false });
-    const next = await openHelper('parent'); prompt(old.id); prompt(next.id);
-    await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(next.id, 'echo next\r', { launch: true });
-    removeTerminalPaneState(old.id);
-  });
-  it('missing integration never receives a timeout write and is not safe to close', async () => {
+  it('a shell with no integration is not safe to close on a failed inspection', async () => {
     const helper = await openHelper('parent'); await vi.advanceTimersByTimeAsync(9000);
-    expect(helper.status).toBe('unsupported'); expect(host.writePty).not.toHaveBeenCalled();
+    expect(host.writePty).not.toHaveBeenCalled();
     host.terminalContext.mockResolvedValue({ busy: null });
     expect(await helperHasWork(helper)).toBe(true);
   });
   it('recovered helpers preserve work even when replay looks idle', async () => {
     const helper = await openHelper('parent'); disposeHelper('parent');
     registry.set(helper.id, { untouched: false } as TerminalEntry);
-    restoreHelper(helper.id, { parentId: 'parent', command: 'git status' }); prompt(helper.id);
-    expect((await openHelper('parent')).id).toBe(helper.id); expect(getHelper('parent')?.status).toBe('preserved');
+    restoreHelper(helper.id, { parentId: 'parent' }); prompt(helper.id);
+    expect((await openHelper('parent')).id).toBe(helper.id);
     await vi.advanceTimersByTimeAsync(2000); expect(host.writePty).not.toHaveBeenCalled();
     expect(registry.get(helper.id)?.helperBusy).toBe(false);
     host.terminalContext.mockResolvedValue({ busy: true });

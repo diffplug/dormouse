@@ -8,13 +8,11 @@ import { addPendingKill } from './pending-kills';
 import { isDelayedKillEnabled } from './labs-settings';
 import type { WorkspaceId } from './session-types';
 import { getDefaultShellOpts } from './shell-defaults';
-import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand, seedTerminalManualCwd } from './terminal-state-store';
-import { DEFAULT_HELPER_COMMAND, type HelperIdentity } from './terminal-context-types';
+import { getInheritableCwd, getTerminalPaneState, seedTerminalManualCwd } from './terminal-state-store';
+import type { HelperIdentity } from './terminal-context-types';
 
-export type HelperStatus = 'waiting' | 'running' | 'completed' | 'preserved' | 'off' | 'unsupported' | 'unconfirmed' | 'exited';
-export interface HelperTerminal extends HelperIdentity { id: string; status: HelperStatus; promoting?: boolean; timer?: ReturnType<typeof setInterval> }
+export interface HelperTerminal extends HelperIdentity { id: string; exited?: boolean; promoting?: boolean; timer?: ReturnType<typeof setInterval> }
 const STATUS_POLL_MS = 100;
-const READINESS_TIMEOUT_MS = 8000;
 const WORK_INSPECTION_MS = 2000;
 const helpers = new Map<string, HelperTerminal>();
 const pending = new Map<string, Promise<HelperTerminal>>();
@@ -40,35 +38,22 @@ export function setHelperVisible(parentId: string, visible: boolean): void {
   }
 }
 
-const atPrompt = (id: string) => {
-  const state = getTerminalPaneState(id);
-  return (state.activity.kind === 'prompt' || state.activity.kind === 'editing') && !state.currentCommand;
-};
-
-/** One poll per helper advances its status and, once settled, refreshes the host work inspection. */
+/** One poll per helper publishes its exit and refreshes the host work inspection. */
 function watchHelper(helper: HelperTerminal): void {
   clearInterval(helper.timer);
   if (!visibleParents.has(helper.parentId) || helper.promoting) return;
-  const started = Date.now();
   let lastInspection = 0;
   let inspecting = false;
   helper.timer = setInterval(() => {
     const entry = registry.get(helper.id);
-    // A replaced helper's poll stops here, never writing to its replacement.
+    // A replaced helper's poll stops here.
     if (!entry || helpers.get(helper.parentId) !== helper) { clearInterval(helper.timer); return; }
-    let status = helper.status;
-    if (entry.exited) status = 'exited';
-    else if (!entry.untouched) status = 'preserved';
-    else if (helper.status === 'waiting') {
-      if (isPaneOscDriven(helper.id) && atPrompt(helper.id)) {
-        status = 'running';
-        seedLaunchedCommand(helper.id, helper.command);
-        getPlatform().writePty(helper.id, `${helper.command}\r`, { launch: true });
-      } else if (Date.now() - started >= READINESS_TIMEOUT_MS) status = 'unsupported';
-    } else if (helper.status === 'running' && atPrompt(helper.id)) status = 'completed';
-    if (status !== helper.status) { helper.status = status; notifyHelpers(); }
-    if (status === 'exited') { clearInterval(helper.timer); return; }
-    if (status === 'waiting' || status === 'running' || inspecting || Date.now() - lastInspection < WORK_INSPECTION_MS) return;
+    if (entry.exited) {
+      clearInterval(helper.timer);
+      if (!helper.exited) { helper.exited = true; notifyHelpers(); }
+      return;
+    }
+    if (inspecting || Date.now() - lastInspection < WORK_INSPECTION_MS) return;
     inspecting = true; lastInspection = Date.now();
     void helperHasWork(helper).catch(() => { entry.helperBusy = true; }).finally(() => {
       inspecting = false;
@@ -77,11 +62,10 @@ function watchHelper(helper: HelperTerminal): void {
   }, STATUS_POLL_MS);
 }
 
-/** Recover a live helper PTY whose source also survived. Replays do not prove
- *  absence of user input, so recovery always disarms autorun. */
+/** Recover a live helper PTY whose source also survived. */
 export function restoreHelper(id: string, identity: HelperIdentity): void {
   parkElement(id);
-  installHelper({ ...identity, id, status: 'preserved' });
+  installHelper({ ...identity, id });
 }
 
 function installHelper(helper: HelperTerminal): void {
@@ -159,7 +143,7 @@ export function reattachHelper(helper: HelperTerminal): boolean {
   void (async () => {
     try {
       if (replacement) await releaseHostHelper(replacement.id);
-      await getPlatform().terminalContext?.({ op: 'promote', id: helper.id, restore: { parentId, command: helper.command } });
+      await getPlatform().terminalContext?.({ op: 'promote', id: helper.id, restore: { parentId } });
     } catch (error) {
       console.warn('[helper] the host refused the restored helper', error);
     } finally {
@@ -218,19 +202,16 @@ function requireHelperMutable(parentId: string): void {
 }
 
 /**
- * Where a new helper starts, and whether autorun may type there. The source's
- * reported directory is whatever its terminal last printed, so only the host's
- * read of the source PTY's process cwd confirms one; `getCwd` answers null where
- * it cannot read (Windows, a failed read). A directory that is only reported
- * still opens, as a split there would, but nothing is typed into it.
+ * Where a new helper starts. The source's reported directory is whatever its
+ * terminal last printed, so the host's read of the source PTY's process cwd wins;
+ * `getCwd` answers null where it cannot read (Windows, a failed read), and a
+ * reported directory then opens as a split there would. A remote parent reports
+ * nothing here: the helper takes the host default rather than claiming the ssh
+ * path, which no terminal output chose.
  */
-async function helperDirectory(parentId: string): Promise<{ cwd: string | undefined; mayAutorun: boolean }> {
+async function helperDirectory(parentId: string): Promise<string | undefined> {
   const processCwd = await getPlatform().getCwd(parentId).catch(() => null);
-  if (processCwd) return { cwd: processCwd, mayAutorun: true };
-  // A remote parent reports nothing here: the helper takes the host default
-  // rather than claiming the ssh path, which no terminal output chose.
-  const reported = getInheritableCwd(parentId);
-  return { cwd: reported, mayAutorun: reported === undefined };
+  return processCwd || getInheritableCwd(parentId);
 }
 
 export async function openHelper(parentId: string): Promise<HelperTerminal> {
@@ -241,34 +222,18 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
   const operation = (async () => {
     if (helpers.has(parentId) && !registry.has(helpers.get(parentId)!.id)) forgetHelper(parentId);
     const previous = helpers.get(parentId);
-    if (previous) {
-      const entry = registry.get(previous.id);
-      const priorStatus = previous.status;
-      if (entry?.exited) previous.status = 'exited';
-      else if (!entry?.untouched) previous.status = 'preserved';
-      else if (previous.status === 'running' && atPrompt(previous.id)) previous.status = 'completed';
-      // The first context render preceded this effect; the next tick would
-      // see the already-updated status and have no change left to publish.
-      if (previous.status !== priorStatus) notifyHelpers();
-      if (!entry?.untouched || !['completed', 'off', 'unconfirmed'].includes(previous.status) || await helperHasWork(previous)) return previous;
-      // Input or ownership can change during process inspection.
-      if (helpers.get(parentId) !== previous || !entry.untouched) return helpers.get(parentId) ?? previous;
-      requireHelperMutable(parentId);
-      disposeHelper(parentId);
-    }
+    if (previous) return previous;
     const platform = getPlatform();
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
-    const [settings, { cwd, mayAutorun }] = await Promise.all([platform.terminalContext({ op: 'settings' }), helperDirectory(parentId)]);
+    const cwd = await helperDirectory(parentId);
     requireHelperMutable(parentId);
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
     const id = mintSurfaceId();
-    const command = settings.command ?? DEFAULT_HELPER_COMMAND;
-    const helper: HelperTerminal = { id, parentId, command, status: !command ? 'off' : mayAutorun ? 'waiting' : 'unconfirmed' };
+    const helper: HelperTerminal = { id, parentId };
     helpers.set(parentId, helper);
-    setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd, helper: { parentId, command } });
+    setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd, helper: { parentId } });
     getOrCreateTerminal(id);
-    // Seed only missing state before readiness: shell startup may report a
-    // different directory, which autorun must keep.
+    // Seed only missing state: shell startup may report a different directory.
     seedTerminalManualCwd(id, cwd);
     parkElement(id);
     notifyHelpers();
@@ -279,16 +244,14 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
   try { return await operation; } finally { pending.delete(parentId); }
 }
 
-/** Hands the helper to the caller for placement: autorun is cancelled and the host stops treating the PTY as auxiliary. */
+/** Hands the helper to the caller for placement: the host stops treating the PTY as auxiliary. */
 export async function beginPromotion(parentId: string): Promise<HelperTerminal> {
   requireHelperMutable(parentId);
   const helper = helpers.get(parentId);
   if (!helper) throw new Error('This terminal has no helper');
   if (helper.promoting) throw new Error('Helper promotion is in progress');
-  // Cancel launch injection before asynchronous ownership transfer.
   clearInterval(helper.timer);
   helper.promoting = true;
-  helper.status = 'preserved';
   const entry = registry.get(helper.id);
   if (entry) entry.untouched = false;
   try { await getPlatform().terminalContext?.({ op: 'promote', id: helper.id }); }
@@ -301,7 +264,7 @@ export async function cancelPromotion(parentId: string): Promise<void> {
   const helper = helpers.get(parentId);
   if (!helper) return;
   try {
-    await getPlatform().terminalContext?.({ op: 'promote', id: helper.id, restore: { parentId, command: helper.command } });
+    await getPlatform().terminalContext?.({ op: 'promote', id: helper.id, restore: { parentId } });
   } finally {
     helper.promoting = false;
     watchHelper(helper);

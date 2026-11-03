@@ -15,7 +15,7 @@ it('preserves one command echo when the helper resizes between PTY chunks', asyn
   adapter.onPtyData(({ data }) => terminal.write(data));
   const drain = () => new Promise<void>(resolve => terminal.write('', resolve));
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
     await Promise.resolve();
     await drain();
     // Make xterm yield after ten small writes: the echo, before its CRLF.
@@ -48,7 +48,7 @@ it.each([false, true])('keeps both narrow helper prompts when startup waits for 
   adapter.onPtyData(output);
   const drain = () => new Promise<void>(resolve => terminal.write('', resolve));
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
     if (yieldBeforeFit) await drain();
     expect(output).not.toHaveBeenCalled();
     terminal.resize(26, 5);
@@ -82,7 +82,7 @@ it.each(['kill', 'reset'] as const)('discards a deferred helper prompt on %s', a
   const output = vi.fn();
   adapter.onPtyData(output);
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
     if (action === 'kill') adapter.killPty(ID);
     else { adapter.reset(); adapter.onPtyData(output); }
     // Reusing the id must not let the old helper write into the new terminal.
@@ -98,10 +98,10 @@ it('does not let a queued prompt release a replacement helper early', async () =
   const output = vi.fn();
   adapter.onPtyData(output);
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
     adapter.killPty(ID);
     adapter.deferHelperStartup = true;
-    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
     await Promise.resolve();
     expect(output).not.toHaveBeenCalled();
     adapter.resumeHelperStartup(ID);

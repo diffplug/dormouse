@@ -118,13 +118,13 @@ test('helper ownership survives a live listing and promotion preserves the PTY a
     },
   }, { replay: true, onHelper: (id, helper) => decisions.push([id, helper]) });
   manager.spawn('parent');
-  manager.spawn('helper', { helper: { parentId: 'parent', command: 'git status' } });
+  manager.spawn('helper', { helper: { parentId: 'parent' } });
   assert.deepEqual(decisions, [['parent', false], ['helper', true]]);
   assert.equal(manager.getHelperParentId('helper'), 'parent');
   assert.equal(manager.getHelperParentId('parent'), undefined);
   spawned[1].output('unsaved editor text');
   manager.list();
-  assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys[1].helper, { parentId: 'parent', command: 'git status' });
+  assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys[1].helper, { parentId: 'parent' });
   assert.equal(events.findLast(e => e.event === 'replay').data.data, 'unsaved editor text');
   manager.context({ op: 'promote', id: 'helper' }, 'promote-1');
   assert.deepEqual(decisions.at(-1), ['helper', false]);
@@ -133,17 +133,17 @@ test('helper ownership survives a live listing and promotion preserves the PTY a
   assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper, undefined);
   assert.equal(spawned.length, 2);
   assert.equal(events.findLast(e => e.event === 'replay').data.data, 'unsaved editor text');
-  manager.context({ op: 'promote', id: 'helper', restore: { parentId: 'parent', command: 'git status' } }, 'restore-1');
+  manager.context({ op: 'promote', id: 'helper', restore: { parentId: 'parent' } }, 'restore-1');
   manager.list();
   assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper.parentId, 'parent');
   assert.deepEqual(decisions.at(-1), ['helper', true]);
   const decided = decisions.length;
-  manager.context({ op: 'promote', id: 'parent', restore: { parentId: 'parent', command: '' } }, 'invalid-self');
+  manager.context({ op: 'promote', id: 'parent', restore: { parentId: 'parent' } }, 'invalid-self');
   assert.match(events.at(-1).data.error, /Invalid helper owner/);
   // A refused promotion decides nothing.
   assert.equal(decisions.length, decided);
   manager.spawn('other');
-  manager.context({ op: 'promote', id: 'other', restore: { parentId: 'parent', command: '' } }, 'invalid-duplicate');
+  manager.context({ op: 'promote', id: 'other', restore: { parentId: 'parent' } }, 'invalid-duplicate');
   assert.match(events.at(-1).data.error, /Invalid helper owner/);
   manager.killAll();
 });
@@ -168,9 +168,9 @@ test('a helper cannot own another helper or reference an absent owner', () => {
     spawn() { spawns++; return { pid: 42, write() {}, resize() {}, kill() {}, onData() {}, onExit() {} }; },
   });
   manager.spawn('parent');
-  manager.spawn('helper', { helper: { parentId: 'parent', command: '' } });
-  manager.spawn('nested', { helper: { parentId: 'helper', command: '' } });
-  manager.spawn('orphan', { helper: { parentId: 'missing', command: '' } });
+  manager.spawn('helper', { helper: { parentId: 'parent' } });
+  manager.spawn('nested', { helper: { parentId: 'helper' } });
+  manager.spawn('orphan', { helper: { parentId: 'missing' } });
   assert.equal(spawns, 2);
   assert.deepEqual(events.filter(e => e.event === 'exit').map(e => e.data.id), ['nested', 'orphan']);
   manager.killAll();
@@ -197,19 +197,41 @@ test('directory opening touches the path only through the host resolver', async 
   assert.equal(realpath.mock.callCount(), 0);
 });
 
-test('settings answer an empty autorun until the user saves one, which then persists', async () => {
+// `helper-terminal.json` is what an earlier build saved. Nothing here may read
+// it, rewrite it, or let its command reach a helper.
+test('a stored helper command reaches nothing: no answer, no write, no rewrite', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-helper-settings-'));
   const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   process.env.HOME = process.env.USERPROFILE = home;
   try {
-    const answers = [];
-    const manager = create((event, data) => { if (event === 'context') answers.push(data); }, { spawn: () => { throw new Error('no spawn'); } });
-    await manager.context({ op: 'settings' }, 'factory');
-    assert.equal(answers.at(-1).command, '');
-    assert.equal(fs.existsSync(path.join(home, '.dormouse', 'helper-terminal.json')), false);
-    await manager.context({ op: 'settings', command: 'git status' }, 'opt-in');
-    await manager.context({ op: 'settings' }, 'read');
-    assert.equal(answers.at(-1).command, 'git status');
+    const stored = path.join(home, '.dormouse', 'helper-terminal.json');
+    fs.mkdirSync(path.dirname(stored));
+    const contents = JSON.stringify({ command: 'git status' });
+    fs.writeFileSync(stored, contents);
+    const events = [];
+    const writes = [];
+    const manager = create((event, data) => events.push({ event, data }), {
+      spawn: () => ({ pid: 42, write: (data) => writes.push(data), resize() {}, kill() {}, onData() {}, onExit() {} }),
+    });
+    const answer = async (request) => {
+      await manager.context(request, 'context');
+      return events.findLast(e => e.event === 'context').data;
+    };
+    assert.deepEqual(await answer({ op: 'home' }), { requestId: 'context', home });
+    manager.spawn('parent');
+    manager.spawn('helper', { helper: { parentId: 'parent' } });
+    assert.equal(manager.getHelperParentId('helper'), 'parent');
+    assert.deepEqual(writes, []);
+    // An older webview's edit is refused, its shape otherwise harmless.
+    assert.match((await answer({ op: 'settings', command: 'echo edited' })).error, /Unknown/);
+    assert.equal(fs.readFileSync(stored, 'utf8'), contents);
+    manager.spawn('older-parent');
+    manager.spawn('older', { helper: { parentId: 'older-parent', command: 'git status' } });
+    assert.equal(manager.getHelperParentId('older'), 'older-parent');
+    manager.list();
+    assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys.find(pty => pty.id === 'older').helper, { parentId: 'older-parent' });
+    assert.deepEqual(writes, []);
+    manager.killAll();
   } finally {
     for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     fs.rmSync(home, { recursive: true, force: true });

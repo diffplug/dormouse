@@ -910,11 +910,6 @@ async function readProcessTable(runtime) {
   return null;
 }
 
-/** The global autorun command: one line, at most 4096 characters (docs/specs/terminal-context.md). */
-function validCommand(value) {
-  return typeof value === 'string' && value.length <= 4096 && !/[\r\n\0]/.test(value);
-}
-
 /** Format a Linux /proc/net hex IPv4 address (little-endian per byte). */
 function parseHexIpv4(hex) {
   const octets = [];
@@ -1532,7 +1527,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
 
   const pty = ptyModule;
   const ptys = new Map(); // id -> pty.IPty
-  const helpers = new Map(); // id -> { parentId, command } for helper PTYs
+  const helpers = new Map(); // id -> { parentId } for helper PTYs
   // Every spawned, unkilled PTY (exited ones included). Only the standalone host
   // asks for `replay`; VS Code's extension host keeps its own buffers.
   // `chars` is what the buffer currently holds (a trim decrements it);
@@ -1600,7 +1595,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   }
 
   function validHelperOwner(id, helper) {
-    return typeof helper.parentId === 'string' && validCommand(helper.command)
+    return typeof helper.parentId === 'string'
       && helper.parentId !== id && sessions.has(helper.parentId) && !helpers.has(helper.parentId)
       && ![...helpers].some(([otherId, other]) => otherId !== id && other.parentId === helper.parentId);
   }
@@ -1627,7 +1622,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       return;
     }
     if (options?.helper && validHelperOwner(id, options.helper)) {
-      helpers.set(id, { parentId: options.helper.parentId, command: options.helper.command });
+      helpers.set(id, { parentId: options.helper.parentId });
     } else if (options?.helper) {
       send("exit", { id, exitCode: 1 });
       return;
@@ -1907,31 +1902,13 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     }
   }
 
-  // Only explicit settings edits write this installation-global preference. No
-  // terminal transcripts or session layout are persisted here.
-  const settingsPath = path.join(os.homedir(), '.dormouse', 'helper-terminal.json');
-  function savedCommand() {
-    try {
-      const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      if (validCommand(saved.command)) return saved.command;
-    } catch { /* Factory default until explicitly saved. */ }
-    return '';
-  }
   const shellBasename = (value) => path.basename(value).replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
   async function context(request, requestId) {
     const result = { requestId };
     try {
       const p = ptys.get(request.id);
-      if (request.op === 'settings') {
-        if (request.command !== undefined) {
-          if (!validCommand(request.command)) throw new Error('Use a single command line (up to 4096 characters)');
-          fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-          const temporary = settingsPath + '.' + process.pid + '.tmp';
-          fs.writeFileSync(temporary, JSON.stringify({ command: request.command }), { mode: 0o600 });
-          fs.renameSync(temporary, settingsPath);
-        }
+      if (request.op === 'home') {
         result.home = os.homedir();
-        result.command = request.command !== undefined ? request.command : savedCommand();
       } else if (request.op === 'info') {
         // Left null when inspection throws: unknown work is never idle.
         result.busy = null;
@@ -1943,7 +1920,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       } else if (request.op === 'promote') {
         if (request.restore) {
           if (!sessions.has(request.id) || !validHelperOwner(request.id, request.restore)) throw new Error('Invalid helper owner');
-          helpers.set(request.id, { parentId: request.restore.parentId, command: request.restore.command });
+          helpers.set(request.id, { parentId: request.restore.parentId });
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {

@@ -13,7 +13,7 @@ function shell(id: string, entry: Partial<TerminalEntry>): void {
 }
 
 function withHelper(entry: Partial<TerminalEntry>): void {
-  vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane' ? { id: 'helper', parentId: 'pane', command: '', status: 'off' } : undefined);
+  vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane' ? { id: 'helper', parentId: 'pane' } : undefined);
   shell('helper', entry);
 }
 

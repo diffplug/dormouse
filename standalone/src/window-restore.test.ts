@@ -91,7 +91,7 @@ describe("routeUnownedPtys", () => {
     const ptys: PtyInfo[] = [
       { id: "a1", alive: true },
       { id: "b1", alive: true },
-      { id: "h1", alive: true, helper: { parentId: "b1", command: "git status" } },
+      { id: "h1", alive: true, helper: { parentId: "b1" } },
     ];
 
     const { extra, unowned } = routeUnownedPtys(ptys, saved);
@@ -109,7 +109,7 @@ describe("routeUnownedPtys", () => {
     };
     const ptys: PtyInfo[] = [
       { id: "fresh", alive: true },
-      { id: "h1", alive: true, helper: { parentId: "fresh", command: "git status" } },
+      { id: "h1", alive: true, helper: { parentId: "fresh" } },
     ];
 
     const { extra, unowned } = routeUnownedPtys(ptys, saved);
@@ -132,7 +132,7 @@ describe("restoreWindowOrFresh", () => {
       ],
       activeWorkspaceId: "ws-a",
     };
-    const helper = { parentId: "b1", command: "git status" };
+    const helper = { parentId: "b1" };
     const { platform } = fakePlatform(
       [
         { id: "a1", alive: true },
@@ -150,7 +150,7 @@ describe("restoreWindowOrFresh", () => {
     expect(plans["ws-b"].initialPaneIds).toEqual(["b1"]);
     expect(plans["ws-b"].restoredLathLayout).toEqual(saved.workspaces[1].session.lathLayout);
     // The helper is restored as one — parked beside its source, not a pane.
-    expect(getHelper("b1")?.status).toBe("preserved");
+    expect(getHelper("b1")).toBeDefined();
     forgetHelper("b1");
   });
 

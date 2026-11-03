@@ -117,7 +117,7 @@ describe("PlaygroundShellRegistry with a filesystem", () => {
     const registry = new PlaygroundShellRegistry(adapter, () => createProgram(), { fs, cwd: "/home/demo/p" });
 
     adapter.spawnPty("one");
-    adapter.spawnPty("helper", { helper: { parentId: "one", command: "git status" } });
+    adapter.spawnPty("helper", { helper: { parentId: "one" } });
     await Promise.resolve();
 
     expect(output.one).toContain("~/p");

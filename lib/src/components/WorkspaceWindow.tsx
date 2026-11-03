@@ -87,7 +87,7 @@ export function WorkspaceWindow({
 
   useEffect(() => {
     const platform = getPlatform();
-    const home = platform.terminalContext?.({ op: 'settings' }).then((settings) => settings.home);
+    const home = platform.terminalContext?.({ op: 'home' }).then((info) => info.home);
     return installWorkspaceAutoNaming(platform.gitInfo?.bind(platform), home);
   }, []);
 

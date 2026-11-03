@@ -54,7 +54,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/tiling-engine.md`** — **Lath**, the in-house headless tiling engine: pure split-tree core, never-re-parent LathHost adapter, wall store + engine, Lath-only persistence.
 - **`docs/specs/alert.md`** — The Activity layer: alert tracks, attention model, TODO lifecycle, notification protocols with their sanitization rules, the Workspace union projection.
 - **`docs/specs/terminal-state.md`** — Per-Session semantic state: CWD, prompt/command lifecycle, title candidates and header derivation, grouping keys.
-- **`docs/specs/terminal-context.md`** — Unified terminal context and helper terminal: lifecycle, promotion, source closure, and global autorun settings.
+- **`docs/specs/terminal-context.md`** — Unified terminal context and helper terminal: lifecycle, promotion, and source closure.
 - **`docs/specs/terminal-escapes.md`** — Registry of every escape sequence parsed, answered, or ignored, each row pointing at its owning spec. Read before touching OSC/CSI parsing.
 - **`docs/compatible-agents.md`** — Public agent guide plus the hidden recovery contract: shutdown capture, detection, single-use records, and cold-restore execution.
 - **`docs/specs/transport.md`** — Adapter-agnostic webview ↔ host protocol: PTY lifecycle and buffering, reconnection, message contracts, persisted-session types, the invariants every adapter honors. A rule both hosts implement identically lives here, and each host spec points at it.
