@@ -2083,13 +2083,13 @@ test('tool --list takes no name, command, or placement flag', async () => {
 // Controls, and the format characters that reorder or hide text: what a person
 // reads before approving a Tool must be what is there. Spelled out rather than
 // built from `FORMAT_CHARACTERS`, so narrowing that set reddens this.
-const HIDDEN = /[\x00-\x09\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+const HIDDEN = /[\x00-\x09\x0b-\x1f\x7f-\x9f\u00a0\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u3000\u3164\ufe00-\ufe0f\ufeff\u{e0001}\u{e0041}\u{e0100}]/u;
 
 test('tool --list escapes control and format characters in repo text, in every output', async () => {
   const listing = {
     project: { path: '/work/s\u2067ite/dormouse.yml', approved: false },
     user: { path: '/home/me/.config/dormouse/dormouse.yml', found: false },
-    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext \u202eexe.txt', shadowed: false }],
+    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext \u202eexe.txt \u00adsoft\u00a0nb\u3164fill\ufe0fsel\u{e0041}tag', shadowed: false }],
     warnings: ['/work/site/dormouse.yml: tools.evil\u001b[2J\u200b: ignoring unknown field \'x\''],
   };
   const client = fixtureClient();
@@ -2101,6 +2101,7 @@ test('tool --list escapes control and format characters in repo text, in every o
   assert.match(text.stdout, /\\u009b31m/);
   assert.match(text.stdout, /fine\\u001b\[2Jtext \\u202eexe\.txt/);
   assert.match(text.stdout, /s\\u2067ite/);
+  assert.match(text.stdout, /\\u00adsoft\\u00a0nb\\u3164fill\\ufe0fsel\\udb40\\udc41tag/);
   const json = await runCli(['tool', '--list', '--json'], { client });
   assert.doesNotMatch(json.stdout, HIDDEN);
   assert.deepEqual(JSON.parse(json.stdout).tools, listing.tools);

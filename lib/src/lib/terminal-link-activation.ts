@@ -1,4 +1,4 @@
-import { PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
+import { NAVIGATION_CANCELLED_ERROR, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
 import { decodeFileLink, localFileLinkPreviewPath } from './external-links';
@@ -17,7 +17,9 @@ let lastPreview: LinkPreview | null = null;
  * links). A local `file:` link whose display text names its target is opened as
  * a `dor open` from that Session: the click previews it, and a double-click's
  * second click (`detail` 2) pins it. Every other link, and an open the host
- * refuses, goes to the confirmation dialog — once per double-click.
+ * refuses, goes to the confirmation dialog — once per double-click. A target
+ * that would run its own script asks once it is resolved, and a double-click's
+ * pin replaces its preview's question; declining opens nothing further.
  */
 export function activateTerminalLink(
   id: string,
@@ -47,10 +49,10 @@ export function activateTerminalLink(
     method: SURFACE_CONTROL_METHODS.tool,
     params: { file: uri, preview, cwd: source.cwd },
   }, (response) => {
-    if (response.ok || response.error === PREVIEW_SUPERSEDED_ERROR || ownPreview?.failed) return;
+    if (response.ok || response.error === PREVIEW_SUPERSEDED_ERROR || response.error === NAVIGATION_CANCELLED_ERROR || ownPreview?.failed) return;
     if (record) record.failed = true;
     requestExternalLinkConfirmation(uri, displayText, source);
-  });
+  }, { terminalLink: true });
 }
 
 /** The click's directory, kept across confirmation and viewer selection: the

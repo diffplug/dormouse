@@ -9,14 +9,14 @@ export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
 /** C0, DEL, and C1, as a character class body. */
 export const CONTROL_CHARACTERS = '\\x00-\\x1f\\x7f-\\x9f';
-/** Unicode format characters that reorder or hide the text around them: every
- *  bidi control, the zero-width space and joiners, the word joiner and
- *  invisible operators, and the BOM — the set `boundedPushText` in
- *  `remote-lib-common/src/security/push.ts` drops. A class body, so a printer
- *  can escape the same set. */
-export const FORMAT_CHARACTERS = '\\u061c\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff';
+/** What reorders or hides the text around it, or draws as a space a shell does
+ *  not read as one: every Unicode format and default-ignorable code point (bidi
+ *  controls, zero-width characters, the soft hyphen, Hangul fillers, variation
+ *  selectors, tag characters) and every separator but U+0020. A class body for a
+ *  `u` RegExp, so a printer can escape the same set. */
+export const FORMAT_CHARACTERS = '\\p{Cf}\\p{Default_Ignorable_Code_Point}\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
 const SHELL_INPUT_CONTROLS = new RegExp(`[${CONTROL_CHARACTERS}]`);
-const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`);
+const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`, 'u');
 
 /** Shell quotes cannot protect bytes that an interactive terminal interprets
  * as editing keys, escape sequences, or line submission before shell parsing.

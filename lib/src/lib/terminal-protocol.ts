@@ -123,7 +123,9 @@ export const CLIPBOARD_OFFER_LIMIT = 16_000;
 const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
-const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
+// The reply reaches the PTY's input, where a shell with no reader stages it as
+// a command line: an id echoed into it may carry nothing a shell reads as syntax.
+const OSC99_RESPONSE_ID_RE = /^[A-Za-z0-9_+.-]{1,64}$/;
 // Every OSC id `parseOsc` claims. Anything else is xterm.js's, which is what
 // lets an unterminated one stream instead of filling `pending`.
 const OSC_CONSUMED_IDS = new Set(['0', '2', '7', '9', '10', '11', '12', '50', '52', '99', '133', '367', '633', '777']);
@@ -1041,15 +1043,9 @@ function sanitizeOsc99Id(id: string | null): string | null {
   return sanitized || null;
 }
 
-function formatOsc99SupportResponse(rawId: string | null): string {
-  const id = normalizeOsc99ResponseId(rawId);
-  const metadata = id ? `i=${id}:p=?` : 'p=?';
+function formatOsc99SupportResponse(id: string | null): string {
+  const metadata = id && OSC99_RESPONSE_ID_RE.test(id) ? `i=${id}:p=?` : 'p=?';
   return `\x1b]99;${metadata};${OSC99_SUPPORT_PAYLOAD}\x1b\\`;
-}
-
-function normalizeOsc99ResponseId(id: string | null): string | null {
-  if (!id || id.length > TITLE_LIMIT) return null;
-  return OSC99_RESPONSE_ID_RE.test(id) ? id : null;
 }
 
 function decodeBase64(input: string): string | null {

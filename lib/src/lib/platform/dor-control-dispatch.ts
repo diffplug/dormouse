@@ -31,7 +31,7 @@ const inFlight = new Map<string, AbortController>();
 export function dispatchDorControlRequest(
   payload: DorControlRequestPayload,
   respond: (response: DorControlResult) => void,
-  { oscOpen = false }: { oscOpen?: boolean } = {},
+  { oscOpen = false, terminalLink = false }: { oscOpen?: boolean; terminalLink?: boolean } = {},
 ): void {
   const { requestId } = payload;
   const controller = new AbortController();
@@ -47,6 +47,8 @@ export function dispatchDorControlRequest(
       // Set only for a Session's own OSC 367 `open` (`tool-open-requests.ts`);
       // nothing crossing the control socket reaches this argument.
       ...(oscOpen ? { oscOpen: true } : {}),
+      // Set only for a click on a terminal link (`terminal-link-activation.ts`).
+      ...(terminalLink ? { terminalLink: true } : {}),
       signal: controller.signal,
       respond: (response: DorControlResult) => {
         inFlight.delete(requestId);

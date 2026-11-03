@@ -19,6 +19,7 @@ import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
 import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
 import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
+import { NAVIGATION_CANCELLED_ERROR } from 'dor/commands/types';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import { applyLiveToolEvents } from '../../lib/tool-events';
 import { openSequence } from 'dor-tools-lib/osc';
@@ -167,11 +168,13 @@ async function mountSlot(options: { caller?: string; slot?: ShellOptions; title?
 
 type ToolResult = { status: string; surfaceId: string; command: string; minimized: boolean };
 
+const dialogButton = (label: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === label)!;
+
 /** Dispatch one control request from `caller`; its `respond` mock. */
-function dispatch(method: string, params: Record<string, unknown>, caller = 'surface:a') {
+function dispatch(method: string, params: Record<string, unknown>, caller = 'surface:a', origin: { terminalLink?: true } = {}) {
   const respond = vi.fn();
   window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-    requestId: crypto.randomUUID(), method, surfaceId: caller, params, signal: requests.signal, respond,
+    requestId: crypto.randomUUID(), method, surfaceId: caller, params, signal: requests.signal, respond, ...origin,
   } }));
   return respond;
 }
@@ -974,7 +977,7 @@ describe('an OSC 367 open', () => {
 });
 
 describe('a terminal link', () => {
-  const openFileButton = () => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
+  const openFileButton = () => dialogButton('Open file');
 
   it('confirms a labelled link through the real Wall and pins its existing preview', async () => {
     await mountSlot();
@@ -1342,11 +1345,84 @@ describe('Tool document navigation', () => {
 });
 
 
+describe('a terminal link to a page that runs its own script', () => {
+  const click = async (file: string, preview = true) => {
+    let respond!: ReturnType<typeof vi.fn>;
+    await act(async () => { respond = dispatch(SURFACE_CONTROL_METHODS.tool, { cwd: '/repo', file, preview }, 'surface:a', { terminalLink: true }); });
+    return respond;
+  };
+  const asking = (uri: string) => waitUntil(() => getExternalLinkConfirmationSnapshot()?.uri === uri);
+
+  it('waits for the user to confirm its full path, and a cancel runs nothing', async () => {
+    await mountSlot();
+    const respond = await click('/elsewhere/page.html');
+    await asking('/elsewhere/page.html');
+    expect(document.body.textContent).toContain('A link in this terminal opens this file');
+    await flush();
+    expect(typed['surface:slot']).toEqual([]);
+
+    act(() => dialogButton('Cancel').click());
+    await waitUntil(() => respond.mock.calls.length > 0);
+    expect(respond.mock.calls[0][0]).toMatchObject({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
+    expect(typed['surface:slot']).toEqual([]);
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
+  });
+
+  it('opens once confirmed', async () => {
+    await mountSlot();
+    const respond = await click('/elsewhere/diagram.svg');
+    await asking('/elsewhere/diagram.svg');
+    act(() => dialogButton('Open file').click());
+    expect(await answer(respond)).toMatchObject({ surfaceId: 'surface:slot' });
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/elsewhere/diagram.svg');
+  });
+
+  it('asks of the resolved target, not the name printed', async () => {
+    const toolControl = await mountSlot();
+    const answerLookup = toolControl.getMockImplementation()!;
+    toolControl.mockImplementation(async call => answerLookup(call.target === 'notes.md' ? { ...call, target: '/elsewhere/page.html' } : call));
+    await click('notes.md');
+    await asking('/elsewhere/page.html');
+  });
+
+  it('keeps one question through a double-click, the pin replacing the preview', async () => {
+    await mountSlot();
+    const preview = await click('/elsewhere/page.html');
+    await asking('/elsewhere/page.html');
+    const pin = await click('/elsewhere/page.html', false);
+    await waitUntil(() => preview.mock.calls.length > 0);
+    expect(preview.mock.calls[0][0]).toMatchObject({ ok: false, error: NAVIGATION_CANCELLED_ERROR });
+    await asking('/elsewhere/page.html');
+    act(() => dialogButton('Open file').click());
+    await answer(pin);
+  });
+
+  it('withdraws the question when a newer preview supersedes it', async () => {
+    await mountSlot();
+    const stale = await click('/elsewhere/page.html');
+    await asking('/elsewhere/page.html');
+    await click('/repo/b.md');
+    await waitUntil(() => stale.mock.calls.length > 0);
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
+
+  it('opens an inert target on the click alone', async () => {
+    await mountSlot();
+    expect(await answer(await click('/elsewhere/notes.md'))).toMatchObject({ surfaceId: 'surface:slot' });
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
+
+  it('does not ask for an open that is not a link click, nor take a request\'s word that it is', async () => {
+    await mountSlot();
+    await answer(await request({ file: '/elsewhere/page.html', terminalLink: true }));
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
+  });
+});
+
 describe('a document link to a page that runs its own script', () => {
   /** The Tool in `surface:slot` follows a document link, as its OSC 367 `open`. */
   const follow = (path: string) => act(async () => applyLiveToolEvents('surface:slot',
     [{ kind: 'toolOpen', open: { path, preview: false, disposition: 'current' } }]));
-  const dialogButton = (label: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === label)!;
   /** Wait for the slot to show `target`. */
   async function untilTarget(target: string): Promise<void> {
     for (let tries = 0; tries < 100; tries++) {

@@ -176,6 +176,24 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it.each(['a b', '$(x)', '${x}', '`x`', 'a|b', 'a&b', 'a>b', 'a#b', '~', '*', "'x'", '"x"', '\\x', 'a=b', 'a/b', 'café', 'a'.repeat(65)])(
+    'echoes no OSC 99 id outside its alphabet into PTY input: %s',
+    (id) => {
+      expect(new TerminalProtocolParser().process(`\x1b]99;i=${id}:p=?;\x07`).events).toEqual([
+        { kind: 'response', data: '\x1b]99;p=?;o=always:p=title,body\x1b\\' },
+      ]);
+    },
+  );
+
+  it.each(['n1', 'A-z_0+9.x', '3f2504e0-4f89-11d3-9a0c-0305e82c3301', 'a'.repeat(64)])(
+    'echoes an OSC 99 id in its alphabet: %s',
+    (id) => {
+      expect(new TerminalProtocolParser().process(`\x1b]99;i=${id}:p=?;\x07`).events).toEqual([
+        { kind: 'response', data: `\x1b]99;i=${id}:p=?;o=always:p=title,body\x1b\\` },
+      ]);
+    },
+  );
+
   it('passes unsupported OSC sequences through to xterm', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('\x1b]555;unknown\x07text');

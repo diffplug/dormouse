@@ -163,6 +163,13 @@ afterEach(() => {
  * (`docs/specs/alert.md` -> Text And Security).
  */
 describe('toPushText', () => {
+  it.each([['soft hyphen', '\u00ad'], ['Hangul filler', '\u3164'], ['variation selector', '\ufe0f'], ['tag character', '\u{e0041}']])(
+    'drops a %s, which draws as nothing',
+    (_, hidden) => {
+      expect(toPushText(`bu${hidden}ild`)).toBe('build');
+    },
+  );
+
   it('keeps ordinary labels intact, including angle brackets', () => {
     // Unlike speech: the bracket rule exists only because WebKit's synthesizer
     // wedges on them, which has nothing to do with a notification.
