@@ -6,7 +6,7 @@
  * why a request was refused.
  *
  * Shared by the runtime that observes, the service that keeps and persists,
- * and the webview and `dor` that read.
+ * and the webview that reads.
  */
 
 import { fromBase64Url } from 'remote-lib-common';
