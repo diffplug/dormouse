@@ -199,16 +199,15 @@ test('directory opening touches the path only through the host resolver', async 
 // host's browsers and Explorer need the Windows path to the same directory.
 test('a Windows pane\'s reported directory reaches the host as a Windows path', async () => {
   const asked = [];
-  const events = [];
-  const manager = create((event, data) => events.push({ event, data }), {
+  const manager = create(() => {}, {
     spawn: () => ({ pid: 42, write() {}, resize() {}, kill() {}, onData() {}, onExit() {} }),
   }, { platform: 'win32', canonicalDirectory: async (path) => { asked.push(path); return null; } });
   manager.spawn('wsl', { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] });
   manager.spawn('gitbash', { shell: 'C:\\Program Files\\Git\\bin\\bash.exe', args: [] });
   manager.spawn('pwsh', { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', args: [] });
   const hostDirectory = async (id, path) => {
-    await manager.context({ op: 'hostDirectory', id, path }, 'host');
-    return events.at(-1).data.path;
+    await manager.context({ op: 'openDirectory', id, path }, 'host');
+    return asked.at(-1);
   };
   assert.equal(await hostDirectory('wsl', '/home/me/app'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
   assert.equal(await hostDirectory('wsl', '/mnt/c/Users/me'), 'C:\\Users\\me');
@@ -217,7 +216,5 @@ test('a Windows pane\'s reported directory reaches the host as a Windows path', 
   assert.equal(await hostDirectory('gitbash', 'C:\\Users\\me'), 'C:\\Users\\me');
   assert.equal(await hostDirectory('pwsh', '/home/me'), '/home/me');
   assert.equal(await hostDirectory('missing', '/home/me'), '/home/me');
-  await manager.context({ op: 'openDirectory', id: 'wsl', path: '/mnt/c/Users/me' }, 'directory');
-  assert.deepEqual(asked, ['C:\\Users\\me']);
   manager.killAll();
 });

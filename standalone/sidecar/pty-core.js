@@ -1948,8 +1948,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
           helpers.set(request.id, { parentId: request.restore.parentId, command: request.restore.command });
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
-      } else if (request.op === 'hostDirectory') {
-        result.path = hostDirectoryOf(request.id, request.path);
       } else if (request.op === 'openDirectory') {
         // The resolver is the only thing that touches the path: a `stat` or
         // `realpath` here would follow a link to a share and reach its host.
