@@ -52,6 +52,7 @@ import {
   toBase64Url,
   type ConnectionDenialCode,
   type ConnectionRequestV1,
+  type DevicePresenceRequired,
   type DeviceRefusalCode,
   type DevicesListResult,
   type DevicesRevokeResult,
@@ -431,8 +432,9 @@ export type ConnectResult =
   | { readonly ok: true; readonly burrowLabel: string }
   | { readonly ok: false; readonly message: string; readonly pairingRequired: boolean };
 
-function deviceRefusalMessage(answer: { outcome: string; code?: DeviceRefusalCode } | null): string {
-  return DEVICE_REFUSAL_MESSAGES[answer?.code ?? 'burrow-error'];
+/** An answer this build cannot read is the Burrow's failure, not a claim about the list. */
+function deviceRefusalMessage(answer: DevicesListResult | DevicesRevokeResult | null): string {
+  return DEVICE_REFUSAL_MESSAGES[answer?.outcome === 'refused' ? answer.code : 'burrow-error'];
 }
 
 /** Mapped again, as the Burrow's own display does: a record may predate the closed set. */
@@ -1230,7 +1232,7 @@ export class PocketClient {
    */
   async revokeDevice(id: string): Promise<DeviceRevocation> {
     if (!this.#servesDevices()) return { ok: false, message: DEVICES_UNSUPPORTED_MESSAGE };
-    const proof = this.#sessionProof;
+    const session = this.#sessionProof;
     let answer: DevicesRevokeResult | null;
     try {
       answer = await this.#deviceRequest(REMOTE_METHODS.devicesRevoke, { id }, isDevicesRevokeResult);
@@ -1239,11 +1241,11 @@ export class PocketClient {
       return { ok: false, message: RELAY_TOO_OLD_FOR_PROOF_MESSAGE };
     }
     if (answer?.outcome !== 'revoked') return { ok: false, message: deviceRefusalMessage(answer) };
-    if (answer.self && proof) {
+    if (answer.self && session) {
       // Best-effort, as at a `pairing-required`: a store that throws leaves the
       // record `paired`, and the next Connect earns that denial and retries.
       try {
-        await this.#dropAuthorization(proof.record);
+        await this.#dropAuthorization(session.record);
       } catch {
         this.#core.disposeSession();
       }
@@ -1261,7 +1263,7 @@ export class PocketClient {
    * challenge it is answered with, if it is. `null` is an answer this build
    * cannot read, or a second demand for the proof it just sent.
    */
-  async #deviceRequest<T extends { outcome: string }>(
+  async #deviceRequest<T extends DevicesListResult | DevicesRevokeResult>(
     method: string,
     params: Record<string, unknown>,
     isResult: (value: unknown) => value is T,
@@ -1272,8 +1274,7 @@ export class PocketClient {
     };
     const first = await read(params);
     if (first?.outcome !== 'presence-required') return first;
-    const { challenge } = first as unknown as { challenge: string };
-    const proof = await this.#proveSession(challenge);
+    const proof = await this.#proveSession((first as DevicePresenceRequired).challenge);
     const second = await read({ ...params, proof });
     return second?.outcome === 'presence-required' ? null : second;
   }

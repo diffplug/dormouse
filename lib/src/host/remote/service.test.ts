@@ -2284,6 +2284,27 @@ describe('paired browsers, over a session', () => {
     expect(store.acl[BURROW_ID]!.every((record) => record.revokedAt === null)).toBe(true);
   });
 
+  it('reads an id another revocation took while the proof verified as gone, logging only that one', async () => {
+    await seedPaired();
+    const paired = await connect('proof');
+    const proof = await paired.proofFor(await challengeFor(paired, REVOKE, { id: otherId }));
+    const verify = globalThis.crypto.subtle.verify.bind(globalThis.crypto.subtle);
+    const spy = vi.spyOn(globalThis.crypto.subtle, 'verify').mockImplementation((async (...args: Parameters<typeof verify>) => {
+      spy.mockRestore();
+      await command('revokeDevice', { id: otherId });
+      return verify(...args);
+    }) as typeof verify);
+
+    expect((await paired.request(REVOKE, { id: otherId, proof })).result).toEqual({
+      outcome: 'refused',
+      code: 'unknown-device',
+    });
+    await settle();
+    expect(store.accessLog.filter((entry) => entry.event === 'revoked')).toEqual([
+      expect.objectContaining({ deviceId: otherId, by: 'settings' }),
+    ]);
+  });
+
   it('refuses an id two statics share, naming neither', async () => {
     await seedPaired();
     const paired = await connect('proof');

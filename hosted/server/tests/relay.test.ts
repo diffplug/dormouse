@@ -407,6 +407,24 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
   expect(typeof finished.json!.verifiedAt).toBe("number");
   // What the Burrow checks: the proof verifies against the binding it built.
   expect(await verifyPresenceProof(proof, binding, { origin, rpId })).toMatchObject({ ok: true });
+  // A session's own proof takes the same routes, and its binding is closed, so
+  // no paired-browser id can ride along for this Relay to keep.
+  const session = {
+    kind: "session" as const,
+    burrowId: laptop.burrowId,
+    connectionId: binding.handshakeHash,
+    burrowChallenge: binding.handshakeHash,
+    handshakeHash: binding.handshakeHash,
+    passkeyCredentialId: binding.passkeyCredentialId,
+  };
+  const sessionProof = await f.prove(sessionToken, owner, phone, session);
+  expect(sessionProof.finished.status).toBe(200);
+  expect(await verifyPresenceProof(sessionProof.proof, session, { origin, rpId })).toMatchObject({ ok: true });
+  const named = await f.call("POST", API_ROUTES.reauthBegin, {
+    bearer: sessionToken,
+    body: { binding: { ...session, deviceId: "abcdef0123456789" } },
+  });
+  expect(named.status).toBe(400);
   // One use: the same nonce never proves presence twice.
   expect(
     (

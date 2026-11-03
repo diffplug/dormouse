@@ -1941,8 +1941,7 @@ export class BurrowRuntime {
         };
         // Spent before any other work, as a connection's is, so no proof is
         // ever checked against a challenge that can be presented again.
-        const challenge = established.challenge;
-        established.challenge = null;
+        const { challenge } = established;
         if (challenge === null || !this.#challenges.consume(challenge)) return refuse('challenge-invalid');
         const policy = this.#policy;
         // Every field from this session's own state, the credential included:

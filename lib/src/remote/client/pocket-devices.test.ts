@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PAIRING_DEVICE_LABELS,
   PRESENCE_WINDOW_IDLE_MS,
+  REMOTE_METHODS,
   type PairedBrowserV1,
   type PresenceBinding,
 } from 'remote-lib-common';
@@ -230,6 +231,19 @@ describe('paired browsers, from Pocket', () => {
     );
     await waitFor(() => harness.client.connectedBurrowId === null, 'the session to end');
     expect(harness.burrow.activeRecords).toEqual([]);
+  });
+
+  it('holds one challenge per session on the Burrow, and none past its end', async () => {
+    const { harness } = await pairedHarness();
+    await harness.client.hello();
+    const before = harness.burrow.pendingChallengeCount;
+    for (let asked = 0; asked < 3; asked++) {
+      await harness.client.request(REMOTE_METHODS.devicesRevoke, { id: THEIRS.id });
+      expect(harness.burrow.pendingChallengeCount).toBe(before + 1);
+    }
+
+    harness.sessions.at(-1)!.end();
+    expect(harness.burrow.pendingChallengeCount).toBe(before);
   });
 
   it('sends no verb on a session the Burrow has ended', async () => {

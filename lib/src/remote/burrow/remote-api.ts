@@ -184,11 +184,11 @@ export class RemoteApiSession {
         case REMOTE_METHODS.terminalResize:
           return this.#resize(request);
         case REMOTE_METHODS.devicesList:
-          if (!this.#devices) return this.#fail(request, `unknown method: ${request.method}`);
-          return this.#answerDevices(request, this.#devicesList(request, this.#devices));
+          if (this.#devices) return this.#answerDevices(request, this.#devicesList(request, this.#devices));
+          return this.#fail(request, `unknown method: ${request.method}`);
         case REMOTE_METHODS.devicesRevoke:
-          if (!this.#devices) return this.#fail(request, `unknown method: ${request.method}`);
-          return this.#answerDevices(request, this.#devicesRevoke(request, this.#devices));
+          if (this.#devices) return this.#answerDevices(request, this.#devicesRevoke(request, this.#devices));
+          return this.#fail(request, `unknown method: ${request.method}`);
         default:
           if (this.#frames && FrameTunnel.owns(request.method)) return this.#frames.handle(request);
           return this.#fail(request, `unknown method: ${request.method}`);
