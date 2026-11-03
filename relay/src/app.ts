@@ -56,6 +56,7 @@ import {
   DUPLICATE_CREDENTIAL_ERROR,
   MALFORMED_ASSERTION_ERROR,
   MALFORMED_BINDING_ERROR,
+  MALFORMED_PASSKEY_QUERY_ERROR,
   UNKNOWN_CREDENTIAL_ERROR,
   UNKNOWN_NONCE_ERROR,
   UNMINTED_DELIVERY_ID_ERROR,
@@ -64,8 +65,10 @@ import {
   checkRegistration,
   isContentHashedName,
   parseBearer,
+  passkeyQueryIds,
   pocketContentSecurityPolicy,
   readJson,
+  removedPasskeyIds,
   verifySigninAssertion,
 } from 'remote-lib-common';
 import type {
@@ -73,6 +76,7 @@ import type {
   BurrowEnrollRequest,
   BurrowEnrollResponse,
   BurrowsResponse,
+  PasskeysRemovedResponse,
   PresenceBinding,
   PushConfigResponse,
   PushDevicesResponse,
@@ -445,6 +449,8 @@ export interface CreatedApp {
    * instead of a timer.
    */
   readonly sweepRevokedBurrows: () => Promise<number>;
+  /** {@link BURROW_REVOCATION_SWEEP_MS}'s other job, on the same terms: a passkey gone from `account.json`. */
+  readonly sweepRemovedPasskeys: () => Promise<number>;
   /**
    * Close the Client sockets whose session has expired, then ping the rest and
    * close whatever has not been heard from within
@@ -978,6 +984,25 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // --- Setup tokens: the credential behind a Burrow's QR -------------------
 
+  // Answered from the file a hand edit removes a passkey from, so a removal
+  // leaves no tombstone. **No file is no answer, not "every passkey went"**: its
+  // absence is an ordinary state of a file whose editing is the revocation
+  // mechanism, and one that will not parse rejects, which revokes nothing too.
+  app.post(API_ROUTES.burrowPasskeysRemoved, requireBurrow, async (c) => {
+    const asked = passkeyQueryIds(await readJson(c));
+    if (!asked) return c.json({ error: MALFORMED_PASSKEY_QUERY_ERROR }, 400);
+    const account = await accounts.load();
+    const res: PasskeysRemovedResponse = {
+      removed: account
+        ? removedPasskeyIds(
+            asked,
+            account.passkeys.map((passkey) => passkey.credentialId),
+          )
+        : [],
+    };
+    return c.json(res);
+  });
+
   app.post(API_ROUTES.burrowSetupToken, requireBurrow, (c) => {
     // The token only; the Burrow composes the QR's URL (`SetupTokenResponse`)
     // around the invitation it holds in memory, and redemption here no longer
@@ -1358,6 +1383,30 @@ export function createApp(config: AppConfig): CreatedApp {
     return closed;
   }
 
+  /**
+   * The passkey ids the last {@link sweepRemovedPasskeys} read, `null` before
+   * the first. Memory only: a restart reconnects every Burrow, and each asks
+   * at its socket's open.
+   */
+  let sweptPasskeys: Set<string> | null = null;
+
+  /**
+   * Nudge every connected Burrow when a hand edit has taken a row out of
+   * `account.json`, the one way a passkey leaves this Relay (State files). The
+   * first sweep nudges too, for an edit between a Burrow's first ask and it.
+   * Like {@link sweepRevokedBurrows}, an absent file reads as nothing changed,
+   * and one that will not parse rejects. How many Burrows were told.
+   */
+  async function sweepRemovedPasskeys(): Promise<number> {
+    const account = await accounts.load();
+    if (!account) return 0;
+    const previous = sweptPasskeys;
+    const current = new Set(account.passkeys.map((passkey) => passkey.credentialId));
+    sweptPasskeys = current;
+    if (previous && [...previous].every((id) => current.has(id))) return 0;
+    return hub.nudgeBurrows();
+  }
+
   // --- Static Pocket app: GET /* fallback, registered LAST so every API and
   //     /ws route above wins. Missing build → a stub with the build command.
   registerPocketServing(app, config.pocketDir, pocketContentSecurityPolicy(origin));
@@ -1369,6 +1418,7 @@ export function createApp(config: AppConfig): CreatedApp {
     hub,
     injectWebSocket,
     sweepRevokedBurrows,
+    sweepRemovedPasskeys,
     sweepRelaySockets,
   };
 }
