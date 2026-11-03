@@ -15,9 +15,9 @@ export function createIframeProxyUrl(
   targetUrl: string,
   embedderOrigins: unknown,
   lease?: { owner: string; id: unknown },
-  tunneled?: boolean,
+  access?: { allowExternal?: boolean; tunneled?: boolean },
 ): Promise<IframeProxyResult> {
-  return createProxy(targetUrl, { log: (msg) => log.info(msg), embedderOrigins, lease, tunneled });
+  return createProxy(targetUrl, { log: (msg) => log.info(msg), embedderOrigins, lease, ...access });
 }
 
 export { isUpstreamOnThisMachine, releaseIframeProxyLease };

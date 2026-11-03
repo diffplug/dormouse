@@ -1752,10 +1752,14 @@ fn iframe_create_proxy_url(
     // The mounted view's lease id; its owner is this window, which only Rust
     // can name (docs/specs/dor-browser.md → "Iframe Proxy Leases").
     lease: Option<String>,
+    // The user allowed the target's origin off this machine
+    // (docs/specs/dor-browser.md → "Iframe External Origins").
+    allow_external: Option<bool>,
 ) -> Result<JsonValue, String> {
     let mut data = serde_json::json!({
         "target": target,
         "embedderOrigins": embedder_origins.unwrap_or_default(),
+        "allowExternal": allow_external.unwrap_or(false),
     });
     if let Some(id) = lease {
         data["lease"] = serde_json::json!({ "owner": window.label(), "id": id });

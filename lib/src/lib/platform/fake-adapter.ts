@@ -1,7 +1,7 @@
 import { DEFAULT_HELPER_COMMAND, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
 import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
 import type { ManagedVoicePort } from './managed-voice-types';
-import type { IframeProxyResult } from './iframe-proxy-types';
+import type { IframeProxyOptions, IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
 import type { AlertManager } from '../alert-manager';
 import { createAlertHost, type AlertHost, type AlertRealm } from '../../host/alert-host';
@@ -110,7 +110,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   // Absent unless a page installs them: the website playground answers both
   // from its in-memory filesystem (docs/specs/tutorial.md -> Playground filesystem).
   toolControl?: (request: ToolHostRequest) => Promise<ToolControlResult>;
-  createIframeProxyUrl?: (targetUrl: string) => Promise<IframeProxyResult>;
+  createIframeProxyUrl?: (targetUrl: string, lease?: string, opts?: IframeProxyOptions) => Promise<IframeProxyResult>;
 
 
   /** Where a due push goes. There is no Burrow here, so by default it reaches

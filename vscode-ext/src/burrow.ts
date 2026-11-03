@@ -269,7 +269,7 @@ function startService(): void {
     store: burrowStateStore(context),
     provider: createBurrowProvider(bound),
     frames: createBurrowFrameHost({
-      create: (url, { embedderOrigins, lease, tunneled }) => createIframeProxyUrl(url, embedderOrigins, lease, tunneled),
+      create: (url, { embedderOrigins, lease, tunneled }) => createIframeProxyUrl(url, embedderOrigins, lease, { tunneled }),
       release: releaseIframeProxyLease,
       isLocal: (url) => isUpstreamOnThisMachine(url),
     }),

@@ -37,6 +37,8 @@ export const iframeCommand: Command = {
 
 Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use \`dor agent-browser open <url>\`.
 
+A page served from anywhere but this machine opens behind a warning until you allow its origin there.
+
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
 
 The target is one of:

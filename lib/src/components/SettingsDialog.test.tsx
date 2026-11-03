@@ -15,6 +15,7 @@ import { stubResizeObserver } from './wall/wall-test-utils';
 import { setNativeFieldValue } from '../lib/dom';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings';
 import { resetPushDevices, setCommandWatched, getWatchedCommands, setPushDevices } from '../lib/terminal-registry';
+import { _resetIframeAllowlistForTesting, allowIframeOrigin, getIframeAllowlist } from '../lib/iframe-allowlist';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -180,6 +181,18 @@ describe('SettingsDialog navigation and search', () => {
     expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['watcher']);
     await act(async () => visible('button[aria-label="Remove my-agent rule"]')[0].click());
     expect(getWatchedCommands()).not.toContain('my-agent');
+  });
+
+  it('lists the external origins iframe previews may show, each removable, and nothing until one is', async () => {
+    _resetIframeAllowlistForTesting();
+    await render();
+    expect(document.querySelector('[data-setting="previews"]')).toBeNull();
+    await act(async () => allowIframeOrigin('http://docs.example'));
+    await search('docs.example');
+    expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['previews']);
+    await act(async () => visible('button[aria-label="Remove http://docs.example"]')[0].click());
+    expect(getIframeAllowlist()).toEqual([]);
+    expect(document.querySelector('[data-setting="previews"]')).toBeNull();
   });
 
   it('keeps a topic chosen while the opened-at topic settles', async () => {

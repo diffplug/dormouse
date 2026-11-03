@@ -8,6 +8,8 @@
  * target (e.g. an `https://` URL, which v1 defers), or an `http://` upstream
  * whose name resolves to an address the SSRF guard refuses (link-local /
  * cloud-metadata); the `detail` field carries the specific cause.
+ * `external` — the upstream resolves to an address off this machine and the
+ * request did not say the user allowed its origin (`IframeProxyOptions`).
  * `unreachable` — the name did not resolve, or no proxy could be stood up. Whether
  * the upstream answers is diagnosed lazily and surfaced as a served error *page*
  * inside the frame. A framed site's
@@ -26,4 +28,9 @@ export const IFRAME_HTTP_ONLY = 'the embedded view frames http:// pages only';
 
 export type IframeProxyResult =
   | { ok: true; url: string }
-  | { ok: false; reason: 'unreachable' | 'scheme'; detail?: string };
+  | { ok: false; reason: 'unreachable' | 'scheme' | 'external'; detail?: string };
+
+/** `allowExternal`: the user allowed the target's exact origin, so an
+ *  upstream off this machine may be proxied (docs/specs/dor-browser.md →
+ *  "Iframe External Origins"). */
+export type IframeProxyOptions = { allowExternal?: boolean };

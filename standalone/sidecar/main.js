@@ -228,6 +228,7 @@ function handleLine(line) {
             embedderOrigins: data.embedderOrigins,
             // Owner stamped by Rust: the asking window.
             lease: data.lease,
+            allowExternal: data.allowExternal === true,
           }),
         }));
         break;
