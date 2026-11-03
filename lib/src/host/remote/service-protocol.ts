@@ -577,9 +577,22 @@ export interface PairedDevice {
   connected: boolean;
 }
 
+/**
+ * A browser revoked and refused, whose revocation no save has carried yet: a
+ * save failed, or none has landed by the first retry. `id` revokes it again,
+ * which saves again.
+ */
+export interface UnsavedRevocation {
+  id: string;
+  /** Mapped through `knownPairingDeviceLabel`, so never text the phone chose. */
+  label: string;
+}
+
 /** What `pairedDevices` answers: empty with no enrollment. */
 export interface PairedDevicesResult {
   devices: PairedDevice[];
+  /** Present only while there are any, and absent from an older broker's answer. */
+  unsavedRevocations?: UnsavedRevocation[];
 }
 
 /** What `accessLog` answers: the whole bounded log, oldest first. */

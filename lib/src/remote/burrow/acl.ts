@@ -78,19 +78,25 @@ export function revocationRequester(value: unknown): RevocationRequester {
   return COMMAND_REQUESTERS.find((known) => known === value) ?? 'settings';
 }
 
+/** Whether `target` names a record holding these identities. */
+export function revocationNames(
+  target: RevocationTarget,
+  record: Pick<BurrowAclRecord, 'clientStaticPublicKey' | 'passkeyCredentialId'>,
+): boolean {
+  return 'clientStaticPublicKey' in target
+    ? record.clientStaticPublicKey === target.clientStaticPublicKey
+    : record.passkeyCredentialId === target.passkeyCredentialId;
+}
+
 /**
  * Revoke what `target` names on `acl`, in place, answering the records it
  * retired as they read before. One rule for the running Burrow and for a
  * stopped one's stored ACL.
  */
 export function revokeTarget(acl: BurrowAcl, target: RevocationTarget): BurrowAclRecord[] {
-  if ('clientStaticPublicKey' in target) {
-    const hit = acl.activeRecords().filter((record) => record.clientStaticPublicKey === target.clientStaticPublicKey);
-    acl.revokeClient(target.clientStaticPublicKey);
-    return hit;
-  }
-  const hit = acl.activeRecords().filter((record) => record.passkeyCredentialId === target.passkeyCredentialId);
-  acl.revokePasskey(target.passkeyCredentialId);
+  const hit = acl.activeRecords().filter((record) => revocationNames(target, record));
+  if ('clientStaticPublicKey' in target) acl.revokeClient(target.clientStaticPublicKey);
+  else acl.revokePasskey(target.passkeyCredentialId);
   return hit;
 }
 
