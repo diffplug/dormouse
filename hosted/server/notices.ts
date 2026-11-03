@@ -1,11 +1,11 @@
 // Rules: docs/specs/hosted.md -> "Billing notices"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing, Stripe } from "@pgstencil/stripe";
+import type { Billing } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
 import type { EmailMessage, EmailSender } from "pgstencil";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
 import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
-import { DAY_MS, run, type PriceCatalog, type PriceChange } from "./billing";
+import { DAY_MS, run, stripeHoldsPrice, type PriceCatalog, type PriceChange } from "./billing";
 import { BILLING_RETURN_PATH, isPlan, type Plan } from "./policy-constants";
 import { billingContact, type Contact } from "./withdrawal";
 
@@ -41,31 +41,14 @@ const LEASE_MS = 5 * 60 * 1000;
 /** How many notices one pass sends, and how many price changes it applies, at most. */
 const BATCH = 50;
 
-/** Prices a Stripe client confirmed, by id, amount, interval, and mode: Stripe never changes a Price's amount or interval. */
-const confirmedPrices = new WeakMap<Stripe, Set<string>>();
-
 /** Throws unless Stripe holds both of `change`'s Prices at its amounts, in USD, per its plan's interval. */
 async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
-  const interval = planInterval(change.plan);
-  let confirmed = confirmedPrices.get(billing.stripe);
-  if (!confirmed) confirmedPrices.set(billing.stripe, (confirmed = new Set()));
   for (const [id, usd] of [
     [change.fromPriceId, change.fromUsd],
     [change.toPriceId, change.toUsd],
-  ] as const) {
-    const key = `${id} ${usd} ${interval} ${billing.config.live}`;
-    if (confirmed.has(key)) continue;
-    const price = await billing.stripe.prices.retrieve(id);
-    if (
-      price.currency !== "usd" ||
-      price.unit_amount !== usd * 100 ||
-      price.recurring?.interval !== interval ||
-      price.recurring.interval_count !== 1 ||
-      price.livemode !== billing.config.live
-    )
-      throw new Error(`Price change ${change.id}: Stripe's ${id} is not ${usd} USD every ${interval}`);
-    confirmed.add(key);
-  }
+  ] as const)
+    if (!(await stripeHoldsPrice(billing, id, usd, change.plan)))
+      throw new Error(`Price change ${change.id}: Stripe's ${id} is not ${usd} USD every ${planInterval(change.plan)}`);
 }
 
 type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored" | "withdrawal";

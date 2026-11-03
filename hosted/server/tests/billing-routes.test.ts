@@ -10,6 +10,7 @@ import { END_REASONS, resyncBilling, type BillingSetup } from "../billing";
 import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
 import {
   BILLING_WEBHOOK_PATH,
+  CHECKOUT_UNAVAILABLE,
   CONSENT_REQUIRED,
   FOUNDERS_ONLY,
   TERMS_CHANGED,
@@ -439,6 +440,41 @@ test("checkout starts only after agreement to the current terms and to automatic
   // Kept once the subscription and the account are gone: it is a billing record.
   await f.sql(`DELETE FROM "user" WHERE id = $1`, [member.id]);
   expect(await consents()).toHaveLength(2);
+});
+
+test("checkout answers no URL for a configured Price Stripe would charge differently from the published price", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const refusal = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => refusal.mockRestore());
+  const member = await f.account();
+  const start = (plan: string) => member.request("/api/billing/checkout", { method: "POST", body: consent(plan) });
+  const consents = () => f.sql(`SELECT plan FROM dormouse_checkout_consents`);
+  const open = () => [...f.dev.checkouts.values()].filter((session) => session.status === "open");
+  for (const wrong of [
+    { usd: LIST_MONTHLY + 5, interval: "month" },
+    { usd: LIST_MONTHLY, interval: "year" },
+  ] as const) {
+    f.prices.set(f.setup.monthly, wrong);
+    const refused = await start("monthly");
+    expect([refused.status, await refused.json()]).toEqual([503, { message: CHECKOUT_UNAVAILABLE }]);
+    expect(await consents()).toEqual([]);
+    expect(open()).toEqual([]);
+  }
+  f.prices.delete(f.setup.founding[0]!);
+  expect((await start("founding")).status).toBe(503);
+  expect(open()).toEqual([]);
+  expect(await f.metrics()).toEqual([]);
+
+  // Set right, it sells, and Stripe is read for a Price once.
+  f.prices.set(f.setup.monthly, { usd: LIST_MONTHLY, interval: "month" });
+  expect((await start("monthly")).status).toBe(200);
+  const reads = f.reads.prices;
+  expect((await start("monthly")).status).toBe(200);
+  expect(f.reads.prices).toBe(reads);
+  expect(await consents()).toEqual([{ plan: "monthly" }]);
 });
 
 test("checkout refuses a price the page did not show before opening one, expiring one left open, so the consent records the one it did", async ({

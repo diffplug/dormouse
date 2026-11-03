@@ -5,7 +5,7 @@ import type { Context, Hono } from "hono";
 import type { Kysely } from "kysely";
 import { readJson } from "remote-lib-common";
 import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
-import { END_REASONS, foundingCohort, idOf, run, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
+import { END_REASONS, foundingCohort, idOf, run, stripeHoldsPrice, withBilling, type BillingSetup, type PriceCatalog } from "./billing";
 import type { BillingClosed, BillingSummary, Withdrawn } from "./billing-summary";
 import { entitledSql, subscribedSql } from "./entitlement";
 import { ACCOUNT_CLOSING, accountClosing, endAfterClosure } from "./closure";
@@ -31,6 +31,9 @@ export const CONSENT_REQUIRED = "Agree to the terms and to automatic renewal fir
 
 /** Checkout's answer to agreement with a terms version no longer current. */
 export const TERMS_CHANGED = "The terms have changed. Reload this page to read them.";
+
+/** Checkout's answer when Stripe would not charge the price the page shows, or cannot say. */
+export const CHECKOUT_UNAVAILABLE = `Checkout is unavailable right now, and nothing was charged. Try again later, or email ${SUPPORT_EMAIL}.`;
 
 /** The founders row's answer to an account not subscribed on a founding Price. */
 export const FOUNDERS_ONLY = "Only a founding subscription can join the founders row.";
@@ -201,10 +204,21 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         await billing.cancelCheckout(userId);
         return c.json({ message: ACCOUNT_CLOSING }, 409);
       }
+      // `expectPrice` held the body's `price` to the catalog's, which is not
+      // Stripe's: a Price set up at another amount never charges it.
+      const shownUsd = catalog.prices.get(priceId)!.usd;
+      const charges = await stripeHoldsPrice(billing, priceId, shownUsd, plan).catch((error: unknown) => {
+        console.error(`Reading Stripe's ${priceId} failed`, error);
+        return false;
+      });
+      if (!charges) {
+        console.error(`Checkout refused: Stripe's ${priceId} does not charge the published ${shownUsd} USD for ${plan}`);
+        await billing.cancelCheckout(userId);
+        return c.json({ message: CHECKOUT_UNAVAILABLE }, 503);
+      }
       // Recorded before the URL is answered, for the Price the buyer was shown
       // and what the page says at it, all from this server's own values, never
-      // the body's: `expectPrice` held the body's `price` to the catalog's.
-      const shownUsd = catalog.prices.get(priceId)!.usd;
+      // the body's.
       await run(
         billing.db,
         `INSERT INTO public.dormouse_checkout_consents

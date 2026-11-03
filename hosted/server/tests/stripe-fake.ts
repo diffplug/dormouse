@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { STRIPE_API_VERSION, Stripe } from "@pgstencil/stripe";
 import type { RandomSource, Time } from "pgstencil";
-import { LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
+import { FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
 import { DAY_MS } from "../billing";
 import { stripeDevBilling } from "../billing-dev";
 
@@ -30,12 +30,13 @@ export async function stripeFake(time: Time, random: RandomSource) {
     [CHANGED_PRICES.monthly]: "month",
     [CHANGED_PRICES.yearly]: "year",
   });
-  /** Price id → what Stripe holds for it; tests may change an entry. */
+  /** Price id → what Stripe holds for it; tests may change an entry. Billing never rereads one it confirmed. */
   const prices = new Map<string, { usd: number; interval: "month" | "year" }>([
     [devSetup.monthly, { usd: LIST_MONTHLY, interval: "month" }],
     [devSetup.yearly, { usd: LIST_ANNUAL, interval: "year" }],
     [CHANGED_PRICES.monthly, { usd: CHANGED_USD.monthly, interval: "month" }],
     [CHANGED_PRICES.yearly, { usd: CHANGED_USD.yearly, interval: "year" }],
+    ...devSetup.founding.map((price, step) => [price, { usd: FOUNDING_LADDER[step]!, interval: "year" as const }] as const),
   ]);
   /** Each subscription a checkout completed, as StripeDev holds it: changing one changes StripeDev's. */
   const live = new Map<string, Stripe.Subscription>();
