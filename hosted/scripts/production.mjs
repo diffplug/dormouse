@@ -221,6 +221,7 @@ export async function verifyPackages(readProvenance = installedProvenance) {
     commits.every((commit) => commit === commits[0]),
     "Production requires accepted, clean pgstencil provenance",
   );
+  return commits[0];
 }
 /**
  * Before the backup, so a release whose Cloudflare or Postgres side is not
