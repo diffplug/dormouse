@@ -2,7 +2,6 @@ import type { ExecutionContext } from "hono";
 import { WS_ROUTES } from "remote-lib-common";
 import { RELAY_ROOM_PARAMS } from "../relay-room-contract";
 import worker, {
-  OneTimeRoom,
   RelayRoom as ProductionRoom,
   RelayRows as ProductionRows,
 } from "../relay-worker";
@@ -113,8 +112,6 @@ export class RelayRows extends ProductionRows {
     return super.sessions(tokenHashes);
   }
 }
-
-export { OneTimeRoom };
 
 type TestEnv = { RELAY_ROOM: DurableObjectNamespace<Record<string, (...args: unknown[]) => unknown>> };
 

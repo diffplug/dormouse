@@ -13,7 +13,7 @@ import {
   toBase64Url,
 } from "remote-lib-common";
 import { RUNS_NOTHING_POLICY, oneTimePagePolicy } from "../headers";
-import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions } from "./bundle";
+import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, alone, bundleWorker, miniflareOptions } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
 
 // Pocket at the relay's root (`docs/specs/pocket-app.md` -> "Serving the
@@ -63,12 +63,12 @@ function assets(request: Request) {
 let relay: Miniflare;
 beforeAll(async () => {
   relay = new Miniflare(
-    miniflareOptions("relay", (await bundleWorker(ENTRIES.relay)).outputFiles[0].text, {
+    alone("relay", miniflareOptions("relay", (await bundleWorker(ENTRIES.relay)).outputFiles[0].text, {
       bindings: { APP_ORIGIN: origin, RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET },
       // Nothing listens here, so a route that reached the database would fail.
       hyperdrives: { HYPERDRIVE: "postgres://user:pass@127.0.0.1:9/none" },
       serviceBindings: { ASSETS: assets },
-    }),
+    })),
   );
   await relay.ready;
 });
@@ -156,11 +156,11 @@ test("the API and socket routes are never Pocket's: no shell, no page policy, no
   expect((await get(WS_ROUTES.burrow)).status).toBe(426);
 });
 
-test("a percent-encoded /connect path is the page's route, under its policy and without the camera", async () => {
+test("a percent-encoded /connect path is the moved page's, under no page's policy and without the camera", async () => {
   for (const path of ["/%63onnect/", "/%63onnect", `${ONE_TIME_PAGE_PATH}%61ssets/x.js`]) {
     const response = await get(path);
     expect(response.headers.get("content-type") ?? "", path).not.toContain("text/html");
-    expect(response.headers.get("content-security-policy"), path).toBe(oneTimePagePolicy(origin));
+    expect(response.headers.get("content-security-policy"), path).toBe(RUNS_NOTHING_POLICY);
     expect(response.headers.get("permissions-policy"), path).toBe(
       "camera=(), microphone=(), geolocation=()",
     );

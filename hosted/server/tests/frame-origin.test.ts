@@ -3,7 +3,7 @@ import { frameOriginResponse } from "../frame-origin";
 
 const asked: string[] = [];
 const env = {
-  CLIENT_ORIGIN: "https://relay.dormouse.sh",
+  CLIENT_ORIGINS: "https://relay.dormouse.sh https://connect.dormouse.sh",
   ASSETS: {
     fetch: async (request: Request) => {
       asked.push(new URL(request.url).pathname);
@@ -24,8 +24,8 @@ describe("frameOriginResponse", () => {
       const response = await at(path);
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toContain(type);
-      expect(response.headers.get("content-security-policy")).toContain(
-        "frame-ancestors https://relay.dormouse.sh",
+      expect(response.headers.get("content-security-policy")).toMatch(
+        /frame-ancestors https:\/\/relay\.dormouse\.sh https:\/\/connect\.dormouse\.sh$/,
       );
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
       expect(response.headers.get("strict-transport-security")).toContain("includeSubDomains");

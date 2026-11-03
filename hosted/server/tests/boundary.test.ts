@@ -16,6 +16,7 @@ import {
   type AccountEnv,
   accountBindings,
   accountPreviewBindings,
+  connectBindings,
   relayBindings,
   voiceBindings,
   voicePreviewBindings,
@@ -25,6 +26,7 @@ import {
   RUNS_NOTHING_POLICY,
   accountRules,
   relayRules,
+  connectRules,
   type RulesFor,
 } from "../headers";
 import { ADMIN_EMAIL } from "../entitlement";
@@ -170,9 +172,12 @@ const SERVED: Record<Name, [string, string][]> = {
     ...ACCOUNT_BILLING,
     ["GET", "/login"],
   ],
+  connect: [
+    ["GET", ONE_TIME_WS_ROUTES.client],
+    ["GET", ONE_TIME_PAGE_PATH],
+  ],
   relay: [
     ["GET", ONE_TIME_WS_ROUTES.burrow],
-    ["GET", ONE_TIME_WS_ROUTES.client],
     ["GET", ONE_TIME_PAGE_PATH],
     ["GET", WS_ROUTES.burrow],
     ["GET", WS_ROUTES.client],
@@ -239,7 +244,23 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["DELETE", "/api/voice/token"],
     ...RELAY_API,
   ],
+  connect: [
+    ["GET", "/api/auth/csrf"],
+    ["GET", "/api/providers"],
+    ["GET", "/api/ready"],
+    ["GET", ONE_TIME_WS_ROUTES.burrow],
+    ["GET", "/"],
+    ["GET", "/login"],
+    ...RELAY_API,
+    ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
+    ["POST", "/api/voice/speak"],
+    ["GET", WS_ROUTES.burrow],
+    ["GET", WS_ROUTES.client],
+  ],
   relay: [
+    // The phone's route is the connect Worker's alone.
+    ["GET", ONE_TIME_WS_ROUTES.client],
     ["GET", "/api/auth/csrf"],
     ["GET", "/api/auth/get-session"],
     ["POST", "/api/auth/sign-out"],
@@ -334,7 +355,9 @@ test("each Worker caches only its own hashed assets as immutable", async () => {
   expect(cache(await send("account", ORIGINS.account + pocket))).toBe(IMMUTABLE);
   expect(cache(await send("account", ORIGINS.account + phone))).toBe("no-store");
   expect(cache(await send("relay", ORIGINS.relay + pocket))).toBe(IMMUTABLE);
-  expect(cache(await send("relay", ORIGINS.relay + phone))).toBe(IMMUTABLE);
+  expect(cache(await send("relay", ORIGINS.relay + phone))).toBe("no-store");
+  expect(cache(await send("connect", ORIGINS.connect + phone))).toBe(IMMUTABLE);
+  expect(cache(await send("connect", ORIGINS.connect + pocket))).toBe("no-store");
   // Each Worker's rules, checked on an app that serves a script at every path.
   const serving = (rules: RulesFor) =>
     workerApp({
@@ -349,13 +372,18 @@ test("each Worker caches only its own hashed assets as immutable", async () => {
     });
   const env = { APP_ORIGIN: ORIGINS.relay };
   const relay = serving(relayRules);
-  for (const path of [pocket, phone, "/%61ssets/app-B39o2E6i.js", "/assets/pocket-private-key-ChSkpulJ.js"])
+  for (const path of [pocket, "/%61ssets/app-B39o2E6i.js", "/assets/pocket-private-key-ChSkpulJ.js"])
     expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe(IMMUTABLE);
   // A name without the content hash can change in place, so it is cached as its path otherwise is.
   for (const path of ["/sw.js", "/assets/plain.js", "/assets/app-B39o2E6.js"])
     expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe("no-cache");
-  for (const path of ["/connect/x.js", `${ONE_TIME_PAGE_PATH}assets/plain.js`, "/api/assets/x.js", "/ws/assets/x.js"])
+  for (const path of [phone, "/connect/x.js", `${ONE_TIME_PAGE_PATH}assets/plain.js`, "/api/assets/x.js", "/ws/assets/x.js"])
     expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe("no-store");
+  const connect = serving(connectRules);
+  const connectEnv = { APP_ORIGIN: ORIGINS.connect };
+  expect(cache(await connect.fetch(new Request(ORIGINS.connect + phone), connectEnv))).toBe(IMMUTABLE);
+  for (const path of [pocket, "/connect/x.js", `${ONE_TIME_PAGE_PATH}assets/plain.js`, "/api/assets/x.js"])
+    expect(cache(await connect.fetch(new Request(ORIGINS.connect + path), connectEnv)), path).toBe("no-store");
   const account = serving(accountRules);
   const accountEnv = { APP_ORIGIN: ORIGINS.account };
   expect(cache(await account.fetch(new Request(ORIGINS.account + pocket), accountEnv))).toBe(IMMUTABLE);
@@ -449,6 +477,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
     RELAY_ENROLL_POLL_LIMIT: {} as RateLimit,
     RELAY_APPROVE_LIMIT: {} as RateLimit,
     ACCOUNT_ORIGIN: "https://account.example.test",
+    CONNECT_ORIGIN: "https://connect.example.test",
     ...STRIPE,
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
@@ -486,8 +515,8 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "APP_ORIGIN",
       "ASSETS",
       "BUILD_SHA",
+      "CONNECT_ORIGIN",
       "HYPERDRIVE",
-      "ONE_TIME_JOIN_LIMIT",
       "ONE_TIME_MINT_LIMIT",
       "ONE_TIME_ROOM",
       "RELAY_ENROLL_BEGIN_LIMIT",
@@ -511,6 +540,14 @@ test("each bindings mapper passes only what its Worker uses", () => {
     undefined,
   ])
     expect(relayBindings({ ...env, ACCOUNT_ORIGIN: loose }).ACCOUNT_ORIGIN, String(loose)).toBeUndefined();
+  // `CONNECT_ORIGIN` as well: it writes a redirect's `Location`.
+  expect(relayBindings(env).CONNECT_ORIGIN).toBe(env.CONNECT_ORIGIN);
+  for (const loose of ["https://connect.example.test/", "https://connect.example.test\nX: y", "javascript:alert(1)", "", undefined])
+    expect(relayBindings({ ...env, CONNECT_ORIGIN: loose }).CONNECT_ORIGIN, String(loose)).toBeUndefined();
+  // No secret and no database: the page's Worker holds the page, its rooms, and their limit.
+  expect(keys(connectBindings(env))).toEqual(
+    ["APP_ORIGIN", "ASSETS", "BUILD_SHA", "ONE_TIME_JOIN_LIMIT", "ONE_TIME_ROOM"].sort(),
+  );
   // No auth secret: speak reads the token's owner, never a login.
   expect(keys(voiceBindings(env))).toEqual(
     ["APP_ORIGIN", "BUILD_SHA", "ELEVENLABS_API_KEY", "HYPERDRIVE"].sort(),

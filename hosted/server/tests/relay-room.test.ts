@@ -50,7 +50,7 @@ import {
   RELAY_ROOM_SWEEP_RETRY_MS,
   RELAY_ROW_READ_TIMEOUT_MS,
 } from "../relay-room-contract";
-import { ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions, wrangler } from "./bundle";
+import { ORIGINS, TEST_ENROLL_SECRET, alone, bundleWorker, miniflareOptions, wrangler } from "./bundle";
 
 // The Hosted Relay's sockets and its per-account `RelayRoom`
 // (`docs/specs/hosted.md` -> "Relay sockets") in real workerd against real
@@ -123,7 +123,7 @@ beforeAll(async () => {
   context = await createTestContext({ migrations });
   const databases = await workerDatabases(context.database.url);
   relay = new Miniflare({
-    ...miniflareOptions(
+    ...alone("relay", miniflareOptions(
       "relay",
       (await bundleWorker("server/tests/relay-room-entry.ts")).outputFiles[0].text,
       {
@@ -138,7 +138,7 @@ beforeAll(async () => {
             new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
         },
       },
-    ),
+    )),
     upstream: origin,
   });
   base = await relay.ready;

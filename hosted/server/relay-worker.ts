@@ -1,7 +1,7 @@
 import { withClient } from "pgstencil/postgres";
 import { relayBindings, type RelayEnv } from "./bindings";
 import { RELAY_NON_PAGE_PREFIXES, relayRules } from "./headers";
-import { oneTimePageRoutes, oneTimeRoutes } from "./one-time";
+import { oneTimeBurrowRoute, oneTimePageMoved } from "./one-time";
 import { pocketRoutes } from "./pocket";
 import { OWNER_COLUMNS } from "./relay-auth";
 import { relayApiRoutes, sweepExpired } from "./relay-api";
@@ -10,8 +10,10 @@ import { workerApp } from "./worker-app";
 
 /**
  * The relay Worker, `dormouse-relay` on `relay.dormouse.sh`: the Hosted Relay's
- * routes and Pocket at the root, the one-time rendezvous, and its `/connect/`
- * page. It holds no auth secret and never asks auth; it queries only its own
+ * routes and Pocket at the root, and the route a Burrow mints a one-time room
+ * on. **Never the one-time phone page**, which renders what a stranger's link
+ * sends beside nothing here (`hosted/server/connect-worker.ts`); its old path
+ * redirects there. It holds no auth secret and never asks auth; it queries only its own
  * tables and the entitlement's user row, and in production its Hyperdrive
  * connects as `dormouse_relay`, granted exactly those
  * (`hosted/server/runtime-roles.sql`). Its PR previews run this entry too, on
@@ -29,8 +31,8 @@ export default workerApp<RelayEnv>({
   routes(app) {
     relayApiRoutes(app);
     relaySocketRoutes(app);
-    oneTimeRoutes(app);
-    oneTimePageRoutes(app);
+    oneTimeBurrowRoute(app);
+    oneTimePageMoved(app);
   },
   fallback: pocketRoutes,
   // The Cron Trigger sweeps every Relay table's expired rows.
@@ -39,6 +41,5 @@ export default workerApp<RelayEnv>({
   },
 });
 
-export { OneTimeRoom } from "./one-time-room";
 export { RelayRoom } from "./relay-room";
 export { RelayRows } from "./relay-rows";

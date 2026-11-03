@@ -8,14 +8,19 @@ import { providerIds } from "../server/providers.js";
 const hosted = new URL("../", import.meta.url);
 
 /**
- * Hosted's three application Workers, each with an origin, a Hyperdrive, and a
- * preview, in deploy order, with the facts their Wrangler configs do not carry.
- * Everything else — script name, `main`, `APP_ORIGIN`, assets, Hyperdrive,
- * Durable Objects, rate limits — is read from `config`. The account deploys
- * last, so its `v2` deleting `OneTimeRoom` lands only once the relay serving the
- * replacement is deployed and, in production, smoked.
+ * Hosted's four application Workers, each with an origin and a preview, in
+ * deploy order, with the facts their Wrangler configs do not carry. Everything
+ * else — script name, `main`, `APP_ORIGIN`, assets, Hyperdrive, Durable Objects,
+ * rate limits — is read from `config`. The connect Worker deploys before the
+ * relay: the relay binds its `OneTimeRoom` and redirects to its page, so neither
+ * may outrun it.
  */
 export const APP_WORKERS = {
+  connect: {
+    config: "wrangler.connect.jsonc",
+    // The production entry: it holds no secret and no database a preview lacks.
+    previewMain: "server/connect-worker.ts",
+  },
   relay: {
     config: "wrangler.relay.jsonc",
     // The production entry: its mapper passes nothing a preview lacks.

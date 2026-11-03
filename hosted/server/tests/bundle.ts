@@ -101,16 +101,23 @@ export function miniflareOptions(name: Name, script: string, extra: Partial<V4Op
  * that answers 404.
  */
 function standIn(name: Name) {
-  const classes = (wrangler[name].durable_objects?.bindings ?? [])
-    .filter(({ script_name }) => !script_name)
-    .map(({ class_name }) => `export class ${class_name} extends DurableObject {}`);
+  const own = (wrangler[name].durable_objects?.bindings ?? []).filter(({ script_name }) => !script_name);
   return miniflareOptions(
     name,
     [
       `import { DurableObject } from "cloudflare:workers";`,
-      ...classes,
+      ...own.map(({ class_name }) => `export class ${class_name} extends DurableObject {}`),
       `export default { fetch: () => new Response(null, { status: 404 }) };`,
     ].join("\n"),
+    {
+      // Its own alone: a binding to a third Worker's class needs that Worker running.
+      durableObjects: Object.fromEntries(
+        own.map(({ name: binding, class_name }) => [
+          binding,
+          { className: class_name, useSQLite: sqliteClass(wrangler[name], class_name) },
+        ]),
+      ),
+    },
   );
 }
 

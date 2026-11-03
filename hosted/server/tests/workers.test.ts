@@ -47,6 +47,7 @@ import {
   TEST_ENROLL_SECRET,
   bundleWorker,
   miniflareOptions,
+  alone,
   together,
   wrangler,
   type Name,
@@ -232,7 +233,7 @@ async function fixture(
                 ),
         outboundService,
       }),
-      workerOptions("relay", {
+      alone("relay", workerOptions("relay", {
         script: (await relayBundle).outputFiles![0].text,
         bindings: {
           APP_ORIGIN: ORIGINS.relay,
@@ -243,7 +244,7 @@ async function fixture(
         assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
         outboundService,
         routes: [`${new URL(ORIGINS.relay).host}/*`],
-      }),
+      })),
     ),
   );
   // The voice Worker on the same database, with every binding the account
