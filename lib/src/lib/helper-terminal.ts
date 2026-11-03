@@ -11,7 +11,7 @@ import { getDefaultShellOpts } from './shell-defaults';
 import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand, seedTerminalManualCwd } from './terminal-state-store';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity } from './terminal-context-types';
 
-export type HelperStatus = 'waiting' | 'running' | 'completed' | 'preserved' | 'off' | 'unsupported' | 'exited';
+export type HelperStatus = 'waiting' | 'running' | 'completed' | 'preserved' | 'off' | 'unsupported' | 'unconfirmed' | 'exited';
 export interface HelperTerminal extends HelperIdentity { id: string; status: HelperStatus; promoting?: boolean; timer?: ReturnType<typeof setInterval> }
 const STATUS_POLL_MS = 100;
 const READINESS_TIMEOUT_MS = 8000;
@@ -217,6 +217,22 @@ function requireHelperMutable(parentId: string): void {
   if (helperTransferPending(parentId)) throw new Error('Workspace is transferring');
 }
 
+/**
+ * Where a new helper starts, and whether autorun may type there. The source's
+ * reported directory is whatever its terminal last printed, so only the host's
+ * read of the source PTY's process cwd confirms one; `getCwd` answers null where
+ * it cannot read (Windows, a failed read). A directory that is only reported
+ * still opens, as a split there would, but nothing is typed into it.
+ */
+async function helperDirectory(parentId: string): Promise<{ cwd: string | undefined; confirmed: boolean }> {
+  const processCwd = await getPlatform().getCwd(parentId).catch(() => null);
+  if (processCwd) return { cwd: processCwd, confirmed: true };
+  // A remote parent reports nothing here: the helper takes the host default
+  // rather than claiming the ssh path, and that default is confirmed.
+  const reported = getInheritableCwd(parentId);
+  return { cwd: reported, confirmed: reported === undefined };
+}
+
 export async function openHelper(parentId: string): Promise<HelperTerminal> {
   requireHelperMutable(parentId);
   // Concurrent openings share one creation, so a source never gets two helpers.
@@ -234,7 +250,7 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
       // The first context render preceded this effect; the next tick would
       // see the already-updated status and have no change left to publish.
       if (previous.status !== priorStatus) notifyHelpers();
-      if (!entry?.untouched || (previous.status !== 'completed' && previous.status !== 'off') || await helperHasWork(previous)) return previous;
+      if (!entry?.untouched || !['completed', 'off', 'unconfirmed'].includes(previous.status) || await helperHasWork(previous)) return previous;
       // Input or ownership can change during process inspection.
       if (helpers.get(parentId) !== previous || !entry.untouched) return helpers.get(parentId) ?? previous;
       requireHelperMutable(parentId);
@@ -242,15 +258,12 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     }
     const platform = getPlatform();
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
-    const settings = await platform.terminalContext({ op: 'settings' });
+    const [settings, { cwd, confirmed }] = await Promise.all([platform.terminalContext({ op: 'settings' }), helperDirectory(parentId)]);
     requireHelperMutable(parentId);
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
     const id = mintSurfaceId();
-    // One cwd for the spawn and the launched command's record, so a remote parent
-    // leaves the helper in the host default rather than claiming the ssh path.
-    const cwd = getInheritableCwd(parentId);
     const command = settings.command ?? DEFAULT_HELPER_COMMAND;
-    const helper: HelperTerminal = { id, parentId, command, status: command ? 'waiting' : 'off' };
+    const helper: HelperTerminal = { id, parentId, command, status: !command ? 'off' : confirmed ? 'waiting' : 'unconfirmed' };
     helpers.set(parentId, helper);
     setPendingShellOpts(id, { ...getDefaultShellOpts(), cwd, helper: { parentId, command } });
     getOrCreateTerminal(id);

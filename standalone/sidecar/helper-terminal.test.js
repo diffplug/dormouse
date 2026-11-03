@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { create, getOpenPortsForPids, openNativeDirectory, shellHasWork } = require('./pty-core');
 
 test('Windows folder opening completes on launch and still reports spawn errors', () => {
@@ -197,6 +199,25 @@ test('directory opening touches the path only through the host resolver', async 
 
 // A WSL pane reports Linux directories and Git Bash MSYS ones; the Windows
 // host's browsers and Explorer need the Windows path to the same directory.
+test('settings answer an empty autorun until the user saves one, which then persists', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-helper-settings-'));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = process.env.USERPROFILE = home;
+  try {
+    const answers = [];
+    const manager = create((event, data) => { if (event === 'context') answers.push(data); }, { spawn: () => { throw new Error('no spawn'); } });
+    await manager.context({ op: 'settings' }, 'factory');
+    assert.equal(answers.at(-1).command, '');
+    assert.equal(fs.existsSync(path.join(home, '.dormouse', 'helper-terminal.json')), false);
+    await manager.context({ op: 'settings', command: 'git status' }, 'opt-in');
+    await manager.context({ op: 'settings' }, 'read');
+    assert.equal(answers.at(-1).command, 'git status');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('a Windows pane\'s reported directory reaches the host as a Windows path', async () => {
   const asked = [];
   const manager = create(() => {}, {

@@ -8,6 +8,7 @@ import { flushTerminal, getTerminalInstance, refitSession } from '../lib/termina
 import { FakePtyAdapter, getPlatform, flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
+import { DEFAULT_HELPER_COMMAND, SUGGESTED_HELPER_COMMAND } from '../lib/terminal-context-types';
 import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
 
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
@@ -61,6 +62,7 @@ function expectContained(element: Element, parent: Element) {
   expect(a.bottom).toBeLessThanOrEqual(b.bottom + 1);
 }
 async function rightClickSourceHeader(source: string) {
+  (getPlatform() as FakePtyAdapter).setProcessCwd(source, '/home/demo/projects/dormouse');
   const header = await requireElement(`[data-pane-header-for="${source}"]`, 'source header');
   header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
   await requireElement('[data-helper-terminal] .xterm', 'helper terminal');
@@ -161,11 +163,16 @@ const meta = {
   component: PlacementWall,
   // Argos replays stories for capture; unfinished input from the preceding run
   // must not turn this run's fresh-helper fixture into a preserved helper.
-  beforeEach: ({ args }) => {
+  beforeEach: async ({ args }) => {
     for (const role of roles(args)) disposeHelper(idOf(args, role));
     const platform = getPlatform() as FakePtyAdapter;
     platform.deferHelperStartup = true;
-    return () => { platform.deferHelperStartup = false; };
+    // The fixture wraps an autorun's echo, which the factory setting has none of.
+    await platform.terminalContext({ op: 'settings', command: SUGGESTED_HELPER_COMMAND });
+    return async () => {
+      platform.deferHelperStartup = false;
+      await platform.terminalContext({ op: 'settings', command: DEFAULT_HELPER_COMMAND });
+    };
   },
   args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) }, chromatic: { viewports: [1200] } },

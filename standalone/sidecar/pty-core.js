@@ -1916,7 +1916,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       if (validCommand(saved.command)) return saved.command;
     } catch { /* Factory default until explicitly saved. */ }
-    return 'git status';
+    return '';
   }
   const shellBasename = (value) => path.basename(value).replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
   const hostDirectoryOf = (id, dir) => hostDirectory(dir, { platform, shell: sessions.get(id)?.shell, wslDistro: sessions.get(id)?.wslDistro });
