@@ -116,7 +116,7 @@ import {
   type TestRendezvous,
 } from '../../remote/test-rendezvous';
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
-import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
+import { DEFAULT_RELAY_ORIGIN, HOSTED_ONE_TIME_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import {
   BurrowService,
@@ -2373,7 +2373,7 @@ describe('one-time connection', () => {
 
   /** Read the link and complete IK against it, as the page does on Connect. */
   async function join(url: string): Promise<TestOneTimePhone> {
-    const link = await parseOneTimeLinkUrl(url, HOSTED_ORIGIN);
+    const link = await parseOneTimeLinkUrl(url, HOSTED_ONE_TIME_ORIGIN);
     if (!link) throw new Error(`a phone could not read the link: ${url}`);
     return joinOneTimeRoom(rendezvous, link);
   }
@@ -2436,7 +2436,10 @@ describe('one-time connection', () => {
     expect(waiting.status).toBe('waiting');
     expect(rendezvous.rooms).toHaveLength(1);
     expect(rendezvous.room().burrowUrl).toBe('wss://relay.dormouse.sh/api/one-time/burrow');
-    expect((await parseOneTimeLinkUrl(waiting.url, HOSTED_ORIGIN))?.roomId).toBe(
+    // The socket stays on the relay's origin; the link sends the phone to the page's own.
+    expect(new URL(waiting.url).origin).toBe('https://try.dormouse.sh');
+    expect(await parseOneTimeLinkUrl(waiting.url, HOSTED_ORIGIN)).toBeNull();
+    expect((await parseOneTimeLinkUrl(waiting.url, HOSTED_ONE_TIME_ORIGIN))?.roomId).toBe(
       rendezvous.room().roomId,
     );
     // No enrollment: no relay socket, and nothing sent to a Relay.

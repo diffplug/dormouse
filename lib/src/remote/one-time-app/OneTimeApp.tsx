@@ -2,7 +2,7 @@
  * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), which
  * Hosted serves at `/connect/`: the link a computer showed, a Connect tap, two
  * digits to type on that computer, then Pocket's mobile wall over the direct
- * path — and nothing kept, since this origin is Hosted's accounts' too.
+ * path — and nothing kept, on an origin of its own that holds no paired keys.
  *
  * The screens draw on Pocket's chrome and shared views; the session is a
  * {@link OneTimeClient}, whose `connectOnce` runs the whole ceremony and is the

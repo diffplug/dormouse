@@ -27,9 +27,10 @@ export const POCKET_PERMISSIONS = "camera=(self), microphone=(), geolocation=()"
 
 /**
  * The relay's prefixes that serve no page: each answers its own routes and
- * otherwise 404s (`workerApp`'s tails), never Pocket's shell.
+ * otherwise 404s (`workerApp`'s tails), never Pocket's shell. `/connect` answers
+ * only the move of the one-time page to its own origin.
  */
-export const RELAY_NON_PAGE_PREFIXES = ["/api", "/ws"] as const;
+export const RELAY_NON_PAGE_PREFIXES = ["/api", "/ws", "/connect"] as const;
 
 /**
  * A response's caching: `immutable` for a content-hashed file (a 200 that is
@@ -70,38 +71,35 @@ export const NO_PAGE_RULES: PathRules = {
 };
 
 /**
- * Which of the relay's three kinds a path is: the one-time page (`/connect`
- * and under `/connect/`), a non-page prefix, or Pocket's
- * (`docs/specs/pocket-app.md` -> "Serving the built bundle") — every other path.
- */
-export function relayPathKind(path: string): "connect" | "api" | "pocket" {
-  if (under(path, ONE_TIME_PAGE_PATH.slice(0, -1))) return "connect";
-  if (RELAY_NON_PAGE_PREFIXES.some((prefix) => under(path, prefix))) return "api";
-  return "pocket";
-}
-
-/**
- * The relay's rules: the page's policy under `/connect`, Pocket's (with the
- * camera) on Pocket's paths, and the runs-nothing policy on the non-page
- * prefixes. Both pages need `APP_ORIGIN`, and a value that is not exactly an
- * http(s) origin could write a directive of its own into the header: the
- * runs-nothing policy answers instead.
+ * The relay's rules: the runs-nothing policy on the non-page prefixes, and
+ * Pocket's (with the camera) on every other path
+ * (`docs/specs/pocket-app.md` -> "Serving the built bundle"). Pocket needs `APP_ORIGIN`, and
+ * a value that is not exactly an http(s) origin could write a directive of its
+ * own into the header: the runs-nothing policy answers instead.
  */
 export const relayRules: RulesFor = (path, appOrigin) => {
-  const kind = relayPathKind(path);
-  if (kind === "api") return NO_PAGE_RULES;
+  if (RELAY_NON_PAGE_PREFIXES.some((prefix) => under(path, prefix))) return NO_PAGE_RULES;
   const origin = exactOrigin(appOrigin);
-  return kind === "connect"
-    ? {
-        policy: origin ? oneTimePagePolicy(origin) : RUNS_NOTHING_POLICY,
-        permissions: NO_DEVICES_PERMISSIONS,
-        cache: contentHashed(path, `${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
-      }
-    : {
-        policy: origin ? pocketContentSecurityPolicy(origin, HOSTED_FRAME_DOMAIN) : RUNS_NOTHING_POLICY,
-        permissions: POCKET_PERMISSIONS,
-        cache: contentHashed(path, "/assets/") ? "immutable" : "no-cache",
-      };
+  return {
+    policy: origin ? pocketContentSecurityPolicy(origin, HOSTED_FRAME_DOMAIN) : RUNS_NOTHING_POLICY,
+    permissions: POCKET_PERMISSIONS,
+    cache: contentHashed(path, "/assets/") ? "immutable" : "no-cache",
+  };
+};
+
+/**
+ * The try Worker's rules: the page's policy under `/connect`, and the
+ * runs-nothing policy everywhere else it answers, with `APP_ORIGIN` read as
+ * {@link relayRules} reads it.
+ */
+export const tryRules: RulesFor = (path, appOrigin) => {
+  if (!under(path, ONE_TIME_PAGE_PATH.slice(0, -1))) return NO_PAGE_RULES;
+  const origin = exactOrigin(appOrigin);
+  return {
+    policy: origin ? oneTimePagePolicy(origin) : RUNS_NOTHING_POLICY,
+    permissions: NO_DEVICES_PERMISSIONS,
+    cache: contentHashed(path, `${ONE_TIME_PAGE_PATH}assets/`) ? "immutable" : "no-store",
+  };
 };
 
 /** `value` when it is exactly an http(s) origin, else null. */
@@ -119,7 +117,7 @@ export function exactOrigin(value: unknown): string | null {
  * scripts from `/connect/assets/` alone (plus WebAssembly for xterm's image
  * decoder), styles from there too plus inline ones for the shell and React,
  * one socket — the rendezvous client route — and frames on the frame domain alone.
- * Nothing names `'self'`, which would admit whatever else the relay origin serves.
+ * Nothing names `'self'`, which would admit whatever else this origin answers.
  * Sandboxed with no top navigation; `form-action` keeps the page's own forms in.
  */
 export function oneTimePagePolicy(appOrigin: string) {

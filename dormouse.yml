@@ -37,7 +37,7 @@ tools:
     port: auto
     prespawn_dedupe: [hosted, $PROJECT_ROOT]
 
-  # One-time connection rendezvous + phone page on localhost:8787 (Worker reloads on save, page rebuilds on save, no HMR); fixed port, so one checkout at a time
+  # One-time connection rendezvous on localhost:8787 + phone page on localhost:8788 (Workers reload on save, page rebuilds on save, no HMR); fixed ports, so one checkout at a time
   one-time:
     run: pnpm dev:one-time
     render: agent-browser-screencast

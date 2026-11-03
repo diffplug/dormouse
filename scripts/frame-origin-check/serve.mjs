@@ -110,7 +110,7 @@ http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, frameOrigin);
   if (pathname === '/__dormouse-frame/probe.html') return send(res, 200, 'text/html; charset=utf-8', readFileSync(join(here, 'probe.html')), PROBE_HEADERS);
   if (pathname === '/__dormouse-frame/probe.js') return send(res, 200, 'text/javascript', readFileSync(join(here, 'probe.js')), PROBE_HEADERS);
-  const response = await frameOriginResponse(new Request(new URL(req.url, frameOrigin), { method: req.method }), { ASSETS: assets, CLIENT_ORIGIN: pocketOrigin });
+  const response = await frameOriginResponse(new Request(new URL(req.url, frameOrigin), { method: req.method }), { ASSETS: assets, CLIENT_ORIGINS: pocketOrigin });
   res.writeHead(response.status, Object.fromEntries(response.headers));
   res.end(Buffer.from(await response.arrayBuffer()));
 }).listen(Number(values['frame-port']), '127.0.0.1');

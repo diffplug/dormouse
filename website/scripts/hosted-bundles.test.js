@@ -51,6 +51,7 @@ describe('Hosted bundle disclosure', () => {
       { entry: 'server/frame-worker.ts', platform: 'worker' },
       { entry: 'server/worker.ts', platform: 'worker' },
       { entry: 'server/relay-worker.ts', platform: 'worker' },
+      { entry: 'server/try-worker.ts', platform: 'worker' },
       { entry: 'server/voice-worker.ts', platform: 'worker' },
       { entry: 'src/main.tsx', platform: 'browser' },
     ]);

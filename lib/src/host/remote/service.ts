@@ -90,6 +90,7 @@ import {
   HOSTED_ACCOUNT_ORIGIN,
   hostedAccountOrigin,
   hostedOrigin,
+  oneTimeLinkOrigin,
   isDevHostedBuild,
   isRelayOrigin,
   type RelayBuild,
@@ -1439,7 +1440,8 @@ export class BurrowService {
    */
   async #openOneTime(): Promise<OneTimeState> {
     const hosted = this.#hostedOrigin;
-    if (hosted === null) {
+    const linkOrigin = oneTimeLinkOrigin(this.#relay);
+    if (hosted === null || linkOrigin === null) {
       throw new Error(
         'One-time connections are unavailable in a self-host build: their links are made at ' +
           `Dormouse Hosted, and this build reaches only its own Relay (${this.#relay.origin}).`,
@@ -1465,6 +1467,7 @@ export class BurrowService {
     }
     const runtime: OneTimeRuntime = new OneTimeRuntime({
       origin: hosted,
+      linkOrigin,
       createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
       directPeering: directPeeringFor(policy, this.#createDirectPeer),

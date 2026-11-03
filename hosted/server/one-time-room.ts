@@ -64,7 +64,8 @@ export class OneTimeRoom {
     };
   }
 
-  // Reached only through `oneTimeRoutes`, which has already checked the
+  // Reached only through `oneTimeBurrowRoute` on the relay Worker or
+  // `oneTimeClientRoute` on the try Worker: each has already checked the
   // upgrade, the Origin, the room id, and the rate limit.
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);

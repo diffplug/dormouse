@@ -18,11 +18,11 @@ const FILES: Readonly<Record<string, string>> = {
 
 export interface FrameOriginEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
-  /** The one origin that may frame this: Pocket's, and the one-time page's. */
-  CLIENT_ORIGIN: string;
+  /** The origins that may frame this, space-separated: Pocket's and the one-time page's. */
+  CLIENT_ORIGINS: string;
 }
 
-const headers = (clientOrigin: string, contentType: string) => ({
+const headers = (clientOrigins: string, contentType: string) => ({
   "content-type": contentType,
   // Revalidated, so a worker fix reaches a phone at its next load.
   "cache-control": "no-cache",
@@ -33,11 +33,11 @@ const headers = (clientOrigin: string, contentType: string) => ({
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   // Only the bootstrap page can be framed, and only by the Client: that is what
   // makes the parent its messages trust the Client (`bootstrap.ts`).
-  "content-security-policy": `default-src 'none'; script-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors ${clientOrigin}`,
+  "content-security-policy": `default-src 'none'; script-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors ${clientOrigins}`,
 });
 
 export async function frameOriginResponse(request: Request, env: FrameOriginEnv): Promise<Response> {
-  const notFound = () => new Response("Not found", { status: 404, headers: headers(env.CLIENT_ORIGIN, "text/plain; charset=utf-8") });
+  const notFound = () => new Response("Not found", { status: 404, headers: headers(env.CLIENT_ORIGINS, "text/plain; charset=utf-8") });
   const url = new URL(request.url);
   const contentType = Object.hasOwn(FILES, url.pathname) ? FILES[url.pathname] : undefined;
   if (!contentType || (request.method !== "GET" && request.method !== "HEAD")) return notFound();
@@ -46,5 +46,5 @@ export async function frameOriginResponse(request: Request, env: FrameOriginEnv)
   if (url.pathname === FRAME_BOOTSTRAP_PATH) url.pathname = url.pathname.slice(0, -".html".length);
   const file = await env.ASSETS.fetch(new Request(url, { method: request.method }));
   if (!file.ok) return notFound();
-  return new Response(request.method === "HEAD" ? null : file.body, { status: 200, headers: headers(env.CLIENT_ORIGIN, contentType) });
+  return new Response(request.method === "HEAD" ? null : file.body, { status: 200, headers: headers(env.CLIENT_ORIGINS, contentType) });
 }

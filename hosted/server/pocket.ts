@@ -4,7 +4,7 @@ import { assetOrNotFound } from "./one-time";
 
 /**
  * Pocket at the relay's root (`docs/specs/pocket-app.md` -> "Serving the built
- * bundle"), staged into the relay's assets beside `/connect/`: a hashed asset
+ * bundle"), staged into the relay's assets: a hashed asset
  * only as itself, the shell straight away for a path that names no file, and
  * any other path as its file, or the shell when there is none. Registered as
  * the relay's fallback, after every route and the non-page tails. Paths are

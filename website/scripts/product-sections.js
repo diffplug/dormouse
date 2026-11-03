@@ -40,9 +40,9 @@ export const productSections = [
   {
     id: "hosted",
     roots: [
-      // Hosted's three Workers and the account page. One package, so the walk
-      // cannot tell the relay Worker's graph from the account's or voice's.
-      // Pocket and the one-time page, which relay.dormouse.sh serves, are built
+      // Hosted's application Workers and the account page. One package, so the
+      // walk cannot tell the relay Worker's graph from the account's or voice's.
+      // Pocket and the one-time page, which Hosted's Workers serve, are built
       // from `dormouse-lib`, so the Terminal's root discloses them.
       "dormouse-hosted",
     ],

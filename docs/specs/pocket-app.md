@@ -211,7 +211,7 @@ A framed page (`docs/specs/remote-api.md` -> "Frames") runs at a frame origin: a
 
 - **The bootstrap page must expire every cookie it can see on the parent domain before the frame's page loads**, leaving this origin's own.
 
-- **Must declare `capabilities.frames` only at Hosted's production origin** (`frameDomainFor`), from Pocket and the one-time page alike: the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on.
+- **Must declare `capabilities.frames` only at Hosted's production origins** (`frameDomainFor`), from Pocket and the one-time page alike: the frame Worker lets no other page frame it, and a preview has no wildcard to serve one on.
 - **Must let frames in through Pocket's and the one-time page's CSPs only for that domain**; a self-host Relay's Pocket names none. The one-time page's own CSP sandbox must grant what `IFRAME_SANDBOX` does, since a frame's is at most its parent's.
 - **Must sandbox a framed page as a local pane's, and its bootstrap page no less**, so it cannot navigate Pocket away, itself or through the sibling it can script.
 - **Must keep a separate `frameOriginFor` salt per tab, in `sessionStorage`**, since a worker cannot tell whose page asked and two tabs sharing an origin would serve each other's requests; a reload keeps it, a browser's Duplicate Tab copies it, and losing it only moves frames to new origins. The one-time page holds its salt in memory alone.
