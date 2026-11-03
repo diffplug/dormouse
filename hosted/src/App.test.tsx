@@ -8,7 +8,7 @@ import * as api from "./api";
 import type { Enrollment } from "./enrollment";
 import type { BillingSummary } from "../server/billing-summary";
 import type { CheckoutIntent } from "./billing";
-import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION } from "../server/policy-constants";
+import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION, termsArchiveUrl } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 
@@ -363,6 +363,7 @@ describe("checkout", () => {
     expect(text()).toContain("42 left at this price");
     const go = () => button("Continue to payment");
     expect(go().disabled).toBe(true);
+    expect(container.querySelector("#agree-terms")!.closest("label")!.querySelector("a")!.href).toBe(termsArchiveUrl(TERMS_VERSION));
     await tick("agree-terms");
     expect(go().disabled).toBe(true);
     await tick("agree-renewal");
@@ -437,6 +438,9 @@ describe("billing", () => {
     expect(location.pathname).toBe("/billing");
     expect(container.querySelector("h1")?.textContent).toBe("You’re subscribed");
     expect(text()).toContain(`To the Terms (version ${TERMS_VERSION}) and to automatic renewal`);
+    expect(container.querySelector<HTMLAnchorElement>(`a[href="${termsArchiveUrl(TERMS_VERSION)}"]`)?.textContent).toBe(
+      `Terms (version ${TERMS_VERSION})`,
+    );
     expect(text()).toContain("at $50 plus any applicable tax");
     vi.mocked(api.getBilling).mockResolvedValue(FOUNDING);
     await act(async () => window.dispatchEvent(new Event("focus")));

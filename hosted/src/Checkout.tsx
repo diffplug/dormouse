@@ -6,14 +6,12 @@ import {
   LINK_CLASS,
   MUTED_TEXT_CLASS,
 } from "dormouse-lib/site/docs-tokens";
-import { TERMS_VERSION, VOICE_DAILY_CAP, type Plan } from "../server/policy-constants";
+import { TERMS_VERSION, VOICE_DAILY_CAP, termsArchiveUrl, type Plan } from "../server/policy-constants";
 import { planInterval, type Tier } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
 import { planOffers, refundWindow } from "./billing";
 import { CHECK_CLASS, HELP_CLASS, PRIMARY_CLASS } from "./classes";
 import { WithdrawalRight } from "./Withdrawal";
-
-const TERMS_URL = "https://dormouse.sh/terms/";
 
 /** `$50/year`. */
 export const perInterval = (price: number, interval: "month" | "year") => `$${price}/${interval}`;
@@ -131,7 +129,7 @@ export function Checkout({
         />
         <span>
           I agree to the{" "}
-          <a className={LINK_CLASS} href={TERMS_URL} target="_blank" rel="noreferrer">
+          <a className={LINK_CLASS} href={termsArchiveUrl(TERMS_VERSION)} target="_blank" rel="noreferrer">
             Dormouse Hosted Terms
           </a>{" "}
           (version {TERMS_VERSION}).

@@ -62,10 +62,12 @@ Source of truth: `App` in `hosted/src/App.tsx`; `takeCheckout` in `hosted/src/bi
 Continuing past the sign-in notice is how an account agrees to the Hosted terms (`website/src/pages/Terms.tsx` -> "The service").
 
 - **Must show the notice beside every sign-in method**, naming `TERMS_VERSION` and linking the terms and privacy policy without leaving the page.
-- **`TERMS_VERSION` is the policy pages' revision date** and changes with every terms revision.
+- **`TERMS_VERSION` is the policy pages' revision date** and changes with every revision of the terms or the privacy policy.
+- **Must keep each published version of both policies as a static file, `website/public/terms/<version>/index.html` and `website/public/privacy/<version>/index.html`, served at `https://dormouse.sh/terms/<version>/` and `https://dormouse.sh/privacy/<version>/`; never change or remove one.** The current version's file holds what its live page renders, so moving `TERMS_VERSION` without its files, or changing a policy's text without moving it, fails `website/src/pages/policy-archive.test.tsx`.
+- **Must link the agreed version's archive, never the live page,** from the purchase agreement and what confirms it: checkout, the `/billing` confirmation, and the purchase email.
 - **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice, current version only.
 
-Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `hosted/server/policy-constants.ts`.
+Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` and `termsArchiveUrl` in `hosted/server/policy-constants.ts`.
 
 ## Entitlement
 
