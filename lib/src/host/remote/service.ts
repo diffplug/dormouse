@@ -48,6 +48,7 @@ import {
 import type { BurrowFrameHost } from '../../remote/burrow/burrow-frame-host';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
 import { burrowFetch, describingFetchFailures, probeBurrowStanding } from '../../remote/burrow/burrow-fetch';
+import { createPasskeySync, type PasskeySync } from '../../remote/burrow/passkey-sync';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import {
   loadPushDevices,
@@ -446,6 +447,8 @@ export class BurrowService {
   readonly #listInterfaces: () => NetworkInterfaceInfo[];
 
   #burrow: BurrowRuntime | null = null;
+  /** {@link #burrow}'s asking after removed passkeys, gone with it. */
+  #passkeySync: PasskeySync | null = null;
   /**
    * The enrollment this service reports: the running Burrow's, or — under a
    * level that runs none — the one it holds without running (`#startBurrow`).
@@ -1656,9 +1659,18 @@ export class BurrowService {
         this.#emitInvitation(inviteId, state, outcome),
       onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
       onPolicyRaised: () => this.#persistRaisedPolicy(enrollment),
+      onPasskeysStale: () => this.#passkeySync?.request(),
       probeStanding: () => probeBurrowStanding({ enrollment, fetch: this.#fetch }),
       onAccess: (entry) => this.#logAccess(entry),
       now: this.#now,
+    });
+    const burrow = this.#burrow;
+    this.#passkeySync = createPasskeySync({
+      enrollment,
+      fetch: this.#fetch,
+      connected: () => burrow.status === 'connected',
+      activeRecords: () => burrow.activeRecords,
+      revoke: (passkeyCredentialId) => this.revoke({ passkeyCredentialId }, 'relay'),
     });
     this.#burrow.start();
     this.#emitStatus();
@@ -1812,6 +1824,8 @@ export class BurrowService {
   }
 
   #stopBurrow(): void {
+    this.#passkeySync?.stop();
+    this.#passkeySync = null;
     this.#burrow?.stop();
     // Invitations go with it: their one-use keys live on the `BurrowRuntime`
     // precisely so a code the old Relay's QR carried cannot complete a

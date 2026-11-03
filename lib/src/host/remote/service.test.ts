@@ -87,6 +87,7 @@ import type {
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
 import { levelsFor, nothingPolicy, type NetworkInterfaceInfo, type NetworkPolicy } from '../../remote/network-policy';
 import type { DirectPathPolicy, DirectPeering } from '../../remote/direct/direct-peer';
+import { PASSKEY_QUERY_RETRY_MS, PASSKEY_QUERY_SPACING_MS } from '../../remote/burrow/passkey-sync';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
@@ -317,6 +318,9 @@ function fakeFetch(): typeof globalThis.fetch {
           rpId: new URL(url).hostname,
         }),
       } as Response;
+    }
+    if (url.endsWith(API_ROUTES.burrowPasskeysRemoved)) {
+      return new Response(JSON.stringify({ removed: [] }));
     }
     if (url.endsWith('/api/push/devices')) {
       return {
@@ -1668,6 +1672,8 @@ describe('push', () => {
     await service.start();
     sockets[0]!.open();
     sockets[0]!.closeWith(WS_CLOSE_BURROW_REVOKED);
+    // What the open asked, while the Relay still took this Burrow.
+    requests = [];
 
     await service.push('pty-1', 'x');
     expect(await command('setupQr')).toMatchObject({ error: expect.stringContaining('not connected') });
@@ -1878,6 +1884,156 @@ describe('paired devices and revocation', () => {
     expect(entries).toHaveLength(ACCESS_LOG_MAX_ENTRIES);
     expect(entries[0]!.at).toBe(1);
     expect(entries.at(-1)!.event).toBe('revoked');
+  });
+});
+
+describe('Relay-named revocation', () => {
+  const PHONE = { ...aclRecord('a-phone'), passkeyCredentialId: 'cred-phone' };
+  const TAB = { ...aclRecord('a-tab'), passkeyCredentialId: 'cred-phone' };
+  const TABLET = { ...aclRecord('b-tablet'), passkeyCredentialId: 'cred-tablet' };
+
+  /** What the Relay answers an ask with. */
+  let relay: (ids: string[]) => Response | Promise<Response>;
+  let asks: string[][];
+
+  /** A running Burrow's service, its Relay this `relay`, and everything else as `fakeFetch` answers. */
+  function serviceWithRelay(seed: Seed): BurrowService {
+    const everythingElse = fakeFetch();
+    return createService(seed, {
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (!String(input).endsWith(API_ROUTES.burrowPasskeysRemoved)) return everythingElse(input, init);
+        const { credentialIds } = JSON.parse(String(init?.body)) as { credentialIds: string[] };
+        asks.push(credentialIds);
+        return relay(credentialIds);
+      }) as typeof globalThis.fetch,
+    });
+  }
+
+  const revokedAt = () => store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null);
+  const seeded = (): Seed => ({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TAB, TABLET] } });
+
+  beforeEach(() => {
+    relay = () => new Response(JSON.stringify({ removed: [] }));
+    asks = [];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Let every promise the frame or the open set going land. */
+  const landed = () => vi.advanceTimersByTimeAsync(0);
+
+  it('at its next connection, revokes what was removed while it was offline, logging the Relay as who asked', async () => {
+    serviceWithRelay(seeded());
+    relay = () => new Response(JSON.stringify({ removed: ['cred-phone'] }));
+    await service.start();
+    await landed();
+    // Nothing is asked before the socket is up.
+    expect(asks).toEqual([]);
+
+    sockets[0]!.open();
+    await landed();
+
+    expect(asks).toEqual([['cred-phone', 'cred-tablet']]);
+    // Every browser paired with it goes, and the passkey the account holds stays.
+    expect(revokedAt()).toEqual([true, true, false]);
+    expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
+    expect(store.accessLog).toEqual([
+      expect.objectContaining({ event: 'revoked', deviceId: deviceIdFor(PHONE.clientStaticPublicKey), by: 'relay' }),
+      expect.objectContaining({ event: 'revoked', deviceId: deviceIdFor(TAB.clientStaticPublicKey), by: 'relay' }),
+    ]);
+    expect(uiEvents().some((event) => event.name === 'access')).toBe(true);
+  });
+
+  it('online, revokes on a nudge', async () => {
+    serviceWithRelay(seeded());
+    await service.start();
+    sockets[0]!.open();
+    await landed();
+    expect(asks).toHaveLength(1);
+    expect(revokedAt()).toEqual([false, false, false]);
+
+    relay = () => new Response(JSON.stringify({ removed: ['cred-tablet'] }));
+    sockets[0]!.receive({ t: 'passkeys-changed' });
+    await vi.advanceTimersByTimeAsync(PASSKEY_QUERY_SPACING_MS);
+
+    expect(asks).toHaveLength(2);
+    expect(revokedAt()).toEqual([false, false, true]);
+    expect(store.accessLog).toEqual([expect.objectContaining({ event: 'revoked', by: 'relay' })]);
+  });
+
+  it('revokes nothing on a failed or unanswered ask, or on a Relay older than the route', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    serviceWithRelay(seeded());
+    relay = () => Promise.reject(new Error('offline'));
+    await service.start();
+    sockets[0]!.open();
+    await landed();
+    expect(asks).toHaveLength(1);
+
+    relay = () => new Response(JSON.stringify({ removed: ['cred-phone'] }), { status: 404 });
+    await vi.advanceTimersByTimeAsync(PASSKEY_QUERY_RETRY_MS);
+    expect(asks).toHaveLength(2);
+
+    expect(revokedAt()).toEqual([false, false, false]);
+    expect(store.accessLog).toEqual([]);
+    expect((await command('status')).result).toMatchObject({ connection: 'connected', pairedClients: 3 });
+  });
+
+  it('ignores an id it did not ask about', async () => {
+    serviceWithRelay(seeded());
+    relay = () => new Response(JSON.stringify({ removed: ['cred-of-a-revoked-record', 'cred-elsewhere'] }));
+    await service.start();
+    sockets[0]!.open();
+    await landed();
+
+    expect(revokedAt()).toEqual([false, false, false]);
+    expect(store.accessLog).toEqual([]);
+  });
+
+  it('never creates, restores, or edits a record: an already-revoked one stays as it was', async () => {
+    const gone = { ...aclRecord('c-gone'), passkeyCredentialId: 'cred-gone', revokedAt: 5 };
+    serviceWithRelay({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [gone, TABLET] } });
+    relay = () => new Response(JSON.stringify({ removed: ['cred-gone', 'cred-tablet'] }));
+    await service.start();
+    sockets[0]!.open();
+    await landed();
+
+    // An inactive record's id is not asked about, so an answer naming it does nothing.
+    expect(asks).toEqual([['cred-tablet']]);
+    const [first, second] = store.acl[BURROW_ID]!;
+    expect(first).toEqual(gone);
+    expect({ ...second, revokedAt: null }).toEqual(TABLET);
+    expect(store.acl[BURROW_ID]).toHaveLength(2);
+  });
+
+  it('no command can claim the Relay asked', async () => {
+    serviceWithRelay(seeded());
+    await service.start();
+
+    await command('revokeDevice', { id: deviceIdFor(TABLET.clientStaticPublicKey), by: 'relay' });
+    await landed();
+
+    expect(store.accessLog).toEqual([expect.objectContaining({ event: 'revoked', by: 'settings' })]);
+  });
+
+  it('a stopped Burrow revokes nothing it was still waiting to hear', async () => {
+    let release = (_answer: Response): void => {};
+    serviceWithRelay(seeded());
+    relay = () => new Promise<Response>((resolve) => (release = resolve));
+    await service.start();
+    sockets[0]!.open();
+    await landed();
+    expect(asks).toHaveLength(1);
+
+    await setPolicy(NOTHING);
+    release(new Response(JSON.stringify({ removed: ['cred-phone'] })));
+    await landed();
+
+    expect(revokedAt()).toEqual([false, false, false]);
   });
 });
 

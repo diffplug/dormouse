@@ -10,7 +10,7 @@ The Relay is one Node process. No database. Every security primitive lives in `r
 
 * **One account** (`accountId: "owner"`), created once off a code an enrolled Burrow displayed; the setup password enrolls Burrows and registers nothing.
 * **Terminal-only**: exactly `docs/specs/remote-api.md` -> "v1 scope".
-* **Revocation is hand-editing a JSON file** ("State files"); no management UI. **Must re-check a connected Burrow's membership in `burrows.json`** every `BURROW_REVOCATION_SWEEP_MS`: a revoked Burrow's socket closes `WS_CLOSE_BURROW_REVOKED` (4001), its Clients get `burrow-gone`, and a later upgrade answers 401. Revoking a Client is the Burrow's own ACL (`docs/specs/remote-security-model.md` -> "Revocation").
+* **Revocation is hand-editing a JSON file** ("State files"); no management UI. **Must re-check a connected Burrow's membership in `burrows.json`** every `BURROW_REVOCATION_SWEEP_MS`: a revoked Burrow's socket closes `WS_CLOSE_BURROW_REVOKED` (4001), its Clients get `burrow-gone`, and a later upgrade answers 401. Revoking a Client is the Burrow's own ACL (`docs/specs/remote-security-model.md` -> "Revocation"). **Must re-read `account.json` on that sweep and send every connected Burrow `passkeys-changed` when a row has gone**, as on its first read since starting, a file absent or unparsable changing nothing; each Burrow then revokes its pairings with that passkey (`docs/specs/remote-security-model.md` -> "Relay-named revocation").
 * **No resume protocol**: a dropped WebSocket is handled by reloading the page or reconnecting the Burrow.
 * **Everything transient is in memory** (challenges, sessions, presence nonces, routing); a Relay restart means everyone reconnects. **Transient stores must prune expired entries as they issue** (rationale).
 * **Must key every keyed transient store by whoever grew it**, each evicting its key's own oldest: setup tokens per minting Burrow (`MAX_TOKENS_PER_BURROW`), sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`); `MAX_SESSIONS` and `MAX_REAUTH_NONCE_SESSIONS` bound their totals. **The two challenge issuers are the accepted exception**: one flat `MAX_PENDING_CHALLENGES` map apiece, whose oldest entry a caller past that route's gate (sign-in has none) can evict, a live ceremony's included (`docs/specs/security.md` -> "Known gaps"; rationale).
@@ -105,6 +105,7 @@ Paths and shapes are `API_ROUTES` / `WS_ROUTES` and their types in `remote-lib-c
 | `POST /api/reauth/finish` | session token | Verifies the presence assertion (`docs/specs/remote-security-model.md` -> "Presence proofs") |
 | `POST /api/burrow/enroll` | setup password or enroll token | Exactly one credential, else 400. **Takes no label.** A foreign `origin` is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale), and a missing or non-string one a 400. `MAX_ENROLLED_BURROWS` is a 409 naming `burrows.json`, checked after the credential (rationale) |
 | `POST /api/burrow/setup-token` | burrow token | Mints the token behind this Burrow's QR (below) |
+| `POST /api/burrow/passkeys/removed` | burrow token | Takes at most `MAX_PASSKEY_QUERY_IDS` `credentialIds`, else 400; answers `{ removed }`, those of them the account no longer holds and nothing else. **No `account.json` names none**; one that will not parse is a 5xx |
 | `GET /api/burrows` | session token | Enrolled Burrows and whether each is connected |
 | `GET /api/push/config` | — | The public VAPID key, or `null` when push is off |
 | `POST /api/push/subscribe` | session token | Upserts `(burrowId, deliveryId)`; 404 for an unknown `burrowId` (rationale); 403 `UNMINTED_DELIVERY_ID_ERROR` for an id its Burrow did not mint ("Web Push") |
@@ -177,7 +178,7 @@ Source of truth: `relay/src/push-endpoint.ts`; `relay/src/push.ts`, including `a
 
 The Relay routes JSON envelopes between Client and Burrow sockets. **`clientId` is a Relay-assigned secret** stamped onto every Burrow-bound frame so the Burrow can address replies, and never sent to a Client.
 
-**The `e2e` envelope is the whole surface.** Four `t: 'e2e'` frames: Client→Relay, Relay→Burrow with `clientId` stamped, Burrow→Relay, Relay→Client with `burrowId` stamped from the socket. A Burrow handles exactly these, `client-gone`, and `policy`, ignoring anything else; any other Client frame type is answered with an `error` and reaches no Burrow.
+**The `e2e` envelope is the whole surface.** Four `t: 'e2e'` frames: Client→Relay, Relay→Burrow with `clientId` stamped, Burrow→Relay, Relay→Client with `burrowId` stamped from the socket. A Burrow handles exactly these, `client-gone`, `policy`, and `passkeys-changed`, ignoring anything else; any other Client frame type is answered with an `error` and reaches no Burrow.
 
 - **An `init` binds** the Client socket to the named Burrow, replacing any binding; a different, live, previously bound Burrow gets `client-gone` first.
 - **A `transport` frame is forwarded only within that binding**, in either direction; one outside it is dropped.
@@ -325,7 +326,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 | `WS_CLOSE_BURROW_NOT_ENTITLED` (4002, Hosted only); probe 403 `NOT_ENTITLED_ERROR` | `not-entitled` |
 
 - **A socket that never opened is probed before its next backoff** with one `GET /api/push/devices` as the Burrow, a refused upgrade being only an error event. **Only a 2xx, 401, or 403 spends the failure streak's one probe** (rationale).
-- **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay nothing more**: no push, device list, or setup code.
+- **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay nothing more**: no push, device list, setup code, or removed passkey.
 
 **Security**: `BurrowAcl`, `ChallengeIssuer`, `verifyPresenceProof`, and the Noise responder for both ceremonies run in the service's process. **Must keep authorization in the Burrow process**; the expected two-digit code never leaves it (`docs/specs/remote-security-model.md` -> "Pairing").
 
@@ -372,4 +373,4 @@ Source of truth: `deploy/local/install-macos.sh`, `deploy/local/install-windows.
 
 ## Future
 
-**Scope: relay-origin-migration** — re-binding the passkey and enrollments after a Tailscale node rename. Relay-pushed revocation is staged in [remote-security-model.md](./remote-security-model.md) `## Future`.
+**Scope: relay-origin-migration** — re-binding the passkey and enrollments after a Tailscale node rename.

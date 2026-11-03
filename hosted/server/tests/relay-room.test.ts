@@ -8,6 +8,7 @@ import { queryDatabase } from "pgstencil/postgres";
 import { workerDatabases } from "./worker-roles";
 import {
   API_ROUTES,
+  MAX_PASSKEY_QUERY_IDS,
   MAX_RELAY_CLIENT_SOCKETS,
   NOT_ENTITLED_ERROR,
   RELAY_IDLE_TIMEOUT_MS,
@@ -99,6 +100,7 @@ async function rpc<T>(account: string, method: string, ...args: unknown[]): Prom
 const roomOf = (account: string) => ({
   closeBurrow: (claimed: string, burrowId: string) => rpc<boolean>(account, "closeBurrow", claimed, burrowId),
   closeSessions: (claimed: string, tokenHashes: string[]) => rpc<number>(account, "closeSessions", claimed, tokenHashes),
+  nudgeBurrows: (claimed: string) => rpc<number>(account, "nudgeBurrows", claimed),
   onlineBurrows: (claimed: string) => rpc<string[]>(account, "onlineBurrows", claimed),
   probe: () => rpc<Probe>(account, "probe"),
   skew: (ms: number) => rpc<null>(account, "skew", ms),
@@ -532,6 +534,8 @@ test("the sweep closes a Burrow removed (4001) or de-entitled (4002) behind its 
   expect((await removed.socket.closed).code).toBe(WS_CLOSE_BURROW_REVOKED);
   expect(await client.take()).toEqual({ t: "burrow-gone" });
   expect(await room.onlineBurrows(owner.userId)).toEqual([kept.burrowId]);
+  // The one it keeps is nudged, a removed passkey's nudge having no other backstop.
+  expect(await kept.socket.take()).toEqual({ t: "passkeys-changed" });
   expect(await kept.socket.quiet(150)).toBe(true);
 
   // The owner loses the entitlement: every Burrow socket it holds goes, on
@@ -557,6 +561,13 @@ test("removing a passkey closes its sessions' Client sockets at once; the sweep 
   };
   const removed = await bound(owner.sessionToken);
   const kept = await bound((await signedIn((await burrowRow(owner.userId)).burrowToken)).sessionToken);
+  /** The next frame but a sweep's nudge, whose order against a teardown is the row reads'. */
+  const routed = async () => {
+    for (;;) {
+      const frame = await burrow.take();
+      if (frame.t !== "passkeys-changed") return frame;
+    }
+  };
   const unauthorized = async (ws: FrameSocket) => {
     const closed = await ws.closed;
     return [closed.code, closed.reason];
@@ -571,6 +582,7 @@ test("removing a passkey closes its sessions' Client sockets at once; the sweep 
     approveLimit: {} as RateLimit,
     closeBurrow: async () => true,
     closeSessions: (userId, tokenHashes) => rpc(userId, "closeSessions", userId, tokenHashes),
+    nudgeBurrows: (userId) => rpc(userId, "nudgeBurrows", userId),
   }));
   expect(await room.closeSessions(randomUUID(), [digest(owner.sessionToken)])).toBe(0);
   expect(await room.closeSessions(owner.userId, [])).toBe(0);
@@ -583,19 +595,91 @@ test("removing a passkey closes its sessions' Client sockets at once; the sweep 
   expect(await unauthorized(removed.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
   expect(await burrow.take()).toEqual({ t: "client-gone", clientId: removed.clientId });
   kept.ws.send(e2eClientFrame(burrowId, { step: "transport" }));
-  expect(await burrow.take()).toMatchObject({ step: "transport", clientId: kept.clientId });
+  expect(await routed()).toMatchObject({ step: "transport", clientId: kept.clientId });
 
   // Its session deleted with no RPC, as an eviction at the session cap is.
   await sql(`DELETE FROM dormouse_relay_sessions WHERE "userId" = $1`, [owner.userId]);
   await room.fire();
   expect(await unauthorized(kept.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
-  expect(await burrow.take()).toEqual({ t: "client-gone", clientId: kept.clientId });
+  expect(await routed()).toEqual({ t: "client-gone", clientId: kept.clientId });
 
   // The owner loses the entitlement: a Client of a session still live goes too.
   const third = await bound((await signedIn((await burrowRow(owner.userId)).burrowToken)).sessionToken);
   await entitled();
   await room.fire();
   expect(await unauthorized(third.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
+});
+
+test("removing a passkey nudges every connected Burrow of the account, whatever sessions it had, and no other account's", async ({
+  onTestFinished,
+}) => {
+  onTestFinished(closeAll);
+  // First: one account is entitled at a time, and a held socket waits for the sweep.
+  const stranger = await (await account()).driver.connectBurrow();
+  const owner = await account();
+  const room = await owner.room();
+  const first = await owner.driver.connectBurrow();
+  const second = await owner.driver.connectBurrow();
+  // A passkey with no session left, so `closeSessions` has nothing to do.
+  await sql(`DELETE FROM dormouse_relay_sessions WHERE "userId" = $1`, [owner.userId]);
+  const accountApp = new Hono();
+  relayAccountRoutes(accountApp, () => ({
+    databaseUrl: context.database.url,
+    auth: async () => Response.json({ user: { id: owner.userId, email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
+    approveLimit: {} as RateLimit,
+    closeBurrow: async () => true,
+    closeSessions: async () => 0,
+    nudgeBurrows: (userId) => rpc(userId, "nudgeBurrows", userId),
+  }));
+  // An object asked about another account tells nobody.
+  expect(await room.nudgeBurrows(randomUUID())).toBe(0);
+  expect(await first.socket.quiet(150)).toBe(true);
+
+  await hibernate(owner.userId);
+  const removal = await accountApp.request(
+    `${ORIGINS.account}/api/relay/passkeys/${encodeURIComponent(owner.authenticator.credentialId)}`,
+    { method: "DELETE", headers: { origin: ORIGINS.account } },
+  );
+  expect(removal.status).toBe(204);
+  expect(await first.socket.take()).toEqual({ t: "passkeys-changed" });
+  expect(await second.socket.take()).toEqual({ t: "passkeys-changed" });
+  expect(await stranger.socket.quiet(150)).toBe(true);
+});
+
+test("the answer names the asked ids the Burrow's own account does not hold, and a socket opened after the removal reads it", async ({
+  onTestFinished,
+}) => {
+  onTestFinished(closeAll);
+  // First: one account is entitled at a time.
+  const other = await account();
+  const owner = await account();
+  const kept = await signedIn((await burrowRow(owner.userId)).burrowToken);
+  const { burrowToken } = await burrowRow(owner.userId);
+  const held = owner.authenticator.credentialId;
+  const stays = kept.authenticator.credentialId;
+  const theirs = other.authenticator.credentialId;
+  const ask = (credentialIds: unknown, bearer = burrowToken) =>
+    call(API_ROUTES.burrowPasskeysRemoved, { bearer, body: { credentialIds } });
+
+  expect((await ask([held, stays])).json).toEqual({ removed: [] });
+  // Another account's passkey reads as one that never existed, so a Burrow's
+  // token learns nothing of it, and an id the Burrow did not ask about is never named.
+  expect((await ask([stays, theirs, "never-existed"])).json).toEqual({ removed: [theirs, "never-existed"] });
+
+  // Removed with the Burrow away; its next socket's question reads the commit.
+  await sql(`DELETE FROM dormouse_relay_passkeys WHERE "credentialId" = $1`, [held]);
+  const reconnected = await owner.driver.reconnectBurrow(burrowToken);
+  expect((await ask([held, stays])).json).toEqual({ removed: [held] });
+  expect(await reconnected.quiet(150)).toBe(true);
+
+  // Refusals revoke nothing on the Burrow, whose only reading of them is failure.
+  expect((await ask("not-a-list")).status).toBe(400);
+  expect((await ask(Array.from({ length: MAX_PASSKEY_QUERY_IDS + 1 }, () => held))).status).toBe(400);
+  expect((await ask([held], "A".repeat(43))).status).toBe(401);
+  await entitled();
+  const lapsed = await ask([held]);
+  expect(lapsed.status).toBe(403);
+  expect(lapsed.json).toEqual({ error: NOT_ENTITLED_ERROR });
 });
 
 test("a Burrow removed between the Worker's token check and the object's accept is refused", async ({
@@ -713,6 +797,7 @@ test("a removal answers 204 once the row is gone, even when closing its socket f
       throw new Error("the relay is unreachable");
     },
     closeSessions: async () => 0,
+    nudgeBurrows: async () => 0,
   }));
   const response = await app.request(`${ORIGINS.account}/api/relay/burrows/${burrowId}`, {
     method: "DELETE",
@@ -720,6 +805,32 @@ test("a removal answers 204 once the row is gone, even when closing its socket f
   });
   expect(response.status).toBe(204);
   expect(await sql(`SELECT 1 FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [burrowId])).toEqual([]);
+  expect(logged).toHaveBeenCalledOnce();
+  logged.mockRestore();
+});
+
+test("a passkey removal answers 204 once the row is gone, even when the nudge fails", async () => {
+  const owner = await account();
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const app = new Hono();
+  relayAccountRoutes(app, () => ({
+    databaseUrl: context.database.url,
+    auth: async () =>
+      Response.json({ user: { id: owner.userId, email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
+    approveLimit: {} as RateLimit,
+    closeBurrow: async () => true,
+    closeSessions: async () => 0,
+    nudgeBurrows: async () => {
+      throw new Error("the relay is unreachable");
+    },
+  }));
+  const credentialId = owner.authenticator.credentialId;
+  const response = await app.request(`${ORIGINS.account}/api/relay/passkeys/${encodeURIComponent(credentialId)}`, {
+    method: "DELETE",
+    headers: { origin: ORIGINS.account },
+  });
+  expect(response.status).toBe(204);
+  expect(await sql(`SELECT 1 FROM dormouse_relay_passkeys WHERE "credentialId" = $1`, [credentialId])).toEqual([]);
   expect(logged).toHaveBeenCalledOnce();
   logged.mockRestore();
 });
@@ -898,6 +1009,7 @@ test("a Burrow enrolled by device code pairs and connects a phone, and under Loc
     approveLimit: { limit: async () => ({ success: true }) } as unknown as RateLimit,
     closeBurrow: async () => true,
     closeSessions: async () => 0,
+    nudgeBurrows: async () => 0,
   }));
   const approved = await account.request(`${ORIGINS.account}/api/relay/enrollments/approve`, {
     method: "POST",

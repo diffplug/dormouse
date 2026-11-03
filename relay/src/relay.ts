@@ -89,6 +89,15 @@ export class RelayHub {
     return true;
   }
 
+  /**
+   * Tell every connected Burrow a passkey may have left the account, so each
+   * asks which of its own did. How many were told.
+   */
+  nudgeBurrows(): number {
+    for (const burrow of this.#burrows.values()) this.#toBurrow(burrow, { t: 'passkeys-changed' });
+    return this.#burrows.size;
+  }
+
   // --- Burrow lifecycle ----------------------------------------------------
 
   /**

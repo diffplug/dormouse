@@ -35,6 +35,7 @@ export const API_ROUTES = {
   burrowEnrollBegin: '/api/burrow/enroll/begin',
   burrowEnrollPoll: '/api/burrow/enroll/poll',
   burrowSetupToken: '/api/burrow/setup-token',
+  burrowPasskeysRemoved: '/api/burrow/passkeys/removed',
   burrows: '/api/burrows',
   pushConfig: '/api/push/config',
   pushSubscribe: '/api/push/subscribe',
@@ -768,6 +769,20 @@ export interface SealedPushPayload extends SealedPushV1 {
  */
 export const PUSH_SEND_DEADLINE_MS = 15_000;
 
+/**
+ * `POST /api/burrow/passkeys/removed`: the credential ids this Burrow's active
+ * records hold, at most `MAX_PASSKEY_QUERY_IDS`, and nothing else of a record
+ * (`docs/specs/remote-security-model.md` -> "Relay-named revocation").
+ */
+export interface PasskeysRemovedRequest {
+  credentialIds: string[];
+}
+
+export interface PasskeysRemovedResponse {
+  /** Those of the asked ids the Burrow's account no longer holds. */
+  removed: string[];
+}
+
 export interface PushSendResponse {
   /** How many subscriptions accepted the push. */
   delivered: number;
@@ -814,12 +829,24 @@ export interface RelayPolicyFrame {
 }
 
 /**
- * Relay → burrow. Every frame but {@link RelayPolicyFrame} addresses one
- * Client by its Relay-assigned `clientId`.
+ * Relay → burrow: ask {@link API_ROUTES.burrowPasskeysRemoved} again, since a
+ * passkey may have left the account. It names none and carries nothing, and a
+ * Burrow that predates it ignores it
+ * (`docs/specs/remote-security-model.md` -> "Relay-named revocation").
+ */
+export interface RelayPasskeysChangedFrame {
+  t: 'passkeys-changed';
+}
+
+/**
+ * Relay → burrow. Every frame but {@link RelayPolicyFrame} and
+ * {@link RelayPasskeysChangedFrame} addresses one Client by its Relay-assigned
+ * `clientId`.
  */
 export type RelayToBurrowFrame =
   | { t: 'client-gone'; clientId: string }
   | RelayPolicyFrame
+  | RelayPasskeysChangedFrame
   | E2eRelayToBurrowFrame;
 
 /** Burrow → Relay. */
