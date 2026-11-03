@@ -1,4 +1,4 @@
-import { CONTROL_OR_FORMAT_TEXT, hasControlOrFormatCharacters, hasShellInputControls } from 'dor/commands/shell-quote';
+import { CONTROL_OR_FORMAT_TEXT, FORMAT_CHARACTERS, hasControlOrFormatCharacters, hasShellInputControls } from 'dor/commands/shell-quote';
 
 /** The schemes the plain confirmation opens; `file:` has its own path
  *  (`docs/specs/dor-tool.md` -> "Terminal links"). Any other scheme hands the
@@ -98,6 +98,10 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
   const shapedHost = extractUrlShapedHost(text);
   if (shapedHost === null) return 'plain';
 
+  // `README.md:42` over `file:///x/README.md` names a file, not a host.
+  const fileName = decodeFileLink(uri)?.path.split('/').pop();
+  if (fileName && canonicalHost(fileName) === shapedHost) return 'plain';
+
   const actualHost = safeHost(uri);
   if (actualHost === null) return 'plain';
 
@@ -158,33 +162,44 @@ function normalizeForMatch(value: string): string {
 
 function safeHost(uri: string): string | null {
   try {
-    return new URL(uri).host.toLowerCase();
+    return new URL(uri).hostname.toLowerCase().replace(/\.$/, '');
   } catch {
     return null;
   }
 }
 
-// "URL-shaped" display text: either contains `://`, or looks like a bare
-// domain (`goog1e.com`, `www.example.org/path`). Bare-domain detection is the
-// classic phishing shape — the attacker shows what looks like a domain in a
-// terminal label that actually links somewhere else.
-const BARE_DOMAIN_RE = new RegExp(`^${DNS_LABEL}(?:\\.${DNS_LABEL})+(?:[/?#].*)?$`, 'i');
+/** A name as the URL parser resolves it: lowercased, IDN to punycode, no root
+ *  dot. A lookalike therefore compares unequal to the host it imitates. */
+function canonicalHost(name: string): string | null {
+  try {
+    return new URL(`https://${name}`).hostname.replace(/\.$/, '');
+  } catch {
+    return null;
+  }
+}
 
+const HIDDEN_IN_DISPLAY = new RegExp(`[${FORMAT_CHARACTERS}]`, 'gu');
+// What may wrap a name in prose. Never `.`, `/`, `\`, or `~` before it: `./a.sh`
+// is a path, and `//host` is read below.
+const DISPLAY_WRAPPING = /^(?:(?![./\\~])[\p{P}\p{S}\p{Z}])+|[\p{P}\p{S}\p{Z}]+$/gu;
+const DISPLAY_LABEL = '[\\p{L}\\p{N}](?:[\\p{L}\\p{N}\\p{M}-]*[\\p{L}\\p{N}\\p{M}])?';
+// "URL-shaped" without a scheme: `localhost` or a dotted name, with any root
+// dot, port, and path. Bare-domain detection is the classic phishing shape: a
+// terminal label that looks like a domain and links somewhere else.
+const BARE_DOMAIN_RE = new RegExp(`^(?://)?(localhost|${DISPLAY_LABEL}(?:\\.${DISPLAY_LABEL})+)\\.?(?::\\d{1,5})?(?:[/?#].*)?$`, 'iu');
+// A name ending in a number is an IPv4 address or not a host: `12.5` is a figure.
+const NUMERIC_LABEL_RE = /(?:^|\.)\d+$/;
+const IPV4_RE = /^\d+\.\d+\.\d+\.\d+$/;
+
+/** The host display text reads as, however spelled: compatibility forms and the
+ *  ideographic full stop folded, invisible characters dropped, wrapping brackets
+ *  and punctuation removed; null for text that names no host. */
 function extractUrlShapedHost(text: string): string | null {
-  const t = text.trim();
-  if (t.includes('://')) {
-    try {
-      return new URL(t).host.toLowerCase();
-    } catch {
-      return null;
-    }
-  }
-  if (BARE_DOMAIN_RE.test(t)) {
-    const slash = t.search(/[/?#]/);
-    const host = slash === -1 ? t : t.slice(0, slash);
-    return host.toLowerCase();
-  }
-  return null;
+  const t = text.normalize('NFKC').replace(HIDDEN_IN_DISPLAY, '').replace(/\u3002/g, '.').replace(DISPLAY_WRAPPING, '');
+  if (t.includes('://')) return safeHost(t);
+  const name = BARE_DOMAIN_RE.exec(t)?.[1];
+  if (!name || (NUMERIC_LABEL_RE.test(name) && !IPV4_RE.test(name))) return null;
+  return canonicalHost(name);
 }
 
 function blocked(

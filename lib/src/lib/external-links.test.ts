@@ -107,6 +107,61 @@ describe('classifyDisplayMatch', () => {
     expect(classifyDisplayMatch('https://github.com/foo', 'docs.github.com')).toBe('deceptive');
   });
 
+  it.each([
+    ['a trailing dot', 'github.com.'],
+    ['a port', 'github.com:443'],
+    ['a subdomain, port, and path', 'www.github.com:443/login'],
+    ['a port on a full URL', 'https://github.com:8443'],
+    ['a dotted address and port', '192.168.0.1:8080'],
+    ['localhost and a port', 'localhost:3000'],
+    ['angle brackets', '<https://github.com>'],
+    ['parentheses', '(github.com)'],
+    ['square brackets', '[github.com]'],
+    ['quotes', '"github.com"'],
+    ['trailing punctuation', 'github.com,'],
+    ['a scheme-relative name', '//github.com'],
+    ['a fullwidth dot', 'github\uff0ecom'],
+    ['an ideographic dot', 'github\u3002com'],
+    ['fullwidth letters', '\uff47\uff49\uff54\uff48\uff55\uff42.com'],
+    ['a zero-width space', 'git\u200bhub.com'],
+    ['a soft hyphen', 'git\u00adhub.com'],
+    ['a trailing no-break space', 'github.com\u00a0'],
+    ['a tag character', 'github.com\u{e0041}'],
+    ['a Cyrillic homoglyph', 'g\u0456thub.com'],
+  ])('flags a different host spelled with %s as deceptive', (_, display) => {
+    expect(classifyDisplayMatch('https://evil.example/login', display)).toBe('deceptive');
+  });
+
+  it.each([
+    ['a trailing dot', 'github.com.'],
+    ['a port', 'github.com:8443'],
+    ['brackets', '(https://github.com)'],
+    ['a fullwidth dot', 'github\uff0ecom'],
+    ['a zero-width space', 'git\u200bhub.com'],
+  ])('keeps the same host spelled with %s plain', (_, display) => {
+    expect(classifyDisplayMatch('https://github.com/x', display)).toBe('plain');
+  });
+
+  it('compares hosts without a port or root dot on the target', () => {
+    expect(classifyDisplayMatch('https://github.com:8443/x', 'github.com')).toBe('plain');
+    expect(classifyDisplayMatch('https://github.com./x', 'github.com')).toBe('plain');
+    expect(classifyDisplayMatch('https://m\u00fcnchen.example/x', 'M\u00dcNCHEN.example')).toBe('plain');
+  });
+
+  it.each(['Visit github.com', '12.5%', '$1.50', 'v1.2.3', 'Next...', 'etc.', 'note:12', './build.sh', '~/a.txt', '(see the report)'])(
+    'keeps text that names no host plain: %s',
+    (display) => {
+      expect(classifyDisplayMatch('https://evil.example/login', display)).toBe('plain');
+    },
+  );
+
+  it('keeps a file link whose text names the file plain, a line number included', () => {
+    expect(classifyDisplayMatch('file:///repo/README.md', 'README.md')).toBe('plain');
+    expect(classifyDisplayMatch('file:///repo/README.md', 'README.md:42')).toBe('plain');
+    expect(classifyDisplayMatch('file:///repo/README.md', '(./README.md)')).toBe('plain');
+    expect(classifyDisplayMatch('file:///repo/notes.txt', 'github.com:443')).toBe('deceptive');
+  });
+
   it('treats label with embedded URL as plain unless the bare-domain pattern matches', () => {
     // "Click for https://goog1e.com/free" contains a URL but is itself not URL-shaped.
     // Conservative call: classify as plain. (We'd need to scan for embedded URLs to flag.)
