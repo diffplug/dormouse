@@ -40,6 +40,12 @@ export const WITHDRAWAL_CLOSED = `This contract can no longer be withdrawn from 
 /** Stripe's webhook endpoint. */
 export const BILLING_WEBHOOK_PATH = "/api/billing/webhook";
 
+/**
+ * The metadata an operator's refund carries, `true`, to correct a charge
+ * without ending its subscription (`hosted/README.md` -> "Refund by hand").
+ */
+export const KEEP_SUBSCRIPTION = "dormouse_keep_subscription";
+
 /** Stripe's events are larger than anything a page sends here. */
 export const WEBHOOK_BODY_BYTES = 1024 * 1024;
 
@@ -303,9 +309,10 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 /**
  * One event, verified once: pgstencil's synchronization, and in its
  * transaction the counts, dispute suspensions, and their notices' records, so
- * a redelivery repeats none. A full refund or a lost dispute then ends the
- * subscription in Stripe, after the commit and on every delivery until it
- * has; a dispute's notice is then sent, and the cron retries one that fails.
+ * a redelivery repeats none. A full refund, unless the operator marked it a
+ * correction, or a lost dispute then ends the subscription in Stripe, after
+ * the commit and on every delivery until it has; a dispute's notice is then
+ * sent, and the cron retries one that fails.
  * Last, any subscription its owner still holds once their account is closed
  * ends ({@link endAfterClosure}).
  */
@@ -354,7 +361,8 @@ async function processEvent(
   const reversed = refunded?.refunded ? refunded : dispute?.action === "end" ? dispute.charge : null;
   // A redelivery after a failed end runs no `apply`: the charge names the owner.
   if (reversed || dispute) owner ??= await billing.ownerOfCustomer(idOf((reversed ?? dispute!.charge).customer));
-  if (owner && reversed) await endForRefund(billing, owner, reversed);
+  if (owner && reversed && !(reversed === refunded && (await markedCorrection(billing, refunded))))
+    await endForRefund(billing, owner, reversed);
   if (owner && dispute)
     for (const error of await sendNotices(billing, mail, context, { userId: owner }))
       console.error("A dispute notice is recorded but not sent; the cron retries it", error);
@@ -365,6 +373,17 @@ async function processEvent(
   const customer = idOf((event.data.object as { customer?: string | { id: string } | null }).customer);
   if (!owner && customer) owner = await billing.ownerOfCustomer(customer);
   if (owner) await endAfterClosure(billing, owner);
+}
+
+/**
+ * Whether the operator marked the refund that completed `charge` a correction.
+ * The pinned API version's event embeds no refunds, so Stripe's list says, on
+ * every delivery; it runs newest first, and the newest refund is the one that
+ * completed the charge. An earlier refund's mark never binds a later one.
+ */
+async function markedCorrection(billing: Billing<Plan>, charge: Stripe.Charge): Promise<boolean> {
+  const { data } = await billing.stripe.refunds.list({ charge: charge.id, limit: 1 });
+  return data[0]?.metadata?.[KEEP_SUBSCRIPTION] === "true";
 }
 
 /**
@@ -469,8 +488,8 @@ export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]>
 
 /**
  * Ends at once, without proration or a final invoice (`billing.end`), the
- * subscription that `charge`, `owner`'s, paid for, now fully refunded or
- * finally reversed, while it is the owner's current one. A charge for an
+ * subscription that `charge`, `owner`'s, paid for, now fully refunded other
+ * than as a correction, or finally reversed, while it is the owner's current one. A charge for an
  * older subscription, one that names no subscription, or one already ended,
  * as on a redelivery once it has, ends nothing; the first two are logged for
  * the operator.
