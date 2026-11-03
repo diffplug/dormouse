@@ -21,6 +21,7 @@ import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
+import elevenLabsGrantsUrl from "../assets/elevenlabs-grants.png";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
@@ -1154,6 +1155,17 @@ export default function Home() {
                 <a href="https://diffplug.com" className="underline hover:opacity-100">DiffPlug LLC</a>)
               </span>
             </p>
+            {/* The ElevenLabs Grants program requires this logo at the bottom of the site. A mask so it takes the theme's text color. */}
+            <a
+              href="https://elevenlabs.io/startup-grants"
+              aria-label="ElevenLabs Grants"
+              className="block h-3 w-[137px] bg-[var(--color-text)]"
+              style={{
+                maskImage: `url("${elevenLabsGrantsUrl}")`,
+                maskSize: "contain",
+                maskRepeat: "no-repeat",
+              }}
+            />
           </div>
         </footer>
       </div>
