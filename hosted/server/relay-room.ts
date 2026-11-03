@@ -359,8 +359,8 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
    * The backstop to `closeBurrow`: every held Burrow whose row is gone or is
    * another account's closes 4001, and one whose owner is no longer entitled
    * 4002, its Clients told `burrow-gone`; the rest are nudged, the backstop to
-   * `nudgeBurrows`. One query for them all, begun at `start`; whether it was read, a failed or timed-out one leaving them to
-   * `#closeUnchecked`.
+   * `nudgeBurrows`. One query for them all, begun at `start`; whether it was
+   * read, a failed or timed-out one leaving them to `#closeUnchecked`.
    */
   async #sweepBurrows(account: string | undefined, start: number): Promise<boolean> {
     const burrowIds = this.#held("burrow").map(({ conn }) => conn.burrowId);
