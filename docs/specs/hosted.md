@@ -105,7 +105,7 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`, which outlives the account); closing in the account's favor restores it.
 - **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
+- **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried ("Billing alert").
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
 Source of truth: `billingSetup`, `withBilling`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
@@ -129,6 +129,16 @@ Each notice is a `dormouse_billing_notices` row, recorded before it is sent and 
 - **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 
 Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql` and `hosted/server/dormouse-migrations/020_withdrawal_notices.sql`.
+
+## Billing alert
+
+- **Must email `SUPPORT_EMAIL`, through the account's own mail sender, when the account cron fails**, a broken billing setup included, with each error's message; billing closed sends nothing. Local development's goes to the local inbox.
+- **Must report overdue, ahead of the other errors,** a withdrawal unsettled a day after its notice, naming the Terms' deadline 14 days from that notice; a closure unsettled a day after it closed; and a withdrawal's acknowledgement unsent after a day. A settlement past the cron's batch is reported too.
+- **Must mail at most once a day per distinct line**, recorded as its SHA-256 in `dormouse_billing_alerts`, which keeps no error text; a mail carries every line still failing. A failed send is retried by the next run. **Without that table, must mail only from the day's first run.**
+- **Never let the alert replace or suppress the cron's failure**: the invocation fails whatever the alert did, so Cron Events shows each failed run.
+- **Never mail a stack, a cause, a key, a connection URL, or a token shaped like a card number**: messages alone, masked. Withdrawal, subscription, and invoice ids and amounts stay, for the operator.
+
+Source of truth: `accountCron` in `hosted/server/account-routes.ts`; `alertBillingFailure` in `hosted/server/billing-alert.ts`; `hosted/server/dormouse-migrations/026_billing_alerts.sql`.
 
 ## Account closure
 

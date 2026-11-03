@@ -2,6 +2,7 @@
 // "Checkout and entitlement".
 import { SUBSCRIBED, type Billing, type Stripe } from "@pgstencil/stripe";
 import { DAY_MS, END_REASONS, idOf, run } from "./billing";
+import { BillingOverdue } from "./billing-alert";
 import type { WithdrawalOffer } from "./billing-summary";
 import type { Plan } from "./policy-constants";
 
@@ -286,12 +287,22 @@ export async function settleWithdrawal(billing: Billing<Plan>, row: WithdrawalRo
 
 /** How many withdrawals one cron run settles at most. */
 const RETRY_BATCH = 20;
+/** How many days after its notice a withdrawal must be refunded (website/src/pages/Terms.tsx -> "EEA and UK consumer withdrawal"). */
+const WITHDRAWAL_REFUND_DAYS = 14;
+/** A withdrawal still unsettled this long after its notice is reported overdue, in time to act before its deadline. */
+const SETTLEMENT_OVERDUE_DAYS = 1;
+/** How many overdue settlements one run names, the oldest first. */
+const OVERDUE_NAMED = 50;
+
+const isoDay = (at: Date) => at.toISOString().slice(0, 10);
 
 /**
  * The cron's pass: tries to settle up to {@link RETRY_BATCH} unsettled
  * withdrawals, however old, the least recently tried first, so one that keeps
  * failing never starves the rest; answers the failures, so every run that
- * tries one still unsettled fails. Its acknowledgement is the notice pass's.
+ * tries one still unsettled fails, and one more per withdrawal overdue
+ * ({@link SETTLEMENT_OVERDUE_DAYS}), tried this run or not, naming its
+ * deadline. Its acknowledgement is the notice pass's.
  */
 export async function settleWithdrawals(billing: Billing<Plan>): Promise<unknown[]> {
   const rows = await run<WithdrawalRow>(
@@ -305,5 +316,15 @@ export async function settleWithdrawals(billing: Billing<Plan>): Promise<unknown
   );
   const failed: unknown[] = [];
   for (const row of rows) await settleWithdrawal(billing, row).catch((error: unknown) => failed.push(error));
+  const overdue = await run<{ id: string; submittedAt: Date }>(
+    billing.db,
+    `SELECT id, "submittedAt" FROM public.dormouse_withdrawals
+    WHERE "settledAt" IS NULL AND "submittedAt" <= $1 ORDER BY "submittedAt", id LIMIT $2`,
+    [new Date(billing.time.now().getTime() - SETTLEMENT_OVERDUE_DAYS * DAY_MS), OVERDUE_NAMED],
+  );
+  for (const { id, submittedAt } of overdue) {
+    const due = new Date(submittedAt.getTime() + WITHDRAWAL_REFUND_DAYS * DAY_MS);
+    failed.push(new BillingOverdue(`Withdrawal ${id}, noticed ${isoDay(submittedAt)}, is unsettled: its refund is due by ${isoDay(due)}`));
+  }
   return failed;
 }

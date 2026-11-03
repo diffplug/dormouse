@@ -45,7 +45,7 @@ Run `pnpm install` and re-run Hosted's integration tests after an update. The pr
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
 | Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `RelayRoom` Durable Object namespace), `dormouse-try-pr-N` (with its own `OneTimeRoom` one), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share as the branch's owner role, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1007` shared by every relay and account preview |
 | Production | Dedicated Dormouse Postgres database, a migration role and one runtime role per Worker, three uncached Hyperdrives, one per Worker connecting as its role; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `RelayRoom` Durable Object namespace and rate-limit namespaces `1` and `3`–`6`), `dormouse-try` (`try.dormouse.sh`, with its `OneTimeRoom` Durable Object namespace and rate-limit namespace `2`, and no Hyperdrive), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep and idle-token Cron Triggers), each on its custom domain; GitHub `hosted-production` environment |
-| Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
+| Email | Dedicated Postmark server, verified `signin@dormouse.sh` and `support@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, the `dormouse-hosted-tagger` GitHub App, the `Hosted tag creation` and `Hosted tag history` tag rulesets, immutable annotated `hosted/` tags |
 | Recovery | Neon backups/PITR enabled, encrypted pre-migration dumps retained as GitHub artifacts for 30 days, age identity also retained independently in a password manager |
@@ -205,7 +205,7 @@ rm vapid.json
 
 The public half is public (`GET /api/push/config` serves it); the private half signs every push. Both are required for a production deploy: preflight refuses a relay Worker missing either. Cloudflare exposes a secret's name, never its value, so preflight cannot tell whether the two match; the relay answers push off for a pair that does not, and the release's live verification fails unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket re-registers it, so rotate only on compromise. Previews derive their own pair and never need this one.
 
-Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` in `wrangler.jsonc` (`docs/specs/hosted.md` -> "Billing"). Set none of them before checkout opens. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it. Before opening checkout, turn on Stripe's customer emails for successful payments: the `/billing` confirmation tells a buyer Stripe sends each receipt. Turn on cancellation in the customer portal too: the confirmation sends a member to Manage billing to cancel. The account Worker emails withdrawal acknowledgements and subscription notices (renewal and annual reminders, price changes, dispute suspensions and restorations) through the same Postmark server as sign-in codes, from `support@dormouse.sh`, so that sender must be verified there.
+Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` in `wrangler.jsonc` (`docs/specs/hosted.md` -> "Billing"). Set none of them before checkout opens. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it. Before opening checkout, turn on Stripe's customer emails for successful payments: the `/billing` confirmation tells a buyer Stripe sends each receipt. Turn on cancellation in the customer portal too: the confirmation sends a member to Manage billing to cancel. The account Worker emails withdrawal acknowledgements, subscription notices (renewal and annual reminders, price changes, dispute suspensions and restorations), and the [billing alert](#billing-alert) through the same Postmark server as sign-in codes, from `support@dormouse.sh`, so that sender must be verified there.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a credential pair do and do not enable. Facebook is outside this milestone.
 
@@ -221,14 +221,35 @@ A list price change for existing monthly or yearly subscribers is one row in `do
    VALUES ('monthly-2027', 'monthly', 'price_old', 'price_new', 10, 12, '2027-03-01T00:00:00Z');
    ```
 
-   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending nothing, until both Prices match their amounts and interval; watch the account Worker's Cron Events for that.
+   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so.
 3. On `effectiveAt`, in one reviewed release, point `STRIPE_PRICE_MONTHLY` (or `STRIPE_PRICE_YEARLY`) at the new Price and change the published price in `website/src/lib/hosted-pricing.ts`, so new checkouts sell it. Keep the row afterwards: it is what still recognizes the old Price for anyone not yet moved.
 
 Never edit a row once its notices have gone out; schedule a further change as a new row from the new Price.
 
+## Billing alert
+
+When the account cron's billing pass fails, the Worker emails `support@dormouse.sh` through Postmark with each error message, leading with anything overdue: a withdrawal unsettled a day after its notice, with its 14-day refund deadline; a closure unsettled after a day; a withdrawal's acknowledgement unsent after a day. A distinct error mails at most once a day, so a persistent failure repeats daily, and the run fails either way. `docs/specs/hosted.md` -> "Billing alert" owns the rules.
+
+| The mail says | Do |
+| --- | --- |
+| `paid outside Stripe`, `refund awaits the customer's action` | [Refund by hand](#refund-by-hand), before the deadline it names |
+| `refund not yet succeeded` | Nothing unless a deadline is near: Stripe is completing it, and the cron settles it. Near one, ask Stripe why |
+| `acknowledgement unsent`, `gave no billing email` | [Acknowledgement by hand](#acknowledgement-by-hand) |
+| `Price change` | [Change a price](#change-a-price): fix or delete the row |
+| Anything else | Usually a Stripe, Postmark, or database outage, which the next runs clear. Past a day, the same line returns, and it is a bug to fix |
+
+The alert cannot report a cron that stopped running, or mail Postmark refuses: `observability` is off, so a failed alert leaves only the failed run in the account Worker's Cron Events. Look there weekly while any withdrawal is open.
+
+Exercise it before opening checkout, and after any Postmark change. With billing's bindings set, add a price change the cron refuses, as the migration role; within 10 minutes the mail arrives, then delete the row:
+
+```sql
+INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt") VALUES ('alert-test', 'yearly', 'price_alert_test', '<a founding Price>', 50, 60, now());
+DELETE FROM dormouse_price_changes WHERE id = 'alert-test';
+```
+
 ## Refund by hand
 
-A withdrawal or account closure is stamped settled only once every payment it refunds is refunded in full by refunds Stripe lists as `succeeded`. Until then its cron keeps retrying it and failing, naming the invoice, for as long as it stays unsettled; watch the account Worker's Cron Events for that. A `pending` refund settles on its own once Stripe completes it, and the account Worker makes a `failed` or `canceled` one again. Two cases need the operator:
+A withdrawal or account closure is stamped settled only once every payment it refunds is refunded in full by refunds Stripe lists as `succeeded`. Until then its cron keeps retrying it and failing, naming the invoice, for as long as it stays unsettled, which the [billing alert](#billing-alert) reports. A `pending` refund settles on its own once Stripe completes it, and the account Worker makes a `failed` or `canceled` one again. Two cases need the operator:
 
 - **Paid outside Stripe.** Stripe cannot refund a payment it did not collect: an invoice marked paid out of band, or paid by a payment record. The error names the invoice and the amount.
 - **A refund awaiting the customer's action.** Stripe holds the refund in `requires_action` until the customer gives it what their payment method needs; the error names the invoice and the payment. Once they do and it succeeds, the cron settles it on its own. To refund another way instead, do step 2 first, so the cron makes no new refund, then cancel that refund in the Stripe Dashboard, then step 1.

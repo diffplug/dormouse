@@ -6,6 +6,7 @@ import type { EmailMessage, EmailSender } from "pgstencil";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
 import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
 import { DAY_MS, run, type PriceCatalog, type PriceChange } from "./billing";
+import { BillingOverdue } from "./billing-alert";
 import { BILLING_RETURN_PATH, isPlan, type Plan } from "./policy-constants";
 import { billingContact, type Contact } from "./withdrawal";
 
@@ -396,7 +397,7 @@ export async function runNotices(
     WHERE kind = 'withdrawal' AND "sentAt" IS NULL AND "createdAt" <= $1`,
     [new Date(now.getTime() - ACKNOWLEDGEMENT_OVERDUE_DAYS * DAY_MS)],
   );
-  if (overdue?.ids) failed.push(new Error(`Withdrawal acknowledgement unsent after a day: withdrawal ${overdue.ids.join(", ")}`));
+  if (overdue?.ids) failed.push(new BillingOverdue(`Withdrawal acknowledgement unsent after a day: withdrawal ${overdue.ids.join(", ")}`));
   failed.push(...(await applyPriceChanges(billing, verified)));
   return failed;
 }
