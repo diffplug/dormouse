@@ -78,7 +78,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`, `servesLoopb
 
 **Must start a new automated target's controller before any Pane exists**; the split appears, and takes focus, once the host confirms startup, never waiting for page load (rationale). A failure reports in context without changing layout or focus. **Must cancel a pending placement when its context closes or is replaced, its source disappears or minimizes, or its Workspace deactivates or closes**, closing a browser that arrives after cancellation or cannot be placed. Context dismisses after a successful placement or reuse, leaving focus on the browser (rationale).
 
-**Must hand the browser, as does a Tool's Break, a Windows cwd**: WSL's `/mnt/c/x` is `C:\x`, else `\\wsl.localhost\<distro>\...`; Git Bash's `/c/x` is `C:\x` (`hostDirectory`).
+**Must give a new target no `cwd`, as does a Tool's Break**, so it runs in the neutral directory ([Browser Host](#browser-host)) and reads no project's provider or viewport config. **Never pass the source's reported directory.**
 
 Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareForPlacement` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`.
 
@@ -141,7 +141,7 @@ flowchart LR
   VS -- bounded local dial --> UP
 ```
 
-**Must resolve new GUI launches in a fresh shell environment** — the user's selected shell with its initialization arguments, in the browser's cwd while it exists, through the staged `dor __launch-env` helper, creating no terminal Surface (rationale) — and retain it only for the browser session's lifetime. **Must close without starting or waiting for a shell**, and refuse launches a close overtook. **Never send this environment to the webview, persist it, or include helper output in diagnostics**; a failed initialization reports without falling back to the GUI environment. A WSL selection resolves on the native host, where providers run.
+**Must resolve new GUI launches in a fresh shell environment** — the user's selected shell with its initialization arguments, in the binding's cwd while it exists, else the neutral directory ([Browser Host](#browser-host)), through the staged `dor __launch-env` helper, creating no terminal Surface (rationale) — and retain it only for the browser session's lifetime. **Must close without starting or waiting for a shell**, and refuse launches a close overtook. **Never send this environment to the webview, persist it, or include helper output in diagnostics**; a failed initialization reports without falling back to the GUI environment. A WSL selection resolves on the native host, where providers run.
 
 **Must resolve each new GUI browser independently**, never borrowing another session's executable; `dor` resolves from its calling terminal. Spawning follows `docs/specs/dor-cli.md` → Spawning External Binaries.
 
@@ -218,6 +218,8 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 
 **Must rebuild every request field by field in `parseBrowserRequest` before a provider sees it**, the security boundary: a known provider and operation, an http(s) navigation or new-session URL, bounded dimensions, a tab id that cannot read as an option, a session name neither CLI reads as an option or a path, and bounded request ids (rationale).
 
+**Must run a provider CLI or launch shell with no binding `cwd` in the neutral directory**, `~/.dormouse/browser-cwd`, which the host creates and leaves empty, failing the launch when it cannot; **never in the host's own cwd**, since a CLI reads project config from where it runs and an extension host's can be a workspace folder. Only the `dor` command that made a binding gives it a project directory, which a swap keeps; a Tool's browser takes the Tool's. What may reach these is `docs/specs/security-local.md` -> "Spawned programs".
+
 What `binaryPath` may name is `docs/specs/security-local.md` -> "Spawned programs"; the host's own override variables are `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`. **A refused `binaryPath` is dropped, never fatal**, so the host's own candidates run (rationale).
 
 **Must land each crisp capture a CLI writes in a fresh, randomly named file in a private per-process `mkdtemp` directory** (mode `0700` on Unix), deleted however the capture ends; the directory goes at shutdown (rationale). Windows permission limits are `docs/specs/security-local.md` -> "Browser panes".
@@ -232,14 +234,14 @@ agent-browser alone has a per-session daemon, state files beside its socket, and
 - **Must send those actions only to the proven daemon's Unix socket or Windows loopback port in `<session>.port`**, refusing missing, stale, or invalid port metadata.
 - **Never spawn a daemon outside a launch's own steps**: any CLI verb starts one at `about:blank`, so `attach` reads the live port from `<session>.pid` / `<session>.stream` and a port probe, and every other verb runs only on proof of a live daemon (`liveDaemon`) — a pid file from this boot, alive, beside a stream port that accepts.
 - **Never signal a pid without that proof** (rationale).
-- **Must run a launch's `open` in the binding's project directory while it exists**, so a relaunch reads the same `./agent-browser.json` the `dor agent-browser` there did.
+- **Must run a launch's `open` in the binding's project directory while it exists**, so a relaunch reads the same `./agent-browser.json` the `dor agent-browser` there did, **and every other verb in the neutral directory** ([Browser Host](#browser-host)).
 - **Must read the stream port in `dor agent-browser` after a command that may bind** (`stream status --json`) and hand it over (rationale). **Never carry a socket directory to the host**, which kills the pid it reads there; host-side operations and captures for a session in a socket directory the host does not share are refused, while its viewer socket still streams and a close still runs.
 
 Source of truth: `createAgentBrowserProvider` in `lib/src/host/agent-browser-host.ts`, `streamStatus` in `dor/src/commands/agent-browser.ts`.
 
 ### Playwright
 
-**Must use the user's installed `@playwright/cli`**, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH` (`playwright-cli` under the `binaryPath` gate). Its installation is the one that launcher belongs to: a bin symlink into the package, an npm shim beside `node_modules`, a `node_modules/.bin` shim, or a shim naming one script below its own directory (`pnpm add -g`); any other layout is unsupported, and what may load is `docs/specs/security-local.md` -> "Spawned programs". The viewer requires CLI 0.1.19's local browser-binding endpoint. GUI launches use Chromium. Native commands keep Playwright semantics: `open` restarts, `goto` navigates. **Must pin every later command to a binding's cwd and executable**, since a Playwright session lives in its CLI project scope; `--session` uses the caller's own scope, GUI Connect the source terminal's cwd, a swap without one the host's.
+**Must use the user's installed `@playwright/cli`**, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH` (`playwright-cli` under the `binaryPath` gate). Its installation is the one that launcher belongs to: a bin symlink into the package, an npm shim beside `node_modules`, a `node_modules/.bin` shim, or a shim naming one script below its own directory (`pnpm add -g`); any other layout is unsupported, and what may load is `docs/specs/security-local.md` -> "Spawned programs". The viewer requires CLI 0.1.19's local browser-binding endpoint. GUI launches use Chromium. Native commands keep Playwright semantics: `open` restarts, `goto` navigates. **Must pin every later command to a binding's cwd and executable**, since a Playwright session lives in its CLI project scope; `--session` uses the caller's own scope, GUI Connect and a swap without one the neutral directory's.
 
 **Must connect with the validated installation's own Playwright client**, accepting only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. **Never load modules from the registry's library path.** `attach` relaunches at the page only when the registry lists no browser for the session. **Must apply a host-reported headedness before the new stream**, so sync never sizes a headed window. Native CLI tabs and the pane share the selected tab.
 

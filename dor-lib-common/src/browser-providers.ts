@@ -83,6 +83,14 @@ export function isUncOrDevicePath(path: string): boolean {
 }
 
 /**
+ * True for `\\wsl.localhost\<distro>\...`, the one UNC spelling that names this
+ * machine: where `dor` translates a WSL caller's directory.
+ */
+export function isWslSharePath(path: string): boolean {
+  return /^\\\\wsl\.localhost\\[^\\/]+(?:\\[^\\/]+)*\\?$/i.test(path) && !path.split('\\').includes('..');
+}
+
+/**
  * True when `candidate` may be spawned as agent-browser.
  *
  * `configuredPath` is the spawner's own `DORMOUSE_AGENT_BROWSER_BIN`, accepted

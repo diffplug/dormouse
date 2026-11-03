@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { neutralBrowserCwd } from './browser-neutral-cwd';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { WebSocket } from 'ws';
@@ -187,6 +188,14 @@ test('a native reopen in headless mode clears headed shutdown ownership', async 
 test('a single-page browser refreshes without asking the CLI for its selection', async () => {
   expect((await pw({ op: 'attach' })).ok).toBe(true);
   expect(mocks.cli.mock.calls.map(([, args]) => args[1])).toEqual(['list']);
+});
+
+test('a launch no binding names a project for runs the CLI in the neutral directory, not the host\'s', async () => {
+  page.goto = vi.fn(async () => null);
+  const opened = await pw({ op: 'launch', url: 'http://localhost/', headed: false }, {});
+  expect(opened.cwd).toBe(neutralBrowserCwd());
+  expect(mocks.cli.mock.calls.length).toBeGreaterThan(0);
+  for (const [, , options] of mocks.cli.mock.calls) expect(options.cwd).toBe(neutralBrowserCwd());
 });
 
 test('a GUI open launches its fresh session without closing it first; a named launch navigates it in its mode and relaunches it into the other', async () => {

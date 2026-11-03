@@ -1,11 +1,12 @@
 // @vitest-environment node
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { browserLaunchEnv, browserShellInvocation } from './browser-launch-env';
+import { neutralBrowserCwd } from './browser-neutral-cwd';
 const roots: string[] = [];
 // Retries: a timed-out shell's tree kill is not awaited, and Windows refuses to
 // remove a directory a dying process still has as its cwd (EBUSY).
@@ -19,6 +20,11 @@ describe.skipIf(!existsSync('/bin/zsh'))('fresh browser shell', () => {
     await writeFile(path.join(dir, '.zshrc'), startup);
     return { dir, runtime: { shell: '/bin/zsh', node: process.execPath, cli }, env: { HOME: dir, ZDOTDIR: dir, PATH: '/usr/bin:/bin' } };
   }
+  it('starts in the neutral directory once the requested one is gone, not the host\'s', async () => {
+    const f = await fixture('export BROWSER_START_CWD="$PWD"\n');
+    const env = await browserLaunchEnv(path.join(f.dir, 'removed'), f.runtime, f.env);
+    expect(env.BROWSER_START_CWD).toBe(realpathSync(neutralBrowserCwd()));
+  });
   it('loads interactive startup in the source cwd and supplies PATH to shebang CLIs', async () => {
     const f = await fixture('echo startup-chatter\nexport PATH="$HOME:$PATH"\nexport BROWSER_START_CWD="$PWD"\nexport BROWSER_TEST_SECRET=private-value\n');
     await symlink(process.execPath, path.join(f.dir, 'node'));

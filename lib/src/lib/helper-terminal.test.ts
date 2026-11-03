@@ -7,7 +7,7 @@ import { installSurfaceIdPool, resetSurfaceIdPool } from './surface-ids';
 import { applyTerminalSemanticEvents, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
 import { beginPromotion, cancelPromotion, closeHelperParent, detachHelper, disposeHelper, resetHelper, finishPromotion, getHelper, helperHasWork, openHelper, reattachHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
 
-const host = vi.hoisted(() => ({ writePty: vi.fn(), terminalContext: vi.fn() }));
+const host = vi.hoisted(() => ({ writePty: vi.fn(), terminalContext: vi.fn(), getCwd: vi.fn() }));
 vi.mock('./platform', () => ({ getPlatform: () => host }));
 vi.mock('./terminal-lifecycle', () => ({
   parkElement: vi.fn(),
@@ -16,7 +16,8 @@ vi.mock('./terminal-lifecycle', () => ({
   disposeSession: (id: string) => { registry.delete(id); removeTerminalPaneState(id); },
 }));
 beforeEach(() => {
-  vi.useFakeTimers(); host.writePty.mockReset(); host.terminalContext.mockReset();
+  vi.useFakeTimers(); host.writePty.mockReset(); host.terminalContext.mockReset(); host.getCwd.mockReset();
+  host.getCwd.mockResolvedValue(null);
   host.terminalContext.mockResolvedValue({ home: '/home/user', command: 'git status', busy: false });
   registry.set('parent', { untouched: true } as TerminalEntry); resetTerminalPaneState('parent');
   setHelperVisible('parent', true);
@@ -286,18 +287,57 @@ describe('helper lifecycle', () => {
     prompt(first.id); await vi.advanceTimersByTimeAsync(500);
     expect(first.status).toBe('completed'); expect(host.writePty).toHaveBeenCalledTimes(1);
   });
-  it.each([
-    ['a local parent cwd', false, '/work'],
-    ['no cwd from a remote parent', true, undefined],
-  ])('spawns and records %s', async (_label, isRemote, expected) => {
-    resetTerminalPaneState('parent', { cwd: { path: '/work', pathKind: 'posix', isRemote, source: 'osc7', updatedAt: 0 } });
+  const reporting = (path: string, isRemote = false) => resetTerminalPaneState('parent', { cwd: { path, pathKind: 'posix', isRemote, source: 'osc7', updatedAt: 0 } });
+  it('starts in the source PTY\'s process directory, whatever the source reports, and autoruns there', async () => {
+    reporting('/reported');
+    host.getCwd.mockResolvedValue('/process');
     const helper = await openHelper('parent');
-    expect(pendingShellOpts.get(helper.id)?.cwd).toBe(expected);
+    expect(host.getCwd).toHaveBeenCalledWith('parent');
+    expect(pendingShellOpts.get(helper.id)?.cwd).toBe('/process');
     prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
-    expect(getTerminalPaneState(helper.id).cwd?.path).toBe(expected);
+    expect(getTerminalPaneState(helper.id).cwd?.path).toBe('/process');
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
+  });
+  it.each([
+    ['answers nothing', () => host.getCwd.mockResolvedValue(null)],
+    ['fails', () => host.getCwd.mockRejectedValue(new Error('no process table'))],
+  ])('opens in the reported directory and types nothing when the process read %s', async (_label, read) => {
+    reporting('/reported');
+    read();
+    const helper = await openHelper('parent');
+    expect(pendingShellOpts.get(helper.id)?.cwd).toBe('/reported');
+    expect(helper.status).toBe('unconfirmed');
+    prompt(helper.id); await vi.advanceTimersByTimeAsync(10_000);
+    expect(host.writePty).not.toHaveBeenCalled();
+    expect(helper.status).toBe('unconfirmed');
+  });
+  it('takes the host default for a remote source it cannot read, where autorun may run', async () => {
+    reporting('/remote/path', true);
+    const helper = await openHelper('parent');
+    expect(pendingShellOpts.get(helper.id)?.cwd).toBeUndefined();
+    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
+    expect(getTerminalPaneState(helper.id).cwd?.path).toBeUndefined();
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
+  });
+  it('types nothing under the factory setting', async () => {
+    host.terminalContext.mockResolvedValue({ home: '/home/user', busy: false });
+    host.getCwd.mockResolvedValue('/process');
+    const helper = await openHelper('parent');
+    expect(helper).toMatchObject({ command: '', status: 'off' });
+    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
+    expect(host.writePty).not.toHaveBeenCalled();
+  });
+  it('refreshes an untouched helper it could not confirm, to follow the source on reopening', async () => {
+    reporting('/reported');
+    const first = await openHelper('parent');
+    prompt(first.id); await vi.advanceTimersByTimeAsync(100);
+    host.getCwd.mockResolvedValue('/process');
+    const second = await openHelper('parent');
+    expect(second).not.toBe(first);
+    expect(pendingShellOpts.get(second.id)?.cwd).toBe('/process');
   });
   it('keeps a directory reported during shell startup when autorun begins', async () => {
-    resetTerminalPaneState('parent', { cwd: { path: '/source', pathKind: 'posix', isRemote: false, source: 'osc7', updatedAt: 0 } });
+    host.getCwd.mockResolvedValue('/source');
     const helper = await openHelper('parent');
     applyTerminalSemanticEvents(helper.id, [{ type: 'cwd', cwd: { path: '/startup', pathKind: 'posix', isRemote: false, source: 'osc7', updatedAt: 1 } }]);
     prompt(helper.id);

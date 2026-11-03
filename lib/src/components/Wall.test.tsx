@@ -987,6 +987,19 @@ describe('Wall on the Lath engine', () => {
   }
   const contextButton = (label: string) => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="${label}"]`)!;
 
+  it('launches a port browser with no directory, whatever the terminal reports', async () => {
+    const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'port', stream: 1 }) });
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />); });
+    await flush();
+    resetTerminalPaneState('surface:a', { cwd: { path: '/reported', pathKind: 'posix', isRemote: false, source: 'osc7', updatedAt: 0 } });
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    expect(requests('launch')).toHaveLength(1);
+    expect(requests('launch')[0].binding).not.toHaveProperty('cwd');
+    resetTerminalPaneState('surface:a');
+  });
+
   it('reveals a restored context-port browser instead of opening a second', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'second', stream: 1 }) });
