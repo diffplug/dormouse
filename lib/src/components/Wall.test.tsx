@@ -157,7 +157,7 @@ describe('Wall on the Lath engine', () => {
         params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announce' },
       }]} />));
       await flush();
-      const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID, command: '', status: 'off' };
+      const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID };
       vi.spyOn(helpers, 'getHelper').mockImplementation((id) => (id === TOOL_ID ? helper : undefined));
       let inspected!: (busy: boolean) => void;
       const inspection = vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(false);
@@ -479,7 +479,7 @@ describe('Wall on the Lath engine', () => {
   it('refuses a close whose helper inspection finishes after a transfer starts', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
     await flush();
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a', command: '', status: 'off' };
+    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a' };
     vi.spyOn(helpers, 'getHelper').mockReturnValue(helper);
     let inspected!: (busy: boolean) => void;
     vi.spyOn(helpers, 'helperHasWork').mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
@@ -974,7 +974,7 @@ describe('Wall on the Lath engine', () => {
   async function openPortContext(provider = 'agent-browser') {
     // The mocked TerminalPane registers no terminal, so a real helper would
     // report its parent closed — an alert the context shows ahead of a port error.
-    vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'surface:context-helper', parentId: 'surface:a', command: '', status: 'preserved' });
+    vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'surface:context-helper', parentId: 'surface:a' });
     if (!fake.hasPty('surface:a')) fake.spawnPty('surface:a');
     fake.setOpenPorts('surface:a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
     await act(async () => {
@@ -3204,7 +3204,7 @@ describe('Wall on the Lath engine', () => {
       await waitUntil(() => respond.mock.calls.length > 0);
       expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
       if (change === 'cancelled') controller.abort();
-      if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a', command: '', status: 'off' } : undefined);
+      if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a' } : undefined);
       if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('surface:a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
       act(() => promptBack('surface:a'));
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
@@ -3421,7 +3421,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   it.each(['agent', 'helper'] as const)('splits instead of taking over a caller with an existing %s', async (reason) => {
-    if (reason === 'helper') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a', command: '', status: 'off' } : undefined);
+    if (reason === 'helper') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a' } : undefined);
     const typed: string[] = [];
     const controller = new AbortController();
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(null));
@@ -3984,7 +3984,7 @@ describe('Wall on the Lath engine', () => {
   function untouchedShellWithHelper(helperEntry: Partial<TerminalEntry>): () => void {
     registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
     registry.set('surface:helper-a', helperEntry as TerminalEntry);
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a', command: '', status: 'off' };
+    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a' };
     vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? helper : undefined);
     vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(false);
     vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => {});
@@ -4082,7 +4082,7 @@ describe('Wall on the Lath engine', () => {
 
   it('drops a kill gesture whose Helper inspection outlives the pane', async () => {
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a', command: '', status: 'off' };
+    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a' };
     vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? helper : undefined);
     vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => {});
     const inspections: Array<(busy: boolean) => void> = [];
@@ -4849,7 +4849,7 @@ it('recedes every other pane while a context is open and restores them as it exi
 });
 
 it('moves a retained helper without resizing or replacing its source, and remembers the manual side', async () => {
-  const retained: helpers.HelperTerminal = { id: 'surface:placement-helper', parentId: 'surface:placement-source', command: '', status: 'preserved' };
+  const retained: helpers.HelperTerminal = { id: 'surface:placement-helper', parentId: 'surface:placement-source' };
   vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:placement-source' ? retained : undefined);
   const openHelper = vi.spyOn(helpers, 'openHelper').mockResolvedValue(retained);
   await act(async () => root.render(<Wall initialPaneIds={['surface:placement-source']} />));

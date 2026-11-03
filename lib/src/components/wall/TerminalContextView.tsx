@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, PauseIcon, PlugIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, PlugIcon, PushPinIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
@@ -8,34 +8,17 @@ import { BROWSER_PROVIDER_GUI } from './browser-automation';
 import { browserProviderSwitch, rememberBrowserProvider, useBrowserProvider } from './BrowserProviderSwitch';
 import type { PortUrlEntry } from './port-url';
 import { displayModeFor, type RenderMode } from './agent-browser-screen';
-import type { HelperStatus } from '../../lib/helper-terminal';
-import { SUGGESTED_HELPER_COMMAND } from '../../lib/terminal-context-types';
 import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import { oppositeEdge } from '../../lib/lath/model';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
-import { anchoredTarget, isComposingKey } from '../../lib/dom';
+import { anchoredTarget } from '../../lib/dom';
 
 export type PortMode = 'system' | RenderMode;
 export type ContextScan = { status: 'scanning' | 'failed' } | { status: 'loaded'; entries: PortUrlEntry[] };
 /** Every action may fail asynchronously; the view reports the failure. */
 type Action = () => void | Promise<void>;
-const SPINNING = <CircleNotchIcon size={13} className="shrink-0 animate-spin" />;
-const PAUSED = <PauseIcon size={13} className="shrink-0" />;
-const SETTLED = <CheckIcon size={13} className="shrink-0" />;
-/** One row per helper state;
- *  a `reset` state offers Reset in place of Modify. */
-const HELPER_STATUS: Record<HelperStatus, { icon: ReactNode; label: (command: string) => string; reset?: boolean }> = {
-  waiting: { icon: SPINNING, label: () => 'Waiting for shell…' },
-  running: { icon: SPINNING, label: command => `Running ${command}…` },
-  completed: { icon: SETTLED, label: command => `${command} autoran` },
-  preserved: { icon: PAUSED, label: () => 'Skipping autorun to preserve user keystrokes', reset: true },
-  off: { icon: PAUSED, label: () => 'Autorun off' },
-  unsupported: { icon: PAUSED, label: () => 'Autorun skipped: shell readiness unavailable' },
-  unconfirmed: { icon: PAUSED, label: () => 'Autorun skipped: this directory could not be confirmed' },
-  exited: { icon: SETTLED, label: () => 'Helper exited', reset: true },
-};
 
 /** A port row entry: a launch target, or (`mode: null`) the provider switch. */
 type PortAction = { mode: PortMode | null; label: string; text: string; icon: ReactNode; disabled: boolean };
@@ -56,7 +39,6 @@ function portActions(provider: BrowserAutomationProvider, providers: readonly Br
 
 const DETAILS = {
   title: { label: 'Title sources', heading: 'Why this title?' },
-  modify: { label: 'Default helper autorun command', heading: 'Default helper autorun command' },
   reset: { label: 'Reset helper terminal', heading: 'Reset helper terminal?' },
 } as const;
 type Detail = keyof typeof DETAILS;
@@ -67,20 +49,24 @@ export interface TerminalContextViewProps {
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
   origin?: { x: number; y: number };
-  defaultCommand?: string; surfaceId: string; cwd: string; helperCwd?: string; mismatch?: boolean;
+  surfaceId: string; cwd: string; helperCwd?: string; mismatch?: boolean;
   workspaceMove?: ReactNode;
   navigation?: ReactNode;
   titleSources: { source: string; value: string; note?: string }[];
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
-  status: HelperStatus; command: string; warning?: string;
+  /** What a Tool is running, absent at its prompt. */
+  runningCommand?: string;
+  /** The helper's shell has ended. */
+  exited?: boolean;
+  warning?: string;
   /** The providers this host can launch a browser with. */
   browserProviders: readonly BrowserAutomationProvider[];
   explorerLabel: string; canExplore: boolean; canIframe: boolean;
   children: ReactNode;
   onClose(): void; onCopyId: Action; onCopyPath: Action; onExplore: Action;
   onWatch(): void; onTodo(): void; onPort(entry: PortUrlEntry, mode: PortMode): void | Promise<void>;
-  onModify(command: string): Promise<void>; onReset: Action; onPromote: Action;
+  onReset: Action; onPromote: Action;
   /** Whether Reset asks first; under Labs it makes the old helper a pending kill instead. Default true. */
   resetAsks?: boolean;
   /** Present only while the source is a preview slot: keep it open. */
@@ -450,11 +436,10 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   useEffect(() => {
     if (!detail) return;
     const previous = document.activeElement as HTMLElement | null;
-    detailRoot.current?.querySelector<HTMLElement>('input,button')?.focus();
+    detailRoot.current?.querySelector<HTMLElement>('button')?.focus();
     return () => { if (previous?.isConnected) previous.focus(); };
   }, [detail]);
   const [port, setPort] = useState<number | null>(null);
-  const [command, setCommand] = useState(p.command);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const entries = p.scan.status === 'loaded' ? p.scan.entries : [];
@@ -471,10 +456,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const submit = async (action: Action) => { setBusy(true); if (await attempt(action)) setDetail(null); setBusy(false); };
   const resetAsks = p.resetAsks !== false;
   const requestReset = () => { if (resetAsks) setDetail('reset'); else void submit(p.onReset); };
-  const status = HELPER_STATUS[p.status];
   const isTool = p.terminalRole === 'tool';
   // A Tool's command is whatever its shell reported, line breaks included.
-  const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command.replace(/\s+/g, ' ')}…` : 'At prompt') : status.label(p.command);
+  const statusLabel = p.exited ? 'Helper exited' : p.runningCommand !== undefined ? `Running ${p.runningCommand.replace(/\s+/g, ' ')}…` : isTool ? 'At prompt' : null;
   const placement = p.placement;
   // The edge facing the source is cut into teeth that reach over it (DESIGN.md → "Terminal Context Teeth").
   const teeth = placement && oppositeEdge(placement.side);
@@ -485,11 +469,10 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     className={`${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 font-mono text-sm text-foreground outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
-      if (isComposingKey(event.nativeEvent)) return;
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
       if (detail && event.key === 'Tab') {
         event.preventDefault();
-        stepFocus(Array.from(detailRoot.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input,select') ?? []), event.shiftKey ? -1 : 1);
+        stepFocus(Array.from(detailRoot.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? []), event.shiftKey ? -1 : 1);
       }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); }
     }}>
@@ -539,8 +522,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           className="flex h-7 shrink-0 items-center gap-3 whitespace-nowrap px-3 shadow-[inset_0_1px_0_var(--color-border),inset_0_-1px_0_var(--color-border)]">
           {/* Named at every width, so a Tool's own terminal never passes for a helper. */}
           <span className="flex shrink-0 items-center gap-2 font-semibold"><TerminalIcon size={15} /><span className="@[48rem]:hidden">{isTool ? 'Tool' : 'Helper'}</span><span className="hidden @[48rem]:inline">{isTool ? 'Tool terminal' : 'Helper terminal'}</span></span>
-          <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span></div>
-          {!isTool && (status.reset ? <ContextAction label="Reset helper terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} />{resetAsks ? 'Reset…' : 'Reset'}</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>)}
+          {statusLabel && <div className="flex min-w-0 items-center gap-2 text-muted">{p.runningCommand !== undefined ? <CircleNotchIcon size={13} className="shrink-0 animate-spin" /> : <CheckIcon size={13} className="shrink-0" />}<span className="truncate" title={statusLabel}>{statusLabel}</span></div>}
+          {!isTool && <ContextAction label="Reset helper terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} />{resetAsks ? 'Reset…' : 'Reset'}</ContextAction>}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {/* The action leaves with the mark, so focus stays in the context for Escape and Tab. */}
             {p.onKeepPreview && <ContextAction label="Keep open" onClick={() => { surface.current?.focus({ preventScroll: true }); p.onKeepPreview?.(); }}><PushPinIcon size={15} />Keep open</ContextAction>}
@@ -553,7 +536,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       </div>
     {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between font-semibold"><span>{DETAILS[detail].heading}</span><ContextAction label="Close details" onClick={() => setDetail(null)} muted><XIcon size={14} /></ContextAction></div>
-      {detail === 'title' ? <div className="grid grid-cols-[8rem_1fr_auto] gap-x-3 gap-y-2">{p.titleSources.map((source, index) => <div className="contents" key={index}><span className="text-muted">{source.source}</span><span>{source.value}</span><span className="text-muted">{source.note}</span></div>)}</div> : detail === 'modify' ? <><input autoFocus aria-label="Default helper autorun command" value={command} onChange={e => setCommand(e.target.value)} maxLength={4096} placeholder="Leave empty to turn autorun off" className="w-full border-b border-input-border bg-input-bg px-2 py-1.5 outline-focus-ring" /><p className="mb-4 mt-2 text-muted">Global default. Applies to new and reset helpers. Runs without asking, in whichever directory the terminal is in; {SUGGESTED_HELPER_COMMAND} there runs programs that repository's config names. Leave empty to turn autorun off.</p><div className="flex justify-end gap-2"><ContextAction label={`Use ${SUGGESTED_HELPER_COMMAND}`} onClick={() => setCommand(SUGGESTED_HELPER_COMMAND)}>Use {SUGGESTED_HELPER_COMMAND}</ContextAction><ContextAction label="Reset helper terminal" onClick={requestReset}>{resetAsks ? 'Reset helper…' : 'Reset helper'}</ContextAction><ContextAction label="Save default" busy={busy} onClick={() => void submit(() => p.onModify(command))}>Save default</ContextAction></div></> : <><p>Discard this helper, including scrollback, unfinished input, and any running program? Unsaved edits will be lost.</p><p className="mb-4 mt-2 text-muted">A fresh helper starts in the parent's current directory using the global autorun default.</p><div className="flex justify-end gap-2"><ContextAction label="Keep helper" onClick={() => setDetail(null)}>Keep helper</ContextAction><ContextAction label="Discard and reset" busy={busy} onClick={() => void submit(p.onReset)}>Discard and reset</ContextAction></div></>}
+      {detail === 'title' ? <div className="grid grid-cols-[8rem_1fr_auto] gap-x-3 gap-y-2">{p.titleSources.map((source, index) => <div className="contents" key={index}><span className="text-muted">{source.source}</span><span>{source.value}</span><span className="text-muted">{source.note}</span></div>)}</div> : <><p>Discard this helper, including scrollback, unfinished input, and any running program? Unsaved edits will be lost.</p><p className="mb-4 mt-2 text-muted">A fresh helper starts in the parent's current directory.</p><div className="flex justify-end gap-2"><ContextAction label="Keep helper" onClick={() => setDetail(null)}>Keep helper</ContextAction><ContextAction label="Discard and reset" busy={busy} onClick={() => void submit(p.onReset)}>Discard and reset</ContextAction></div></>}
       {error && <ContextDiagnostic className="mt-2 text-error">{error}</ContextDiagnostic>}
     </div></div>}
     </div>

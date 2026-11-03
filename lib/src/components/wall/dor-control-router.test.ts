@@ -119,7 +119,7 @@ describe('dor control routing', () => {
 
   it('captures in-process helper identity from the registry without aliasing self', () => {
     const owner = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['parent']);
-    registry.set('surface:9', { helper: { parentId: 'parent', command: '' } } as TerminalEntry);
+    registry.set('surface:9', { helper: { parentId: 'parent' } } as TerminalEntry);
     try {
       dispatch(request({ surfaceId: 'surface:9' }));
       expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({

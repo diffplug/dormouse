@@ -1,30 +1,29 @@
 # Terminal context
 
 > - See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> - Owns helper lifecycle and global autorun.
+> - Owns helper lifecycle.
 > - Layout owns context composition and input focus; terminal-state owns shell semantics; alert owns suppression; transport owns live recovery; dor-cli owns helper-origin `dor` commands.
 
 ## Helper lifecycle
 
 - **Must create at most one helper per source, lazily on first context opening.** Closing the source during startup cancels creation. Helpers cannot have helpers.
-- **Must start with the configured shell in the source PTY's process directory, as the host reads it (`getCwd`), never the directory the source reports**, using the ordinary split fallback when unavailable. **Where the host cannot read it** (Windows, which has no such read, or a failed read), **must start in the local directory the source reports and never type autorun there**, showing that autorun was skipped; a source reporting none starts in the host default, where autorun runs. **Must preserve a directory the helper reports before autorun.** Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
-- **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. Without readiness before a timeout, show an unsupported state and never write a timeout fallback.
-- **Must treat typing, paste, accepted drops, and application mouse input as user work**, disarming automatic refresh until Reset or Promote. Selection, copying, resize, and terminal protocol replies do not count. Returning to idle does not rearm autorun.
-- **Must refresh an untouched helper whose autorun completed, is off, or was skipped for its directory on reopening only after a host idle check.** Foreground commands, background descendants, and failed/unknown inspection preserve the helper.
+- **Must start with the configured shell in the source PTY's process directory, as the host reads it (`getCwd`), never the directory the source reports**, using the ordinary split fallback when unavailable. **Where the host cannot read it** (Windows, which has no such read, or a failed read), **must start in the local directory the source reports**; a source reporting none starts in the host default. Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
+- **Never write to a helper's PTY on its own**: a helper starts its shell and runs nothing.
+- **Must keep a helper as the user left it across reopening**, its shell, scrollback, and directory, whether or not it has been used; only Reset replaces it.
 - **Must hide a retained helper without terminating its PTY**; revealing or promoting reuses the same xterm element. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
-- **Must keep a preserved helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
+- **Must keep a helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
 - **Must pause status and process-inspection polling while the context is hidden**, its Workspace out of view included. Reopening publishes current terminal status; source closure inspects work on demand.
 
-**Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting.
+**Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one in the source's current directory.
 
-Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/helper-terminal.test.ts`.
+Source of truth: `openHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
 ## Promotion and source closure
 
 Workspace movement: `docs/specs/standalone.md` → Transfer.
 
-**Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, make its Surface id targetable, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
+**Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Close context, make its Surface id targetable, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
 
 **Must reject Reset, source retirement, and duplicate Promote during ownership transfer**, including from a reopened context. A failed transfer or rollback reports its error and resumes inspection so promotion can be retried.
 
@@ -35,16 +34,6 @@ Workspace movement: `docs/specs/standalone.md` → Transfer.
 **Must include hidden helper work in shutdown checks**, including helpers whose source Surface or Workspace is pending kill. The helper's host inspection also detects background descendants; unresolved inspection, including a process table missing the live PTY process, counts conservatively as work. **Never count a Windows shell's own processes as work**: Git Bash's MSYS bash beneath its launcher, `wsl.exe`'s relay, host and console. Inspection cannot see work inside WSL or past an MSYS exec; a foreground command there still counts through shell integration. Minimizing the source hides its context and retains the helper.
 
 Source of truth: `beginPromotion` / `cancelPromotion` / `finishPromotion` / `helperHasWork` in `lib/src/lib/helper-terminal.ts`; `closeSurface` / `requestKill` / `contextActions` in `lib/src/components/Wall.tsx`; `countRunningSessions` in `lib/src/lib/terminal-state-store.ts`.
-
-## Global autorun setting
-
-**Must default to an empty command, which disables autorun**; `git status` is an opt-in Modify offers, never a default (`docs/specs/security-local.md` -> "Spawned programs"). **Never write the preference but on an explicit edit**, so an installation that never saved one follows the factory default. An explicit Modify edit applies to new and reset helpers, never a retained one. Its status describes the command captured at creation, even when the global default changes.
-
-**Must accept only a single command line of at most 4096 characters**, excluding CR, LF, and NUL. The host persists only this preference in `~/.dormouse/helper-terminal.json`, using atomic replacement with private file permissions. All desktop renderers read that shared preference through the host; the fake adapter keeps a deterministic in-memory setting.
-
-**Must enforce command validity at the host.** A rejected edit keeps the prior preference.
-
-Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext` in `lib/src/lib/platform/fake-adapter.ts`; `TerminalContextRequest` in `lib/src/lib/terminal-context-types.ts`.
 
 ## Presentation coverage
 
@@ -58,7 +47,7 @@ Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalConte
 
 ## Tool context
 
-**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title explanation, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title explanation, directory, port, and alert presentation, showing Tool command status without helper Reset or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
 
 **Must mount only one terminal view for the Tool at a time**, moving its retained xterm between the full pane and context without disposing the Session. Context keystrokes, including terminal clipboard chords, belong to that terminal and never reach the browser underneath. Closing context preserves both processes and browser state.
 

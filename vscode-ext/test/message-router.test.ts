@@ -189,7 +189,7 @@ it('reports rejected helper creation as an exited terminal', () => {
   const webview = fakeWebview();
   const disposable = router.attachRouter(webview.channel, {});
   try {
-    webview.send({ type: 'pty:spawn', id: 'rejected-helper', options: { helper: { parentId: 'unowned-parent', command: 'git status' } } });
+    webview.send({ type: 'pty:spawn', id: 'rejected-helper', options: { helper: { parentId: 'unowned-parent' } } });
     expect(webview.posted).toContainEqual({ type: 'pty:exit', id: 'rejected-helper', exitCode: 1 });
   } finally { disposable.dispose(); }
 });

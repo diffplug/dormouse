@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { registry } from '../../lib/terminal-store';
 import { messageOf } from '../../lib/errors';
 import { wallHandleOwning } from './wall-handles';
 import { MoveWorkspaceAction } from './MoveWorkspaceAction';
@@ -14,7 +15,6 @@ import { focusSession, getRunningCommandWatchKey, getRunningCommandWatchRule, ge
 import { writeTextToClipboard } from '../../lib/clipboard-write';
 import { listenerUrlsByPort } from './port-url';
 import { hostBrowserProviders } from './browser-automation';
-import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
 import { ToolNavigationButtons } from './ToolNavigationButtons';
 
 /** `preview`: the Surface is its Workspace's preview slot, which the context
@@ -29,7 +29,6 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const [scan, setScan] = useState<ContextScan>({ status: 'scanning' });
   const [home, setHome] = useState('');
-  const [defaultCommand, setDefaultCommand] = useState(DEFAULT_HELPER_COMMAND);
   const [helperError, setHelperError] = useState('');
   const platform = getPlatform();
   const helper = tool ? undefined : getHelper(id);
@@ -46,7 +45,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   useEffect(() => {
     let cancelled = false;
     if (!tool) void openHelper(id).catch(e => { if (!cancelled) setHelperError(messageOf(e)); });
-    void platform.terminalContext?.({ op: 'settings' }).then(info => { if (!cancelled) { setHome(info.home ?? ''); setDefaultCommand(info.command ?? DEFAULT_HELPER_COMMAND); } }).catch(() => {});
+    void platform.terminalContext?.({ op: 'home' }).then(info => { if (!cancelled) setHome(info.home ?? ''); }).catch(() => {});
     void platform.getOpenPorts(id).then(ports => { if (!cancelled) setScan({ status: 'loaded', entries: listenerUrlsByPort(ports) }); }, () => { if (!cancelled) setScan({ status: 'failed' }); });
     return () => { cancelled = true; };
   }, [id, platform, tool]);
@@ -61,19 +60,18 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const copy = async (value: string) => { if (!await writeTextToClipboard(value)) throw new Error('Could not copy to clipboard'); };
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
   const source = wallHandleOwning(id);
-  const warning = openWarning ?? (helperError || (helper && helper.status !== 'waiting' && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
+  const warning = openWarning ?? (helperError || (helper && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
   return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} surfaceId={id}
     navigation={tool ? <ToolNavigationButtons id={id} params={params} /> : undefined}
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
-    status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}
+    runningCommand={tool && state.currentCommand ? state.currentCommand.rawCommandLine ?? '' : undefined} exited={!!helper && registry.get(helper.id)?.exited} warning={warning}
     explorerLabel={IS_MAC ? 'Reveal in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
     browserProviders={hostBrowserProviders()} canIframe={!!platform.createIframeProxyUrl}
     onClose={onClose} onCopyId={() => copy(id)} onCopyPath={() => copy(cwd?.path ?? '')}
     onExplore={async () => { if (platform.terminalContext && cwd) await platform.terminalContext({ op: 'openDirectory', id, path: cwd.path }); }}
     onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
-    onModify={async command => { await platform.terminalContext?.({ op: 'settings', command }); setDefaultCommand(command); }}
     resetAsks={!isDelayedKillEnabled()}
     onReset={async () => { await resetHelper(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, appTitleForPane, title ?? id) }); await openHelper(id); }} onPromote={() => context.promote(id)}
     onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>

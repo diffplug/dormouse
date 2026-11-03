@@ -61,7 +61,7 @@ describe('closing one window of several', () => {
   it.each(['surface', 'workspace'] as const)('asks for hidden helper work belonging to a pending %s', (kind) => {
     twoWorkspaces(null);
     setWorkspaceSurfaces('ws-2', ['parent']);
-    const helper = { helper: { parentId: 'parent', command: '' }, helperBusy: false } as TerminalEntry;
+    const helper = { helper: { parentId: 'parent' }, helperBusy: false } as TerminalEntry;
     registry.set('helper', helper);
     applyTerminalSemanticEvents('helper', [{ type: 'promptStart' }]);
     addPendingKill({ kind, id: kind === 'workspace' ? 'ws-2' : 'parent', workspaceId: 'ws-2', title: 'shell', label: kind }, { restore: () => {}, finalize: () => {} });

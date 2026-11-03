@@ -326,7 +326,7 @@ Source of truth: `handleEditableClipboard` in `lib/src/components/wall/keyboard/
 
 **Must give application-captured right-click to the terminal program.** Do not add a Shift-right-click override gesture.
 
-**Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm. Which of those disarm autorun follows `docs/specs/terminal-context.md` → "Helper lifecycle".
+**Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm.
 
 **Must copy selected context diagnostic text with Cmd+C on macOS and Ctrl+C elsewhere.** Copy only a selection contained in the focused diagnostic, retaining it on clipboard failure; helper and editable-field chords keep their own routing.
 

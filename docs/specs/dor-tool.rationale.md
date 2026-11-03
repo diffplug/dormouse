@@ -46,7 +46,7 @@ Every preview-slot retarget of a serving Tool (the built-in file viewer, `builti
 
 ## Lifecycle
 
-The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
+The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's Reset and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 
 ## Reaping
 

@@ -98,15 +98,15 @@ describe('resumeOrRestore', () => {
     expect(platform.spawnPty).not.toHaveBeenCalled();
   });
 
-  it('restores helpers outside the primary layout and disarms autorun', async () => {
+  it('restores helpers outside the primary layout', async () => {
     const layout = lathLayoutFor('parent');
-    const helper = { parentId: 'parent', command: 'git status' };
+    const helper = { parentId: 'parent' };
     const result = await resumeOrRestore(createPlatform([{ id: 'parent', alive: true }, { id: 'helper', alive: true, helper }], {
       version: 4, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null, untouched: false }],
     }));
     expect(result.paneIds).toEqual(['parent']); expect(result.lathLayout).toEqual(layout);
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('helper', 'helper-replay', { alive: true, exitCode: undefined, helper });
-    expect(getHelper('parent')?.status).toBe('preserved'); forgetHelper('parent');
+    expect(getHelper('parent')).toBeDefined(); forgetHelper('parent');
   });
 
   it('restores saved visible layout and minimized doors for matching live PTYs', async () => {
@@ -466,7 +466,7 @@ describe('resumeOrRestoreFrom', () => {
   });
 
   it('keeps a helper with the Workspace that holds its source', async () => {
-    const helper = { parentId: 'a1', command: 'git status' };
+    const helper = { parentId: 'a1' };
     const { platform, live: collected } = await live([
       { id: 'a1', alive: true },
       { id: 'a-helper', alive: true, helper },
@@ -478,7 +478,7 @@ describe('resumeOrRestoreFrom', () => {
       ptyIds: new Set(['a1', 'a-helper']),
     });
     expect(a.paneIds).toEqual(['a1']);
-    expect(getHelper('a1')?.status).toBe('preserved');
+    expect(getHelper('a1')).toBeDefined();
     forgetHelper('a1');
 
     // The same helper handed to a Workspace WITHOUT its source is an ordinary

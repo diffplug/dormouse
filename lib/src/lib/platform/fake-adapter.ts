@@ -1,4 +1,4 @@
-import { DEFAULT_HELPER_COMMAND, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
+import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
 import type { ManagedVoicePort } from './managed-voice-types';
 import type { IframeProxyOptions, IframeProxyResult } from './iframe-proxy-types';
@@ -51,7 +51,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   private terminals = new Set<string>();
   /** The deterministic demo shell behind each helper (docs/specs/terminal-context.md). */
   private helpers = new Map<string, { cwd: string; busy: boolean }>();
-  private helperCommand = DEFAULT_HELPER_COMMAND;
   private processCwds = new Map<string, string>();
   /** Placement stories release each helper after fitting its mounted terminal. */
   deferHelperStartup = false;
@@ -214,12 +213,8 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   async terminalContext(request: TerminalContextRequest): Promise<TerminalContextInfo> {
     switch (request.op) {
-      case 'settings':
-        if (request.command !== undefined) {
-          if (/[\r\n\0]/.test(request.command) || request.command.length > 4096) throw new Error('Use a single command line (up to 4096 characters)');
-          this.helperCommand = request.command;
-        }
-        return { home: '/home/demo', command: this.helperCommand };
+      case 'home':
+        return { home: '/home/demo' };
       case 'info':
         return { busy: this.helpers.get(request.id)?.busy ?? false };
       case 'promote':

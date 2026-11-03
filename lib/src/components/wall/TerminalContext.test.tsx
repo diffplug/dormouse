@@ -31,8 +31,8 @@ beforeEach(() => {
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   props = { title: 'pnpm dev', surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
-    watchRule: 'pnpm', watching: false, todo: false, status: 'completed', command: 'git status', explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
-    onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onModify: vi.fn(async () => {}), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
+    watchRule: 'pnpm', watching: false, todo: false, explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
+    onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); removeMouseSelectionState('parent'); cfg.layout.animate = previousAnimate; vi.useRealTimers(); });
@@ -288,13 +288,13 @@ it('keeps presses in a helper\'s portaled copy editor out of context dismissal',
   act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
   expect(props.onClose).toHaveBeenCalledOnce();
 });
-it('requires explicit confirmation before resetting a preserved helper', async () => {
-  props.status = 'preserved'; render(); await click('Reset helper terminal'); await click('Keep helper'); expect(props.onReset).not.toHaveBeenCalled();
+it('requires explicit confirmation before resetting a helper', async () => {
+  render(); await click('Reset helper terminal'); await click('Keep helper'); expect(props.onReset).not.toHaveBeenCalled();
   await click('Reset helper terminal'); await click('Discard and reset'); expect(props.onReset).toHaveBeenCalledOnce();
 });
 
 it('resets at once, with no question, when Labs makes the old helper a pending kill', async () => {
-  props.status = 'preserved'; props.resetAsks = false; render();
+  props.resetAsks = false; render();
   await click('Reset helper terminal');
   expect(props.onReset).toHaveBeenCalledOnce();
   expect(container.textContent).not.toContain('Discard and reset');
@@ -306,46 +306,46 @@ it('keeps a failed promotion visible and retryable', async () => {
 });
 it('keeps a submitting detail button focused so the dialog keeps Escape and its Tab trap', async () => {
   let reject!: (reason: Error) => void;
-  props.onModify = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
-  props.initialDetail = 'modify'; render();
-  const save = button('Save default');
-  act(() => save.focus());
-  await click('Save default');
+  props.onReset = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+  props.initialDetail = 'reset'; render();
+  const discard = button('Discard and reset');
+  act(() => discard.focus());
+  await click('Discard and reset');
   // In flight: inert via aria-disabled only, so the browser cannot blur it.
-  expect(save.disabled).toBe(false);
-  expect(save.getAttribute('aria-disabled')).toBe('true');
-  expect(document.activeElement).toBe(save);
-  await click('Save default');
-  expect(props.onModify).toHaveBeenCalledOnce();
-  await act(async () => reject(new Error('Command rejected')));
-  // The rejected edit keeps the dialog open, and focus never left the button.
-  expect(container.querySelector('[role="alert"]')?.textContent).toBe('Command rejected');
+  expect(discard.disabled).toBe(false);
+  expect(discard.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(discard);
+  await click('Discard and reset');
+  expect(props.onReset).toHaveBeenCalledOnce();
+  await act(async () => reject(new Error('Reset refused')));
+  // The failure keeps the dialog open, and focus never left the button.
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe('Reset refused');
   expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-  expect(save.hasAttribute('aria-disabled')).toBe(false);
-  expect(document.activeElement).toBe(save);
+  expect(discard.hasAttribute('aria-disabled')).toBe(false);
+  expect(document.activeElement).toBe(discard);
   // So the <section>'s handlers still receive Tab and Escape from a focused descendant.
-  act(() => save.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+  act(() => discard.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
   // Focus has to *move* and stay in: `contains` alone passes for a no-op Tab. Which element it
   // lands on is not asserted — jsdom returns a selector list grouped by selector rather than in
   // document order, so the trap's wrap target differs here from a real browser.
-  expect(document.activeElement).not.toBe(save);
+  expect(document.activeElement).not.toBe(discard);
   expect(container.querySelector('[role="dialog"]')!.contains(document.activeElement)).toBe(true);
   act(() => (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(props.onClose).not.toHaveBeenCalled();
 });
 it('keeps the focus ring on an in-flight button while withholding only its hover styling', async () => {
-  props.onModify = vi.fn(() => new Promise<void>(() => {}));
-  props.initialDetail = 'modify'; render();
-  const save = button('Save default');
-  const rest = save.className;
-  await click('Save default');
+  props.onReset = vi.fn(() => new Promise<void>(() => {}));
+  props.initialDetail = 'reset'; render();
+  const discard = button('Discard and reset');
+  const rest = discard.className;
+  await click('Discard and reset');
   // Hover is gated on aria-disabled; focus-visible is not, so the focused button keeps its ring.
   const hovers = rest.split(' ').filter(c => c.includes('hover:'));
   expect(hovers.length).toBeGreaterThan(0);
   for (const hover of hovers) expect(hover).toContain('not-aria-disabled:');
-  for (const ring of ['focus-visible:outline', 'focus-visible:outline-focus-ring', 'enabled:focus-visible:text-link']) expect(save.className.split(' ')).toContain(ring);
-  expect(save.className).toBe(rest);
+  for (const ring of ['focus-visible:outline', 'focus-visible:outline-focus-ring', 'enabled:focus-visible:text-link']) expect(discard.className.split(' ')).toContain(ring);
+  expect(discard.className).toBe(rest);
 });
 it('shows both directories in the mismatch warning', () => {
   props.mismatch = true; props.helperCwd = '~/other'; render(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/other'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/repo');
@@ -368,7 +368,7 @@ it('shares header and uncaptured body entry points; captured mouse has no Shift 
 it('offers the rule covering the running script, else that script\'s own key', async () => {
   const clearRules = () => act(() => { for (const name of terminalRegistry.getWatchedCommands()) terminalRegistry.setCommandWatched(name, false); });
   clearRules();
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'watch-row', command: '', status: 'off' });
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'watch-row' });
   terminalRegistry.applyTerminalSemanticEvents('watch-row', [
     { type: 'commandLine', commandLine: 'cd web && pnpm run dev' },
     { type: 'commandStart', source: 'osc633_boundaries' },
@@ -392,7 +392,7 @@ it('offers the rule covering the running script, else that script\'s own key', a
 });
 
 it('never offers Explore for a share or device path, however the terminal reported it', async () => {
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'unc-row', command: '', status: 'off' });
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'unc-row' });
   const unavailable = () => container.querySelector('[aria-label="Directory unavailable on this host"]');
   try {
     for (const [cwd, explorable] of [
@@ -412,8 +412,18 @@ it('never offers Explore for a share or device path, however the terminal report
   }
 });
 
+it('offers Reset and states only an exit in the helper status row', () => {
+  render();
+  const row = () => container.querySelector('[aria-label="Helper terminal status"]')!;
+  expect(button('Reset helper terminal')).not.toBeNull();
+  expect(row().querySelector('span.truncate')).toBeNull();
+  props.exited = true; render();
+  expect(row().querySelector('span.truncate')?.textContent).toBe('Helper exited');
+  expect(button('Reset helper terminal')).not.toBeNull();
+});
+
 it('shows a running Tool command that spans lines on one', () => {
-  props = { ...props, terminalRole: 'tool', status: 'running', command: 'cd web\npnpm dev' };
+  props = { ...props, terminalRole: 'tool', runningCommand: 'cd web\npnpm dev' };
   render();
   expect(container.querySelector('[title^="Running "]')?.getAttribute('title')).toBe('Running cd web pnpm dev…');
 });
@@ -428,7 +438,6 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
   expect(container.querySelector('[data-context-terminal="tool-source"]')).not.toBeNull();
   expect(container.querySelector('[data-helper-terminal]')).toBeNull();
   expect(container.querySelector('[aria-label="Tool terminal status"]')).not.toBeNull();
-  expect(container.querySelector('[aria-label="Modify autorun command"]')).toBeNull();
   expect(container.querySelector('[aria-label="Reset helper terminal"]')).toBeNull();
   expect(container.querySelector('[aria-label="Move this terminal into a new pane"]')).toBeNull();
   act(() => container.querySelector('[data-context-terminal]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
@@ -438,7 +447,7 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
 });
 
 it('offers Keep open only for a preview slot, as a focusable button that keeps focus in the context', async () => {
-  props = { ...props, terminalRole: 'tool', status: 'running', command: 'view a.md' };
+  props = { ...props, terminalRole: 'tool', runningCommand: 'view a.md' };
   render();
   expect(button('Keep open')).toBeNull();
   props.onKeepPreview = vi.fn();
@@ -514,27 +523,8 @@ it('position buttons preserve input focus and report the destination', async () 
   expect(document.activeElement).toBe(input);
 });
 
-
-it.each(['composing', 'WebKit ending'])('leaves detail Escape and Tab to the IME (%s)', async phase => {
-  render();
-  await click('Modify autorun command');
-  const input = container.querySelector<HTMLInputElement>('[role="dialog"] input')!;
-  act(() => input.focus());
-  for (const key of ['Tab', 'Escape']) {
-    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, isComposing: phase === 'composing' });
-    if (phase === 'WebKit ending') Object.defineProperty(event, 'keyCode', { value: 229 });
-    act(() => input.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(false);
-    expect(document.activeElement).toBe(input);
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(props.onClose).not.toHaveBeenCalled();
-  }
-  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-  expect(container.querySelector('[role="dialog"]')).toBeNull();
-});
-
 it('pauses its helper while its Workspace is out of view, and resumes when it returns', async () => {
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'hidden-source', command: '', status: 'off' });
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'hidden-source' });
   const visible = vi.spyOn(helpers, 'setHelperVisible');
   const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" /></WorkspaceActiveContext.Provider>));
   try {

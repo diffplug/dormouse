@@ -563,7 +563,7 @@ export function attachRouter(
     switch (msg.type) {
       case 'pty:context': {
         const request = msg.request;
-        if ((request.op !== 'settings' && !ownedPtyIds.has(request.id)) || (request.op === 'promote' && request.restore && !ownedPtyIds.has(request.restore.parentId))) {
+        if ((request.op !== 'home' && !ownedPtyIds.has(request.id)) || (request.op === 'promote' && request.restore && !ownedPtyIds.has(request.restore.parentId))) {
           post({ type: 'pty:contextResult', requestId: msg.requestId, result: { error: 'Terminal is not owned by this workspace' } });
           break;
         }

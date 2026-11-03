@@ -798,7 +798,7 @@ describe('the sidecar host', () => {
 
   it('keeps a helper `pty-core` reports at its spawn inert', () => {
     duringSpawn = (id) => host.alerts.setHelper(id, true);
-    host.handleCommand('pty:spawn', { id: 'helper-1', options: { helper: { parentId: 'pty-1', command: 'git status' } } });
+    host.handleCommand('pty:spawn', { id: 'helper-1', options: { helper: { parentId: 'pty-1' } } });
     host.alerts.notifyFromProtocol('helper-1', REPORT);
     expect(states('helper-1')).toEqual([]);
   });
