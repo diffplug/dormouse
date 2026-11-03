@@ -2,7 +2,7 @@ import { useState, type ComponentProps } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ExternalLinkModal } from '../components/ExternalLinkModal';
 import { classifyDisplayMatch, inspectExternalUri } from '../lib/external-links';
-import { documentLinkRequest } from '../lib/external-link-confirmation';
+import { linkOpenRequest } from '../lib/external-link-confirmation';
 
 function ExternalLinkModalStory({ uri, displayText, documentLink = false, ...dialog }: { uri: string; displayText: string; documentLink?: boolean } & Pick<ComponentProps<typeof ExternalLinkModal>, 'handlers' | 'error' | 'busy'>) {
   const [selected, setSelected] = useState(0);
@@ -16,7 +16,7 @@ function ExternalLinkModalStory({ uri, displayText, documentLink = false, ...dia
         {...dialog}
         selected={selected}
         onSelect={setSelected}
-        request={documentLink ? documentLinkRequest(uri) : {
+        request={documentLink ? linkOpenRequest(uri, 'document') : {
           uri,
           displayText,
           verdict: classifyDisplayMatch(uri, displayText),
