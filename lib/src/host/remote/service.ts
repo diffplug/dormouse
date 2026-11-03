@@ -1214,7 +1214,8 @@ export class BurrowService {
    * then revoke it as {@link revoke} does. A browser already cut off whose
    * revocation is unsaved has no active record left, and is the one this attempt
    * saves again. An id that names no paired phone, or more than one, revokes
-   * nothing.
+   * nothing, and answers for itself: another phone's unsaved revocation is tried
+   * again behind it, never waited on or reported here.
    */
   async #revokeDevice(params: RevokeDeviceParams | undefined): Promise<RevokeDeviceResult> {
     const id = typeof params?.id === 'string' ? params.id.trim().toLowerCase() : '';
@@ -1223,13 +1224,19 @@ export class BurrowService {
     const statics = new Set(
       records.map((record) => record.clientStaticPublicKey).filter((clientStatic) => deviceIdFor(clientStatic) === id),
     );
-    if (statics.size > 1) throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
+    if (statics.size > 1) {
+      void this.saveRevocations();
+      throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
+    }
     const by = revocationRequester(params?.by);
     const [clientStaticPublicKey] = [...statics];
     if (clientStaticPublicKey !== undefined) return this.revoke({ clientStaticPublicKey }, by);
     const held = this.#heldDevices({ overdueOnly: false }).find((device) => device.id === id);
+    if (!held) {
+      void this.saveRevocations();
+      throw new Error(`No paired phone has the id ${id}.`);
+    }
     await this.#retryRevocationSave();
-    if (!held) throw new Error(`No paired phone has the id ${id}.`);
     return { revoked: 1, labels: [held.label] };
   }
 
@@ -1252,7 +1259,11 @@ export class BurrowService {
   async revoke(target: RevocationTarget, by: RevocationRequester): Promise<RevokeDeviceResult> {
     const apply = async () => (this.#burrow ? this.#revokeRunning(target, by) : this.#revokeStored(target, by));
     const revoked = await (this.#burrow ? apply() : this.#serialize(apply));
-    if (revoked.length > 0) this.#emit({ name: 'access' });
+    if (revoked.length === 0) {
+      void this.saveRevocations();
+      return { revoked: 0, labels: [] };
+    }
+    this.#emit({ name: 'access' });
     await this.#retryRevocationSave();
     return {
       revoked: revoked.length,

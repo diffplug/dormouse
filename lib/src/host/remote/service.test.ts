@@ -1890,13 +1890,13 @@ describe('paired devices and revocation', () => {
       return store.acl[BURROW_ID]!.map((record) => record.revokedAt !== null);
     }
 
-    async function afterFailedSave(seed: Partial<Seed> = {}): Promise<void> {
+    async function afterFailedSave(seed: Partial<Seed> = {}, unrevoked = [false, false]): Promise<void> {
       createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, TABLET] }, ...seed });
       await service.start();
       sockets[0]?.open();
       vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
       expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/disk full/);
-      expect(revokedInStore()).toEqual([false, false]);
+      expect(revokedInStore()).toEqual(unrevoked);
     }
 
     afterEach(() => {
@@ -1950,8 +1950,51 @@ describe('paired devices and revocation', () => {
       await afterFailedSave();
 
       expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
-
+      await settle();
       expect(revokedInStore()).toEqual([true, false]);
+    });
+
+    it('is saved again by a revoke of an id two phones share', async () => {
+      const twins = [aclRecord('twin-phone-1'), aclRecord('twin-phone-2')];
+      await afterFailedSave({ acl: { [BURROW_ID]: [PHONE, TABLET, ...twins] } }, [false, false, false, false]);
+
+      const id = deviceIdFor(twins[0]!.clientStaticPublicKey);
+      expect((await command('revokeDevice', { id })).error).toMatch(/More than one/);
+      await settle();
+      expect(revokedInStore()).toEqual([true, false, false, false]);
+    });
+
+    it('is saved again by a revoke of a target naming nothing, which answers for itself', async () => {
+      await afterFailedSave();
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('still full'));
+
+      await expect(service.revoke({ passkeyCredentialId: 'someone-else' }, 'settings')).resolves.toEqual({
+        revoked: 0,
+        labels: [],
+      });
+      await settle();
+      expect(revokedInStore()).toEqual([false, false]);
+
+      await service.revoke({ passkeyCredentialId: 'someone-else' }, 'settings');
+      await settle();
+      expect(revokedInStore()).toEqual([true, false]);
+    });
+
+    it('never answers an id naming no phone with another phone\'s failed or stuck save', async () => {
+      await afterFailedSave();
+
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('still full'));
+      expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
+      await settle();
+      expect(revokedInStore()).toEqual([false, false]);
+
+      const write = Promise.withResolvers<void>();
+      vi.spyOn(store, 'saveAcl').mockImplementationOnce(() => write.promise);
+      const stuck = service.saveRevocations();
+      await settle();
+      expect((await command('revokeDevice', { id: '0000000000000000' })).error).toMatch(/No paired phone/);
+      write.resolve();
+      await stuck;
     });
 
     it('is saved again at dispose, so the next service loads it', async () => {
