@@ -459,13 +459,12 @@ export async function loadPairedDevices(): Promise<{
 
 /**
  * Revoke one paired phone by its {@link PairedDevice.id}, or save again a
- * revocation by its {@link UnsavedRevocation.id}, named as Settings' doing for
- * the access log. Rejections — an id that names no phone or more
+ * revocation by its {@link UnsavedRevocation.id}. Rejections — an id that names no phone or more
  * than one, no enrollment, a save that failed — propagate verbatim. The
  * service announces the change as `access` ({@link subscribeToAccess}).
  */
 export async function revokePairedDevice(id: string): Promise<RevokeDeviceResult> {
-  const params: RevokeDeviceParams = { id, by: 'settings' };
+  const params: RevokeDeviceParams = { id };
   return (await requireBurrowLink().command('revokeDevice', params)) as RevokeDeviceResult;
 }
 

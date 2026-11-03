@@ -25,7 +25,6 @@ import {
 import {
   firstPerClientStatic,
   revocationNames,
-  revocationRequester,
   revokeTarget,
   type RevocationRequester,
   type RevocationTarget,
@@ -1228,9 +1227,8 @@ export class BurrowService {
       void this.saveRevocations();
       throw new Error(`More than one paired phone has the id ${id}, so none was revoked.`);
     }
-    const by = revocationRequester(params?.by);
     const [clientStaticPublicKey] = [...statics];
-    if (clientStaticPublicKey !== undefined) return this.revoke({ clientStaticPublicKey }, by);
+    if (clientStaticPublicKey !== undefined) return this.revoke({ clientStaticPublicKey }, 'settings');
     const held = this.#heldDevices({ overdueOnly: false }).find((device) => device.id === id);
     if (!held) {
       void this.saveRevocations();

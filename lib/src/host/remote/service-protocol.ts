@@ -368,8 +368,6 @@ export interface TakeBackResult {
  */
 export interface RevokeDeviceParams {
   id: string;
-  /** Who asked, for the access log; read through `revocationRequester`. */
-  by?: string;
 }
 
 /** How many ACL records the revocation retired, and the label of each browser it cut off. */
@@ -559,8 +557,8 @@ export interface BurrowConsoleStatus {
 export type PushDevicesResult = { devices: Array<{ label: string }> } | null;
 
 /**
- * One paired browser, as Settings → Remote control and `dor remote list`
- * show it: every active ACL record of one Client static, folded.
+ * One paired browser, as Settings → Remote control shows it: every active ACL
+ * record of one Client static, folded.
  *
  * **Never the Client static or the `deliveryId`.** `id` is `deviceIdFor` of
  * the static — a name to revoke by, which authorizes nothing.

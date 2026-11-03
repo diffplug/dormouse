@@ -638,8 +638,8 @@ export const RULES = [
     security: 'must be the only caller of `BurrowAcl.revokeClient` and `revokePasskey`',
     kind: 'exactly',
     trees: ACL_WRITER_TREES,
-    // Every revocation — Settings, `dor`, and whatever names a credential
-    // later — goes through the one target-based helper, so the session ending
+    // Every revocation — Settings, the Relay, and whatever comes later —
+    // goes through the one target-based helper, so the session ending
     // and the log that follow it cannot be skipped by a second path.
     pattern: /\.revoke(?:Client|Passkey)\(/g,
     count: 2,

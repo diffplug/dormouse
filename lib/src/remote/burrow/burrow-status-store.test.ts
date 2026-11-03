@@ -379,11 +379,11 @@ describe('paired phones and the access log', () => {
     ]);
   });
 
-  it('names Settings as the one revoking', async () => {
+  it('revokes by the phone\'s id alone', async () => {
     const command = vi.fn(async () => ({ revoked: 1, labels: ['Dormouse Pocket (browser)'] }));
     burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
     expect(await revokePairedDevice('3f2a9c01d47e6b01')).toEqual({ revoked: 1, labels: ['Dormouse Pocket (browser)'] });
-    expect(command).toHaveBeenCalledWith('revokeDevice', { id: '3f2a9c01d47e6b01', by: 'settings' });
+    expect(command).toHaveBeenCalledWith('revokeDevice', { id: '3f2a9c01d47e6b01' });
   });
 
   it('tells an access subscriber of each access event until it unsubscribes', () => {

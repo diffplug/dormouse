@@ -19,7 +19,6 @@ import { moveCommand } from './commands/move.js';
 import { killCommand } from './commands/kill.js';
 import { listCommand } from './commands/list.js';
 import { readCommand } from './commands/read.js';
-import { remoteCommand } from './commands/remote.js';
 import { reopenCommand } from './commands/reopen.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
@@ -59,7 +58,6 @@ const COMMANDS = [
   listCommand,
   workspaceCommand,
   appCommand,
-  remoteCommand,
 ] as const satisfies readonly Command[];
 
 

@@ -1803,7 +1803,7 @@ describe('paired devices and revocation', () => {
     await service.start();
     sockets[0]!.open();
 
-    expect((await command('revokeDevice', { id: phoneId.toUpperCase(), by: 'dor' })).result).toEqual({
+    expect((await command('revokeDevice', { id: phoneId.toUpperCase() })).result).toEqual({
       revoked: 1,
       labels: [BROWSER],
     });
@@ -1813,7 +1813,7 @@ describe('paired devices and revocation', () => {
     expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
     expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toHaveLength(1);
     expect(store.accessLog).toEqual([
-      expect.objectContaining({ event: 'revoked', deviceId: phoneId, device: BROWSER, by: 'dor' }),
+      expect.objectContaining({ event: 'revoked', deviceId: phoneId, device: BROWSER, by: 'settings' }),
     ]);
     expect(accessEvents()).toBeGreaterThan(0);
   });
@@ -1822,13 +1822,13 @@ describe('paired devices and revocation', () => {
     createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] } });
     await service.start();
 
-    expect((await command('revokeDevice', { id: phoneId, by: 'not-a-requester' })).result).toMatchObject({
+    expect((await command('revokeDevice', { id: phoneId, by: 'someone-else' })).result).toMatchObject({
       revoked: 1,
     });
     await settle();
 
     expect(store.acl[BURROW_ID]![0]!.revokedAt).not.toBeNull();
-    // A requester outside the closed set is read as the Settings list.
+    // The service names the requester; a message cannot.
     expect(store.accessLog).toEqual([expect.objectContaining({ event: 'revoked', by: 'settings' })]);
     // The next start loads the revocation, not the snapshot before it.
     await setPolicy(RELAY_ON);
@@ -1934,7 +1934,7 @@ describe('paired devices and revocation', () => {
       expect((await command('revokeDevice', { id: phoneId })).error).toMatch(/still full/);
       expect((await pairedResult()).unsavedRevocations).toHaveLength(1);
 
-      expect((await command('revokeDevice', { id: phoneId, by: 'dor' })).result).toEqual({
+      expect((await command('revokeDevice', { id: phoneId })).result).toEqual({
         revoked: 1,
         labels: [BROWSER],
       });
@@ -1944,6 +1944,28 @@ describe('paired devices and revocation', () => {
       await settle();
       // Saving it again is not a second revocation.
       expect(store.accessLog.filter(({ event }) => event === 'revoked')).toHaveLength(1);
+    });
+
+    it('holds a Relay-named revocation the same way, and its id in Settings saves it again', async () => {
+      const otherPasskey = { ...TABLET, passkeyCredentialId: 'cred-other' };
+      createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [PHONE, otherPasskey] } });
+      await service.start();
+      sockets[0]!.open();
+      vi.spyOn(store, 'saveAcl').mockRejectedValueOnce(new Error('disk full'));
+
+      await expect(service.revoke({ passkeyCredentialId: PHONE.passkeyCredentialId }, 'relay')).rejects.toThrow(
+        /disk full/,
+      );
+      expect(revokedInStore()).toEqual([false, false]);
+      expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
+
+      expect((await command('revokeDevice', { id: phoneId })).result).toEqual({ revoked: 1, labels: [BROWSER] });
+      expect(revokedInStore()).toEqual([true, false]);
+      expect((await pairedResult()).unsavedRevocations).toBeUndefined();
+      await settle();
+      expect(store.accessLog.filter(({ event }) => event === 'revoked')).toEqual([
+        expect.objectContaining({ deviceId: phoneId, by: 'relay' }),
+      ]);
     });
 
     it('is saved again by a revoke attempt that finds nothing to do', async () => {
