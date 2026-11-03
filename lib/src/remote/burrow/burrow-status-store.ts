@@ -26,6 +26,7 @@ import {
   type BurrowConsoleStatus,
   type RevokeDeviceParams,
   type RevokeDeviceResult,
+  type UnsavedRevocation,
   type SetupQrResult,
 } from '../../host/remote/service-protocol';
 import { parseAccessLog, type AccessLogEntry } from './access-log';
@@ -440,17 +441,25 @@ export async function sendTestPush(): Promise<PushSendSummary> {
 
 /**
  * The phones paired with this machine's enrollment, newest pairing first
- * (`service-protocol.ts` -> `PairedDevice`); empty with no enrollment. An
- * answer with no list reads as none: there is nothing a caller could do with
- * a half-understood one. Rejections propagate verbatim.
+ * (`service-protocol.ts` -> `PairedDevice`), and any revocation not saved yet;
+ * empty with no enrollment. An answer with no list reads as none: there is
+ * nothing a caller could do with a half-understood one. Rejections propagate
+ * verbatim.
  */
-export async function loadPairedDevices(): Promise<PairedDevice[]> {
+export async function loadPairedDevices(): Promise<{
+  devices: PairedDevice[];
+  unsavedRevocations: UnsavedRevocation[];
+}> {
   const result = (await requireBurrowLink().command('pairedDevices')) as PairedDevicesResult | null;
-  return Array.isArray(result?.devices) ? result.devices : [];
+  return {
+    devices: Array.isArray(result?.devices) ? result.devices : [],
+    unsavedRevocations: Array.isArray(result?.unsavedRevocations) ? result.unsavedRevocations : [],
+  };
 }
 
 /**
- * Revoke one paired phone by its {@link PairedDevice.id}. Rejections — an id that names no phone or more
+ * Revoke one paired phone by its {@link PairedDevice.id}, or save again a
+ * revocation by its {@link UnsavedRevocation.id}. Rejections — an id that names no phone or more
  * than one, no enrollment, a save that failed — propagate verbatim. The
  * service announces the change as `access` ({@link subscribeToAccess}).
  */
