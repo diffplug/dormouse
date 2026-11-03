@@ -189,6 +189,13 @@ export function AccessLogDisclosure({ entries }: { entries: AccessLogEntry[] }) 
  * cannot render as nothing; the store already dropped any this build does not
  * know, and {@link own} stops a prototype name all the same.
  */
+/** What a `revoked` entry says of who asked, from a member of `REVOCATION_REQUESTERS`. */
+const REVOKED_BY: Record<string, string> = {
+  dor: 'revoked from dor',
+  settings: 'revoked from Settings',
+  relay: 'revoked: its passkey was removed from the account',
+};
+
 const ACCESS_EVENT_COPY: Record<AccessEvent, (entry: AccessLogEntry) => string> = {
   paired: () => 'paired',
   'pairing-denied': (entry) => `pairing refused${because(entry.reason)}`,
@@ -202,8 +209,7 @@ const ACCESS_EVENT_COPY: Record<AccessEvent, (entry: AccessLogEntry) => string> 
   attached: (entry) => (entry.surface ? `attached ${entry.surface}` : 'attached a terminal'),
   closed: (entry) => `closed ${entry.surface ?? 'a surface'}`,
   ended: (entry) => `session ended${after(entry.durationMs)}${entry.path ? `, ${entry.path}` : ''}`,
-  revoked: (entry) =>
-    entry.by === 'dor' ? 'revoked from dor' : entry.by === 'settings' ? 'revoked from Settings' : 'revoked',
+  revoked: (entry) => own(REVOKED_BY, entry.by ?? '') ?? 'revoked',
   'one-time-connected': () => 'connected by one-time link',
   'one-time-denied': (entry) => `one-time link refused${because(entry.reason)}`,
   'one-time-ended': (entry) =>
