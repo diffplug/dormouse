@@ -30,6 +30,8 @@ import {
   checkRegistration,
   enrollConfirmDigits,
   enrollUserCode,
+  isSignedEnrollDeviceCode,
+  signEnrollDeviceCode,
   fromBase64Url,
   isPresenceBinding,
   isRelayBearer,
@@ -95,8 +97,8 @@ export const MAX_SESSIONS_PER_ACCOUNT = 32;
 export const MAX_SETUP_CHALLENGES_PER_BURROW = MAX_TOKENS_PER_BURROW;
 
 /**
- * A device code's leading bytes: its expiry, big-endian epoch seconds; the
- * rest of its 32 are random.
+ * A device code's leading bytes: its expiry, big-endian epoch seconds. The rest
+ * of its 32 are random, then the tag `signEnrollDeviceCode` writes.
  */
 const DEVICE_CODE_EXPIRY_BYTES = 4;
 
@@ -502,8 +504,8 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
 
   // --- Enrollment: device code, approved on the account origin --------------
 
-  // Begin writes nothing: the device code carries its own expiry, the user
-  // code is derived from it and the digits from that, so an unauthenticated
+  // Begin writes nothing: the device code carries its own expiry and tag, the
+  // user code is derived from it and the digits from that, so an unauthenticated
   // caller grows no table.
   app.post(API_ROUTES.burrowEnrollBegin, async (c) => {
     const body = await readJson<{ origin?: unknown; purpose?: unknown }>(c);
@@ -520,7 +522,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const expiresAtS = Math.floor((Date.now() + ENROLLMENT_TTL_MS) / 1000);
     const bytes = crypto.getRandomValues(new Uint8Array(RELAY_BEARER_BYTE_LENGTH));
     new DataView(bytes.buffer).setUint32(0, expiresAtS);
-    const userCode = await userCodeOf(c.env, bytes, purpose);
+    const key = enrollKey(c.env, purpose);
+    await signEnrollDeviceCode(key, bytes);
+    const userCode = await enrollUserCode(key, bytes);
     const res: BurrowEnrollBeginResponse = {
       purpose,
       deviceCode: toBase64Url(bytes),
@@ -544,10 +548,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const voiceAnswer = (res: BurrowVoicePollResponse) => c.json(res);
     if (!isRelayBearer(deviceCode)) return answer({ status: "expired" });
     const bytes = fromBase64Url(deviceCode);
-    // Expired by its own clock, without the database.
+    // Expired by its own clock, or never issued for this purpose: neither reaches
+    // the database, so a poll looks up only a user code begin handed out.
     const expiresAtS = new DataView(bytes.buffer, bytes.byteOffset, DEVICE_CODE_EXPIRY_BYTES).getUint32(0);
     if (expiresAtS * 1000 <= Date.now()) return answer({ status: "expired" });
-    const userCode = await userCodeOf(c.env, bytes, purpose);
+    const key = enrollKey(c.env, purpose);
+    if (!(await isSignedEnrollDeviceCode(key, bytes))) return answer({ status: "expired" });
+    const userCode = await enrollUserCode(key, bytes);
     const confirmDigits = await enrollConfirmDigits(enrollSecret(c.env), userCode);
     return database(c, async (db) => {
       // The read stamps a live, unredeemed approval typed with other digits,
@@ -819,9 +826,9 @@ function enrollSecret(env: RelayEnv): string {
   return env.RELAY_ENROLL_SECRET;
 }
 
-/** A device code's user code, under its purpose's key. */
-function userCodeOf(env: RelayEnv, deviceCode: Uint8Array, purpose: "remote" | "voice") {
+/** The key a device code's tag and user code are under: one per purpose. */
+function enrollKey(env: RelayEnv, purpose: "remote" | "voice") {
   const secret = enrollSecret(env);
-  return enrollUserCode(purpose === "voice" ? `${secret}:voice` : secret, deviceCode);
+  return purpose === "voice" ? `${secret}:voice` : secret;
 }
 const invalidSetup = (c: Context) => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);

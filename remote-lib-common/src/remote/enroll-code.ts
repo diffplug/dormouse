@@ -1,12 +1,15 @@
 /**
  * The codes of Hosted's device-code approval (`docs/specs/hosted.md` -> "Burrow
- * enrollment"): the user code, which the link carries to the account page and
- * keys the approval, derived from the device code; and the two confirmation
- * digits Dormouse shows and the user types there, derived from the user code.
+ * enrollment"): the tag that shows Hosted issued a device code; the user code,
+ * which the link carries to the account page and keys the approval, derived
+ * from the device code; and the two confirmation digits Dormouse shows and the
+ * user types there, derived from the user code.
  *
- * Imports nothing, so the account frontend takes it without the rest of this
- * package.
+ * Imports only `bytes.ts`, so the account frontend takes it without the rest of
+ * this package.
  */
+
+import { concatBytes, constantTimeEqual, utf8Encode } from '../security/bytes.js';
 
 /**
  * Crockford base32 without `0`, `1` (nor the `O`, `I`, `L`, `U` Crockford
@@ -54,6 +57,37 @@ interface HmacSubtle {
   sign(algorithm: 'HMAC', key: unknown, data: Uint8Array): Promise<ArrayBuffer>;
 }
 
+const defaultSubtle = () => (globalThis as unknown as { crypto: { subtle: HmacSubtle } }).crypto.subtle;
+
+/** A device code's trailing bytes, the {@link enrollDeviceCodeTag} of the rest. */
+const DEVICE_CODE_TAG_BYTES = 12;
+/** A different length than any device code, so a tag's MAC is never a user code's. */
+const DEVICE_CODE_TAG_LABEL = 'enroll-device-code:';
+
+/** The tag of `deviceCode`, over all but its trailing {@link DEVICE_CODE_TAG_BYTES}. */
+async function enrollDeviceCodeTag(secret: string, deviceCode: Uint8Array): Promise<Uint8Array> {
+  const signed = deviceCode.subarray(0, deviceCode.length - DEVICE_CODE_TAG_BYTES);
+  const mac = await hmac(secret, concatBytes(utf8Encode(DEVICE_CODE_TAG_LABEL), signed), defaultSubtle());
+  return mac.subarray(0, DEVICE_CODE_TAG_BYTES);
+}
+
+/** Writes `deviceCode`'s tag over its trailing bytes, its issue being what the tag shows. */
+export async function signEnrollDeviceCode(
+  secret: string,
+  deviceCode: Uint8Array,
+): Promise<void> {
+  deviceCode.set(await enrollDeviceCodeTag(secret, deviceCode), deviceCode.length - DEVICE_CODE_TAG_BYTES);
+}
+
+/** Whether `deviceCode` carries the tag only `secret`'s holder can write. */
+export async function isSignedEnrollDeviceCode(
+  secret: string,
+  deviceCode: Uint8Array,
+): Promise<boolean> {
+  const carried = deviceCode.subarray(deviceCode.length - DEVICE_CODE_TAG_BYTES);
+  return constantTimeEqual(await enrollDeviceCodeTag(secret, deviceCode), carried);
+}
+
 /**
  * The user code of `deviceCode`: `HMAC-SHA-256(secret, deviceCode)` read five
  * bits at a time, most significant first, into
@@ -64,7 +98,7 @@ interface HmacSubtle {
 export async function enrollUserCode(
   secret: string,
   deviceCode: Uint8Array,
-  subtle: HmacSubtle = (globalThis as unknown as { crypto: { subtle: HmacSubtle } }).crypto.subtle,
+  subtle: HmacSubtle = defaultSubtle(),
 ): Promise<string> {
   const mac = await hmac(secret, deviceCode, subtle);
   let code = '';
@@ -89,7 +123,7 @@ export async function enrollUserCode(
 export async function enrollConfirmDigits(
   secret: string,
   userCode: string,
-  subtle: HmacSubtle = (globalThis as unknown as { crypto: { subtle: HmacSubtle } }).crypto.subtle,
+  subtle: HmacSubtle = defaultSubtle(),
 ): Promise<string> {
   const mac = await hmac(secret, new TextEncoder().encode(`confirm:${userCode}`), subtle);
   for (let byte = 0; byte + 1 < mac.length; byte += 2) {

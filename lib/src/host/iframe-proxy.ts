@@ -490,6 +490,11 @@ function upstreamRequestHeaders(grant: Grant, req: http.IncomingMessage): http.O
   return headers;
 }
 
+/** The browser names a worker's script fetch, its first and every update, itself. */
+function isServiceWorkerScript(req: http.IncomingMessage): boolean {
+  return req.headers['service-worker'] === 'script' || req.headers['sec-fetch-dest'] === 'serviceworker';
+}
+
 function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.ServerResponse): void {
   if (!isLoopbackHost(req.headers.host, grant.port)) {
     // DNS rebinding: a hostile domain re-pointed at 127.0.0.1 reaches this
@@ -505,6 +510,14 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   // must not do is let a page that says `Origin: https://evil.example` hold a
   // closed pane's grant, and its upstream binding, open indefinitely.
   if (!isForeignOrigin(req.headers.origin, grant.port)) grant.lastUsed = Date.now();
+  // A worker outlives its grant in the browser's storage for this origin, and
+  // would answer whichever later grant lands on this port, ahead of the proxy
+  // and its Clear-Site-Data. A tunneled page is not at this port.
+  if (!grant.tunneled && isServiceWorkerScript(req)) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end('A preview runs without service workers.');
+    return;
+  }
   const path = req.url ?? '/';
 
   const headers = upstreamRequestHeaders(grant, req);

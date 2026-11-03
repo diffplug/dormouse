@@ -126,6 +126,17 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
     server = existingServer;
     announce(server);
   } else {
+    // An `https:` origin with no bind host is either a container, whose namespace
+    // bounds the port, or a local TLS proxy beside a plaintext port on every
+    // interface. Only the operator can tell which, so the default stays and this
+    // says so.
+    if (!bindHost && new URL(origin).protocol === 'https:') {
+      console.warn(
+        `DORMOUSE_BIND_HOST is unset, so plain HTTP on port ${port} listens on every interface beside the ` +
+          `HTTPS origin ${origin}. Set DORMOUSE_BIND_HOST=127.0.0.1 if the TLS proxy is on this machine; ` +
+          'in a container, whose namespace bounds the port, nothing needs changing.',
+      );
+    }
     server = serve(
       { fetch: app.fetch, port, ...(bindHost ? { hostname: bindHost } : {}) },
       () => announce(server),
