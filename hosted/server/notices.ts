@@ -4,9 +4,17 @@ import type { Billing } from "@pgstencil/stripe";
 import { escape } from "@pgstencil/auth/email";
 import type { EmailMessage, EmailSender } from "pgstencil";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
-import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
+import {
+  DIFFPLUG_POSTAL_ADDRESS,
+  MODEL_FORM_INTRO,
+  MODEL_WITHDRAWAL_FORM,
+  SUPPORT_EMAIL,
+  WITHDRAWAL_RIGHT,
+  WITHDRAWAL_STATEMENT,
+} from "../../website/src/lib/hosted-withdrawal";
 import { DAY_MS, run, stripeHoldsPrice, type PriceCatalog, type PriceChange } from "./billing";
-import { BILLING_RETURN_PATH, isPlan, type Plan } from "./policy-constants";
+import { disclosure, priceInUsd } from "./disclosure";
+import { BILLING_RETURN_PATH, isPlan, termsArchiveUrl, type Plan } from "./policy-constants";
 import { billingContact, type Contact } from "./withdrawal";
 
 /**
@@ -32,7 +40,7 @@ export const PRICE_NOTICE_MIN_DAYS = 7;
  * spare and never announces a change that then cannot apply.
  */
 const PRICE_SEND_BY_DAYS = PRICE_NOTICE_MIN_DAYS + 1;
-/** How long the cron retries a dispute notice, stale past it; a withdrawal's acknowledgement it retries until sent. */
+/** How long the cron retries a dispute notice, stale past it; a withdrawal's acknowledgement and a purchase's confirmation it retries until sent. */
 const RETRY_DAYS = 30;
 /** A withdrawal's acknowledgement still unsent this many days after its withdrawal fails every cron run until it goes. */
 const ACKNOWLEDGEMENT_OVERDUE_DAYS = 1;
@@ -51,7 +59,7 @@ async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
       throw new Error(`Price change ${change.id}: Stripe's ${id} is not ${usd} USD every ${planInterval(change.plan)}`);
 }
 
-type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored" | "withdrawal";
+type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored" | "withdrawal" | "purchase";
 
 /** A notice to send, with what its text needs. */
 interface Pending {
@@ -66,6 +74,11 @@ interface Pending {
   withdrawalPlan: string | null;
   contractStartedAt: Date | null;
   submittedAt: Date | null;
+  /** A purchase's: what its checkout's consent recorded. */
+  consentPlan: string | null;
+  shownUsd: number | null;
+  termsVersion: string | null;
+  consentedAt: Date | null;
 }
 
 /** What composing a notice reads beyond its row. */
@@ -155,6 +168,34 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
       ];
       break;
     }
+    case "purchase": {
+      // The durable confirmation docs/specs/pricing.md -> "Checkout and entitlement" requires.
+      const { consentPlan, shownUsd, termsVersion, consentedAt } = notice;
+      if (!isPlan(consentPlan) || !shownUsd || !termsVersion || !consentedAt)
+        throw new Error(`Notice ${notice.id}: its checkout recorded no consent to confirm`);
+      const agreed = disclosure(consentPlan, shownUsd);
+      subject = "Your Dormouse Hosted subscription confirmation";
+      paragraphs = [
+        "Thank you for subscribing to Dormouse Hosted. Keep this email as your record of what you agreed to.",
+        [
+          ["Seller", "DiffPlug LLC"],
+          ["Plan", `Dormouse Hosted, ${PLAN_NAMES[consentPlan]}`],
+          ["Price", priceInUsd(consentPlan, shownUsd)],
+          ["Automatic renewal", agreed.renewal],
+          ["Terms", `Version ${termsVersion}, which you agreed to on ${UTC.format(consentedAt)}: ${termsArchiveUrl(termsVersion)}`],
+          [
+            "Cancel",
+            `${agreed.cancel} Use Manage billing on your billing page: ${billingPage}. If you cannot sign in, email ${SUPPORT_EMAIL} and we will cancel it for you.`,
+          ],
+          ["Refunds", `${agreed.refund} Email ${SUPPORT_EMAIL} to ask.`],
+          ["Limits", agreed.limits],
+        ],
+        `${WITHDRAWAL_RIGHT} Your billing page: ${billingPage}.`,
+        `Model withdrawal form. ${MODEL_FORM_INTRO} ${MODEL_WITHDRAWAL_FORM}`,
+        help,
+      ];
+      break;
+    }
   }
   paragraphs.push(DIFFPLUG_POSTAL_ADDRESS);
   return {
@@ -182,7 +223,7 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
  * renewal, a price change's only while it is further off than
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
  * while its dispute is open; a dispute notice for {@link RETRY_DAYS}; a
- * withdrawal's acknowledgement until it is sent.
+ * withdrawal's acknowledgement and a purchase's confirmation until sent.
  * The batch is leased in the statement that picks it, so two passes never
  * send one twice. Never-tried notices go first, then the least recently
  * tried, so ones that keep failing never starve newer ones past their
@@ -203,11 +244,16 @@ export async function sendNotices(
   const leased = await run<Pending>(
     billing.db,
     `WITH due AS (
-      SELECT n.id, s.price_id AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt"
+      SELECT n.id, s.price_id AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt",
+        k.plan AS "consentPlan", k."shownUsd", k."termsVersion", k."consentedAt"
       FROM public.dormouse_billing_notices n
       LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
       LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
       LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
+      -- A checkout reused across a terms change holds one consent per version.
+      LEFT JOIN LATERAL (
+        SELECT * FROM public.dormouse_checkout_consents consent WHERE consent."checkoutId" = n."checkoutId"
+        ORDER BY consent."consentedAt" DESC LIMIT 1) k ON true
       WHERE n."sentAt" IS NULL AND (n."attemptedAt" IS NULL OR n."attemptedAt" < $2)
         AND ($3::text IS NULL OR n."userId" = $3)
         AND CASE
@@ -221,13 +267,14 @@ export async function sendNotices(
             n."createdAt" > $4
             AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
           WHEN n.kind = 'dispute_restored' THEN n."createdAt" > $4
-          ELSE n.kind = 'withdrawal'
+          ELSE n.kind IN ('withdrawal', 'purchase')
         END
       ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5
       FOR UPDATE OF n SKIP LOCKED)
     UPDATE public.dormouse_billing_notices n SET "attemptedAt" = $1 FROM due WHERE n.id = due.id
     RETURNING n.id, n."userId", n.kind, n."renewsAt", due."priceId", n."priceChangeId",
-      n."withdrawalId", due."withdrawalPlan", due."contractStartedAt", due."submittedAt"`,
+      n."withdrawalId", due."withdrawalPlan", due."contractStartedAt", due."submittedAt",
+      due."consentPlan", due."shownUsd", due."termsVersion", due."consentedAt"`,
     [
       now,
       new Date(now.getTime() - LEASE_MS),

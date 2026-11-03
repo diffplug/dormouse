@@ -61,6 +61,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 - **Checkout starts from a Hosted account**: `/checkout` on the account origin asks for sign-in first, so the subscription belongs to an account from its first event.
 - **Must obtain affirmative agreement to the versioned terms and express consent to automatic renewal at the purchase action**, two unticked boxes, disclosing beside it the price in US dollars and tax, the interval and renewal price, cancellation, the refund conditions, and the material limits: one individual including work use, no device limit, and managed voice's daily cap. Checkout refuses a Price other than the one shown and records the consent with it and with what it presented (`docs/specs/hosted.md` -> "Billing").
 - **Must keep a durable confirmation at `/billing` while the plan is held**: the plan and price, renewal, the terms version agreed and when, how to cancel, and refunds; Stripe's receipt emails carry each payment.
+- **Must email a durable confirmation to the billing email when a checkout completes**, which outlasts the plan: the seller, the plan, the price in US dollars and interval, automatic renewal, the terms version agreed and when with a link to its text, how to cancel, the refund conditions, the material limits, and the EEA and UK withdrawal right, where to withdraw, and the model form (`docs/specs/hosted.md` -> "Billing notices").
 - **Founding offers the founders-row opt-in, unticked, once bought**; the account can leave at any time.
 - **Must support EEA and UK consumer withdrawal**; the voluntary guarantee is additional (rationale):
   - **Must disclose the statutory withdrawal right, where the online withdrawal is, the support path, and the model form at checkout and in the `/billing` confirmation.**
@@ -133,7 +134,7 @@ Part of **hosted-sales**; these remain unimplemented launch gates, not claims ab
 
 EEA/UK representative appointment is excluded from the internal release gate by operator decision; applicable legal obligations remain unchanged (rationale).
 
-- **Must confirm Stripe's receipt emails are on, and that they and the `/billing` confirmation meet each sales territory's durable-confirmation rule**, before charging; consent at the purchase action is "Checkout and entitlement".
+- **Must confirm Stripe's receipt emails are on, and that they, the purchase email, and the `/billing` confirmation meet each sales territory's durable-confirmation rule**, before charging; consent at the purchase action is "Checkout and entitlement".
 - **Must turn on cancellation in Stripe's customer portal before charging**, the online cancellation "Checkout and entitlement" relies on.
 - **Must confirm the built notices ("Checkout and entitlement") meet each sales territory's rules beyond California's**, and provide any additional legally required notice or consent process (rationale).
 - **Must send notices other than subscription notices to the account contact email, or show them at sign-in when none exists**, recording delivery or presentation before a notice period starts.

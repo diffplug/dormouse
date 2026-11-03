@@ -1,11 +1,17 @@
 import { test, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
+import { escape } from "@pgstencil/auth/email";
 import { EmailDev } from "pgstencil";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
-import { WITHDRAWAL_STATEMENT } from "../../../website/src/lib/hosted-withdrawal";
+import {
+  DIFFPLUG_POSTAL_ADDRESS,
+  MODEL_WITHDRAWAL_FORM,
+  WITHDRAWAL_RIGHT,
+  WITHDRAWAL_STATEMENT,
+} from "../../../website/src/lib/hosted-withdrawal";
 import { END_REASONS, resyncBilling, type BillingSetup } from "../billing";
 import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
 import {
@@ -25,8 +31,8 @@ import { entitledSql } from "../entitlement";
 import { WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
 import { DEV_FOUNDING_PRICES } from "../billing-dev";
-import { presentedLines } from "../disclosure";
-import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, VOICE_DAILY_CAP } from "../policy-constants";
+import { disclosure, presentedLines } from "../disclosure";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, VOICE_DAILY_CAP, termsArchiveUrl } from "../policy-constants";
 import { ORIGINS } from "./bundle";
 import { CHANGED_PRICES, CHANGED_USD, stripeFake } from "./stripe-fake";
 import { workerDatabases } from "./worker-roles";
@@ -35,6 +41,7 @@ import { workerDatabases } from "./worker-roles";
 // signed-in account may ask, what Stripe's webhook does, and what each counts.
 
 const origin = ORIGINS.account;
+const PURCHASE_SUBJECT = "Your Dormouse Hosted subscription confirmation";
 /** What the checkout page sends once both boxes are ticked, beside `plan` at the price it showed. */
 const consent = (plan: string) => ({
   plan,
@@ -52,7 +59,10 @@ async function fixture({ closed = false } = {}) {
   /** user id → its session's user, as `get-session` answers it, and when that login began. */
   const users = new Map<string, { id: string; email: string | null; emailVerified: boolean }>();
   const logins = new Map<string, string>();
-  const email = new EmailDev(context.time);
+  const inbox = new EmailDev(context.time);
+  /** Every email but purchase confirmations, which {@link buy} sends every test and {@link confirmations} reads. */
+  const email = { all: () => inbox.all().filter((message) => message.subject !== PURCHASE_SUBJECT) };
+  const confirmations = () => inbox.all().filter((message) => message.subject === PURCHASE_SUBJECT);
   /** Mail sends to fail, before any goes out. */
   const mailing = { failures: 0 };
   const mail = () => ({
@@ -61,7 +71,7 @@ async function fixture({ closed = false } = {}) {
         mailing.failures--;
         throw new Error("Postmark outage");
       }
-      await email.send(message);
+      await inbox.send(message);
     },
   });
   /** Each Burrow socket, and each session's Client sockets, closure asked to close. */
@@ -153,14 +163,23 @@ async function fixture({ closed = false } = {}) {
       headers: { "content-type": "application/json", ...(method === "GET" ? { "sec-fetch-site": "same-origin" } : { origin }) },
       ...(method !== "GET" && { body: "{}" }),
     });
-  /** Starts `plan` for `who` and completes it in StripeDev, delivering its events. */
-  const buy = async (who: Awaited<ReturnType<typeof account>>, plan: string, ref?: string) => {
+  /** Starts `plan` for `who`, answering its open Stripe session. */
+  const startCheckout = async (who: Awaited<ReturnType<typeof account>>, plan: string, ref?: string) => {
     const started = await who.request("/api/billing/checkout", { method: "POST", body: { ...consent(plan), ref } });
     expect(started.status, await started.clone().text()).toBe(200);
     const { url } = (await started.json()) as { url: string };
-    const session = [...stripe.dev.checkouts.values()].find((s) => s.url === url)!;
+    return [...stripe.dev.checkouts.values()].find((s) => s.url === url)!;
+  };
+  /**
+   * Starts `plan` for `who` and completes it in StripeDev, delivering its
+   * events. Its confirmation's row goes, so a test of another notice reads
+   * only its own; {@link startCheckout} keeps it.
+   */
+  const buy = async (who: Awaited<ReturnType<typeof account>>, plan: string, ref?: string) => {
+    const session = await startCheckout(who, plan, ref);
     const subscription = stripe.dev.completeCheckout(session.id);
     await deliver();
+    await sql(`DELETE FROM dormouse_billing_notices WHERE kind = 'purchase'`);
     return { session, subscription };
   };
   /** Each subscription Hosted ended (`billing.end`), and the reason it recorded. */
@@ -193,11 +212,13 @@ async function fixture({ closed = false } = {}) {
     webhook,
     send,
     deliver,
+    startCheckout,
     buy,
     metrics,
     ended,
     entitledOn,
     email,
+    confirmations,
     mail,
     mailing,
     logins,
@@ -932,6 +953,8 @@ test("the online withdrawal is offered within its window, to an EEA, UK, or unkn
   const abroad = await f.account();
   const { session: abroadSession, subscription: abroadSubscription } = await f.buy(abroad, "monthly");
   f.countries.set(abroadSession.customer as string, "US");
+  // Past what the page reuses of the contact the purchase's confirmation read.
+  f.time.advanceMilliseconds(11 * 60 * 1000);
   expect(await abroad.summary()).toMatchObject({ plan: "monthly", withdrawal: null });
   const refused = await abroad.request("/api/billing/withdraw", { method: "POST", body: { subscription: abroadSubscription.id } });
   expect([refused.status, await refused.json()]).toEqual([409, { message: WITHDRAWAL_CLOSED }]);
@@ -1494,6 +1517,94 @@ const padded = (text: string) =>
 const RENEWAL_NOTICE_DAYS = 30;
 const PRICE_NOTICE_DAYS = 21;
 const PRICE_NOTICE_MIN_DAYS = 7;
+
+test("a completed checkout emails what was agreed once, to the Stripe customer's email, never the sign-in email", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const notices = () =>
+    f.sql<{ kind: string; subscriptionId: string; email: string | null }>(
+      `SELECT kind, "subscriptionId", email FROM dormouse_billing_notices WHERE kind = 'purchase'`,
+    );
+  const member = await f.account("signin@example.test");
+  const session = await f.startCheckout(member, "founding");
+  f.dev.customers.get(session.customer as string)!.email = "billing@example.test";
+  const { id: subscription } = f.dev.completeCheckout(session.id);
+  await f.deliver();
+
+  expect(await notices()).toEqual([{ kind: "purchase", subscriptionId: subscription, email: "billing@example.test" }]);
+  const [mail] = f.confirmations();
+  expect(mail!.to).toEqual(["billing@example.test"]);
+  const [{ at }] = await f.sql<{ at: Date }>(`SELECT "consentedAt" AS at FROM dormouse_checkout_consents`);
+  const agreed = disclosure("founding", FOUNDING_LADDER[0]!);
+  for (const fact of [
+    "Seller: DiffPlug LLC",
+    "Plan: Dormouse Hosted, Founding",
+    `Price: $${FOUNDING_LADDER[0]} a year in US dollars, plus any applicable tax.`,
+    `Automatic renewal: Renews automatically every year at $${FOUNDING_LADDER[0]} until you cancel.`,
+    agreed.renewal,
+    `Terms: Version ${TERMS_VERSION}, which you agreed to on `,
+    at.getUTCFullYear().toString(),
+    termsArchiveUrl(TERMS_VERSION),
+    agreed.cancel,
+    "Use Manage billing",
+    `${origin}/billing`,
+    agreed.refund,
+    `Limits: ${agreed.limits}`,
+    `up to ${VOICE_DAILY_CAP} alarms a day`,
+    WITHDRAWAL_RIGHT,
+    MODEL_WITHDRAWAL_FORM,
+    DIFFPLUG_POSTAL_ADDRESS,
+  ])
+    expect(mail!.text, fact).toContain(fact);
+  expect(mail!.html).toContain(escape(MODEL_WITHDRAWAL_FORM));
+  expect(mail!.text).not.toContain("signin@example.test");
+
+  // Redelivered, or the same checkout in another event: nothing new.
+  const completed = f.delivered.find((event) => event.type === "checkout.session.completed")!;
+  expect((await f.send(completed)).status).toBe(200);
+  expect((await f.send({ ...completed, id: "evt_again" })).status).toBe(200);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.confirmations()).toHaveLength(1);
+  expect(await notices()).toHaveLength(1);
+
+  // Filled from the consent, never what the page says or sells by the time it goes.
+  const provider = await f.account(null);
+  const second = await f.startCheckout(provider, "yearly");
+  await f.sql(`UPDATE dormouse_checkout_consents SET "shownUsd" = 77, "termsVersion" = '2020-01-01' WHERE "checkoutId" = $1`, [
+    second.metadata!.pgstencil_operation,
+  ]);
+  f.dev.customers.get(second.customer as string)!.email = "provider@example.test";
+  f.dev.completeCheckout(second.id);
+  await f.deliver();
+  const [, late] = f.confirmations();
+  expect(late!.to).toEqual(["provider@example.test"]);
+  expect(late!.text).toContain("Price: $77 a year in US dollars");
+  expect(late!.text).toContain(termsArchiveUrl("2020-01-01"));
+});
+
+test("a purchase's confirmation that fails to send never fails the webhook, and the cron retries it until sent", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => log.mockRestore());
+  const unsent = () => f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL`);
+  const member = await f.account();
+  const session = await f.startCheckout(member, "monthly");
+  f.dev.completeCheckout(session.id);
+  f.mailing.failures = 1;
+  // `deliver` holds each event to a 200.
+  await f.deliver();
+  expect([f.mailing.failures, f.confirmations(), await unsent()]).toEqual([0, [], [{ kind: "purchase" }]]);
+  expect(log.mock.calls.some(([message]) => String(message).includes("the cron retries it"))).toBe(true);
+
+  // Later than any other notice's retry lasts, and with the subscription long past its period.
+  f.time.advanceMilliseconds(60 * DAY_MS);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.confirmations()).toHaveLength(1);
+  expect(await unsent()).toEqual([]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.confirmations()).toHaveLength(1);
+});
 
 test("a renewal notice and a monthly plan's annual reminder go out once, 30 days ahead, to the billing email", async ({
   onTestFinished,

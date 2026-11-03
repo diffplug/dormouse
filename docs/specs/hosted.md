@@ -116,7 +116,7 @@ Source of truth: `billingSetup`, `withBilling`, `stripeHoldsPrice`, `resyncBilli
 
 ## Billing notices
 
-Each notice is a `dormouse_billing_notices` row, recorded before it is sent and stamped once Postmark accepts it, one per kind and renewal, dispute, or withdrawal.
+Each notice is a `dormouse_billing_notices` row, recorded before it is sent and stamped once Postmark accepts it, one per kind and renewal, dispute, withdrawal, or purchased subscription.
 
 | Kind | Due | Still sent while |
 |---|---|---|
@@ -126,13 +126,15 @@ Each notice is a `dormouse_billing_notices` row, recorded before it is sent and 
 | `dispute_suspended` | a dispute opens a suspension | the dispute is open, for 30 days |
 | `dispute_restored` | it closes in the account's favor, no other open | 30 days |
 | `withdrawal` (its acknowledgement) | a withdrawal is recorded, in the same statement | until sent; the cron fails once one is a day overdue |
+| `purchase` (its confirmation) | a checkout completes, one per subscription | until sent |
 
 - **Must send every notice to the Stripe customer's email**, never the sign-in email, so a provider-only account gets them.
-- **Must record a dispute's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
+- **Must record a dispute's or a purchase's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
+- **Must fill a purchase's notice from its checkout's consent** ("Billing"), never the current price or terms.
 - **A price change is an operator's `dormouse_price_changes` row** (`hosted/README.md`); both its Prices grant the plan once inserted. **Never act on one naming a founding Price or another plan's**, or whose Prices Stripe does not hold at its amounts, in USD, at the plan's interval.
 - **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 
-Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql` and `hosted/server/dormouse-migrations/020_withdrawal_notices.sql`.
+Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql`, `hosted/server/dormouse-migrations/020_withdrawal_notices.sql`, and `hosted/server/dormouse-migrations/027_purchase_notices.sql`.
 
 ## Account closure
 

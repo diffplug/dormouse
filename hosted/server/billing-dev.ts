@@ -33,6 +33,12 @@ export async function stripeDevBilling(
     if (!usd) throw new Error(`StripeDev holds no Price ${id}`);
     return { id, currency: "usd", unit_amount: usd * 100, livemode: false, recurring: { interval, interval_count: 1 } };
   }) as never;
+  // Nor a customer's, which every Hosted notice reads its address from.
+  dev.stripe.customers.retrieve = (async (id: string) => {
+    const customer = dev.customers.get(id);
+    if (!customer) throw new Error(`StripeDev holds no customer ${id}`);
+    return customer;
+  }) as never;
   const setup: BillingSetup = {
     secretKey: "sk_test_dormouse_local_only",
     webhookSecret: dev.webhookSecret,

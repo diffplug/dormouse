@@ -80,11 +80,13 @@ test("the open cohort is the last one bought at until its net count fills: a ref
   expect(openCohort(all, all.map((n, step) => (step === 0 ? n - 1 : n)))).toBeNull();
 });
 
-test("every Price StripeDev offers, as the dev loop's checkout reads it, is the published one", async ({ onTestFinished }) => {
+test("the dev loop's StripeDev answers what checkout and the notices read: each published Price, and a customer's email", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
   await f.billing(async (billing, { prices }) => {
     for (const [id, { plan, usd }] of prices) expect(await stripeHoldsPrice(billing, id, usd, plan), id).toBe(true);
+    const { id } = await billing.stripe.customers.create({ email: "billing@example.test" });
+    expect(await billing.stripe.customers.retrieve(id)).toMatchObject({ email: "billing@example.test" });
   });
 });
 
