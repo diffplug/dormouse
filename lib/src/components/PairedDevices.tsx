@@ -190,7 +190,6 @@ export function AccessLogDisclosure({ entries }: { entries: AccessLogEntry[] }) 
  * {@link RevocationRequester}, so a new requester cannot log as a bare `revoked`.
  */
 const REVOKED_BY: Record<RevocationRequester, string> = {
-  dor: 'revoked from dor',
   settings: 'revoked from Settings',
   relay: 'revoked: its passkey was removed from the account',
 };
