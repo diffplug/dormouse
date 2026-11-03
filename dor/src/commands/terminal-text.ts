@@ -3,10 +3,11 @@ import { CONTROL_CHARACTERS, FORMAT_CHARACTERS } from './shell-quote.js';
 import type { ToolSurfaceResponse, VersionMetadata } from './types.js';
 
 const TERMINAL_CONTROLS = new RegExp(`[${CONTROL_CHARACTERS}]`, 'g');
-const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`, 'g');
+const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`, 'gu');
 /** What `JSON.stringify` leaves unescaped of the set above: it escapes C0. */
-const JSON_UNESCAPED = new RegExp(`[\\x7f-\\x9f${FORMAT_CHARACTERS}]`, 'g');
-export const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
+const JSON_UNESCAPED = new RegExp(`[\\x7f-\\x9f${FORMAT_CHARACTERS}]`, 'gu');
+/** Per UTF-16 unit, so a tag character's pair still parses back from JSON. */
+export const escapeControl = (char: string) => char.split('').map(unit => `\\u${unit.charCodeAt(0).toString(16).padStart(4, '0')}`).join('');
 
 /** The one spelling of a `dor` error line, shared by every path that prints one. */
 export function errorLine(message: string): string {
