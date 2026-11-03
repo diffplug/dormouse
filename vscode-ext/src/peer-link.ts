@@ -452,10 +452,10 @@ function send(
   client.socket.write(encodeFrame(frame));
 }
 
-/** Ask one peer and resolve when it answers, or when the budget expires. */
 /** A peer that spent its budget, which a window gone (`null`) is not: it may still own things. */
 const PEER_SILENT = 'silent';
 
+/** Ask one peer and resolve when it answers, or when the budget expires. */
 function ask(
   client: PeerLinkClient,
   // Surface/directory requests use this response table. Stream readiness has

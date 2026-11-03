@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { providerAuthorizationOrigins } from "../server/providers.js";
 import { FRAME_WORKER_PATH } from "../../remote-lib-common/src/remote/frame-origin-paths.ts";
-import { oneTimeSmoke } from "./one-time-smoke.mjs";
+import { oneTimePageSmoke, oneTimeSmoke } from "./one-time-smoke.mjs";
 
 /** What the account's page sends with a login read (`docs/specs/security-hosted.md` -> "Origin boundary"). */
 const OWN_PAGE = { headers: { "sec-fetch-site": "same-origin" } };
@@ -310,12 +310,12 @@ async function retrying(limit, what, check, { retryMs, wait }) {
 
 /**
  * A frame origin at `domain`, under a label no phone mints: it serves the
- * worker, framed only by `clientOrigin` and HTTPS-only, and nothing else. The
+ * worker, framed only by `clientOrigins` and HTTPS-only, and nothing else. The
  * worker's body proves the revision, since this Worker holds no `BUILD_SHA`.
  */
 export async function frameSmoke(
   domain,
-  clientOrigin,
+  clientOrigins,
   {
     fetcher = fetch,
     attempts = 1,
@@ -330,7 +330,7 @@ export async function frameSmoke(
     assert.equal(served.status, 200, `${origin} must serve its worker`);
     assert.equal(await served.text(), await worker(), `${origin} must serve this release's worker`);
     assert.match(served.headers.get("content-type") ?? "", /^text\/javascript/);
-    assert.match(served.headers.get("content-security-policy") ?? "", new RegExp(`frame-ancestors ${clientOrigin}$`));
+    assert.match(served.headers.get("content-security-policy") ?? "", new RegExp(`frame-ancestors ${clientOrigins}$`));
     assert.match(served.headers.get("strict-transport-security") ?? "", /includeSubDomains/);
     assert.equal(served.headers.get("set-cookie"), null, `${origin} must set no cookie`);
     const other = await fetcher(`${origin}/`);
@@ -349,15 +349,32 @@ async function liveSmoke(origin, sha, fetcher, attempts, retry) {
 }
 
 /**
- * The relay's smoke: `liveSmoke`, then its push config and its one-time
- * rendezvous, each retried on its own the same way.
+ * The try Worker's smoke: its revision, then the phone page, each retried
+ * on its own. It has no readiness, holding no database, and the rendezvous is
+ * `relaySmoke`'s, since a room is minted on the relay.
+ */
+export async function trySmoke(
+  origin,
+  sha,
+  { fetcher = fetch, attempts = 1, retryMs = 10_000, wait = delay } = {},
+) {
+  const retry = { retryMs, wait };
+  await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await retrying(attempts, `${origin} page`, () => oneTimePageSmoke(origin, fetcher), retry);
+}
+
+/**
+ * The relay's smoke: `liveSmoke`, then its push config and the one-time
+ * rendezvous it mints for the page at `tryOrigin`, each retried on its own the
+ * same way.
  */
 export async function relaySmoke(
   origin,
+  tryOrigin,
   sha,
   {
     fetcher = fetch,
-    oneTime = (origin) => oneTimeSmoke(origin),
+    oneTime = oneTimeSmoke,
     attempts = 1,
     retryMs = 10_000,
     wait = delay,
@@ -366,25 +383,25 @@ export async function relaySmoke(
   const retry = { retryMs, wait };
   await liveSmoke(origin, sha, fetcher, attempts, retry);
   await retrying(attempts, `${origin} push`, () => pushConfigSmoke(origin, fetcher), retry);
-  await retrying(attempts, `${origin} one-time`, () => oneTime(origin), retry);
+  await retrying(attempts, `${origin} one-time`, () => oneTime(origin, tryOrigin), retry);
 }
 
 /**
  * Every Worker's smoke: the account's auth boundary, the voice's `liveSmoke`,
- * and `relaySmoke` — never waiting on the account, so an account failure hides
- * no relay one. The three run concurrently, each retrying on its own up to its
- * `attempts` (one count for all, or `{ account, relay, voice }`), `retryMs`
- * apart. Every part settles before the smoke fails, and the failure names each
- * part that failed.
+ * `trySmoke`, and `relaySmoke` — never waiting on the account, so an account
+ * failure hides no relay one. They run concurrently, each retrying on its own up
+ * to its `attempts` (one count for all, or `{ account, relay, voice, try }`),
+ * `retryMs` apart. Every part settles before the smoke fails, and the failure
+ * names each part that failed.
  */
 export async function smokeAll(
-  { account, relay, voice },
+  { account, relay, voice, try: tryOrigin },
   sha,
   {
     fetcher = fetch,
     preview = false,
     providers = [],
-    oneTime = (origin) => oneTimeSmoke(origin),
+    oneTime,
     attempts = 1,
     retryMs = 10_000,
     wait = delay,
@@ -396,8 +413,9 @@ export async function smokeAll(
   const results = await Promise.allSettled([
     retrying(limit("account"), account, () =>
       smoke(account, sha, fetcher, preview, providers), retry),
-    relaySmoke(relay, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
+    relaySmoke(relay, tryOrigin, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
     liveSmoke(voice, sha, fetcher, limit("voice"), retry),
+    trySmoke(tryOrigin, sha, { fetcher, attempts: limit("try"), retryMs, wait }),
   ]);
   const failures = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
@@ -413,10 +431,11 @@ if (
 ) {
   const [origins, sha] = process.argv.slice(2);
   assert.match(sha ?? "", /^[a-f0-9]{40}$/);
-  const { account, relay, voice } = JSON.parse(origins);
+  const parsed = JSON.parse(origins);
+  const { account, voice, try: tryOrigin } = parsed;
   // A just-uploaded Worker may take a short time to become reachable everywhere.
-  await smokeAll({ account, relay, voice }, sha, { preview: true, attempts: 6 });
+  await smokeAll(parsed, sha, { preview: true, attempts: 6 });
   console.log(
-    `Preview smoke checks passed: ${account}/login, ${relay}/connect/, ${voice} (${sha})`,
+    `Preview smoke checks passed: ${account}/login, ${tryOrigin}/connect/, ${voice} (${sha})`,
   );
 }

@@ -94,9 +94,11 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
   if (normalizeForMatch(text) === normalizeForMatch(uri)) return 'match';
 
   const shown = normalizeDisplayText(text);
-  // `README.md:42` over `file:///x/README.md` names a file, not a host.
+  // `README.md:42` over `file:///x/README.md` names a file, not a host. The text
+  // as printed counts too: normalizing strips `_app.tsx`'s underscore and
+  // composes a decomposed name, so neither matches its own path afterwards.
   const file = decodeFileLink(uri);
-  if (file && namesPath(file.path, shown.replace(LINE_SUFFIX_RE, ''))) return 'plain';
+  if (file && [shown, text].some((name) => namesPath(file.path, name.replace(LINE_SUFFIX_RE, '')))) return 'plain';
 
   const shapedHost = extractUrlShapedHost(shown);
   if (shapedHost === null) return 'plain';

@@ -15,7 +15,8 @@
  * signaling, no ICE server but Cloudflare's STUN and no TURN at all, no
  * checked-in service worker shadowing the built one, no one-time frame the
  * Relay or `BurrowRuntime` could read, no parse in
- * the Hosted room that forwards one, no grant a one-time connection could
+ * the Hosted room that forwards one, no one-time page or phone route in Hosted's
+ * relay Worker, no grant a one-time connection could
  * leave behind, no store a one-time phone could keep anything in, no presence
  * window anywhere but the Burrow, and no relayed application message a
  * Local-networks session would read. An
@@ -153,7 +154,7 @@ const ONE_TIME_PHONE_MODULES = [
   ONE_TIME_RENDEZVOUS,
 ];
 
-/** The one-time phone page, served from an origin Hosted's accounts share: every module in it. */
+/** The one-time phone page, which keeps nothing on the origin it has to itself: every module in it. */
 const ONE_TIME_PAGE_TREE = 'lib/src/remote/one-time-app/';
 
 /**
@@ -527,6 +528,19 @@ export const RULES = [
     pattern: ONE_TIME_ROOM_LEAKS,
     violationFile: 'hosted/server/one-time-room.ts',
     violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
+  },
+  {
+    rule: "Hosted's relay Worker serves no one-time page and admits no phone",
+    spec: HOSTED_SECURITY_SPEC,
+    security: 'the one-time page is served, or a phone admitted, on any origin holding a paired phone',
+    kind: 'forbid',
+    files: ['hosted/server/relay-worker.ts', 'hosted/scripts/stage-relay.mjs'],
+    // Pocket's origin holds a paired phone's keys, and the page renders what a
+    // stranger's link sends: a relay entry mounting the page's routes, or a
+    // relay staging that copies the page, puts the two back on one origin.
+    pattern: /\b(?:oneTimePageRoutes|oneTimeClientRoute|OneTimeRoom|ONE_TIME_SHELL|dist-one-time)\b/g,
+    violationFile: 'hosted/server/relay-worker.ts',
+    violation: '\nconst __selftest = oneTimeClientRoute;\n',
   },
   {
     rule: "Hosted's RelayRoom never names, parses, decodes, logs, or stores a frame",

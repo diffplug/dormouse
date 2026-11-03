@@ -15,7 +15,7 @@ function folderLabel(cwd: CwdState, homePath: string | undefined): string {
   return cwdDisplay(cwd, { style: 'basename' });
 }
 
-export function gitAutoName(git: GitDirInfo): string {
+function gitAutoName(git: GitDirInfo): string {
   return `${git.repo} @ ${git.branch}`;
 }
 

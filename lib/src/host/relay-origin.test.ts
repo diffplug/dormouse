@@ -17,6 +17,7 @@ import { readConfigs } from '../../../hosted/scripts/workers.mjs';
 import {
   DEFAULT_RELAY_ORIGIN,
   HOSTED_ACCOUNT_ORIGIN,
+  HOSTED_ONE_TIME_ORIGIN,
   HOSTED_VOICE_ORIGIN,
   bakedRelay,
   bakedRelayMode,
@@ -25,6 +26,7 @@ import {
   hostedVoiceOrigin,
   isDevHostedBuild,
   isRelayOrigin,
+  oneTimeLinkOrigin,
 } from './relay-origin';
 
 /**
@@ -74,8 +76,9 @@ describe('the baked relay origin', () => {
     expect(BUILD_DEFAULT).toBe(DEFAULT_RELAY_ORIGIN);
   });
 
-  it('names the origins Hosted deploys its three Workers at', async () => {
-    const { account, relay, voice } = await readConfigs();
+  it('names the origins Hosted deploys its Workers at', async () => {
+    const { account, try: tryWorker, relay, voice } = await readConfigs();
+    expect(HOSTED_ONE_TIME_ORIGIN).toBe(tryWorker.vars.APP_ORIGIN);
     expect(DEFAULT_RELAY_ORIGIN).toBe(relay.vars.APP_ORIGIN);
     expect(HOSTED_VOICE_ORIGIN).toBe(voice.vars.APP_ORIGIN);
     expect(HOSTED_ACCOUNT_ORIGIN).toBe(account.vars.APP_ORIGIN);
@@ -102,6 +105,12 @@ describe('the baked relay origin', () => {
   it('reaches Hosted only in a Hosted build', () => {
     expect(hostedOrigin({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe('http://localhost:8787');
     expect(hostedOrigin({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBeNull();
+    // A stock build's link leaves the relay's origin; a dev build's page is
+    // whichever its local or preview relay redirects to.
+    expect(oneTimeLinkOrigin({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' })).toBe(HOSTED_ONE_TIME_ORIGIN);
+    expect(oneTimeLinkOrigin({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe('http://localhost:8787');
+    expect(oneTimeLinkOrigin({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBeNull();
+    expect(HOSTED_ONE_TIME_ORIGIN).not.toBe(DEFAULT_RELAY_ORIGIN);
   });
 
   it('speaks managed voice at the fixed voice origin, in a Hosted build only', () => {

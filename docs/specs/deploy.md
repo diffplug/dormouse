@@ -19,7 +19,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 ## Release checklist
 
-**Must ship a desktop release that carries, or changes, the one-time link version only after Hosted production serves that version** — its rendezvous routes and its `/connect/` page (`docs/specs/one-time.md` -> "Link"): run `.github/workflows/hosted-production.yml` first and confirm its live verification passed, `oneTimeSmoke` included. **Hosted must never stop serving a link version a shipped Burrow emits.**
+**Must ship a desktop release that carries, or changes, the one-time link version only after Hosted production serves that version** — its rendezvous routes and its `/connect/` page on `HOSTED_ONE_TIME_ORIGIN` (`docs/specs/one-time.md` -> "Link"): run `.github/workflows/hosted-production.yml` first and confirm its live verification passed, `oneTimeSmoke` included. **Hosted must never stop serving a link version a shipped Burrow emits**, the relay's redirect for a link at its old origin included (`docs/specs/one-time.md` -> "Links from older builds").
 
 A release that changes remote control or Hosted runs the red team first (`docs/specs/security-audit.md` -> "Red team").
 

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
-import { frameSmoke, relaySmoke, smokeAll } from "./preview-smoke.mjs";
+import { trySmoke, frameSmoke, relaySmoke, smokeAll } from "./preview-smoke.mjs";
 import { HOSTED_FRAME_DOMAIN } from "../../remote-lib-common/src/remote/pocket-deployment.ts";
 import {
   WORKERS,
@@ -18,7 +18,7 @@ import {
  * cannot redirect production or stand in for a sibling, and its Hyperdrive:
  * the GitHub variable naming it and the Postgres role it must connect as —
  * the relay's and voice's created by `hosted/server/runtime-roles.sql`, the
- * account's by hand (hosted/README.md).
+ * account's by hand (hosted/README.md). The try Worker has none.
  */
 export const PRODUCTION = {
   account: {
@@ -39,13 +39,20 @@ export const PRODUCTION = {
     hyperdrive: "VOICE_HYPERDRIVE_ID",
     role: "dormouse_voice",
   },
+  try: {
+    name: "dormouse-try",
+    origin: "https://try.dormouse.sh",
+  },
 };
+
+/** The Workers `PRODUCTION` gives a Hyperdrive and a role. */
+const hyperdriveWorkers = Object.entries(PRODUCTION).filter(([, { hyperdrive }]) => hyperdrive);
 
 /** The frame Worker's identity, on a domain nothing else of Hosted's is under. */
 export const FRAMES = {
   name: "dormouse-frames",
   domain: HOSTED_FRAME_DOMAIN,
-  clientOrigin: PRODUCTION.relay.origin,
+  clientOrigins: `${PRODUCTION.relay.origin} ${PRODUCTION.try.origin}`,
 };
 
 /** Its whole config: anything more, a binding above all, it must not have. */
@@ -61,7 +68,7 @@ function framesConfig(base) {
   assert.equal(base.name, FRAMES.name);
   for (const key of Object.keys(base))
     assert.ok(FRAMES_CONFIG_KEYS.has(key), `${FRAMES.name} must not carry ${key}`);
-  assert.deepEqual(base.vars, { CLIENT_ORIGIN: FRAMES.clientOrigin });
+  assert.deepEqual(base.vars, { CLIENT_ORIGINS: FRAMES.clientOrigins });
   assert.deepEqual(base.routes, [{ pattern: `*.${FRAMES.domain}/*`, zone_name: FRAMES.domain }]);
   assert.equal(base.assets.binding, "ASSETS");
   assert.equal(base.workers_dev, false);
@@ -82,9 +89,12 @@ export function productionConfig(base, env, worker) {
   assert.match(need(env, "CLOUDFLARE_ACCOUNT_ID"), /^[a-f0-9]{32}$/);
   assert.equal(base.name, identity.name);
   assert.equal(base.vars.APP_ORIGIN, identity.origin);
-  // The relay's enrollment links name production's account, and only it.
-  if (worker === "relay")
+  // The relay's enrollment links name production's account, and only it, and
+  // an older build's one-time link moves to production's page, and only it.
+  if (worker === "relay") {
     assert.equal(base.vars.ACCOUNT_ORIGIN, PRODUCTION.account.origin);
+    assert.equal(base.vars.TRY_ORIGIN, PRODUCTION.try.origin);
+  }
   // The canonical domain alone: no public alias, candidate, or preview URL.
   assert.deepEqual(base.routes, [
     { pattern: new URL(identity.origin).host, custom_domain: true },
@@ -100,6 +110,10 @@ export function productionConfig(base, env, worker) {
   if (base.assets)
     config.assets = { ...base.assets, directory: fromStage(base.assets.directory) };
   const variable = identity.hyperdrive;
+  if (!variable) {
+    assert.equal(base.hyperdrive, undefined, `${identity.name} must not bind a Hyperdrive`);
+    return config;
+  }
   const id = need(env, variable);
   assert.match(id, /^[a-f0-9]{32}$/, `${variable} must be a Hyperdrive ID`);
   assert.notEqual(id, "0".repeat(32), `Provision production Hyperdrive first: ${variable}`);
@@ -113,7 +127,7 @@ export function productionConfig(base, env, worker) {
  */
 function hyperdriveIds(configs) {
   const ids = Object.fromEntries(
-    Object.keys(PRODUCTION).map((worker) => {
+    hyperdriveWorkers.map(([worker]) => {
       const bindings = configs[worker].hyperdrive ?? [];
       assert.equal(
         bindings.length,
@@ -123,7 +137,7 @@ function hyperdriveIds(configs) {
       return [worker, bindings[0].id];
     }),
   );
-  const variables = Object.values(PRODUCTION).map(({ hyperdrive }) => hyperdrive);
+  const variables = hyperdriveWorkers.map(([, { hyperdrive }]) => hyperdrive);
   assert.equal(
     new Set(Object.values(ids)).size,
     variables.length,
@@ -156,16 +170,17 @@ export function requiredSecrets(configs) {
   );
 }
 /**
- * The relay and voice retry as a preview's parts do, since a first release
- * attaches their custom domains and a new certificate can outlast the health
- * retry; the account's smoke sends POSTs, so it runs once.
+ * The relay, voice, and try Workers retry as a preview's parts do, since a
+ * first release attaches their custom domains and a new certificate can outlast
+ * the health retry; the account's smoke sends POSTs, so it runs once.
  */
-const ATTEMPTS = { account: 1, relay: 6, voice: 6 };
+const ATTEMPTS = { account: 1, relay: 6, voice: 6, try: 6 };
 
 /**
- * Deploys frames, relay, voice, then account, stopping at a failure. The relay
- * passes `relaySmoke` before anything after it deploys, so the account's `v2`
- * deleting the old `OneTimeRoom` never runs while the replacement is unproven.
+ * Deploys frames, try, relay, voice, then account, stopping at a failure.
+ * The try Worker passes `trySmoke` before the relay deploys, so a link
+ * an older build shows is never redirected to a page not yet served, and the
+ * relay passes `relaySmoke` before anything after it deploys.
  * `options` stands in for the process and network in tests.
  */
 export function deployProduction(
@@ -177,9 +192,14 @@ export function deployProduction(
     spawn,
     afterDeploy: async (worker) => {
       if (worker === "frames")
-        await frameSmoke(FRAMES.domain, FRAMES.clientOrigin, { attempts: ATTEMPTS.relay, ...options });
+        await frameSmoke(FRAMES.domain, FRAMES.clientOrigins, { attempts: ATTEMPTS.relay, ...options });
+      if (worker === "try")
+        await trySmoke(configs.try.vars.APP_ORIGIN, sha, {
+          attempts: ATTEMPTS.try,
+          ...options,
+        });
       if (worker === "relay")
-        await relaySmoke(configs.relay.vars.APP_ORIGIN, sha, {
+        await relaySmoke(configs.relay.vars.APP_ORIGIN, configs.try.vars.APP_ORIGIN, sha, {
           attempts: ATTEMPTS.relay,
           ...options,
         });
@@ -189,7 +209,7 @@ export function deployProduction(
 
 /** The release's live verification, of all of them once the account deployed. */
 export async function productionSmoke(configs, sha, options = {}) {
-  await frameSmoke(FRAMES.domain, FRAMES.clientOrigin, { attempts: ATTEMPTS.relay, ...options });
+  await frameSmoke(FRAMES.domain, FRAMES.clientOrigins, { attempts: ATTEMPTS.relay, ...options });
   return smokeAll(originsOf(configs), sha, {
     providers: oauthProviders(configs.account),
     attempts: ATTEMPTS,
@@ -236,7 +256,7 @@ export async function verifyPackages(readProvenance = installedProvenance) {
 export async function preflight(env, configs, api = cloudflare(env)) {
   const ids = hyperdriveIds(configs);
   const origin = hyperdriveOrigin(need(env, "DATABASE_URL"));
-  for (const [worker, { role }] of Object.entries(PRODUCTION)) {
+  for (const [worker, { role }] of hyperdriveWorkers) {
     const { result } = await api(`hyperdrive/configs/${ids[worker]}`);
     const name = `${configs[worker].name}'s Hyperdrive`;
     assert.equal(result.caching?.disabled, true, `${name} must disable caching`);

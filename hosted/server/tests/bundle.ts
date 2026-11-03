@@ -58,6 +58,22 @@ function sqliteClass(config: WranglerConfig, className: string, script?: string)
   );
 }
 
+/** `bindings` as Miniflare's `durableObjects` option, for the Worker `config`. */
+const durableObjectOptions = (
+  config: WranglerConfig,
+  bindings: NonNullable<WranglerConfig["durable_objects"]>["bindings"],
+) =>
+  Object.fromEntries(
+    bindings.map(({ name, class_name, script_name }) => [
+      name,
+      {
+        className: class_name,
+        ...(script_name && { scriptName: script_name }),
+        useSQLite: sqliteClass(config, class_name, script_name),
+      },
+    ]),
+  );
+
 /**
  * Miniflare options running `script` as Worker `name`, under its config's
  * script name: compatibility from that Worker's own config, and its Durable
@@ -75,16 +91,7 @@ export function miniflareOptions(name: Name, script: string, extra: Partial<V4Op
     compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags,
     ...(config.durable_objects && {
-      durableObjects: Object.fromEntries(
-        config.durable_objects.bindings.map(({ name, class_name, script_name }) => [
-          name,
-          {
-            className: class_name,
-            ...(script_name && { scriptName: script_name }),
-            useSQLite: sqliteClass(config, class_name, script_name),
-          },
-        ]),
-      ),
+      durableObjects: durableObjectOptions(config, config.durable_objects.bindings),
     }),
     ...(config.ratelimits && {
       ratelimits: Object.fromEntries(
@@ -101,16 +108,18 @@ export function miniflareOptions(name: Name, script: string, extra: Partial<V4Op
  * that answers 404.
  */
 function standIn(name: Name) {
-  const classes = (wrangler[name].durable_objects?.bindings ?? [])
-    .filter(({ script_name }) => !script_name)
-    .map(({ class_name }) => `export class ${class_name} extends DurableObject {}`);
+  const own = (wrangler[name].durable_objects?.bindings ?? []).filter(({ script_name }) => !script_name);
   return miniflareOptions(
     name,
     [
       `import { DurableObject } from "cloudflare:workers";`,
-      ...classes,
+      ...own.map(({ class_name }) => `export class ${class_name} extends DurableObject {}`),
       `export default { fetch: () => new Response(null, { status: 404 }) };`,
     ].join("\n"),
+    {
+      // Its own alone: a binding to a third Worker's class needs that Worker running.
+      durableObjects: durableObjectOptions(wrangler[name], own),
+    },
   );
 }
 

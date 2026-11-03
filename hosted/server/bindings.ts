@@ -43,15 +43,15 @@ export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv, Billing
   OAUTH_PROVIDERS?: string;
 }
 
-/** `relay.dormouse.sh`: the Hosted Relay and Pocket, the one-time rendezvous and its phone page. */
+/** `relay.dormouse.sh`: the Hosted Relay and Pocket, and the one-time rendezvous's Burrow route. */
 export interface RelayEnv extends WorkerEnv {
   ASSETS: Assets;
   HYPERDRIVE: { connectionString: string };
+  /** The try Worker's `OneTimeRoom`s, which a Burrow's socket opens. */
   ONE_TIME_ROOM: DurableObjectNamespace;
   /** One `RelayRoom` per account, holding its relay sockets. */
   RELAY_ROOM: DurableObjectNamespace<RelayRoomRpc>;
   ONE_TIME_MINT_LIMIT: RateLimit;
-  ONE_TIME_JOIN_LIMIT: RateLimit;
   RELAY_SIGNIN_LIMIT: RateLimit;
   RELAY_SETUP_LIMIT: RateLimit;
   RELAY_ENROLL_BEGIN_LIMIT: RateLimit;
@@ -61,11 +61,23 @@ export interface RelayEnv extends WorkerEnv {
    * names: exactly an origin once mapped, or absent, and then it names none.
    */
   ACCOUNT_ORIGIN?: string;
+  /**
+   * The try Worker's origin, where a link from an older build is sent:
+   * exactly an origin once mapped, or absent, and then that link is a 404.
+   */
+  TRY_ORIGIN?: string;
   /** The HMAC key a device code's user code is derived under. */
   RELAY_ENROLL_SECRET: string;
   /** The Web Push signing pair; push is off without a matching pair. */
   RELAY_VAPID_PUBLIC_KEY?: string;
   RELAY_VAPID_PRIVATE_KEY?: string;
+}
+
+/** `try.dormouse.sh`: the one-time phone page and the room a phone joins. No secret and no database. */
+export interface TryEnv extends WorkerEnv {
+  ASSETS: Assets;
+  ONE_TIME_ROOM: DurableObjectNamespace;
+  ONE_TIME_JOIN_LIMIT: RateLimit;
 }
 
 /** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
@@ -120,15 +132,24 @@ export const relayBindings = (env: RelayEnv): RelayEnv => ({
   ONE_TIME_ROOM: env.ONE_TIME_ROOM,
   RELAY_ROOM: env.RELAY_ROOM,
   ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
-  ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
   RELAY_SIGNIN_LIMIT: env.RELAY_SIGNIN_LIMIT,
   RELAY_SETUP_LIMIT: env.RELAY_SETUP_LIMIT,
   RELAY_ENROLL_BEGIN_LIMIT: env.RELAY_ENROLL_BEGIN_LIMIT,
   RELAY_ENROLL_POLL_LIMIT: env.RELAY_ENROLL_POLL_LIMIT,
   ACCOUNT_ORIGIN: exactOrigin(env.ACCOUNT_ORIGIN) ?? undefined,
+  TRY_ORIGIN: exactOrigin(env.TRY_ORIGIN) ?? undefined,
   RELAY_ENROLL_SECRET: env.RELAY_ENROLL_SECRET,
   RELAY_VAPID_PUBLIC_KEY: env.RELAY_VAPID_PUBLIC_KEY,
   RELAY_VAPID_PRIVATE_KEY: env.RELAY_VAPID_PRIVATE_KEY,
+});
+
+/** The page's assets, its rooms, and their join limit: nothing a stranger's page could lead anywhere else. */
+export const tryBindings = (env: TryEnv): TryEnv => ({
+  ASSETS: env.ASSETS,
+  APP_ORIGIN: env.APP_ORIGIN,
+  BUILD_SHA: env.BUILD_SHA,
+  ONE_TIME_ROOM: env.ONE_TIME_ROOM,
+  ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
 });
 
 /** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */

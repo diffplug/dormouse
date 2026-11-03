@@ -8,18 +8,18 @@ import {
   ONE_TIME_WS_ROUTES,
   toBase64Url,
 } from "remote-lib-common";
-import type { RelayEnv } from "./bindings";
+import type { TryEnv, RelayEnv } from "./bindings";
 import { forwardUpgrade, isUpgrade, upgradeRequired } from "./socket-room";
 
-type OneTimeContext = Context<{ Bindings: RelayEnv }>;
+type TryContext = Context<{ Bindings: TryEnv }>;
 
-/**
- * The one-time rendezvous routes (`docs/specs/one-time.md` -> "Hosted
- * rendezvous"). Each checks the request, then hands a bare upgrade to the
- * room's Durable Object; neither reads a cookie, reaches Hyperdrive, or asks
- * auth anything.
- */
-export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
+// The one-time rendezvous routes (`docs/specs/one-time.md` -> "Hosted
+// rendezvous"). Each checks the request, then hands a bare upgrade to the
+// room's Durable Object; neither reads a cookie, reaches Hyperdrive, or asks
+// auth anything.
+
+/** The relay Worker's half: where every Burrow, of any release, mints its room. */
+export function oneTimeBurrowRoute(app: Hono<{ Bindings: RelayEnv }>) {
   app.get(ONE_TIME_WS_ROUTES.burrow, async (c) => {
     if (!isUpgrade(c)) return upgradeRequired(c, "message");
     // Every browser sends Origin on a WebSocket handshake and the Burrow's
@@ -31,8 +31,12 @@ export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const room = toBase64Url(
       crypto.getRandomValues(new Uint8Array(E2E_ID_BYTE_LENGTH)),
     );
-    return forward(c, ONE_TIME_WS_ROUTES.burrow, room);
+    return forward(c.env.ONE_TIME_ROOM, c.req.url, ONE_TIME_WS_ROUTES.burrow, room);
   });
+}
+
+/** The try Worker's half: only the page on that origin may join a room. */
+export function oneTimeClientRoute(app: Hono<{ Bindings: TryEnv }>) {
   app.get(ONE_TIME_WS_ROUTES.client, async (c) => {
     if (!isUpgrade(c)) return upgradeRequired(c, "message");
     if (c.req.raw.headers.get("origin") !== c.env.APP_ORIGIN)
@@ -41,19 +45,19 @@ export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     const room = rooms.length === 1 ? rooms[0] : undefined;
     if (!isE2eId(room)) return c.json({ message: "Unknown room." }, 400);
     if (!(await allowed(c, c.env.ONE_TIME_JOIN_LIMIT))) return tooMany(c);
-    return forward(c, ONE_TIME_WS_ROUTES.client, room);
+    return forward(c.env.ONE_TIME_ROOM, c.req.url, ONE_TIME_WS_ROUTES.client, room);
   });
 }
 
 /**
  * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), staged
- * into the relay's assets under `/connect/`: its shell and its content-hashed
- * assets, and nothing else under the path. The relay's assets have no SPA
- * fallback; an HTML answer to an asset path is refused all the same, as is a
- * name that is not content-hashed, whatever the build staged.
+ * into the try Worker's assets under `/connect/`: its shell and its
+ * content-hashed assets, and nothing else under the path. The assets have no
+ * SPA fallback; an HTML answer to an asset path is refused all the same, as is
+ * a name that is not content-hashed, whatever the build staged.
  */
-export function oneTimePageRoutes(app: Hono<{ Bindings: RelayEnv }>) {
-  const assets = (c: OneTimeContext) => c.env.ASSETS.fetch(c.req.raw);
+export function oneTimePageRoutes(app: Hono<{ Bindings: TryEnv }>) {
+  const assets = (c: TryContext) => c.env.ASSETS.fetch(c.req.raw);
   const assetDir = `${ONE_TIME_PAGE_PATH}assets/`;
   app.get(ONE_TIME_PAGE_PATH.slice(0, -1), assets);
   app.get(ONE_TIME_PAGE_PATH, assets);
@@ -64,22 +68,37 @@ export function oneTimePageRoutes(app: Hono<{ Bindings: RelayEnv }>) {
 }
 
 /**
+ * Where a link an older build shows lands on the relay's origin: the same page
+ * at its own origin (`docs/specs/one-time.md` -> "Links from older builds"). A
+ * browser carries the fragment across the redirect and no server sees it, so
+ * nothing of a stranger's ever renders beside Pocket.
+ */
+export function oneTimePageMoved(app: Hono<{ Bindings: RelayEnv }>) {
+  const moved = (c: Context<{ Bindings: RelayEnv }>) =>
+    c.env.TRY_ORIGIN
+      ? c.redirect(`${c.env.TRY_ORIGIN}${ONE_TIME_PAGE_PATH}`, 308)
+      : c.notFound();
+  app.get(ONE_TIME_PAGE_PATH.slice(0, -1), moved);
+  app.get(ONE_TIME_PAGE_PATH, moved);
+}
+
+/**
  * A content-hashed asset's answer: the file itself, or a 404 — never HTML,
  * which would be cached as immutable under the hashed name.
  */
-export function assetOrNotFound(c: OneTimeContext, response: Response) {
+export function assetOrNotFound(c: Context, response: Response) {
   return response.ok &&
     !(response.headers.get("content-type") ?? "").includes("text/html")
     ? response
     : c.notFound();
 }
 
-function tooMany(c: OneTimeContext) {
+function tooMany(c: Context) {
   return c.json({ message: "Too many requests." }, 429);
 }
 
 /** Whether `limit` admits this caller, keyed by {@link rateLimitKey}. */
-export async function allowed(c: OneTimeContext, limit: RateLimit) {
+export async function allowed(c: Context, limit: RateLimit) {
   return (
     await limit.limit({
       key: rateLimitKey(c.req.raw.headers.get("cf-connecting-ip")),
@@ -141,7 +160,6 @@ function ipv6Groups(ip: string): string[] {
 }
 
 /** The room's object, handed a bare upgrade naming the room and nothing else of the caller's. */
-function forward(c: OneTimeContext, route: string, room: string) {
-  const stub = c.env.ONE_TIME_ROOM.get(c.env.ONE_TIME_ROOM.idFromName(room));
-  return forwardUpgrade(stub, new URL(route, c.req.url), { [ONE_TIME_ROOM_PARAM]: room });
+function forward(rooms: DurableObjectNamespace, url: string, route: string, room: string) {
+  return forwardUpgrade(rooms.get(rooms.idFromName(room)), new URL(route, url), { [ONE_TIME_ROOM_PARAM]: room });
 }

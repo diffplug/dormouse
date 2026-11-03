@@ -4,15 +4,17 @@ import { request } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ONE_TIME_BASE } from "../../lib/scripts/assert-pocket-worker.mjs";
-import { parseConfig } from "./workers.mjs";
+import { parseConfig, renameBoundScripts } from "./workers.mjs";
 
 /**
  * The one-time rendezvous and phone page on loopback (`docs/specs/one-time.md`
- * -> "Dev loop"): the relay Worker under `wrangler dev`, with its Durable
- * Object and rate limits, serving the page `vite build --watch` rebuilds. Root `pnpm dev:one-time`; inside Dormouse, `dor tool
- * one-time`. A loopback bind is not an access control, and this needs none of
- * its own: the Worker's origin gate refuses any Host but the loopback origin,
- * and the routes' Origin rules are the deployed ones.
+ * -> "Dev loop"): the relay and try Workers under `wrangler dev`, each on its
+ * own port as in production, sharing the try Worker's Durable Object through
+ * Wrangler's local registry, and the page `vite build --watch` rebuilds. Root
+ * `pnpm dev:one-time`; inside Dormouse, `dor tool one-time`. A loopback bind is
+ * not an access control, and this needs none of its own: each Worker's origin
+ * gate refuses any Host but its loopback origin, and the routes' Origin rules
+ * are the deployed ones.
  */
 
 const hosted = fileURLToPath(new URL("../", import.meta.url));
@@ -32,15 +34,18 @@ function stop(code) {
   process.exitCode = code;
 }
 
-/** Fixed rather than OS-assigned: the origin is baked into the Burrow build that dials it. */
+/** The relay's; fixed rather than OS-assigned: the origin is baked into the Burrow build that dials it. */
 export const DEFAULT_PORT = 8787;
 
-/** The port `PORT` names, or the default; anything else is refused before a process starts. */
+/**
+ * The relay's port, which `PORT` names, or the default; anything else is
+ * refused before a process starts. The try Worker takes the next one.
+ */
 export function devPort(env) {
   if (env.PORT === undefined || env.PORT === "") return DEFAULT_PORT;
   const port = Number(env.PORT);
-  if (!/^\d+$/.test(env.PORT) || port < 1 || port > 65535)
-    throw new Error(`PORT must be a TCP port, not ${JSON.stringify(env.PORT)}`);
+  if (!/^\d+$/.test(env.PORT) || port < 1 || port >= 65535)
+    throw new Error(`PORT must be a TCP port with a free one after it, not ${JSON.stringify(env.PORT)}`);
   return port;
 }
 
@@ -73,38 +78,52 @@ export function hostedAttachment(env) {
 /** A Hyperdrive id `wrangler dev --local` requires and never looks up. */
 export const LOCAL_HYPERDRIVE_ID = "local-development";
 
+/** The dev script name of the Worker production calls `name`, so nothing here names a deployed one. */
+const devName = (name) => `${name}-dev`;
+
 /**
- * The Wrangler config the loop runs, written beside the staged page.
- * Allowlisted from `hosted/wrangler.relay.jsonc` like the preview's: the relay
- * entry, the rendezvous's Durable Object, migration, and rate limits, and the
- * assets binding over the staging folder — never a route or a production
- * secret, so it cannot answer for production. Its enrollment secret is
- * {@link DEV_ENROLL_SECRET}, fixed and public. Attached to the Hosted dev loop
- * ({@link hostedAttachment}), it also names that account origin and reaches
- * its database through a local Hyperdrive, never production's.
+ * A Worker's Wrangler config, written beside the staged page. Allowlisted from
+ * its checked-in config like the preview's: its entry, its Durable Objects,
+ * another Worker's under its dev name, its migrations and rate limits, and the
+ * assets binding over `assets` — never a route or a production secret, so it
+ * cannot answer for production.
  */
-export function devConfig(base, port, attached = null) {
-  return {
-    name: `${base.name}-dev`,
-    main: "../../server/relay-worker.ts",
-    compatibility_date: base.compatibility_date,
-    compatibility_flags: base.compatibility_flags,
-    assets: { ...base.assets, directory: "./assets" },
-    vars: {
-      APP_ORIGIN: devOrigin(port),
-      RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
-      ...(attached && { ACCOUNT_ORIGIN: attached.accountOrigin }),
-    },
-    ...(attached && {
-      hyperdrive: [
-        { binding: "HYPERDRIVE", id: LOCAL_HYPERDRIVE_ID, localConnectionString: attached.databaseUrl },
-      ],
-    }),
-    durable_objects: base.durable_objects,
-    migrations: base.migrations,
-    ratelimits: base.ratelimits,
-  };
-}
+const devWorkerConfig = (base, assets, vars) => ({
+  name: devName(base.name),
+  main: `../../${base.main}`,
+  compatibility_date: base.compatibility_date,
+  compatibility_flags: base.compatibility_flags,
+  assets: { ...base.assets, directory: assets },
+  vars,
+  durable_objects: renameBoundScripts(base.durable_objects, devName),
+  migrations: base.migrations,
+  ratelimits: base.ratelimits,
+});
+
+/** The try Worker's, over the folder the page rebuilds into. */
+export const devTryConfig = (base, port) =>
+  devWorkerConfig(base, "./try-assets", { APP_ORIGIN: devOrigin(port) });
+
+/**
+ * The relay Worker's, over assets holding nothing, since the loop builds no
+ * Pocket. Its enrollment secret is {@link DEV_ENROLL_SECRET}, fixed and public.
+ * Attached to the Hosted dev loop ({@link hostedAttachment}), it also names that
+ * account origin and reaches its database through a local Hyperdrive, never
+ * production's.
+ */
+export const devRelayConfig = (base, port, tryPort, attached = null) => ({
+  ...devWorkerConfig(base, "./relay-assets", {
+    APP_ORIGIN: devOrigin(port),
+    TRY_ORIGIN: devOrigin(tryPort),
+    RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
+    ...(attached && { ACCOUNT_ORIGIN: attached.accountOrigin }),
+  }),
+  ...(attached && {
+    hyperdrive: [
+      { binding: "HYPERDRIVE", id: LOCAL_HYPERDRIVE_ID, localConnectionString: attached.databaseUrl },
+    ],
+  }),
+});
 
 /** One GET through the Worker, as a browser on the loopback origin sends it. */
 function status(port, path) {
@@ -139,15 +158,21 @@ async function waitFor(what, ready, timeoutMs) {
 
 async function main() {
   const port = devPort(process.env);
-  const origin = devOrigin(port);
+  const tryPort = port + 1;
   const attached = hostedAttachment(process.env);
-  const base = parseConfig(readFileSync(resolve(hosted, "wrangler.relay.jsonc"), "utf8"));
-  const pageDir = resolve(devDir, "assets", PAGE_PATH.slice(1));
+  const read = (name) => parseConfig(readFileSync(resolve(hosted, name), "utf8"));
+  const pageDir = resolve(devDir, "try-assets", PAGE_PATH.slice(1));
   // A page left by an earlier run would satisfy the first wait below.
   rmSync(devDir, { recursive: true, force: true });
   mkdirSync(pageDir, { recursive: true });
-  const configPath = resolve(devDir, "wrangler.json");
-  writeFileSync(configPath, JSON.stringify(devConfig(base, port, attached), null, 2) + "\n");
+  mkdirSync(resolve(devDir, "relay-assets"), { recursive: true });
+  const writeConfig = (name, config) => {
+    const path = resolve(devDir, name);
+    writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+    return path;
+  };
+  const tryConfig = writeConfig("try.json", devTryConfig(read("wrangler.try.jsonc"), tryPort));
+  const relayConfig = writeConfig("relay.json", devRelayConfig(read("wrangler.relay.jsonc"), port, tryPort, attached));
 
   // Each package's own bin shim, which execs its tool, so a signal reaches it.
   const run = (name, args, cwd) => {
@@ -177,28 +202,35 @@ async function main() {
   await waitFor("the first page build", () => existsSync(resolve(pageDir, "index.html")), 180_000);
   if (stopping) return;
 
-  run(
-    "wrangler",
-    [
-      "dev",
-      "--config", configPath,
-      "--local",
-      "--ip", "127.0.0.1",
-      "--port", String(port),
-      "--local-protocol", "http",
-      "--show-interactive-dev-session=false",
-    ],
-    hosted,
-  );
-  await waitFor("the Worker", async () => (await status(port, PAGE_PATH)) === 200, 120_000);
+  const wrangler = (config, workerPort) =>
+    run(
+      "wrangler",
+      [
+        "dev",
+        "--config", config,
+        "--local",
+        "--ip", "127.0.0.1",
+        "--port", String(workerPort),
+        "--local-protocol", "http",
+        "--show-interactive-dev-session=false",
+      ],
+      hosted,
+    );
+  // The room's Worker first, which the relay binds through the local registry.
+  wrangler(tryConfig, tryPort);
+  await waitFor("the try Worker", async () => (await status(tryPort, PAGE_PATH)) === 200, 120_000);
+  if (stopping) return;
+  wrangler(relayConfig, port);
+  await waitFor("the relay Worker", async () => (await status(port, "/api/health")) === 200, 120_000);
   if (stopping) return;
 
   console.log(
     [
       "",
-      `One-time rendezvous and phone page: ${origin}${PAGE_PATH}`,
+      `One-time phone page: ${devOrigin(tryPort)}${PAGE_PATH}`,
+      `Rendezvous Burrow route: ${devOrigin(port)}`,
       "Build a dev Burrow that opens its links here (e.g. `pnpm innerdogfood`) with:",
-      `  DORMOUSE_RELAY_ORIGIN=${origin}`,
+      `  DORMOUSE_RELAY_ORIGIN=${devOrigin(port)}`,
       // A local origin counts as Hosted only in a dev build
       // (docs/specs/relay.md -> "Relay origin").
       "  DORMOUSE_RELAY_IS_HOSTED=1",
@@ -211,7 +243,7 @@ async function main() {
   // OSC 367 (docs/specs/dor-tool.md -> OSC 367): frame this port's page, not
   // Wrangler's inspector, which the same process tree also binds.
   process.stdout.write(
-    `\u001b]367;serve;${JSON.stringify({ v: 1, port, path: PAGE_PATH })}\u001b\\`,
+    `\u001b]367;serve;${JSON.stringify({ v: 1, port: tryPort, path: PAGE_PATH })}\u001b\\`,
   );
 }
 

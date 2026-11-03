@@ -63,6 +63,7 @@ import {
   ORIGINS,
   TEST_ENROLL_SECRET,
   bundleWorker,
+  alone,
   miniflareOptions,
   testVapidKeys,
 } from "./bundle";
@@ -94,7 +95,7 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
   let answer: (url: URL) => WorkerResponse | Promise<WorkerResponse> = () =>
     new WorkerResponse(null, { status: 201 });
   const relay = new Miniflare(
-    miniflareOptions("relay", (await script).outputFiles[0].text, {
+    alone("relay", miniflareOptions("relay", (await script).outputFiles[0].text, {
       bindings: Object.fromEntries(
         Object.entries({
           APP_ORIGIN: origin,
@@ -119,7 +120,7 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
         });
         return answer(new URL(request.url));
       },
-    }),
+    })),
   );
   try {
     await relay.ready;

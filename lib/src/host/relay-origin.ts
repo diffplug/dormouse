@@ -1,8 +1,9 @@
 /**
  * The one relay origin this build was baked with, and the mode it sets
  * (`docs/specs/relay.md` → "Relay origin"): the Burrow's only Relay, and — in a
- * Hosted build — where the one-time rendezvous goes too. Managed voice speaks
- * at {@link HOSTED_VOICE_ORIGIN} instead, and enrollment is approved at
+ * Hosted build — where the one-time rendezvous goes too. A one-time link sends
+ * the phone to {@link HOSTED_ONE_TIME_ORIGIN}, managed voice speaks at
+ * {@link HOSTED_VOICE_ORIGIN}, and enrollment is approved at
  * {@link HOSTED_ACCOUNT_ORIGIN}.
  *
  * Baked by `scripts/relay-origin.mjs` into both host bundles. **Never webview
@@ -33,6 +34,14 @@ export const HOSTED_VOICE_ORIGIN = 'https://voice.dormouse.sh';
  * (`docs/specs/relay.md` → "Relay origin").
  */
 export const HOSTED_ACCOUNT_ORIGIN = 'https://hosted.dormouse.sh';
+
+/**
+ * Where a Hosted build's one-time link sends a phone: the page's own origin,
+ * which holds no paired phone's keys. A fixed constant, never baked: **the
+ * desktop never requests it**, and only writes it into the link it shows
+ * (`docs/specs/one-time.md` → "Link").
+ */
+export const HOSTED_ONE_TIME_ORIGIN = 'https://try.dormouse.sh';
 
 /** The account page that lists its enrolled computers, with Remove. */
 export const ACCOUNT_PAGE_PATH = '/account';
@@ -92,6 +101,17 @@ export function bakedRelayMode(): RelayMode {
  */
 export function hostedOrigin(relay: RelayBuild): string | null {
   return relay.mode === 'hosted' ? relay.origin : null;
+}
+
+/**
+ * Where this build's one-time link sends a phone:
+ * {@link HOSTED_ONE_TIME_ORIGIN}, or in a dev Hosted build its own relay origin,
+ * whose old page path redirects to the page that local or preview Worker pairs
+ * with; `null` in a self-host build.
+ */
+export function oneTimeLinkOrigin(relay: RelayBuild): string | null {
+  if (relay.mode !== 'hosted') return null;
+  return isDevHostedBuild(relay) ? relay.origin : HOSTED_ONE_TIME_ORIGIN;
 }
 
 /**

@@ -163,6 +163,14 @@ describe('classifyDisplayMatch', () => {
     expect(classifyDisplayMatch('file:///repo/notes.txt', 'github.com:443')).toBe('deceptive');
   });
 
+  it.each(['_app.tsx', '@types.d.ts', '-v1.md', '#notes.md', 'cafe\u0301.md', 'cafe\u0301.md:7'])(
+    'keeps a file link plain when its text is the name as listed, even where normalizing would change it: %s',
+    (name) => {
+      const uri = `file:///repo/${encodeURIComponent(name.replace(/:\d+$/, ''))}`;
+      expect(classifyDisplayMatch(uri, name)).toBe('plain');
+    },
+  );
+
   it('reads a separator as a space, not as nothing', () => {
     expect(classifyDisplayMatch('https://evil.example/login', 'Visit\u2028github.com')).toBe('plain');
   });

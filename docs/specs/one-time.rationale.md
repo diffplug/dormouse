@@ -18,11 +18,19 @@ Evidence for `docs/specs/one-time.md`, keyed by its headings.
 
 ## Phone page
 
+**Why the page has an origin of its own.** Pocket's origin holds a paired phone's records and keys, and the page renders bytes from whoever made the link, so sharing an origin put a future XSS in shared rendering one stranger's link from those keys, with no pairing. No path to it existed when the page moved (`oneTimePagePolicy`, no HTML sink in the shared rendering); the move removes the shared origin as a condition. The page needs no Pocket storage or WebAuthn, so it gives up nothing.
+
 **Why the sandbox keeps `allow-same-origin`.** Without it the page runs in an opaque origin, so its WebSocket handshake carries `Origin: null`, which the client route refuses. Chrome logs "An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing" for the pair even on a top-level document (measured in agent-browser's Chrome, 2026-09-28); a top-level document has no parent to escape through, and the sandbox still withholds popups, forms, modals, and downloads. It was the one console entry on the ready, expired, and invalid screens; no directive reported a violation, and a tap's socket to the client route and a WebAssembly compile both ran.
 
 **Why the page reloads on `hashchange`.** Opening a link in the tab already showing `/connect/` changes only the fragment, which a browser treats as a same-document jump: measured in agent-browser's Chrome, 2026-09-28, the page stayed on its "invalid" screen with the new link left in the address bar.
 
 **Why the page names the device rather than borrowing Pocket's label.** Pocket names its install mode, "Dormouse Pocket (browser)" or "(Home Screen)", because one phone can hold two Client identities. The one-time page holds none, and the end-to-end run (standalone harness, 2026-09) showed the laptop's approval modal calling a one-time phone "Dormouse Pocket (browser)", an app it never opened. A device the page cannot name falls to "Phone browser", which is also what the Burrow shows for any label outside the set.
+
+## Links from older builds
+
+**Why a redirect rather than the old page for a grace period.** A browser applies the request's fragment to a `Location` that has none (RFC 9110 §10.2.2), and `parseOneTimeLinkUrl` reads only the URL the page arrived at, so an older build's link needs nothing from the relay's origin but the redirect: no window remains in which the old page has to render. Measured in Chrome, driving a real 308 from a local relay Worker to a local try Worker, 2026-11-02.
+
+**Why 308 with `no-store`.** A browser that cached the move could not be sent back if a release were rolled back past it.
 
 ## Service and hosts
 

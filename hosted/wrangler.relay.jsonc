@@ -22,7 +22,8 @@
   },
   "vars": {
     "APP_ORIGIN": "https://relay.dormouse.sh",
-    "ACCOUNT_ORIGIN": "https://hosted.dormouse.sh"
+    "ACCOUNT_ORIGIN": "https://hosted.dormouse.sh",
+    "TRY_ORIGIN": "https://try.dormouse.sh"
   },
   // Its own Hyperdrive, connecting as `dormouse_relay`; the release supplies the
   // `RELAY_HYPERDRIVE_ID` variable. All zeros until set here (hosted/README.md ->
@@ -38,7 +39,8 @@
     "bindings": [
       {
         "name": "ONE_TIME_ROOM",
-        "class_name": "OneTimeRoom"
+        "class_name": "OneTimeRoom",
+        "script_name": "dormouse-try"
       },
       {
         "name": "RELAY_ROOM",
@@ -59,6 +61,12 @@
       "new_sqlite_classes": [
         "RelayRoom"
       ]
+    },
+    {
+      "tag": "v3",
+      "deleted_classes": [
+        "OneTimeRoom"
+      ]
     }
   ],
   "ratelimits": [
@@ -67,14 +75,6 @@
       "namespace_id": "1",
       "simple": {
         "limit": 10,
-        "period": 60
-      }
-    },
-    {
-      "name": "ONE_TIME_JOIN_LIMIT",
-      "namespace_id": "2",
-      "simple": {
-        "limit": 30,
         "period": 60
       }
     },

@@ -36,6 +36,8 @@ sequenceDiagram
 
 **One link per connection, one phone per link.** Exactly `<origin>/connect/#<v>.<roomId>.<expiry>.<ephPub>`: the fragment is positional, dot-delimited, carries no field names, is exactly 79 characters, and never reaches a server.
 
+**The link names the page's own origin, `HOSTED_ONE_TIME_ORIGIN`, never Pocket's, and the Burrow never connects to it.** A dev Hosted build names its relay origin, which redirects ("Links from older builds"), since no second origin is baked.
+
 | Field | Encoding, exact length | Purpose |
 | --- | --- | --- |
 | `v` | literal `1`, one character | E2E wire version; any other value is rejected, never negotiated |
@@ -50,11 +52,11 @@ sequenceDiagram
 
 Which desktop release may carry a link version: `docs/specs/deploy.md` -> "Release checklist".
 
-Source of truth: `remote-lib-common/src/security/one-time-link.ts`.
+Source of truth: `remote-lib-common/src/security/one-time-link.ts`; `oneTimeLinkOrigin` in `lib/src/host/relay-origin.ts`.
 
 ## Wire contract
 
-**A separate frame family, never an `E2eKind`**, so neither the Relay nor `BurrowRuntime` has a reader for it. Two WebSocket routes on the one-time origin: `ONE_TIME_WS_ROUTES.burrow` (`/api/one-time/burrow`) mints a room, and `ONE_TIME_WS_ROUTES.client` (`/api/one-time/client?room=<roomId>`) joins one. **Must send each message as one JSON frame with exact keys**, forwarded verbatim by the room:
+**A separate frame family, never an `E2eKind`**, so neither the Relay nor `BurrowRuntime` has a reader for it. Two WebSocket routes: `ONE_TIME_WS_ROUTES.burrow` (`/api/one-time/burrow`) on the relay origin mints a room, and `ONE_TIME_WS_ROUTES.client` (`/api/one-time/client?room=<roomId>`) on the page's origin joins one. **Must send each message as one JSON frame with exact keys**, forwarded verbatim by the room:
 
 | Frame | Direction | Shape |
 | --- | --- | --- |
@@ -87,7 +89,7 @@ Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`; `parseOneTimeF
 
 **`OneTimeRuntime` is single-use: one rendezvous socket, one one-use keypair, one phone, one guess, and at most one session.** It opens once and ends once, and nothing resumes. Its states are `OneTimeState`, its endings `OneTimeEndReason`.
 
-- **Must open the socket through the host's factory with no `Origin` header**, on the origin's Burrow route.
+- **Must open the socket through the host's factory with no `Origin` header**, on the relay origin's Burrow route.
 - **The first message must be one `OneTimeRoomFrame`, the keypair minted and the frame read within `ONE_TIME_OPEN_TIMEOUT_MS`**, else `unreachable`. The link's expiry is the earlier of the runtime's own `now + ONE_TIME_LINK_TTL_MS` and the room's `expiresAt`, floored to whole seconds.
 - **Must discard `RELAY_PONG` keepalive replies and guard and count every other later message** after the [length check](#wire-contract): past `MAX_ONE_TIME_FORWARDED` the runtime stops reading the room.
 - Reserving the link: `docs/specs/remote-security-model.md` -> "One-time connection".
@@ -116,16 +118,16 @@ Source of truth: `OneTimeClient` in `lib/src/remote/client/one-time-client.ts`.
 
 ## Hosted rendezvous
 
-The relay Worker (`https://relay.dormouse.sh`; `docs/specs/hosted.md` -> "Application boundary") serves both routes, and one `OneTimeRoom` Durable Object per room carries the frames. **Never parse, store, or log a forwarded frame**: the room bounds a frame by its raw length and its count alone, and forwards the string verbatim (rationale).
+The relay Worker serves the Burrow route and the try Worker the client route (`docs/specs/hosted.md` -> "Application boundary"), and one `OneTimeRoom` Durable Object per room, which the try Worker implements and the relay binds, carries the frames. **Never parse, store, or log a forwarded frame**: the room bounds a frame by its raw length and its count alone, and forwards the string verbatim (rationale).
 
 | Route | Admits | Refuses |
 | --- | --- | --- |
 | `ONE_TIME_WS_ROUTES.burrow` | an upgrade with no `Origin` header | 426 without an upgrade, 403 on any `Origin`, 429 past `ONE_TIME_MINT_LIMIT` |
-| `ONE_TIME_WS_ROUTES.client` | an upgrade whose `Origin` is exactly `APP_ORIGIN`, naming exactly one E2E id as `room` | 426 without an upgrade, 403 on any other or no `Origin`, 400 on a missing, repeated, or malformed room, 429 past `ONE_TIME_JOIN_LIMIT` |
+| `ONE_TIME_WS_ROUTES.client` | an upgrade whose `Origin` is exactly the try Worker's `APP_ORIGIN`, naming exactly one E2E id as `room` | 426 without an upgrade, 403 on any other or no `Origin`, 400 on a missing, repeated, or malformed room, 429 past `ONE_TIME_JOIN_LIMIT` |
 
 - **Must mount after the bindings mapper and the 421 gate**, and never read a cookie, reach Hyperdrive, or call auth. The Worker mints each room id from 16 random bytes and hands the room a fresh request carrying only the upgrade and the room id, never the caller's headers.
 - **The `Origin` rules are abuse control, never authorization** (rationale).
-- **Both limits key on `cf-connecting-ip`**: an IPv6 address by its /64, an IPv4-mapped one (`::ffff:0:0/96`, however spelled) by its IPv4, and a missing one as `local` (rationale); `hosted/wrangler.relay.jsonc` sets them.
+- **Both limits key on `cf-connecting-ip`**: an IPv6 address by its /64, an IPv4-mapped one (`::ffff:0:0/96`, however spelled) by its IPv4, and a missing one as `local` (rationale); the Worker's own Wrangler config sets each.
 - **The room's state is the Burrow socket's hibernation attachment** — `expiresAt`, `joined`, and a count of every frame received — never memory, so a hibernated room keeps its join and its count. `RELAY_PING` is answered by the runtime's auto-response and never wakes, forwards, or counts.
 
 A room's life, each step one event on the object:
@@ -138,32 +140,43 @@ A room's life, each step one event on the object:
 
 **Every ending deletes the alarm and the room's storage**, so a finished room holds nothing.
 
-Source of truth: `oneTimeRoutes` in `hosted/server/one-time.ts`; `OneTimeRoom` in `hosted/server/one-time-room.ts`.
+Source of truth: `oneTimeBurrowRoute` and `oneTimeClientRoute` in `hosted/server/one-time.ts`; `OneTimeRoom` in `hosted/server/one-time-room.ts`.
 
 ## Phone page
 
-The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp`, refusing a browser without X25519 or `RTCPeerConnection`.
+The try Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp`, refusing a browser without X25519 or `RTCPeerConnection`. **Never serve it on an origin holding a paired phone's keys**: it renders what a stranger's link sends (rationale).
 
 - **Must take the fragment and erase it with `history.replaceState` before the first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and runs `connectOnce`, so a link-preview crawler spends nothing.
 - Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
 - **Must show the Surfaces Pocket shows, with the same wall**, Tools and pages included (`docs/specs/pocket-app.md` -> "Frame origin").
-- **Must be ephemeral to the person using it: never persist anything of the page's own**: no storage, IndexedDB, worker, push, or cookie, though Pocket keeps its own on the same origin. A framed page's own origin may leave a worker and what the page stored, under a salt held only in memory, so nothing can reach them again until the browser evicts them. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
+- **Must be ephemeral to the person using it: never persist anything of the page's own**: no storage, IndexedDB, worker, push, or cookie. A framed page's own origin may leave a worker and what the page stored, under a salt held only in memory, so nothing can reach them again until the browser evicts them. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
 - **Must mount the wall only on `ok`**; every ending closes the client and releases the adapter.
 - **The label the page sends is `oneTimeDeviceLabel`, never Pocket's `deviceLabel`**, and always a member of `ONE_TIME_DEVICE_LABELS` (rationale).
 
-**Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` into `lib/dist-one-time` under base `ONE_TIME_PAGE_PATH`, then runs `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under `/connect/`, nothing inline. Hosted's `build` runs it first, and `stageRelay` empties the relay's assets directory, copies the page to `hosted/dist/relay/connect/` beside Pocket at the root, and checks the copy.
+**Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` into `lib/dist-one-time` under base `ONE_TIME_PAGE_PATH`, then runs `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under `/connect/`, nothing inline. Hosted's `build` runs it first, and `stageTry` empties the try Worker's assets directory, copies the page to `hosted/dist/try/connect/`, and checks the copy.
 
-**Serving.** The relay Worker answers `/connect`, `/connect/`, and `/connect/assets/*` from its assets, with no SPA fallback; an HTML answer or an unhashed name under `/connect/assets/`, and any other path under `/connect/`, is a 404. Everything under `/connect` carries `oneTimePagePolicy` (`hosted/server/headers.ts`), built from the relay's `APP_ORIGIN`. Every other relay response carries Pocket's policy or `RUNS_NOTHING_POLICY` (`docs/specs/security-hosted.md` -> "Relay boundary").
+**Serving.** The try Worker answers `/connect`, `/connect/`, and `/connect/assets/*` from its assets, with no SPA fallback; an HTML answer or an unhashed name under `/connect/assets/`, and any other path under `/connect/`, is a 404. Everything under `/connect` carries `oneTimePagePolicy` (`hosted/server/headers.ts`), built from its `APP_ORIGIN`, and every other response `RUNS_NOTHING_POLICY`.
 
 - **An `APP_ORIGIN` that is not exactly `scheme://host[:port]` of plain host characters gets `RUNS_NOTHING_POLICY` instead**: the URL parser admits `;`, `,`, and `'` in a host.
 - **The sandbox keeps `allow-same-origin`**, and Chrome's warning about the pair stands (rationale).
 
-Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`; `stageRelay` in `hosted/scripts/stage-relay.mjs`; `oneTimePageRoutes` in `hosted/server/one-time.ts`; `relayRules` in `hosted/server/headers.ts`.
+Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`; `stageTry` in `hosted/scripts/stage-try.mjs`; `oneTimePageRoutes` in `hosted/server/one-time.ts`; `tryRules` in `hosted/server/headers.ts`.
+
+### Links from older builds
+
+Every release before the page's move shows `https://relay.dormouse.sh/connect/#…`, and the phone of that link joins a room minted on the relay's Burrow route, as every release's is.
+
+- **The relay must answer `/connect` and `/connect/` with a 308 to `TRY_ORIGIN` + `ONE_TIME_PAGE_PATH`, and nothing else under `/connect/`**: no page, no shell, and no client route, so nothing of a stranger's renders beside Pocket from the release that serves the try Worker on (rationale).
+- A browser carries the fragment across the redirect, and the prologue binds no origin, so the link completes on the page's origin unchanged.
+- **Must keep the redirect while a shipped Burrow may show such a link** (`docs/specs/deploy.md` -> "Release checklist"); it renders nothing, so no grace period ends it.
+- A phone that loaded the old page before the deploy finds its client route gone at the Connect tap, and reads generic copy, like any lost room.
+
+Source of truth: `oneTimePageMoved` in `hosted/server/one-time.ts`.
 
 ## Dev loop
 
-**`dor tool one-time` runs the rendezvous and page on loopback, without Postgres**, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin"). **Started by `dor tool hosted`, it reads that loop's development database and announces no page**, since that Tool frames the account origin (`docs/specs/hosted.md` -> "Development and release").
+**`dor tool one-time` runs the rendezvous and page on loopback, without Postgres**: the relay Worker at `PORT` or a fixed default, since a Burrow build bakes that origin in, and the try Worker on the next port, sharing its room through Wrangler's local registry. Their configs carry no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin"). **Started by `dor tool hosted`, it reads that loop's development database and announces no page**, since that Tool frames the account origin (`docs/specs/hosted.md` -> "Development and release").
 
 Source of truth: `hosted/scripts/dev-one-time.mjs`.
 
