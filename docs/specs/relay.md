@@ -265,7 +265,7 @@ Source of truth: `remote-lib-common/src/security/noise-transport.ts`.
 
 | `DORMOUSE_RELAY_ORIGIN` | Mode | Relay | One-time connection | Managed voice | Standalone auto-update |
 | --- | --- | --- | --- | --- | --- |
-| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, enrolled by device code | at this origin | at `https://voice.dormouse.sh` | on |
+| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, enrolled by device code | its socket at this origin, its link at `https://connect.dormouse.sh` | at `https://voice.dormouse.sh` | on |
 | any other accepted origin | self-host | exactly this origin | off | off | off |
 
 - **A self-host build sends nothing to `dormouse.sh` or any host under it unless the user clicks a link** (rationale). **Every Hosted-reaching host feature takes the nullable `hostedOrigin` or `hostedVoiceOrigin` and does nothing on `null`** (`docs/specs/one-time.md` -> "Service and hosts", `docs/specs/alert.md` -> "Managed voice"); the standalone webview never checks for updates (`docs/specs/auto-update.md` -> "How it works").
@@ -273,7 +273,7 @@ Source of truth: `remote-lib-common/src/security/noise-transport.ts`.
 - **Accepted origins**: a bare origin as `new URL` spells it, on `https:` or on loopback `http:` (`localhost`, `127.0.0.1`, `[::1]`), of at most `MAX_RELAY_ORIGIN_LENGTH`, the longest a one-time link fits. Anything else fails the build. **The pairing QR's fixed tail leaves a self-host origin 103 characters** ("Setup tokens and the pairing QR"): an origin of 104–167 characters builds and enrolls, then every "Set up a phone" fails.
 - **`DORMOUSE_RELAY_IS_HOSTED=1` counts a non-default origin as Hosted in a dev build only**. **Every other build is a release build and fails when the flag is set or the origin is loopback `http:`** (rationale). Unflagged, a loopback origin is a local self-host Relay.
 - **The retired `DORMOUSE_REMOTE_CONNECT_SRC` set non-blank fails the build.**
-- **Managed voice's origin is the constant `HOSTED_VOICE_ORIGIN`, never baked or overridden**, a loopback dev Hosted build included (rationale). **The account's origin is the constant `HOSTED_ACCOUNT_ORIGIN`, never baked and never requested**: the desktop opens it only on a user's click, in the browser. Hosted's origins: `docs/specs/hosted.md` -> "Application boundary".
+- **Managed voice's origin is the constant `HOSTED_VOICE_ORIGIN`, never baked or overridden**, a loopback dev Hosted build included (rationale). **The account's origin is the constant `HOSTED_ACCOUNT_ORIGIN`, never baked and never requested**: the desktop opens it only on a user's click, in the browser. **The one-time page's origin is the constant `HOSTED_ONE_TIME_ORIGIN`, never baked and never requested**: the desktop only writes it into a link (`docs/specs/one-time.md` -> "Link"). Hosted's origins: `docs/specs/hosted.md` -> "Application boundary".
 
 **The Burrow composes every Relay URL from the baked origin and takes none as input.** `enroll` and `enrollOffer` post to it, and **a Hosted build refuses both**; device-code enrollment ("Burrow side") is Hosted's alone. Under the network policy's `nothing`: `docs/specs/remote-network.md` -> "Policy". **An enrollment whose Relay URL or `origin` names another origin reads as none** wherever one is read and stays on disk untouched, so switching back restores it (rationale). Origins compare as `new URL(...).origin`.
 

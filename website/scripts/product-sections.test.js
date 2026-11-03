@@ -73,7 +73,7 @@ describe('the committed npm disclosure', () => {
     ]) expect(disclosed).toContain(name);
   });
 
-  // relay.dormouse.sh serves Pocket and the one-time page, built from
+  // Hosted's Workers serve Pocket and the one-time page, built from
   // `dormouse-lib`, whose React and xterm.js the Terminal's root discloses.
   it('leaves Pocket\'s packages under the Terminal', () => {
     for (const name of ['react', '@xterm/xterm']) {

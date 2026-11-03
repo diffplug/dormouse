@@ -1,24 +1,25 @@
 # Dormouse Hosted accounts
 
 > - See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
-> - Owns the Hosted account application, the Hosted Relay's account-scoped routes and sockets, and the deployment of Hosted's four Workers. The one-time rendezvous the relay Worker serves belongs to `docs/specs/one-time.md` -> "Hosted rendezvous"; the Relay's shared route and routing semantics to `docs/specs/relay.md` -> "HTTP API" and "Routing"; remote authorization to `docs/specs/remote-security-model.md`.
+> - Owns the Hosted account application, the Hosted Relay's account-scoped routes and sockets, and the deployment of Hosted's five Workers. The one-time rendezvous the relay Worker serves belongs to `docs/specs/one-time.md` -> "Hosted rendezvous"; the Relay's shared route and routing semantics to `docs/specs/relay.md` -> "HTTP API" and "Routing"; remote authorization to `docs/specs/remote-security-model.md`.
 
 ## Application boundary
 
-**Must serve Hosted as four Workers from `hosted/`:**
+**Must serve Hosted as five Workers from `hosted/`:**
 
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
 | `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, Natural Voice on or off, the Relay's account routes ("Burrow enrollment"), billing, Stripe's webhook, and the founders row ("Billing") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom`, the Stripe bindings |
-| `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, `RelayRoom`, the one-time, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
+| `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time Burrow route (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `RelayRoom`, a binding to the connect Worker's `OneTimeRoom`, the mint, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `CONNECT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
+| `dormouse-connect` | `https://connect.dormouse.sh` | the one-time phone page and client route (`docs/specs/one-time.md` -> "Phone page") | `OneTimeRoom`, the join rate limit, its assets |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak, a token's own delete, and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 | `dormouse-frames` | `https://*.dormouseusercontent.com` | a frame origin's own files (`docs/specs/pocket-app.md` -> "Frame origin") | its assets |
 
-Every Worker but `dormouse-frames` answers `/api/health` and `/api/ready`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. `/api/ready` answers 200 once a query its role must be granted runs through its Hyperdrive, else a bare 503; it reads no row and has no rate limit. The account falls back to its SPA assets, the relay to Pocket's. Origin and binding isolation: `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
+Every Worker but `dormouse-frames` answers `/api/health` and, but `dormouse-connect`, which holds no database, `/api/ready`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` and `/connect` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. `/api/ready` answers 200 once a query its role must be granted runs through its Hyperdrive, else a bare 503; it reads no row and has no rate limit. The account falls back to its SPA assets, the relay to Pocket's, the connect Worker to nothing. Origin and binding isolation: `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
 
 **Must keep serving `/account` on the account origin**: every desktop since v1.2.0 opens it by a hard-coded path.
 
-**Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
+**Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker that binds one.
 
 **Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns and `owner_access` view, the relay inserts approved voice tokens ("Managed voice"), and both add to the daily counts ("Metrics"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
@@ -346,7 +347,7 @@ Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetri
 
 **Must run local development with `dor tool hosted` inside Dormouse.** Its loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the Worker's account routes (`accountRoutes`) and cron, but never the voice origin's; billing runs on StripeDev, which takes no card. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also runs the relay Worker on that database, with this origin as `ACCOUNT_ORIGIN`** (`docs/specs/one-time.md` -> "Dev loop").
 
-**Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+**Must verify the production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must isolate test stacks from development and concurrent runs, remove containers and volumes on teardown, and reap abandoned stacks only after their owner exits.**
 
@@ -358,7 +359,7 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs, on a PR labeled `hosted-preview`.** Drafts qualify; forks receive no deployment credentials.
 
-**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive all three share, and a Neon branch from an empty dedicated preview project**, all reused until the PR closes or loses the label. That Hyperdrive connects as the branch's owner, so no preview exercises the restricted roles; `hosted/server/tests` binds the relay and voice to them (rationale). Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespaces, each preview preview-only rate-limit namespaces, and wire each preview to its own PR's siblings** (the account's `RELAY_ROOM`, the relay's `ACCOUNT_ORIGIN`). **Must derive every preview secret from `PREVIEW_AUTH_SECRET` and its Worker's name**, the relay's VAPID pair included, so no production key reaches a preview and subscriptions survive the PR's redeploys.
+**Must isolate each PR in four persistent workers.dev Workers (`dormouse-{hosted,relay,voice,connect}-pr-N`), one uncached Hyperdrive all but the connect Worker share, and a Neon branch from an empty dedicated preview project**, all reused until the PR closes or loses the label. That Hyperdrive connects as the branch's owner, so no preview exercises the restricted roles; `hosted/server/tests` binds the relay and voice to them (rationale). Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay and connect preview its own Durable Object namespaces, each preview preview-only rate-limit namespaces, and wire each preview to its own PR's siblings** (the account's `RELAY_ROOM`, the relay's `ONE_TIME_ROOM`, `ACCOUNT_ORIGIN`, and `CONNECT_ORIGIN`). **Must derive every preview secret from `PREVIEW_AUTH_SECRET` and its Worker's name**, the relay's VAPID pair included, so no production key reaches a preview and subscriptions survive the PR's redeploys.
 
 **Must sweep before provisioning, never at close:** each preview deploy first deletes every closed or unlabeled PR's preview (rationale).
 
@@ -368,11 +369,11 @@ Source of truth: `.github/workflows/hosted-preview.yml`; `previewConfig` / `prev
 
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain, and the relay's `ACCOUNT_ORIGIN` to the account's origin; `preflight`, before the backup, checks each Worker's Hyperdrive and its own secret names (`docs/specs/security-hosted.md` -> "Deployment boundary") — names only, as Cloudflare exposes no value. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy relay, voice, then account, stopping at a failure**; the relay must pass its revision check, `/api/ready`, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain, and the relay's `ACCOUNT_ORIGIN` and `CONNECT_ORIGIN` to those Workers' origins; `preflight`, before the backup, checks each Worker's Hyperdrive and its own secret names (`docs/specs/security-hosted.md` -> "Deployment boundary") — names only, as Cloudflare exposes no value. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy frames, connect, relay, voice, then account, stopping at a failure**; the connect Worker must pass its revision check and `oneTimePageSmoke` before the relay deploys, and the relay its revision check, `/api/ready`, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
 
-**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. A deploy restarts every room, dropping links still waiting or mid-handshake, and every relay socket, which its end reconnects; a session already on its direct path never touches Hosted. Live verification checks all three Workers once the account has deployed.
+**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. A connect deploy restarts every room, dropping links still waiting or mid-handshake, and a relay deploy every relay socket, which its end reconnects; a session already on its direct path never touches Hosted. Live verification checks every Worker once the account has deployed.
 
-**Never replay a smoke's POST after a transport failure.** Production repeats only the relay and voice smokes (rationale).
+**Never replay a smoke's POST after a transport failure.** Production repeats only the relay, voice, and connect smokes (rationale).
 
 **Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification**, naming the deployed commit and verification run and attempt; retries are idempotent and redeployments get new tags. Code rollback never reverses migrations.
 
