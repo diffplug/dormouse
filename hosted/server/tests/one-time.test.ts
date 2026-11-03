@@ -501,6 +501,22 @@ test("the deployment smoke passes against the two Workers, which their previews 
   );
 });
 
+test("the deployment smoke fails on a relay still answering the old page, before it opens a socket", async () => {
+  const opened: string[] = [];
+  await expect(
+    smoke.oneTimeSmoke(
+      relay,
+      origin,
+      ((url: string) => {
+        opened.push(url);
+        throw new Error("no socket should open");
+      }),
+      (async () => new Response(PAGE_SHELL, { status: 200 })) as unknown as typeof fetch,
+    ),
+  ).rejects.toThrow(/moves an older build's link/);
+  expect(opened).toEqual([]);
+});
+
 test("the smoke's copies of the contract match remote-lib-common", () => {
   expect(smoke.ONE_TIME_WS_ROUTES).toEqual(ONE_TIME_WS_ROUTES);
   expect(smoke.ONE_TIME_ROOM_PARAM).toBe(ONE_TIME_ROOM_PARAM);
