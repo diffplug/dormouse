@@ -1,6 +1,6 @@
 /* The image editor on the workbench's --vscode-* variables: two dense rows of
- * chrome, then the canvas. It fills the box its host gives it. The options row
- * never wraps, so switching tools never moves the canvas: as the editor
+ * chrome, then the canvas. It fills the box its host gives it. Above 500px the
+ * options row never wraps, so switching tools never moves the canvas: as the editor
  * narrows, its readouts drop out first (the container queries at the end),
  * with the host's controls marked `ie-optional`; Save's own enabled state
  * still says whether there are edits. */
