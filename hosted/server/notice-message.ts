@@ -13,7 +13,7 @@ import {
   WITHDRAWAL_STATEMENT,
 } from "../../website/src/lib/hosted-withdrawal";
 import type { PriceCatalog } from "./billing";
-import { disclosure, priceInUsd } from "./disclosure";
+import { disclosure, priceLine } from "./disclosure";
 import { BILLING_RETURN_PATH, isPlan, termsArchiveUrl, type Plan } from "./policy-constants";
 
 /** Who a notice is from, so a customer's reply and a sign-in code's sender stay apart. */
@@ -140,7 +140,7 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
         [
           ["Seller", "DiffPlug LLC"],
           ["Plan", `Dormouse Hosted, ${PLAN_NAMES[consentPlan]}`],
-          ["Price", priceInUsd(consentPlan, shownUsd)],
+          ["Price", priceLine(consentPlan, shownUsd)],
           ["Automatic renewal", agreed.renewal],
           ["Terms", `Version ${termsVersion}, which you agreed to on ${UTC.format(consentedAt)}: ${termsArchiveUrl(termsVersion)}`],
           [

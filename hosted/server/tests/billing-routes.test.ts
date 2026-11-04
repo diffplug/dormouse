@@ -446,7 +446,7 @@ test("checkout starts only after agreement to the current terms and to automatic
     voiceDailyCap: VOICE_DAILY_CAP,
     presentedText: presentedLines("yearly", LIST_ANNUAL, TERMS_VERSION).join("\n"),
   });
-  for (const fact of ["$100 USD a year", `up to ${VOICE_DAILY_CAP} alarms a day`, "withdraw within 14 days", `(version ${TERMS_VERSION})`])
+  for (const fact of ["$100 a year", `up to ${VOICE_DAILY_CAP} alarms a day`, "withdraw within 14 days", `(version ${TERMS_VERSION})`])
     expect((await consents())[1]!.presentedText).toContain(fact);
   await expect(
     f.sql(`INSERT INTO dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId") VALUES ('x', 'x', 'x', 'x', 'x')`),
@@ -1655,7 +1655,7 @@ test("a completed checkout emails what was agreed once, to the Stripe customer's
   for (const fact of [
     "Seller: DiffPlug LLC",
     "Plan: Dormouse Hosted, Founding",
-    `Price: $${FOUNDING_LADDER[0]} USD a year, plus any applicable tax.`,
+    `Price: $${FOUNDING_LADDER[0]} a year, plus any applicable tax.`,
     `Automatic renewal: Renews automatically every year at $${FOUNDING_LADDER[0]} until you cancel.`,
     agreed.renewal,
     `Terms: Version ${TERMS_VERSION}, which you agreed to on `,
@@ -1694,7 +1694,7 @@ test("a completed checkout emails what was agreed once, to the Stripe customer's
   await f.deliver();
   const [, late] = f.confirmations();
   expect(late!.to).toEqual(["provider@example.test"]);
-  expect(late!.text).toContain("Price: $77 USD a year");
+  expect(late!.text).toContain("Price: $77 a year");
   expect(late!.text).toContain(termsArchiveUrl("2020-01-01"));
 });
 
