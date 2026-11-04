@@ -19,6 +19,7 @@ Install and sign in to the agent separately, then launch it from a Dormouse term
 | [Warp](https://docs.warp.dev/agents/cli/reference/) | `warp` | `warp --resume <id>` | Yes |
 | [Cursor](https://cursor.com/docs/cli/overview) | `agent` | `agent --resume <id>` | Yes |
 | [Cursor](https://cursor.com/docs/cli/overview) | `cursor-agent` | `cursor-agent --resume <id>` | Yes |
+| Muse | `muse` | `muse resume <id>` | No |
 
 Hints printed with `=`, such as `copilot --resume=<id>`, are recognized too. Claude's older `claude --continue` hint is also recognized; every other integration requires an explicit ID, so conversations that share a directory restore separately. Warp's integration uses the `warp` agent CLI.
 
@@ -30,13 +31,13 @@ During an orderly app shutdown or VS Code window reload, Dormouse interrupts run
 
 The agent restores its saved conversation. This does not automatically resubmit a prompt or restart the interrupted task. The agent must remain installed and its conversation must still be available. Its own authentication or permission prompts may appear.
 
-Recovery requires a fresh exit hint followed by a separator, such as a newline. An empty conversation may produce none. A crash or force-quit can prevent capture, and a conversation you already exited before Dormouse shuts down is not recovered from old terminal output. In these cases, use the agent's own conversation history. Standalone window reloads keep the live terminal processes, so those conversations keep running without this recovery step.
+Recovery requires a fresh exit hint followed by a separator, such as a newline. An empty conversation may produce none. Muse produces none when shutdown catches a turn before its first output, because its exit then takes more `^C` presses than capture sends. A crash or force-quit can prevent capture, and a conversation you already exited before Dormouse shuts down is not recovered from old terminal output. In these cases, use the agent's own conversation history. Standalone window reloads keep the live terminal processes, so those conversations keep running without this recovery step.
 
 ### Watching for attention
 
 When no watch list has been saved, Dormouse watches commands marked **Yes** in the table above. This includes fresh installations and upgrades where watching was never configured. It observes terminal output becoming busy and then quiet, which can indicate a finished response or a request for input. This is an output heuristic; it does not read the agent's internal task state.
 
-An existing saved watch list is preserved, including an empty list. To watch any running command, listed here or not, open its terminal context and turn on **watch `<command>`**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules.
+An existing saved watch list is preserved, including an empty list. To watch any running command, listed here or not, open its terminal context and turn on **watch `<command>`**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules. A watched Muse rings when a response finishes but not at an approval prompt, where it keeps animating.
 
 Watching requires shell integration that reports the running command. Terminal notifications and command-exit alerts work independently of watching.
 
