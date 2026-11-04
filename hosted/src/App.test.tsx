@@ -389,9 +389,9 @@ describe("checkout", () => {
   });
 
   it.each([
-    ["monthly", "$10 a month in US dollars", "first payment for a full refund, which ends the plan. Monthly renewals are outside this guarantee."],
-    ["yearly", "$100 a year in US dollars", "first payment or of a yearly renewal for a full refund, which ends the plan."],
-    ["founding", "$50 a year in US dollars", "first payment or of a yearly renewal for a full refund, which ends the plan."],
+    ["monthly", "$10 USD a month", "first payment for a full refund, which ends the plan. Monthly renewals are outside this guarantee."],
+    ["yearly", "$100 USD a year", "first payment or of a yearly renewal for a full refund, which ends the plan."],
+    ["founding", "$50 USD a year", "first payment or of a yearly renewal for a full refund, which ends the plan."],
   ] as const)("discloses %s's price in US dollars, its refund, limits, and withdrawal, and everything its consent records", async (plan, usd, refund) => {
     vi.mocked(api.getSession).mockResolvedValue(login());
     vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
