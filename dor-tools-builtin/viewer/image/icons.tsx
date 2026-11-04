@@ -20,7 +20,6 @@ const paths = {
   redo: <><path d="M11 3l3 3-3 3" /><path d="M13.5 6H6a3.5 3.5 0 0 0 0 7h4" /></>,
   square: <rect x="3.5" y="3.5" width="9" height="9" fill="currentColor" />,
   round: <circle cx="8" cy="8" r="4.5" fill="currentColor" />,
-  close: <path d="M4 4l8 8M12 4l-8 8" />,
 };
 export type IconName = keyof typeof paths;
 

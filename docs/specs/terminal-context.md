@@ -13,7 +13,7 @@
 - **Must hide a retained helper without terminating its PTY**; revealing or promoting reuses the same xterm element. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
 - **Must keep a helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
-- **Must pause status and process-inspection polling while the context is hidden**, its Workspace out of view included. Reopening publishes current terminal status; source closure inspects work on demand.
+- **Must pause exit and process-inspection polling while the context is hidden**, its Workspace out of view included. Reopening publishes a helper's exit; source closure inspects work on demand.
 
 **Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one in the source's current directory.
 

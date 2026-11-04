@@ -258,7 +258,7 @@ A mode or selection change, or a kill confirmation, takes it down.
 
 Chrome outside every Wall takes the chrome keyboard lease instead: the Workspace strip's rename editor, close confirmation, and tab menu live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. The Workspace branch is inert on a Wall with no Workspace id.
 
-**Must leave Escape and Tab to IME composition in modal/popover focus traps and terminal-context dialogs, and Enter/Escape in shared inline editors** (`isComposingKey` in `lib/src/lib/dom.ts`).
+**Must leave Escape and Tab to IME composition in modal/popover focus traps, and Enter/Escape in shared inline editors** (`isComposingKey` in `lib/src/lib/dom.ts`).
 
 Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `acquireChromeKeyboardLease` in `lib/src/components/wall/chrome-keyboard-lease.ts`; `handleStrayKey` in `lib/src/components/wall/keyboard/handle-stray-key.ts`.
 

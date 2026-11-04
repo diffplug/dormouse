@@ -14,7 +14,7 @@ export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
 export const PRELAUNCH_NOTICE = "Pre-launch — word of mouth only, please. No top-level forum posts.";
 
 type SiteHeaderProps = Omit<ComponentProps<typeof SharedSiteHeader>, "links" | "notice"> & {
-  /** Show the pre-launch strip (Home and the reference pages). */
+  /** Show the pre-launch strip (Home, the docs, and the policy pages). */
   prelaunch?: boolean;
 };
 
