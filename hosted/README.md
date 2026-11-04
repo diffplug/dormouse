@@ -32,6 +32,14 @@ dor tool one-time      # outside Dormouse: pnpm dev:one-time
 
 It serves the relay at `http://localhost:8787` (or `PORT`) and the try Worker on the next port, and prints the `DORMOUSE_RELAY_ORIGIN` and `DORMOUSE_RELAY_IS_HOSTED=1` values that point a local dev Burrow build at it; `docs/specs/one-time.md` -> "Dev loop" owns what it runs. A phone cannot reach a loopback origin, so a real phone tests against a PR preview.
 
+### Run against Stripe test mode
+
+The local entry uses StripeDev unless all five `STRIPE_*` bindings are in its environment, then real Stripe with the key's mode; it refuses a live key. Mail still lands in the local inbox. Use a sandbox's secret key and test-mode Prices.
+
+`stripe listen` cannot carry billing's webhook: it forwards events at the account's default API version even with `--use-configured-webhooks`, and the Worker answers any version but the SDK's pinned `STRIPE_API_VERSION` with 400. Create an endpoint with `--api-version` set to the pinned version, the events under "Stripe setup", and a URL on a temporary tunnel, and use its signing secret as `STRIPE_WEBHOOK_SECRET`. The tunnel must reach only `POST /api/billing/webhook`, through a proxy that sends `Host: localhost:$PORT`, because the local origin holds login codes (`hosted/server/dev-host-guard.ts`) and refuses other hosts. That guard also refuses Stripe's cross-site return to `/billing`, so reopen the page by hand; a deployed origin has no such guard.
+
+A test clock needs its customer from the start: after the first checkout creates the account's customer, expire that session, set `customer_id` in `pgstencil_billing.accounts` to a customer on the clock with the same `pgstencil_owner` metadata, delete the account's `pgstencil_billing.checkouts` row, and check out again. A clock moves only Stripe's dates, never Hosted's notice or withdrawal windows.
+
 ## Update pgstencil
 
 `hosted/package.json` installs released `pgstencil` and `@pgstencil/auth` from npm. They share a version and Hosted declares their peer dependencies. Approved pgstencil releases are exempt from the pnpm and Renovate cooldowns because the release workflow requires a passing security audit, stages the archives, and requires a maintainer's 2FA approval before publishing.
@@ -209,6 +217,17 @@ Billing stays closed, and its Cron Trigger idle, until the account Worker holds 
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a credential pair do and do not enable. Facebook is outside this milestone.
 
+## Stripe setup
+
+One Stripe account holds only Dormouse, because retries, customer emails, and the default portal are account-wide. Do this in its sandbox first, then live. Checked against a sandbox on 2026-11-03.
+
+- **Product:** one, with a tax code. **Prices:** recurring, USD, `tax_behavior=exclusive`, whole dollars matching `website/src/lib/hosted-pricing.ts`: `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING`, comma-separated in `FOUNDING_LADDER` order.
+- **Stripe Tax:** head office, default tax code, and a registration everywhere the business must collect. It collects only where registered.
+- **Customer portal, the default configuration:** cancel at period end with no proration or reason, payment methods, invoice history, email and address; **plan switching off**, since a Price billing does not know fails that owner's webhooks and leaving founding loses the lock.
+- **Revenue recovery:** Smart Retries over 2 months for cards, then cancel the subscription, so a founder keeps the 30 days the Terms promise to fix a failed renewal. Failed-payment emails on, since Hosted sends none, with a Stripe-hosted link.
+- **Customer emails:** successful payments and refunds on.
+- **Webhook endpoint:** `https://hosted.dormouse.sh/api/billing/webhook`, created through the API with `api_version` set to the SDK's pinned `STRIPE_API_VERSION`, since any other version is refused with 400. Its events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`, `invoice.paid`, `invoice.payment_failed`.
+
 ## Change a price
 
 A list price change for existing monthly or yearly subscribers is one row in `dormouse_price_changes`; the account cron sends each subscriber's notice and moves them to the new Price from their first renewal that notice reached in time (`docs/specs/hosted.md` -> "Billing notices"). Founding Prices never change, and the cron refuses a row naming one.
@@ -276,7 +295,7 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
 4. Start with email, attempt the same-address provider from another browser, and confirm no automatic linking. Connect it from the signed-in account, then confirm both methods return the same account ID. Connect Apple with its different relay address. Confirm an identity belonging to another account does not transfer, and that a connection started before logout fails on return.
 5. Log in on two devices and confirm both remain signed in. Log out on one; the other must remain signed in. Provider-only accounts display no email and repeat login preserves their account ID.
 6. Sign in as the admin address, turn on Natural Voice from Dormouse desktop, and speak one short phrase. Turn it off on the account page and confirm the next alarm uses the system voice and Settings offers to turn it on again. Turn it on again, then off from Dormouse, and confirm the account page says it is off. Confirm another account sees no Natural Voice section.
-7. Confirm the voice Worker alone registers its two Cron Triggers: the deploy log lists `schedule: */5 * * * *` (the history sweep) and `schedule: 0 4 * * *` (idle tokens), the dashboard shows it under Workers & Pages -> `dormouse-voice` -> Settings -> Trigger Events, and `dormouse-hosted` lists none. After the speak in step 6, the ElevenLabs console's speech history should be empty within a few minutes. The Worker's Cron Events list each run; a failed run means the key cannot list or delete history. Recheck them for failed runs after any key change.
+7. Confirm the voice Worker registers its two Cron Triggers: the deploy log lists `schedule: */5 * * * *` (the history sweep) and `schedule: 0 4 * * *` (idle tokens), the dashboard shows it under Workers & Pages -> `dormouse-voice` -> Settings -> Trigger Events, and `dormouse-hosted` lists only billing's `*/10 * * * *`. After the speak in step 6, the ElevenLabs console's speech history should be empty within a few minutes. The Worker's Cron Events list each run; a failed run means the key cannot list or delete history. Recheck them for failed runs after any key change.
 8. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and check the live responses against the origin, caching, and cookie rules in `docs/specs/security-hosted.md` -> "Origin boundary".
 9. Confirm the release smoke's one-time half passed: `https://try.dormouse.sh/connect/` answers the page under its own policy with its script beside it, `https://relay.dormouse.sh/connect/` answers only the 308 to it, and the rendezvous mints a room on the relay, is refused with a browser `Origin`, refuses a join from the relay's origin, joins from the try origin, crosses a frame each way, and is refused a second phone. Load `https://try.dormouse.sh/connect/` in a browser and confirm no injected script or third-party request, and that `https://relay.dormouse.sh/` answers Pocket's shell under Pocket's policy.
 10. With a desktop build pointed at this origin, open a one-time link on a real iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi as the laptop and each by scanning the QR code with the native camera, which must keep the fragment. Connect, type the digits, run a command, and End from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends report the end. On a guest or client-isolated network the attempt ends on the same-Wi-Fi copy.
