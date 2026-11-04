@@ -21,6 +21,7 @@ export const CODING_AGENTS: readonly CodingAgent[] = [
   { name: 'Antigravity', commands: ['agy'], resume: '--conversation', watchByDefault: true },
   { name: 'Warp', commands: ['warp'], resume: '--resume', watchByDefault: true },
   { name: 'Cursor', commands: ['agent', 'cursor-agent'], resume: '--resume', watchByDefault: true },
+  { name: 'Muse', commands: ['muse'], resume: 'resume', watchByDefault: false },
 ];
 
 export const DEFAULT_WATCHED_COMMANDS: readonly string[] = CODING_AGENTS

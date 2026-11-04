@@ -40,6 +40,19 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Codex with the 400 ms fallback** (Codex CLI 0.159.3, macOS, 2026-10-01). Native PTY probes resumed a disposable conversation containing a literal test reply, waited 1.5 seconds after the assistant reply rendered, then ran the production capture machine. Five idle runs printed the hint at 265, 202, 209, 192, and 209 ms, each with one press; a separate one-press control yielded at 203 ms. With unsent input, the fallback press arrived at 413 ms and the hint at 680 ms. Every capture retained the exact conversation ID, and each fresh process rendered the saved reply. These runs used `--no-daemon`, `--no-alt-screen`, and disabled MCP servers; they did not test heavy load, other platforms, or a complete app restart. The slowest idle run left 135 ms before the fallback, so this evidence is not a bound on shutdown latency under load.
 
+**Muse's press counts** (Muse Code 1.4.14, macOS, 2026-11-04). Native PTY probes ran the production capture machine; idle and unsent-text runs used `--provider echo`, the others the default model. Muse asks `Press Ctrl-C again to quit`, which the ask gate already matches.
+
+| State when interrupted | Presses | Hint at |
+| --- | --- | --- |
+| idle (three runs) | 2 | 435–500 ms |
+| unsent text | 3 | 649 ms |
+| streaming a response | 2 | 361 ms |
+| at an approval prompt | 3 | 719 ms |
+| thinking, before the turn's first output | 2, needs 4 | none |
+| freshly launched, no conversation | 2 | none, correctly |
+
+Before a turn's first output, the first press cancels the turn and returns its prompt to the input, the second clears the input, and only the third asks, so no ask ever earns a third press. Taking a fourth press or a blind third would break the agents the retry gates protect. Two panes in one directory captured separate ids and each restored its own reply; a fresh process kept the same id through a second capture. These probes exercised shared capture and agent resume, not a complete app restart.
+
 ## Detection
 
 **Why the rightmost match wins by position, not by pattern order.** An agent that redraws its hint with carriage returns leaves several candidates in the window; position is the only ordering that tracks which one the user can see, so ranking patterns against each other would sometimes surface a stale id.
@@ -76,3 +89,6 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **The cold-activation cost, measured.** Claude ≈ 5 s to resume, codex ≈ 25 s with MCP servers (date not recorded). Multiplied by every agent pane in a Workspace and by how often Reload Window happens, that is what a future setting would trade against.
 
+## Watching for attention
+
+**Why Muse is not watched by default** (Muse Code 1.4.14, macOS, 2026-11-04). At an approval prompt its `Calling tools` spinner keeps repainting, about 5 KB/s. Fed real output, `QuiesceDetector` stayed `BUSY` for the 44 s the probe waited there, with Muse's own line reading `last event 38s ago`. A finished response did settle, and its idle redraws raised no run. It emits no `OSC 9` notification or progress, so nothing else marks the prompt.

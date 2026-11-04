@@ -43,4 +43,9 @@ export const AGENT_EXIT_FIXTURES = [
     output: '  Press Ctrl+C again to exit\r\n\r\n  To resume this session: agent --resume=66666666-6666-4666-8666-666666666666\r\nuser@machine project % ',
     command: 'agent --resume 66666666-6666-4666-8666-666666666666',
   },
+  {
+    agent: 'Muse', version: '1.4.14', os: 'macOS',
+    output: '\x1b[<1u\x1b[<u\x1b[?1004l\x1b[?2004l\x1b[0 q\x1b[?25h\x1b[2mTo continue this session, run muse resume 88888888-8888-7888-8888-888888888888\x1b[22m\r\nuser@machine project % ',
+    command: 'muse resume 88888888-8888-7888-8888-888888888888',
+  },
 ] as const;
