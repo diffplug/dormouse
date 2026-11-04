@@ -86,6 +86,13 @@ interface ActiveProtocolProgress {
 /** How a progress cycle ended. */
 type ProgressOutcome = 'complete' | 'warning' | 'error';
 
+/** A cycle's end, waiting out `cfg.alert.progressEndGrace` to see if it was one. */
+interface PendingProgressEnd {
+  outcome: ProgressOutcome;
+  percent: number | null;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 /** A progress title by outcome: after the running command, or on its own
  *  (`docs/specs/alert.md` -> Terminal reports). */
 const PROGRESS_TITLES: Record<ProgressOutcome, { afterCommand: string; alone: string }> = {
@@ -300,6 +307,8 @@ interface AlertEntry {
   ackedQuiet: boolean;
   /** The live `OSC 9;4` cycle. Never touches the ring, and the ring never touches it. */
   progress: ActiveProtocolProgress | null;
+  /** Set while `progress` has ended but the end has not counted yet. */
+  progressEnd: PendingProgressEnd | null;
   commandExitWatch: CommandExitWatch | null;
   pendingCommandLine: string | null;
   todo: TodoState;
@@ -785,13 +794,19 @@ export class AlertManager {
     if (progress.state === 'clear' || progress.state === 'error' || (progress.state === 'normal' && progress.percent === 100)) {
       // Only a live cycle's end completes a turn: programs clear defensively,
       // and a command boundary already ended any cycle a late end belongs to.
-      if (!live) return;
-      // A cycle that completes keeps the warning it ran under.
-      const outcome: ProgressOutcome = progress.state === 'error' ? 'error' : live.state === 'warning' ? 'warning' : 'complete';
-      this.finishProtocolProgressCycle(id, entry, outcome, progress.state === 'clear' ? live.percent : progress.percent);
+      // The first end stands: a program may send 100% and then clear.
+      if (!live || entry.progressEnd) return;
+      entry.progressEnd = {
+        // A cycle that completes keeps the warning it ran under.
+        outcome: progress.state === 'error' ? 'error' : live.state === 'warning' ? 'warning' : 'complete',
+        percent: progress.state === 'clear' ? live.percent : progress.percent,
+        timer: setTimeout(() => this.settleProgressEnd(id, entry), cfg.alert.progressEndGrace),
+      };
       return;
     }
 
+    // The next cycle opened at once: that end was no completion.
+    this.cancelProgressEnd(entry);
     // Announced work is work, and may start a run as input does, so output
     // after a mid-turn acknowledgement still makes the turn's end news.
     this.noteWork(id, entry);
@@ -799,6 +814,18 @@ export class AlertManager {
     if (live?.state === progress.state && live.percent === progress.percent) return;
     entry.progress = { state: progress.state, percent: progress.percent };
     this.notify(id);
+  }
+
+  /** A pending end counts now: its grace ran out, or something proved it real. */
+  private settleProgressEnd(id: string, entry: AlertEntry): void {
+    const end = entry.progressEnd;
+    if (end) this.finishProtocolProgressCycle(id, entry, end.outcome, end.percent);
+  }
+
+  private cancelProgressEnd(entry: AlertEntry): void {
+    if (entry.progressEnd === null) return;
+    clearTimeout(entry.progressEnd.timer);
+    entry.progressEnd = null;
   }
 
   /**
@@ -870,6 +897,7 @@ export class AlertManager {
     entry: AlertEntry,
     event: Extract<TerminalSemanticEvent, { type: 'commandStart' }>,
   ): void {
+    this.settleProgressEnd(id, entry);
     const resolved = resolveCommandStart(entry.pendingCommandLine, event);
     entry.pendingCommandLine = null;
     // A later stray clear finds no cycle to complete.
@@ -891,6 +919,8 @@ export class AlertManager {
     entry: AlertEntry,
     exitCode: number | undefined,
   ): boolean {
+    // The program said it was done and has now stopped, so that end was real.
+    this.settleProgressEnd(id, entry);
     const watch = entry.commandExitWatch;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
@@ -999,6 +1029,7 @@ export class AlertManager {
    * settles as a completion after it. The caller publishes.
    */
   private endRun(entry: AlertEntry): void {
+    this.cancelProgressEnd(entry);
     entry.progress = null;
     entry.detector.reset();
   }
@@ -1078,6 +1109,8 @@ export class AlertManager {
     if (this.helpers.has(id)) return;
     this.markSeen(entry);
     if (input) {
+      // Answered: it lands in the echo window just opened, so only an await sees it.
+      this.settleProgressEnd(id, entry);
       this.clearRingForUser(entry);
       this.setTodoForUser(id, entry, false);
       return;
@@ -1244,6 +1277,7 @@ export class AlertManager {
     if (entry) {
       entry.detector.dispose();
       this.endLeaveGrace(entry);
+      this.cancelProgressEnd(entry);
       this.entries.delete(id);
       this.notify(id);
     }
@@ -1285,6 +1319,7 @@ export class AlertManager {
     for (const entry of this.entries.values()) {
       entry.detector.dispose();
       this.endLeaveGrace(entry);
+      this.cancelProgressEnd(entry);
     }
     this.entries.clear();
     this.removed.clear();
@@ -1342,6 +1377,7 @@ export class AlertManager {
         ring: null,
         ackedQuiet: false,
         progress: null,
+        progressEnd: null,
         commandExitWatch: null,
         pendingCommandLine: null,
         todo: false,

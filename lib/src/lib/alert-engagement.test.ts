@@ -565,7 +565,7 @@ describe('a Claude Code turn', () => {
 
   it('shows the finish as TODO while the user watches, and clears it once they type', () => {
     const endAt = ENTER_AT + RECORDED_TURN_MS;
-    const typedAt = endAt + 2_000;
+    const typedAt = endAt + cfg.alert.progressEndGrace + 2_000;
     const run = player([
       ...turn(RECORDED_TURN_MS),
       key(typedAt, 'x'),
@@ -582,8 +582,8 @@ describe('a Claude Code turn', () => {
   it.each([
     ['a turn too short to establish activity', RECORDED_TURN_MS],
     ['a longer turn', LONG_TURN_MS],
-  ] as const)('rings "claude finished" once, as it ends, when the user moved away mid-turn: %s', (_when, turnMs) => {
-    const ringAt = ENTER_AT + turnMs;
+  ] as const)('rings "claude finished" once, when its end has stood, when the user moved away mid-turn: %s', (_when, turnMs) => {
+    const ringAt = ENTER_AT + turnMs + cfg.alert.progressEndGrace;
     const run = player([...turn(turnMs), MOVED_AWAY]);
 
     run.to(ringAt - 1);
@@ -630,18 +630,33 @@ describe('a Claude Code turn', () => {
 
     run.to(ENTER_AT + LONG_TURN_MS + 6_100 - 1);
     expect(ringing(PANE)).toBe(false);
-    run.to(ENTER_AT + LONG_TURN_MS + 6_100);
+    run.to(ENTER_AT + LONG_TURN_MS + 6_100 + cfg.alert.progressEndGrace);
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: FINISHED });
   });
 
   it('completes a watched turn once: a dismissed finish never settles again', () => {
     manager.setWatchedCommands(['claude']);
-    const endAt = ENTER_AT + LONG_TURN_MS;
-    const run = player([...turn(LONG_TURN_MS), MOVED_AWAY, at(endAt + 100, () => manager.dismissAlert(PANE))]);
+    const ringAt = ENTER_AT + LONG_TURN_MS + cfg.alert.progressEndGrace;
+    const run = player([...turn(LONG_TURN_MS), MOVED_AWAY, at(ringAt + 100, () => manager.dismissAlert(PANE))]);
 
-    run.to(endAt + 30_000);
+    run.to(ringAt + 30_000);
     expect(ringing(PANE)).toBe(false);
     expect(episodes.size).toBe(1);
+  });
+
+  it('never rings when queued work starts the next turn as the cycle ends', () => {
+    // Claude Code 2.1.318 with background agents: `OSC 9;4;0` and the next
+    // `OSC 9;4;3` within a millisecond, frames on throughout (report, 2026-11-04).
+    const endAt = ENTER_AT + LONG_TURN_MS;
+    const run = player([
+      ...turn(LONG_TURN_MS).filter((step) => step.at !== endAt),
+      MOVED_AWAY,
+      emit(endAt, '\x1b]9;4;0;\x07\x1b]9;4;3;\x07'),
+    ]);
+
+    run.to(endAt + 30_000);
+    expect(episodes.size).toBe(0);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'OSC_NOTIF_BUSY', todo: false, notification: null });
   });
 
   it('rings a permission request at once, though the prompt keeps blinking', () => {
