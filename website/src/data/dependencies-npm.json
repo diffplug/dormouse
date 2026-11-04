@@ -2703,7 +2703,7 @@
       "homepage": "https://github.com/cure53/DOMPurify",
       "versions": [
         "3.4.15",
-        "3.4.16"
+        "3.4.17"
       ]
     },
     {
@@ -4358,7 +4358,7 @@
       "author": "Colin McDonnell <zod@colinhacks.com>",
       "homepage": "https://zod.dev",
       "versions": [
-        "4.6.5"
+        "4.6.7"
       ]
     }
   ]
