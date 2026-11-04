@@ -32,6 +32,10 @@ export const cfg = {
      * land before a held completion counts as left behind: a VS Code webview's
      * blur and its window's focus change arrive in no fixed order. */
     leaveGrace: 1_000,
+    /** ms — how long a progress cycle's end waits before it counts: an agent
+     * can end one cycle and open the next at once when queued work starts a
+     * new turn, which is no completion. */
+    progressEndGrace: 3_000,
     /** ms — shared grace period for keystroke echo AND fast command completions.
      * Both are intentionally suppressed: completions inside it neither ring nor
      * wait to ring on inactivity. Keep these effects coupled; there is no separate

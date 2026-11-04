@@ -8,7 +8,7 @@ import {
 } from './terminal-protocol';
 import { cfg } from '../cfg';
 import { toPersistedAlertState } from './session-types';
-import { armCommandExit, collectEpisodes, driveToBusy, engage, finishCommand, goIdle, leave, press, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
+import { armCommandExit, collectEpisodes, driveToBusy, engage, finishCommand, goIdle, leave, press, progressEndStands, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
 
 describe('AlertManager in isolation', () => {
   let manager: AlertManager;
@@ -490,6 +490,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
     manager.updateProtocolProgress(id, { state: 'clear', percent: null });
+    progressEndStands();
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: false,
@@ -565,6 +566,142 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toMatchObject({ episode: null, todo: false, notification: null });
   });
 
+  describe("a progress cycle's end", () => {
+    const GRACE = cfg.alert.progressEndGrace;
+    const active = (id: string) => manager.updateProtocolProgress(id, { state: 'indeterminate', percent: null });
+    const end = (id: string) => manager.updateProtocolProgress(id, { state: 'clear', percent: null });
+
+    it('counts only once its grace passes, the cycle still busy until then', () => {
+      const id = 'end-grace';
+      active(id);
+      end(id);
+      vi.advanceTimersByTime(GRACE - 1);
+      expect(manager.getState(id)).toMatchObject({ status: 'OSC_NOTIF_BUSY', todo: false, notification: null });
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('is no end if an active update follows inside the grace, and the next end still rings', () => {
+      const id = 'end-then-restart';
+      active(id);
+      end(id);
+      vi.advanceTimersByTime(GRACE - 1);
+      active(id);
+      vi.advanceTimersByTime(60_000);
+      expect(manager.getState(id)).toMatchObject({ status: 'OSC_NOTIF_BUSY', todo: false, notification: null });
+
+      end(id);
+      vi.advanceTimersByTime(GRACE);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('holds back a settle that falls due inside the grace', () => {
+      const id = 'end-no-settle';
+      manager.setWatchedCommands(['claude']);
+      runCommand(manager, id, 'claude');
+      active(id);
+      driveToBusy(manager, id);
+      const quiet = cfg.alert.mightNeedAttention + cfg.alert.needsAttentionConfirm;
+      vi.advanceTimersByTime(quiet - GRACE + 1);
+      end(id);
+      vi.advanceTimersByTime(GRACE - 1);
+      expect(manager.getState(id)).toMatchObject({ status: 'OSC_NOTIF_BUSY', notification: null });
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).notification).toMatchObject({ source: 'OSC 9;4' });
+    });
+
+    it('stands as first sent, its grace not restarted by a later end', () => {
+      const id = 'end-first-stands';
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 40 });
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+      vi.advanceTimersByTime(GRACE - 1);
+      manager.updateProtocolProgress(id, { state: 'error', percent: null });
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        notification: { title: 'Progress complete', body: 'Progress 100%' },
+      });
+    });
+
+    it.each([
+      ['a finish', (id: string) => finishCommand(manager, id)],
+      ['a prompt', (id: string) => manager.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }])],
+      ['PTY exit', (id: string) => manager.onExit(id, 0)],
+      ['a command start', (id: string) => runCommand(manager, id, 'next')],
+    ] as const)('counts at once on %s, naming the command it ended under', (_boundary, boundary) => {
+      const id = `end-boundary-${_boundary}`;
+      // Unseen: its own finish never rings, so only the report can.
+      runCommand(manager, id, 'cargo build');
+      active(id);
+      end(id);
+      boundary(id);
+      expect(manager.getState(id)).toMatchObject({
+        status: 'ALERT_RINGING',
+        notification: { source: 'OSC 9;4', title: 'cargo build finished' },
+      });
+    });
+
+    it.each([
+      ['a host interrupt', (id: string) => manager.silenceRun(id)],
+      ['a restore', (id: string) => manager.seed(id, { todo: false })],
+    ] as const)('is dropped by %s', (_how, drop) => {
+      const id = `end-dropped-${_how}`;
+      active(id);
+      end(id);
+      drop(id);
+      vi.advanceTimersByTime(GRACE);
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null, episode: null });
+    });
+
+    it('gives the next cycle its own full grace after a dropped end', () => {
+      const id = 'end-dropped-then-next';
+      active(id);
+      end(id);
+      vi.advanceTimersByTime(GRACE - 2);
+      manager.silenceRun(id);
+      active(id);
+      end(id);
+      vi.advanceTimersByTime(GRACE - 1);
+      expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
+    it('never reaches the next PTY generation when the Session restarts during the grace', () => {
+      const id = 'end-restarted';
+      active(id);
+      end(id);
+      manager.restart(id);
+      const seen = recordingClaimant(id, false);
+      vi.advanceTimersByTime(GRACE);
+      expect(seen).toEqual([]);
+    });
+
+    it('is answered by typing inside the grace: no ring and no TODO, though an await still hears it', () => {
+      const id = 'end-typed-over';
+      const seen = recordingClaimant(id, false);
+      engage(manager, id);
+      active(id);
+      end(id);
+      manager.acknowledge(id, { input: true });
+      expect(seen).toHaveLength(1);
+      vi.advanceTimersByTime(GRACE);
+      expect(seen).toHaveLength(1);
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null, episode: null });
+    });
+
+    it('waits out a click: the look at the pane is no answer to it', () => {
+      const id = 'end-clicked';
+      engage(manager, id);
+      active(id);
+      end(id);
+      manager.acknowledge(id, { input: false });
+      expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+      vi.advanceTimersByTime(GRACE);
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: { source: 'OSC 9;4' } });
+    });
+  });
+
   it('leaves a TODO the user cleared off when the state they acknowledged is reported again', () => {
     const id = 'receipt-after-clear';
     manager.notifyFromProtocol(id, REPORT);
@@ -582,6 +719,7 @@ describe('AlertManager in isolation', () => {
     const id = `progress-title-${_outcome}`;
     runCommand(manager, id, 'cargo build --release');
     for (const update of updates) manager.updateProtocolProgress(id, update);
+    progressEndStands();
     expect(manager.getState(id).notification).toMatchObject({ source: 'OSC 9;4', title });
   });
 
@@ -607,6 +745,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
     manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+    progressEndStands();
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
       todo: true,
@@ -1145,6 +1284,7 @@ describe('AlertManager in isolation', () => {
       seen.length = 0;
 
       manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+      progressEndStands();
 
       expect(manager.getState(id).status).not.toBe('OSC_NOTIF_BUSY');
       expect(seen).not.toEqual([]);
@@ -1336,6 +1476,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
       manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+      progressEndStands();
 
       expect(seen).toEqual([{
         kind: 'notification',
@@ -1446,6 +1587,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
       manager.updateProtocolProgress(id, { state: 'clear', percent: null });
+      progressEndStands();
       await Promise.resolve();
       expect(outcome).toMatchObject({ kind: 'resolved', cause: 'bell' });
     });
@@ -1720,6 +1862,7 @@ describe('AlertManager in isolation', () => {
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
+      progressEndStands();
 
       expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
       expect(manager.getState(id)).toMatchObject({

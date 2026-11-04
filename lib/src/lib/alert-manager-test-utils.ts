@@ -8,6 +8,7 @@
  * mightNeedAttention=2000, needsAttentionConfirm=3000, workStartWindow=5000.
  */
 import { vi } from 'vitest';
+import { cfg } from '../cfg';
 import type { ActivityNotification, AlertManager } from './alert-manager';
 
 /** The viewer a suite reports for when one renderer realm is enough. */
@@ -92,6 +93,11 @@ export function driveToCandidate(manager: AlertManager, id: string): void {
 export function driveToBusy(manager: AlertManager, id: string): void {
   driveToCandidate(manager, id);
   manager.onData(id);
+}
+
+/** A progress cycle's end waits out its grace and counts. */
+export function progressEndStands(): void {
+  vi.advanceTimersByTime(cfg.alert.progressEndGrace);
 }
 
 /** Silence through both quiet windows: BUSY -> MIGHT_NEED_ATTENTION -> settled. */

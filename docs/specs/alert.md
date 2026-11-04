@@ -27,7 +27,7 @@ Only `watching` requires WATCHING.
 Public `status` is a projection — first match wins:
 
 1. `ALERT_RINGING` if the ring is active.
-2. `OSC_NOTIF_BUSY` if a progress cycle is active.
+2. `OSC_NOTIF_BUSY` if a progress cycle is Active or Ending.
 3. The output/silence detector's own state if WATCHING is on. **Never reorder 3 and 4** (rationale).
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
 5. Otherwise `WATCHING_DISABLED`.
@@ -91,7 +91,7 @@ flowchart TD
   P["Viewer presence"] -- "Present, focus" --> EN["Engagement"]
   WIN["Input windows"] -- "gate output" --> DET["Output detector"]
   IN["input"] --> WIN
-  PR["Progress cycle"] -- "Active: no settle, end: reset" --> DET
+  PR["Progress cycle"] -- "Active or Ending: no settle, end: reset" --> DET
   PR -- "active update" --> WIN
   DET -- "settle" --> DIS{{"Dispatch"}}
   CMD["Foreground command"] -- "command finish, seen or unseen" --> DIS
@@ -215,7 +215,7 @@ stateDiagram-v2
     BUSY --> MIGHT_NEED_ATTENTION: silence
     BUSY --> Quiet: reset
     MIGHT_NEED_ATTENTION --> BUSY: output
-    MIGHT_NEED_ATTENTION --> Quiet: more silence — a settle, unless the progress cycle is Active
+    MIGHT_NEED_ATTENTION --> Quiet: more silence — a settle, unless the progress cycle is Active or Ending
     MIGHT_NEED_ATTENTION --> Quiet: reset
   }
 ```
@@ -226,8 +226,12 @@ stateDiagram-v2
     [*] --> NoCycle
     NoCycle --> Active: normal below 100, warning, or indeterminate
     Active --> Active: another of those
-    Active --> NoCycle: normal 100, clear, or error — a report, then a reset
+    Active --> Ending: normal 100, clear, or error
     Active --> NoCycle: command boundary or host interrupt
+    Ending --> Active: normal below 100, warning, or indeterminate
+    Ending --> Ending: normal 100, clear, or error, the first end standing
+    Ending --> NoCycle: the end grace elapses, a gesture with input, or a command boundary — a reset, then a report
+    Ending --> NoCycle: host interrupt
     NoCycle --> NoCycle: normal 100, clear, or error
   }
 ```
@@ -433,7 +437,7 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 The output/silence detector is always on, one per Session for its whole lifetime; the rule set decides only whether its state is publicly visible and whether a settle may ring.
 
-**Must use the detector as the single output-activity signal for status and inferred completion**; its states are the Output detector machine (Completion events → State machines). **Never dispatch a settle while an `OSC 9;4` cycle is active, and reset the detector when one ends**; the cycle's end completes the turn (rationale).
+**Must use the detector as the single output-activity signal for status and inferred completion**; its states are the Output detector machine (Completion events → State machines). **Never dispatch a settle while an `OSC 9;4` cycle is Active or Ending, and reset the detector when one ends**; the cycle's end completes the turn (rationale).
 
 **A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or input revive a retired id**; a semantic or protocol event may (rationale).
 
@@ -470,18 +474,20 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 - `OSC 9` — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation (`docs/specs/terminal-state.md`), with no alert effect. A number, alone or before `;`, is a ConEmu subcommand (`9;12`, a bare `9;9`) yielding neither notification nor title — except `9;4` below and `9;9;<cwd>` (`docs/specs/terminal-state.md`).
 - `OSC 777` — only the `notify` subcommand is supported; unsupported subcommands and empty sanitized notifications are ignored.
 - `OSC 99` (kitty) — chunked notifications keyed by `i`; completion rings once if the sanitized title or body is nonempty. Management payloads (`p=?`, `p=close`, `p=alive`) contribute no content.
-- `OSC 9;4` progress — progress only: no title, body, urgency, id, app name, or action fields. **A cycle must stay an independent sub-state: it never changes the ring, and the ring never changes it** (rationale); an active cycle only holds back settles (WATCHING Track).
+- `OSC 9;4` progress — progress only: no title, body, urgency, id, app name, or action fields. **A cycle must stay an independent sub-state: it never changes the ring, and the ring never changes it** (rationale); an active cycle only holds back settles (WATCHING Track). **Must take a cycle's end as real only once `cfg.alert.progressEndGrace` passes without an active update** (rationale).
 
   | Input | Behavior |
   |---|---|
-  | active normal / warning / indeterminate | starts or updates the cycle and opens the work-start window; never a completion |
+  | active normal / warning / indeterminate | starts or updates the cycle, cancels a pending end, and opens the work-start window; never a completion |
   | `state=1, progress=100` | ends the cycle; a report completion |
   | `state=2` | ends the cycle; a report error |
   | clear | ends the cycle; a report completion |
-  | any of those three with no cycle active | ignored (rationale) |
+  | any of those three with no cycle active or an end already pending | ignored (rationale) |
   | completing a warning cycle | a report completion with the warning title |
   | invalid state, missing percent for `1`/`4`, out-of-range percent | ignored |
-  | a command boundary — start, finish, prompt, PTY exit | ends the cycle silently |
+  | a command boundary — start, finish, prompt, PTY exit | a pending end counts at once (rationale); otherwise ends the cycle silently |
+  | a gesture with input | a pending end counts at once, inside the echo window it opened |
+  | a host interrupt | drops a pending end and ends the cycle silently |
 
   Titles name the running command — its watch key, else its display command — and fall back to a generic title with none running.
 

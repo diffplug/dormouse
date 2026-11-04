@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
-import { armCommandExit, driveToBusy, engage, finishCommand, goIdle, heartbeat, press, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
+import { armCommandExit, driveToBusy, engage, finishCommand, goIdle, heartbeat, press, progressEndStands, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
 import { toPersistedAlertState } from './session-types';
 import { createOwnerPtyStream } from '../host/owner-pty';
 
@@ -137,6 +137,7 @@ describe('owed alerts during resumed output', () => {
     // A turn the program began unasked, announced as `OSC 9;4;3`, painting nothing.
     manager.updateProtocolProgress(ID, { state: 'indeterminate', percent: null });
     manager.updateProtocolProgress(ID, { state: 'clear', percent: null });
+    progressEndStands();
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: { source: 'OSC 9;4' } });
   });
   it('lets a progress update start a run, so output after a mid-turn dismissal makes the end news', () => {
@@ -147,6 +148,7 @@ describe('owed alerts during resumed output', () => {
     manager.dismissAlert(ID);
     burst(3_000);
     manager.updateProtocolProgress(ID, { state: 'clear', percent: null });
+    progressEndStands();
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: { source: 'OSC 9;4' } });
   });
   it('ignores repeated typing echoes', () => {
