@@ -98,7 +98,7 @@ const SIGN_IN_PARAMS = new URLSearchParams(location.search);
 const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error");
 
 /** The address bar's path for each page past enrollment. */
-const VIEW_PATHS: Record<View, string> = { account: "/account", checkout: "/checkout", billing: "/billing" };
+const VIEW_PATHS: Record<View, string> = { account: "/account", checkout: "/checkout", billing: "/billing", closed: "/closed" };
 
 // How long the page re-reads for a Pending before saying it has not shown;
 // after that the focus refresh picks it up.
@@ -130,7 +130,7 @@ export function App({
   // Null hides the Plan section; "closed" until checkout opens.
   const [billing, setBilling] = useState<BillingSummary | "closed" | null>(null);
   const [view, setViewState] = useState<View>(
-    checkout ? "checkout" : location.pathname === "/billing" ? "billing" : "account",
+    checkout ? "checkout" : location.pathname === "/billing" ? "billing" : location.pathname === "/closed" ? "closed" : "account",
   );
   const viewRef = useRef(view);
   const setView = (next: View) => {
@@ -223,6 +223,8 @@ export function App({
     setComputers(enrolled);
     setPasskeys(registered);
     setBilling(plan);
+    // Signed in on a `/closed` link kept from an earlier account: this one stands.
+    if (current && viewRef.current === "closed") setView("account");
     history.replaceState(
       null,
       "",
@@ -279,7 +281,8 @@ export function App({
   // A failed lookup keeps its error and Retry on screen rather than sending
   // a member who is signed in away during an outage, even once that error is
   // cleared (a new enrollment link, Don't approve).
-  // Checkout asks for sign-in, so it never shows the notice.
+  // Checkout asks for sign-in, so it never shows the notice, and a closed
+  // account stays on the page that confirms it.
   const comingSoon = preLaunchNotice(lookup, SIGN_IN_OPEN || view !== "account");
   useEffect(() => {
     if (!comingSoon) return;
@@ -489,7 +492,8 @@ export function App({
     mutate("close", async () => {
       await closeAccountRequest();
       forgetAccount();
-      setNotice({ text: "Your account is closed. We keep billing records as the privacy policy describes." });
+      setView("closed");
+      history.replaceState(null, "", VIEW_PATHS.closed);
     });
   const leaveBilling = () => {
     forgetCheckout();

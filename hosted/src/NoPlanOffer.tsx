@@ -7,7 +7,7 @@ import {
   DASHED_ROW_CLASS,
 } from "dormouse-lib/site/docs-tokens";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
-import { foundingTier, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing.ts";
+import { foundingTier, HOSTED_YEARLY, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing.ts";
 
 /** The Hosted page's plan cards, in a new tab so this one keeps its code. */
 export const HOSTED_PLANS_URL = withHostedRef("https://dormouse.sh/hosted/", HOSTED_REFS.hostedNoPlan, "pricing");
@@ -27,13 +27,16 @@ const NO_LIMIT = "No device limit, no per-device charge";
 export function NoPlanOffer({
   purpose,
   checkoutOpen = false,
+  foundingLapsed = false,
 }: {
   purpose: "remote" | "voice" | undefined;
   /** Billing is open, so the plans link goes to checkout. */
   checkoutOpen?: boolean;
+  /** This account subscribes again at list, so the offer is. */
+  foundingLapsed?: boolean;
 }) {
   const voice = purpose === "voice";
-  const founding = foundingTier();
+  const tier = foundingLapsed ? HOSTED_YEARLY : foundingTier();
   return (
     <div className={CARD_ACCENT_CLASS}>
       <h2 className="font-display text-xl text-balance">
@@ -53,12 +56,12 @@ export function NoPlanOffer({
         ))}
       </ul>
       <p className="mt-5 flex flex-wrap items-baseline gap-x-2">
-        <s className={`font-display text-xl ${CARD_MUTED_TEXT_CLASS}`}>${founding.listPrice}</s>
-        <span className="font-display text-4xl">${founding.price}</span>
-        <span className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>{founding.per}</span>
+        {tier.listPrice && <s className={`font-display text-xl ${CARD_MUTED_TEXT_CLASS}`}>${tier.listPrice}</s>}
+        <span className="font-display text-4xl">${tier.price}</span>
+        <span className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>{tier.per}</span>
       </p>
       <p className={`mt-1 text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-        Founding price, locked while you stay subscribed. Or ${LIST_MONTHLY}/month.
+        {foundingLapsed ? "Yearly" : "Founding price, locked while you stay subscribed"}. Or ${LIST_MONTHLY}/month.
       </p>
       <a
         className={`mt-5 gap-2 ${ACTION_CLASS}`}
