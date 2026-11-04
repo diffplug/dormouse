@@ -65,6 +65,9 @@ export function Checkout({
     <form onSubmit={submit}>
       <fieldset>
         <legend className="mb-3 font-display text-xl">Choose a plan</legend>
+        {billing.foundingLapsed && (
+          <p className={HELP_CLASS}>Your founding price ended with your earlier subscription, so subscribing again is at the list price.</p>
+        )}
         {offers.map((each) => (
           <label
             key={each.id}

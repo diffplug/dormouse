@@ -33,7 +33,7 @@ export const ENROLLMENT_POLL_INTERVAL_S = 5;
 // `hosted/server/tests/policy.test.ts` pins this to. A new version is a new
 // acceptance row, never an edit of an old one. Moving it needs that version's
 // archive: `website/src/pages/policy-archive.test.tsx` says how.
-export const TERMS_VERSION = "2026-10-30";
+export const TERMS_VERSION = "2026-11-03";
 
 // Where a terms version's own text stays, unchanged, once published.
 export const termsArchiveUrl = (version: string) => `https://dormouse.sh/terms/${version}/`;

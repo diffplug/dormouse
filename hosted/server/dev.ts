@@ -10,6 +10,7 @@ import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
 import { EmailDev, SecureRandom, SystemTime } from "pgstencil";
 import { accountCron, accountRoutes, type AccountRoutesHost } from "./account-routes";
+import { billingSetup } from "./billing";
 import { stripeDevBilling } from "./billing-dev";
 import { BILLING_WEBHOOK_PATH } from "./billing-routes";
 import { authMetricHooks } from "./metrics";
@@ -65,15 +66,22 @@ const auth = createAuthApp({
 auth.app.get("/api/dev/emails", (c) =>
   c.json(email.all().map(({ to, text }) => ({ to, text }))),
 );
-// StripeDev in place of Stripe, so checkout runs end to end without a card or
-// a charge. Its state sits beside the development database's, which outlives
+// The five `STRIPE_*` bindings in the environment run real Stripe test mode
+// (`hosted/README.md` -> "Run against Stripe test mode"), and never a live key.
+const sandbox = billingSetup(process.env);
+if (sandbox?.live) throw new Error("The development entry refuses a live Stripe key.");
+// Else StripeDev in place of Stripe, so checkout runs end to end without a card
+// or a charge. Its state sits beside the development database's, which outlives
 // a restart, and its webhook comes back through this server.
-const stripe = await stripeDevBilling(
-  new SystemTime(),
-  new SecureRandom(),
-  fileURLToPath(new URL("../.pgstencil/stripe-dev.json", import.meta.url)),
-);
-stripe.dev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
+const stripe = sandbox
+  ? undefined
+  : await stripeDevBilling(
+      new SystemTime(),
+      new SecureRandom(),
+      fileURLToPath(new URL("../.pgstencil/stripe-dev.json", import.meta.url)),
+    );
+stripe?.dev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
+const billing = sandbox ?? stripe?.setup ?? null;
 const app = new Hono();
 // Built once, so the approval limiter counts across requests.
 const host: AccountRoutesHost = {
@@ -87,7 +95,7 @@ const host: AccountRoutesHost = {
   closeBurrow: async () => {},
   closeSessions: async () => {},
   nudgeBurrows: async () => {},
-  setup: () => stripe.setup,
+  setup: () => billing,
   // A withdrawal's acknowledgement lands in the local inbox beside sign-in codes.
   mail: () => email,
 };
@@ -115,7 +123,11 @@ ready = {
   vite,
 };
 console.log(
-  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.\nCheckout runs on StripeDev at ${stripe.dev.origin}: no card, no charge.`,
+  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.\n${
+    stripe
+      ? `Checkout runs on StripeDev at ${stripe.dev.origin}: no card, no charge.`
+      : `Checkout runs on Stripe test mode; forward its webhook to ${origin}${BILLING_WEBHOOK_PATH}.`
+  }`,
 );
 // OSC 367 (docs/specs/dor-tool.md -> OSC 367): frame this origin, not the
 // relay's port or Wrangler's inspector, which the same process tree binds.
@@ -175,7 +187,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     await vite.close();
     await auth.close();
     email.close();
-    await stripe.dev.close();
+    await stripe?.dev.close();
     await relayExit;
     process.exit(0);
   });

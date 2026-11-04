@@ -11,6 +11,8 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Ordinary: Story = {};
+/** Where closing an account lands: the closure and what happens to any refund. */
+export const AccountClosed: Story = { args: { session: null, view: "closed" } };
 export const ProviderOnly: Story = { args: { session: { ...SESSION, user: { ...SESSION.user, email: null } } } };
 export const AllProvidersConnected: Story = { args: { accounts: providers.map((providerId) => ({ providerId })) } };
 export const StaleLogin: Story = { args: { fresh: false },

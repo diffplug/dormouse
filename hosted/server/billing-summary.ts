@@ -21,8 +21,10 @@ export interface BillingSummary {
   entitled: boolean;
   /** A payment dispute is open, which pauses the subscription. */
   suspended: boolean;
-  /** The founding cohort on sale; null once founding has closed. */
+  /** The founding cohort on sale to this account; null once founding has closed, or `foundingLapsed`. */
   founding: { cohort: number; seatsLeft: number } | null;
+  /** An earlier founding subscription ended and kept its seat, so subscribing again is at list. */
+  foundingLapsed: boolean;
   /** `offered` while a founding subscription grants access; `name` while shown in the founders row. */
   founder: { offered: boolean; name: string | null };
   /** What the account agreed to when it bought the held subscription. */

@@ -34,7 +34,7 @@ import { NoPlanOffer } from "./NoPlanOffer";
 import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
 import { Checkout } from "./Checkout";
-import { CloseAccount } from "./Closure";
+import { AccountClosed, CloseAccount } from "./Closure";
 import { ChoosePlan, FoundersOptIn, ManageBilling, PlanConfirmation, PlanSection } from "./Plan";
 import { WithdrawalAcknowledgement, WithdrawalFunction } from "./Withdrawal";
 import type { Enrollment } from "./enrollment";
@@ -79,7 +79,7 @@ function Ticked({ children }: { children: string }) {
 }
 
 /** Which page of the account app, past enrollment, this is. */
-export type View = "account" | "checkout" | "billing";
+export type View = "account" | "checkout" | "billing" | "closed";
 
 /** App's existing values and callbacks; the controller owns their lifecycle. */
 export interface HostedPageProps {
@@ -178,6 +178,13 @@ export function HostedPage({
       </>
     );
 
+  if (view === "closed")
+    return (
+      <HostedShell themeControl={themeControl}>
+        <AccountClosed />
+      </HostedShell>
+    );
+
   return (
     <HostedShell themeControl={themeControl}>
         <h1 className={`mb-3 text-balance leading-tight ${PAGE_TITLE_CLASS}`}>
@@ -264,7 +271,7 @@ export function HostedPage({
                 {enrolling.code ? (
                   noPlan ? (
                     <>
-                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} />
+                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} foundingLapsed={summary?.foundingLapsed} />
                       {enrolling.purpose !== "voice" && (
                         <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
                           <SelfHostLine />

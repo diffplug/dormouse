@@ -24,7 +24,7 @@ export const ACCOUNT = { session: SESSION, computers: COMPUTERS, passkeys: PASSK
 /** Billing open, no plan held, the first founding cohort on sale. */
 export const NO_PLAN: BillingSummary = {
   plan: null, price: null, active: false, until: null, renews: false, entitled: false, suspended: false,
-  founding: { cohort: 0, seatsLeft: 63 }, founder: { offered: false, name: null }, consent: null, withdrawal: null, withdrawn: null,
+  founding: { cohort: 0, seatsLeft: 63 }, foundingLapsed: false, founder: { offered: false, name: null }, consent: null, withdrawal: null, withdrawn: null,
 };
 /** A founding plan bought today, renewing next year. */
 export const FOUNDING: BillingSummary = {

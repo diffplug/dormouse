@@ -1,5 +1,5 @@
 // Rules: docs/specs/hosted.md -> "Billing".
-import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe";
+import { Billing, BillingError, Stripe, purchaseStanding, type BillingDB } from "@pgstencil/stripe";
 import { CompiledQuery, type Kysely } from "kysely";
 import { SecureRandom, SystemTime, type EmailSender, type Time } from "pgstencil";
 import { connectDatabase } from "pgstencil/postgres";
@@ -208,6 +208,23 @@ export async function foundingPurchases(billing: Billing<Plan>, founding: readon
 export async function foundingCohort(billing: Billing<Plan>, founding: readonly string[]) {
   const { gross, net } = await foundingPurchases(billing, founding);
   return openCohort(gross, net);
+}
+
+/**
+ * Whether `owner`'s founding price has lapsed, so founding is no longer theirs
+ * to buy: an earlier founding subscription of theirs ended and kept its seat,
+ * by the rule {@link foundingPurchases} counts seats with. One ended within
+ * `REFUND_DAYS` returned its seat, so its buyer may buy again.
+ */
+export async function foundingLapsed(billing: Billing<Plan>, owner: string, founding: readonly string[]) {
+  const ended = await billing.db
+    .selectFrom("subscriptions")
+    .selectAll()
+    .where("owner_id", "=", owner)
+    .where("price_id", "in", founding)
+    .where("ended_at", "is not", null)
+    .execute();
+  return ended.some((subscription) => purchaseStanding(subscription, { refundDays: REFUND_DAYS }) === "purchased");
 }
 
 /**

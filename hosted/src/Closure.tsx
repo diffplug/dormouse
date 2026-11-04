@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from "react";
-import { MUTED_TEXT_CLASS, PANEL_CLASS, siteButton } from "dormouse-lib/site/docs-tokens";
+import { MUTED_TEXT_CLASS, PAGE_INTRO_CLASS, PAGE_TITLE_CLASS, PANEL_CLASS, siteButton } from "dormouse-lib/site/docs-tokens";
 import { RECENT_LOGIN_WINDOW } from "../server/policy-constants";
 import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
@@ -38,6 +38,33 @@ export function closureTerms(billing: BillingSummary | "closed" | null): ReactNo
       ? [`To keep Hosted until ${day(billing.until)} instead, cancel renewal in Manage billing.`]
       : []),
   ];
+}
+
+/**
+ * Where closing an account lands (`/closed`), for good: it reads no account,
+ * so a reload still says it, and it states the refund rule rather than one
+ * account's refund.
+ */
+export function AccountClosed() {
+  return (
+    <>
+      <h1 className={`mb-3 text-balance leading-tight ${PAGE_TITLE_CLASS}`}>Your account is closed</h1>
+      <p className={`mb-10 ${PAGE_INTRO_CLASS}`}>
+        Its sign-in methods, computers, passkeys, and Natural Voice are deleted. Any plan it held has ended and will not renew.
+      </p>
+      <h2 className={HEADING_CLASS}>Refunds</h2>
+      <p className={HELP_CLASS}>
+        If your first payment, or a yearly renewal, was in the 30 days before you closed, we refund that payment in full, including
+        tax, to the original payment method. Your bank or payment provider controls when the credit appears. Otherwise closing refunds nothing.
+      </p>
+      <p className={HELP_CLASS}>
+        In the EEA or UK, you can still withdraw from a contract during its withdrawal period, for a full refund of every payment, by emailing <SupportLink />.
+      </p>
+      <p className={HELP_CLASS}>
+        We keep billing records as the privacy policy describes. Questions about a refund: <SupportLink />.
+      </p>
+    </>
+  );
 }
 
 /** The account page's last section: closing the account, explained and confirmed in a dialog. */
