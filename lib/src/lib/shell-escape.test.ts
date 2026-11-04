@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { buildShellCommandForKind } from 'dor/commands/shell-quote';
 import { shellEscapePath, shellEscapePosix } from './shell-escape';
 
@@ -163,6 +163,15 @@ describe('shellEscapePosix round-trips through a real shell', () => {
   }
 });
 
+/** PowerShell arguments that print, as JSON, the argv `typed` parses to. A
+ *  PowerShell function, so the shell's own argument parsing is what is read. */
+function powerShellArgvArgs(typed: string[]): string[] {
+  const script = '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); '
+    + 'function argv { [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args))) }; '
+    + `argv ${typed.join(' ')}`;
+  return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
+}
+
 /** Run `typed` as the arguments of a command line in `shell`, and return the
  *  argv that command received. */
 function argvThrough(shell: string, path: string, typed: string[]): unknown {
@@ -173,12 +182,7 @@ function argvThrough(shell: string, path: string, typed: string[]): unknown {
     expect(result.status, result.stderr).toBe(0);
     return JSON.parse(result.stdout);
   }
-  // A PowerShell function, so the shell's own argument parsing is what is read.
-  const script = '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); '
-    + 'function argv { [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args))) }; '
-    + `argv ${typed.join(' ')}`;
-  const encoded = Buffer.from(script, 'utf16le').toString('base64');
-  const result = spawnSync(path, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+  const result = spawnSync(path, powerShellArgvArgs(typed), { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
   expect(result.error).toBeUndefined();
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout);
@@ -191,6 +195,23 @@ describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s pa
     ['powershell', findShell(`${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`)],
     ['pwsh', findShell(...(process.env.PATH ?? '').split(delimiter).map(dir => join(dir, 'pwsh.exe')), `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\PowerShell\\7\\pwsh.exe`)],
   ];
+  const paths = [...WINDOWS_LITERAL.map(([path]) => path), ...WINDOWS_REFUSED];
+
+  // Even after CI's warm-up step, the first Windows PowerShell 5.1 child to run
+  // the argv script takes about 400 ms longer than its byte-identical repeat,
+  // and once ran past its 10s bound while the 5.1 children around it took
+  // 500 ms. Run that exact script once per PowerShell here, bounded only by the
+  // hook, and log how long it took. (Both Session kinds type the same text.)
+  beforeAll(() => {
+    const typed = paths.flatMap((path) => shellEscapePath(path, 'powershell') ?? []);
+    for (const [name, shell] of shells.slice(1)) {
+      if (!shell) continue;
+      const start = performance.now();
+      const result = spawnSync(shell, powerShellArgvArgs(typed), { encoding: 'utf8', windowsHide: true, timeout: 50_000 });
+      console.log(`${name} argv warm-up: ${Math.round(performance.now() - start)} ms, exit ${result.status}`);
+    }
+  }, 120_000);
+
   it('has every Windows shell on the CI runner', () => {
     if (process.env.CI) expect(shells.filter(([, shell]) => !shell)).toEqual([]);
   });
@@ -204,7 +225,6 @@ describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s pa
         const recorder = join(dir, 'argv.cjs');
         writeFileSync(recorder, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))');
         const bin = fileURLToPath(new URL('../../../dor/bin/', import.meta.url));
-        const paths = [...WINDOWS_LITERAL.map(([path]) => path), ...WINDOWS_REFUSED];
         const accepted = paths.flatMap(path => {
           const quoted = shellEscapePath(path, 'powershell');
           return quoted === null ? [] : [{ path, quoted }];
@@ -224,7 +244,6 @@ describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s pa
   }
 
   // The refused names too: any that were typed must come back literally.
-  const paths = [...WINDOWS_LITERAL.map(([path]) => path), ...WINDOWS_REFUSED];
   for (const kind of ['cmd', 'powershell'] as const) {
     for (const [name, shell] of shells) {
       it.skipIf(!shell)(`reads a ${kind} Session's paths back literally in ${name}`, () => {
