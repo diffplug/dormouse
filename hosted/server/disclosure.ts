@@ -12,13 +12,13 @@ export const refundWindow = (plan: Plan) =>
 
 const renewalCadence = (plan: Plan) => (planInterval(plan) === "year" ? "every year" : "every month");
 
-/** `$50 USD a year, plus any applicable tax.` */
-export const priceInUsd = (plan: Plan, price: number) =>
-  `$${price} USD a ${planInterval(plan)}, plus any applicable tax.`;
+/** `$50 a year, plus any applicable tax.` A bare `$`: the Terms say which dollars. */
+export const priceLine = (plan: Plan, price: number) =>
+  `$${price} a ${planInterval(plan)}, plus any applicable tax.`;
 
 /** What the page lists beside the purchase action for `plan` at `price`, in its order. */
 export const disclosure = (plan: Plan, price: number) => ({
-  price: `${priceInUsd(plan, price)} Stripe shows the total before you pay.`,
+  price: `${priceLine(plan, price)} Stripe shows the total before you pay.`,
   renewal: `Renews automatically ${renewalCadence(plan)} at $${price} until you cancel.${
     plan === "founding" ? " Your founding price stays for as long as your subscription does." : ""
   }`,
