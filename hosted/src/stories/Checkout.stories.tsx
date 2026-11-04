@@ -14,6 +14,8 @@ export const Yearly: Story = { args: { checkoutPlan: "yearly" } };
 export const Monthly: Story = { args: { checkoutPlan: "monthly" } };
 /** Past the ladder's last step, founding is off sale. */
 export const FoundingClosed: Story = { args: { billing: { ...NO_PLAN, founding: null } } };
+/** An earlier founding subscription ended and kept its seat: at list from here. */
+export const FoundingLapsed: Story = { args: { billing: { ...NO_PLAN, founding: null, foundingLapsed: true } } };
 export const Phone: Story = { args: { phone: true } };
 export const Light: Story = { args: { light: true } };
 export const SignedOut: Story = { args: { session: null, billing: null } };

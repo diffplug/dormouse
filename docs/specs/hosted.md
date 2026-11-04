@@ -39,7 +39,7 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exceptions: `ADMIN_EMAIL` ("Entitlement") and `SIGN_IN_ALLOWLIST` (below).
 
-**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on any read but a provider callback or the CSRF challenge, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
+**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on any read but a provider callback or the CSRF challenge, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, the page is `/checkout`, `/billing`, or `/closed`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
@@ -82,7 +82,7 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds; closed, 200 `{ closed: true }` |
+| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, foundingLapsed, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds; closed, 200 `{ closed: true }` |
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew, price }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
@@ -100,15 +100,16 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must start a checkout only after agreement to `TERMS_VERSION` and to automatic renewal at the `price` the page showed, recorded in `dormouse_checkout_consents` before its URL is answered**; another version answers 409 `TERMS_CHANGED`, and a checkout whose Price `priceCatalog` does not price at `price` is refused (`expectPrice`) with 409 `PRICE_CHANGED`. `GET` shows the latest while a subscription is held.
 - **Must add or rename a founders-row name (`dormouse_founders`) only while `subscribedSql` holds on the founding Prices** (else 409) and `isFounderName` accepts it; leaving always works, a rename keeps `shownSince`. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must verify the webhook's signature over the raw body before any write** and answer 2xx only once `webhook()` has committed, any other failure 503, which Stripe retries.
-- **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: `billing.end` with reason `refund`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator.
+- **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: `billing.end` with reason `refund`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator. **Never end a subscription for a refunded charge whose newest refund Stripe lists carries the metadata `KEEP_SUBSCRIPTION` = `true`**, the operator's correction (`hosted/README.md` -> "Refund by hand"), read from Stripe on every delivery since the event embeds no refunds; a lost dispute ignores it.
 - **Must offer the online withdrawal only from the held subscription while `withdrawalOffer` holds**, once per subscription; else withdraw answers 409 `WITHDRAWAL_CLOSED`. A withdrawal (`dormouse_withdrawals`) is recorded with its acknowledgement, a `withdrawal` notice, then settled: its subscription ended at once (reason `withdrawal`), every paid invoice payment refunded in full, stamped once done; the cron retries every unsettled one, however old, least recently tried first, and fails while one does (`hosted/README.md` -> "Refund by hand"). **Never stamp a withdrawal or closure settled while a payment it refunds was paid outside Stripe, or the refunds Stripe lists for it as `succeeded` fall short of it**, whatever a create answered. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`, which outlives the account); closing in the account's favor restores it.
 - **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
+- **Never open a founding checkout for an account `foundingLapsed` answers true**, the rule `docs/specs/pricing.md` -> "Checkout and entitlement" states: it answers 409 `PRICE_CHANGED`, so a stale page rereads, and `GET` answers `founding` null beside it.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
-Source of truth: `billingSetup`, `withBilling`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
+Source of truth: `billingSetup`, `withBilling`, `foundingLapsed`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
 
 ## Billing notices
 
@@ -143,8 +144,9 @@ Errors are JSON `{ message }`; it needs no entitlement and works with billing cl
 - **Never answer a checkout URL for an account gone or under a hold younger than `CLOSING_HOLD_MINUTES`**: checked once it opened, the checkout is expired (409 `ACCOUNT_CLOSING`).
 - **Must end, and refund as closing does, a subscription the webhook finds current for an owner with no `"user"` row**, recorded unsettled on its closure first; a failed end fails the event.
 - **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done, as a withdrawal is ("Billing").
+- **Must land a closed account on `/closed` on this origin**, signed out and without the pre-launch notice; a login there goes to `/account`. What it says: `docs/specs/pricing.md` -> "Checkout and entitlement".
 
-Source of truth: `closureRoutes`, `accountClosing`, and `endAfterClosure` in `hosted/server/closure.ts`; `CloseAccount` in `hosted/src/Closure.tsx`.
+Source of truth: `closureRoutes`, `accountClosing`, and `endAfterClosure` in `hosted/server/closure.ts`; `CloseAccount` and `AccountClosed` in `hosted/src/Closure.tsx`.
 
 ## Managed voice
 

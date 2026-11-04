@@ -12,6 +12,7 @@ import {
   BILLING_WEBHOOK_PATH,
   CONSENT_REQUIRED,
   FOUNDERS_ONLY,
+  KEEP_SUBSCRIPTION,
   TERMS_CHANGED,
   WEBHOOK_BODY_BYTES,
   WITHDRAWAL_CLOSED,
@@ -314,6 +315,7 @@ test("checkout takes a plan and a ref, never a Price, customer, quantity, or ret
     entitled: true,
     suspended: false,
     founding: { cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE - 1 },
+    foundingLapsed: false,
     founder: { offered: true, name: null },
     consent: { termsVersion: TERMS_VERSION, consentedAt: expect.any(String) },
     // No billing country: offered, as an EEA or UK consumer's would be.
@@ -592,6 +594,118 @@ test("a full refund ends the subscription it paid for at once; a partial one cha
   expect(f.cancels).toHaveLength(1);
   await vi.waitFor(async () => expect(await f.metrics()).toContain("subscription.refunded founding 1"));
   expect((await f.metrics()).filter((row) => row.startsWith("subscription.canceled"))).toEqual([]);
+});
+
+test("a lapsed founder subscribes again at list; a refund inside the window returns the seat and leaves founding open", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const DAYS_31 = 31 * 24 * 60 * 60 * 1000;
+  const founding = (who: Awaited<ReturnType<typeof f.account>>) =>
+    who.request("/api/billing/checkout", { method: "POST", body: consent("founding") });
+  const refundEvent = (customer: unknown, paymentIntent: string, subscription: string) => {
+    f.paidInvoices.set(paymentIntent, subscription);
+    return f.event("charge.refunded", {
+      id: `ch_${paymentIntent}`,
+      object: "charge",
+      customer,
+      payment_intent: paymentIntent,
+      refunded: true,
+    });
+  };
+
+  // Refunded inside the window: the seat came back, and so may its buyer.
+  const refunded = await f.account();
+  const first = await f.buy(refunded, "founding");
+  expect((await f.send(refundEvent(first.session.customer, "pi_inside", first.subscription.id))).status).toBe(200);
+  await f.deliver();
+  expect(await refunded.summary()).toMatchObject({ plan: null, founding: { cohort: 0 }, foundingLapsed: false });
+  await f.buy(refunded, "founding");
+
+  // Held: not lapsed, as the founder may yet renew.
+  const lapsed = await f.account();
+  const held = await f.buy(lapsed, "founding");
+  expect(await lapsed.summary()).toMatchObject({ plan: "founding", foundingLapsed: false });
+
+  // Ended past the window, by cancelling or for non-payment: list only.
+  f.time.advanceMilliseconds(DAYS_31);
+  f.dev.transition(held.subscription.id, "cancel");
+  await f.deliver();
+  expect(await lapsed.summary()).toMatchObject({ plan: null, founding: null, foundingLapsed: true });
+  const sessions = f.dev.checkouts.size;
+  const refused = await founding(lapsed);
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toEqual({ message: PRICE_CHANGED });
+  expect(f.dev.checkouts.size).toBe(sessions);
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_checkout_consents WHERE plan = 'founding' AND "userId" = $1`, [lapsed.id])).toEqual([{ n: 1 }]);
+  await f.buy(lapsed, "yearly");
+  expect(await lapsed.summary()).toMatchObject({ plan: "yearly", foundingLapsed: true, founding: null });
+
+  // Refunded past the window, as a yearly renewal is: the seat stays taken, so founding does not reopen.
+  const renewed = await f.account();
+  const late = await f.buy(renewed, "founding");
+  f.time.advanceMilliseconds(DAYS_31);
+  expect((await f.send(refundEvent(late.session.customer, "pi_outside", late.subscription.id))).status).toBe(200);
+  await f.deliver();
+  expect(await renewed.summary()).toMatchObject({ plan: null, founding: null, foundingLapsed: true });
+
+  // Another account still sees the cohort.
+  expect(await (await f.account()).summary()).toMatchObject({ founding: { cohort: 0 }, foundingLapsed: false });
+});
+
+test("a whole charge refunded as a correction keeps the subscription on every delivery; the refund completing a charge decides", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { session, subscription } = await f.buy(member, "monthly");
+  const refundEvent = (paymentIntent: string) => {
+    f.paidInvoices.set(paymentIntent, subscription.id);
+    return f.event("charge.refunded", {
+      id: `ch_${paymentIntent}`,
+      object: "charge",
+      customer: session.customer,
+      payment_intent: paymentIntent,
+      refunded: true,
+    });
+  };
+  const refund = (paymentIntent: string, keep: boolean, amount?: number) =>
+    f.setup.stripe.refunds.create({
+      charge: `ch_${paymentIntent}`,
+      ...(amount && { amount }),
+      ...(keep && { metadata: { [KEEP_SUBSCRIPTION]: "true" } }),
+    });
+  const kept = async (event: ReturnType<typeof refundEvent>) => {
+    expect((await f.send(event)).status).toBe(200);
+    expect(f.cancels).toEqual([]);
+    expect(await f.entitledOn(member.id)).toBe(true);
+    expect(await member.summary()).toMatchObject({ plan: "monthly", active: true });
+  };
+
+  await refund("pi_whole", true);
+  const whole = refundEvent("pi_whole");
+  await kept(whole);
+  // A redelivery reads the same refund, and keeps it too.
+  await kept(whole);
+
+  // Marked on the refund that completes the charge, after an ordinary partial one.
+  await refund("pi_marked_last", false, 400);
+  await refund("pi_marked_last", true);
+  await kept(refundEvent("pi_marked_last"));
+
+  // The mark on a refund that failed still keeps it: the charge is not refunded.
+  f.refundStatuses.push("failed");
+  await refund("pi_failed", true);
+  await kept(refundEvent("pi_failed"));
+
+  // Marked earlier only: the ordinary refund completing the charge ends it, as any full refund does.
+  await refund("pi_marked_first", true, 400);
+  await refund("pi_marked_first", false);
+  expect((await f.send(refundEvent("pi_marked_first"))).status).toBe(200);
+  expect(f.cancels).toEqual([{ subscription: subscription.id }]);
+  expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.refund }]);
 });
 
 test("an open dispute suspends without ending, closing it in the account's favor restores it, and a lost one ends it", async ({

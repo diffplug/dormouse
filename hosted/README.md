@@ -247,6 +247,8 @@ Never edit a row once its notices have gone out; schedule a further change as a 
 
 ## Refund by hand
 
+A whole-charge refund ends the subscription it paid for. To correct a billing mistake and keep the subscription, make the refund with the metadata on it, from the Stripe CLI or Workbench rather than the Dashboard's refund form, whose `charge.refunded` event would arrive before any metadata you add afterwards: `stripe refunds create --live --charge=<charge id> -d "metadata[dormouse_keep_subscription]=true"`. Only the refund that completes the charge counts, so split refunds need it on the last one.
+
 A withdrawal or account closure is stamped settled only once every payment it refunds is refunded in full by refunds Stripe lists as `succeeded`. Until then its cron keeps retrying it and failing, naming the invoice, for as long as it stays unsettled; watch the account Worker's Cron Events for that. A `pending` refund settles on its own once Stripe completes it, and the account Worker makes a `failed` or `canceled` one again. Two cases need the operator:
 
 - **Paid outside Stripe.** Stripe cannot refund a payment it did not collect: an invoice marked paid out of band, or paid by a payment record. The error names the invoice and the amount.

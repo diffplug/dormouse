@@ -66,8 +66,8 @@ export async function stripeFake(time: Time, random: RandomSource) {
   /**
    * Each refund made: its PaymentIntent, or charge when it names one, and its
    * metadata's withdrawal, or closure when it names one; its amount when not
-   * the whole payment, and its status when not `succeeded`. Tests may push one
-   * made by hand, or change a status as Stripe would.
+   * the whole payment, its status when not `succeeded`, and any other metadata.
+   * Tests may push one made by hand, or change a status as Stripe would.
    */
   const refunds: {
     paymentIntent?: string;
@@ -76,6 +76,7 @@ export async function stripeFake(time: Time, random: RandomSource) {
     closure?: string;
     amount?: number;
     status?: "pending" | "requires_action" | "failed" | "canceled" | "succeeded";
+    metadata?: Record<string, string>;
   }[] = [];
   /** The statuses the next refunds made take, in order; once empty, `succeeded`. */
   const refundStatuses: NonNullable<(typeof refunds)[number]["status"]>[] = [];
@@ -141,8 +142,11 @@ export async function stripeFake(time: Time, random: RandomSource) {
           }),
       });
     }
+    // A charge named `ch_<PaymentIntent id>` is that PaymentIntent's: Stripe lists its refunds under both.
     const refundOf = (intent: string | null, charge: string | null) => (refund: (typeof refunds)[number]) =>
-      intent ? refund.paymentIntent === intent : refund.charge === charge;
+      intent
+        ? refund.paymentIntent === intent
+        : refund.charge === charge || (!!charge && refund.paymentIntent === charge.slice("ch_".length));
     const asRefund = (refund: (typeof refunds)[number]) => ({
       id: `re_${refunds.indexOf(refund)}`,
       object: "refund",
@@ -151,10 +155,18 @@ export async function stripeFake(time: Time, random: RandomSource) {
       payment_intent: refund.paymentIntent ?? null,
       charge: refund.charge ?? null,
       status: refund.status ?? "succeeded",
+      metadata: {
+        ...(refund.withdrawal && { dormouse_withdrawal: refund.withdrawal }),
+        ...(refund.closure && { dormouse_closure: refund.closure }),
+        ...refund.metadata,
+      },
     });
     if (url.pathname === "/v1/refunds" && req.method === "GET") {
       const of = refundOf(url.searchParams.get("payment_intent"), url.searchParams.get("charge"));
-      return json(200, { object: "list", has_more: false, data: refunds.filter(of).map(asRefund) });
+      // Newest first, as Stripe lists them, and the charge's event embeds none.
+      const listed = refunds.filter(of).reverse();
+      const limit = Number(url.searchParams.get("limit") ?? 10);
+      return json(200, { object: "list", has_more: listed.length > limit, data: listed.slice(0, limit).map(asRefund) });
     }
     if (url.pathname === "/v1/refunds" && req.method === "POST") {
       const body = new URLSearchParams(raw);
@@ -186,12 +198,19 @@ export async function stripeFake(time: Time, random: RandomSource) {
       const closure = body.get("metadata[dormouse_closure]");
       const withdrawal = body.get("metadata[dormouse_withdrawal]");
       const status = refundStatuses.shift();
+      const metadata = Object.fromEntries(
+        [...body].flatMap(([name, value]) => {
+          const key = /^metadata\[(.+)\]$/.exec(name)?.[1];
+          return key && key !== "dormouse_closure" && key !== "dormouse_withdrawal" ? [[key, value]] : [];
+        }),
+      );
       const made = {
         ...(intent ? { paymentIntent: intent } : { charge: charge! }),
         withdrawal,
         ...(closure && { closure }),
         ...(amount !== INVOICE_CENTS && { amount }),
         ...(status && status !== "succeeded" && { status }),
+        ...(Object.keys(metadata).length && { metadata }),
       };
       refunds.push(made);
       return answer(200, asRefund(made));
