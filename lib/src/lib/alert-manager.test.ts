@@ -8,7 +8,7 @@ import {
 } from './terminal-protocol';
 import { cfg } from '../cfg';
 import { toPersistedAlertState } from './session-types';
-import { armCommandExit, collectEpisodes, driveToBusy, engage, finishCommand, goIdle, leave, press, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
+import { armCommandExit, collectEpisodes, driveToBusy, engage, finishCommand, goIdle, leave, press, progressEndStands, REPORT, runCommand, settle, work } from './alert-manager-test-utils';
 
 describe('AlertManager in isolation', () => {
   let manager: AlertManager;
@@ -490,7 +490,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
     manager.updateProtocolProgress(id, { state: 'clear', percent: null });
-    vi.advanceTimersByTime(cfg.alert.progressEndGrace);
+    progressEndStands();
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: false,
@@ -653,6 +653,20 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null, episode: null });
     });
 
+    it('gives the next cycle its own full grace after a dropped end', () => {
+      const id = 'end-dropped-then-next';
+      active(id);
+      end(id);
+      vi.advanceTimersByTime(GRACE - 2);
+      manager.silenceRun(id);
+      active(id);
+      end(id);
+      vi.advanceTimersByTime(GRACE - 1);
+      expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
+      vi.advanceTimersByTime(1);
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+    });
+
     it('never reaches the next PTY generation when the Session restarts during the grace', () => {
       const id = 'end-restarted';
       active(id);
@@ -705,7 +719,7 @@ describe('AlertManager in isolation', () => {
     const id = `progress-title-${_outcome}`;
     runCommand(manager, id, 'cargo build --release');
     for (const update of updates) manager.updateProtocolProgress(id, update);
-    vi.advanceTimersByTime(cfg.alert.progressEndGrace);
+    progressEndStands();
     expect(manager.getState(id).notification).toMatchObject({ source: 'OSC 9;4', title });
   });
 
@@ -731,7 +745,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
     manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
-    vi.advanceTimersByTime(cfg.alert.progressEndGrace);
+    progressEndStands();
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
       todo: true,
@@ -1270,7 +1284,7 @@ describe('AlertManager in isolation', () => {
       seen.length = 0;
 
       manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
-      vi.advanceTimersByTime(cfg.alert.progressEndGrace);
+      progressEndStands();
 
       expect(manager.getState(id).status).not.toBe('OSC_NOTIF_BUSY');
       expect(seen).not.toEqual([]);
@@ -1462,7 +1476,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('OSC_NOTIF_BUSY');
 
       manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
-      vi.advanceTimersByTime(cfg.alert.progressEndGrace);
+      progressEndStands();
 
       expect(seen).toEqual([{
         kind: 'notification',
@@ -1573,7 +1587,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
 
       manager.updateProtocolProgress(id, { state: 'clear', percent: null });
-      vi.advanceTimersByTime(cfg.alert.progressEndGrace);
+      progressEndStands();
       await Promise.resolve();
       expect(outcome).toMatchObject({ kind: 'resolved', cause: 'bell' });
     });
@@ -1848,7 +1862,7 @@ describe('AlertManager in isolation', () => {
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });
       manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
-      vi.advanceTimersByTime(cfg.alert.progressEndGrace);
+      progressEndStands();
 
       expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'bell' });
       expect(manager.getState(id)).toMatchObject({

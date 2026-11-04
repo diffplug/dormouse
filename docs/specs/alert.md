@@ -474,7 +474,7 @@ Sequence syntax lives in `docs/specs/terminal-escapes.md`; what each means here:
 - `OSC 9` — the message becomes the body, title null. Empty sanitized messages are ignored. It also feeds title-candidate derivation (`docs/specs/terminal-state.md`), with no alert effect. A number, alone or before `;`, is a ConEmu subcommand (`9;12`, a bare `9;9`) yielding neither notification nor title — except `9;4` below and `9;9;<cwd>` (`docs/specs/terminal-state.md`).
 - `OSC 777` — only the `notify` subcommand is supported; unsupported subcommands and empty sanitized notifications are ignored.
 - `OSC 99` (kitty) — chunked notifications keyed by `i`; completion rings once if the sanitized title or body is nonempty. Management payloads (`p=?`, `p=close`, `p=alive`) contribute no content.
-- `OSC 9;4` progress — progress only: no title, body, urgency, id, app name, or action fields. **A cycle must stay an independent sub-state: it never changes the ring, and the ring never changes it** (rationale); an active cycle only holds back settles (WATCHING Track). **Must take a cycle's end as real only once `cfg.alert.progressEndGrace` passes without an active update** (rationale); until then the cycle stays busy.
+- `OSC 9;4` progress — progress only: no title, body, urgency, id, app name, or action fields. **A cycle must stay an independent sub-state: it never changes the ring, and the ring never changes it** (rationale); an active cycle only holds back settles (WATCHING Track). **Must take a cycle's end as real only once `cfg.alert.progressEndGrace` passes without an active update** (rationale).
 
   | Input | Behavior |
   |---|---|
