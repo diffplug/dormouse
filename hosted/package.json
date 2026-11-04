@@ -46,7 +46,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.0",
-    "miniflare": "5.20260908.0-alpha",
+    "miniflare": "5.20261101.0-beta",
     "node-pg-migrate": "^9.0.0",
     "storybook": "11.0.0-alpha.8",
     "tailwindcss": "^4.3.0",
