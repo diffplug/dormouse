@@ -56,8 +56,9 @@ peerDependencyRules:
 minimumReleaseAge: 1440
 overrides:
   # Mermaid 11's core imports KaTeX for $$ math labels. Keep its layout/appearance
-  # while fixing GHSA-238p-pmpm-9mq7; remove when Mermaid accepts patched KaTeX.
-  "mermaid@11>katex": 0.19.1
+  # while fixing GHSA-238p-pmpm-9mq7. The vulnerable-range selector stops applying
+  # when upstream's declared range no longer overlaps it; then remove the entry.
+  "mermaid@11>katex@<0.18.2": 0.19.1
 minimumReleaseAgeExclude:
   - pgstencil
   - "@pgstencil/*"
