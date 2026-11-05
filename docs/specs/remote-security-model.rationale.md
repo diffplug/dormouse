@@ -30,6 +30,8 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 
 **Why a delivery id carries a tag.** The Relay must refuse a new push row from a session that is not a paired phone, and holds no ACL to check one against; the `burrowToken` is the one secret it shares with the Burrow. The 128 random bits keep the id unguessable, and the tag keeps it unforgeable without the token.
 
+**Why a deadline, one write at a time, and the live ACL after a late one.** A store write cannot be cancelled once it runs: a file write on a stalled disk or a VS Code storage call can stay pending indefinitely, and without a deadline every approval and revocation save queued behind one waited with it, retries included. Letting a second write run beside a stalled one would let the older land last, so a stalled write keeps its turn, and writes that gave up before theirs are dropped, which also keeps a long stall from piling up snapshots. A write that does land late may be an approval its runtime has since refused, or an ACL from before a revocation, so the live ACL is written after it.
+
 ## Presence proofs
 
 **Why an unbound `begin`, or a `finish` with no nonce, is refused outright.** Either arm answers a challenge that nothing ties to a ceremony — a signature the caller could replay into a pairing or a connection it never participated in. Refusing at the route leaves no code path that mints presence for an unspecified purpose.
