@@ -344,7 +344,7 @@ function HostedCard({ buy }: { buy: Buy }) {
             <a href={sitePath(POCKET_PLAYGROUND_PATH)} className={LINK_CLASS}>Pocket</a> and push
             notifications on your phone — we’ll run the server for you
           </>,
-          "High-quality ElevenLabs speech synthesis",
+          "High-quality natural speech synthesis",
           "One account for your whole personal fleet of machines",
         ]}
       />
@@ -525,7 +525,7 @@ export default function Hosted() {
         <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>Included with any plan</p>
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
           Free and with no account, Dormouse speaks an unattended terminal’s name in your
-          browser or system voice. A plan swaps that for a natural ElevenLabs
+          browser or system voice. A plan swaps that for a natural
           voice on every machine you enroll, chosen from a curated set. I hold the vendor key, so there is no second account to set
           up or pay for.
         </p>

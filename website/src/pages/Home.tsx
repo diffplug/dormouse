@@ -1015,7 +1015,7 @@ export default function Home() {
               </div>
               <div>
                 <SpeakerHighIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
-                <h3 className="mb-2 font-display text-xl">ElevenLabs voice</h3>
+                <h3 className="mb-2 font-display text-xl">Natural Voice</h3>
                 <p className="leading-relaxed opacity-70">
                   Choose a managed natural voice for spoken alerts, while browser and
                   system speech stay available.
