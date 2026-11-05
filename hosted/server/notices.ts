@@ -83,11 +83,22 @@ export async function sendNotices(
   const leased = await run<Pending>(
     billing.db,
     `WITH due AS (
-      SELECT n.id, s.price_id AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt",
+      SELECT n.id, COALESCE(next."toPriceId", s.price_id) AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt",
         k.plan AS "consentPlan", k."shownUsd", k."termsVersion", k."consentedAt"
       FROM public.dormouse_billing_notices n
       LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
       LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
+      -- A renewal-type notice states what its renewal charges: the new Price of
+      -- a change whose notice for that renewal went, or can still go, in time
+      -- for it to apply.
+      LEFT JOIN LATERAL (
+        SELECT pc."toPriceId" FROM public.dormouse_billing_notices p
+        JOIN public.dormouse_price_changes pc ON pc.id = p."priceChangeId"
+        WHERE n.kind IN ('renewal', 'annual') AND p.kind = 'price_change'
+          AND p."subscriptionId" = n."subscriptionId" AND p."renewsAt" = n."renewsAt"
+          AND CASE WHEN p."sentAt" IS NULL THEN p."renewsAt" > $1::timestamptz + make_interval(days => $7)
+            ELSE p."sentAt" <= p."renewsAt" - make_interval(days => $8) END
+        LIMIT 1) next ON true
       LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
       -- A checkout reused across a terms change holds one consent per version.
       LEFT JOIN LATERAL (
@@ -122,6 +133,7 @@ export async function sendNotices(
       BATCH,
       verified,
       PRICE_SEND_BY_DAYS,
+      PRICE_NOTICE_MIN_DAYS,
     ],
   );
   const failed: unknown[] = [];

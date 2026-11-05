@@ -134,6 +134,7 @@ Each notice is a `dormouse_billing_notices` row, recorded before it is sent and 
 - **Must fill a purchase's notice from its checkout's consent** ("Billing"), never the current price or terms.
 - **A price change is an operator's `dormouse_price_changes` row** (`hosted/README.md`); both its Prices grant the plan once inserted. **Never act on one naming a founding Price or another plan's**, or whose Prices Stripe does not hold at its amounts, in USD, at the plan's interval.
 - **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must state in a renewal notice or annual reminder the price its renewal charges**: a price change's new Price once its notice for that renewal went, or can still go, at least 7 days ahead.
 
 Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql`, `hosted/server/dormouse-migrations/020_withdrawal_notices.sql`, and `hosted/server/dormouse-migrations/027_purchase_notices.sql`.
 
