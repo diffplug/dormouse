@@ -313,7 +313,7 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 - **The label is sanitized** so it cannot escape the directory.
 - **Temp-then-rename**, the temp file fsynced first and, on unix, the directory after, best-effort (rationale). **The writer removes its own temp file on every error path**, so only a crash leaves one.
 - **Window identity is implicit**: each command keys by the invoking window's label, so the frontend stays window-agnostic.
-- Only §Per-window close, the boot merge (§Arrival queue), and the discard above delete a snapshot.
+- Only §Per-window close, the boot merge (§Arrival queue), the discard above, and a failed Reopen delete a snapshot.
 
 **Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory.
 
