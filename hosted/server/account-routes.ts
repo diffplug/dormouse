@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
-import type { EmailSender } from "pgstencil";
+import type { EmailSender, Time } from "pgstencil";
 import { cookieAdmin } from "./account-gate";
+import { alertBillingFailure } from "./billing-alert";
 import { resyncBilling, type BillingSetup } from "./billing";
 import { billingRoutes, type BillingHost } from "./billing-routes";
 import { closureRoutes, type ClosureHost } from "./closure";
@@ -34,8 +35,24 @@ export function accountRoutes(app: Hono<any>, host: (c: Context) => AccountRoute
   app.get(ADMIN_METRICS_PATH, cookieAdmin(host), async (c) => c.json(await readMetrics(host(c).databaseUrl)));
 }
 
-/** The account's Cron Trigger, every 10 minutes in the Worker and the development server alike: billing's resync. */
-export const accountCron = (
+/**
+ * The account's Cron Trigger, every 10 minutes in the Worker and the development
+ * server alike: billing's resync. A failure, a misconfigured setup's included,
+ * alerts support and still fails the invocation, whatever the alert does.
+ */
+export async function accountCron(
   deployment: { databaseUrl: string; setup(): BillingSetup | null; mail(): EmailSender },
   origin: string,
-) => resyncBilling(deployment.setup(), deployment.databaseUrl, origin, () => deployment.mail());
+) {
+  let time: Time | undefined;
+  try {
+    const setup = deployment.setup();
+    time = setup?.time;
+    await resyncBilling(setup, deployment.databaseUrl, origin, () => deployment.mail());
+  } catch (failure) {
+    await alertBillingFailure(failure, deployment.databaseUrl, () => deployment.mail(), time).catch((error: unknown) =>
+      console.error("The billing alert failed; the cron still fails", error),
+    );
+    throw failure;
+  }
+}

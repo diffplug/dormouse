@@ -6,6 +6,7 @@ import { readJson } from "remote-lib-common";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
 import { DAY_MS, END_REASONS, run, withBilling, type BillingSetup } from "./billing";
+import { BillingOverdue } from "./billing-alert";
 import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
 import type { RelayAccountHost } from "./relay-account";
 import { refundPaidInvoices } from "./withdrawal";
@@ -114,12 +115,17 @@ async function settleClosure(billing: Billing<Plan>, owner: string, canceled: re
 
 /** How many closures one cron run finishes at most. */
 const RETRY_BATCH = 20;
+/** A closure's refunds still unsettled this long after it closed are reported overdue. */
+const SETTLEMENT_OVERDUE_DAYS = 1;
+/** How many overdue closures one run names, the oldest first. */
+const OVERDUE_NAMED = 50;
 
 /**
  * The cron's pass: tries to finish the refunds of up to {@link RETRY_BATCH}
  * unsettled closures, however old, the least recently tried first, so one
  * that keeps failing never starves the rest; answers the failures, so every
- * run that tries one still unsettled fails.
+ * run that tries one still unsettled fails, and one more per closure overdue
+ * ({@link SETTLEMENT_OVERDUE_DAYS}), tried this run or not.
  */
 export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> {
   const rows = await run<{ userId: string; canceledSubscriptions: string[] }>(
@@ -134,6 +140,18 @@ export async function retryClosures(billing: Billing<Plan>): Promise<unknown[]> 
   const failed: unknown[] = [];
   for (const { userId, canceledSubscriptions } of rows)
     await settleClosure(billing, userId, canceledSubscriptions).catch((error: unknown) => failed.push(error));
+  const overdue = await run<{ userId: string; closedAt: Date; canceledSubscriptions: string[] }>(
+    billing.db,
+    `SELECT "userId", "closedAt", "canceledSubscriptions" FROM public.dormouse_account_closures
+    WHERE "settledAt" IS NULL AND "closedAt" <= $1 ORDER BY "closedAt", "userId" LIMIT $2`,
+    [new Date(billing.time.now().getTime() - SETTLEMENT_OVERDUE_DAYS * DAY_MS), OVERDUE_NAMED],
+  );
+  for (const { userId, closedAt, canceledSubscriptions } of overdue)
+    failed.push(
+      new BillingOverdue(
+        `Closure of account ${userId}, closed ${closedAt.toISOString().slice(0, 10)}, is unsettled: subscription ${canceledSubscriptions.join(", ")}`,
+      ),
+    );
   return failed;
 }
 

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import type { PriceCatalog } from "../../server/billing";
+import { alertMessage } from "../../server/billing-alert-message";
 import { noticeMessage, type Kind, type NoticeContext, type Pending } from "../../server/notice-message";
 import type { Plan } from "../../server/policy-constants";
 import { EmailFrame } from "./EmailFrame";
@@ -76,6 +77,17 @@ export const Withdrawal = notice("withdrawal", "founding", {
   submittedAt: new Date("2027-03-05T09:12:00Z"),
 });
 export const SignInCode: Story = { args: signInEmail("buyer@example.test", "12345678") };
+/** To the operator, not a customer. */
+export const BillingAlert: Story = {
+  args: alertMessage(
+    [
+      { text: "Withdrawal e7a40e59-bc8d-404c-b29c-5a32b0c40bef: submitted 2027-03-05, its refund is due by 2027-03-19", overdue: true },
+      { text: "Withdrawal e7a40e59-bc8d-404c-b29c-5a32b0c40bef: paid outside Stripe, refund by hand, then mark it settled: invoice in_123 (1190 of 1190 usd)", overdue: false },
+    ],
+    new Date("2027-03-06T12:00:00Z"),
+    true,
+  ),
+};
 
 const EVERY_NOTICE = {
   purchase: Purchase,

@@ -1,10 +1,11 @@
 // Rules: docs/specs/hosted.md -> "Billing notices"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing } from "@pgstencil/stripe";
+import type { Billing, Stripe } from "@pgstencil/stripe";
 import { postmarkEmail } from "@pgstencil/auth/postmark";
 import type { EmailSender } from "pgstencil";
 import { planInterval } from "../../website/src/lib/hosted-pricing";
 import { DAY_MS, run, stripeHoldsPrice, type PriceCatalog, type PriceChange } from "./billing";
+import { BillingOverdue } from "./billing-alert";
 import { NOTICE_FROM, noticeMessage, type NoticeContext, type Pending } from "./notice-message";
 import type { Plan } from "./policy-constants";
 import { billingContact, type Contact } from "./withdrawal";
@@ -264,7 +265,7 @@ export async function runNotices(
     WHERE kind = 'withdrawal' AND "sentAt" IS NULL AND "createdAt" <= $1`,
     [new Date(now.getTime() - ACKNOWLEDGEMENT_OVERDUE_DAYS * DAY_MS)],
   );
-  if (overdue?.ids) failed.push(new Error(`Withdrawal acknowledgement unsent after a day: withdrawal ${overdue.ids.join(", ")}`));
+  if (overdue?.ids) failed.push(new BillingOverdue(`Withdrawal acknowledgement unsent after a day: withdrawal ${overdue.ids.join(", ")}`));
   failed.push(...(await applyPriceChanges(billing, verified)));
   return failed;
 }

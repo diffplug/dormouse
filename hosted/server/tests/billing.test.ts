@@ -302,6 +302,7 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
     fileURLToPath(import.meta.resolve("@pgstencil/auth/better-auth-testing")),
   ]);
   const outbound: string[] = [];
+  const mailed: { To: string; TextBody: string }[] = [];
   const worker = async (stripe: Record<string, string>) => {
     const mf = new Miniflare(
       alone(
@@ -320,6 +321,10 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
           async outboundService(request: Request) {
             const url = new URL(request.url);
             outbound.push(url.origin);
+            if (url.origin === "https://api.postmarkapp.com") {
+              mailed.push((await request.json()) as { To: string; TextBody: string });
+              return WorkerResponse.json({ ErrorCode: 0, Message: "OK" });
+            }
             if (url.origin !== "https://api.stripe.com") throw new Error(`Unexpected outbound host: ${url.host}`);
             const response = await fetch(f.dev.origin + url.pathname + url.search, {
               method: request.method,
@@ -359,4 +364,17 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
   expect(outbound.length).toBeGreaterThan(0);
   expect(new Set(outbound)).toEqual(new Set(["https://api.stripe.com"]));
   expect(await f.entitledOn(member)).toEqual(everywhere(true));
+  expect(mailed).toEqual([]);
+
+  // A failing pass emails support through Postmark, once, and the invocation still fails.
+  await f.sql(
+    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+    VALUES ('refused', 'yearly', $1, 'price_next', 50, 60, now())`,
+    [f.setup.founding[0]],
+  );
+  const failing = await worker(bindings);
+  expect((await failing.scheduled({ cron: "*/10 * * * *" })).outcome).toBe("exception");
+  expect((await failing.scheduled({ cron: "*/10 * * * *" })).outcome).toBe("exception");
+  expect(mailed.map((mail) => mail.To)).toEqual(["support@dormouse.sh"]);
+  expect(mailed[0]!.TextBody).toContain("Price change refused names a founding Price");
 });
