@@ -3,7 +3,7 @@ import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { digest } from "@pgstencil/auth/security";
 import { withClient } from "pgstencil/postgres";
-import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
+import { currentManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
 import { recordMetric } from "./metrics";
@@ -151,13 +151,15 @@ export function voiceBearerRoutes(app: Hono<any>, host: (c: Context) => SpeakHos
       } catch {
         return badBody(c);
       }
-      const { text, voiceId } = body ?? {};
-      if (typeof text !== "string" || typeof voiceId !== "string")
+      const { text, voiceId: requested } = body ?? {};
+      if (typeof text !== "string" || typeof requested !== "string")
         return badBody(c);
       const spoken = text.trim();
       if (spoken.length < 1 || spoken.length > 200)
         return fail(c, 400, "Text must be 1 to 200 characters.");
-      if (!isManagedVoiceId(voiceId)) return fail(c, 400, "Unknown voice.");
+      // A retired id, which a shipped desktop keeps sending, speaks as its replacement.
+      const voiceId = currentManagedVoiceId(requested);
+      if (!voiceId) return fail(c, 400, "Unknown voice.");
 
       if (!synthesize)
         return fail(c, 503, "Managed voice is not configured on this server.");

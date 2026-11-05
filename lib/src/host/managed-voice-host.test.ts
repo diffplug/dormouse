@@ -179,11 +179,26 @@ describe('configuration', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('treats a corrupt or hand-edited file as unconfigured, and a retired voice as the default', async () => {
+  it('treats a corrupt or hand-edited file as unconfigured, and a voice outside the set as the default', async () => {
     await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: 'dmv_short', voiceId: 7 }));
     expect(await make().handle({ op: 'status' })).toEqual(idle(false));
     await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: TOKEN, voiceId: 'abc123' }));
     expect(await make().handle({ op: 'status' })).toEqual(idle(true));
+  });
+
+  it('reads a stored retired voice as its replacement, and speaks in it', async () => {
+    // George's id, stored by a desktop before the 2026 change, is Eldrin's.
+    await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: TOKEN, voiceId: 'JBFqnCBsd6RMkjVDRZzb' }));
+    const restarted = make();
+    expect(await restarted.handle({ op: 'status' })).toEqual(idle(true, OTHER_VOICE));
+    fetchMock.mockResolvedValue(audioResponse());
+    await restarted.handle({ op: 'speak', text: 'build finished' });
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({ text: 'build finished', voiceId: OTHER_VOICE });
+  });
+
+  it('stores a chosen retired voice as its replacement', async () => {
+    expect(await host.handle({ op: 'configure', update: { voiceId: 'JBFqnCBsd6RMkjVDRZzb' } })).toEqual({ ok: true, ...idle(false, OTHER_VOICE) });
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).voiceId).toBe(OTHER_VOICE);
   });
 
   it('keeps a saved token through a read error, and reads again next time', async () => {

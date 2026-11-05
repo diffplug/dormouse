@@ -7,7 +7,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isManagedVoiceId, isManagedVoiceToken } from 'remote-lib-common';
+import { currentManagedVoiceId, isManagedVoiceToken } from 'remote-lib-common';
 import { beginHostedApproval, pollHostedVoiceApproval } from '../remote/burrow/enrollment';
 import { HostedApproval } from './remote/hosted-approval';
 import { enrollVerificationUrl } from './remote/hosted-enrollment-url';
@@ -82,8 +82,8 @@ function normalizeStored(value: unknown): StoredManagedVoice {
   const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   return {
     token: isManagedVoiceToken(record.token) ? record.token : null,
-    // A voice the curated set no longer holds reads as the default, which speak can send.
-    voiceId: isManagedVoiceId(record.voiceId) ? record.voiceId : DEFAULT_MANAGED_VOICE_ID,
+    // A retired voice reads as its replacement; any other id outside the set, as the default.
+    voiceId: currentManagedVoiceId(record.voiceId) ?? DEFAULT_MANAGED_VOICE_ID,
   };
 }
 
@@ -164,8 +164,8 @@ export function createManagedVoiceHost(options: {
 
   async function configure(update: unknown): Promise<ManagedVoiceConfigResult> {
     if (!store) return { ok: false, reason: 'unavailable' };
-    const voiceId = (update as { voiceId?: unknown } | null)?.voiceId;
-    if (!isManagedVoiceId(voiceId)) return { ok: false, reason: 'invalid-voice' };
+    const voiceId = currentManagedVoiceId((update as { voiceId?: unknown } | null)?.voiceId);
+    if (!voiceId) return { ok: false, reason: 'invalid-voice' };
     try {
       return { ok: true, ...await save('voiceId', (config) => ({ ...config, voiceId })) };
     } catch (error) {
