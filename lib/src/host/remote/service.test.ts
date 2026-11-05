@@ -1368,6 +1368,8 @@ describe('pairing queue', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mostInFlight).toBe(1);
+      // The stuck write and the live ACL after it: the revocation's own, which gave up first, never ran.
+      expect(save).toHaveBeenCalledTimes(2);
       expect(store.acl[BURROW_ID]).toEqual([expect.objectContaining({ revokedAt: expect.any(Number) })]);
       expect(((await command('pairedDevices')).result as PairedDevicesResult).unsavedRevocations).toBeUndefined();
     } finally {
