@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clampIssueBody } from './clamp-issue-body.mjs';
-import { auditedRules, FAIL_IF_RE, isDomainPrompt, proseLines, RULE_ID, scopeOf } from './spec-md.mjs';
+import { auditedRules, FAIL_IF_RE, isDomainPrompt, proseLines, RULE_ID, scopeOf, sections } from './spec-md.mjs';
 
 export const SENTINEL = '<!-- END OF REPORT -->';
 const AUDIT_DIR = '.github/audit';
@@ -168,25 +168,42 @@ export function fragmentManifest(root, fragment) {
   return owed;
 }
 
+/** The work stream that runs a domain's one qualitative pass and owes no rule. */
+export const QUALITATIVE = 'qualitative';
+
 /**
- * A domain prompt's `## Work streams`, each as its name, its bullet, and the
- * `spec\0heading` keys the bullet names: a backticked spec path, then the
- * quoted headings under it.
+ * A domain prompt's `## ` sections, its fragment, and its `## Work streams`,
+ * each as `{ name, holds, keys }`: `keys` the `spec\0heading` pairs its bullet
+ * names, a backticked spec path, then the quoted headings under it.
  */
-export function workStreams(root, domain) {
-  const text = readFileSync(join(root, AUDIT_DIR, `${domain}.md`), 'utf8');
-  const section = text.split(/^## Work streams$/m)[1]?.split(/^## /m)[0];
-  if (!section) throw new Error(`${domain}.md has no \`## Work streams\` section`);
-  return section.split('\n').filter((l) => l.startsWith('- `')).map((line) => {
+export function readDomainPrompt(root, domain) {
+  const path = join(root, AUDIT_DIR, `${domain}.md`);
+  if (!/^[\w-]+$/.test(domain) || !existsSync(path)) throw new Error(`no domain prompt ${domain}`);
+  const text = readFileSync(path, 'utf8');
+  const parts = sections(text, 2);
+  const list = parts.filter((p) => p.heading === 'Work streams');
+  if (list.length !== 1) throw new Error(`${domain}.md has no one \`## Work streams\` section`);
+  const streams = [...list[0].text.matchAll(/^- `([\w-]+)` — (\S.*)$/gm)].map((m) => {
     const keys = [];
     let spec = null;
-    for (const m of line.matchAll(/`(docs\/specs\/[^`]+)`|"([^"]+)"/g)) {
-      if (m[1]) spec = m[1];
-      else keys.push(`${spec}\0${m[2]}`);
+    for (const k of m[2].matchAll(/`(docs\/specs\/[^`]+)`|"([^"]+)"/g)) {
+      if (k[1]) spec = k[1];
+      else keys.push(`${spec}\0${k[2]}`);
     }
-    return { name: line.match(/^- `([\w-]+)`/)[1], line, keys };
+    return { name: m[1], holds: m[2], keys };
   });
+  // What a stream holds, which the list's own lead-in says: every rule under its headings, subheadings or not.
+  const scope = list[0].text.match(/Each holds (every rule under the headings it names[^:\n]*):/)?.[1];
+  if (!scope) throw new Error(`${domain}.md does not say what its work streams hold`);
+  if (streams.filter((s) => s.name === QUALITATIVE).length !== 1) throw new Error(`${domain}.md lists no one \`${QUALITATIVE}\` stream`);
+  if (new Set(streams.map((s) => s.name)).size !== streams.length) throw new Error(`${domain}.md lists a stream twice`);
+  const fragment = text.match(/^\*\*Output file:\*\* `([\w.-]+\.md)`/m)?.[1];
+  if (!fragment) throw new Error(`${domain}.md names no output file`);
+  return { parts, streams, scope, fragment };
 }
+
+/** A domain prompt's work streams, in the order it lists them. */
+export const workStreams = (root, domain) => readDomainPrompt(root, domain).streams;
 
 /**
  * The share of a domain's manifest one work stream owes: the rules under the
@@ -269,6 +286,11 @@ function closeFinding(parsed, finding, evidence) {
 const ruleWords = (text) => text.replace(FAIL_IF_RE, '').replace(/^\*\*\s*/, '').replace(new RegExp(`^\`${RULE_ID}\`\\s*`), '')
   .replaceAll('**', '').split(/\s+/).filter(Boolean);
 
+/** Whether deterministic fragment `f` answers part of a rule a domain also owes: its script's pin among others. */
+const answersPart = (f, rule) => rule.pin.includes(`\`${DETERMINISTIC[f]}\``);
+/** The note a domain's template carries for such a rule, which its domain still owes whole. */
+export const partlyNote = (f) => `; \`${f}\` answers part of it, and this fragment still owes the whole rule`;
+
 /**
  * The manifest's template lines, each naming its rule by the opening words
  * that tell it from every other rule under its heading, and by its spec and
@@ -276,8 +298,6 @@ const ruleWords = (text) => text.replace(FAIL_IF_RE, '').replace(/^\*\*\s*/, '')
  */
 export function manifestLines(root, fragment, stream = null) {
   const owed = stream === null ? fragmentManifest(root, fragment) : streamManifest(root, fragment, stream);
-  // A domain owes a rule a deterministic script answers in part whole, so its template says so.
-  const partly = fragment in DETERMINISTIC ? [] : Object.entries(DETERMINISTIC);
   return [...owed].flatMap(([key, ids]) => {
     const [spec, heading] = key.split('\0');
     const siblings = specRules(root, spec).filter((r) => r.heading === heading);
@@ -287,9 +307,8 @@ export function manifestLines(root, fragment, stream = null) {
     while (k < Math.max(...all.map((w) => w.length)) && new Set(all.map((w) => w.slice(0, k).join(' '))).size < all.length) k++;
     return ids.map((id) => {
       const w = words.get(id);
-      const pin = siblings.find((r) => r.id === id).pin;
-      const shared = partly.filter(([, script]) => pin.includes(`\`${script}\``)).map(([f]) => `; \`${f}\` answers part of it, and this fragment still owes the whole rule`);
-      return `- PASS: ${id} — <clause of the rule opening "${w.slice(0, k).join(' ')}${w.length > k ? ' …' : ''}", under \`${spec}\` -> "${heading}"${shared.join('')}>: <evidence>`;
+      const partly = fragment in DETERMINISTIC ? undefined : Object.keys(DETERMINISTIC).find((f) => answersPart(f, ruleIndex(root).get(id)));
+      return `- PASS: ${id} — <clause of the rule opening "${w.slice(0, k).join(' ')}${w.length > k ? ' …' : ''}", under \`${spec}\` -> "${heading}"${partly ? partlyNote(partly) : ''}>: <evidence>`;
     });
   });
 }

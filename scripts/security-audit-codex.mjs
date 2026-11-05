@@ -27,29 +27,11 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judgeFragment, SENTINEL } from './security-audit-report.mjs';
-import { AUDIT_DIR, proseLines } from './spec-md.mjs';
+import { judgeFragment, QUALITATIVE, readDomainPrompt, SENTINEL } from './security-audit-report.mjs';
+import { AUDIT_DIR, sections } from './spec-md.mjs';
 
 /** The preamble's sections a Codex session never sees: it has no subagents to delegate to or wait for. */
 export const DELEGATION_SECTIONS = ['Work streams', 'Waiting for delegates'];
-const QUALITATIVE = 'qualitative';
-
-/**
- * A markdown text cut at its headings of exactly `level` (`#` count), fenced
- * code aside: the text before the first one, then each heading with its body.
- */
-function sections(text, level) {
-  const lines = text.split('\n');
-  const prose = proseLines(text);
-  const marker = new RegExp(`^${'#'.repeat(level)} (.+)$`);
-  const out = [{ heading: null, lines: [] }];
-  lines.forEach((line, i) => {
-    const m = prose[i].match(marker);
-    if (m) out.push({ heading: m[1].trim(), lines: [] });
-    out.at(-1).lines.push(line);
-  });
-  return out.map(({ heading, lines: l }) => ({ heading, text: l.join('\n') }));
-}
 
 const joinSections = (parts) => parts.map((p) => p.text.replace(/\n+$/, '')).join('\n\n') + '\n';
 
@@ -69,31 +51,12 @@ export function codexPreamble(root = '.') {
   return joinSections(kept);
 }
 
-/** A domain file's `## ` sections, its fragment, and its work streams as `{ name, holds }`. */
-function readDomain(root, domain) {
-  const path = join(root, AUDIT_DIR, `${domain}.md`);
-  if (!/^[\w-]+$/.test(domain) || !existsSync(path)) throw new Error(`no domain prompt ${domain}`);
-  const text = readFileSync(path, 'utf8');
-  const parts = sections(text, 2);
-  const list = parts.filter((p) => p.heading === 'Work streams');
-  if (list.length !== 1) throw new Error(`${domain}.md has no one \`## Work streams\` section`);
-  const streams = [...list[0].text.matchAll(/^- `([\w-]+)` — (\S.*)$/gm)].map((m) => ({ name: m[1], holds: m[2] }));
-  // What a stream holds, which the list's own lead-in says: every rule under its headings, subheadings or not.
-  const scope = list[0].text.match(/Each holds (every rule under the headings it names[^:\n]*):/)?.[1];
-  if (!scope) throw new Error(`${domain}.md does not say what its work streams hold`);
-  if (streams.filter((s) => s.name === QUALITATIVE).length !== 1) throw new Error(`${domain}.md lists no one \`${QUALITATIVE}\` stream`);
-  if (new Set(streams.map((s) => s.name)).size !== streams.length) throw new Error(`${domain}.md lists a stream twice`);
-  const fragment = text.match(/^\*\*Output file:\*\* `([\w.-]+\.md)`/m)?.[1];
-  if (!fragment) throw new Error(`${domain}.md names no output file`);
-  return { parts, streams, scope, fragment };
-}
-
 /** The domain's work stream names, in the order its file lists them. */
-export const streams = (root, domain) => readDomain(root, domain).streams.map((s) => s.name);
+export const streams = (root, domain) => readDomainPrompt(root, domain).streams.map((s) => s.name);
 
 /** One stream's whole prompt. */
 export function streamPrompt(root, domain, stream) {
-  const { parts, streams: all, scope, fragment } = readDomain(root, domain);
+  const { parts, streams: all, scope, fragment } = readDomainPrompt(root, domain);
   const s = all.find((x) => x.name === stream);
   if (!s) throw new Error(`${domain}.md lists no \`${stream}\` stream`);
   const qualitative = stream === QUALITATIVE;

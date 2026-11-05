@@ -12,7 +12,7 @@ The three release-gate pieces are named separately because they break independen
 
 The local unauthenticated probe returned an inconclusive result on Windows despite receiving HTTP 404 (2026-10-21): curl failed to write the response body to a Unix-only null-device path. A local HTTP regression covers real 404 and 200 responses plus a connection failure.
 
-**Why a shared rule is owed twice (2026-11).** A rule such as the release gate's has one clause GitHub state answers (the workflow is enabled) and others only a reading of the workflow files does. The state fragment records a line for the clause it answers, and on the nightly runs of 2026-11-03 to -05 `ci-and-secrets` read that line as the rule being answered there and left it out of its own fragment, so each run came back INCONCLUSIVE on a rule its manifest printed. The template now names the fragment that answers part of the rule.
+**Why a shared rule is owed twice (2026-11).** A rule such as the release gate's has one clause GitHub state answers (the workflow is enabled) and others only a reading of the workflow files does. The state fragment records a line for the clause it answers, and on the nightly runs of 2026-11-03 to -05 `ci-and-secrets` read that line as the rule being answered there and left it out of its own fragment, so each run came back INCONCLUSIVE on a rule its manifest printed.
 
 ## Skipping an unchanged audit
 
@@ -114,7 +114,7 @@ Run 37710148950 (2026-10-08) reported two `FAIL`s and two WARNINGs; run 37713086
 
 Duplicates came from delegation: each delegate a domain improvised ran its own qualitative pass over overlapping ground, and the merge concatenated them, so one PowerShell finding reached #1027 three times and a log finding twice. Named streams make the partition the prompt's rather than the run's, with one qualitative stream so no ground is swept twice; the five-line merge catches what still overlaps, including across domains.
 
-Named streams still left the rule lists to the domain: on those same three nights `ci-and-secrets` typed each delegate's rule IDs into its brief and pruned the shared rule from them, though the manifest it had printed owed it. A stream's share printed from the manifest leaves the domain nothing to type, and the `check` a domain runs before rewriting its verdict line names any rule still unanswered while there is time to answer it.
+Named streams still left the rule lists to the domain: on those nights `ci-and-secrets` typed each delegate's rule IDs into its brief and pruned that shared rule from them. A stream's share printed from the manifest leaves the domain nothing to type, and the `check` a domain runs before rewriting its verdict line names any rule still unanswered while there is time to answer it.
 
 ## Embargo
 

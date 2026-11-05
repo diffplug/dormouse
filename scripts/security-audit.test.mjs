@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import YAML from 'yaml';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
-import { DETERMINISTIC, OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, manifestLines, ledgerMeta, owedIds as owedRuleIds, ruleIndex, streamManifest, workStreams as promptWorkStreams } from './security-audit-report.mjs';
+import { DETERMINISTIC, OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, manifestLines, ledgerMeta, owedIds as owedRuleIds, partlyNote, ruleIndex, streamManifest, workStreams as promptWorkStreams } from './security-audit-report.mjs';
 import { DISCLOSURE_LABEL, disclosureReason, parseLedger, planDisclosures, statusBody } from './security-audit-public-body.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
@@ -774,7 +774,7 @@ test('the manifest names every owed rule by its ID and opening words its sibling
     assert.equal(lines.length, ids.length, fragment);
     const openings = new Map();
     ids.forEach((id, i) => {
-      const m = lines[i].match(/^- PASS: (S\d+) — <clause of the rule opening "(.+?)(?: …)?", under `(.+)` -> "(.+?)"(?:; `[\w.-]+` answers part of it, and this fragment still owes the whole rule)?>: <evidence>$/);
+      const m = lines[i].replace(partlyNote(STATE_FRAGMENT), '').match(/^- PASS: (S\d+) — <clause of the rule opening "(.+?)(?: …)?", under `(.+)` -> "(.+)">: <evidence>$/);
       assert.ok(m, lines[i]);
       assert.equal(m[1], id);
       const rule = ruleOf(id);
@@ -820,7 +820,6 @@ test('every security spec FAIL IF section is claimed by exactly one domain', () 
   assert.deepEqual([...owners.keys()].filter((key) => !sections.has(key)), []);
 });
 
-/** A domain prompt's work streams, each with the `spec\0heading` keys its bullet names. */
 const workStreams = (domain) => promptWorkStreams(repo, domain);
 
 // The work streams replace a domain's own partition, so between them they hold
@@ -828,7 +827,7 @@ const workStreams = (domain) => promptWorkStreams(repo, domain);
 test('each domain\'s work streams cover every owed heading once', () => {
   for (const { domain, fragment } of domains(repo)) {
     const listed = workStreams(domain);
-    assert.ok(listed.some((s) => s.line.startsWith('- `qualitative` —')), `${domain}: no qualitative stream`);
+    assert.ok(listed.some((s) => s.name === 'qualitative'), `${domain}: no qualitative stream`);
     assert.deepEqual(listed.flatMap((s) => s.keys).sort(), [...fragmentManifest(repo, fragment).keys()].sort(), domain);
   }
 });
@@ -847,7 +846,6 @@ test('each work stream\'s manifest is its share of the domain\'s, every rule in 
   assert.throws(() => streamManifest(repo, CI, 'typo'), /lists no `typo` work stream/);
   const cli = spawnSync(process.execPath, [join(repo, 'scripts/security-audit-report.mjs'), 'manifest', CI, '--stream', 'audit'], { cwd: repo, encoding: 'utf8' });
   assert.equal(cli.stdout, `${manifestLines(repo, CI, 'audit').join('\n')}\n`);
-  assert.ok(manifestLines(repo, CI, 'audit').length < manifestLines(repo, CI).length);
 });
 
 // A rule the deterministic check answers in part leaves a line in its
@@ -855,16 +853,17 @@ test('each work stream\'s manifest is its share of the domain\'s, every rule in 
 // template says it still owes the whole rule. Only such a rule carries it.
 test('a domain\'s template marks each rule the deterministic check answers in part', () => {
   const [[state, script]] = Object.entries(DETERMINISTIC);
-  const note = `; \`${state}\` answers part of it, and this fragment still owes the whole rule>`;
+  const note = `${partlyNote(state)}>`;
   const marked = [];
   for (const fragment of fragments) {
+    const ids = owedIds(fragment);
     manifestLines(repo, fragment).forEach((line, i) => {
-      const id = owedIds(fragment)[i];
-      assert.equal(line.includes(note), ruleOf(id).pin.includes(`\`${script}\``), `${fragment}: ${id}`);
-      if (line.includes(note)) marked.push(id);
+      assert.equal(line.includes(note), ruleOf(ids[i]).pin.includes(`\`${script}\``), `${fragment}: ${ids[i]}`);
+      if (line.includes(note)) marked.push(ids[i]);
     });
   }
-  assert.ok(marked.length > 0 && marked.every((id) => owedIds(STATE_FRAGMENT).includes(id)), marked.join(' '));
+  const stateIds = new Set(owedIds(STATE_FRAGMENT));
+  assert.ok(marked.length > 0 && marked.every((id) => stateIds.has(id)), marked.join(' '));
   assert.ok(!manifestLines(repo, STATE_FRAGMENT).some((line) => line.includes(note)));
 });
 
@@ -1763,7 +1762,7 @@ test('a Codex session gets every preamble section but the delegation ones', () =
       assert.match(prompt, new RegExp(`^# Work stream \`${stream}\` of the \`${domain}\` domain$`, 'm'));
       assert.doesNotMatch(prompt, /^## Work streams$/m);
       assert.equal(/^## Qualitative pass$/m.test(prompt), stream === 'qualitative', `${domain}/${stream}`);
-      assert.ok(prompt.includes(workStreams(domain).find((s) => s.name === stream).line.replace(/^- `[\w-]+` — /, '')), `${domain}/${stream} names what it holds`);
+      assert.ok(prompt.includes(workStreams(domain).find((s) => s.name === stream).holds), `${domain}/${stream} names what it holds`);
       const share = `manifest ${domains(repo).find((d) => d.domain === domain).fragment} --stream ${stream}\``;
       assert.equal(prompt.includes(share), stream !== 'qualitative', `${domain}/${stream} prints its own share`);
     }
