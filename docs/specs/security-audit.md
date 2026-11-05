@@ -18,6 +18,7 @@
 **Every `FAIL IF` that GitHub state answers is judged by `scripts/github-state-check.mjs`, not a model** (rationale). The `Check GitHub state` step runs it on `AUDIT_PAT` before the domains start; it enumerates rulesets, environments, and secrets from the API, compares them with `.github/audit/expected-github-state.json`, and writes `audit-github-state.md` in the fragment form `.github/audit/_preamble.md` fixes, one line per clause. That fragment rides `AUDIT_FRAGMENTS`, so its verdict reaches the release gate through [Outcomes and reporting](#outcomes-and-reporting) and its detail follows [Embargo](#embargo) like any domain's.
 
 - **A domain never re-derives a clause the fragment answers**; it reads the fragment as evidence and keeps the judgement bullets, the qualitative pass, and whether the expected-state file still encodes its spec.
+- **A rule pinned by the check alone is the fragment's; pinned beside anything else, its domain owes it too, whole** (rationale).
 - **A `FAIL IF` marked `Pinned by` a script or test in `pnpm test` is answered by running it**, not by reading the code it checks.
 - **The check reads a 403 under `AUDIT_PAT` as scope drift, a `FAIL`**, any other failed call as `UNVERIFIABLE`, and never passes a clause it could not read; `--local` makes a 403 `UNVERIFIABLE` for an operator's own login.
 
@@ -106,11 +107,11 @@ Source of truth: `Compose the audit report` and `Publish the audit status` in `.
 
 ## Findings
 
-**A BLOCKER fails the run like a failed `FAIL IF`**; the severity rubric and evidence rules are `.github/audit/_preamble.md`'s (rationale). **Findings naming the same file and root cause within five lines are one finding**, at the worst severity reported, across domains. **Delegation follows each domain prompt's `## Work streams`**, one `qualitative` stream among them, the domain's only qualitative pass.
+**A BLOCKER fails the run like a failed `FAIL IF`**; the severity rubric and evidence rules are `.github/audit/_preamble.md`'s (rationale). **Findings naming the same file and root cause within five lines are one finding**, at the worst severity reported, across domains. **Delegation follows each domain prompt's `## Work streams`**, one `qualitative` stream among them, the domain's only qualitative pass, and each delegate prints its own share of the manifest (rationale).
 
 - **FAIL IF** `S21` `.github/audit/_preamble.md` stops rating BLOCKER by attacker-controlled input reaching code execution, a credential, or an authorization grant, or stops requiring every BLOCKER and WARNING to quote its code, trace source to a named sink, and give a reproduction, or a BLOCKER or WARNING lacking those lines can reach PASS (rationale).
 - **FAIL IF** `S22` the private report stops merging findings by file, root cause, and a five-line window, or the ledger files one file and root cause as two open issues.
-- **FAIL IF** `S23` a domain prompt's `## Work streams` omits or repeats a heading its manifest owes, or `.github/audit/_preamble.md` lets a domain delegate by any other partition or run more than one qualitative pass (rationale).
+- **FAIL IF** `S23` a domain prompt's `## Work streams` omits or repeats a heading its manifest owes, or `.github/audit/_preamble.md` lets a domain delegate by any other partition, brief a delegate with a rule list, or run more than one qualitative pass (rationale).
 - **FAIL IF** `S24` `.github/audit/_preamble.md` stops requiring a PASS to trace each input a gate compares to whether the rule's attacker sets it, to judge a configuration's omissions by their actual fallback and take its failure and default paths, to keep every condition of a split rule, and to re-verify the open findings citing its rule (rationale).
 
 Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/security-audit-report.mjs`.
