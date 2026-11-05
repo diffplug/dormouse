@@ -646,10 +646,13 @@ export class BurrowRuntime {
 
   /**
    * Save the live ACL, as it reads once this write's turn comes. Queued with
-   * approvals, so neither overwrites the other's snapshot.
+   * approvals, so neither overwrites the other's snapshot. **Refused once this
+   * runtime stopped**: its ACL is then a snapshot a successor may have moved past,
+   * and writing it after the successor's writes would undo them.
    */
   saveRevocations(): Promise<void> {
     return this.#saveApproval(async () => {
+      if (this.#stopped) throw new Error('this Burrow stopped before its turn to save');
       await this.#saveAcl(this.#enrollment.burrowId, this.#acl.records());
     });
   }

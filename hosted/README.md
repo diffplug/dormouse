@@ -1,8 +1,8 @@
 # Dormouse Hosted
 
-Four Hono/Cloudflare Workers and the frame Worker `dormouse-frames` on `*.dormouseusercontent.com` are built from this package: the account frontend and auth at `https://hosted.dormouse.sh` (`dormouse-hosted`), the Hosted Relay's account-scoped routes with Pocket at the root and the one-time connection's Burrow route at `https://relay.dormouse.sh` (`dormouse-relay`), the one-time `/connect/` phone page and its client route at `https://try.dormouse.sh` (`dormouse-try`; [the one-time spec](../docs/specs/one-time.md)), and managed-voice speech at `https://voice.dormouse.sh` (`dormouse-voice`). The marketing website is a separate application. Managed voice and the Relay admit only the admin account; device-code Burrow enrollment and account-scoped encrypted terminal routing are implemented. Real-provider and live production acceptance remain separate release gates. See [the spec](../docs/specs/hosted.md), whose "Application boundary" owns what each Worker serves.
+Four Hono/Cloudflare Workers and the frame Worker `dormouse-frames` on `*.dormouseusercontent.com` are built from this package: the account frontend and auth at `https://hosted.dormouse.sh` (`dormouse-hosted`), the Hosted Relay's account-scoped routes with Pocket at the root and the one-time connection's Burrow route at `https://relay.dormouse.sh` (`dormouse-relay`), the one-time `/connect/` phone page and its client route at `https://try.dormouse.sh` (`dormouse-try`; [the one-time spec](../docs/specs/one-time.md)), and managed-voice speech at `https://voice.dormouse.sh` (`dormouse-voice`). The marketing website is a separate application. Managed voice and the Relay admit a subscribed account, and the admin account as a standing comp (`docs/specs/hosted.md` -> "Entitlement"); billing stays closed until the account Worker holds its Stripe bindings, so until then only the admin gets them. Device-code Burrow enrollment and account-scoped encrypted terminal routing are implemented. Real-provider and live production acceptance remain separate release gates. See [the spec](../docs/specs/hosted.md), whose "Application boundary" owns what each Worker serves.
 
-This file is the whole operator runbook, in the order an operator works: run locally, update packages, set up GitHub, provision previews, provision production, release, accept, recover. Marketing, desktop releases, Hosted production, and PR previews have separate deployment credentials. A passing local test implies no cloud resource and no real-provider acceptance.
+This file is the whole operator runbook, in the order an operator works: run locally, update packages, set up GitHub, provision previews, provision production, support customers, release, accept, recover. Marketing, desktop releases, Hosted production, and PR previews have separate deployment credentials. A passing local test implies no cloud resource and no real-provider acceptance.
 
 ## Run locally
 
@@ -15,14 +15,14 @@ dor tool hosted
 
 Outside Dormouse, use `pnpm dev:hosted` and open the `http://localhost:<port>` URL it prints. Request a code for a test address and read it at `/api/dev/emails` on that same origin. No real mail is sent, and the development database is isolated by the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what the local entry serves and what production omits. The port is OS-assigned unless you set `PORT`. Do not share this local inbox publicly. The local origin serves the account's Natural Voice routes but not the voice origin's: a Hosted build speaks only at `https://voice.dormouse.sh` (`docs/specs/hosted.md` -> "Development and release").
 
-The same command runs the relay Worker on this database at `http://localhost:8787` (or `RELAY_PORT`), so a dev desktop build enrolls by device code end to end. Start one with `DORMOUSE_RELAY_IS_HOSTED=1 DORMOUSE_RELAY_ORIGIN=http://localhost:8787 pnpm innerdogfood`, choose Local networks only or Anywhere in its Settings → Network, then unfold Hosted Relay and press Enroll remote control (or Turn on Natural Voice) and approve the code at the account origin. Approval needs the entitlement, so sign in there as `ADMIN_EMAIL` (`hosted/server/entitlement.ts`); its code lands in the local inbox. Its port is not OS-assigned, so don't also run `dor tool one-time`, or another checkout's `dor tool hosted`, beside it.
+The same command runs the relay Worker on this database at `http://localhost:8787` (or `RELAY_PORT`), so a dev desktop build enrolls by device code end to end. Start one with `DORMOUSE_RELAY_IS_HOSTED=1 DORMOUSE_RELAY_ORIGIN=http://localhost:8787 pnpm innerdogfood`, choose Local networks only or Anywhere in its Settings → Network, then unfold Hosted Relay and press Enroll remote control (or Turn on Natural Voice) and approve the code at the account origin. Approval needs the entitlement, so sign in there as `ADMIN_EMAIL` (`hosted/server/entitlement.ts`); its code lands in the local inbox. Its port is not OS-assigned, and the try Worker takes the next one, so don't also run `dor tool one-time`, or another checkout's `dor tool hosted`, beside it.
 
 ```sh
 pnpm test:hosted
 pnpm build:hosted
 ```
 
-Tests run each production Worker in real workerd, the account's with disposable Postgres clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, boundary, and push-egress suites alone, without Docker. The build writes each Worker's static files under `dist/<worker>/` (Pocket at `dist/relay/`, `/connect/` at `dist/relay/connect/`) and dry-runs all three Workers; it does not deploy. Production deploys only through the release workflow.
+Tests run each production Worker in real workerd, the account's with disposable Postgres clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, boundary, and push-egress suites alone, without Docker. The build writes each Worker's static files under `dist/<worker>/` (Pocket at `dist/relay/`, `/connect/` at `dist/try/connect/`) and dry-runs every Worker; it does not deploy. Production deploys only through the release workflow.
 
 The one-time rendezvous and `/connect/` page run on their own, without Docker or Postgres (the relay Worker's Relay routes answer 503 there):
 
@@ -53,7 +53,7 @@ Run `pnpm install` and re-run Hosted's integration tests after an update. The pr
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
 | Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `RelayRoom` Durable Object namespace), `dormouse-try-pr-N` (with its own `OneTimeRoom` one), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share as the branch's owner role, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1007` shared by every relay and account preview |
 | Production | Dedicated Dormouse Postgres database, a migration role and one runtime role per Worker, three uncached Hyperdrives, one per Worker connecting as its role; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `RelayRoom` Durable Object namespace and rate-limit namespaces `1` and `3`–`6`), `dormouse-try` (`try.dormouse.sh`, with its `OneTimeRoom` Durable Object namespace and rate-limit namespace `2`, and no Hyperdrive), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep and idle-token Cron Triggers), each on its custom domain; GitHub `hosted-production` environment |
-| Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
+| Email | Dedicated Postmark server, verified `signin@dormouse.sh` and `support@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, the `dormouse-hosted-tagger` GitHub App, the `Hosted tag creation` and `Hosted tag history` tag rulesets, immutable annotated `hosted/` tags |
 | Recovery | Neon backups/PITR enabled, encrypted pre-migration dumps retained as GitHub artifacts for 30 days, age identity also retained independently in a password manager |
@@ -167,7 +167,7 @@ gh variable set HOSTED_TAG_APP_CLIENT_ID --repo diffplug/dormouse --env hosted-r
 gh secret set HOSTED_TAG_APP_PRIVATE_KEY --repo diffplug/dormouse --env hosted-release-tag < PATH_TO_DOWNLOADED_KEY.pem
 ```
 
-`DATABASE_URL` is the direct migration-role Postgres URL. Generate the age identity with `age-keygen` into private password-manager storage, then enter it at the hidden prompt; preserve that independent copy and old keys on rotation. Use a production Cloudflare token covering Workers deployment (which includes the Durable Object migrations, rate-limit bindings, and Cron Triggers), Workers secret listing, Hyperdrive read, the custom-domain zone permissions for all three hostnames, and Workers Routes edit on the `dormouseusercontent.com` zone.
+`DATABASE_URL` is the direct migration-role Postgres URL. Generate the age identity with `age-keygen` into private password-manager storage, then enter it at the hidden prompt; preserve that independent copy and old keys on rotation. Use a production Cloudflare token covering Workers deployment (which includes the Durable Object migrations, rate-limit bindings, and Cron Triggers), Workers secret listing, Hyperdrive read, the custom-domain zone permissions for all four hostnames, and Workers Routes edit on the `dormouseusercontent.com` zone.
 
 The tag job authenticates as `dormouse-hosted-tagger`, a private GitHub App owned by `diffplug` (App ID `5228264`) (client ID `Iv23liADZP0hPRZCYRz8`) with Contents write, Metadata read, no webhook or events, and one installation selecting only this repository. The App is a bypass actor on `Hosted tag creation` alone, so it can create `hosted/` tags but never move or delete one, and `v*` tags stay admin-only; `docs/specs/security-ci.md` -> "Hosted Deployments" owns these checks. Do not grant tag bypass to the bot or Actions generally.
 
@@ -213,7 +213,7 @@ rm vapid.json
 
 The public half is public (`GET /api/push/config` serves it); the private half signs every push. Both are required for a production deploy: preflight refuses a relay Worker missing either. Cloudflare exposes a secret's name, never its value, so preflight cannot tell whether the two match; the relay answers push off for a pair that does not, and the release's live verification fails unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket re-registers it, so rotate only on compromise. Previews derive their own pair and never need this one.
 
-Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` in `wrangler.jsonc` (`docs/specs/hosted.md` -> "Billing"). Set none of them before checkout opens. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it. Before opening checkout, turn on Stripe's customer emails for successful payments: the `/billing` confirmation tells a buyer Stripe sends each receipt. Turn on cancellation in the customer portal too: the confirmation sends a member to Manage billing to cancel. The account Worker emails withdrawal acknowledgements and subscription notices (renewal and annual reminders, price changes, dispute suspensions and restorations) through the same Postmark server as sign-in codes, from `support@dormouse.sh`, so that sender must be verified there.
+Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` in `wrangler.jsonc` (`docs/specs/hosted.md` -> "Billing"). Set none of them before checkout opens. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it. Before opening checkout, turn on Stripe's customer emails for successful payments: the `/billing` confirmation tells a buyer Stripe sends each receipt. Turn on cancellation in the customer portal too: the confirmation sends a member to Manage billing to cancel. The account Worker emails purchase confirmations, withdrawal acknowledgements, subscription notices (renewal and annual reminders, price changes, dispute suspensions and restorations), and the [billing alert](#billing-alert) through the same Postmark server as sign-in codes, from `support@dormouse.sh`, so that sender must be verified there.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a credential pair do and do not enable. Facebook is outside this milestone.
 
@@ -240,16 +240,37 @@ A list price change for existing monthly or yearly subscribers is one row in `do
    VALUES ('monthly-2027', 'monthly', 'price_old', 'price_new', 10, 12, '2027-03-01T00:00:00Z');
    ```
 
-   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending nothing, until both Prices match their amounts and interval; watch the account Worker's Cron Events for that.
+   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so.
 3. On `effectiveAt`, in one reviewed release, point `STRIPE_PRICE_MONTHLY` (or `STRIPE_PRICE_YEARLY`) at the new Price and change the published price in `website/src/lib/hosted-pricing.ts`, so new checkouts sell it. Keep the row afterwards: it is what still recognizes the old Price for anyone not yet moved.
 
 Never edit a row once its notices have gone out; schedule a further change as a new row from the new Price.
+
+## Billing alert
+
+When the account cron's billing pass fails, the Worker emails `support@dormouse.sh` through Postmark with each error message, leading with anything overdue: a withdrawal unsettled a day after its notice, with its 14-day refund deadline; a closure unsettled after a day; a withdrawal's acknowledgement unsent after a day. A distinct error mails at most once a day, so a persistent failure repeats daily, and the run fails either way. `docs/specs/hosted.md` -> "Billing alert" owns the rules.
+
+| The mail says | Do |
+| --- | --- |
+| `paid outside Stripe`, `refund awaits the customer's action` | [Refund by hand](#refund-by-hand), before the deadline it names |
+| `refund not yet succeeded` | Nothing unless a deadline is near: Stripe is completing it, and the cron settles it. Near one, ask Stripe why |
+| `acknowledgement unsent`, `gave no billing email` | [Acknowledgement by hand](#acknowledgement-by-hand) |
+| `Price change` | [Change a price](#change-a-price): fix or delete the row |
+| Anything else | Usually a Stripe, Postmark, or database outage, which the next runs clear. Past a day, the same line returns, and it is a bug to fix |
+
+The alert cannot report a cron that stopped running, or mail Postmark refuses: `observability` is off, so a failed alert leaves only the failed run in the account Worker's Cron Events. Look there weekly while any withdrawal is open.
+
+Exercise it before opening checkout, and after any Postmark change. With billing's bindings set, add a price change the cron refuses, as the migration role; within 10 minutes the mail arrives, then delete the row:
+
+```sql
+INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt") VALUES ('alert-test', 'yearly', 'price_alert_test', '<a founding Price>', 50, 60, now());
+DELETE FROM dormouse_price_changes WHERE id = 'alert-test';
+```
 
 ## Refund by hand
 
 A whole-charge refund ends the subscription it paid for. To correct a billing mistake and keep the subscription, make the refund with the metadata on it, from the Stripe CLI or Workbench rather than the Dashboard's refund form, whose `charge.refunded` event would arrive before any metadata you add afterwards: `stripe refunds create --live --charge=<charge id> -d "metadata[dormouse_keep_subscription]=true"`. Only the refund that completes the charge counts, so split refunds need it on the last one.
 
-A withdrawal or account closure is stamped settled only once every payment it refunds is refunded in full by refunds Stripe lists as `succeeded`. Until then its cron keeps retrying it and failing, naming the invoice, for as long as it stays unsettled; watch the account Worker's Cron Events for that. A `pending` refund settles on its own once Stripe completes it, and the account Worker makes a `failed` or `canceled` one again. Two cases need the operator:
+A withdrawal or account closure is stamped settled only once every payment it refunds is refunded in full by refunds Stripe lists as `succeeded`. Until then its cron keeps retrying it and failing, naming the invoice, for as long as it stays unsettled, which the [billing alert](#billing-alert) reports. A `pending` refund settles on its own once Stripe completes it, and the account Worker makes a `failed` or `canceled` one again. Two cases need the operator:
 
 - **Paid outside Stripe.** Stripe cannot refund a payment it did not collect: an invoice marked paid out of band, or paid by a payment record. The error names the invoice and the amount.
 - **A refund awaiting the customer's action.** Stripe holds the refund in `requires_action` until the customer gives it what their payment method needs; the error names the invoice and the payment. Once they do and it succeeds, the cron settles it on its own. To refund another way instead, do step 2 first, so the cron makes no new refund, then cancel that refund in the Stripe Dashboard, then step 1.
@@ -273,6 +294,138 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
    UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE "withdrawalId" = '<withdrawal id>' AND "sentAt" IS NULL;
    ```
 
+## Support runbooks
+
+Owner: (to be named before launch). Monitored address: `support@dormouse.sh`.
+
+SQL runs as the migration role. `stripe` commands run from the Stripe CLI logged in to the live account (add `--live`), or the Dashboard's Workbench shell.
+
+### Find and verify the customer
+
+The Terms let us verify ownership, and forbid requiring account recovery. Most runbooks below start here.
+
+1. Find the Stripe customer by the sender's email in the Dashboard's search, or by a charge they describe (`last4:4242`). Its `metadata.pgstencil_owner` is the Hosted account id.
+2. Take either as proof, and nothing more: a reply from the Stripe customer's email to a message you sent it, or the last4, date, and amount of a charge on that customer. Never ask for a full card number, a password, or a sign-in. Say nothing to an unverified sender about whether an address has an account.
+3. Read the account's subscriptions; a current one has a status of `active`, `trialing`, `past_due`, `unpaid`, `paused`, or `incomplete`:
+
+   ```sql
+   SELECT s.owner_id, a.customer_id, s.id, s.price_id, s.status, s.started_at, s.ended_at, s.period_end, s.cancel_at_period_end, s.end_reason FROM pgstencil_billing.accounts a JOIN pgstencil_billing.subscriptions s ON s.owner_id = a.owner_id WHERE a.customer_id = '<customer id>' ORDER BY s.started_at;
+   ```
+
+### Cancel for someone who cannot sign in
+
+Deadline: the Terms state no number of days, but the cancellation must land before the next renewal, so do it the day the email arrives. If a renewal charged after their request arrived, refund it in full, which also ends the plan.
+
+1. [Find and verify the customer](#find-and-verify-the-customer).
+2. Stop the renewal, keeping access through the period they paid for. Use this command rather than the Dashboard's button: Stripe's portal was seen to set `cancel_at` instead (sandbox, 2026-11-03), and Hosted reads only `cancel_at_period_end`, so its billing page and renewal notices would still say it renews.
+
+   ```sh
+   stripe subscriptions update <subscription id> -d cancel_at_period_end=true
+   ```
+
+   A `past_due`, `unpaid`, or `paused` subscription has no paid period left, so cancel it at once: `stripe subscriptions cancel <subscription id> -d prorate=false -d invoice_now=false`.
+3. Confirm the webhook arrived: step 3 of finding the customer shows `cancel_at_period_end` true, or the status `canceled`.
+4. Email them, at the address they proved: no further charge, and the date access ends. Mention the 30-day refund if a payment is inside it.
+
+### Close an account by email
+
+Deadline: the Terms state no number of days. Closing takes effect as soon as they confirm, so act that day. The refunds are the cron's.
+
+1. [Find and verify the customer](#find-and-verify-the-customer). An account with no Stripe customer has only its sign-in email to reply from (`SELECT id FROM "user" WHERE email = '...' AND "emailVerified";`). A provider-only account with neither has nothing to verify against: send it to the owner, and never delete on an unverified request.
+2. Explain, then wait for their yes, as the account page does before it closes (`closureTerms` in `hosted/src/Closure.tsx`): the plan ends now and never renews; a first payment, or a yearly or founding renewal, inside the last 30 days is refunded in full with tax, and otherwise the time left is not; withdrawal and the 30-day guarantee for an earlier payment stay open by email; cancelling renewal instead keeps access through the period.
+3. End each current subscription in Stripe, without a refund or a final invoice, then confirm with step 3 of finding the customer that it shows `ended_at`:
+
+   ```sh
+   stripe subscriptions cancel <subscription id> -d prorate=false -d invoice_now=false
+   ```
+
+4. Record the closure and delete the account in one statement, as the route does. `<subscription ids>` is an array literal of what step 3 ended, `{sub_a,sub_b}`, or `{}` for none:
+
+   ```sql
+   WITH recorded AS (INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt") VALUES ('<account id>', '<subscription ids>'::text[], CASE WHEN cardinality('<subscription ids>'::text[]) = 0 THEN now() END)) DELETE FROM "user" WHERE id = '<account id>';
+   ```
+
+5. Within 10 minutes the cron refunds what closing owes and stamps `settledAt`; a failure reaches the [billing alert](#billing-alert). The account's Relay sockets close at the Relay's next sweep. Email them what ended and what was refunded.
+
+### Voluntary 30-day refund
+
+Deadline: they must ask within 30 days of the payment, counted to the day their email arrived. The Terms state no number of days for paying it. Pay it that day: a founding seat returns only if the subscription ends within 30 days of its start.
+
+| Payment | Refund it? |
+| --- | --- |
+| The first payment of the customer's first subscription | Yes |
+| A yearly or founding renewal | Yes |
+| A monthly renewal | No: the guarantee excludes it, though a statutory right may not |
+| The first payment of a later subscription, after a cancel or plan change | No: that does not restart the window |
+
+1. [Find and verify the customer](#find-and-verify-the-customer). If they are in the EEA or UK inside 14 days, tell them withdrawal refunds every payment. Find the payment on the customer's page in the Dashboard; the invoice shows why it was billed and when it was paid.
+2. Refund the full charge in the Dashboard (**Refund payment**, full amount, reason **Requested by customer**). The charge includes its tax, and Stripe Tax reverses that with it.
+3. Stripe's `charge.refunded` ends the subscription at once. Confirm within a minute that it shows `canceled` and `end_reason` `refund`. No cron pass repairs a lost event, so if it still shows current after Stripe's retries, run the cancel command from the closure runbook. A refund of an earlier subscription's charge ends nothing; if they want the current plan ended too, cancel it the same way.
+4. Email them: the plan has ended, the amount refunded with tax, and that their bank decides when the credit appears.
+
+A founding refund on a renewal, or one ending after the subscription's 30th day, does not return the seat, because Hosted counts it as a kept purchase. A refund of a whole charge ends the plan whatever it was for; to correct a billing mistake and keep the plan, mark the refund as [Refund by hand](#refund-by-hand) says.
+
+### Withdrawal by email or post
+
+Deadline: refund every payment for the subscription within 14 days after **receiving** the notice, by the original payment method, with no fee or deduction for use. The clock starts when the email or letter arrives, not when someone reads it, so post to DiffPlug's address must be collected well inside that.
+
+They may withdraw within 14 days after the contract, ending at the end of the 14th day in their time zone and later if that is a weekend or public holiday; a notice sent inside that counts, however late it arrives. It needs only to be an unambiguous statement: no reason, no particular form, no account access. If the period has passed or they are outside the EEA and UK, the 30-day refund may still apply, and doubt resolves toward honoring it.
+
+1. Locate the purchase with [Find and verify the customer](#find-and-verify-the-customer), by whatever the notice gives. Ask for more only if you cannot tell whose contract it is; asking does not move the deadline.
+2. Record it, so the cron does what the online function does. `<received at>` is when the notice arrived, with its zone, and `<country>` is the customer's billing country, or use `NULL`. This works on an account already closed:
+
+   ```sql
+   WITH recorded AS (INSERT INTO dormouse_withdrawals (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", country, "submittedAt") SELECT gen_random_uuid()::text, owner_id, id, '<monthly, yearly, or founding>', price_id, started_at, '<country>', '<received at>'::timestamptz FROM pgstencil_billing.subscriptions WHERE id = '<subscription id>' RETURNING id, "userId", "submittedAt") INSERT INTO dormouse_billing_notices (id, "userId", kind, "withdrawalId", "createdAt") SELECT gen_random_uuid()::text, "userId", 'withdrawal', id, "submittedAt" FROM recorded;
+   ```
+
+3. In Stripe, do nothing by hand: within 10 minutes the cron ends the subscription at once, refunds every paid invoice with its tax, emails the acknowledgement to the billing email, and stamps `settledAt`. Check that the subscription shows `canceled` and each payment shows refunded. A refund already made by hand counts toward it, so nothing is paid twice.
+4. Reply to the sender, whatever address they wrote from: their statement in their own words, when it arrived, that the plan has ended, and the refund. The emailed acknowledgement quotes the online function's statement and goes only to the billing email.
+5. From a day after the notice, the [billing alert](#billing-alert) names the withdrawal and its deadline until it settles. A payment Stripe cannot refund is [Refund by hand](#refund-by-hand), by the withdrawal id it names. An acknowledgement that cannot send is [Acknowledgement by hand](#acknowledgement-by-hand).
+
+### Unused-period refund
+
+Owed if we permanently discontinue Hosted, end paid access for a reason other than the customer's material breach, or, during a prepaid term, materially reduce the paid service or materially change the Terms and they choose to end instead of accepting.
+
+Deadline: the Terms state no number of days; the refund runs from when paid access ends, so pay it then. The 30-day window does not apply: this is a separate promise for time we no longer provide, and the Terms say the guarantee does not limit it. No code computes it.
+
+1. End the plan by hand first, as in the closure runbook, without proration: a partial refund leaves a subscription running, and Hosted ends one only when a charge is refunded in full (seen in the sandbox, 2026-11-03). Its `ended_at` is when paid access ended.
+2. Compute it from the latest paid invoice alone, as earlier periods were used. On that invoice in the Dashboard, `paid` is the amount paid in cents, tax included, and the period is its line's start and end:
+
+   ```text
+   refund = round(paid × (period end − ended_at) / (period end − period start))
+   ```
+
+   For example, $119.00 paid with VAT for a 365-day period, ended with 183 days left: 11900 × 183 / 365 = 5966, so $59.66. Subtract nothing for use, and refund no more than the payment has left after any earlier refund.
+3. Refund that amount of the invoice's payment in the Dashboard (**Refund payment**, partial, reason **Requested by customer**), never a tax-only amount: Stripe Tax splits a refund between net and tax in proportion, which is the corresponding tax the Terms promise.
+4. Email them: when access ended, the arithmetic, and the amount with tax. On discontinuation, do this for every current subscription and leave the Stripe bindings in place until the last refund succeeds and the last event is delivered.
+
+### Restore a founding lock
+
+For a billing-provider migration or a payment failure DiffPlug caused; a founder who cancelled, or whose own failed renewal ran out, subscribes again at list. Deadline: the Terms promise "a reasonable opportunity to restore payment", with no number of days. Offer at least the 30 days a founder gets to fix their own failed renewal, and say the date in writing. Checkout may refuse founding to a lapsed founder, so this is by hand. Try it once in a Stripe sandbox before its first real use.
+
+1. [Find and verify the customer](#find-and-verify-the-customer). Their locked Price is the old subscription's `price_id`, which must be in `STRIPE_PRICES_FOUNDING`; after moving to a new Stripe account, those are the new account's Prices at the same ladder steps. Confirm no subscription is current: `owner_access` grants access only for exactly one.
+2. Email the offer, plan, base price, renewal date, and how to cancel, and get their written yes: this starts an automatically renewing charge.
+3. Create it on that Price. The metadata key is what makes Hosted see it, on the customer `pgstencil_billing.accounts` holds, and the Dashboard's **Create subscription** can set the same fields:
+
+   ```sh
+   stripe subscriptions create -d customer=<customer id> -d "items[0][price]=<locked Price>" -d "items[0][quantity]=1" -d "metadata[pgstencil_owner]=<account id>" -d "automatic_tax[enabled]=true" -d payment_behavior=default_incomplete -d "payment_settings[save_default_payment_method]=on_subscription" -d "expand[0]=latest_invoice"
+   ```
+
+   Send them the answer's `latest_invoice.hosted_invoice_url`, where they pay and save a card; Stripe expires an unpaid first invoice after about 23 hours (`incomplete_expired`), and you then create it again. To charge a card they agreed to keep, use `-d default_payment_method=<payment method id> -d payment_behavior=error_if_incomplete` instead. If they already paid through a date, as in a migration, use that card and add `-d billing_cycle_anchor=<period end, Unix time> -d proration_behavior=none`: nothing is charged until then, and it must be under a year away.
+4. Verify webhook acceptance. In Developers → Webhooks, `customer.subscription.created` for it must have answered 200: a Price Hosted does not recognize, a quantity other than 1, or the wrong mode makes it, and every later event for that owner, answer 503. Then step 3 of finding the customer must show the new subscription on the locked Price, `active` once paid.
+5. Email them the renewal date and price. The new subscription counts as one more purchase at its cohort, an overcount of one seat that is accepted.
+
+### Notices the first time
+
+We must give at least 30 days' notice before we permanently discontinue Hosted, materially reduce paid service during a prepaid term, or materially change the Terms, unless an urgent legal or security requirement prevents it, then as soon as reasonably possible. Nothing sends these yet: the billing notices have no such kind, and sign-in shows no notice to an account without a contact email.
+
+Before the first one, either build a recorded notice to the billing and contact emails, with sign-in presentation for accounts without one, or do this by hand:
+
+1. List who it reaches. A subscriber's goes to the Stripe customer's email. Every account's also goes to its contact email: `SELECT id, email FROM "user" WHERE "emailVerified";`.
+2. An account with no contact email and no subscription can only be told at sign-in, which is not built, and a notice not shown starts no period for it. Build the sign-in presentation first, or leave that account on its previous terms.
+3. Send each one through Postmark, from `support@dormouse.sh`: what changes, the effective date, how to end the subscription, and the unused-period refund if they do. Record per account the id, address, time, and Postmark message id in private storage; Postmark's own history expires. Resend or follow up a bounce, as an undelivered notice starts nothing.
+4. Set the effective date at least 30 days after the last notice actually went out. A new version's date never backdates: `TERMS_VERSION` and the page's date are its revision, publishing it replaces nothing for an existing account, and that account stays on its previous terms until the effective date, or until it expressly agrees sooner. A change never applies to a dispute already begun.
+
 ## Release
 
 1. Review the exact package provenance and code revision. Run `pnpm test:hosted`, `pnpm build:hosted`, and the repository lints. Validate production migrations.
@@ -282,7 +435,7 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
    gh workflow run hosted-production.yml --repo diffplug/dormouse --ref main -f promote=true
    ```
 
-   Default `promote=false` verifies and builds only. `promote=true` enters the protected production environment and runs the preflight, backup and restore-test, migration, deployment, and live-verification sequence in `docs/specs/hosted.md` -> "Production releases", deploying the relay, voice, and account Workers in that order. The relay's revision, readiness, and one-time checks pass before the voice or account deploys, and all three are checked again after the account deploys. No real mail is sent by its smoke checks, and passing them is not acceptance.
+   Default `promote=false` verifies and builds only. `promote=true` enters the protected production environment and runs the preflight, backup and restore-test, migration, deployment, and live-verification sequence in `docs/specs/hosted.md` -> "Production releases", deploying the frames, try, relay, voice, and account Workers in that order. The try Worker's revision and page checks pass before the relay deploys, the relay's revision, readiness, and one-time checks before the voice or account deploys, and every Worker is checked again after the account deploys. No real mail is sent by its smoke checks, and passing them is not acceptance.
 
    The release needs all three Hyperdrive variables. A missing one, two Workers on one Hyperdrive, or a Hyperdrive that caches, reaches another database, or connects as anything but its Worker's role stops it at preflight, before the backup, so nothing in production changes. Preflight reads only Cloudflare's side: a role Postgres refuses (no LOGIN, a wrong password, a missing grant) passes it. A refused relay role stops the release at the relay's readiness, right after the relay deploys and before the voice or account; a refused voice or account role is caught only by the live verification after all three deploy. Either way the new Worker is already serving and its lookups fail, so before the first release on a new role, confirm it connects with `psql` as that role; on a failure, fix the role at once and rerun.
 
@@ -308,4 +461,4 @@ Do not mark all five login methods complete until email and all four providers p
 
 A failed migration or deployment may already have changed production state; workflow failure does not automatically reverse it. Use the Worker's deployment history for code rollback and investigate database compatibility first; `docs/specs/hosted.md` -> "Production releases" owns what a code rollback does not undo. Cloudflare refuses a rollback of `dormouse-relay` past its `OneTimeRoom` migration, or of `dormouse-hosted` past the deletion of its own; every relay deploy or rollback drops the one-time links still open, and established sessions run directly and are unaffected. Restore a backup only after an explicit operator decision, into a separate database first.
 
-Current provisioning status is discoverable with `gh secret list --env NAME`, `gh variable list --env NAME`, and each provider console. Configuration presence alone is not acceptance. The account limitations an operator will be asked about — login lifetime, no device revocation or sign-out-everywhere, no merge or recovery, admin-only managed voice, no paid-service activation — are in `docs/specs/hosted.md`.
+Current provisioning status is discoverable with `gh secret list --env NAME`, `gh variable list --env NAME`, and each provider console. Configuration presence alone is not acceptance. The account limitations an operator will be asked about — login lifetime, no device revocation or sign-out-everywhere, no merge or recovery — and billing, closed until its bindings are set, are in `docs/specs/hosted.md`.

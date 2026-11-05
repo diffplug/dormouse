@@ -5,26 +5,35 @@ import { sitePath } from "../lib/site-meta";
 
 export type PolicySection = { id: string; title: string; body: ReactNode };
 
-export default function HostedPolicyLayout({ path, title, applicability, sections }: {
-  path: string;
-  title: string;
-  applicability: string;
-  sections: PolicySection[];
-}) {
+export type PolicyPage = { title: string; applicability: string; sections: PolicySection[] };
+
+/**
+ * A policy's own text, without the site around it: what its live page shows
+ * and its version's archive holds (`website/src/pages/policy-archive.test.tsx`).
+ */
+export function PolicyText({ title, applicability, sections }: PolicyPage) {
+  return (
+    <>
+      <p className={`mb-3 font-display text-sm ${MUTED_TEXT_CLASS}`}>Dormouse Hosted</p>
+      <h1 className="mb-4 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{title}</h1>
+      <p className={`mb-12 ${MUTED_TEXT_CLASS}`}>Last updated <time dateTime="2026-11-03">November 3, 2026</time>. {applicability}</p>
+      {sections.map(({ id, title, body }) => (
+        <section key={id} aria-labelledby={id} className="mb-10">
+          <h2 id={id} className="mb-3 scroll-mt-24 font-display text-2xl">{title}</h2>
+          <div className={`${BODY_TEXT_CLASS} space-y-4`}>{body}</div>
+        </section>
+      ))}
+    </>
+  );
+}
+
+export default function HostedPolicyLayout({ path, ...page }: PolicyPage & { path: string }) {
   return (
     <>
       <SiteHeader activePath={path} style={STATIC_PAGE_HEADER_STYLE} prelaunch />
       <div className="min-h-screen bg-[var(--color-bg)] px-4 pt-28 pb-12 text-[var(--color-text)] md:px-6 md:pt-36">
         <main className="mx-auto max-w-3xl">
-          <p className={`mb-3 font-display text-sm ${MUTED_TEXT_CLASS}`}>Dormouse Hosted</p>
-          <h1 className="mb-4 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{title}</h1>
-          <p className={`mb-12 ${MUTED_TEXT_CLASS}`}>Last updated <time dateTime="2026-11-03">November 3, 2026</time>. {applicability}</p>
-          {sections.map(({ id, title, body }) => (
-            <section key={id} aria-labelledby={id} className="mb-10">
-              <h2 id={id} className="mb-3 scroll-mt-24 font-display text-2xl">{title}</h2>
-              <div className={`${BODY_TEXT_CLASS} space-y-4`}>{body}</div>
-            </section>
-          ))}
+          <PolicyText {...page} />
         </main>
         <footer className="mx-auto mt-12 max-w-3xl border-t border-[var(--color-text)]/20 pt-6">
           <nav aria-label="Hosted policies" className="flex flex-wrap gap-x-6 gap-y-3">

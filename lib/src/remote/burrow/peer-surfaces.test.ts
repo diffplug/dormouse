@@ -270,7 +270,7 @@ describe('surface responder', () => {
     await Promise.resolve();
     expect(quiet.notified).toBe(0);
     // Answering still works: it costs nothing until the Burrow asks.
-    registerSurface('surface:2', 'pty-2');
+    registerSurface('surface:2');
     expect(quiet.answer('directory', {})).toHaveLength(1);
   });
 });

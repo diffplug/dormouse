@@ -86,6 +86,8 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 
 **Why neither queue, when the save still takes one.** A store write has no timeout, and a VS Code keychain write can wait on a locked keychain, so a revocation behind one would leave its target connected until that write ended. Only the save needs ordering: the approval that overtook it re-applies it at publish, and the queued save reads the live ACL at its turn.
 
+**Why a stalled write holds the next try, with no deadline.** A store write cannot be cancelled once it runs, and both stores land writes in call order, so a try queued behind a stalled one could land no sooner; one run beside it could let the older land last. A deadline would only answer sooner, at the cost of an approval reported failed whose write then lands, which a restart before the next write would honour. What can stall instead is kept apart: the retry skips the lifecycle chain, and VS Code queues keychain writes apart from `globalState`.
+
 **Why retry, with no tombstone.** A marker in the same store fails with the same write. Without a retry a transient failure was as lasting as a full disk, because the phone's record has gone from the live ACL and nothing else would write it. So the residual is only a save that keeps failing up to the moment the service stops.
 
 **Why a device id is 64 bits of the static, in hex.** The static is a public key and authorizes nothing, but it is long and stable, so it stays in the service; a prefix is short enough to read in a list. A paired phone chooses its own static and could grind one sharing a shorter prefix with another phone's, so that the person revoking one cuts off the other; 64 bits puts that out of reach, and the ambiguity refusal covers what is left.

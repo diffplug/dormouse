@@ -62,10 +62,12 @@ Source of truth: `App` in `hosted/src/App.tsx`; `takeCheckout` in `hosted/src/bi
 Continuing past the sign-in notice is how an account agrees to the Hosted terms (`website/src/pages/Terms.tsx` -> "The service").
 
 - **Must show the notice beside every sign-in method**, naming `TERMS_VERSION` and linking the terms and privacy policy without leaving the page.
-- **`TERMS_VERSION` is the policy pages' revision date** and changes with every terms revision.
+- **`TERMS_VERSION` is the policy pages' revision date** and changes with every revision of the terms or the privacy policy.
+- **Must keep each published version of both policies as a static file, `website/public/terms/<version>/index.html` and `website/public/privacy/<version>/index.html`, served at `https://dormouse.sh/terms/<version>/` and `https://dormouse.sh/privacy/<version>/`; never change or remove one.** The current version's file holds what its live page renders, so moving `TERMS_VERSION` without its files, or changing a policy's text without moving it, fails `website/src/pages/policy-archive.test.tsx`.
+- **Must link the agreed version's archive, never the live page,** from the purchase agreement and what confirms it: checkout, the `/billing` confirmation, and the purchase email.
 - **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice, current version only.
 
-Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `hosted/server/policy-constants.ts`.
+Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` and `termsArchiveUrl` in `hosted/server/policy-constants.ts`.
 
 ## Entitlement
 
@@ -98,6 +100,8 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Never offer a trial or Managed Payments; must enable Stripe Tax on every Checkout.**
 - **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name and a `ref`, normalized as `checkoutRef` does; the owner is the login, its email only once verified (else Checkout asks), and Stripe returns to `/billing`. A checkout open for another plan is expired first (`replace`); a held subscription refuses another with 409.
 - **Must start a checkout only after agreement to `TERMS_VERSION` and to automatic renewal at the `price` the page showed, recorded in `dormouse_checkout_consents` before its URL is answered**; another version answers 409 `TERMS_CHANGED`, and a checkout whose Price `priceCatalog` does not price at `price` is refused (`expectPrice`) with 409 `PRICE_CHANGED`. `GET` shows the latest while a subscription is held.
+- **Never answer a checkout URL until Stripe holds its Price at the catalog's amount**, in USD, at the plan's interval, in this deployment's mode (`stripeHoldsPrice`, once per Price and isolate); the catalog's amounts are the published prices, not Stripe's. Otherwise, or when Stripe cannot say, the checkout is expired and the route answers 503 `CHECKOUT_UNAVAILABLE`.
+- **Must record with the consent what it was given to, derived on the server and never from the request**: `shownUsd`, the catalog's amount for its Price; `voiceDailyCap`, `VOICE_DAILY_CAP`; and `presentedText`, every statement the page makes for that plan and price (`presentedLines` in `hosted/server/disclosure.ts`, which the page renders). `termsVersion` names the terms' own text ("Terms acceptance").
 - **Must add or rename a founders-row name (`dormouse_founders`) only while `subscribedSql` holds on the founding Prices** (else 409) and `isFounderName` accepts it; leaving always works, a rename keeps `shownSince`. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must verify the webhook's signature over the raw body before any write** and answer 2xx only once `webhook()` has committed, any other failure 503, which Stripe retries.
 - **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: `billing.end` with reason `refund`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator. **Never end a subscription for a refunded charge whose newest refund Stripe lists carries the metadata `KEEP_SUBSCRIPTION` = `true`**, the operator's correction (`hosted/README.md` -> "Refund by hand"), read from Stripe on every delivery since the event embeds no refunds; a lost dispute ignores it.
@@ -106,14 +110,14 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
 - **Never open a founding checkout for an account `foundingLapsed` answers true**, the rule `docs/specs/pricing.md` -> "Checkout and entitlement" states: it answers 409 `PRICE_CHANGED`, so a stale page rereads, and `GET` answers `founding` null beside it.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
-- **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried.
+- **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried ("Billing alert").
 - **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
-Source of truth: `billingSetup`, `withBilling`, `foundingLapsed`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
+Source of truth: `billingSetup`, `withBilling`, `stripeHoldsPrice`, `foundingLapsed`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
 
 ## Billing notices
 
-Each notice is a `dormouse_billing_notices` row, recorded before it is sent and stamped once Postmark accepts it, one per kind and renewal, dispute, or withdrawal.
+Each notice is a `dormouse_billing_notices` row, recorded before it is sent and stamped once Postmark accepts it, one per kind and renewal, dispute, withdrawal, or purchased subscription.
 
 | Kind | Due | Still sent while |
 |---|---|---|
@@ -123,13 +127,25 @@ Each notice is a `dormouse_billing_notices` row, recorded before it is sent and 
 | `dispute_suspended` | a dispute opens a suspension | the dispute is open, for 30 days |
 | `dispute_restored` | it closes in the account's favor, no other open | 30 days |
 | `withdrawal` (its acknowledgement) | a withdrawal is recorded, in the same statement | until sent; the cron fails once one is a day overdue |
+| `purchase` (its confirmation) | a checkout completes, one per subscription | until sent |
 
 - **Must send every notice to the Stripe customer's email**, never the sign-in email, so a provider-only account gets them.
-- **Must record a dispute's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
+- **Must record a dispute's or a purchase's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
+- **Must fill a purchase's notice from its checkout's consent** ("Billing"), never the current price or terms.
 - **A price change is an operator's `dormouse_price_changes` row** (`hosted/README.md`); both its Prices grant the plan once inserted. **Never act on one naming a founding Price or another plan's**, or whose Prices Stripe does not hold at its amounts, in USD, at the plan's interval.
 - **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 
-Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql` and `hosted/server/dormouse-migrations/020_withdrawal_notices.sql`.
+Source of truth: `runNotices` and `sendNotices` in `hosted/server/notices.ts`; `recordDispute` in `hosted/server/billing-routes.ts`; `hosted/server/dormouse-migrations/018_billing_notices.sql`, `hosted/server/dormouse-migrations/020_withdrawal_notices.sql`, and `hosted/server/dormouse-migrations/027_purchase_notices.sql`.
+
+## Billing alert
+
+- **Must email `SUPPORT_EMAIL`, through the account's own mail sender, when the account cron fails**, a broken billing setup included, with each error's message; billing closed sends nothing. Local development's goes to the local inbox.
+- **Must report overdue, ahead of the other errors,** a withdrawal unsettled a day after its notice, naming the Terms' deadline 14 days from that notice; a closure unsettled a day after it closed; and a withdrawal's acknowledgement unsent after a day. A settlement past the cron's batch is reported too.
+- **Must mail at most once a day per distinct line**, recorded as its SHA-256 in `dormouse_billing_alerts`, which keeps no error text; a mail carries every line still failing. A failed send is retried by the next run. **Without that table, must mail only from the day's first run.**
+- **Never let the alert replace or suppress the cron's failure**: the invocation fails whatever the alert did, so Cron Events shows each failed run.
+- **Never mail a stack, a cause, a key, a connection URL, or a token shaped like a card number**: messages alone, masked. Withdrawal, subscription, and invoice ids and amounts stay, for the operator.
+
+Source of truth: `accountCron` in `hosted/server/account-routes.ts`; `alertBillingFailure` in `hosted/server/billing-alert.ts`; `hosted/server/dormouse-migrations/028_billing_alerts.sql`.
 
 ## Account closure
 

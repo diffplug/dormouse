@@ -49,12 +49,18 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
   #enrollment: Promise<BurrowEnrollment | null> | null = null;
   #watch: vscode.Disposable | undefined;
   /**
-   * Preserve call order across asynchronous keychain/Memento writes. The Burrow
+   * Preserve call order across asynchronous `globalState` writes. The Burrow
    * updates its ACL from snapshots, so letting two approvals write together
    * could allow the older snapshot to finish last and silently de-pair the
    * newer Client after a restart.
    */
   readonly #mutate = createSerialQueue();
+  /**
+   * The same for `SecretStorage` writes, on a queue of their own: a keychain
+   * that waits on its unlock prompt must not hold the ACL, a revocation's save
+   * included, behind it. No write here reads another's key.
+   */
+  readonly #mutateSecrets = createSerialQueue();
 
   /**
    * @param onServingChanged Some window of this extension wrote or cleared the
@@ -100,14 +106,14 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
   }
 
   saveEnrollment(enrollment: BurrowEnrollment): Promise<void> {
-    return this.#mutate(async () => {
+    return this.#mutateSecrets(async () => {
       await this.#context.secrets.store(ENROLLMENT_KEY, JSON.stringify(enrollment));
       this.#enrollment = Promise.resolve(enrollment);
     });
   }
 
   clearEnrollment(): Promise<void> {
-    return this.#mutate(async () => {
+    return this.#mutateSecrets(async () => {
       await this.#context.secrets.delete(ENROLLMENT_KEY);
       this.#enrollment = Promise.resolve(null);
     });
@@ -132,12 +138,12 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
   }
 
   /**
-   * Set or clear the marker, in call order with every other write here. A
+   * Set or clear the marker, in call order with every other keychain write. A
    * clear reads first, so clearing an absent marker — every service start —
    * announces nothing to the other windows.
    */
   saveOneTimeServing(serving: boolean): Promise<void> {
-    return this.#mutate(async () => {
+    return this.#mutateSecrets(async () => {
       if (serving) {
         await this.#context.secrets.store(ONE_TIME_SERVING_KEY, '1');
         return;

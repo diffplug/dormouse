@@ -476,6 +476,51 @@ describe('burrow state store', () => {
     expect(await target.loadEnrollment()).toBeNull();
   });
 
+  it('saves the ACL while a keychain write waits, in order with other ACL writes', async () => {
+    const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
+    const { context, store } = fakeContext();
+    const unlocked = Promise.withResolvers<void>();
+    const keychainStore = context.secrets.store;
+    const keychainDelete = context.secrets.delete;
+    // A keychain waiting on its unlock prompt.
+    context.secrets.store = async (key: string, value: string) => {
+      await unlocked.promise;
+      await keychainStore(key, value);
+    };
+    context.secrets.delete = async (key: string) => {
+      await unlocked.promise;
+      await keychainDelete(key);
+    };
+    const target = new VsCodeBurrowStateStore(context);
+    const enrollment = {
+      relayUrl: 'https://relay.dormouse.sh',
+      burrowId: BURROW_ID,
+      burrowToken: 'token',
+      origin: 'https://relay.dormouse.sh',
+      rpId: 'relay.dormouse.sh',
+      ...ENROLLMENT_LOCAL,
+    };
+    let enrolled = false;
+    const enrolling = target.saveEnrollment(enrollment).then(() => {
+      enrolled = true;
+    });
+    const clearing = target.clearEnrollment();
+    const serving = target.saveOneTimeServing(true);
+
+    const first = aclRecord(BURROW_ID, 'first');
+    const revoked = { ...first, revokedAt: 2 };
+    await target.saveAcl(BURROW_ID, [first]);
+    await target.saveAcl(BURROW_ID, [revoked]);
+
+    expect(enrolled).toBe(false);
+    expect(await target.loadAcl(BURROW_ID)).toEqual([revoked]);
+    unlocked.resolve();
+    await Promise.all([enrolling, clearing, serving]);
+    // In call order among themselves.
+    expect(store.secrets.has('dormouse.burrow.enrollment')).toBe(false);
+    expect(store.secrets.has(ONE_TIME_SERVING_KEY)).toBe(true);
+  });
+
   it('forgets a failed keychain read instead of memoizing it', async () => {
     // A locked or keyring-less keychain rejects `secrets.get`; that says
     // nothing about what the store holds. A memoized rejection would leave an

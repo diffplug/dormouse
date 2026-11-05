@@ -1,13 +1,17 @@
 // Rules: docs/specs/hosted.md -> "Billing notices"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
 import type { Billing, Stripe } from "@pgstencil/stripe";
-import { escape } from "@pgstencil/auth/email";
-import type { EmailMessage, EmailSender } from "pgstencil";
-import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
-import { DIFFPLUG_POSTAL_ADDRESS, SUPPORT_EMAIL, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
-import { DAY_MS, run, type PriceCatalog, type PriceChange } from "./billing";
-import { BILLING_RETURN_PATH, isPlan, type Plan } from "./policy-constants";
+import { postmarkEmail } from "@pgstencil/auth/postmark";
+import type { EmailSender } from "pgstencil";
+import { planInterval } from "../../website/src/lib/hosted-pricing";
+import { DAY_MS, run, stripeHoldsPrice, type PriceCatalog, type PriceChange } from "./billing";
+import { BillingOverdue } from "./billing-alert";
+import { NOTICE_FROM, noticeMessage, type NoticeContext, type Pending } from "./notice-message";
+import type { Plan } from "./policy-constants";
 import { billingContact, type Contact } from "./withdrawal";
+
+/** The mail a notice goes by: Postmark sends the address it is built with, whatever a message names. */
+export const noticeMail = (token: string): EmailSender => postmarkEmail(token, NOTICE_FROM);
 
 /**
  * A yearly plan's renewal notice, and a monthly plan's annual reminder, are
@@ -32,7 +36,7 @@ export const PRICE_NOTICE_MIN_DAYS = 7;
  * spare and never announces a change that then cannot apply.
  */
 const PRICE_SEND_BY_DAYS = PRICE_NOTICE_MIN_DAYS + 1;
-/** How long the cron retries a dispute notice, stale past it; a withdrawal's acknowledgement it retries until sent. */
+/** How long the cron retries a dispute notice, stale past it; a withdrawal's acknowledgement and a purchase's confirmation it retries until sent. */
 const RETRY_DAYS = 30;
 /** A withdrawal's acknowledgement still unsent this many days after its withdrawal fails every cron run until it goes. */
 const ACKNOWLEDGEMENT_OVERDUE_DAYS = 1;
@@ -41,155 +45,14 @@ const LEASE_MS = 5 * 60 * 1000;
 /** How many notices one pass sends, and how many price changes it applies, at most. */
 const BATCH = 50;
 
-/** Prices a Stripe client confirmed, by id, amount, interval, and mode: Stripe never changes a Price's amount or interval. */
-const confirmedPrices = new WeakMap<Stripe, Set<string>>();
-
 /** Throws unless Stripe holds both of `change`'s Prices at its amounts, in USD, per its plan's interval. */
 async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
-  const interval = planInterval(change.plan);
-  let confirmed = confirmedPrices.get(billing.stripe);
-  if (!confirmed) confirmedPrices.set(billing.stripe, (confirmed = new Set()));
   for (const [id, usd] of [
     [change.fromPriceId, change.fromUsd],
     [change.toPriceId, change.toUsd],
-  ] as const) {
-    const key = `${id} ${usd} ${interval} ${billing.config.live}`;
-    if (confirmed.has(key)) continue;
-    const price = await billing.stripe.prices.retrieve(id);
-    if (
-      price.currency !== "usd" ||
-      price.unit_amount !== usd * 100 ||
-      price.recurring?.interval !== interval ||
-      price.recurring.interval_count !== 1 ||
-      price.livemode !== billing.config.live
-    )
-      throw new Error(`Price change ${change.id}: Stripe's ${id} is not ${usd} USD every ${interval}`);
-    confirmed.add(key);
-  }
-}
-
-type Kind = "renewal" | "annual" | "price_change" | "dispute_suspended" | "dispute_restored" | "withdrawal";
-
-/** A notice to send, with what its text needs. */
-interface Pending {
-  id: string;
-  userId: string;
-  kind: Kind;
-  renewsAt: Date | null;
-  priceId: string | null;
-  priceChangeId: string | null;
-  /** A withdrawal's: its reference, plan, when its contract started, and when it was submitted. */
-  withdrawalId: string | null;
-  withdrawalPlan: string | null;
-  contractStartedAt: Date | null;
-  submittedAt: Date | null;
-}
-
-/** What composing a notice reads beyond its row. */
-export interface NoticeContext {
-  catalog: PriceCatalog;
-  /** The account origin, whose billing page a notice links. */
-  origin: string;
-}
-
-const DAY = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" });
-const UTC = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeStyle: "long", timeZone: "UTC" });
-const UTC_DAY = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" });
-
-/** A paragraph, or a list of terms and their values. */
-type Block = string | readonly (readonly [string, string])[];
-
-/** The email for notice `notice`, to the billing email `to`. */
-function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: NoticeContext): EmailMessage {
-  const billingPage = new URL(BILLING_RETURN_PATH, context.origin).href;
-  const name = plan ? PLAN_NAMES[plan] : "Dormouse Hosted";
-  const interval = plan ? planInterval(plan) : null;
-  const usd = notice.priceId ? (context.catalog.prices.get(notice.priceId)?.usd ?? null) : null;
-  const on = notice.renewsAt ? DAY.format(notice.renewsAt) : "";
-  const cancel = `To stop it renewing, cancel before ${on} in Manage billing on your billing page: ${billingPage}. You keep Hosted until ${on}. If you cannot sign in, email ${SUPPORT_EMAIL} and we will cancel it for you.`;
-  const yearlyRefund = `Ask within 30 days of a yearly renewal payment and we refund it in full, including tax.`;
-  const help = `Questions: ${SUPPORT_EMAIL}.`;
-  let subject: string;
-  let paragraphs: Block[];
-  switch (notice.kind) {
-    case "renewal":
-      subject = `Your Dormouse Hosted subscription renews on ${on}`;
-      paragraphs = [
-        `Your ${name} subscription renews automatically on ${on}${usd ? `, for another year at $${usd} plus any applicable tax, charged to your payment method on file` : ", for another year"}.`,
-        cancel,
-        yearlyRefund,
-        help,
-      ];
-      break;
-    case "annual":
-      subject = "Your yearly reminder about your Dormouse Hosted subscription";
-      paragraphs = [
-        `This is your yearly reminder that your ${name} subscription renews automatically every month${usd ? ` at $${usd} plus any applicable tax, charged to your payment method on file` : ""}, until you cancel. Your next renewal is on ${on}.`,
-        `To cancel, use Manage billing on your billing page: ${billingPage}. You keep Hosted until the end of the month you paid for. If you cannot sign in, email ${SUPPORT_EMAIL} and we will cancel it for you.`,
-        help,
-      ];
-      break;
-    case "price_change": {
-      const change = context.catalog.usable.find((candidate) => candidate.id === notice.priceChangeId)!;
-      subject = `Your Dormouse Hosted price changes on ${on}`;
-      paragraphs = [
-        `The price of your ${name} subscription changes from $${change.fromUsd} to $${change.toUsd} a ${interval}, plus any applicable tax, starting with your renewal on ${on}. Nothing changes before then.`,
-        `If you do not want to pay the new price, ${cancel.charAt(0).toLowerCase()}${cancel.slice(1)}`,
-        ...(interval === "year" ? [yearlyRefund] : []),
-        help,
-      ];
-      break;
-    }
-    case "dispute_suspended":
-      subject = "Dormouse Hosted is paused during a payment dispute";
-      paragraphs = [
-        "A payment for your Dormouse Hosted subscription is being disputed with your bank or card provider. While the dispute is open, we have paused the paid features it covers, Natural Voice and the Hosted Relay. Your subscription is not cancelled, and Dormouse keeps working, with spoken alarms in your system voice.",
-        "If the disputed payment is restored, or the pause was a mistake, we restore your remaining paid access and any founding price you held. If the payment is finally reversed, we may end the access it paid for and stop future renewals.",
-        `This does not limit your right to dispute a charge, or any refund or remedy owed to you. To reach us about the dispute, email ${SUPPORT_EMAIL}.`,
-      ];
-      break;
-    case "dispute_restored":
-      subject = "Your Dormouse Hosted access is restored";
-      paragraphs = [
-        "The payment dispute on your Dormouse Hosted subscription has closed with the payment in place, and we have restored your paid access. Your subscription continues as before, including any founding price you held.",
-        `This does not limit any refund or remedy owed to you. ${help}`,
-      ];
-      break;
-    case "withdrawal": {
-      // The durable acknowledgement docs/specs/pricing.md -> "Checkout and entitlement" requires.
-      const contract = isPlan(notice.withdrawalPlan) ? PLAN_NAMES[notice.withdrawalPlan] : notice.withdrawalPlan;
-      subject = "We received your withdrawal from Dormouse Hosted";
-      paragraphs = [
-        "DiffPlug LLC received your withdrawal from your Dormouse Hosted subscription contract.",
-        [
-          ["Your statement", WITHDRAWAL_STATEMENT],
-          ["Submitted", UTC.format(notice.submittedAt!)],
-          ["Contract", `Dormouse Hosted, ${contract}, ordered on ${UTC_DAY.format(notice.contractStartedAt!)}`],
-          ["Reference", notice.withdrawalId!],
-        ],
-        "Your subscription ends with this withdrawal and will not renew. We refund every payment you made for it in full, including tax, to your original payment method within 14 days of your withdrawal, with no deduction. Your bank or card provider decides when the credit appears.",
-        `Keep this email as your record. Questions: ${SUPPORT_EMAIL}.`,
-      ];
-      break;
-    }
-  }
-  paragraphs.push(DIFFPLUG_POSTAL_ADDRESS);
-  return {
-    from: `Dormouse Hosted <${SUPPORT_EMAIL}>`,
-    to: [to],
-    replyTo: SUPPORT_EMAIL,
-    subject,
-    text: paragraphs
-      .map((block) => (typeof block === "string" ? block : block.map(([term, value]) => `${term}: ${value}`).join("\n")))
-      .join("\n\n"),
-    html: `<html lang="en"><body>${paragraphs
-      .map((block) =>
-        typeof block === "string"
-          ? `<p>${escape(block)}</p>`
-          : `<dl>${block.map(([term, value]) => `<dt>${escape(term)}</dt><dd>${escape(value)}</dd>`).join("")}</dl>`,
-      )
-      .join("")}</body></html>`,
-  };
+  ] as const)
+    if (!(await stripeHoldsPrice(billing, id, usd, change.plan)))
+      throw new Error(`Price change ${change.id}: Stripe's ${id} is not ${usd} USD every ${planInterval(change.plan)}`);
 }
 
 /**
@@ -199,7 +62,7 @@ function noticeMessage(to: string, notice: Pending, plan: Plan | null, context: 
  * renewal, a price change's only while it is further off than
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
  * while its dispute is open; a dispute notice for {@link RETRY_DAYS}; a
- * withdrawal's acknowledgement until it is sent.
+ * withdrawal's acknowledgement and a purchase's confirmation until sent.
  * The batch is leased in the statement that picks it, so two passes never
  * send one twice. Never-tried notices go first, then the least recently
  * tried, so ones that keep failing never starve newer ones past their
@@ -220,11 +83,16 @@ export async function sendNotices(
   const leased = await run<Pending>(
     billing.db,
     `WITH due AS (
-      SELECT n.id, s.price_id AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt"
+      SELECT n.id, s.price_id AS "priceId", w.plan AS "withdrawalPlan", w."contractStartedAt", w."submittedAt",
+        k.plan AS "consentPlan", k."shownUsd", k."termsVersion", k."consentedAt"
       FROM public.dormouse_billing_notices n
       LEFT JOIN pgstencil_billing.subscriptions s ON s.id = n."subscriptionId"
       LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
       LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
+      -- A checkout reused across a terms change holds one consent per version.
+      LEFT JOIN LATERAL (
+        SELECT * FROM public.dormouse_checkout_consents consent WHERE consent."checkoutId" = n."checkoutId"
+        ORDER BY consent."consentedAt" DESC LIMIT 1) k ON true
       WHERE n."sentAt" IS NULL AND (n."attemptedAt" IS NULL OR n."attemptedAt" < $2)
         AND ($3::text IS NULL OR n."userId" = $3)
         AND CASE
@@ -238,13 +106,14 @@ export async function sendNotices(
             n."createdAt" > $4
             AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
           WHEN n.kind = 'dispute_restored' THEN n."createdAt" > $4
-          ELSE n.kind = 'withdrawal'
+          ELSE n.kind IN ('withdrawal', 'purchase')
         END
       ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5
       FOR UPDATE OF n SKIP LOCKED)
     UPDATE public.dormouse_billing_notices n SET "attemptedAt" = $1 FROM due WHERE n.id = due.id
     RETURNING n.id, n."userId", n.kind, n."renewsAt", due."priceId", n."priceChangeId",
-      n."withdrawalId", due."withdrawalPlan", due."contractStartedAt", due."submittedAt"`,
+      n."withdrawalId", due."withdrawalPlan", due."contractStartedAt", due."submittedAt",
+      due."consentPlan", due."shownUsd", due."termsVersion", due."consentedAt"`,
     [
       now,
       new Date(now.getTime() - LEASE_MS),
@@ -396,7 +265,7 @@ export async function runNotices(
     WHERE kind = 'withdrawal' AND "sentAt" IS NULL AND "createdAt" <= $1`,
     [new Date(now.getTime() - ACKNOWLEDGEMENT_OVERDUE_DAYS * DAY_MS)],
   );
-  if (overdue?.ids) failed.push(new Error(`Withdrawal acknowledgement unsent after a day: withdrawal ${overdue.ids.join(", ")}`));
+  if (overdue?.ids) failed.push(new BillingOverdue(`Withdrawal acknowledgement unsent after a day: withdrawal ${overdue.ids.join(", ")}`));
   failed.push(...(await applyPriceChanges(billing, verified)));
   return failed;
 }

@@ -1903,6 +1903,22 @@ describe('paired devices and revocation', () => {
       vi.useRealTimers();
     });
 
+    it('keeps being saved again while another store write on the lifecycle chain hangs', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      await afterFailedSave();
+      const hung = Promise.withResolvers<void>();
+      vi.spyOn(store, 'saveEnrollment').mockImplementation(() => hung.promise);
+      // The Relay's raise is saved on the lifecycle chain, and this one never returns.
+      sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS);
+
+      expect(revokedInStore()).toEqual([true, false]);
+      expect((await pairedResult()).unsavedRevocations).toBeUndefined();
+      hung.resolve();
+    });
+
     it('is saved again on a timer until one lands, with nothing else asked', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       await afterFailedSave();

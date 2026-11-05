@@ -1,15 +1,27 @@
 import { test, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Hono } from "hono";
+import { escape } from "@pgstencil/auth/email";
 import { EmailDev } from "pgstencil";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
-import { WITHDRAWAL_STATEMENT } from "../../../website/src/lib/hosted-withdrawal";
+import {
+  DIFFPLUG_POSTAL_ADDRESS,
+  MODEL_WITHDRAWAL_FORM,
+  SUPPORT_EMAIL,
+  WITHDRAWAL_RIGHT,
+  WITHDRAWAL_STATEMENT,
+} from "../../../website/src/lib/hosted-withdrawal";
+import { accountCron } from "../account-routes";
+import { alertLines } from "../billing-alert";
 import { END_REASONS, resyncBilling, type BillingSetup } from "../billing";
+import { noticeMail } from "../notices";
 import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../../website/src/lib/hosted-cohorts";
 import {
   BILLING_WEBHOOK_PATH,
+  CHECKOUT_UNAVAILABLE,
   CONSENT_REQUIRED,
   FOUNDERS_ONLY,
   KEEP_SUBSCRIPTION,
@@ -25,7 +37,8 @@ import { entitledSql } from "../entitlement";
 import { WITHDRAWAL_OPEN_DAYS } from "../withdrawal";
 import { migrations } from "../migrations";
 import { DEV_FOUNDING_PRICES } from "../billing-dev";
-import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION } from "../policy-constants";
+import { disclosure, presentedLines } from "../disclosure";
+import { CHECKOUT_CLOSED, PRICE_CHANGED, TERMS_VERSION, VOICE_DAILY_CAP, termsArchiveUrl } from "../policy-constants";
 import { ORIGINS } from "./bundle";
 import { CHANGED_PRICES, CHANGED_USD, stripeFake } from "./stripe-fake";
 import { workerDatabases } from "./worker-roles";
@@ -34,6 +47,7 @@ import { workerDatabases } from "./worker-roles";
 // signed-in account may ask, what Stripe's webhook does, and what each counts.
 
 const origin = ORIGINS.account;
+const PURCHASE_SUBJECT = "Your Dormouse Hosted subscription confirmation";
 /** What the checkout page sends once both boxes are ticked, beside `plan` at the price it showed. */
 const consent = (plan: string) => ({
   plan,
@@ -51,7 +65,10 @@ async function fixture({ closed = false } = {}) {
   /** user id → its session's user, as `get-session` answers it, and when that login began. */
   const users = new Map<string, { id: string; email: string | null; emailVerified: boolean }>();
   const logins = new Map<string, string>();
-  const email = new EmailDev(context.time);
+  const inbox = new EmailDev(context.time);
+  /** Every email but purchase confirmations, which {@link buy} sends every test and {@link confirmations} reads. */
+  const email = { all: () => inbox.all().filter((message) => message.subject !== PURCHASE_SUBJECT) };
+  const confirmations = () => inbox.all().filter((message) => message.subject === PURCHASE_SUBJECT);
   /** Mail sends to fail, before any goes out. */
   const mailing = { failures: 0 };
   const mail = () => ({
@@ -60,7 +77,7 @@ async function fixture({ closed = false } = {}) {
         mailing.failures--;
         throw new Error("Postmark outage");
       }
-      await email.send(message);
+      await inbox.send(message);
     },
   });
   /** Each Burrow socket, and each session's Client sockets, closure asked to close. */
@@ -152,14 +169,23 @@ async function fixture({ closed = false } = {}) {
       headers: { "content-type": "application/json", ...(method === "GET" ? { "sec-fetch-site": "same-origin" } : { origin }) },
       ...(method !== "GET" && { body: "{}" }),
     });
-  /** Starts `plan` for `who` and completes it in StripeDev, delivering its events. */
-  const buy = async (who: Awaited<ReturnType<typeof account>>, plan: string, ref?: string) => {
+  /** Starts `plan` for `who`, answering its open Stripe session. */
+  const startCheckout = async (who: Awaited<ReturnType<typeof account>>, plan: string, ref?: string) => {
     const started = await who.request("/api/billing/checkout", { method: "POST", body: { ...consent(plan), ref } });
     expect(started.status, await started.clone().text()).toBe(200);
     const { url } = (await started.json()) as { url: string };
-    const session = [...stripe.dev.checkouts.values()].find((s) => s.url === url)!;
+    return [...stripe.dev.checkouts.values()].find((s) => s.url === url)!;
+  };
+  /**
+   * Starts `plan` for `who` and completes it in StripeDev, delivering its
+   * events. Its confirmation's row goes, so a test of another notice reads
+   * only its own; {@link startCheckout} keeps it.
+   */
+  const buy = async (who: Awaited<ReturnType<typeof account>>, plan: string, ref?: string) => {
+    const session = await startCheckout(who, plan, ref);
     const subscription = stripe.dev.completeCheckout(session.id);
     await deliver();
+    await sql(`DELETE FROM dormouse_billing_notices WHERE kind = 'purchase'`);
     return { session, subscription };
   };
   /** Each subscription Hosted ended (`billing.end`), and the reason it recorded. */
@@ -185,6 +211,7 @@ async function fixture({ closed = false } = {}) {
   return {
     ...context,
     ...stripe,
+    host,
     sql,
     account,
     anonymous,
@@ -192,11 +219,13 @@ async function fixture({ closed = false } = {}) {
     webhook,
     send,
     deliver,
+    startCheckout,
     buy,
     metrics,
     ended,
     entitledOn,
     email,
+    confirmations,
     mail,
     mailing,
     logins,
@@ -372,8 +401,18 @@ test("checkout starts only after agreement to the current terms and to automatic
   onTestFinished(f.close);
   const member = await f.account();
   const consents = () =>
-    f.sql<{ checkoutId: string; termsVersion: string; userId: string; plan: string; priceId: string }>(
-      `SELECT "checkoutId", "termsVersion", "userId", plan, "priceId" FROM dormouse_checkout_consents ORDER BY "consentedAt"`,
+    f.sql<{
+      checkoutId: string;
+      termsVersion: string;
+      userId: string;
+      plan: string;
+      priceId: string;
+      shownUsd: number;
+      voiceDailyCap: number;
+      presentedText: string;
+    }>(
+      `SELECT "checkoutId", "termsVersion", "userId", plan, "priceId", "shownUsd", "voiceDailyCap", "presentedText"
+      FROM dormouse_checkout_consents ORDER BY "consentedAt"`,
     );
   const { price: _price, ...unpriced } = consent("yearly");
   for (const body of [
@@ -407,7 +446,15 @@ test("checkout starts only after agreement to the current terms and to automatic
     userId: member.id,
     plan: "yearly",
     priceId: f.setup.yearly,
+    shownUsd: LIST_ANNUAL,
+    voiceDailyCap: VOICE_DAILY_CAP,
+    presentedText: presentedLines("yearly", LIST_ANNUAL, TERMS_VERSION).join("\n"),
   });
+  for (const fact of ["$100 a year", `up to ${VOICE_DAILY_CAP} alarms a day`, "withdraw within 14 days", `(version ${TERMS_VERSION})`])
+    expect((await consents())[1]!.presentedText).toContain(fact);
+  await expect(
+    f.sql(`INSERT INTO dormouse_checkout_consents ("checkoutId", "termsVersion", "userId", plan, "priceId") VALUES ('x', 'x', 'x', 'x', 'x')`),
+  ).rejects.toThrow(/dormouse_checkout_consents_evidence_check/);
   const [{ at }] = await f.sql<{ at: Date }>(`SELECT "consentedAt" AS at FROM dormouse_checkout_consents WHERE "checkoutId" = $1`, [
     operation,
   ]);
@@ -422,6 +469,41 @@ test("checkout starts only after agreement to the current terms and to automatic
   // Kept once the subscription and the account are gone: it is a billing record.
   await f.sql(`DELETE FROM "user" WHERE id = $1`, [member.id]);
   expect(await consents()).toHaveLength(2);
+});
+
+test("checkout answers no URL for a configured Price Stripe would charge differently from the published price", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const refusal = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => refusal.mockRestore());
+  const member = await f.account();
+  const start = (plan: string) => member.request("/api/billing/checkout", { method: "POST", body: consent(plan) });
+  const consents = () => f.sql(`SELECT plan FROM dormouse_checkout_consents`);
+  const open = () => [...f.dev.checkouts.values()].filter((session) => session.status === "open");
+  for (const wrong of [
+    { usd: LIST_MONTHLY + 5, interval: "month" },
+    { usd: LIST_MONTHLY, interval: "year" },
+  ] as const) {
+    f.prices.set(f.setup.monthly, wrong);
+    const refused = await start("monthly");
+    expect([refused.status, await refused.json()]).toEqual([503, { message: CHECKOUT_UNAVAILABLE }]);
+    expect(await consents()).toEqual([]);
+    expect(open()).toEqual([]);
+  }
+  f.prices.delete(f.setup.founding[0]!);
+  expect((await start("founding")).status).toBe(503);
+  expect(open()).toEqual([]);
+  expect(await f.metrics()).toEqual([]);
+
+  // Set right, it sells, and Stripe is read for a Price once.
+  f.prices.set(f.setup.monthly, { usd: LIST_MONTHLY, interval: "month" });
+  expect((await start("monthly")).status).toBe(200);
+  const reads = f.reads.prices;
+  expect((await start("monthly")).status).toBe(200);
+  expect(f.reads.prices).toBe(reads);
+  expect(await consents()).toEqual([{ plan: "monthly" }]);
 });
 
 test("checkout refuses a price the page did not show before opening one, expiring one left open, so the consent records the one it did", async ({
@@ -991,6 +1073,8 @@ test("the online withdrawal is offered within its window, to an EEA, UK, or unkn
   const abroad = await f.account();
   const { session: abroadSession, subscription: abroadSubscription } = await f.buy(abroad, "monthly");
   f.countries.set(abroadSession.customer as string, "US");
+  // Past what the page reuses of the contact the purchase's confirmation read.
+  f.time.advanceMilliseconds(11 * 60 * 1000);
   expect(await abroad.summary()).toMatchObject({ plan: "monthly", withdrawal: null });
   const refused = await abroad.request("/api/billing/withdraw", { method: "POST", body: { subscription: abroadSubscription.id } });
   expect([refused.status, await refused.json()]).toEqual([409, { message: WITHDRAWAL_CLOSED }]);
@@ -1554,6 +1638,94 @@ const RENEWAL_NOTICE_DAYS = 30;
 const PRICE_NOTICE_DAYS = 21;
 const PRICE_NOTICE_MIN_DAYS = 7;
 
+test("a completed checkout emails what was agreed once, to the Stripe customer's email, never the sign-in email", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const notices = () =>
+    f.sql<{ kind: string; subscriptionId: string; email: string | null }>(
+      `SELECT kind, "subscriptionId", email FROM dormouse_billing_notices WHERE kind = 'purchase'`,
+    );
+  const member = await f.account("signin@example.test");
+  const session = await f.startCheckout(member, "founding");
+  f.dev.customers.get(session.customer as string)!.email = "billing@example.test";
+  const { id: subscription } = f.dev.completeCheckout(session.id);
+  await f.deliver();
+
+  expect(await notices()).toEqual([{ kind: "purchase", subscriptionId: subscription, email: "billing@example.test" }]);
+  const [mail] = f.confirmations();
+  expect(mail!.to).toEqual(["billing@example.test"]);
+  const [{ at }] = await f.sql<{ at: Date }>(`SELECT "consentedAt" AS at FROM dormouse_checkout_consents`);
+  const agreed = disclosure("founding", FOUNDING_LADDER[0]!);
+  for (const fact of [
+    "Seller: DiffPlug LLC",
+    "Plan: Dormouse Hosted, Founding",
+    `Price: $${FOUNDING_LADDER[0]} a year, plus any applicable tax.`,
+    `Automatic renewal: Renews automatically every year at $${FOUNDING_LADDER[0]} until you cancel.`,
+    agreed.renewal,
+    `Terms: Version ${TERMS_VERSION}, which you agreed to on `,
+    at.getUTCFullYear().toString(),
+    termsArchiveUrl(TERMS_VERSION),
+    agreed.cancel,
+    "Use Manage billing",
+    `${origin}/billing`,
+    agreed.refund,
+    `Limits: ${agreed.limits}`,
+    `up to ${VOICE_DAILY_CAP} alarms a day`,
+    WITHDRAWAL_RIGHT,
+    MODEL_WITHDRAWAL_FORM,
+    DIFFPLUG_POSTAL_ADDRESS,
+  ])
+    expect(mail!.text, fact).toContain(fact);
+  expect(mail!.html).toContain(escape(MODEL_WITHDRAWAL_FORM));
+  expect(mail!.text).not.toContain("signin@example.test");
+
+  // Redelivered, or the same checkout in another event: nothing new.
+  const completed = f.delivered.find((event) => event.type === "checkout.session.completed")!;
+  expect((await f.send(completed)).status).toBe(200);
+  expect((await f.send({ ...completed, id: "evt_again" })).status).toBe(200);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.confirmations()).toHaveLength(1);
+  expect(await notices()).toHaveLength(1);
+
+  // Filled from the consent, never what the page says or sells by the time it goes.
+  const provider = await f.account(null);
+  const second = await f.startCheckout(provider, "yearly");
+  await f.sql(`UPDATE dormouse_checkout_consents SET "shownUsd" = 77, "termsVersion" = '2020-01-01' WHERE "checkoutId" = $1`, [
+    second.metadata!.pgstencil_operation,
+  ]);
+  f.dev.customers.get(second.customer as string)!.email = "provider@example.test";
+  f.dev.completeCheckout(second.id);
+  await f.deliver();
+  const [, late] = f.confirmations();
+  expect(late!.to).toEqual(["provider@example.test"]);
+  expect(late!.text).toContain("Price: $77 a year");
+  expect(late!.text).toContain(termsArchiveUrl("2020-01-01"));
+});
+
+test("a purchase's confirmation that fails to send never fails the webhook, and the cron retries it until sent", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => log.mockRestore());
+  const unsent = () => f.sql(`SELECT kind FROM dormouse_billing_notices WHERE "sentAt" IS NULL`);
+  const member = await f.account();
+  const session = await f.startCheckout(member, "monthly");
+  f.dev.completeCheckout(session.id);
+  f.mailing.failures = 1;
+  // `deliver` holds each event to a 200.
+  await f.deliver();
+  expect([f.mailing.failures, f.confirmations(), await unsent()]).toEqual([0, [], [{ kind: "purchase" }]]);
+  expect(log.mock.calls.some(([message]) => String(message).includes("the cron retries it"))).toBe(true);
+
+  // Later than any other notice's retry lasts, and with the subscription long past its period.
+  f.time.advanceMilliseconds(60 * DAY_MS);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.confirmations()).toHaveLength(1);
+  expect(await unsent()).toEqual([]);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+  expect(f.confirmations()).toHaveLength(1);
+});
+
 test("a renewal notice and a monthly plan's annual reminder go out once, 30 days ahead, to the billing email", async ({
   onTestFinished,
 }) => {
@@ -2059,4 +2231,339 @@ test("closed, the public cohort read answers 503 and no picture is served", asyn
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual({ message: CHECKOUT_CLOSED });
   expect((await f.visit(FOUNDER_AVATAR_PREFIX + "0".repeat(64))).status).toBe(404);
+});
+
+const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
+/**
+ * The statements in the sql block under `heading` in hosted/README.md, each
+ * `'<placeholder>'` filled from `values`, so a runbook's SQL is what runs here.
+ */
+function runbook(heading: string, values: Record<string, string>) {
+  const section = readme.split(/^#{2,3} /m).find((part) => part.startsWith(`${heading}\n`));
+  const sql = section && /```sql\n([\s\S]*?)```/.exec(section)?.[1];
+  if (!sql) throw new Error(`hosted/README.md has no SQL under "${heading}"`);
+  return sql.trim().replace(/'<([^>]+)>'/g, (_, name: string) => {
+    if (!(name in values)) throw new Error(`No value for <${name}>`);
+    return `'${values[name]}'`;
+  });
+}
+
+/** The billing cron's alerts in the local inbox, as the development server's are. */
+const alerts = (f: Awaited<ReturnType<typeof fixture>>) => f.email.all().filter((mail) => mail.to[0] === SUPPORT_EMAIL);
+/** A price change the catalog refuses, naming a founding Price: it changes nothing, and fails every cron run until deleted. */
+const refusedChange = (f: Awaited<ReturnType<typeof fixture>>, id: string) =>
+  f.sql(
+    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+    VALUES ($1, 'yearly', $2, $3, 50, 60, now())`,
+    [id, `price_${randomUUID().replaceAll("-", "")}`, f.setup.founding[0]],
+  );
+const refusedLine = (id: string) => `Price change ${id} names a founding Price or another plan's; it is ignored`;
+
+test("a failing billing cron emails support once a day per distinct error, and still fails", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const cron = () => accountCron(f.host, origin);
+  await cron();
+  expect(alerts(f)).toEqual([]);
+
+  await refusedChange(f, "first");
+  await expect(cron()).rejects.toThrow("1 billing resyncs failed");
+  expect(alerts(f)).toHaveLength(1);
+  expect(alerts(f)[0]).toMatchObject({ from: `Dormouse Hosted <${SUPPORT_EMAIL}>`, subject: "Dormouse Hosted billing: cron failing" });
+  expect(alerts(f)[0]!.text).toContain(refusedLine("first"));
+  expect(alerts(f)[0]!.html).toContain("Price change first names");
+
+  // Every 10 minutes the run fails again, and mails nothing new.
+  for (let run = 0; run < 3; run++) {
+    f.time.advanceMilliseconds(10 * 60 * 1000);
+    await expect(cron()).rejects.toThrow(AggregateError);
+  }
+  expect(alerts(f)).toHaveLength(1);
+
+  // A new error mails at once, with what is still failing beside it.
+  await refusedChange(f, "second");
+  await expect(cron()).rejects.toThrow("2 billing resyncs failed");
+  expect(alerts(f)).toHaveLength(2);
+  expect(alerts(f)[1]!.text).toContain(refusedLine("first"));
+  expect(alerts(f)[1]!.text).toContain(refusedLine("second"));
+  // A line that clears and returns within the day mails nothing new.
+  await f.sql(`DELETE FROM dormouse_price_changes WHERE id = 'second'`);
+  await expect(cron()).rejects.toThrow(AggregateError);
+  await refusedChange(f, "second");
+  await expect(cron()).rejects.toThrow(AggregateError);
+  expect(alerts(f)).toHaveLength(2);
+
+  // A day on, the persisting failure mails again.
+  f.time.advanceMilliseconds(23 * 60 * 60 * 1000);
+  await expect(cron()).rejects.toThrow(AggregateError);
+  expect(alerts(f)).toHaveLength(2);
+  f.time.advanceMilliseconds(60 * 60 * 1000);
+  await expect(cron()).rejects.toThrow(AggregateError);
+  expect(alerts(f)).toHaveLength(3);
+
+  // Fixed, the run passes and mails nothing, and the records are pruned by the next alert.
+  await f.sql(`DELETE FROM dormouse_price_changes`);
+  await cron();
+  expect(alerts(f)).toHaveLength(3);
+  f.time.advanceMilliseconds(3 * 24 * 60 * 60 * 1000);
+  await refusedChange(f, "third");
+  await expect(cron()).rejects.toThrow(AggregateError);
+  expect(alerts(f)).toHaveLength(4);
+  expect(await f.sql(`SELECT fingerprint FROM dormouse_billing_alerts`)).toHaveLength(1);
+});
+
+test("a failed alert never hides the cron's failure, and the next run sends it", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const cron = () => accountCron(f.host, origin);
+  await refusedChange(f, "first");
+  f.mailing.failures = 1;
+  await expect(cron()).rejects.toThrow("1 billing resyncs failed");
+  expect(alerts(f)).toEqual([]);
+  expect(error).toHaveBeenCalledWith(expect.stringContaining("billing alert failed"), expect.objectContaining({ message: "Postmark outage" }));
+  // A second run while the send may still be in flight holds off.
+  await expect(cron()).rejects.toThrow("1 billing resyncs failed");
+  expect(alerts(f)).toEqual([]);
+  f.time.advanceMilliseconds(10 * 60 * 1000);
+  await expect(cron()).rejects.toThrow("1 billing resyncs failed");
+  expect(alerts(f)).toHaveLength(1);
+
+  // A mail sender that cannot even be built, as with a missing token, hides nothing either.
+  await refusedChange(f, "second");
+  const mail = () => {
+    throw new Error("Configure Postmark and the sender address");
+  };
+  await expect(accountCron({ ...f.host, mail }, origin)).rejects.toThrow("2 billing resyncs failed");
+});
+
+test("the alert says what is overdue, and when a withdrawal's refund is due", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const cron = () => accountCron(f.host, origin);
+  const member = await f.account();
+  const { session, subscription } = await f.buy(member, "yearly");
+  f.paidInvoices.set("pi_oob", subscription.id);
+  f.paidBy.set("pi_oob", "out_of_band");
+  const closing = await f.account();
+  const { subscription: closed } = await f.buy(closing, "monthly");
+  f.paidInvoices.set("pi_c_oob", closed.id);
+  f.paidBy.set("pi_c_oob", "out_of_band");
+  // Stripe holds no billing email, so the acknowledgement cannot go either.
+  f.dev.customers.get(session.customer as string)!.email = null;
+  const answered = await member.request("/api/billing/withdraw", { method: "POST", body: { subscription: subscription.id } });
+  expect(answered.status).toBe(200);
+  expect((await closing.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+  const [row] = await f.sql<{ id: string; submittedAt: Date }>(`SELECT id, "submittedAt" FROM dormouse_withdrawals`);
+  const id = row!.id;
+
+  // Fresh, it is an ordinary failure, naming the invoice and amount for the operator.
+  f.time.advanceMilliseconds(6 * 60 * 1000);
+  await expect(cron()).rejects.toThrow(AggregateError);
+  expect(alerts(f)).toHaveLength(1);
+  expect(alerts(f)[0]!.subject).toBe("Dormouse Hosted billing: cron failing");
+  expect(alerts(f)[0]!.text).toContain("in_pi_oob (1000 of 1000 usd)");
+  expect(alerts(f)[0]!.text).not.toContain("Overdue");
+
+  // A day on, it leads with the overdue withdrawal, its deadline, the closure, and the acknowledgement.
+  f.time.advanceMilliseconds(24 * 60 * 60 * 1000);
+  await expect(cron()).rejects.toThrow(AggregateError);
+  expect(alerts(f)).toHaveLength(2);
+  const { subject, text, html } = alerts(f)[1]!;
+  expect(subject).toBe("Dormouse Hosted billing: 3 overdue, cron failing");
+  const day = (at: Date) => at.toISOString().slice(0, 10);
+  const due = day(new Date(row!.submittedAt.getTime() + 14 * 24 * 60 * 60 * 1000));
+  const overdue = text.slice(text.indexOf("Overdue:"), text.indexOf("Errors:"));
+  expect(overdue).toContain(`Withdrawal ${id}, noticed ${day(row!.submittedAt)}, is unsettled: its refund is due by ${due}`);
+  expect(overdue).toContain(`Closure of account ${closing.id}`);
+  expect(overdue).toContain(closed.id);
+  expect(overdue).toContain(`Withdrawal acknowledgement unsent after a day: withdrawal ${id}`);
+  expect(text.indexOf("Overdue:")).toBeLessThan(text.indexOf("Errors:"));
+  expect(text.slice(text.indexOf("Errors:"))).toContain(`Notice `);
+  expect(html).toContain("<h2>Overdue</h2>");
+});
+
+test("an overdue settlement past the cron's batch is still named", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const old = new Date(f.time.now().getTime() - 2 * 24 * 60 * 60 * 1000);
+  // Past one run's batch of 20, least recently tried first: the unsettled one last tried this run is not retried on the next.
+  const ids = Array.from({ length: 25 }, (_, n) => `w${n}`);
+  for (const id of ids)
+    await f.sql(
+      `INSERT INTO dormouse_withdrawals (id, "userId", "subscriptionId", plan, "priceId", "contractStartedAt", "submittedAt", "attemptedAt")
+      VALUES ($1, 'nobody', $2, 'yearly', 'price_x', $3, $3, $3)`,
+      [id, `sub_${id}`, old],
+    );
+  await expect(accountCron(f.host, origin)).rejects.toThrow(AggregateError);
+  const { text } = alerts(f)[0]!;
+  for (const id of ids) expect(text).toContain(`Withdrawal ${id}, noticed`);
+});
+
+test("the alert carries messages alone, with no secret, card number, or stack", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  // The row's id is any text, so it stands in for an upstream error that quotes these.
+  await refusedChange(f, "sk_live_abc*123 rk_test_def whsec_ghi postgres://user:hunter2@db.example/neondb 4242 4242 4242 4242 5555555555554444");
+  await expect(accountCron(f.host, origin)).rejects.toThrow(AggregateError);
+  const [mail] = alerts(f);
+  for (const body of [mail!.text, mail!.html]) {
+    for (const leak of ["abc", "rk_test", "whsec_", "hunter2", "4242", "5555", "billing-routes.test", "    at "]) expect(body).not.toContain(leak);
+    expect(body).toContain("[secret]");
+    expect(body).toContain("[connection url]");
+    expect(body).toContain("[number]");
+  }
+
+  // What the operator acts on survives; a cause never travels; one message is one line however often it fails.
+  const withdrawal = "Withdrawal 123e4567-e89b-12d3-a456-426614174000: paid outside Stripe, invoice in_1234567890123456 (1000 of 1000 usd)";
+  const cause = new Error("the cause, sk_live_x", { cause: new Error("hidden") });
+  expect(alertLines(new AggregateError([new Error(withdrawal), new Error(withdrawal), new AggregateError([cause])], "ignored")).map((line) => line.text)).toEqual([
+    withdrawal,
+    "the cause, [secret]",
+  ]);
+  expect(alertLines(new Error("x".repeat(2000)))[0]!.text.length).toBeLessThanOrEqual(500);
+});
+
+test("the cron's alert covers a broken setup and an unreachable database, and billing closed sends nothing", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+
+  await accountCron({ ...f.host, setup: () => null }, origin);
+  expect(alerts(f)).toEqual([]);
+
+  const broken = {
+    ...f.host,
+    setup: () => {
+      throw new Error("STRIPE_PRICES_FOUNDING names 4 Prices; the published ladder has 5");
+    },
+  };
+  await expect(accountCron(broken, origin)).rejects.toThrow("STRIPE_PRICES_FOUNDING");
+  expect(alerts(f).map((mail) => mail.text)).toEqual([expect.stringContaining("STRIPE_PRICES_FOUNDING names 4")]);
+
+  // With no table to read, only the day's first run mails, so the outage still mails once a day.
+  const down = { ...f.host, databaseUrl: "postgres://user:hunter2@127.0.0.1:9/none" };
+  const midnight = Math.ceil(f.time.now().getTime() / (24 * 60 * 60 * 1000)) * 24 * 60 * 60 * 1000;
+  f.time.set(new Date(midnight + 5 * 60 * 1000).toISOString());
+  await expect(accountCron(down, origin)).rejects.toThrow();
+  expect(alerts(f)).toHaveLength(2);
+  expect(alerts(f)[1]!.text).toContain("could not be reached");
+  expect(alerts(f)[1]!.text).not.toContain("hunter2");
+  f.time.set(new Date(midnight + 15 * 60 * 1000).toISOString());
+  await expect(accountCron(down, origin)).rejects.toThrow();
+  expect(alerts(f)).toHaveLength(2);
+});
+
+test("hosted/README.md's alert exercise fails the cron, and deleting its row clears it", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const [insert, remove] = runbook("Billing alert", { "a founding Price": f.setup.founding[0]! }).split("\n");
+  await f.sql(insert!);
+  await expect(accountCron(f.host, origin)).rejects.toThrow("1 billing resyncs failed");
+  expect(alerts(f)[0]!.text).toContain(refusedLine("alert-test"));
+  await f.sql(remove!);
+  await accountCron(f.host, origin);
+});
+
+test("hosted/README.md's withdrawal by email: the cron ends it, refunds every payment, and acknowledges it, closed account or not", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const received = "2026-01-01T09:00:00+01:00";
+  for (const closedFirst of [false, true]) {
+    const member = await f.account();
+    const { session, subscription } = await f.buy(member, "yearly");
+    const [first, renewal] = [`pi_w_first_${closedFirst}`, `pi_w_renewal_${closedFirst}`];
+    f.paidInvoices.set(first, subscription.id);
+    f.paidInvoices.set(renewal, subscription.id);
+    f.invoiceFacts.set(renewal, { reason: "subscription_cycle", paidAt: new Date(f.time.now().getTime() - 90 * DAY_MS) });
+    if (closedFirst) expect((await member.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
+    const before = f.refunds.length;
+    await f.sql(
+      runbook("Withdrawal by email or post", {
+        "monthly, yearly, or founding": "yearly",
+        country: "DE",
+        "received at": received,
+        "subscription id": subscription.id,
+      }),
+    );
+    const [row] = await f.sql<{ id: string; settledAt: Date | null }>(
+      `SELECT id, "settledAt" FROM dormouse_withdrawals WHERE "subscriptionId" = $1`,
+      [subscription.id],
+    );
+    expect(row!.settledAt).toBeNull();
+    await accountCron(f.host, origin);
+
+    expect(await f.sql(`SELECT status FROM pgstencil_billing.subscriptions WHERE id = $1`, [subscription.id])).toEqual([
+      { status: "canceled" },
+    ]);
+    expect(f.cancels.filter((cancel) => cancel.subscription === subscription.id)).toHaveLength(1);
+    // Every payment, the renewal too; what closing already refunded is not paid twice.
+    expect(f.refunds.slice(before).map((refund) => refund.paymentIntent)).toEqual(closedFirst ? [renewal] : [first, renewal]);
+    expect(f.refunds.filter((refund) => refund.paymentIntent === first)).toHaveLength(1);
+    const [settled] = await f.sql<{ settledAt: Date | null }>(`SELECT "settledAt" FROM dormouse_withdrawals WHERE id = $1`, [row!.id]);
+    expect(settled!.settledAt).not.toBeNull();
+    const billingEmail = f.dev.customers.get(session.customer as string)!.email;
+    const acknowledged = f.email.all().filter((mail) => mail.to[0] === billingEmail && mail.subject.startsWith("We received your withdrawal"));
+    expect(acknowledged).toHaveLength(1);
+    expect(acknowledged[0]!.text).toContain(`Reference: ${row!.id}`);
+    expect(acknowledged[0]!.text).toContain("1 January 2026 at 08:00:00 UTC");
+  }
+});
+
+test("hosted/README.md's closure by email: the cron refunds what closing owes, and the account is gone", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  f.paidInvoices.set("pi_hand_close", subscription.id);
+  await f.setup.stripe!.subscriptions.cancel(subscription.id, { prorate: false, invoice_now: false });
+  await f.deliver();
+  const [ended] = await f.sql<{ ended_at: Date | null }>(`SELECT ended_at FROM pgstencil_billing.subscriptions WHERE id = $1`, [subscription.id]);
+  expect(ended!.ended_at).not.toBeNull();
+
+  const close = (id: string, subscriptions: string) => f.sql(runbook("Close an account by email", { "account id": id, "subscription ids": subscriptions }));
+  await close(member.id, `{${subscription.id}}`);
+  expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [member.id])).toEqual([]);
+  expect(f.refunds).toEqual([]);
+  await accountCron(f.host, origin);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_hand_close", withdrawal: null, closure: subscription.id }]);
+  const stamped = (id: string) => f.sql<{ settled: boolean }>(`SELECT "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`, [id]);
+  expect(await stamped(member.id)).toEqual([{ settled: true }]);
+
+  // An account with no subscription closes settled, with nothing for the cron to do.
+  const free = await f.account();
+  await close(free.id, "{}");
+  expect(await f.sql(`SELECT id FROM "user" WHERE id = $1`, [free.id])).toEqual([]);
+  expect(await stamped(free.id)).toEqual([{ settled: true }]);
+});
+
+test("hosted/README.md's cancellation by hand keeps access through the period and stops renewal notices", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  await f.send(f.dev.transition(subscription.id, "cancel-at-period-end"));
+  const lookup = runbook("Find and verify the customer", {
+    "customer id": (await f.sql<{ customer_id: string }>(`SELECT customer_id FROM pgstencil_billing.accounts WHERE owner_id = $1`, [member.id]))[0]!.customer_id,
+  });
+  expect(await f.sql(lookup)).toMatchObject([{ owner_id: member.id, id: subscription.id, status: "active", cancel_at_period_end: true }]);
+  expect(await member.summary()).toMatchObject({ plan: "yearly", active: true, renews: false, entitled: true });
+});
+
+test("a notice goes out from support, not the sign-in sender", async () => {
+  const sent = vi.fn(async () => new Response(JSON.stringify({ ErrorCode: 0 })));
+  vi.stubGlobal("fetch", sent);
+  try {
+    await noticeMail("token").send({ from: "ignored@example.test", to: ["buyer@example.test"], subject: "s", text: "t", html: "<p>t</p>" });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  const [, init] = sent.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(init.body as string).From).toBe(`Dormouse Hosted <${SUPPORT_EMAIL}>`);
 });

@@ -6,7 +6,7 @@ import { BillingError } from "@pgstencil/stripe";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../../website/src/lib/hosted-pricing";
-import { billingSetup, openCohort, resyncBilling, withBilling } from "../billing";
+import { billingSetup, openCohort, resyncBilling, stripeHoldsPrice, withBilling } from "../billing";
 import type { Plan } from "../policy-constants";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
 import { ADMIN_EMAIL, entitled, entitledSql } from "../entitlement";
@@ -78,6 +78,16 @@ test("the open cohort is the last one bought at until its net count fills: a ref
     seatsLeft: 1,
   });
   expect(openCohort(all, all.map((n, step) => (step === 0 ? n - 1 : n)))).toBeNull();
+});
+
+test("the dev loop's StripeDev answers what checkout and the notices read: each published Price, and a customer's email", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  await f.billing(async (billing, { prices }) => {
+    for (const [id, { plan, usd }] of prices) expect(await stripeHoldsPrice(billing, id, usd, plan), id).toBe(true);
+    const { id } = await billing.stripe.customers.create({ email: "billing@example.test" });
+    expect(await billing.stripe.customers.retrieve(id)).toMatchObject({ email: "billing@example.test" });
+  });
 });
 
 async function fixture() {
@@ -292,6 +302,7 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
     fileURLToPath(import.meta.resolve("@pgstencil/auth/better-auth-testing")),
   ]);
   const outbound: string[] = [];
+  const mailed: { To: string; TextBody: string }[] = [];
   const worker = async (stripe: Record<string, string>) => {
     const mf = new Miniflare(
       alone(
@@ -310,6 +321,10 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
           async outboundService(request: Request) {
             const url = new URL(request.url);
             outbound.push(url.origin);
+            if (url.origin === "https://api.postmarkapp.com") {
+              mailed.push((await request.json()) as { To: string; TextBody: string });
+              return WorkerResponse.json({ ErrorCode: 0, Message: "OK" });
+            }
             if (url.origin !== "https://api.stripe.com") throw new Error(`Unexpected outbound host: ${url.host}`);
             const response = await fetch(f.dev.origin + url.pathname + url.search, {
               method: request.method,
@@ -349,4 +364,17 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
   expect(outbound.length).toBeGreaterThan(0);
   expect(new Set(outbound)).toEqual(new Set(["https://api.stripe.com"]));
   expect(await f.entitledOn(member)).toEqual(everywhere(true));
+  expect(mailed).toEqual([]);
+
+  // A failing pass emails support through Postmark, once, and the invocation still fails.
+  await f.sql(
+    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+    VALUES ('refused', 'yearly', $1, 'price_next', 50, 60, now())`,
+    [f.setup.founding[0]],
+  );
+  const failing = await worker(bindings);
+  expect((await failing.scheduled({ cron: "*/10 * * * *" })).outcome).toBe("exception");
+  expect((await failing.scheduled({ cron: "*/10 * * * *" })).outcome).toBe("exception");
+  expect(mailed.map((mail) => mail.To)).toEqual(["support@dormouse.sh"]);
+  expect(mailed[0]!.TextBody).toContain("Price change refused names a founding Price");
 });

@@ -2233,7 +2233,7 @@
       "homepage": "https://github.com/tj/commander.js",
       "versions": [
         "7.2.0",
-        "8.3.0"
+        "15.0.0"
       ]
     },
     {
@@ -2702,7 +2702,6 @@
       "author": "Dr.-Ing. Mario Heiderich, Cure53 <mario@cure53.de> (https://cure53.de/)",
       "homepage": "https://github.com/cure53/DOMPurify",
       "versions": [
-        "3.4.15",
         "3.4.17"
       ]
     },
@@ -2893,7 +2892,7 @@
       "author": "Khan Academy and other contributors",
       "homepage": "https://katex.org",
       "versions": [
-        "0.16.47"
+        "0.19.1"
       ]
     },
     {
@@ -3435,7 +3434,7 @@
       "author": "Microsoft Corporation",
       "homepage": "https://github.com/microsoft/monaco-editor",
       "versions": [
-        "0.57.0"
+        "0.58.0-dev-20261103"
       ]
     },
     {

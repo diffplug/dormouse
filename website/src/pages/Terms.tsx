@@ -1,5 +1,5 @@
 import type { MetaArgs } from "react-router";
-import HostedPolicyLayout, { type PolicySection } from "../components/HostedPolicyLayout";
+import HostedPolicyLayout, { type PolicyPage, type PolicySection } from "../components/HostedPolicyLayout";
 import { LINK_CLASS } from "dormouse-lib/site/docs-tokens";
 import { siteMeta, sitePath } from "../lib/site-meta";
 import { MODEL_WITHDRAWAL_FORM } from "../lib/hosted-withdrawal";
@@ -91,6 +91,12 @@ export const TERMS_SECTIONS: PolicySection[] = [
   </> },
 ];
 
+export const TERMS_PAGE: PolicyPage = {
+  title: "Dormouse Hosted terms of service",
+  applicability: "This version applies according to the acceptance and notice provisions under “The service” below.",
+  sections: TERMS_SECTIONS,
+};
+
 export default function Terms() {
-  return <HostedPolicyLayout path="/terms" title="Dormouse Hosted terms of service" applicability="This version applies according to the acceptance and notice provisions under “The service” below." sections={TERMS_SECTIONS} />;
+  return <HostedPolicyLayout path="/terms" {...TERMS_PAGE} />;
 }

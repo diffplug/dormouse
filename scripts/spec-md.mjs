@@ -99,6 +99,23 @@ export function auditedRules(text) {
   return rules;
 }
 
+/**
+ * A markdown text cut at its headings of exactly `level` (`#` count), fenced
+ * code aside: the text before the first one, then each heading with its body.
+ */
+export function sections(text, level) {
+  const lines = text.split('\n');
+  const prose = proseLines(text);
+  const marker = new RegExp(`^${'#'.repeat(level)} (.+)$`);
+  const out = [{ heading: null, lines: [] }];
+  lines.forEach((line, i) => {
+    const m = prose[i].match(marker);
+    if (m) out.push({ heading: m[1].trim(), lines: [] });
+    out.at(-1).lines.push(line);
+  });
+  return out.map(({ heading, lines: l }) => ({ heading, text: l.join('\n') }));
+}
+
 /** Where the audit's domain prompts live (docs/specs/security-audit.md -> "Domains"). */
 export const AUDIT_DIR = '.github/audit';
 

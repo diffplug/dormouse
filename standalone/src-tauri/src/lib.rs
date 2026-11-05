@@ -3898,6 +3898,7 @@ fn reopen_closed_window(
         push_closed(&mut guard(&windows.closed_windows), closed);
         return Err(err);
     }
+    send_window_labels(&app);
     Ok(true)
 }
 
@@ -3976,9 +3977,12 @@ fn hover_workspace_target(
     }
 }
 
-#[tauri::command]
-fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
+/// Async because the kill waits up to ~5s for the exit; the `Result` is what
+/// Tauri requires of an async command that borrows its `State`.
+#[tauri::command(async)]
+fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) -> Result<(), String> {
     kill_sidecar_and_wait(&state.child);
+    Ok(())
 }
 
 // ── Quit protocol commands (docs/specs/standalone.md §Quit flow) ─────────────
@@ -7032,6 +7036,26 @@ mod tests {
         assert!(acquisitions > 0, "journal lock scan must inspect its callers");
     }
 
+    /// The Burrow's ask collector waits only on the labels it was last sent, so
+    /// a window opened without a push answers no ask until another window
+    /// comes or goes. `restore_windows` runs inside `setup`, which pushes after.
+    #[test]
+    fn every_window_opener_pushes_the_window_labels() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let mut offenders: Vec<&str> = Vec::new();
+        for item in src.split("\nfn ").skip(1) {
+            let name = item.split('(').next().unwrap_or("");
+            let body = item.split("\n}\n").next().unwrap_or(item);
+            if name != "build_window" && name != "restore_windows" && body.contains("build_window(")
+                && !body.contains("send_window_labels(")
+            {
+                offenders.push(name);
+            }
+        }
+        assert!(offenders.is_empty(), "these open a window without send_window_labels: {offenders:?}");
+        assert!(src.contains("restore_windows(app.handle()"), "setup must still restore windows itself");
+    }
+
     #[test]
     fn blocking_commands_run_off_the_main_thread() {
         let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
@@ -7108,6 +7132,7 @@ mod tests {
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",
+                "kill_sidecar_and_wait",
             ].iter().any(|helper| body.contains(helper));
             if reaches_blocking && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());
