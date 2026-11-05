@@ -24,7 +24,7 @@ function readPositiveNumberFlag(key: string): number | null {
 
 /** Overrides the Tool reap idle threshold, in ms: testing only
  *  (`docs/specs/dor-tool.md` -> Reaping). */
-export const TOOL_REAP_IDLE_MS_FLAG_KEY = 'dormouse.debug.toolReapIdleMs';
+const TOOL_REAP_IDLE_MS_FLAG_KEY = 'dormouse.debug.toolReapIdleMs';
 
 export function toolReapIdleMsOverride(): number | null {
   return readPositiveNumberFlag(TOOL_REAP_IDLE_MS_FLAG_KEY);

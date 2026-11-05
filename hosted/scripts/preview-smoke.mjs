@@ -11,7 +11,7 @@ import { oneTimePageSmoke, oneTimeSmoke } from "./one-time-smoke.mjs";
 const OWN_PAGE = { headers: { "sec-fetch-site": "same-origin" } };
 
 /** @param {{ text: string }} email */
-export const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
+const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
 
 // Only the initial health GET can retry a transport failure while a new custom
 // domain becomes reachable, or a healthy older revision during rollout.
@@ -110,7 +110,6 @@ export async function smoke(
   fetcher = fetch,
   preview = false,
   expectedProviders = [],
-  authOrigin = origin,
 ) {
   assert.equal(new URL(origin).protocol, "https:");
   await healthSmoke(origin, sha, fetcher);
@@ -173,7 +172,7 @@ export async function smoke(
     const started = await request("/api/auth/sign-in/social", {
       method: "POST",
       headers: {
-        origin: authOrigin,
+        origin,
         "content-type": "application/json",
         "x-csrf-token": state.csrf,
         cookie: cookieHeader,
@@ -185,7 +184,7 @@ export async function smoke(
     assert.equal(authorization.origin, providerAuthorizationOrigins[provider]);
     assert.equal(
       authorization.searchParams.get("redirect_uri"),
-      `${authOrigin}/api/auth/callback/${provider}`,
+      `${origin}/api/auth/callback/${provider}`,
     );
     assert.ok(authorization.searchParams.get("client_id"));
     assert.ok(authorization.searchParams.get("state"));
