@@ -3976,9 +3976,12 @@ fn hover_workspace_target(
     }
 }
 
-#[tauri::command]
-fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
+/// Async because the kill waits up to ~5s for the exit; the `Result` is what
+/// Tauri requires of an async command that borrows its `State`.
+#[tauri::command(async)]
+fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) -> Result<(), String> {
     kill_sidecar_and_wait(&state.child);
+    Ok(())
 }
 
 // ── Quit protocol commands (docs/specs/standalone.md §Quit flow) ─────────────
@@ -7108,6 +7111,7 @@ mod tests {
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",
+                "kill_sidecar_and_wait",
             ].iter().any(|helper| body.contains(helper));
             if reaches_blocking && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());
