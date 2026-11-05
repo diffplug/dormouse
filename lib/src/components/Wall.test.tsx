@@ -49,7 +49,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 // The real registry + fake platform are used; only the xterm-heavy TerminalPane is
 // stubbed so panes mount cheaply. TerminalPanel still runs usePaneChrome (registering
-// the leaf element) and renders this stub inside its animation div.
+// the leaf element) and renders this stub inside its pane div.
 vi.mock('./TerminalPane', () => ({
   // `isFocused` is the Wall's focus decision for a pane (mode === 'passthrough' &&
   // selected) — the real component turns it into an xterm `.focus()`. Reflect it as
@@ -154,7 +154,7 @@ describe('Wall on the Lath engine', () => {
     async function toolInHelperWait(consent: Parameters<typeof answerClientClose>[0], waitOn: 'first' | 'last' = 'last') {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
         id: TOOL_ID, title: 'storybook', component: 'tool', tabComponent: 'tool',
-        params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announce' },
+        params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announced' },
       }]} />));
       await flush();
       const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID };
@@ -3725,7 +3725,6 @@ describe('Wall on the Lath engine', () => {
     return { id: response!.result!.surfaceId };
   }
 
-  /** `dor agent-browser --surface <handle>`'s host half; returns the raw control response. */
   /** `dor agent-browser --key <name>` asking this Wall what that key's session is called. */
   async function dispatchResolveAgentBrowserKey(key: string): Promise<unknown> {
     let response: unknown;
@@ -3742,6 +3741,7 @@ describe('Wall on the Lath engine', () => {
     return response;
   }
 
+  /** `dor agent-browser --surface <handle>`'s host half; returns the raw control response. */
   async function dispatchResolveBrowser(surface: string, provider = 'agent-browser'): Promise<unknown> {
     let response: unknown;
     await act(async () => {

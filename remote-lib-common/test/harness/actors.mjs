@@ -71,7 +71,7 @@ export function registrationClientData({ challenge, origin, type = 'webauthn.cre
   return toBase64Url(utf8Encode(JSON.stringify({ type, challenge, origin, crossOrigin: false })));
 }
 
-/** A SimBurrow, or a bare hostId string; both name one Burrow to these actors. */
+/** A SimBurrow, or a bare burrowId string; both name one Burrow to these actors. */
 function burrowIdOf(burrow) {
   return typeof burrow === 'string' ? burrow : burrow.burrowId;
 }
@@ -268,10 +268,6 @@ export class SimBurrow {
     this.acl = new BurrowAcl(burrowId, { now: clock.now });
     this.challenges = new ChallengeIssuer({ now: clock.now, ttlMs });
     this.windows = new PresenceWindows({ now: clock.now });
-  }
-
-  issueChallenge() {
-    return this.challenges.issue();
   }
 
   /** The state the QR panel renders: `live`, `reserved`, `consumed`, or absent. */

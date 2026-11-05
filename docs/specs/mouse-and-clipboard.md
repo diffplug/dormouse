@@ -381,5 +381,5 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 - Multi-line paste confirmation dialogs.
 - A "literal next keystroke" terminal-level shortcut (Ctrl+Alt+V or similar) for programs without Ctrl+Q-style `quoted-insert`.
 - Middle-click paste / X11 PRIMARY selection integration on Linux.
-- Drop-position-aware pane routing (drops go to the focused pane today).
+- Drop-position-aware pane routing (drops go to the selected Pane today, §8.7).
 - Drag-to-paste in the VSCode build — `WebviewView` is excluded from external-file drop routing and there is no API to opt in ([microsoft/vscode#111092](https://github.com/microsoft/vscode/issues/111092), closed as out-of-scope).

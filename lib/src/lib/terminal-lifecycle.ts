@@ -826,7 +826,7 @@ export function getSessionInputVersion(id: string): number {
 export function writeUserInput(id: string, data: string): void {
   // Typing, a paste, or Pocket's input bar ends a finalized selection — the
   // copy editor over it, or a shadowed drag — on every path alike
-  // (docs/specs/mouse-and-clipboard.md §4.3, §3.8). A wheel tick scrolls the
+  // (docs/specs/mouse-and-clipboard.md §4.5, §3.8). A wheel tick scrolls the
   // program and leaves it be.
   if (getMouseSelectionState(id).selection?.dragging === false && stripMouseReportsFromInput(data).length > 0) {
     setMouseSelection(id, null);
