@@ -35,6 +35,7 @@ import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import { TERMS_VERSION, VOICE_DAILY_CAP } from "../policy-constants";
 import {
   API_ROUTES,
+  MANAGED_VOICES,
   NOT_ENTITLED_ERROR,
   WS_CLOSE_BURROW_REVOKED,
   WS_ROUTES,
@@ -878,7 +879,7 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
   expect(await inbox.get(id)).toBeUndefined();
 });
 
-const voiceId = "21m00Tcm4TlvDq8ikWAM";
+const voiceId = MANAGED_VOICES[0].id;
 const hi = { text: "hi", voiceId };
 
 test("terms acceptance: any signed-in account records the current version once, from this origin only", async ({
@@ -930,6 +931,36 @@ test("speak stops reading a body past its cap, one sent without a content-length
   } as RequestInit);
   expect(response.status).toBe(400);
   expect(pulled).toBeLessThan(16);
+});
+
+test("speak sends a retired voice id upstream as the member that replaced it, and refuses an unknown one", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const token = await admin.mint();
+  const sent: string[] = [];
+  const app = new Hono();
+  voiceBearerRoutes(app, () => ({
+    databaseUrl: f.database.url,
+    synthesize: async (voice) => {
+      sent.push(voice);
+      return new Response(new Uint8Array([0xff, 0xfb]), { headers: { "content-type": "audio/mpeg" } });
+    },
+  }));
+  const speak = (voice: string) =>
+    app.request("/api/voice/speak", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ text: "hi", voiceId: voice }),
+    });
+  // George's id, which a desktop released before the 2026 change stored, speaks as Eldrin.
+  expect((await speak("JBFqnCBsd6RMkjVDRZzb")).status).toBe(200);
+  expect((await speak(MANAGED_VOICES[1].id)).status).toBe(200);
+  expect((await speak("AZnzlk1XvdvUeBnXmlld")).status).toBe(400);
+  expect(sent).toEqual([MANAGED_VOICES[1].id, MANAGED_VOICES[1].id]);
 });
 
 test("Natural Voice: only the verified admin speaks; the account sees on or off and turns every token off", async ({

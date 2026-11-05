@@ -152,6 +152,9 @@ Source of truth: `closureRoutes`, `accountClosing`, and `endAfterClosure` in `ho
 
 A desktop with Natural Voice on exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). A voice-purpose device-code approval ("Burrow enrollment") mints only the token at redemption.
 
+- **Must translate a retired voice id (`RETIRED_MANAGED_VOICES`) to the member that replaced it**, in speak before the set check and in the desktop host's stored and chosen voice (rationale).
+- **A change to the set must keep every retired id mapped to a current member**, and **must deploy Hosted with the new set and mappings before any desktop release that offers it**.
+
 | Route | Credential | Success |
 |---|---|---|
 | `GET /api/voice` | login cookie, same-origin fetch | 200 `{ entitled, on }`, `on` while the account holds a live token |
@@ -173,7 +176,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 
 1. 401 for a missing, malformed, unknown, or expired token.
 2. 403 when the owner is not entitled.
-3. 400 for malformed JSON, `text` outside 1–200 characters after trim, or a `voiceId` outside the curated set.
+3. 400 for malformed JSON, `text` outside 1–200 characters after trim, or a `voiceId` that resolves to no member of the curated set.
 4. 503 when the deployment has no `ELEVENLABS_API_KEY`.
 5. 429 once the owner's UTC-day counter reaches 500. The atomic increment precedes the upstream call, so failed upstream attempts count.
 6. 502 when ElevenLabs throws or answers non-2xx.
@@ -186,7 +189,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 - **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a history sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
-Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `mintVoiceToken` in `hosted/server/voice-token.ts`.
+Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `mintVoiceToken` in `hosted/server/voice-token.ts`; `currentManagedVoiceId` in `remote-lib-common/src/remote/managed-voice.ts`.
 
 ### Supplier plan
 
