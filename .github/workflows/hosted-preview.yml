@@ -154,7 +154,7 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate --preview && pnpm --filter dormouse-hosted db:validate --preview
         env:
           DATABASE_URL: ${{ steps.database.outputs.db_url }}
-      - name: Deploy the account, relay, and voice Workers and Hyperdrive
+      - name: Deploy the try, relay, voice, and account Workers and Hyperdrive
         id: deploy
         run: pnpm --filter dormouse-hosted preview:deploy
         env:
