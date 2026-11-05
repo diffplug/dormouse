@@ -59,6 +59,14 @@ overrides:
   # while fixing GHSA-238p-pmpm-9mq7. The vulnerable-range selector stops applying
   # when upstream's declared range no longer overlaps it; then remove the entry.
   "mermaid@11>katex@<0.18.2": 0.19.1
+  # GHSA-3g3m-2fjr-6pw4 (glob cancellation) and GHSA-g3hv-75wg-m249
+  # (minimatch pattern amplification). Glob 14 also brings patched minimatch.
+  # Keep these scoped to the affected consumers and vulnerable declared ranges;
+  # an upstream dependency removal or fixed-only range makes its entry inactive.
+  "archiver-utils>glob@<14.0.2": 14.0.3
+  "node-pg-migrate>glob@<14.0.2": 14.0.3
+  "@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2": 14.0.3
+  "@vscode/vsce>minimatch@<11.0.1": 11.0.4
 minimumReleaseAgeExclude:
   - pgstencil
   - "@pgstencil/*"
