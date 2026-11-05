@@ -481,10 +481,15 @@ describe('burrow state store', () => {
     const { context, store } = fakeContext();
     const unlocked = Promise.withResolvers<void>();
     const keychainStore = context.secrets.store;
+    const keychainDelete = context.secrets.delete;
     // A keychain waiting on its unlock prompt.
     context.secrets.store = async (key: string, value: string) => {
       await unlocked.promise;
       await keychainStore(key, value);
+    };
+    context.secrets.delete = async (key: string) => {
+      await unlocked.promise;
+      await keychainDelete(key);
     };
     const target = new VsCodeBurrowStateStore(context);
     const enrollment = {
@@ -499,6 +504,8 @@ describe('burrow state store', () => {
     const enrolling = target.saveEnrollment(enrollment).then(() => {
       enrolled = true;
     });
+    const clearing = target.clearEnrollment();
+    const serving = target.saveOneTimeServing(true);
 
     const first = aclRecord(BURROW_ID, 'first');
     const revoked = { ...first, revokedAt: 2 };
@@ -508,8 +515,10 @@ describe('burrow state store', () => {
     expect(enrolled).toBe(false);
     expect(await target.loadAcl(BURROW_ID)).toEqual([revoked]);
     unlocked.resolve();
-    await enrolling;
-    expect(store.secrets.has('dormouse.burrow.enrollment')).toBe(true);
+    await Promise.all([enrolling, clearing, serving]);
+    // In call order among themselves.
+    expect(store.secrets.has('dormouse.burrow.enrollment')).toBe(false);
+    expect(store.secrets.has(ONE_TIME_SERVING_KEY)).toBe(true);
   });
 
   it('forgets a failed keychain read instead of memoizing it', async () => {
