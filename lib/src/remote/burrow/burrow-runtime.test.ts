@@ -1203,6 +1203,30 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(burrow.activeRecords).toEqual([record]);
   });
 
+  it('writes no ACL from a runtime that stopped while its save waited behind another write', async () => {
+    const write = Promise.withResolvers<void>();
+    const saveAcl = vi
+      .fn<NonNullable<BurrowOptions['saveAcl']>>()
+      .mockImplementationOnce((_burrowId, records) => {
+        savedRecords = [...records];
+      })
+      .mockImplementationOnce(() => write.promise);
+    makeBurrow(undefined, { saveAcl });
+    const { record } = await pairedClient();
+    const pairing = await requestPairing('c2', await newAuthenticator());
+    const approved = approvals.at(-1)!.approve(pairing.code);
+    await settle();
+    burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
+    const saved = burrow.saveRevocations();
+
+    burrow.stop();
+    write.resolve();
+    await approved;
+
+    await expect(saved).rejects.toThrow(/stopped/);
+    expect(saveAcl).toHaveBeenCalledTimes(2);
+  });
+
   it('applies a revocation at once while an earlier ACL write is stuck', async () => {
     const write = Promise.withResolvers<void>();
     const saveAcl = vi

@@ -572,6 +572,8 @@ export class BurrowService {
    */
   readonly #unsavedRevocations = new Map<string, HeldRevocation[]>();
   #revocationRetry: ReturnType<typeof setTimeout> | null = null;
+  /** Tries at {@link #unsavedRevocations}, one at a time, and off {@link #serialize} while a Burrow runs. */
+  readonly #revocationSaves = createSerialQueue();
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -1313,7 +1315,7 @@ export class BurrowService {
    * {@link #saveHeldRevocations} for a person waiting on the answer: bounded,
    * since a store write has no deadline, and any failure in the words they read.
    * From then on Settings shows what is still held. A write that outlasts the
-   * bound keeps its place on the chain, where nothing can overlap it.
+   * bound keeps its place, where nothing can overlap it.
    */
   async #retryRevocationSave(): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1330,7 +1332,7 @@ export class BurrowService {
       this.#emit({ name: 'access' });
       const until = this.#kind === 'vscode' ? 'the window running remote control closes' : 'Dormouse quits';
       throw new Error(
-        `The phone is disconnected and refused, but the revocation could not be saved: ${messageOf(error)}. Dormouse keeps trying; if ${until} before a save lands, the phone can connect again.`,
+        `The phone is disconnected and refused, but the revocation could not be saved: ${messageOf(error)}. Dormouse will try again; if ${until} before a save lands, the phone can connect again.`,
       );
     } finally {
       clearTimeout(timer);
@@ -1338,18 +1340,28 @@ export class BurrowService {
   }
 
   /**
-   * One try at every unsaved revocation, on `#serialize`: through the running
-   * Burrow whose ACL it is, so the write queues with its approvals, else from the
-   * store.
+   * One try at every unsaved revocation: through the running Burrow whose ACL it
+   * is, so the write queues with its approvals and **never on `#serialize`**,
+   * where an enrollment save waiting on a locked keychain would hold it; else
+   * from the store, on `#serialize`, so no Burrow starts between the read and
+   * the write.
    */
   #saveHeldRevocations(): Promise<void> {
     if (this.#unsavedRevocations.size === 0) return Promise.resolve();
-    return this.#serialize(async () => {
+    return this.#revocationSaves(async () => {
       try {
         for (const burrowId of [...this.#unsavedRevocations.keys()]) {
-          const burrow = this.#enrollment?.burrowId === burrowId ? this.#burrow : null;
-          if (burrow) await burrow.saveRevocations();
-          else await this.#saveAcl(burrowId, await this.#loadAcl(burrowId));
+          const running = () => (this.#enrollment?.burrowId === burrowId ? this.#burrow : null);
+          const burrow = running();
+          if (burrow) {
+            await burrow.saveRevocations();
+            continue;
+          }
+          await this.#serialize(async () => {
+            const started = running();
+            if (started) await started.saveRevocations();
+            else await this.#saveAcl(burrowId, await this.#loadAcl(burrowId));
+          });
         }
       } finally {
         this.#armRevocationRetry();
