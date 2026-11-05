@@ -14,7 +14,7 @@ export const HOSTED_PLANS_URL = withHostedRef("https://dormouse.sh/hosted/", HOS
 /** This origin's checkout, once open: also a new tab, for the same reason. */
 export const CHECKOUT_URL = withHostedRef("/checkout", HOSTED_REFS.hostedNoPlan);
 
-const VOICE = "Natural Voice powered by ElevenLabs for spoken alarms";
+const VOICE = "Natural Voice for spoken alarms";
 const POCKET = "Dormouse Pocket on your phone through the Hosted Relay";
 const PUSH = "Sealed push notifications when a terminal needs you";
 const NO_LIMIT = "No device limit, no per-device charge";
