@@ -1,9 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { CARD_CLASS, LINK_CLASS } from "dormouse-lib/site/docs-tokens";
-import { isFounderName } from "../server/policy-constants";
+import { isFounderName, termsArchiveUrl } from "../server/policy-constants";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
-import { day, refundWindow } from "./billing";
+import { refundWindow } from "../server/disclosure";
+import { day } from "./billing";
 import { perInterval } from "./Checkout";
 import { BUTTON_CLASS, CHECK_CLASS, HEADING_CLASS, HELP_CLASS, INPUT_CLASS, LABEL_CLASS } from "./classes";
 import { Facts, ModelForm, SupportLink } from "./Withdrawal";
@@ -188,9 +189,13 @@ export function PlanConfirmation({
       ? ([
           [
             "You agreed",
-            `To the Terms (version ${billing.consent.termsVersion}) and to automatic renewal, on ${new Date(
-              billing.consent.consentedAt,
-            ).toLocaleString()}.`,
+            <>
+              To the{" "}
+              <a className={LINK_CLASS} href={termsArchiveUrl(billing.consent.termsVersion)} target="_blank" rel="noreferrer">
+                Terms (version {billing.consent.termsVersion})
+              </a>{" "}
+              and to automatic renewal, on {new Date(billing.consent.consentedAt).toLocaleString()}.
+            </>,
           ],
         ] as [string, ReactNode][])
       : []),

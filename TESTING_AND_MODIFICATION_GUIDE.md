@@ -82,6 +82,8 @@ CI splits the root test gate between `Library Tests` (`pnpm test:lib`, including
 
 Hosted Vitest runs use a fresh pgstencil root per invocation, shared by its workers and child processes. The global teardown removes that run's Docker containers, network, and volumes, including after test failures; watch mode retains them until the watcher exits. A run killed before teardown leaves a record under `~/.cache/dormouse/test-databases-v1`; the next Hosted invocation retries cleanup after checking that its owner PID is no longer alive. Cleanup failures retain the record and copied Compose file for retry even after the original worktree is deleted. Tests that never allocate a database do not start Docker. No cleanup targets development stacks or another live test run. Lifecycle regressions run with `node --test hosted/scripts/test-databases.test.mjs`.
 
+**Every email Hosted sends has a story in `hosted/src/stories/Emails.stories.tsx`**, added in the change that adds the email: a new billing notice fails to compile until it has one, and the sign-in email is held to what is sent by `hosted/server/tests/workers.test.ts`.
+
 Hosted's rendering seam is `hosted/src/HostedPage.tsx`: `App.tsx` owns the state and handlers, and passes them through to the page. Hosted stories live in `hosted/src/stories/` and run in lib's shared Storybook, inside a document with Hosted's CSS and production theme. Run these from the worktree root:
 
 ```sh

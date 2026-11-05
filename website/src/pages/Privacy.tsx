@@ -1,5 +1,5 @@
 import type { MetaArgs } from "react-router";
-import HostedPolicyLayout, { type PolicySection } from "../components/HostedPolicyLayout";
+import HostedPolicyLayout, { type PolicyPage, type PolicySection } from "../components/HostedPolicyLayout";
 import { LINK_CLASS } from "dormouse-lib/site/docs-tokens";
 import { siteMeta, sitePath } from "../lib/site-meta";
 
@@ -93,6 +93,12 @@ export const PRIVACY_SECTIONS: PolicySection[] = [
   </> },
 ];
 
+export const PRIVACY_PAGE: PolicyPage = {
+  title: "Dormouse Hosted privacy policy",
+  applicability: "This notice applies from publication. Descriptions of optional or paid features apply only when those features are available and you use them. Material changes to processing remain subject to the notice and consent provisions below.",
+  sections: PRIVACY_SECTIONS,
+};
+
 export default function Privacy() {
-  return <HostedPolicyLayout path="/privacy" title="Dormouse Hosted privacy policy" applicability="This notice applies from publication. Descriptions of optional or paid features apply only when those features are available and you use them. Material changes to processing remain subject to the notice and consent provisions below." sections={PRIVACY_SECTIONS} />;
+  return <HostedPolicyLayout path="/privacy" {...PRIVACY_PAGE} />;
 }

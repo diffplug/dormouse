@@ -1,6 +1,7 @@
 import { test, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
+import { signInEmail } from "../../src/stories/email-fixtures";
 import { fileURLToPath } from "node:url";
 import {
   Miniflare,
@@ -370,9 +371,12 @@ async function fixture(
         ).status,
       ).toBe(200);
       const message = await context.email.next();
+      const otp = message.text.match(/\b\d{8}\b/)![0];
+      const { subject, text, html } = signInEmail(address, otp);
+      expect(message).toMatchObject({ subject, text, html });
       const result = await post("sign-in/email-otp", {
         email: address,
-        otp: message.text.match(/\b\d{8}\b/)![0],
+        otp,
       });
       expect(result.status).toBe(200);
       return result;

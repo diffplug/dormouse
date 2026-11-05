@@ -6,7 +6,7 @@ import { BillingError } from "@pgstencil/stripe";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../../website/src/lib/hosted-pricing";
-import { billingSetup, openCohort, resyncBilling, withBilling } from "../billing";
+import { billingSetup, openCohort, resyncBilling, stripeHoldsPrice, withBilling } from "../billing";
 import type { Plan } from "../policy-constants";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
 import { ADMIN_EMAIL, entitled, entitledSql } from "../entitlement";
@@ -78,6 +78,16 @@ test("the open cohort is the last one bought at until its net count fills: a ref
     seatsLeft: 1,
   });
   expect(openCohort(all, all.map((n, step) => (step === 0 ? n - 1 : n)))).toBeNull();
+});
+
+test("the dev loop's StripeDev answers what checkout and the notices read: each published Price, and a customer's email", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  await f.billing(async (billing, { prices }) => {
+    for (const [id, { plan, usd }] of prices) expect(await stripeHoldsPrice(billing, id, usd, plan), id).toBe(true);
+    const { id } = await billing.stripe.customers.create({ email: "billing@example.test" });
+    expect(await billing.stripe.customers.retrieve(id)).toMatchObject({ email: "billing@example.test" });
+  });
 });
 
 async function fixture() {
