@@ -177,8 +177,8 @@ export function UnsavedRevocationList({
               onAction={() => void onRetry(revocation.id)}
             />
             <div className="text-xs text-error">
-              Refused now, but this computer could not save that. Dormouse keeps trying; if it closes before a save
-              lands, this phone can connect again.
+              Refused now, but this computer could not save that yet. If Dormouse closes before a save lands, this
+              phone can connect again.
             </div>
           </li>
         ))}

@@ -476,6 +476,42 @@ describe('burrow state store', () => {
     expect(await target.loadEnrollment()).toBeNull();
   });
 
+  it('saves the ACL while a keychain write waits, in order with other ACL writes', async () => {
+    const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
+    const { context, store } = fakeContext();
+    const unlocked = Promise.withResolvers<void>();
+    const keychainStore = context.secrets.store;
+    // A keychain waiting on its unlock prompt.
+    context.secrets.store = async (key: string, value: string) => {
+      await unlocked.promise;
+      await keychainStore(key, value);
+    };
+    const target = new VsCodeBurrowStateStore(context);
+    const enrollment = {
+      relayUrl: 'https://relay.dormouse.sh',
+      burrowId: BURROW_ID,
+      burrowToken: 'token',
+      origin: 'https://relay.dormouse.sh',
+      rpId: 'relay.dormouse.sh',
+      ...ENROLLMENT_LOCAL,
+    };
+    let enrolled = false;
+    const enrolling = target.saveEnrollment(enrollment).then(() => {
+      enrolled = true;
+    });
+
+    const first = aclRecord(BURROW_ID, 'first');
+    const revoked = { ...first, revokedAt: 2 };
+    await target.saveAcl(BURROW_ID, [first]);
+    await target.saveAcl(BURROW_ID, [revoked]);
+
+    expect(enrolled).toBe(false);
+    expect(await target.loadAcl(BURROW_ID)).toEqual([revoked]);
+    unlocked.resolve();
+    await enrolling;
+    expect(store.secrets.has('dormouse.burrow.enrollment')).toBe(true);
+  });
+
   it('forgets a failed keychain read instead of memoizing it', async () => {
     // A locked or keyring-less keychain rejects `secrets.get`; that says
     // nothing about what the store holds. A memoized rejection would leave an

@@ -384,28 +384,6 @@ const SERVICE_ID_BYTES = 16;
 /** How long a revocation goes unsaved before the next try, and how long a person waits on a write that has not failed. */
 export const REVOCATION_SAVE_RETRY_MS = 30_000;
 
-/** How long an ACL store write may take, from its call, before its caller is told it failed. */
-export const ACL_WRITE_DEADLINE_MS = 10_000;
-
-/** `work`, or a rejection naming what has not finished once `ms` passes; `onLate` runs then. */
-async function withinDeadline<T>(work: Promise<T>, ms: number, onLate?: () => void): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          onLate?.();
-          reject(new Error('the write has not finished'));
-        }, ms);
-        timer.unref?.();
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /** One entry of `BurrowService.#unsavedRevocations`. */
 interface HeldRevocation {
   readonly target: RevocationTarget;
@@ -594,10 +572,8 @@ export class BurrowService {
    */
   readonly #unsavedRevocations = new Map<string, HeldRevocation[]>();
   #revocationRetry: ReturnType<typeof setTimeout> | null = null;
-  /** Tries at {@link #unsavedRevocations}, one at a time and never on {@link #serialize}. */
+  /** Tries at {@link #unsavedRevocations}, one at a time, and off {@link #serialize} while a Burrow runs. */
   readonly #revocationSaves = createSerialQueue();
-  /** The ACL writes ({@link #saveAcl}), one at a time. */
-  readonly #aclWrites = createSerialQueue();
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -1178,45 +1154,12 @@ export class BurrowService {
   }
 
   /**
-   * Save an ACL a runtime built, or the stored one with every hold applied, read
-   * in this write's own turn, and let go of the revocations it carries — not all
-   * of them: an approval's write can have taken its snapshot before one applied.
-   *
-   * **One write at a time, each answered within {@link ACL_WRITE_DEADLINE_MS}
-   * of its call**, so a store that hangs holds up no approval, revocation, or
-   * retry behind it. A write that has not started by then never runs. One still
-   * running keeps its turn, so nothing newer is written while it might land, and
-   * if it lands after all, the live ACL is written next: what it wrote may be
-   * older than what its caller went on to hold.
+   * Save an ACL this service read or a runtime built, and let go of the
+   * revocations it carries — not all of them: an approval's write can have taken
+   * its snapshot before one applied.
    */
-  #saveAcl(
-    burrowId: string,
-    records: () => readonly BurrowAclRecord[] | Promise<readonly BurrowAclRecord[]>,
-  ): Promise<void> {
-    // Dropped at the deadline, so a write queued behind a hung one holds no snapshot.
-    let pending: typeof records | null = records;
-    let late = false;
-    const write = this.#aclWrites(async () => {
-      const read = pending;
-      pending = null;
-      if (!read) return;
-      const written = await read();
-      await this.#store.saveAcl(burrowId, written);
-      this.#releaseCarried(burrowId, written);
-      if (late) {
-        void this.#saveLiveAcl(burrowId).catch((error: unknown) => {
-          console.warn('[burrow] could not save the ACL again after a late write', error);
-        });
-      }
-    });
-    return withinDeadline(write, ACL_WRITE_DEADLINE_MS, () => {
-      late = true;
-      pending = null;
-    });
-  }
-
-  /** The holds `records`, now saved, carries, let go. */
-  #releaseCarried(burrowId: string, records: readonly BurrowAclRecord[]): void {
+  async #saveAcl(burrowId: string, records: readonly BurrowAclRecord[]): Promise<void> {
+    await this.#store.saveAcl(burrowId, records);
     const held = this.#unsavedRevocations.get(burrowId);
     if (!held) return;
     const left = held.filter((entry) =>
@@ -1370,45 +1313,60 @@ export class BurrowService {
 
   /**
    * {@link #saveHeldRevocations} for a person waiting on the answer: bounded,
-   * since it can wait behind approvals' writes, and any failure in the words they
-   * read. From then on Settings shows what is still held.
+   * since a store write has no deadline, and any failure in the words they read.
+   * From then on Settings shows what is still held. A write that outlasts the
+   * bound keeps its place, where nothing can overlap it.
    */
   async #retryRevocationSave(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await withinDeadline(this.#saveHeldRevocations(), REVOCATION_SAVE_RETRY_MS);
+      await Promise.race([
+        this.#saveHeldRevocations(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('the write has not finished')), REVOCATION_SAVE_RETRY_MS);
+          timer.unref?.();
+        }),
+      ]);
     } catch (error) {
       for (const held of [...this.#unsavedRevocations.values()].flat()) held.overdue = true;
       this.#emit({ name: 'access' });
       const until = this.#kind === 'vscode' ? 'the window running remote control closes' : 'Dormouse quits';
       throw new Error(
-        `The phone is disconnected and refused, but the revocation could not be saved: ${messageOf(error)}. Dormouse keeps trying; if ${until} before a save lands, the phone can connect again.`,
+        `The phone is disconnected and refused, but the revocation could not be saved: ${messageOf(error)}. Dormouse will try again; if ${until} before a save lands, the phone can connect again.`,
       );
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   /**
-   * One try at every unsaved revocation, never on `#serialize`: an enrollment
-   * save waiting on a locked keychain would hold every retry behind it.
+   * One try at every unsaved revocation: through the running Burrow whose ACL it
+   * is, so the write queues with its approvals and **never on `#serialize`**,
+   * where an enrollment save waiting on a locked keychain would hold it; else
+   * from the store, on `#serialize`, so no Burrow starts between the read and
+   * the write.
    */
   #saveHeldRevocations(): Promise<void> {
     if (this.#unsavedRevocations.size === 0) return Promise.resolve();
     return this.#revocationSaves(async () => {
       try {
-        for (const burrowId of [...this.#unsavedRevocations.keys()]) await this.#saveLiveAcl(burrowId);
+        for (const burrowId of [...this.#unsavedRevocations.keys()]) {
+          const running = () => (this.#enrollment?.burrowId === burrowId ? this.#burrow : null);
+          const burrow = running();
+          if (burrow) {
+            await burrow.saveRevocations();
+            continue;
+          }
+          await this.#serialize(async () => {
+            const started = running();
+            if (started) await started.saveRevocations();
+            else await this.#saveAcl(burrowId, await this.#loadAcl(burrowId));
+          });
+        }
       } finally {
         this.#armRevocationRetry();
       }
     });
-  }
-
-  /**
-   * The ACL as it stands: the running Burrow's, so the write queues with its
-   * approvals, else the store's with every hold applied, read in the write's own
-   * turn so that no write before it is lost.
-   */
-  #saveLiveAcl(burrowId: string): Promise<void> {
-    const burrow = this.#enrollment?.burrowId === burrowId ? this.#burrow : null;
-    return burrow ? burrow.saveRevocations() : this.#saveAcl(burrowId, () => this.#loadAcl(burrowId));
   }
 
   /** One timer at most, and none past disposal, whose last try is its own. */
@@ -1835,7 +1793,7 @@ export class BurrowService {
       directPeering: directPeeringFor(policy, this.#createDirectPeer),
       createSession: (opts) => this.#createApiSession(opts),
       loadAcl: () => records,
-      saveAcl: (burrowId, next) => this.#saveAcl(burrowId, () => next),
+      saveAcl: (burrowId, next) => this.#saveAcl(burrowId, next),
       requestApproval: (pending) => this.#enqueuePairing({ ...pending, kind: 'pairing' }),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
       onInvitationChanged: (inviteId, state, outcome) =>

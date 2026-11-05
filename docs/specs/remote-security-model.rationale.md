@@ -30,8 +30,6 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 
 **Why a delivery id carries a tag.** The Relay must refuse a new push row from a session that is not a paired phone, and holds no ACL to check one against; the `burrowToken` is the one secret it shares with the Burrow. The 128 random bits keep the id unguessable, and the tag keeps it unforgeable without the token.
 
-**Why a deadline, one write at a time, and the live ACL after a late one.** A store write cannot be cancelled once it runs: a file write on a stalled disk or a VS Code storage call can stay pending indefinitely, and without a deadline every approval and revocation save queued behind one waited with it, retries included. Letting a second write run beside a stalled one would let the older land last, so a stalled write keeps its turn, and writes that gave up before theirs are dropped, which also keeps a long stall from piling up snapshots. A write that does land late may be an approval its runtime has since refused, or an ACL from before a revocation, so the live ACL is written after it.
-
 ## Presence proofs
 
 **Why an unbound `begin`, or a `finish` with no nonce, is refused outright.** Either arm answers a challenge that nothing ties to a ceremony — a signature the caller could replay into a pairing or a connection it never participated in. Refusing at the route leaves no code path that mints presence for an unspecified purpose.
@@ -87,6 +85,8 @@ The self-host operator explicitly accepted the fallback tradeoff: same-origin ma
 **Why a revocation acts before it saves, when an approval saves first.** The two fail in opposite directions. An approval that published before a failed save would grant access nothing durable records; a revocation that waited for its save would leave a phone the person just cut off connected for as long as the disk refuses. Acting first fails closed, and the cost of a failed save is a phone that comes back once the service stops — Dormouse quitting, or in VS Code the broker window closing — which the error says. The service holds the revocation over every runtime it starts meanwhile, since a network-policy change restarts one from the store.
 
 **Why neither queue, when the save still takes one.** A store write has no timeout, and a VS Code keychain write can wait on a locked keychain, so a revocation behind one would leave its target connected until that write ended. Only the save needs ordering: the approval that overtook it re-applies it at publish, and the queued save reads the live ACL at its turn.
+
+**Why a stalled write holds the next try, with no deadline.** A store write cannot be cancelled once it runs, and both stores land writes in call order, so a try queued behind a stalled one could land no sooner; one run beside it could let the older land last. A deadline would only answer sooner, at the cost of an approval reported failed whose write then lands, which a restart before the next write would honour. What can stall instead is kept apart: the retry skips the lifecycle chain, and VS Code queues keychain writes apart from `globalState`.
 
 **Why retry, with no tombstone.** A marker in the same store fails with the same write. Without a retry a transient failure was as lasting as a full disk, because the phone's record has gone from the live ACL and nothing else would write it. So the residual is only a save that keeps failing up to the moment the service stops.
 

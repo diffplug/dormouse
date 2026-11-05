@@ -121,7 +121,6 @@ import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import {
   BurrowService,
   enqueuePending,
-  ACL_WRITE_DEADLINE_MS,
   enrollVerificationUrl,
   REVOCATION_SAVE_RETRY_MS,
   suggestedBurrowLabel,
@@ -1321,60 +1320,6 @@ describe('pairing queue', () => {
     await Promise.all([approval, restart]);
     expect(await readOutcome(socket, session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
     expect((await command('status')).result).toMatchObject({ pairedClients: 1 });
-  });
-
-  it('gives an ACL write a deadline, overlaps none, and follows a late one with the live ACL', async () => {
-    const phone = aclRecord('a-phone');
-    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [phone] } });
-    await service.start();
-    const socket = sockets[0]!;
-    socket.open();
-    const { item, code } = await pair(socket, 'c1');
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    try {
-      const write = Promise.withResolvers<void>();
-      const persist = store.saveAcl.bind(store);
-      let inFlight = 0;
-      let mostInFlight = 0;
-      const save = vi.spyOn(store, 'saveAcl').mockImplementation(async (burrowId, records) => {
-        mostInFlight = Math.max(mostInFlight, ++inFlight);
-        try {
-          if (save.mock.calls.length === 1) await write.promise;
-          await persist(burrowId, records);
-        } finally {
-          inFlight--;
-        }
-      });
-
-      const approval = command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
-      // The approval mints its delivery id first, on WebCrypto rather than a timer.
-      for (let turn = 0; turn < 200 && save.mock.calls.length === 0; turn++) {
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-      expect(save).toHaveBeenCalledOnce();
-      const revoking = command('revokeDevice', { id: deviceIdFor(phone.clientStaticPublicKey) });
-      await vi.advanceTimersByTimeAsync(ACL_WRITE_DEADLINE_MS);
-      await approval;
-
-      // The stuck write failed the approval, and freed the chains behind it.
-      expect((await command('status')).result).toMatchObject({ pairedClients: 0 });
-      await vi.advanceTimersByTimeAsync(ACL_WRITE_DEADLINE_MS);
-      expect((await revoking).error).toMatch(/refused/);
-      // Nothing was written beside the stuck write, and what gave up before its turn never ran.
-      expect(save).toHaveBeenCalledTimes(1);
-
-      // It lands at last, holding the pairing it failed and the phone before its revocation.
-      write.resolve();
-      await vi.advanceTimersByTimeAsync(0);
-
-      expect(mostInFlight).toBe(1);
-      // The stuck write and the live ACL after it: the revocation's own, which gave up first, never ran.
-      expect(save).toHaveBeenCalledTimes(2);
-      expect(store.acl[BURROW_ID]).toEqual([expect.objectContaining({ revokedAt: expect.any(Number) })]);
-      expect(((await command('pairedDevices')).result as PairedDevicesResult).unsavedRevocations).toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('lets go of no revocation an approval\'s write took its snapshot before', async () => {
