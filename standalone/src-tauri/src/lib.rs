@@ -3898,6 +3898,7 @@ fn reopen_closed_window(
         push_closed(&mut guard(&windows.closed_windows), closed);
         return Err(err);
     }
+    send_window_labels(&app);
     Ok(true)
 }
 
@@ -7033,6 +7034,26 @@ mod tests {
             }
         }
         assert!(acquisitions > 0, "journal lock scan must inspect its callers");
+    }
+
+    /// The Burrow's ask collector waits only on the labels it was last sent, so
+    /// a window opened without a push answers no ask until another window
+    /// comes or goes. `restore_windows` runs inside `setup`, which pushes after.
+    #[test]
+    fn every_window_opener_pushes_the_window_labels() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let mut offenders: Vec<&str> = Vec::new();
+        for item in src.split("\nfn ").skip(1) {
+            let name = item.split('(').next().unwrap_or("");
+            let body = item.split("\n}\n").next().unwrap_or(item);
+            if name != "build_window" && name != "restore_windows" && body.contains("build_window(")
+                && !body.contains("send_window_labels(")
+            {
+                offenders.push(name);
+            }
+        }
+        assert!(offenders.is_empty(), "these open a window without send_window_labels: {offenders:?}");
+        assert!(src.contains("restore_windows(app.handle()"), "setup must still restore windows itself");
     }
 
     #[test]
