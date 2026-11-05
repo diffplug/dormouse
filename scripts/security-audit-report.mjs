@@ -5,9 +5,10 @@
  * "Outcomes and reporting" for the contract and `.github/audit/_preamble.md`
  * for the line grammar the domains write.
  *
- *   node scripts/security-audit-report.mjs manifest <fragment>
+ *   node scripts/security-audit-report.mjs manifest <fragment> [--stream <name>]
  *     The result lines that domain owes: one per `FAIL IF` rule in its specs,
- *     each carrying its rule's ID, opening words, spec, and heading.
+ *     each carrying its rule's ID, opening words, spec, and heading. With
+ *     `--stream`, only the share of one of its prompt's `## Work streams`.
  *   node scripts/security-audit-report.mjs check <fragment>
  *     The local runner's verdict on one fragment; exit 0 only on PASS.
  *   node scripts/security-audit-report.mjs compose --run-url <url> [--transcript-url <url>] --outputs <file>
@@ -167,6 +168,43 @@ export function fragmentManifest(root, fragment) {
   return owed;
 }
 
+/**
+ * A domain prompt's `## Work streams`, each as its name, its bullet, and the
+ * `spec\0heading` keys the bullet names: a backticked spec path, then the
+ * quoted headings under it.
+ */
+export function workStreams(root, domain) {
+  const text = readFileSync(join(root, AUDIT_DIR, `${domain}.md`), 'utf8');
+  const section = text.split(/^## Work streams$/m)[1]?.split(/^## /m)[0];
+  if (!section) throw new Error(`${domain}.md has no \`## Work streams\` section`);
+  return section.split('\n').filter((l) => l.startsWith('- `')).map((line) => {
+    const keys = [];
+    let spec = null;
+    for (const m of line.matchAll(/`(docs\/specs\/[^`]+)`|"([^"]+)"/g)) {
+      if (m[1]) spec = m[1];
+      else keys.push(`${spec}\0${m[2]}`);
+    }
+    return { name: line.match(/^- `([\w-]+)`/)[1], line, keys };
+  });
+}
+
+/**
+ * The share of a domain's manifest one work stream owes: the rules under the
+ * headings its bullet names. Throws for a stream the prompt does not list, or
+ * one owing nothing, since an empty share would let a delegate pass on no
+ * rules.
+ */
+export function streamManifest(root, fragment, stream) {
+  const domain = domains(root).find((d) => d.fragment === fragment);
+  if (!domain) throw new Error(`no domain prompt writes ${fragment}`);
+  const s = workStreams(root, domain.domain).find((x) => x.name === stream);
+  if (!s) throw new Error(`${domain.domain}.md lists no \`${stream}\` work stream`);
+  const owed = fragmentManifest(root, fragment);
+  const share = new Map([...owed].filter(([key]) => s.keys.includes(key)));
+  if (share.size === 0) throw new Error(`the \`${stream}\` work stream owes no result line; it runs no rule`);
+  return share;
+}
+
 // --- Parsing one fragment --------------------------------------------------
 
 /** The verdict a fragment's first line states: one of the three exact lines `.github/audit/_preamble.md` allows, or null. */
@@ -236,8 +274,11 @@ const ruleWords = (text) => text.replace(FAIL_IF_RE, '').replace(/^\*\*\s*/, '')
  * that tell it from every other rule under its heading, and by its spec and
  * heading, so a domain finds the rule it checked and copies its ID.
  */
-export function manifestLines(root, fragment) {
-  return [...fragmentManifest(root, fragment)].flatMap(([key, ids]) => {
+export function manifestLines(root, fragment, stream = null) {
+  const owed = stream === null ? fragmentManifest(root, fragment) : streamManifest(root, fragment, stream);
+  // A domain owes a rule a deterministic script answers in part whole, so its template says so.
+  const partly = fragment in DETERMINISTIC ? [] : Object.entries(DETERMINISTIC);
+  return [...owed].flatMap(([key, ids]) => {
     const [spec, heading] = key.split('\0');
     const siblings = specRules(root, spec).filter((r) => r.heading === heading);
     const words = new Map(siblings.map((r) => [r.id, ruleWords(r.text)]));
@@ -246,7 +287,9 @@ export function manifestLines(root, fragment) {
     while (k < Math.max(...all.map((w) => w.length)) && new Set(all.map((w) => w.slice(0, k).join(' '))).size < all.length) k++;
     return ids.map((id) => {
       const w = words.get(id);
-      return `- PASS: ${id} — <clause of the rule opening "${w.slice(0, k).join(' ')}${w.length > k ? ' …' : ''}", under \`${spec}\` -> "${heading}">: <evidence>`;
+      const pin = siblings.find((r) => r.id === id).pin;
+      const shared = partly.filter(([, script]) => pin.includes(`\`${script}\``)).map(([f]) => `; \`${f}\` answers part of it, and this fragment still owes the whole rule`);
+      return `- PASS: ${id} — <clause of the rule opening "${w.slice(0, k).join(' ')}${w.length > k ? ' …' : ''}", under \`${spec}\` -> "${heading}"${shared.join('')}>: <evidence>`;
     });
   });
 }
@@ -598,7 +641,7 @@ function main(argv) {
     else args._ = rest[i];
   }
   if (command === 'manifest') {
-    for (const line of manifestLines('.', args._)) console.log(line);
+    for (const line of manifestLines('.', args._, args.stream ?? null)) console.log(line);
     return;
   }
   if (command === 'check') {
