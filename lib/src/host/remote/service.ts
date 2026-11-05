@@ -596,8 +596,8 @@ export class BurrowService {
   #revocationRetry: ReturnType<typeof setTimeout> | null = null;
   /** Tries at {@link #unsavedRevocations}, one at a time and never on {@link #serialize}. */
   readonly #revocationSaves = createSerialQueue();
-  /** The tail of the ACL writes ({@link #saveAcl}), which run one at a time. */
-  #aclWrites: Promise<void> = Promise.resolve();
+  /** The ACL writes ({@link #saveAcl}), one at a time. */
+  readonly #aclWrites = createSerialQueue();
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -1191,12 +1191,16 @@ export class BurrowService {
    */
   #saveAcl(
     burrowId: string,
-    records: readonly BurrowAclRecord[] | (() => Promise<readonly BurrowAclRecord[]>),
+    records: () => readonly BurrowAclRecord[] | Promise<readonly BurrowAclRecord[]>,
   ): Promise<void> {
+    // Dropped at the deadline, so a write queued behind a hung one holds no snapshot.
+    let pending: typeof records | null = records;
     let late = false;
-    const write = this.#aclWrites.then(async () => {
-      if (late) return;
-      const written = typeof records === 'function' ? await records() : records;
+    const write = this.#aclWrites(async () => {
+      const read = pending;
+      pending = null;
+      if (!read) return;
+      const written = await read();
       await this.#store.saveAcl(burrowId, written);
       this.#releaseCarried(burrowId, written);
       if (late) {
@@ -1205,9 +1209,9 @@ export class BurrowService {
         });
       }
     });
-    this.#aclWrites = write.catch(() => {});
     return withinDeadline(write, ACL_WRITE_DEADLINE_MS, () => {
       late = true;
+      pending = null;
     });
   }
 
@@ -1831,7 +1835,7 @@ export class BurrowService {
       directPeering: directPeeringFor(policy, this.#createDirectPeer),
       createSession: (opts) => this.#createApiSession(opts),
       loadAcl: () => records,
-      saveAcl: (burrowId, next) => this.#saveAcl(burrowId, next),
+      saveAcl: (burrowId, next) => this.#saveAcl(burrowId, () => next),
       requestApproval: (pending) => this.#enqueuePairing({ ...pending, kind: 'pairing' }),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
       onInvitationChanged: (inviteId, state, outcome) =>
