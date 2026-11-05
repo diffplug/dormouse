@@ -317,7 +317,7 @@ The Terms let us verify ownership, and forbid requiring account recovery. Most r
 Deadline: the Terms state no number of days, but the cancellation must land before the next renewal, so do it the day the email arrives. If a renewal charged after their request arrived, refund it in full, which also ends the plan.
 
 1. [Find and verify the customer](#find-and-verify-the-customer).
-2. Stop the renewal, keeping access through the period they paid for. Use this command rather than the Dashboard's button: Stripe's portal was seen to set `cancel_at` instead (sandbox, 2026-11-03), and Hosted reads only `cancel_at_period_end`, so its billing page and renewal notices would still say it renews.
+2. Stop the renewal, keeping access through the period they paid for: in the Dashboard, cancel the subscription at the end of the current period, or:
 
    ```sh
    stripe subscriptions update <subscription id> -d cancel_at_period_end=true
