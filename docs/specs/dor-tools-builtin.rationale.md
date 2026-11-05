@@ -30,6 +30,8 @@ Image URLs carry a per-load generation because the browser keeps decoded images 
 
 Mermaid stays on 11: 12 makes its ELK layout (a 1.4 MB elkjs chunk) the default and restyles state diagrams, so diagrams would look different here than in renderers on dagre and the classic look; 12.0 was also three weeks old (2026-10).
 
+Mermaid 11's `mermaid.core.mjs` dynamically imports the npm KaTeX package for `$$…$$` labels, so a scoped override to patched KaTeX changes the viewer bundle without adopting Mermaid 12. Omitting or stubbing that import would remove math labels from user documents; plain diagrams do not load it. The override addresses GHSA-238p-pmpm-9mq7 (2026-11).
+
 The page keeps `'unsafe-inline'` scripts because the host injects its iframe shim inline (`docs/specs/theme.md` → Tool iframe themes), so the CSP alone does not stop inline event handlers. MDXEditor's stock `GenericHTMLNode` copies every document attribute onto a live element, and its image export builds an `<img>` with the document's attributes in the live document, where a `srcset` loads and fires `onerror`; both ran document script in Chromium (2026-10) with the page's save and paste routes in reach.
 
 ## Folder viewer
@@ -39,6 +41,8 @@ A names-only folder viewer leaves file contents behind the existing one-file gra
 Each page POST is its own connection, so two can arrive out of order. In a live run (2026-09-28), when POSTs still became `dor open` calls, a double-click's activate reached the renderer before its select, so the file opened as an ordinary split beside the folder viewer instead of pinning the slot the select was creating. Selects stay concurrent because supersession needs a newer select to reach the renderer while an older one is still in flight.
 
 ## Editing files
+
+Monaco 0.57 vendors DOMPurify 3.4.15 inside its ESM sources, so overriding its npm dependency would leave the viewer's sanitizer unchanged. The 0.58.0-dev-20261103 prerelease vendors 3.4.17 as well as declaring it, fixing the five DOMPurify alerts tracked in #1574; this is a temporary pin until a stable Monaco release contains that fix (verified from the published tarballs, 2026-11).
 
 Windows tests in 2026-10 (Node 22.22.3) showed an atomic Node rename failing with EPERM while the raw grant retained a descriptor. A protected owner-only document also acquired its parent directory's broader DACL after the ordinary rename path. Native replacement succeeded with the original grant still open and retained the document ACL. [Microsoft's ReplaceFileW contract](https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-replacefilew) records the metadata and ACL merge; ignoring merge errors would weaken the permission guarantee.
 
