@@ -226,6 +226,7 @@ One Stripe account holds only Dormouse, because retries, customer emails, and th
 - **Customer portal, the default configuration:** cancel at period end with no proration or reason, payment methods, invoice history, email and address; **plan switching off**, since a Price billing does not know fails that owner's webhooks and leaving founding loses the lock.
 - **Revenue recovery:** Smart Retries over 2 months for cards, then cancel the subscription, so a founder keeps the 30 days the Terms promise to fix a failed renewal. Failed-payment emails on, since Hosted sends none, with a Stripe-hosted link.
 - **Customer emails:** successful payments and refunds on.
+- **Link:** on. Its instant bank payments come with it, with no separate switch, so Checkout offers "Pay with Bank" beside cards; a refund to a bank account takes a few days to succeed, and a withdrawal or closure it pays stays unsettled until then.
 - **Webhook endpoint:** `https://hosted.dormouse.sh/api/billing/webhook`, created through the API with `api_version` set to the SDK's pinned `STRIPE_API_VERSION`, since any other version is refused with 400. Its events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`, `invoice.paid`, `invoice.payment_failed`.
 
 ## Change a price

@@ -1857,6 +1857,55 @@ test("a price change applies only from a renewal its notice reached at least 7 d
   expect(f.moves).toHaveLength(1);
 });
 
+test("a renewal notice sent beside a price change's states the new price that renewal charges", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  // A change whose notice went out too late, and one whose notice can no
+  // longer go out in time, never apply, so their renewals keep the old price.
+  const late = await f.account();
+  const { subscription: lateSubscription } = await f.buy(late, "yearly");
+  const stale = await f.account();
+  const { subscription: staleSubscription } = await f.buy(stale, "yearly");
+  await f.sql(
+    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+    VALUES ('yearly-120', 'yearly', $1, $2, $3, $4, $5)`,
+    [f.setup.yearly, CHANGED_PRICES.yearly, LIST_ANNUAL, CHANGED_USD.yearly, f.time.now()],
+  );
+  // Inside both windows at once: the renewal notice's 30 days and the change's 21.
+  const renewsAt = new Date(subscription.items.data[0]!.current_period_end * 1000);
+  f.time.advanceMilliseconds(renewsAt.getTime() - f.time.now().getTime() - (PRICE_NOTICE_DAYS - 1) * DAY_MS);
+  const lateRenewsAt = new Date(lateSubscription.items.data[0]!.current_period_end * 1000);
+  const soon = new Date(f.time.now().getTime() + (PRICE_NOTICE_MIN_DAYS - 1) * DAY_MS);
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = $2 WHERE id = $1`, [staleSubscription.id, soon]);
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "subscriptionId", "renewsAt", "priceChangeId", "createdAt", email, "sentAt")
+    VALUES ('late', $1, 'price_change', $2, $3, 'yearly-120', $4, 'late@example.test', $4)`,
+    [late.id, lateSubscription.id, lateRenewsAt, new Date(lateRenewsAt.getTime() - (PRICE_NOTICE_MIN_DAYS - 1) * DAY_MS)],
+  );
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "subscriptionId", "renewsAt", "priceChangeId", "createdAt")
+    VALUES ('unsent', $1, 'price_change', $2, $3, 'yearly-120', $4)`,
+    [stale.id, staleSubscription.id, soon, f.time.now()],
+  );
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+
+  const mailTo = async (account: { id: string }, word: string) => {
+    const [{ email }] = await f.sql<{ email: string }>(
+      `SELECT email FROM dormouse_billing_notices WHERE "userId" = $1 AND kind = 'renewal'`,
+      [account.id],
+    );
+    return f.email.all().find((mail) => mail.to.includes(email) && mail.subject.includes(word))!.text;
+  };
+  expect(await mailTo(member, "price changes")).toContain(`from $${LIST_ANNUAL} to $${CHANGED_USD.yearly} a year`);
+  const renewal = await mailTo(member, "renews");
+  expect(renewal).toContain(`for another year at $${CHANGED_USD.yearly} plus any applicable tax`);
+  expect(renewal).not.toContain(`$${LIST_ANNUAL}`);
+  for (const account of [late, stale])
+    expect(await mailTo(account, "renews")).toContain(`for another year at $${LIST_ANNUAL} plus any applicable tax`);
+});
+
 test("a dispute's suspension and restoration are each emailed once to the billing email, and the cron retries a failed send", async ({
   onTestFinished,
 }) => {
