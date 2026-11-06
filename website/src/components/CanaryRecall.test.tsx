@@ -55,7 +55,9 @@ const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, 
 const slot = (i: number, n: number) => ((i + 0.5) / n) * 100;
 const TZ = process.env.TZ;
 afterEach(() => {
-  process.env.TZ = TZ;
+  // Assigning `undefined` to `process.env` stores the string "undefined".
+  if (TZ === undefined) delete process.env.TZ;
+  else process.env.TZ = TZ;
 });
 
 describe("recallWeeks", () => {

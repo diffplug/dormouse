@@ -97,8 +97,10 @@ describe('pickFocusRing', () => {
       lab: lab(80, 80, 80),
       preferred: true,
     };
+    // Both clear the floor; the muted one comes first, so input order alone would pick it.
+    const muted: FocusRingCandidate = { varName: '--color-header-inactive-bg', lab: lab(0x09, 0x47, 0x71) };
     const vivid: FocusRingCandidate = { varName: '--color-header-active-bg', lab: lab(0xff, 0x40, 0x40) };
-    const pick = pickFocusRing([flatPreferred, vivid], APP_DARK);
+    const pick = pickFocusRing([flatPreferred, muted, vivid], APP_DARK);
     expect(pick?.varName).toBe('--color-header-active-bg');
   });
 
