@@ -156,13 +156,14 @@ describe('getPushAvailability', () => {
     await expect(getPushAvailability()).resolves.toBe('denied');
   });
 
-  it('waits for an in-flight registration rather than calling it a failure', async () => {
+  it('waits for an in-flight registration and reports its result', async () => {
     stubBrowser({});
     let resolve: (value: unknown) => void = () => {};
     getRegistration.mockReturnValue(new Promise((r) => { resolve = r; }));
     const pending = getPushAvailability();
-    resolve(registration());
-    await expect(pending).resolves.toBe('ready');
+    // An unawaited promise is truthy, so only a wait sees the failed registration.
+    resolve(null);
+    await expect(pending).resolves.toBe('no-worker');
   });
 });
 
