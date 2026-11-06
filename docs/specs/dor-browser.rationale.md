@@ -194,7 +194,13 @@ The built-in local-file viewer supplies its own content boundary and permits the
 
 ## Iframe External Origins
 
-**Why the proxy changes what an external page is.** It strips the upstream's framing headers and, by default, its CSP, and serves every grant from the shared `127.0.0.1` hostname, so a remote page loses protections its author relied on; the warning names that, rather than claiming the page itself is hostile. Approval does not make signing in safe, which is why cookies stay stripped.
+**Why the proxy changes what an external page is.** It strips the upstream's framing headers and, by default, its CSP, and serves every grant from the shared `127.0.0.1` hostname, so a remote page loses protections its author relied on, and gains a loopback origin: past the browser's local-network barrier, and admitted by every loopback service that trusts loopback origins. Vite's default `server.cors` matches any `127.0.0.1` port, and agent-browser 0.31.1's stream server accepted a WebSocket from one and took input on it (2026-11, Chromium and a macOS WKWebView). Cookies stay stripped all the same.
+
+**Why the network, not the origin (2026-11).** Over plain `http://` the page is whatever anyone on the path sends, so an exact-origin allowlist bounded a name while the path decided what ran. The network policy's `allowed` already says which networks the user trusts, so one list bounds both a phone's path and a pane's upstream. Serving external grants from an opaque origin (a `sandbox` CSP without `allow-same-origin`) did drop the loopback standing, but module scripts and storage failed with it, so dev servers did not load. The consent sits at the refusal and names the interface's network, because the person reading it knows "Tailscale" or "the WSL VM", not a CIDR.
+
+**Why never a public address.** Previews exist for local development, and a page on the internet arrives over a path the user does not control; agent-browser renders one at its own origin. Only RFC 1918, the shared address space Tailscale draws from, and unique-local IPv6 count as private: `198.18.0.0/15` stays public because fake-IP proxies (Surge, Clash) answer every public name from it, and NAT64 or 6to4 spellings of a private address stay public too.
+
+**Why every address, read again at each reuse.** A name can resolve to several addresses and a connection may use any of them, so each one pinned must pass. A lease reuses its grant across Reload, Back and Forward, so a network removed while the page is open must end the grant there as well as at the next mint.
 
 **Why local is the resolved address.** A hostname proves nothing: `localhost` is whatever the resolver answers, a public name can resolve to `127.0.0.1`, and a LAN or tailnet name is usually another machine. The addresses are the ones the grant is pinned to, so the one classified is the one connected to. Two non-loopback answers still reach this machine and are handed out routinely: `0.0.0.0`, which `python -m http.server` and other servers bound to every interface print, and an address one of this host's interfaces holds, which `listenerUrlsByPort` names for a server bound to that interface alone. A private-network address on any other host stays external.
 
@@ -203,8 +209,6 @@ The built-in local-file viewer supplies its own content boundary and permits the
 **Why the redirect replaces the redirecting entry.** Pushing the target would leave the redirecting URL behind it, and Back would land there only to be redirected again. The redirect page carries no shim for the same reason: its `location` report would race the `navigate` and could put the redirecting URL back.
 
 **Why a tunneled grant keeps its redirect.** `PocketBrowserFrame` handles no `navigate`, so the Dormouse page would be a dead end on a phone, and a target on the Burrow's `localhost` means nothing in the phone's own browser. What a frame should do instead is `docs/specs/remote-api.md` -> "1b. A frame redirected off its page".
-
-**Why one list per install.** Every other Settings value persists per host install in `localStorage`; a per-window or per-session list would re-ask on every restore of a pane the user already allowed.
 
 ## Iframe Proxy Leases
 

@@ -12,7 +12,7 @@ Evidence for `docs/specs/remote-network.md`, keyed by its headings.
 
 **Three personas set the levels (2026-09-30).** One wants no network requests at all; one will try Pocket but only over their LAN or VPN; one wants it to work anywhere. One choice per persona, with the connections it implies listed beside it, replaced a transport matrix (persistent vs one-time × restricted vs not) whose rows the UI never needed to distinguish.
 
-**Why `autoUpdate`, and the allowed networks outside Local networks, end nothing.** The rule that a change ends the live one-time session exists so a narrowed policy cannot leave an old path exempt. `autoUpdate` governs no path a phone uses, and the allowed networks govern one only under Local networks, so ending a phone's session because the person toggled update checks, or edited a list that Anywhere never reads, would cost them the connection and protect nothing.
+**Why an addition, `autoUpdate`, and the allowed networks outside Local networks end nothing.** The rule that a change ends the live one-time session exists so a narrowed policy cannot leave an old path exempt. `autoUpdate` governs no path a phone uses, the allowed networks govern one only under Local networks, and an added network narrows nothing, so ending a phone's session because the person toggled update checks, edited a list Anywhere never reads, or allowed a network for a browser pane would cost them the connection and protect nothing. The hold reads the service's list at each attempt and recheck rather than a copy, so an addition reaches a running Burrow without the restart that would end its sessions; before panes shared the list (2026-11), any change restarted it.
 
 ## Updates
 
@@ -23,6 +23,8 @@ Evidence for `docs/specs/remote-network.md`, keyed by its headings.
 **Why the list states only what is built (2026-09-30).** The list is what a person reads to decide which level to trust, so a row for unbuilt behavior promises traffic that never happens, and a missing row hides one that does. The 2026-09-30 prototype listed the whole design; `connectionsFor` now derives rows from the shipped policy and runtime facts, including Hosted enrollment.
 
 **Why the panel fills the LAN prefixes.** `setNetworkPolicy` takes a policy only exactly and answers what it saved; filling in networks there would save something the request did not say. The panel already holds the interfaces the person is looking at, and the switches show at once what was allowed.
+
+**Why the fill keys on the LAN prefixes, not an empty list (2026-11).** A browser pane's warning adds a network under any level, most often a VPN or virtual one — a dev server on another tailnet machine, or in a WSL VM — so a list holding only those says nothing about which networks phones should use. Filling only an empty list left Local networks with no Wi-Fi after such a click. The cost falls on a person who kept only their VPN for phones and later returns to Local networks: the LAN switch comes back on, and they switch it off again.
 
 ## Local networks
 

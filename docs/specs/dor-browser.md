@@ -257,7 +257,7 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 `dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but agents cannot drive or read it. On hosts with `createIframeProxyUrl`, `IframePanel` frames a per-grant loopback proxy URL; without it, a raw uninstrumented iframe. The desktop playground's `createIframeProxyUrl` fronts only its own viewers (`docs/specs/tutorial.md` → Playground filesystem).
 
-The proxy instruments any `http://` upstream it fronts, loopback and remote alike — a remote one only once allowed ([Iframe External Origins](#iframe-external-origins)): headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must connect a grant, over HTTP and WebSocket alike, only to the addresses its upstream resolved to when minted.** **Must refuse (`scheme`) an upstream resolving to any link-local / cloud-metadata address**, in any spelling, including an IPv6 literal that reaches one through a translator (rationale); one that does not resolve is `unreachable`.
+The proxy instruments any `http://` upstream it fronts, loopback and remote alike — a remote one only on an allowed network ([Iframe External Origins](#iframe-external-origins)): headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must connect a grant, over HTTP and WebSocket alike, only to the addresses its upstream resolved to when minted.** **Must refuse (`scheme`) an upstream resolving to any link-local / cloud-metadata address**, in any spelling, including an IPv6 literal that reaches one through a translator (rationale); one that does not resolve is `unreachable`.
 
 **Must refuse `https://`, regardless of scheme casing, at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
 
@@ -298,16 +298,17 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe
 
 ### Iframe External Origins
 
-An upstream is local when every address it resolved to at mint is on this machine (`docs/specs/remote-api.md` -> "Frames"); its name never counts. This section governs a local pane's grants: a tunneled grant is on this machine or refused, whatever `allowExternal` says, and its redirects pass as sent.
+An upstream is local when every address it resolved to at mint is on this machine (`docs/specs/remote-api.md` -> "Frames"); its name never counts. This section governs a local pane's grants: a tunneled grant is on this machine or refused, whatever the allowed networks hold, and its redirects pass as sent.
 
-- A non-local upstream is refused (`external`) unless the request carries `allowExternal`, sent only for an origin on the panel's allowlist (`docs/specs/security-local.md` -> "Browser panes").
-- The allowlist holds exact origins (scheme, host, port) in webview `localStorage`, one per host install, each removable in Settings → General. **Must re-ask the host when the pane's origin is allowed or removed**, so a removal closes an open preview.
-- The `external` warning names the origin and offers Open in browser, Allow this origin, and Cancel (back one entry, else close the pane).
-- An allowed origin gets a preview only: cookies stay stripped and `https://` stays refused.
+- **A non-local upstream gets a grant only when every pinned address off this machine is private (`PRIVATE_RANGES`: RFC 1918, `100.64.0.0/10`, `fc00::/7`) and inside the network policy's `allowed`** (`docs/specs/remote-network.md` -> "Policy"), under every level, read again at every mint and lease reuse; otherwise it is refused `external`. **Never front a public address**, whatever `allowed` holds (rationale). A policy the host cannot read allows none (`docs/specs/security-local.md` -> "Browser panes").
+- **Each host reads the stored policy itself**: the sidecar from its Burrow service, a VS Code window from its service or, with none, from `globalState`. The request carries no allowance.
+- The `external` warning names the page's origin. **Where every refused address lies in a prefix of this machine's interfaces (`listNetworkInterfaces`), it offers to allow those prefixes**, adding them through `setNetworkPolicy` from the service's latest answer, the level left alone; a public address, or one on no interface's prefix, gets no such offer. It also offers Open in agent-browser, Open in browser, and Cancel (back one entry, else close the pane), and says what allowing a network lets its pages reach (`ALLOWED_NETWORK_REACH`).
+- **Must re-ask the host when `allowed` changes**, from any window or Settings, so a removal closes an open preview whose grant it no longer covers.
+- A page off this machine gets a preview only: cookies stay stripped and `https://` stays refused.
 
 Both webview CSPs admit only loopback frames (`docs/specs/security-local.md` -> "Network policy"), so a form, script, or link off the proxy to a remote origin is refused. A pane's frame load (`Sec-Fetch-Dest` `document` or `iframe`) redirected to another origin, given an embedder chain, gets a Dormouse page in place of the `Location`. In the pane's frame it posts `navigate` with the target and its own URL; the panel takes it as a URL-bar entry, replacing the redirecting history entry (rationale). A nested frame, outside the webview CSP, follows the redirect itself.
 
-Source of truth: `mintGrant` and `offOriginRedirect` in `lib/src/host/iframe-proxy.ts`, `errorPageHtml` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/lib/iframe-allowlist.ts`, `lib/src/components/wall/IframePanel.tsx`.
+Source of truth: `mintGrant`, `offMachineRefusal`, and `offOriginRedirect` in `lib/src/host/iframe-proxy.ts`, `PRIVATE_RANGES` in `lib/src/host/remote/network-interfaces.ts`, `errorPageHtml` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/components/wall/IframePanel.tsx`.
 
 ### Iframe Proxy Leases
 
@@ -346,7 +347,7 @@ The optional `PlatformAdapter.createIframeProxyUrl`, the `IframeProxyResult` uni
 
 **Must pass the webview's own ancestor chain with every request for a proxy URL** — `location.origin` plus `location.ancestorOrigins`, knowable only in the realm that has a `location` (rationale). The host validates it and uses it all-or-nothing: an unparseable or opaque (`"null"`) entry means no chain (rationale), and with no chain the proxy preserves framing headers and injects nothing.
 
-The proxy binds loopback only, a mitigation and not the boundary; each grant fronts exactly one upstream; no user script is injected; and every user-supplied `http://` target on this machine, or allowed off it ([Iframe External Origins](#iframe-external-origins)), but none resolving to a refused address ([Iframe Renderer](#iframe-renderer)), is trusted as the user's command, at the cost of the upstream's own XSS policy unless it opts into preservation. The `Host`, `Origin`, cookie, `frame-ancestors`, shim-targeting and grant-refresh rules are `docs/specs/security-local.md` → "Loopback Listeners" and "Browser panes".
+The proxy binds loopback only, a mitigation and not the boundary; each grant fronts exactly one upstream; no user script is injected; and every user-supplied `http://` target on this machine, or on an allowed network off it ([Iframe External Origins](#iframe-external-origins)), but none resolving to a refused address ([Iframe Renderer](#iframe-renderer)), is trusted as the user's command, at the cost of the upstream's own XSS policy unless it opts into preservation. The `Host`, `Origin`, cookie, `frame-ancestors`, shim-targeting and grant-refresh rules are `docs/specs/security-local.md` → "Loopback Listeners" and "Browser panes".
 
 Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`, `embedderOrigins` in `lib/src/lib/embedder-origins.ts`, `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, `lib/src/host/loopback-guard.ts`. `lib/src/host/iframe-proxy.test.ts` pins the upgrade path as well as the request path.
 
