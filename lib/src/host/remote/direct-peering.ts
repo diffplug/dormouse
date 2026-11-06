@@ -5,35 +5,37 @@
  */
 
 import type { DirectPeering } from '../../remote/direct/direct-peer';
-import { burrowUsesStun, holdsToAllowedNetworks, type NetworkPolicy } from '../../remote/network-policy';
+import { burrowUsesStun, holdsToAllowedNetworks, type NetworkLevel, type NetworkPolicy } from '../../remote/network-policy';
 import { localNetworksPath } from './local-networks';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
 
 /**
- * The direct path a runtime opened or started under `policy` holds for its
- * life, both halves chosen here from that one policy: `createDirectPeer` bound
- * to gather through Cloudflare STUN only where {@link burrowUsesStun}, and
- * where {@link holdsToAllowedNetworks} the hold on each attempt. **No runtime
- * chooses either**: a change {@link samePaths} sees ends the runtime instead
- * (`BurrowService.#setNetworkPolicy`).
+ * The direct path a runtime opened or started under `level` holds for its
+ * life: `createDirectPeer` bound to gather through Cloudflare STUN only where
+ * {@link burrowUsesStun}, and where {@link holdsToAllowedNetworks} the hold on
+ * each attempt, reading `allowed` — the policy's networks as they stand — at
+ * each use. **No runtime chooses either**: a change {@link narrowsPaths} sees
+ * ends the runtime instead (`BurrowService.#setNetworkPolicy`).
  */
 export function directPeeringFor(
-  policy: NetworkPolicy,
+  level: NetworkLevel,
+  allowed: () => readonly string[],
   createDirectPeer: BurrowDirectPeerFactory | undefined,
 ): DirectPeering {
-  const stun = burrowUsesStun(policy.level);
+  const stun = burrowUsesStun(level);
   return {
     createPeer: createDirectPeer ? (pathPolicy) => createDirectPeer(pathPolicy, stun) : null,
-    pathPolicy: holdsToAllowedNetworks(policy.level) ? localNetworksPath(policy.allowed) : undefined,
+    pathPolicy: holdsToAllowedNetworks(level) ? localNetworksPath(allowed) : undefined,
   };
 }
 
 /**
- * Whether two policies allow the same paths: the level, and where it
- * {@link holdsToAllowedNetworks}, the allowed networks as a set.
+ * Whether `next` takes away a path `previous` allowed: a change of level, or
+ * where it {@link holdsToAllowedNetworks}, a network no longer allowed. Adding
+ * one takes nothing away, and a live hold reads it.
  */
-export function samePaths(a: NetworkPolicy, b: NetworkPolicy): boolean {
-  if (a.level !== b.level) return false;
-  if (!holdsToAllowedNetworks(a.level)) return true;
-  return a.allowed.length === b.allowed.length && a.allowed.every((cidr) => b.allowed.includes(cidr));
+export function narrowsPaths(previous: NetworkPolicy, next: NetworkPolicy): boolean {
+  if (previous.level !== next.level) return true;
+  if (!holdsToAllowedNetworks(previous.level)) return false;
+  return previous.allowed.some((cidr) => !next.allowed.includes(cidr));
 }

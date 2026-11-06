@@ -619,6 +619,20 @@ export async function burrowNetworkAllowed(): Promise<boolean> {
   }
 }
 
+/**
+ * The network policy's allowed networks, which bound a pane's iframe upstream
+ * off this machine: the service's in the broker, else the stored policy's, as
+ * {@link burrowNetworkAllowed} reads it. None for a read that fails.
+ */
+export async function burrowAllowedNetworks(): Promise<readonly string[]> {
+  if (service) return service.allowedNetworks();
+  try {
+    return (await idleNetworkPolicy()).allowed;
+  } catch {
+    return [];
+  }
+}
+
 /** The network policy as a service starting now would read it, the default unsaved. */
 async function idleNetworkPolicy(): Promise<NetworkPolicy> {
   if (!context) throw new Error(NO_BURROW);

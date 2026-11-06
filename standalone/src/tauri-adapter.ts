@@ -9,7 +9,6 @@ import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
 import { nativeClipboardWriter } from "./native-clipboard";
 import type {
-  IframeProxyOptions,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
@@ -473,7 +472,7 @@ export class TauriAdapter implements PlatformAdapter {
     return result;
   }
 
-  async createIframeProxyUrl(targetUrl: string, lease?: string, opts?: IframeProxyOptions): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(targetUrl: string, lease?: string): Promise<IframeProxyResult> {
     // The sidecar stands up the loopback proxy and serves the bytes (shared
     // lib/src/host/iframe-proxy.ts). On failure, report unreachable so the panel
     // shows a hint rather than a never-loading frame.
@@ -484,7 +483,6 @@ export class TauriAdapter implements PlatformAdapter {
         target: targetUrl,
         embedderOrigins: embedderOrigins(),
         lease: lease ?? null,
-        allowExternal: opts?.allowExternal === true,
       }));
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };

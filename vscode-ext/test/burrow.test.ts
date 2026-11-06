@@ -1184,6 +1184,22 @@ describe('burrow service glue', () => {
     expect(byId(results(bound.posted))['rh-takeBack']).toEqual({ ended: false });
   });
 
+  // docs/specs/dor-browser.md -> "Iframe External Origins": a pane's upstream
+  // off this machine is bounded by the stored policy in every window.
+  it('reads the allowed networks from the stored policy in a window with no service', async () => {
+    const mod = await freshBurrow();
+    mod.configureBurrow(fakeDeps().deps());
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
+    await tick();
+    expect(await mod.burrowAllowedNetworks()).toEqual([]);
+    store.global.set(NETWORK_POLICY_KEY, { level: 'nothing', allowed: ['100.64.0.0/10'], autoUpdate: false });
+    expect(await mod.burrowAllowedNetworks()).toEqual(['100.64.0.0/10']);
+    // A damaged record reads as Nothing, which allows none.
+    store.global.set(NETWORK_POLICY_KEY, { level: 'nothing', allowed: 'all', autoUpdate: false });
+    expect(await mod.burrowAllowedNetworks()).toEqual([]);
+  });
+
   it('contends when another window enrolls, without a reload', async () => {
     // This window was un-enrolled at activation, so it never contended and has
     // no socket and no broker to hear from. The shared `SecretStorage` is the

@@ -13,7 +13,8 @@ import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallA
 import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
 import { confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 import { resetToolDirty } from '../../lib/tool-dirty-store';
-import { _resetIframeAllowlistForTesting, allowIframeOrigin, getIframeAllowlist, removeIframeOrigin } from '../../lib/iframe-allowlist';
+import type { BurrowLink } from '../../lib/platform/types';
+import { networkPolicyResult, type NetworkPolicy, type NetworkPolicyResult } from '../../remote/network-policy';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -711,21 +712,59 @@ describe('the render modes a tool is offered (regression: PR #493 review)', () =
 });
 
 describe('external origins', () => {
+  const TAILNET_PAGE = 'http://100.101.1.2:5173';
+  const TAILNET = '100.64.0.0/10';
   const EXTERNAL = 'http://docs.example';
-  beforeEach(() => _resetIframeAllowlistForTesting());
-  afterEach(() => _resetIframeAllowlistForTesting());
   const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === label);
 
-  /** A host that refuses anything off `localhost` unless the user allowed it,
-   *  with a pane whose param writes land back in its props. */
-  async function renderGated(url: string, actions: WallActions = stubActions()) {
-    const platform = installBrowserHost().platform;
-    const createProxy = vi.fn(async (target: string, _lease?: string, opts?: { allowExternal?: boolean }) => (
-      new URL(target).hostname === 'localhost' || opts?.allowExternal === true
-        ? { ok: true as const, url: `${PROXY}${new URL(target).pathname}` }
-        : { ok: false as const, reason: 'external' as const }
-    ));
+  /**
+   * A Burrow service holding the network policy, which tells every subscriber
+   * of each change, and a host whose proxy gate reads it: `localhost` is this
+   * machine, the tailnet page is on Tailscale, `192.168.50.7` on a private
+   * network this machine is not on, and anything else public.
+   */
+  function policyHost(platform: PlatformAdapter, initial: NetworkPolicy) {
+    let network: NetworkPolicyResult = networkPolicyResult(initial, 'hosted', []);
+    const listeners = new Set<(data: unknown) => void>();
+    const emit = (policy: NetworkPolicy) => {
+      network = networkPolicyResult(policy, 'hosted', []);
+      for (const listener of listeners) listener({ name: 'network-policy', ...network });
+    };
+    const command = vi.fn(async (cmd: string, params?: unknown) => {
+      if (cmd === 'networkPolicy') return network;
+      if (cmd === 'setNetworkPolicy') {
+        emit((params as { policy: NetworkPolicy }).policy);
+        return network;
+      }
+      return null;
+    });
+    platform.burrow = {
+      command, respond: () => {}, notify: () => {},
+      on: (name: string, listener: (data: unknown) => void) => {
+        if (name !== 'network-policy') return () => {};
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+    } as unknown as BurrowLink;
+    const createProxy = vi.fn(async (target: string) => {
+      const { hostname, pathname } = new URL(target);
+      const framed = { ok: true as const, url: `${PROXY}${pathname}` };
+      if (hostname === 'localhost') return framed;
+      if (hostname === '100.101.1.2') {
+        return network.policy.allowed.includes(TAILNET) ? framed
+          : { ok: false as const, reason: 'external' as const, offer: { label: 'Tailscale', prefixes: [TAILNET] } };
+      }
+      if (hostname === '192.168.50.7') return { ok: false as const, reason: 'external' as const };
+      return { ok: false as const, reason: 'external' as const, publicAddress: true };
+    });
     platform.createIframeProxyUrl = createProxy;
+    return { command, createProxy, emit };
+  }
+
+  /** A pane under {@link policyHost}, whose param writes land back in its props. */
+  async function renderGated(url: string, actions: WallActions = stubActions(), policy: NetworkPolicy = { level: 'nothing', allowed: ['10.8.0.0/24'], autoUpdate: false }) {
+    const platform = installBrowserHost().platform;
+    const host = policyHost(platform, policy);
     const openExternal = vi.fn();
     platform.openExternal = openExternal;
     const writes: Record<string, unknown>[] = [];
@@ -744,32 +783,60 @@ describe('external origins', () => {
       );
     }
     await act(async () => { root.render(<Pane />); });
-    return { createProxy, openExternal, writes };
+    await act(async () => {});
+    return { ...host, openExternal, writes };
   }
 
-  it('warns before framing an origin the user has not allowed, then frames it once allowed', async () => {
-    const { createProxy } = await renderGated(`${EXTERNAL}/guide`);
+  it('warns before framing a page on a network not allowed, then frames it once Allow adds that network', async () => {
+    const { command, createProxy } = await renderGated(`${TAILNET_PAGE}/guide`);
     expect(container.querySelector('iframe')).toBeNull();
-    expect(container.textContent).toContain('External website preview');
-    expect(container.textContent).toContain(EXTERNAL);
-    expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}/guide`, expect.any(String));
+    expect(container.textContent).toContain('Page on another device');
+    expect(container.textContent).toContain(TAILNET_PAGE);
+    expect(container.textContent).toContain('Pages on a network you allow can reach services on this computer');
+    expect(createProxy).toHaveBeenLastCalledWith(`${TAILNET_PAGE}/guide`, expect.any(String));
 
-    await act(async () => { button('Allow this origin')!.click(); });
-    expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}/guide`, expect.any(String), { allowExternal: true });
+    await act(async () => { button(`Allow Tailscale (${TAILNET})`)!.click(); });
+    await act(async () => {});
+    // Added to what the service last answered, its level left alone.
+    expect(command).toHaveBeenCalledWith('setNetworkPolicy', {
+      policy: { level: 'nothing', allowed: ['10.8.0.0/24', TAILNET], autoUpdate: false },
+    });
     expect(container.querySelector('iframe')?.getAttribute('src')).toBe(`${PROXY}/guide`);
-    expect(getIframeAllowlist()).toEqual([EXTERNAL]);
-
-    // Removing it (Settings) closes the open preview behind the warning again.
-    await act(async () => { removeIframeOrigin(EXTERNAL); });
-    expect(container.querySelector('iframe')).toBeNull();
-    expect(container.textContent).toContain('External website preview');
   });
 
-  it('allows an exact origin only: another port asks again', async () => {
-    allowIframeOrigin(EXTERNAL);
-    const { createProxy } = await renderGated(`${EXTERNAL}:8080/guide`);
-    expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}:8080/guide`, expect.any(String));
-    expect(container.textContent).toContain('External website preview');
+  it('closes an open preview whose network is removed, and keeps one a change leaves allowed', async () => {
+    const { createProxy, emit } = await renderGated(`${TAILNET_PAGE}/guide`, stubActions(), {
+      level: 'local', allowed: [TAILNET], autoUpdate: false,
+    });
+    const framed = container.querySelector('iframe');
+    expect(framed?.getAttribute('src')).toBe(`${PROXY}/guide`);
+
+    // Another window adds a network: the host is asked again and still fronts it.
+    const asked = createProxy.mock.calls.length;
+    await act(async () => { emit({ level: 'local', allowed: [TAILNET, '10.0.0.0/8'], autoUpdate: false }); });
+    await act(async () => {});
+    expect(createProxy.mock.calls.length).toBe(asked + 1);
+    expect(container.querySelector('iframe')).toBe(framed);
+
+    // Settings removes it: the preview gives way to the warning.
+    await act(async () => { emit({ level: 'local', allowed: ['10.0.0.0/8'], autoUpdate: false }); });
+    await act(async () => {});
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).toContain('Page on another device');
+  });
+
+  it('offers no Allow for a public page, only agent-browser, the browser, and Cancel', async () => {
+    await renderGated(`${EXTERNAL}/guide`);
+    expect(container.textContent).toContain('Website on the internet');
+    expect(Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim()))
+      .toEqual(['Open in agent-browser', 'Open in browser', 'Cancel']);
+  });
+
+  it('offers no Allow for a private network this computer is not on, naming Settings instead', async () => {
+    await renderGated('http://192.168.50.7/');
+    expect(container.textContent).toContain('add its range in Settings → Network');
+    expect(button('Open in agent-browser')).toBeDefined();
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.startsWith('Allow'))).toBe(false);
   });
 
   it('closes the pane on Cancel when there is no page to go back to, and opens the browser on request', async () => {
@@ -778,7 +845,6 @@ describe('external origins', () => {
     await act(async () => { button('Open in browser')!.click(); });
     expect(openExternal).toHaveBeenCalledWith(`${EXTERNAL}/guide`);
     expect(onKill).toHaveBeenCalledWith('iframe-external');
-    expect(getIframeAllowlist()).toEqual([]);
   });
 
   it('follows a redirect off the proxy through the gate, in place of the page that redirected', async () => {
@@ -798,7 +864,7 @@ describe('external origins', () => {
     });
     expect(writes).toEqual([{ url: `${EXTERNAL}/login` }]);
     expect(createProxy).toHaveBeenLastCalledWith(`${EXTERNAL}/login`, expect.any(String));
-    expect(container.textContent).toContain('External website preview');
+    expect(container.textContent).toContain('Website on the internet');
     // The redirecting entry was replaced, so there is nothing to go back to.
     await act(async () => { button('Cancel')!.click(); });
     expect(onKill).toHaveBeenCalledWith('iframe-external');

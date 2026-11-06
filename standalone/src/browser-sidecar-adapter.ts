@@ -5,7 +5,6 @@ import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
-  IframeProxyOptions,
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
@@ -259,13 +258,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
   }
 
-  async createIframeProxyUrl(targetUrl: string, lease?: string, opts?: IframeProxyOptions): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(targetUrl: string, lease?: string): Promise<IframeProxyResult> {
     try {
       return await this.leaseOrder.create(lease, () => this.host.invoke<IframeProxyResult>("iframe_create_proxy_url", {
         target: targetUrl,
         embedderOrigins: embedderOrigins(),
         lease: lease ?? null,
-        allowExternal: opts?.allowExternal === true,
       }));
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };

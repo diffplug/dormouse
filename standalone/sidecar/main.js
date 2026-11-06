@@ -228,7 +228,9 @@ function handleLine(line) {
             embedderOrigins: data.embedderOrigins,
             // Owner stamped by Rust: the asking window.
             lease: data.lease,
-            allowExternal: data.allowExternal === true,
+            // The Burrow service holds the network policy, whose allowed
+            // networks bound an upstream off this machine.
+            allowedNetworks: () => host.allowedNetworks(),
           }),
         }));
         break;

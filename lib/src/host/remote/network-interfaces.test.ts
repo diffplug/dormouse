@@ -23,6 +23,7 @@ import {
   allowedAddressTest,
   canonicalCidr,
   classifyNetworkInterfaces,
+  isPrivateAddress,
   listNetworkInterfaces,
 } from './network-interfaces';
 
@@ -115,6 +116,22 @@ describe('allowedAddressTest', () => {
   });
 });
 
+describe('isPrivateAddress', () => {
+  it('reads RFC 1918, the shared address space, and unique local IPv6 as private, mapped IPv4 included', () => {
+    for (const address of ['10.1.2.3', '172.16.0.1', '172.31.255.254', '192.168.86.177', '100.64.0.1', '100.127.255.254',
+      'fd7a:115c:a1e0::1', 'fc00::1', '::ffff:10.0.0.5', '::ffff:192.168.1.5']) {
+      expect(isPrivateAddress(address), address).toBe(true);
+    }
+  });
+
+  it('reads every other address as public, the ranges’ neighbours and translators included', () => {
+    for (const address of ['8.8.8.8', '172.15.255.255', '172.32.0.1', '192.169.0.1', '100.63.255.255', '100.128.0.1',
+      '198.18.0.1', '192.0.2.1', '2001:db8::1', 'fe00::1', '64:ff9b::a00:5', '2002:a00:5::1', 'docs.example']) {
+      expect(isPrivateAddress(address), address).toBe(false);
+    }
+  });
+});
+
 /** One `os.networkInterfaces()` address, with the fields the classifier reads. */
 function address(cidr: string, internal = false): OsAddress {
   const [ip] = cidr.split('/') as [string];
@@ -170,6 +187,15 @@ describe('classifyNetworkInterfaces', () => {
       'br-3f2a': [address('172.18.0.1/16')],
       veth1a2b: [address('172.19.0.1/16')],
       'vEthernet (WSL)': [address('172.20.0.1/20')],
+      'vEthernet (WSL (Hyper-V firewall))': [address('172.29.176.1/20')],
+      'vEthernet (Default Switch)': [address('172.30.0.1/20')],
+      vnic0: [address('10.211.55.2/24')],
+      podman0: [address('10.88.0.1/16')],
+      'cni-podman0': [address('10.89.0.1/16')],
+      lxdbr0: [address('10.90.0.1/24')],
+      incusbr0: [address('10.91.0.1/24')],
+      'VirtualBox Host-Only Network': [address('192.168.57.1/24')],
+      'VMware Network Adapter VMnet8': [address('192.168.101.1/24')],
       vmnet8: [address('192.168.100.1/24')],
       vboxnet0: [address('192.168.56.1/24')],
       virbr0: [address('192.168.122.1/24')],
@@ -186,6 +212,15 @@ describe('classifyNetworkInterfaces', () => {
       ['br-3f2a', 'Virtual network', 'virtual'],
       ['veth1a2b', 'Virtual network', 'virtual'],
       ['vEthernet (WSL)', 'Virtual network', 'virtual'],
+      ['vEthernet (WSL (Hyper-V firewall))', 'Virtual network', 'virtual'],
+      ['vEthernet (Default Switch)', 'Virtual network', 'virtual'],
+      ['vnic0', 'Virtual network', 'virtual'],
+      ['podman0', 'Virtual network', 'virtual'],
+      ['cni-podman0', 'Virtual network', 'virtual'],
+      ['lxdbr0', 'Virtual network', 'virtual'],
+      ['incusbr0', 'Virtual network', 'virtual'],
+      ['VirtualBox Host-Only Network', 'Virtual network', 'virtual'],
+      ['VMware Network Adapter VMnet8', 'Virtual network', 'virtual'],
       ['vmnet8', 'Virtual network', 'virtual'],
       ['vboxnet0', 'Virtual network', 'virtual'],
       ['virbr0', 'Virtual network', 'virtual'],

@@ -60,6 +60,15 @@ export interface NetworkPolicyResult {
   refusal?: PathRefusal;
 }
 
+/**
+ * What allowing a network means for browser panes, said wherever one is
+ * allowed: a page on it is framed on this computer's loopback, beside its own
+ * services (`docs/specs/dor-browser.md` -> "Iframe External Origins").
+ */
+export const ALLOWED_NETWORK_REACH =
+  'Pages on a network you allow can reach services on this computer, like your own dev servers. ' +
+  'Allow only networks you control.';
+
 /** The most CIDRs a policy may allow. */
 export const MAX_ALLOWED_NETWORKS = 32;
 

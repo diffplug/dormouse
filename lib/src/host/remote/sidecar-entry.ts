@@ -443,6 +443,8 @@ export interface SidecarHost {
   onPtyEvent(event: string, data: unknown): void;
   /** Saves what only memory holds that must outlive this process. Never rejects; bound it, since a store can hang. */
   saveBeforeExit(): Promise<void>;
+  /** The network policy's allowed networks, which bound a pane's iframe upstream off this machine. */
+  allowedNetworks(): Promise<readonly string[]>;
   dispose(): void;
 }
 
@@ -644,6 +646,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     onPtyEvent: bridge.onPtyEvent,
 
     saveBeforeExit: () => service.saveRevocations(),
+
+    allowedNetworks: () => service.allowedNetworks(),
 
     dispose() {
       for (const stop of stops) stop();

@@ -101,6 +101,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
 }));
 
 vi.mock('../src/burrow', () => ({
+  burrowAllowedNetworks: async () => ['100.64.0.0/10'],
   burrowNetworkAllowed: async () => true,
   configureBurrow: (deps: BurrowDeps) => {
     wiring.burrow = deps;
@@ -921,19 +922,20 @@ it('holds a webview\'s iframe leases under its router, and ends them with it', (
   }
 });
 
-// docs/specs/dor-browser.md → "Iframe External Origins": only an exact `true`
-// from the webview lets the proxy reach off this machine.
-it('forwards the user\'s allowance of an external origin, and nothing that merely resembles it', () => {
+// docs/specs/dor-browser.md → "Iframe External Origins": the proxy reads the
+// network policy's allowed networks itself, and nothing the webview sends widens them.
+it('bounds an upstream off this machine by the policy, never by the request', async () => {
   const webview = fakeWebview();
   const disposable = router.attachRouter(webview.channel);
   try {
     iframeProxy.create.mockClear();
-    for (const allowExternal of [true, 'true', 1, undefined]) {
-      webview.send({ type: 'iframe:createProxyUrl', url: 'http://docs.example/', embedderOrigins: [], allowExternal, requestId: 'r' });
-    }
-    expect(iframeProxy.create.mock.calls.map((call) => call[3])).toEqual([
-      { allowExternal: true }, { allowExternal: false }, { allowExternal: false }, { allowExternal: false },
-    ]);
+    webview.send({
+      type: 'iframe:createProxyUrl', url: 'http://docs.example/', embedderOrigins: [], requestId: 'r',
+      allowExternal: true, allowedNetworks: ['0.0.0.0/0'],
+    });
+    const access = iframeProxy.create.mock.calls[0]![3] as { allowedNetworks: () => Promise<string[]> };
+    expect(Object.keys(access)).toEqual(['allowedNetworks']);
+    expect(await access.allowedNetworks()).toEqual(['100.64.0.0/10']);
   } finally {
     disposable.dispose();
   }

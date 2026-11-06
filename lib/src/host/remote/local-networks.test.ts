@@ -89,7 +89,7 @@ describe('bindAddressFor', () => {
 
 describe('localNetworksPath: the bind', () => {
   it('reads this machine’s interfaces at each attempt, binding nothing where it cannot list them', () => {
-    const path = localNetworksPath(['192.168.86.0/24']);
+    const path = localNetworksPath(() => ['192.168.86.0/24']);
     os.interfaces = LAPTOP;
     expect(path.bindAddress()).toBe('192.168.86.160');
     // The laptop moved: the next attempt binds what is there now.
@@ -123,7 +123,7 @@ const candidatesIn = (sdp: string) => sdp.split('\r\n').filter((line) => line.st
 
 describe('localNetworksPath', () => {
   it('keeps only the answer’s candidates on an allowed network', () => {
-    const described = localNetworksPath(TAILNET).describe(ANSWER)!;
+    const described = localNetworksPath(() => TAILNET).describe(ANSWER)!;
 
     expect(candidatesIn(described)).toEqual([
       'a=candidate:4 1 UDP 2116025599 fd7a:115c:a1e0::4339:e51a 64178 typ host',
@@ -139,7 +139,7 @@ describe('localNetworksPath', () => {
   });
 
   it('leaves an allowed default address alone', () => {
-    const described = localNetworksPath(['192.168.86.0/24']).describe(ANSWER)!;
+    const described = localNetworksPath(() => ['192.168.86.0/24']).describe(ANSWER)!;
     expect(described).toContain('\r\nc=IN IP4 192.168.86.160\r\n');
     expect(candidatesIn(described)).toEqual([
       'a=candidate:1 1 UDP 2114977791 192.168.86.160 64178 typ host',
@@ -147,8 +147,8 @@ describe('localNetworksPath', () => {
   });
 
   it('refuses to describe an end with no candidate on an allowed network', () => {
-    expect(localNetworksPath(['10.0.0.0/8']).describe(ANSWER)).toBeNull();
-    expect(localNetworksPath([]).describe(ANSWER)).toBeNull();
+    expect(localNetworksPath(() => ['10.0.0.0/8']).describe(ANSWER)).toBeNull();
+    expect(localNetworksPath(() => []).describe(ANSWER)).toBeNull();
   });
 
   it('accepts only the offer’s candidates that are IP addresses on an allowed network', () => {
@@ -165,13 +165,13 @@ describe('localNetworksPath', () => {
       '',
     ].join('\r\n');
 
-    const accepted = localNetworksPath(LAN).acceptRemote(offer);
+    const accepted = localNetworksPath(() => LAN).acceptRemote(offer);
     expect(candidatesIn(accepted)).toEqual(['a=candidate:1 1 UDP 2113937151 192.168.86.23 51234 typ host']);
     expect(accepted).toContain('\r\nc=IN IP4 0.0.0.0\r\n');
     expect(accepted).toContain('\r\na=end-of-candidates\r\n');
 
     // None left is still an offer to answer: the phone's own checks form the pair.
-    expect(candidatesIn(localNetworksPath(['10.0.0.0/8']).acceptRemote(offer))).toEqual([]);
+    expect(candidatesIn(localNetworksPath(() => ['10.0.0.0/8']).acceptRemote(offer))).toEqual([]);
   });
 
   it('strips an offer’s off-network candidate however its whitespace and line endings are written', () => {
@@ -190,7 +190,7 @@ describe('localNetworksPath', () => {
       '',
     ].join('\r\n');
 
-    const accepted = localNetworksPath(LAN).acceptRemote(offer);
+    const accepted = localNetworksPath(() => LAN).acceptRemote(offer);
     expect(accepted).not.toContain('203.0.113.7');
     expect(accepted).not.toContain('candidate:8');
     expect(candidatesIn(accepted)).toEqual([
@@ -209,7 +209,7 @@ describe('localNetworksPath', () => {
       'a=candidate:3 1 udp 1677729535 ::ffff:192.168.86.24 51236 typ srflx raddr 0.0.0.0 rport 0',
       '',
     ].join('\r\n');
-    expect(candidatesIn(localNetworksPath(LAN).acceptRemote(offer))).toEqual([
+    expect(candidatesIn(localNetworksPath(() => LAN).acceptRemote(offer))).toEqual([
       'a=candidate:842163049 1 UDP 213937151 192.168.86.23 51234 typ host',
       'a=candidate:2 1 UDP 2113937151 fd65:c3d1:3e82:67d9::1 51235 typ host',
       // IPv4-mapped is its IPv4 address, as the selected pair's check reads it.
@@ -240,12 +240,12 @@ describe('localNetworksPath', () => {
       'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 TYP host',
       'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ local',
     ];
-    const accepted = localNetworksPath(allowed).acceptRemote(['v=0', ...lines, ''].join('\r\n'));
+    const accepted = localNetworksPath(() => allowed).acceptRemote(['v=0', ...lines, ''].join('\r\n'));
     expect(candidatesIn(accepted)).toEqual([]);
     expect(accepted).toBe('v=0\r\n');
     // The same lines in the one spelling are kept.
     const canonical = 'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host';
-    expect(candidatesIn(localNetworksPath(allowed).acceptRemote(`v=0\r\n${canonical}\r\n`))).toHaveLength(1);
+    expect(candidatesIn(localNetworksPath(() => allowed).acceptRemote(`v=0\r\n${canonical}\r\n`))).toHaveLength(1);
   });
 
   it('reports the offer’s first public candidate, whatever the allowed networks, as a diagnostic', () => {
@@ -263,17 +263,17 @@ describe('localNetworksPath', () => {
       'a=candidate:7 1 udp 1677729535 2607:fb90:1:2::9 40001 typ srflx raddr :: rport 0',
       '',
     ].join('\r\n');
-    expect(localNetworksPath(LAN).reportedAddress(offer)).toBe('172.58.12.9');
+    expect(localNetworksPath(() => LAN).reportedAddress(offer)).toBe('172.58.12.9');
     // One inside the allowed networks is no reason the phone was refused.
-    expect(localNetworksPath(['172.58.0.0/16']).reportedAddress(offer)).toBe('2607:fb90:1:2::9');
-    expect(localNetworksPath(LAN).reportedAddress(offer.replace(/^a=candidate:6 .*$/m, ''))).toBe('2607:fb90:1:2::9');
+    expect(localNetworksPath(() => ['172.58.0.0/16']).reportedAddress(offer)).toBe('2607:fb90:1:2::9');
+    expect(localNetworksPath(() => LAN).reportedAddress(offer.replace(/^a=candidate:6 .*$/m, ''))).toBe('2607:fb90:1:2::9');
     // Private addresses only, or none at all: nothing to report.
-    expect(localNetworksPath(LAN).reportedAddress(LAN_OFFER_PRIVATE)).toBeNull();
-    expect(localNetworksPath(LAN).reportedAddress('v=0\r\n')).toBeNull();
+    expect(localNetworksPath(() => LAN).reportedAddress(LAN_OFFER_PRIVATE)).toBeNull();
+    expect(localNetworksPath(() => LAN).reportedAddress('v=0\r\n')).toBeNull();
   });
 
   it('allows a pair whose two ends are both on allowed networks', () => {
-    const path = localNetworksPath([...LAN, ...TAILNET]);
+    const path = localNetworksPath(() => [...LAN, ...TAILNET]);
     expect(path.refusal({ local: '192.168.86.160', remote: '192.168.86.23' })).toBeNull();
     expect(path.refusal({ local: '100.97.229.25', remote: '100.101.7.8' })).toBeNull();
     // Across two allowed networks is still on allowed networks at both ends.
@@ -283,7 +283,7 @@ describe('localNetworksPath', () => {
   });
 
   it('refuses a pair with either end off the allowed networks, naming that end, this one first', () => {
-    const path = localNetworksPath(LAN);
+    const path = localNetworksPath(() => LAN);
     expect(path.refusal({ local: '100.97.229.25', remote: '192.168.86.23' })).toEqual({
       reason: 'the selected pair’s local end is not on an allowed network',
       end: 'local',
@@ -304,7 +304,7 @@ describe('localNetworksPath', () => {
       '',
     ].join('\r\n');
     for (const range of ['::/0', '::ffff:0:0/96']) {
-      const path = localNetworksPath([range]);
+      const path = localNetworksPath(() => [range]);
       expect(candidatesIn(path.acceptRemote(offer)), range).toEqual(
         range === '::/0' ? ['a=candidate:3 1 UDP 2113937151 2001:db8::7 51238 typ host'] : [],
       );
@@ -313,11 +313,11 @@ describe('localNetworksPath', () => {
       expect(path.refusal({ local: '::ffff:192.168.86.160', remote: '::ffff:203.0.113.7' })?.end, range).toBe('local');
     }
     // An IPv4 range beside it still decides IPv4 ends alone.
-    expect(localNetworksPath(['::/0', ...LAN]).refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end).toBe('remote');
+    expect(localNetworksPath(() => ['::/0', ...LAN]).refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end).toBe('remote');
   });
 
   it('refuses a name, an mDNS name, a missing end, or no pair at all', () => {
-    const path = localNetworksPath(LAN);
+    const path = localNetworksPath(() => LAN);
     for (const remote of ['phone.local', '0f1e2d3c-aaaa-bbbb-cccc-000000000000.local', null]) {
       expect(path.refusal({ local: '192.168.86.160', remote })?.end, String(remote)).toBe('remote');
     }

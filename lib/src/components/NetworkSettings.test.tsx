@@ -231,9 +231,17 @@ describe('policyForLevel', () => {
     });
   });
 
-  it('keeps the networks already allowed, and fills nothing for another level', () => {
-    const typed = { ...nothingPolicy(), allowed: ['10.8.0.0/24'] };
-    expect(policyForLevel(network(typed), 'local').allowed).toEqual(['10.8.0.0/24']);
+  // A browser pane allows a network under any level, so a list holding only a
+  // VPN or virtual range says nothing about which networks phones should use.
+  it('adds the LAN prefixes beside a list that holds none of them', () => {
+    const panes = { ...nothingPolicy(), allowed: ['100.64.0.0/10', '192.168.215.0/24'] };
+    expect(policyForLevel(network(panes), 'local').allowed)
+      .toEqual(['100.64.0.0/10', '192.168.215.0/24', LAN, 'fd00:1::/64', '10.1.0.0/16']);
+  });
+
+  it('keeps the networks already allowed once one LAN prefix is, and fills nothing for another level', () => {
+    const typed = { ...nothingPolicy(), allowed: ['10.8.0.0/24', '10.1.0.0/16'] };
+    expect(policyForLevel(network(typed), 'local').allowed).toEqual(['10.8.0.0/24', '10.1.0.0/16']);
     expect(policyForLevel(network(nothingPolicy()), 'relay').allowed).toEqual([]);
     expect(policyForLevel(network(nothingPolicy()), 'anywhere')).toEqual(ANYWHERE);
     expect(policyForLevel(network(LOCAL), 'anywhere')).toEqual({ ...ANYWHERE, allowed: [LAN] });
@@ -397,14 +405,26 @@ describe('Settings → Network', () => {
     ]);
   });
 
-  it('chooses Anywhere, which shows no allowed networks', async () => {
-    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
+  it('shows the allowed networks under every level, for phones only under Local networks', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult({ ...LOCAL, allowed: [] }, 'hosted', INTERFACES) });
     await render();
     expect(text()).toContain('Allowed networks');
+    expect(text()).toContain('A phone connects only when both ends');
+    expect(text()).toContain('No network is allowed, so no phone can connect.');
     await act(async () => radio('Anywhere').click());
     await act(async () => {});
     expect(radio('Anywhere').getAttribute('aria-checked')).toBe('true');
-    expect(text()).not.toContain('Allowed networks');
+    expect(text()).toContain('Allowed networks');
+    expect(text()).toContain('Browser panes preview pages on these networks.');
+    expect(text()).toContain('Pages on a network you allow can reach services on this computer');
+    expect(text()).not.toContain('No network is allowed');
+  });
+
+  it('allows a network under Nothing, leaving the level alone', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
+    await render();
+    await act(async () => (container.querySelector('[aria-label="Allow Tailscale utun4 off"]') as HTMLElement).click());
+    expect(command).toHaveBeenCalledWith('setNetworkPolicy', { policy: { ...nothingPolicy(), allowed: ['100.64.0.0/10'] } });
   });
 
   it('chooses Local networks from the Phones hint, allowing the LAN interfaces', async () => {

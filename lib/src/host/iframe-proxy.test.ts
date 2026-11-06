@@ -156,8 +156,10 @@ describe('createIframeProxyUrl — admission', () => {
     if (!r.ok) expect(r.reason).toBe('scheme');
   });
 
-  it('refuses a metadata address the user allowed, by literal or by name', async () => {
-    const allowed = { ...NO_LOG, allowExternal: true, interfaceAddresses: () => [] };
+  it('refuses a metadata address on an allowed network, by literal or by name', async () => {
+    const allowed = {
+      ...NO_LOG, interfaceAddresses: () => [], allowedNetworks: async () => ['fc00::/7', '100.64.0.0/10', '64:ff9b::/96'],
+    };
     for (const literal of ['[fd00:ec2::254]', '[fd20:ce::254]', '[64:ff9b::a9fe:a9fe]', '100.100.100.200']) {
       expect(await createIframeProxyUrl(`http://${literal}/`, allowed)).toMatchObject({ ok: false, reason: 'scheme' });
     }
@@ -226,11 +228,15 @@ describe('createIframeProxyUrl — the upstream address is fixed when the grant 
   });
 });
 
-describe('createIframeProxyUrl — an upstream off this machine needs the user’s allowance', () => {
+describe('createIframeProxyUrl — an upstream off this machine needs a network the policy allows', () => {
   // Answers in the resolver's order; the grant connects to the first, so a
   // loopback first answer keeps the real upstream reachable.
   const answering = (...addresses: string[]) => async () =>
     addresses.map((address) => ({ address, family: net.isIPv6(address) ? 6 : 4 }));
+  const allowing = (...cidrs: string[]) => async () => cidrs;
+  const TAILSCALE = { id: 'utun4', label: 'Tailscale', kind: 'vpn' as const, prefixes: ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'] };
+  const WSL = { id: 'vEthernet (WSL)', label: 'Virtual network', kind: 'virtual' as const, prefixes: ['172.29.176.0/20'] };
+  const offered = () => [TAILSCALE, WSL];
 
   it('judges local by every resolved address reaching this machine, never by the name', async () => {
     const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
@@ -251,25 +257,68 @@ describe('createIframeProxyUrl — an upstream off this machine needs the user�
     }
   });
 
-  it('proxies an external upstream only when the request says the user allowed it', async () => {
+  it('fronts a private address inside an allowed network, and nothing off this machine without a reader', async () => {
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('remote'); });
-    const resolve = answering('127.0.0.1', '192.0.2.1');
-    for (const allowExternal of [undefined, false, 'true', 1]) {
-      expect(await createIframeProxyUrl(`http://docs.example:${port}/`, { ...NO_LOG, resolve, allowExternal }))
-        .toMatchObject({ ok: false, reason: 'external' });
-    }
-    const url = await frame(`http://docs.example:${port}/`, { ...NO_LOG, resolve, allowExternal: true });
+    const resolve = answering('127.0.0.1', '100.101.102.103');
+    expect(await createIframeProxyUrl(`http://devbox.ts.example:${port}/`, { ...NO_LOG, resolve, offeredNetworks: offered }))
+      .toMatchObject({ ok: false, reason: 'external' });
+    const url = await frame(`http://devbox.ts.example:${port}/`, { ...NO_LOG, resolve, allowedNetworks: allowing('100.64.0.0/10') });
     expect((await get(url)).body).toBe('remote');
+    // Every address off this machine must be inside one.
+    expect(await createIframeProxyUrl(`http://devbox.ts.example:${port}/`, {
+      ...NO_LOG, resolve: answering('100.101.102.103', 'fd7a:115c:a1e0::5'), allowedNetworks: allowing('100.64.0.0/10'), offeredNetworks: offered,
+    })).toEqual({
+      ok: false, reason: 'external', detail: 'not on a network you allowed',
+      offer: { label: 'Tailscale', prefixes: ['fd7a:115c:a1e0::/48'] },
+    });
   });
 
-  it('stops reusing a leased external grant once the allowance is withdrawn', async () => {
+  it('refuses a private address outside the allowed networks, offering this machine’s network that holds it', async () => {
+    const ask = (resolve: () => Promise<{ address: string; family: number }[]>) =>
+      createIframeProxyUrl('http://172.29.183.4:5173/', { ...NO_LOG, resolve, allowedNetworks: allowing('10.0.0.0/8'), offeredNetworks: offered });
+    expect(await ask(answering('172.29.183.4'))).toEqual({
+      ok: false, reason: 'external', detail: 'not on a network you allowed',
+      offer: { label: 'Virtual network', prefixes: ['172.29.176.0/20'] },
+    });
+    expect(await ask(answering('100.101.102.103', 'fd7a:115c:a1e0::5'))).toMatchObject({
+      offer: { label: 'Tailscale', prefixes: ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'] },
+    });
+    // On no network this machine is on: nothing to offer, though Settings can add its range.
+    const unheld = await ask(answering('192.168.50.7'));
+    expect(unheld).toMatchObject({ ok: false, reason: 'external' });
+    expect(unheld).not.toHaveProperty('offer');
+    expect(unheld).not.toHaveProperty('publicAddress');
+  });
+
+  it('never fronts a public address, whatever the allowed networks hold, and offers nothing for it', async () => {
+    const wide = { ...NO_LOG, allowedNetworks: allowing('0.0.0.0/0', '::/0'), offeredNetworks: () => [
+      { id: 'en0', label: 'Local network', kind: 'lan' as const, prefixes: ['0.0.0.0/0', '::/0'] },
+    ] };
+    for (const addresses of [['192.0.2.1'], ['127.0.0.1', '93.184.216.34'], ['10.0.0.5', '2001:db8::1'], ['198.18.0.1'], ['::ffff:8.8.8.8']]) {
+      expect(await createIframeProxyUrl('http://docs.example:9/', { ...wide, resolve: answering(...addresses) }), addresses.join())
+        .toEqual({ ok: false, reason: 'external', detail: 'on a public address', publicAddress: true });
+    }
+  });
+
+  it('allows nothing when the policy cannot be read', async () => {
+    const r = await createIframeProxyUrl('http://docs.example:9/', {
+      ...NO_LOG, resolve: answering('10.0.0.5'), allowedNetworks: async () => { throw new Error('unreadable'); },
+    });
+    expect(r).toMatchObject({ ok: false, reason: 'external' });
+  });
+
+  it('re-asks the policy on every lease reuse, ending the grant of a network no longer allowed', async () => {
     const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
-    const resolve = answering('127.0.0.1', '192.0.2.1');
+    const resolve = answering('127.0.0.1', '10.0.0.5');
     const lease = { owner: 'window-a', id: 'surface:external#mount' };
-    const allowed = await frame(`http://docs.example:${port}/`, { ...NO_LOG, resolve, lease, allowExternal: true });
-    expect(await createIframeProxyUrl(`http://docs.example:${port}/`, { ...NO_LOG, resolve, lease }))
-      .toMatchObject({ ok: false, reason: 'external' });
-    expect(await isListening(Number(new URL(allowed).port))).toBe(false);
+    let allowed = ['10.0.0.0/8'];
+    const opts = { ...NO_LOG, resolve, lease, allowedNetworks: async () => allowed, offeredNetworks: () => [] };
+    const first = await frame(`http://docs.example:${port}/`, opts);
+    // Reused while still allowed: the same grant, so the same origin.
+    expect(await frame(`http://docs.example:${port}/next`, opts)).toBe(`${new URL(first).origin}/next`);
+    allowed = ['192.168.0.0/16'];
+    expect(await createIframeProxyUrl(`http://docs.example:${port}/`, opts)).toMatchObject({ ok: false, reason: 'external' });
+    expect(await isListening(Number(new URL(first).port))).toBe(false);
     releaseIframeProxyLease(lease.owner, lease.id);
   });
 });
@@ -927,13 +976,14 @@ describe('iframe proxy leases', () => {
         .toMatchObject({ ok: true });
     });
 
-    it('leaves a local pane able to frame a remote page the user allowed, and a tunneled one never', async () => {
-      const remote = { ...NO_LOG, resolve: at('93.184.216.34') };
-      expect(await createIframeProxyUrl('http://remote.example:9/', { ...remote, allowExternal: true }))
+    it('leaves a local pane able to frame a page on an allowed network, and a tunneled one never', async () => {
+      const remote = { ...NO_LOG, resolve: at('10.0.0.5') };
+      const allowedNetworks = async () => ['10.0.0.0/8'];
+      expect(await createIframeProxyUrl('http://remote.example:9/', { ...remote, allowedNetworks }))
         .toMatchObject({ ok: true });
       expect(await createIframeProxyUrl('http://remote.example:9/', remote))
         .toMatchObject({ ok: false, reason: 'external' });
-      expect(await createIframeProxyUrl('http://remote.example:9/', { ...remote, allowExternal: true, tunneled: true }))
+      expect(await createIframeProxyUrl('http://remote.example:9/', { ...remote, allowedNetworks, tunneled: true }))
         .toMatchObject({ ok: false, reason: 'scheme' });
     });
 
@@ -1021,11 +1071,11 @@ describe('iframe proxy leases', () => {
     expect(seen).toEqual(['/app.js', '/worker.js']);
   });
 
-  it('refuses a service worker script on an allowed external grant too', async () => {
+  it('refuses a service worker script on a grant off this machine too', async () => {
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
     const url = await frame(`http://docs.example:${port}/`, {
-      ...NO_LOG, allowExternal: true, interfaceAddresses: () => [],
-      resolve: async () => [{ address: '127.0.0.1', family: 4 }],
+      ...NO_LOG, allowedNetworks: async () => ['10.0.0.0/8'],
+      resolve: async () => [{ address: '127.0.0.1', family: 4 }, { address: '10.0.0.5', family: 4 }],
     });
     expect((await request(`${url}sw.js`, { headers: { 'Service-Worker': 'script' } })).status).toBe(403);
   });
