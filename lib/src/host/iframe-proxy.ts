@@ -55,8 +55,10 @@ import type { Readable, Transform } from 'stream';
 import * as zlib from 'zlib';
 import * as net from 'net';
 import { networkInterfaces } from 'os';
-import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
+import { IFRAME_HTTP_ONLY, type IframeExternalRefusal, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
+import type { NetworkInterfaceInfo } from '../remote/network-policy';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
+import { allowedAddressTest, isPrivateAddress, listNetworkInterfaces } from './remote/network-interfaces';
 import { createSerialQueue } from './remote/serial-queue';
 import {
   FRAMING_RESPONSE_HEADERS,
@@ -120,6 +122,15 @@ const systemResolver: UpstreamResolver = (hostname) => dnsLookup(hostname, { all
 export type InterfaceAddresses = () => string[];
 const systemInterfaces: InterfaceAddresses = () =>
   Object.values(networkInterfaces()).flatMap((entries) => (entries ?? []).map((entry) => entry.address));
+/**
+ * The network policy's allowed networks as the host holds them now
+ * (`docs/specs/remote-network.md` -> "Policy"): canonical CIDRs. The hosts
+ * read the Burrow service's policy; absent, none is allowed.
+ */
+export type AllowedNetworks = () => Promise<readonly string[]>;
+const noNetworks: AllowedNetworks = async () => [];
+/** This machine's interfaces as the Allowed networks list offers them. Injected by tests. */
+export type OfferedNetworks = () => NetworkInterfaceInfo[];
 
 /** Host-supplied logger; defaults to a no-op so the module is usable bare. */
 export type ProxyLogger = (message: string) => void;
@@ -149,10 +160,10 @@ interface Grant {
   lastUsed: number;
   /** Held by a lease: no idle TTL, no eviction. */
   leased: boolean;
-  /** Some address it connects to is not this machine's: minted, and reused, only
-   *  for a request the user allowed (docs/specs/dor-browser.md → "Iframe
-   *  External Origins"). */
-  external: boolean;
+  /** The addresses it connects to: minted, and reused, only while each one off
+   *  this machine is private and inside an allowed network
+   *  (docs/specs/dor-browser.md → "Iframe External Origins"). */
+  pinned: readonly UpstreamAddress[];
   /** Not yet served a document: the next one clears the origin's site data. */
   fresh: boolean;
   /** Upgraded sockets, which `server.close()` would leave running. */
@@ -244,11 +255,12 @@ export async function createIframeProxyUrl(
     lease?: unknown;
     resolve?: UpstreamResolver;
     interfaceAddresses?: InterfaceAddresses;
-    /** The user allowed this target's origin, so an upstream off this machine
-     *  may be proxied. Anything but `true` refuses one as `external`. */
-    allowExternal?: unknown;
+    /** Read at every mint and lease reuse off this machine; absent, an upstream
+     *  off this machine is refused as `external`. */
+    allowedNetworks?: AllowedNetworks;
+    offeredNetworks?: OfferedNetworks;
     /** For a remote Client's frame: its pages carry the socket shim, and only an
-     *  upstream on this machine is fronted, whatever `allowExternal` says
+     *  upstream on this machine is fronted, whatever the allowed networks hold
      *  (docs/specs/remote-api.md → "Frames"). */
     tunneled?: boolean;
   },
@@ -276,7 +288,8 @@ export async function createIframeProxyUrl(
   const resolve = opts?.resolve ?? systemResolver;
   const access: MintAccess = {
     interfaces: opts?.interfaceAddresses ?? systemInterfaces,
-    allowExternal: opts?.allowExternal === true,
+    allowedNetworks: opts?.allowedNetworks ?? noNetworks,
+    offeredNetworks: opts?.offeredNetworks ?? listNetworkInterfaces,
     tunneled: opts?.tunneled === true,
   };
 
@@ -303,15 +316,16 @@ const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detai
 
 /** The lease's grant, reused while it fronts the same upstream origin for the
  *  same embedder chain — a Reload, Back or Forward keeps the page's origin —
- *  and, off this machine, while the user still allows it; else a fresh one in
- *  its place. One released meanwhile mints nothing. */
+ *  and, off this machine, while its networks are still allowed; else a fresh
+ *  one in its place, through the same gate. One released meanwhile mints nothing. */
 async function acquireLeased(
   lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver, access: MintAccess,
 ): Promise<IframeProxyResult> {
   const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
   if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)
-    && (access.allowExternal || !lease.grant.external)) {
+    && await offMachineRefusal(offThisMachine(lease.grant.pinned, access.interfaces()), access) === null) {
+    if (released()) return CLOSED_VIEW;
     return framedUrl(lease.grant, upstream);
   }
   if (lease.grant) {
@@ -331,11 +345,50 @@ async function acquireLeased(
 type Refusal = Extract<IframeProxyResult, { ok: false }>;
 
 const METADATA_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
-const EXTERNAL_REFUSED: Refusal = { ok: false, reason: 'external', detail: 'not on this machine' };
+const PUBLIC_REFUSED: IframeExternalRefusal = {
+  ok: false, reason: 'external', detail: 'on a public address', publicAddress: true,
+};
 const OFF_MACHINE_REFUSED: Refusal = { ok: false, reason: 'scheme', detail: 'a remote device frames pages on this machine only' };
 
 /** What a grant may front, and for whom. */
-type MintAccess = { interfaces: InterfaceAddresses; allowExternal: boolean; tunneled: boolean };
+type MintAccess = {
+  interfaces: InterfaceAddresses;
+  allowedNetworks: AllowedNetworks;
+  offeredNetworks: OfferedNetworks;
+  tunneled: boolean;
+};
+
+/**
+ * Why a pane may not front `offMachine`, the addresses off this machine a grant
+ * pins, or `null` when it may: none, or every one private and inside a network
+ * the policy allows now (docs/specs/dor-browser.md → "Iframe External
+ * Origins"). **A public address is refused whatever the policy holds.** A
+ * policy that cannot be read allows nothing.
+ */
+async function offMachineRefusal(
+  offMachine: readonly UpstreamAddress[], access: MintAccess,
+): Promise<IframeExternalRefusal | null> {
+  if (offMachine.length === 0) return null;
+  if (offMachine.some(({ address }) => !isPrivateAddress(address))) return PUBLIC_REFUSED;
+  const allowed = allowedAddressTest(await access.allowedNetworks().catch(() => []));
+  const outside = offMachine.filter(({ address }) => !allowed(address));
+  if (outside.length === 0) return null;
+  const offer = networkOffer(outside, access.offeredNetworks());
+  return { ok: false, reason: 'external', detail: 'not on a network you allowed', ...(offer ? { offer } : {}) };
+}
+
+/** This machine's networks holding every one of `addresses`, or none when some address is on none. */
+function networkOffer(addresses: readonly UpstreamAddress[], interfaces: readonly NetworkInterfaceInfo[]): IframeExternalRefusal['offer'] {
+  const networks = interfaces.flatMap(({ label, prefixes }) =>
+    prefixes.map((prefix) => ({ label, prefix, contains: allowedAddressTest([prefix]) })));
+  const holding = addresses.map(({ address }) => networks.find(({ contains }) => contains(address)));
+  if (holding.some((network) => network === undefined)) return undefined;
+  const chosen = holding as { label: string; prefix: string }[];
+  return {
+    label: [...new Set(chosen.map(({ label }) => label))].join(' and '),
+    prefixes: [...new Set(chosen.map(({ prefix }) => prefix))],
+  };
+}
 
 /**
  * The addresses a grant for `upstream` connects to, fixed for its lifetime, or
@@ -374,8 +427,8 @@ function pinnedLookup(addresses: readonly UpstreamAddress[]): net.LookupFunction
   };
 }
 
-function allOnThisMachine(addresses: readonly UpstreamAddress[], interfaces: readonly string[]): boolean {
-  return addresses.every(({ address }) => isThisMachineAddress(address, interfaces));
+function offThisMachine(addresses: readonly UpstreamAddress[], interfaces: readonly string[]): UpstreamAddress[] {
+  return addresses.filter(({ address }) => !isThisMachineAddress(address, interfaces));
 }
 
 /**
@@ -397,7 +450,7 @@ export async function isUpstreamOnThisMachine(
   if (upstream.protocol !== 'http:') return false;
   const pinned = await pinAddresses(upstream, opts?.resolve ?? systemResolver);
   if (!Array.isArray(pinned) && pinned.reason === 'unreachable') throw new Error(pinned.detail);
-  return Array.isArray(pinned) && allOnThisMachine(pinned, (opts?.interfaceAddresses ?? systemInterfaces)());
+  return Array.isArray(pinned) && offThisMachine(pinned, (opts?.interfaceAddresses ?? systemInterfaces)()).length === 0;
 }
 
 async function mintGrant(
@@ -407,9 +460,10 @@ async function mintGrant(
   if (!Array.isArray(pinned)) return pinned;
   // Local is where the grant will connect — every pinned address on this
   // machine — never what the name looks like.
-  const external = !allOnThisMachine(pinned, access.interfaces());
-  if (external && access.tunneled) return OFF_MACHINE_REFUSED;
-  if (external && !access.allowExternal) return EXTERNAL_REFUSED;
+  const offMachine = offThisMachine(pinned, access.interfaces());
+  if (offMachine.length > 0 && access.tunneled) return OFF_MACHINE_REFUSED;
+  const refusal = await offMachineRefusal(offMachine, access);
+  if (refusal) return refusal;
   const now = Date.now();
   sweepGrants(now);
 
@@ -421,7 +475,7 @@ async function mintGrant(
     server: null as unknown as http.Server,
     lastUsed: now,
     leased,
-    external,
+    pinned,
     // A tunneled page is not at this port, so there is nothing of its to clear.
     fresh: !access.tunneled,
     sockets: new Set(),

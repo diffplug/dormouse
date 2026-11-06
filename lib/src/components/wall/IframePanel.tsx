@@ -3,7 +3,7 @@ import { XIcon } from '@phosphor-icons/react';
 import { modalActionButton, PaneMessage, PopupButtonRow, popupButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
-import type { IframeProxyResult } from '../../lib/platform/types';
+import type { IframeNetworkOffer, IframeProxyResult } from '../../lib/platform/types';
 import { IFRAME_HTTP_ONLY } from '../../lib/platform/iframe-proxy-types';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
@@ -23,7 +23,9 @@ import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor'
 import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isRealBlur } from '../../lib/window-focus';
-import { allowIframeOrigin, iframeOriginOf, isIframeOriginAllowed, subscribeToIframeAllowlist } from '../../lib/iframe-allowlist';
+import { changeNetworkPolicy, getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../../remote/burrow/network-policy-store';
+import { ALLOWED_NETWORK_REACH, withAllowedNetworks } from '../../remote/network-policy';
+import { useBusyAction } from '../remote-control-shared';
 
 // Uninstrumented documents (docs/specs/dor-browser.md → "Iframe Shim"). The
 // lead admits the shim's pageshow report, which races the frame's load event
@@ -45,9 +47,9 @@ type Resolution =
   // The host can't run a proxy (e.g. the web host) — keep the blind raw-iframe
   // fallback rather than hiding the surface.
   | { kind: 'raw'; src: string }
-  // The upstream is off this machine and the user has not allowed its origin
-  // (docs/specs/dor-browser.md → "Iframe External Origins").
-  | { kind: 'external'; origin: string }
+  // The upstream is off this machine, on a public address or a network the
+  // policy does not allow (docs/specs/dor-browser.md → "Iframe External Origins").
+  | { kind: 'external'; origin: string; publicAddress: boolean; offer?: IframeNetworkOffer }
   // 'non-http' is the panel's own refusal of a non-http(s) `params.url`;
   // 'scheme'/'unreachable' come back from the proxy.
   | { kind: 'error'; reason: 'unreachable' | 'scheme' | 'non-http'; detail?: string };
@@ -56,6 +58,32 @@ type IframeHistory = {
   entries: string[];
   index: number;
 };
+
+/** The policy's allowed networks as one value, so a change to them is seen; `null` until it is read. */
+function allowedNetworksKey(): string | null {
+  const state = getNetworkPolicySnapshot();
+  return state.kind === 'ready' ? [...state.network.policy.allowed].sort().join(' ') : null;
+}
+
+const networksOf = (key: string) => new Set(key.split(' ').filter(Boolean));
+
+/** Add `prefixes` to the allowed networks, from the service's latest answer. Whether any was new. */
+async function allowNetworks(prefixes: readonly string[]): Promise<boolean> {
+  let added = false;
+  await changeNetworkPolicy(({ policy }) => {
+    const next = withAllowedNetworks(policy, prefixes);
+    added = next !== null;
+    return next;
+  });
+  return added;
+}
+
+/** What the panel shows for the host's answer to framing `url`. */
+function resolutionOf(url: string, result: IframeProxyResult): Resolution {
+  if (result.ok) return { kind: 'proxied', src: result.url, origin: originOf(result.url) };
+  if (result.reason !== 'external') return { kind: 'error', reason: result.reason, detail: result.detail };
+  return { kind: 'external', origin: originOf(url) || url, publicAddress: result.publicAddress === true, offer: result.offer };
+}
 
 function originOf(url: string): string {
   try {
@@ -208,10 +236,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // accurate focus model, and real error pages. Reachability is diagnosed by
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
-  // Allowing or removing this origin in another pane, window, or Settings
-  // re-asks the host, so a removal closes an open preview as well.
-  const targetOrigin = framedUrl ? iframeOriginOf(sourceUrl) : null;
-  const externalAllowed = useSyncExternalStore(subscribeToIframeAllowlist, () => isIframeOriginAllowed(targetOrigin));
+  const resolutionRef = useRef(resolution);
+  resolutionRef.current = resolution;
   // This mounted view's lease on its proxy grant (docs/specs/dor-browser.md →
   // "Iframe Proxy Leases"): Reload, Back and Forward keep the grant and its
   // origin, and unmounting — a kill, a swap, a transfer — ends it. Minted by
@@ -260,19 +286,43 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     // The lease arrives with the first effect pass.
     if (lease === null) return;
     let cancelled = false;
-    (externalAllowed ? createProxy(sourceUrl, lease, { allowExternal: true }) : createProxy(sourceUrl, lease)).then(
+    createProxy(sourceUrl, lease).then(
       (result: IframeProxyResult) => {
-        if (cancelled) return;
-        if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
-        else if (result.reason === 'external') setResolution({ kind: 'external', origin: targetOrigin ?? sourceUrl });
-        else setResolution({ kind: 'error', reason: result.reason, detail: result.detail });
+        if (!cancelled) setResolution(resolutionOf(sourceUrl, result));
       },
       () => {
         if (!cancelled) setResolution({ kind: 'error', reason: 'unreachable' });
       },
     );
     return () => { cancelled = true; };
-  }, [sourceUrl, reloadNonce, lease, externalAllowed]);
+  }, [sourceUrl, reloadNonce, lease]);
+
+  // A change to the allowed networks — from this pane's warning, another's, or
+  // Settings, in any window — re-asks the host where it could matter: a
+  // refused page once one is added, and a framed one once one is removed, so
+  // that preview closes with its grant. The first reading is the baseline the
+  // pane was resolved under.
+  const allowedKey = useSyncExternalStore(subscribeToNetworkPolicy, allowedNetworksKey);
+  const seenAllowedKeyRef = useRef(allowedKey);
+  useEffect(() => {
+    const before = seenAllowedKeyRef.current;
+    seenAllowedKeyRef.current = allowedKey;
+    if (before === null || allowedKey === null || before === allowedKey) return;
+    const was = networksOf(before);
+    const now = networksOf(allowedKey);
+    const current = resolutionRef.current;
+    const affected = current.kind === 'external' ? [...now].some((cidr) => !was.has(cidr))
+      : current.kind === 'proxied' && [...was].some((cidr) => !now.has(cidr));
+    const createProxy = getPlatform().createIframeProxyUrl;
+    if (!affected || !createProxy || lease === null) return;
+    let cancelled = false;
+    createProxy(sourceUrl, lease).then((result) => {
+      if (cancelled || resolutionRef.current !== current) return;
+      const next = resolutionOf(sourceUrl, result);
+      if (current.kind !== 'proxied' || next.kind !== 'proxied' || next.origin !== current.origin) setResolution(next);
+    }, () => {});
+    return () => { cancelled = true; };
+  }, [allowedKey, sourceUrl, lease]);
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back
@@ -518,11 +568,17 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       ) : resolution.kind === 'external' ? (
         <ExternalPreviewPrompt
           origin={resolution.origin}
+          publicAddress={resolution.publicAddress}
+          offer={resolution.offer}
+          onAllow={resolution.offer ? async () => {
+            // The policy's event re-asks; an offer already allowed meanwhile does not move it.
+            if (!await allowNetworks(resolution.offer!.prefixes)) setReloadNonce((n) => n + 1);
+          } : undefined}
+          onOpenInAgentBrowser={openInAgentBrowser}
           onOpenInBrowser={getPlatform().openExternal ? () => {
             getPlatform().openExternal?.(sourceUrl);
             cancelExternal();
           } : undefined}
-          onAllow={() => allowIframeOrigin(resolution.origin)}
           onCancel={cancelExternal}
         />
       ) : (
@@ -562,15 +618,21 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   );
 }
 
-// The concern is what the proxy changes, not the page: it takes away the
-// site's own framing and script protections, and allowing an origin does not
-// make signing in there safe.
-export function ExternalPreviewPrompt({ origin, onOpenInBrowser, onAllow, onCancel }: {
+// What it asks is where the page is: a public address never frames, and a
+// private one frames once its network is allowed, which also lets it reach
+// this computer's own services — so the consent names the network, and says so.
+export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, onOpenInAgentBrowser, onOpenInBrowser, onCancel }: {
   origin: string;
+  /** Some address it is on is public, so no network can be allowed for it. */
+  publicAddress: boolean;
+  /** This machine's networks holding it, which `onAllow` allows. */
+  offer?: IframeNetworkOffer;
+  onAllow?: () => Promise<void>;
+  onOpenInAgentBrowser?: () => void;
   onOpenInBrowser?: () => void;
-  onAllow: () => void;
   onCancel: () => void;
 }) {
+  const { busy, error, run } = useBusyAction();
   const press = (action: () => void) => ({
     onMouseDown: (e: MouseEvent) => e.stopPropagation(),
     onClick: (e: MouseEvent) => { e.stopPropagation(); action(); },
@@ -579,26 +641,41 @@ export function ExternalPreviewPrompt({ origin, onOpenInBrowser, onAllow, onCanc
   return (
     <div role="alertdialog" aria-labelledby={titleId} className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg px-6 text-center">
       <div className="max-w-md text-sm text-foreground">
-        <div id={titleId} className="font-semibold">External website preview</div>
+        <div id={titleId} className="font-semibold">{publicAddress ? 'Website on the internet' : 'Page on another device'}</div>
         <div className="mt-1 break-all font-mono text-xs text-muted">{origin}</div>
         <p className="mt-2 text-muted">
-          Dormouse’s iframe proxy changes website security protections to support local development.
-          Do not sign in or enter sensitive information here.
+          {publicAddress
+            ? 'Previews show pages on this computer and on private networks you allow, never the internet.'
+            : offer
+              ? `It is on ${offer.label} (${offer.prefixes.join(', ')}), which you haven’t allowed. ${ALLOWED_NETWORK_REACH}`
+              : `It is on a private network none of this computer’s connections is on. To preview it, add its range in Settings → Network. ${ALLOWED_NETWORK_REACH}`}
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
+        {offer && onAllow && (
+          <button type="button" disabled={busy} {...press(() => void run(onAllow))} className={modalActionButton({ tone: 'secondary' })}>
+            Allow {offer.label} ({offer.prefixes.join(', ')})
+          </button>
+        )}
+        {onOpenInAgentBrowser && (
+          <button type="button" {...press(onOpenInAgentBrowser)} className={modalActionButton({ tone: 'primary' })}>
+            Open in agent-browser
+          </button>
+        )}
         {onOpenInBrowser && (
-          <button type="button" {...press(onOpenInBrowser)} className={modalActionButton({ tone: 'primary' })}>
+          <button
+            type="button"
+            {...press(onOpenInBrowser)}
+            className={modalActionButton({ tone: onOpenInAgentBrowser ? 'secondary' : 'primary' })}
+          >
             Open in browser
           </button>
         )}
-        <button type="button" {...press(onAllow)} className={modalActionButton({ tone: 'secondary' })}>
-          Allow this origin
-        </button>
         <button type="button" {...press(onCancel)} className={modalActionButton({ tone: 'secondary' })}>
           Cancel
         </button>
       </div>
+      {error ? <div role="alert" className="max-w-md text-sm text-error">{error}</div> : null}
     </div>
   );
 }

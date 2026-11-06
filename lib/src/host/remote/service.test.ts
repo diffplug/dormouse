@@ -3120,6 +3120,15 @@ describe('network policy', () => {
       createHostedService({ network: LOCAL_ON });
       expect(await service.networkAllowed()).toBe(true);
     });
+
+    // A browser pane reads them at every level (docs/specs/dor-browser.md ->
+    // "Iframe External Origins"), so Nothing still answers its list.
+    it('still answers the allowed networks, and none once disposed', async () => {
+      createHostedService({ network: { ...NOTHING, allowed: ['100.64.0.0/10'] } });
+      expect(await service.allowedNetworks()).toEqual(['100.64.0.0/10']);
+      service.dispose();
+      expect(await service.allowedNetworks()).toEqual([]);
+    });
   });
 
   it('runs a Hosted enrollment under Local networks, holding its sessions to the allowed networks with no STUN', async () => {
@@ -3158,7 +3167,7 @@ describe('network policy', () => {
     expect(requests.map((request) => request.url)).toContain(`${HOSTED_ORIGIN}${API_ROUTES.pushSend}`);
   });
 
-  it('restarts the running Burrow on any change to its paths, and on nothing else', async () => {
+  it('restarts the running Burrow on any change that narrows its paths, and on nothing else', async () => {
     createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON });
     await service.start();
     expect(sockets).toHaveLength(1);
@@ -3168,7 +3177,16 @@ describe('network policy', () => {
     expect(sockets).toHaveLength(1);
     expect(sockets[0]!.readyState).not.toBe(3);
 
-    // The allowed networks under Local networks do: a runtime holds the ones it started on.
+    // A network added under Local networks takes nothing away: the running
+    // hold reads it, and nothing restarts.
+    const hold = handedTransport.directPeering!.pathPolicy!;
+    expect(hold.refusal({ local: '10.0.0.2', remote: '10.0.0.3' })).not.toBeNull();
+    await setPolicy({ ...LOCAL_ON, allowed: [LAN, '10.0.0.0/8'] });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.readyState).not.toBe(3);
+    expect(hold.refusal({ local: '10.0.0.2', remote: '10.0.0.3' })).toBeNull();
+
+    // One removed does: the runtime it narrows ends.
     await setPolicy({ ...LOCAL_ON, allowed: ['10.0.0.0/8'] });
     expect(sockets[0]!.readyState).toBe(3);
     expect(sockets).toHaveLength(2);
@@ -3252,12 +3270,16 @@ describe('network policy', () => {
       expect(sockets).toHaveLength(1);
     });
 
-    it('ends a live one-time link on a change of level or Local networks’ networks, never on autoUpdate alone', async () => {
+    it('ends a live one-time link on a change of level or a network Local networks no longer allows, never on autoUpdate or an addition', async () => {
       createHostedService();
       await service.start();
       expect((await command('oneTimeOpen')).result).toMatchObject({ status: 'waiting' });
 
       await setPolicy({ ...LOCAL_ON, autoUpdate: true });
+      expect(oneTimeStates().at(-1)).toMatchObject({ status: 'waiting' });
+      expect(rendezvous.room().burrow.closeCode).toBeNull();
+
+      await setPolicy({ ...LOCAL_ON, allowed: [LAN, '10.0.0.0/8'] });
       expect(oneTimeStates().at(-1)).toMatchObject({ status: 'waiting' });
       expect(rendezvous.room().burrow.closeCode).toBeNull();
 

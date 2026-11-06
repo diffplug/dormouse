@@ -29,6 +29,7 @@ import {
   subscribeToNetworkPolicy,
 } from '../remote/burrow/network-policy-store';
 import {
+  ALLOWED_NETWORK_REACH,
   MAX_ALLOWED_NETWORKS,
   burrowUsesStun,
   checksForUpdates,
@@ -40,6 +41,7 @@ import {
   type NetworkLevel,
   type NetworkPolicy,
   type NetworkPolicyResult,
+  withAllowedNetworks,
 } from '../remote/network-policy';
 
 /**
@@ -94,15 +96,15 @@ function useSave() {
 }
 
 /**
- * The policy choosing `level` makes. **Local networks chosen with nothing
- * allowed first allows every prefix of this machine's `lan` interfaces**, never
- * a VPN or virtual one; the service never fills them in.
+ * The policy choosing `level` makes. **Local networks chosen with no prefix of
+ * this machine's `lan` interfaces allowed first adds every one**, never a VPN
+ * or virtual one, beside whatever the list holds; the service never fills them in.
  */
 export function policyForLevel(network: NetworkPolicyResult, level: NetworkLevel): NetworkPolicy {
   const { policy, interfaces } = network;
-  if (!holdsToAllowedNetworks(level) || policy.allowed.length > 0) return { ...policy, level };
-  const lan = interfaces.filter((item) => item.kind === 'lan').flatMap((item) => item.prefixes);
-  return { ...policy, level, allowed: [...new Set(lan)].slice(0, MAX_ALLOWED_NETWORKS) };
+  const lan = [...new Set(interfaces.filter((item) => item.kind === 'lan').flatMap((item) => item.prefixes))];
+  if (!holdsToAllowedNetworks(level) || lan.some((cidr) => policy.allowed.includes(cidr))) return { ...policy, level };
+  return { ...policy, level, allowed: [...policy.allowed, ...lan].slice(0, MAX_ALLOWED_NETWORKS) };
 }
 
 /** The change choosing `level` makes, or none when it is already the level. */
@@ -280,7 +282,7 @@ const LABEL = 'text-sm text-foreground';
 const HINT = 'mt-1 text-sm leading-relaxed text-muted';
 const ERROR = 'mt-2 text-sm leading-relaxed text-error';
 
-/** The choice, what it connects to, and — under Local networks — the allowed networks. */
+/** The choice, what it connects to, and the allowed networks. */
 export function NetworkSettings() {
   const view = useNetworkView();
   const { error, save } = useSave();
@@ -304,7 +306,7 @@ export function NetworkSettings() {
       />
       {error ? <div className={ERROR}>{error}</div> : null}
       <ConnectionList rows={rows} />
-      {holdsToAllowedNetworks(policy.level) ? <AllowedNetworks network={network} /> : null}
+      <AllowedNetworks network={network} />
     </div>
   );
 }
@@ -414,14 +416,8 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
   const listed = allowed.filter((cidr) => !covered.has(cidr));
   // Each against the service's latest answer, so quick clicks compose.
   const change = (next: (allowed: string[]) => string[]) =>
-    save(({ policy: latest }) => {
-      const nextAllowed = next(latest.allowed);
-      if (nextAllowed.length > MAX_ALLOWED_NETWORKS) {
-        throw new Error(`At most ${MAX_ALLOWED_NETWORKS} ranges can be allowed. Remove one first.`);
-      }
-      return { ...latest, allowed: nextAllowed };
-    });
-  const add = (cidrs: string[]) => change((now) => [...now, ...cidrs.filter((cidr) => !now.includes(cidr))]);
+    save(({ policy: latest }) => ({ ...latest, allowed: next(latest.allowed) }));
+  const add = (cidrs: string[]) => save(({ policy: latest }) => withAllowedNetworks(latest, cidrs));
   const remove = (cidr: string) => change((now) => now.filter((other) => other !== cidr));
   // Off keeps a range another switch reading On still needs.
   const switchOff = (item: NetworkInterfaceInfo) =>
@@ -432,12 +428,19 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
       return now.filter((cidr) => !item.prefixes.includes(cidr) || kept.has(cidr));
     });
   const range = draft.trim().toLowerCase();
+  // Browser panes read the list under every level; phones only under Local networks.
+  const phones = holdsToAllowedNetworks(network.policy.level);
 
   return (
     <section className={SETTINGS_SECTION} aria-labelledby="network-allowed-label">
       <div id="network-allowed-label" className={LABEL}>Allowed networks</div>
-      <div className={HINT}>A phone connects only when both ends of its connection are on one of these.</div>
-      {network.refusal ? <PathRefusalNotice refusal={network.refusal} /> : null}
+      <div className={HINT}>
+        {phones
+          ? 'A phone connects only when both ends of its connection are on one of these, and browser panes preview pages on them.'
+          : 'Browser panes preview pages on these networks. Under Local networks only, phones connect over them too.'}{' '}
+        {ALLOWED_NETWORK_REACH}
+      </div>
+      {phones && network.refusal ? <PathRefusalNotice refusal={network.refusal} /> : null}
       <div className="mt-2 flex flex-col gap-1.5">
         {interfaces.map((item) => (
           <NetworkRow
@@ -491,14 +494,15 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
         <button type="submit" disabled={!looksLikeCidr(range)} className={modalActionButton()}>Add</button>
       </form>
       {error ? <div className={`${UNDER_SWITCH_INDENT} ${ERROR}`}>{error}</div> : null}
-      {allowed.length === 0 ? (
+      {phones && allowed.length === 0 ? (
         <div className={`${UNDER_SWITCH_INDENT} ${ERROR}`}>
           No network is allowed, so no phone can connect.
         </div>
       ) : null}
       <div className={`${UNDER_SWITCH_INDENT} ${HINT}`}>
         A range matches any network using the same addresses, so another Wi-Fi on 192.168.1.x matches
-        192.168.1.0/24 too. Pairing still decides which phones may connect.
+        192.168.1.0/24 too. Pairing still decides which phones may connect, and pages on the internet never
+        preview.
       </div>
     </section>
   );

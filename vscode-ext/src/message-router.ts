@@ -27,6 +27,7 @@ import { askBudgetMs, silentAnswers, type AskAnswers } from '../../lib/src/host/
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
 import {
+  burrowAllowedNetworks,
   burrowNetworkAllowed,
   configureBurrow,
   deliverCommandResult,
@@ -709,7 +710,9 @@ export function attachRouter(
           Array.isArray(msg.embedderOrigins) ? msg.embedderOrigins : [],
           // The lease is this webview's: its owner is this router.
           msg.lease === undefined ? undefined : { owner: routerId, id: msg.lease },
-          { allowExternal: msg.allowExternal === true },
+          // Read from the policy at each mint, in a window with a Burrow
+          // service or without one.
+          { allowedNetworks: burrowAllowedNetworks },
         ).then(
           (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,

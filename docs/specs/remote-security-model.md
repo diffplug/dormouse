@@ -84,7 +84,7 @@ Source of truth: `presenceChallenge` / `signinChallenge` / `isPresenceBinding` i
 - **Open means under `PRESENCE_WINDOW_IDLE_MS` since the static's last activity and under `PRESENCE_WINDOW_MAX_MS` since the proof** ([Burrow bounds](#burrow-bounds); rationale). Activity is the proof itself or any decrypted Client→Burrow message, keepalives included, on an established session of that static (rationale).
 - **The offer is binding.** Message 2 carries it ([Connection](#connection)); a redeem consumes the challenge, is `presence-rejected` when the challenge is spent or no window was offered, and otherwise rides the offered window without evaluating it again, running the conjunction against that window's identities (a miss: `pairing-required`; rationale).
 - **The Relay can neither mint nor extend a window**: one opens only on a proof the Burrow verified, keyed by a static the Relay never sees, and only messages the Burrow decrypts count as activity.
-- **Cleared by `stop()`**, and by a raised UV demand ([Passkeys](#passkeys)), and absent from every new runtime (a Burrow restart, a network-policy change); **never cleared by a dropped relay socket** (rationale). Evaluated at the offer, never reaped, and held in memory only.
+- **Cleared by `stop()`**, and by a raised UV demand ([Passkeys](#passkeys)), and absent from every new runtime (a Burrow restart, a narrowing network-policy change); **never cleared by a dropped relay socket** (rationale). Evaluated at the offer, never reaped, and held in memory only.
 
 Source of truth: `PresenceWindows` in `remote-lib-common/src/security/presence-window.ts`; `BurrowRuntime.#openWindow` in `lib/src/remote/burrow/burrow-runtime.ts`.
 

@@ -8,8 +8,9 @@
  * target (e.g. an `https://` URL, which v1 defers), or an `http://` upstream
  * whose name resolves to an address the SSRF guard refuses (link-local /
  * cloud-metadata); the `detail` field carries the specific cause.
- * `external` — the upstream resolves to an address off this machine and the
- * request did not say the user allowed its origin (`IframeProxyOptions`).
+ * `external` — the upstream resolves to an address off this machine that is
+ * public, or private and outside every network the network policy allows
+ * (`IframeExternalRefusal`).
  * `unreachable` — the name did not resolve, or no proxy could be stood up. Whether
  * the upstream answers is diagnosed lazily and surfaced as a served error *page*
  * inside the frame. A framed site's
@@ -26,11 +27,29 @@
  *  the bare wording, and a render swap only warns in the console. */
 export const IFRAME_HTTP_ONLY = 'the embedded view frames http:// pages only';
 
+/**
+ * The networks of this machine's interfaces holding every address an
+ * `external` refusal's upstream is on, which the pane's warning offers to
+ * allow: `label` is what a person calls them, `prefixes` the canonical CIDRs.
+ */
+export type IframeNetworkOffer = { label: string; prefixes: string[] };
+
+/**
+ * An upstream the proxy will not front off this machine
+ * (docs/specs/dor-browser.md → "Iframe External Origins"). `publicAddress`:
+ * some address it is on is public, which no allowed network admits. `offer`:
+ * every one is private and on a network this machine is on, so allowing those
+ * networks would admit it.
+ */
+export type IframeExternalRefusal = {
+  ok: false;
+  reason: 'external';
+  detail?: string;
+  publicAddress?: boolean;
+  offer?: IframeNetworkOffer;
+};
+
 export type IframeProxyResult =
   | { ok: true; url: string }
-  | { ok: false; reason: 'unreachable' | 'scheme' | 'external'; detail?: string };
-
-/** `allowExternal`: the user allowed the target's exact origin, so an
- *  upstream off this machine may be proxied (docs/specs/dor-browser.md →
- *  "Iframe External Origins"). */
-export type IframeProxyOptions = { allowExternal?: boolean };
+  | { ok: false; reason: 'unreachable' | 'scheme'; detail?: string }
+  | IframeExternalRefusal;

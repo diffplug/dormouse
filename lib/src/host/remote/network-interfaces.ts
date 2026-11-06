@@ -110,8 +110,14 @@ export function allowedAddressTest(cidrs: readonly string[]): (address: string) 
 }
 
 const VPN_NAME = /^(utun|tun|wg|tailscale)/i;
-/** Bridge, container, and VM interfaces; `veth` also covers Windows' `vEthernet`. */
-const VIRTUAL_NAME = /^(bridge|docker|vmnet|vboxnet|veth|br-|virbr)/i;
+/**
+ * Bridge, container, and VM interfaces: macOS's vmnet bridges (UTM, Parallels,
+ * Apple's Virtualization), Parallels' older `vnic`, Linux's Docker, Podman,
+ * LXD, Incus and libvirt bridges and veth pairs, and Windows' adapters by their
+ * connection names — `veth` also covers Hyper-V's and WSL's `vEthernet (…)`.
+ */
+const VIRTUAL_NAME =
+  /^(bridge|docker|vmnet|vboxnet|veth|br-|virbr|vnic|podman|cni-podman|lxdbr|incusbr|VirtualBox Host-Only|VMware Network Adapter)/i;
 /** Tailscale's two ranges, the ones its host routes widen to. */
 const TAILNET_RANGES = ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'].map((range) => ({
   range,
@@ -124,6 +130,16 @@ const tailnetRangeOf = (address: string) => TAILNET_RANGES.find(({ contains }) =
  */
 const isTailnetV6 = TAILNET_RANGES[1]!.contains;
 const TAILSCALE_NAME = /^tailscale/i;
+/**
+ * The ranges a network a person runs draws from: RFC 1918, the shared address
+ * space carriers and Tailscale draw from (RFC 6598), and IPv6 unique local
+ * addresses (RFC 4193). Anything else that is not this machine is public, or
+ * refused as link-local or metadata before anyone asks.
+ */
+export const PRIVATE_RANGES = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', 'fc00::/7'];
+/** Whether an IP literal is in {@link PRIVATE_RANGES}, an IPv4-mapped one read as its IPv4 address. */
+export const isPrivateAddress = allowedAddressTest(PRIVATE_RANGES);
+
 /**
  * Link-local in either family: IPv6's on every interface, and IPv4's
  * self-assigned address where no network answered — neither a network a phone

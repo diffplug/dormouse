@@ -406,7 +406,7 @@ describe('the direct path over the native addon', () => {
    * fake pair can only assert. Before the teardown case, which ends the addon.
    */
   it.skipIf(!EXTERNAL_V4)('binds the one allowed address, and advertises it alone', async () => {
-    const peer = createNativeDirectPeerFactory()(localNetworksPath([`${EXTERNAL_V4}/32`]))!;
+    const peer = createNativeDirectPeerFactory()(localNetworksPath(() => [`${EXTERNAL_V4}/32`]))!;
     try {
       peer.createDataChannel(DIRECT_CHANNEL_LABEL, { ordered: true });
       await peer.setLocalDescription(await peer.createOffer());
@@ -425,7 +425,7 @@ describe('the direct path over the native addon', () => {
    * whose offer `rewrite` edits in transit.
    */
   const openBound = (rewrite: (offer: string) => string = (offer) => offer) => {
-    const pathPolicy = localNetworksPath([`${EXTERNAL_V4}/32`]);
+    const pathPolicy = localNetworksPath(() => [`${EXTERNAL_V4}/32`]);
     return untilOpen(async (attempt) => {
       let opened = 0;
       const lost: string[] = [];
@@ -527,7 +527,7 @@ describe('the direct path over the native addon', () => {
         `a=candidate: 1 1 UDP 2001::ffff:127.0.0.1 ${unread.port} typ host`,
         '',
       ].join('\r\n');
-      const accepted = localNetworksPath(['::1/128', '2001::/16']).acceptRemote(offer);
+      const accepted = localNetworksPath(() => ['::1/128', '2001::/16']).acceptRemote(offer);
       await burrow.setRemoteDescription({ type: 'offer', sdp: accepted });
       await waitFor(() => kept.checks >= 2, 'the kept candidate’s check to be retransmitted', ATTEMPT_BUDGET_MS);
       expect(unread.checks).toBe(0);

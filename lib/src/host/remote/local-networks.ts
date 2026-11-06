@@ -8,7 +8,7 @@
 import { isIP } from 'node:net';
 import { networkInterfaces, type NetworkInterfaceInfo as OsAddress } from 'node:os';
 import type { DirectPathPolicy } from '../../remote/direct/direct-peer';
-import { allowedAddressTest, canonicalAddress, isOfferedAddress } from './network-interfaces';
+import { PRIVATE_RANGES, allowedAddressTest, canonicalAddress, isOfferedAddress } from './network-interfaces';
 
 /**
  * The one address of `raw` an attempt's socket binds under `allowed`, or `null`
@@ -113,20 +113,16 @@ function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sd
 
 /**
  * Every range an address a phone reports could be private to some network:
- * RFC 1918, carrier-grade NAT, loopback, link-local, unspecified, and IPv6
- * unique-local. What is left is an address the internet routes.
+ * {@link PRIVATE_RANGES}, loopback, link-local, and unspecified. What is left
+ * is an address the internet routes.
  */
-const isPrivateAddress = allowedAddressTest([
+const isUnroutedAddress = allowedAddressTest([
+  ...PRIVATE_RANGES,
   '0.0.0.0/8',
-  '10.0.0.0/8',
-  '100.64.0.0/10',
   '127.0.0.0/8',
   '169.254.0.0/16',
-  '172.16.0.0/12',
-  '192.168.0.0/16',
   '::/128',
   '::1/128',
-  'fc00::/7',
   'fe80::/10',
 ]);
 
@@ -138,7 +134,7 @@ const isPrivateAddress = allowedAddressTest([
 export function firstPublicCandidate(sdp: string, skip: (address: string) => boolean = () => false): string | null {
   for (const line of sdp.split(LINE_END)) {
     const address = parseCandidate(line)?.address;
-    if (address !== undefined && !isPrivateAddress(address) && !skip(address)) return address;
+    if (address !== undefined && !isUnroutedAddress(address) && !skip(address)) return address;
   }
   return null;
 }
@@ -149,13 +145,21 @@ export function firstPublicCandidate(sdp: string, skip: (address: string) => boo
  * networks, and a platform that will not list them binds nothing and leaves
  * the path check to decide. Both descriptions keep only candidates inside
  * `allowed`, and both ends of the selected pair must be IP literals inside it.
+ * `allowed` is read at each use, so a network added while a runtime lives
+ * reaches it; a removal ends the runtime instead (`BurrowService.#setNetworkPolicy`).
  */
-export function localNetworksPath(allowed: readonly string[]): DirectPathPolicy {
-  const inAllowed = allowedAddressTest(allowed);
+export function localNetworksPath(allowed: () => readonly string[]): DirectPathPolicy {
+  let read: readonly string[] | null = null;
+  let test: (address: string) => boolean = () => false;
+  const inAllowed = (address: string) => {
+    const now = allowed();
+    if (now !== read) [read, test] = [now, allowedAddressTest(now)];
+    return test(address);
+  };
   return {
     bindAddress() {
       try {
-        return bindAddressFor(allowed, networkInterfaces());
+        return bindAddressFor(allowed(), networkInterfaces());
       } catch {
         return null;
       }

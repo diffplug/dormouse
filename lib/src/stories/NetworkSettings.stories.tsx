@@ -256,7 +256,7 @@ export const LocalNetworksNoneAllowed: Story = {
 
 /**
  * Phones on any network: one-time links only, Cloudflare's STUN as a phone
- * connects, and no allowed networks to pick.
+ * connects, and the allowed networks there for browser panes alone.
  */
 export const Anywhere: Story = {
   parameters: { primedBurrow: hosted(ANYWHERE_ON) },
@@ -266,7 +266,23 @@ export const Anywhere: Story = {
     await canvas.findByText(CLOUDFLARE_STUN_HOST);
     await canvas.findByText('Your phone, on any network');
     await canvas.findByText(/Your phone can be on any network\./);
-    await expect(canvas.queryByText('Allowed networks')).toBeNull();
+    await canvas.findByText('Allowed networks');
+    await canvas.findByText(/^Browser panes preview pages on these networks\./);
+    await expect(canvas.queryByText('No network is allowed, so no phone can connect.')).toBeNull();
+  },
+};
+
+/**
+ * Nowhere, with a network a browser pane allowed: the list stays, for panes,
+ * and opens no connection.
+ */
+export const NowhereWithPaneNetwork: Story = {
+  parameters: { primedBurrow: hosted({ ...nothingPolicy(), allowed: TAILSCALE.prefixes }) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/^Nothing\. Terminals, browser panes, and agents/);
+    await canvas.findByText(/Pages on a network you allow can reach services on this computer/);
+    await expect(canvas.getByRole('switch', { name: /^Allow Tailscale/ })).toHaveAttribute('aria-checked', 'true');
   },
 };
 
@@ -312,10 +328,10 @@ export const SwitchingLevels: Story = {
     await canvas.findByText('Your phone, on an allowed network');
     await userEvent.click(canvas.getByRole('radio', { name: /^Anywhere/ }));
     await canvas.findByText(CLOUDFLARE_STUN_HOST);
-    await expect(canvas.queryByText('Allowed networks')).toBeNull();
+    await canvas.findByText(/^Browser panes preview pages on these networks\./);
     await userEvent.click(canvas.getByRole('radio', { name: /^Nowhere/ }));
     await canvas.findByText(/^Nothing\. Terminals, browser panes, and agents/);
-    await expect(canvas.queryByText('Allowed networks')).toBeNull();
+    await canvas.findByText('Allowed networks');
     await canvas.findByRole('button', { name: 'Local networks only' });
     await canvas.findByRole('button', { name: 'Anywhere' });
   },
