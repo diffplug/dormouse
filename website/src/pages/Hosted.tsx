@@ -421,12 +421,11 @@ function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
           charged, and no seat has been taken.
         </p>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-          Want to hear when it opens? I announce Dormouse on my personal devlog. This is
-          not a product-only waitlist; you’ll also receive other devlog posts.
+          Want to hear when it opens? Join Dormouse’s email list and I’ll tell you.
         </p>
         <div className="mt-4">
           <NotifySignupForm
-            buttonLabel="Continue to nedshed.dev"
+            buttonLabel="Email me when it opens"
             emailId="hosted-notify-email"
             announcement="Dormouse Hosted checkout"
             variant="docs"
@@ -616,7 +615,7 @@ export default function Hosted() {
           manage your sign-in methods. Use an email code or a supported identity
           provider, and explicitly connect additional methods from your account.
           Creating an account does not upload your terminal contents or subscribe
-          you to the devlog.
+          you to the email list.
         </p>
         <p className={BODY_TEXT_CLASS}>
           <a href="https://hosted.dormouse.sh" className={LINK_CLASS}>Manage your Hosted account</a>.

@@ -15,7 +15,7 @@ export const SIGN_IN_ALLOWLIST: readonly string[] = [
 
 /** Matches the frontend's pre-launch copy in `hosted/src/App.tsx`. */
 export const PRELAUNCH_REFUSAL =
-  "Coming soon, check out the devlog at nedshed.dev";
+  "Coming soon. Get an email when it opens.";
 
 type FetchAuth = (
   request: Request,

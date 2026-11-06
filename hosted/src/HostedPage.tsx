@@ -40,7 +40,8 @@ import { WithdrawalAcknowledgement, WithdrawalFunction } from "./Withdrawal";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
-export const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
+/** MailerLite's own page for the "Dormouse signup" form: double opt-in, into the "Dormouse" group. */
+export const SUBSCRIBE_URL = "https://preview.mailerlite.io/forms/2773191/203349323128243736/share";
 const SELF_HOST_URL = "https://dormouse.sh/self-host/";
 
 const ROW_CLASS = `flex min-h-14 items-center justify-between gap-4 py-1.5 ${DASHED_ROW_CLASS}`;
@@ -208,7 +209,7 @@ export function HostedPage({
         </h1>
         <p className={`mb-10 ${PAGE_INTRO_CLASS}`}>
           {comingSoon
-            ? "Check out the devlog at nedshed.dev."
+            ? "Get an email when it opens."
             : enrolling
             ? !enrolling.code
               ? "This link cannot be approved."
@@ -239,7 +240,7 @@ export function HostedPage({
           <p role="status">Checking your account…</p>
         ) : comingSoon ? (
           <a className={PRIMARY_CLASS} href={SUBSCRIBE_URL}>
-            Subscribe at nedshed.dev
+            Join the email list
           </a>
         ) : (
           <>

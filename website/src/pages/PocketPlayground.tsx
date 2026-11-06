@@ -55,7 +55,7 @@ function DesktopPocketPlaygroundPage() {
             computer; Hosted removes the server setup and maintenance.
           </p>
           <NotifySignupForm
-            buttonLabel="Join the devlog for Pocket + Hosted news"
+            buttonLabel="Email me Pocket + Hosted news"
             announcement="Dormouse Pocket and Hosted"
           />
         </section>
