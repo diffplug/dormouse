@@ -556,7 +556,7 @@ describe('Settings → Network', () => {
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Add an allowed network range"]')!;
     await act(async () => setNativeFieldValue(input, '10.99.0.0/16'));
     await act(async () => button('Add').click());
-    expect(text()).toContain(`At most ${MAX_ALLOWED_NETWORKS} ranges can be allowed. Remove one first.`);
+    expect(text()).toContain(`At most ${MAX_ALLOWED_NETWORKS} networks can be allowed. Remove one first.`);
     expect(sentPolicies()).toEqual([]);
   });
 

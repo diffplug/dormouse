@@ -811,11 +811,11 @@ describe('external origins', () => {
     const framed = container.querySelector('iframe');
     expect(framed?.getAttribute('src')).toBe(`${PROXY}/guide`);
 
-    // Another window adds a network: the host is asked again and still fronts it.
+    // Another window adds a network, which can close nothing: no need to ask.
     const asked = createProxy.mock.calls.length;
     await act(async () => { emit({ level: 'local', allowed: [TAILNET, '10.0.0.0/8'], autoUpdate: false }); });
     await act(async () => {});
-    expect(createProxy.mock.calls.length).toBe(asked + 1);
+    expect(createProxy.mock.calls.length).toBe(asked);
     expect(container.querySelector('iframe')).toBe(framed);
 
     // Settings removes it: the preview gives way to the warning.

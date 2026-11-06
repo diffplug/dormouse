@@ -41,6 +41,7 @@ import {
   type NetworkLevel,
   type NetworkPolicy,
   type NetworkPolicyResult,
+  withAllowedNetworks,
 } from '../remote/network-policy';
 
 /**
@@ -103,8 +104,7 @@ export function policyForLevel(network: NetworkPolicyResult, level: NetworkLevel
   const { policy, interfaces } = network;
   const lan = [...new Set(interfaces.filter((item) => item.kind === 'lan').flatMap((item) => item.prefixes))];
   if (!holdsToAllowedNetworks(level) || lan.some((cidr) => policy.allowed.includes(cidr))) return { ...policy, level };
-  const allowed = [...policy.allowed, ...lan.filter((cidr) => !policy.allowed.includes(cidr))];
-  return { ...policy, level, allowed: allowed.slice(0, MAX_ALLOWED_NETWORKS) };
+  return { ...policy, level, allowed: [...policy.allowed, ...lan].slice(0, MAX_ALLOWED_NETWORKS) };
 }
 
 /** The change choosing `level` makes, or none when it is already the level. */
@@ -416,14 +416,8 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
   const listed = allowed.filter((cidr) => !covered.has(cidr));
   // Each against the service's latest answer, so quick clicks compose.
   const change = (next: (allowed: string[]) => string[]) =>
-    save(({ policy: latest }) => {
-      const nextAllowed = next(latest.allowed);
-      if (nextAllowed.length > MAX_ALLOWED_NETWORKS) {
-        throw new Error(`At most ${MAX_ALLOWED_NETWORKS} ranges can be allowed. Remove one first.`);
-      }
-      return { ...latest, allowed: nextAllowed };
-    });
-  const add = (cidrs: string[]) => change((now) => [...now, ...cidrs.filter((cidr) => !now.includes(cidr))]);
+    save(({ policy: latest }) => ({ ...latest, allowed: next(latest.allowed) }));
+  const add = (cidrs: string[]) => save(({ policy: latest }) => withAllowedNetworks(latest, cidrs));
   const remove = (cidr: string) => change((now) => now.filter((other) => other !== cidr));
   // Off keeps a range another switch reading On still needs.
   const switchOff = (item: NetworkInterfaceInfo) =>

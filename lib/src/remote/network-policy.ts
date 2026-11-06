@@ -72,6 +72,20 @@ export const ALLOWED_NETWORK_REACH =
 /** The most CIDRs a policy may allow. */
 export const MAX_ALLOWED_NETWORKS = 32;
 
+/**
+ * `policy` with `cidrs` added to its allowed networks, each once, the level
+ * left alone; `null` when none is new. Throws what the panel shows past
+ * {@link MAX_ALLOWED_NETWORKS}.
+ */
+export function withAllowedNetworks(policy: NetworkPolicy, cidrs: readonly string[]): NetworkPolicy | null {
+  const missing = [...new Set(cidrs)].filter((cidr) => !policy.allowed.includes(cidr));
+  if (missing.length === 0) return null;
+  if (policy.allowed.length + missing.length > MAX_ALLOWED_NETWORKS) {
+    throw new Error(`At most ${MAX_ALLOWED_NETWORKS} networks can be allowed. Remove one first.`);
+  }
+  return { ...policy, allowed: [...policy.allowed, ...missing] };
+}
+
 /** The policy that opens nothing: a new install's, and what an unreadable record reads as. */
 export function nothingPolicy(): NetworkPolicy {
   return { level: 'nothing', allowed: [], autoUpdate: false };

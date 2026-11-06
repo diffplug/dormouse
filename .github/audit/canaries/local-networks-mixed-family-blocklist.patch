@@ -20,7 +20,7 @@ index 621427f53..e31f4609e 100644
 -      '',
 -    ].join('\r\n');
 -    for (const range of ['::/0', '::ffff:0:0/96']) {
--      const path = localNetworksPath([range]);
+-      const path = localNetworksPath(() => [range]);
 -      expect(candidatesIn(path.acceptRemote(offer)), range).toEqual(
 -        range === '::/0' ? ['a=candidate:3 1 UDP 2113937151 2001:db8::7 51238 typ host'] : [],
 -      );
@@ -29,11 +29,11 @@ index 621427f53..e31f4609e 100644
 -      expect(path.refusal({ local: '::ffff:192.168.86.160', remote: '::ffff:203.0.113.7' })?.end, range).toBe('local');
 -    }
 -    // An IPv4 range beside it still decides IPv4 ends alone.
--    expect(localNetworksPath(['::/0', ...LAN]).refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end).toBe('remote');
+-    expect(localNetworksPath(() => ['::/0', ...LAN]).refusal({ local: '192.168.86.160', remote: '203.0.113.7' })?.end).toBe('remote');
 -  });
 -
    it('refuses a name, an mDNS name, a missing end, or no pair at all', () => {
-     const path = localNetworksPath(LAN);
+     const path = localNetworksPath(() => LAN);
      for (const remote of ['phone.local', '0f1e2d3c-aaaa-bbbb-cccc-000000000000.local', null]) {
 diff --git a/lib/src/host/remote/network-interfaces.test.ts b/lib/src/host/remote/network-interfaces.test.ts
 index 69c2b30cc..575dde448 100644

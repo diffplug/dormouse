@@ -74,7 +74,7 @@ export const PublicAddress: Story = {
 
 /** A refused change shows where it was made. */
 export const AllowRefused: Story = {
-  args: { onAllow: fn(async () => { throw new Error('At most 32 networks can be allowed. Remove one in Settings → Network first.'); }) },
+  args: { onAllow: fn(async () => { throw new Error('At most 32 networks can be allowed. Remove one first.'); }) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: 'Allow Tailscale (100.64.0.0/10)' }));

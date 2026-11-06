@@ -160,10 +160,10 @@ interface Grant {
   lastUsed: number;
   /** Held by a lease: no idle TTL, no eviction. */
   leased: boolean;
-  /** The addresses it connects to that are not this machine's: minted, and
-   *  reused, only while each is private and inside an allowed network
+  /** The addresses it connects to: minted, and reused, only while each one off
+   *  this machine is private and inside an allowed network
    *  (docs/specs/dor-browser.md → "Iframe External Origins"). */
-  offMachine: readonly UpstreamAddress[];
+  pinned: readonly UpstreamAddress[];
   /** Not yet served a document: the next one clears the origin's site data. */
   fresh: boolean;
   /** Upgraded sockets, which `server.close()` would leave running. */
@@ -324,7 +324,7 @@ async function acquireLeased(
   const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
   if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)
-    && await offMachineRefusal(lease.grant.offMachine, access) === null) {
+    && await offMachineRefusal(offThisMachine(lease.grant.pinned, access.interfaces()), access) === null) {
     if (released()) return CLOSED_VIEW;
     return framedUrl(lease.grant, upstream);
   }
@@ -475,7 +475,7 @@ async function mintGrant(
     server: null as unknown as http.Server,
     lastUsed: now,
     leased,
-    offMachine,
+    pinned,
     // A tunneled page is not at this port, so there is nothing of its to clear.
     fresh: !access.tunneled,
     sockets: new Set(),

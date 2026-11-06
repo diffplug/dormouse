@@ -3,7 +3,7 @@ import { XIcon } from '@phosphor-icons/react';
 import { modalActionButton, PaneMessage, PopupButtonRow, popupButton, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
-import type { IframeExternalRefusal, IframeNetworkOffer, IframeProxyResult } from '../../lib/platform/types';
+import type { IframeNetworkOffer, IframeProxyResult } from '../../lib/platform/types';
 import { IFRAME_HTTP_ONLY } from '../../lib/platform/iframe-proxy-types';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
@@ -24,7 +24,7 @@ import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isRealBlur } from '../../lib/window-focus';
 import { changeNetworkPolicy, getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../../remote/burrow/network-policy-store';
-import { ALLOWED_NETWORK_REACH, MAX_ALLOWED_NETWORKS } from '../../remote/network-policy';
+import { ALLOWED_NETWORK_REACH, withAllowedNetworks } from '../../remote/network-policy';
 import { useBusyAction } from '../remote-control-shared';
 
 // Uninstrumented documents (docs/specs/dor-browser.md → "Iframe Shim"). The
@@ -59,40 +59,30 @@ type IframeHistory = {
   index: number;
 };
 
-/** The policy's allowed networks as one value, so a change to them re-asks; empty until it is read. */
-function allowedNetworksKey(): string {
+/** The policy's allowed networks as one value, so a change to them is seen; `null` until it is read. */
+function allowedNetworksKey(): string | null {
   const state = getNetworkPolicySnapshot();
-  return state.kind === 'ready' ? [...state.network.policy.allowed].sort().join(' ') : '';
+  return state.kind === 'ready' ? [...state.network.policy.allowed].sort().join(' ') : null;
 }
 
-/** Add `prefixes` to the allowed networks, from the service's latest answer, the level left alone. Whether any was new. */
+const networksOf = (key: string) => new Set(key.split(' ').filter(Boolean));
+
+/** Add `prefixes` to the allowed networks, from the service's latest answer. Whether any was new. */
 async function allowNetworks(prefixes: readonly string[]): Promise<boolean> {
   let added = false;
   await changeNetworkPolicy(({ policy }) => {
-    const missing = prefixes.filter((prefix) => !policy.allowed.includes(prefix));
-    if (missing.length === 0) return null;
-    if (policy.allowed.length + missing.length > MAX_ALLOWED_NETWORKS) {
-      throw new Error(`At most ${MAX_ALLOWED_NETWORKS} networks can be allowed. Remove one in Settings → Network first.`);
-    }
-    added = true;
-    return { ...policy, allowed: [...policy.allowed, ...missing] };
+    const next = withAllowedNetworks(policy, prefixes);
+    added = next !== null;
+    return next;
   });
   return added;
 }
 
-function isOffer(value: unknown): value is IframeNetworkOffer {
-  const offer = value as Partial<IframeNetworkOffer> | null;
-  return typeof offer?.label === 'string' && Array.isArray(offer.prefixes) && offer.prefixes.length > 0
-    && offer.prefixes.every((prefix) => typeof prefix === 'string');
-}
-
-function externalResolution(url: string, refusal: IframeExternalRefusal): Resolution {
-  return {
-    kind: 'external',
-    origin: originOf(url) || url,
-    publicAddress: refusal.publicAddress === true,
-    ...(isOffer(refusal.offer) ? { offer: refusal.offer } : {}),
-  };
+/** What the panel shows for the host's answer to framing `url`. */
+function resolutionOf(url: string, result: IframeProxyResult): Resolution {
+  if (result.ok) return { kind: 'proxied', src: result.url, origin: originOf(result.url) };
+  if (result.reason !== 'external') return { kind: 'error', reason: result.reason, detail: result.detail };
+  return { kind: 'external', origin: originOf(url) || url, publicAddress: result.publicAddress === true, offer: result.offer };
 }
 
 function originOf(url: string): string {
@@ -248,8 +238,6 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
   const resolutionRef = useRef(resolution);
   resolutionRef.current = resolution;
-  const sourceUrlRef = useRef(sourceUrl);
-  sourceUrlRef.current = sourceUrl;
   // This mounted view's lease on its proxy grant (docs/specs/dor-browser.md →
   // "Iframe Proxy Leases"): Reload, Back and Forward keep the grant and its
   // origin, and unmounting — a kill, a swap, a transfer — ends it. Minted by
@@ -300,10 +288,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     let cancelled = false;
     createProxy(sourceUrl, lease).then(
       (result: IframeProxyResult) => {
-        if (cancelled) return;
-        if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
-        else if (result.reason === 'external') setResolution(externalResolution(sourceUrl, result));
-        else setResolution({ kind: 'error', reason: result.reason, detail: result.detail });
+        if (!cancelled) setResolution(resolutionOf(sourceUrl, result));
       },
       () => {
         if (!cancelled) setResolution({ kind: 'error', reason: 'unreachable' });
@@ -313,30 +298,31 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   }, [sourceUrl, reloadNonce, lease]);
 
   // A change to the allowed networks — from this pane's warning, another's, or
-  // Settings, in any window — re-asks the host: a refused page may now frame,
-  // and a framed one off this machine whose network was removed closes, its
-  // grant with it. A frame the host still fronts stays as it is.
+  // Settings, in any window — re-asks the host where it could matter: a
+  // refused page once one is added, and a framed one once one is removed, so
+  // that preview closes with its grant. The first reading is the baseline the
+  // pane was resolved under.
   const allowedKey = useSyncExternalStore(subscribeToNetworkPolicy, allowedNetworksKey);
   const seenAllowedKeyRef = useRef(allowedKey);
   useEffect(() => {
-    if (seenAllowedKeyRef.current === allowedKey) return;
+    const before = seenAllowedKeyRef.current;
     seenAllowedKeyRef.current = allowedKey;
+    if (before === null || allowedKey === null || before === allowedKey) return;
+    const was = networksOf(before);
+    const now = networksOf(allowedKey);
     const current = resolutionRef.current;
-    if (current.kind === 'external') {
-      setReloadNonce((n) => n + 1);
-      return;
-    }
+    const affected = current.kind === 'external' ? [...now].some((cidr) => !was.has(cidr))
+      : current.kind === 'proxied' && [...was].some((cidr) => !now.has(cidr));
     const createProxy = getPlatform().createIframeProxyUrl;
-    if (current.kind !== 'proxied' || !createProxy || lease === null) return;
-    const asked = sourceUrl;
+    if (!affected || !createProxy || lease === null) return;
     let cancelled = false;
-    createProxy(asked, lease).then((result) => {
-      if (cancelled || resolutionRef.current !== current || sourceUrlRef.current !== asked) return;
-      if (result.ok && originOf(result.url) !== current.origin) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
-      else if (!result.ok) setResolution(result.reason === 'external' ? externalResolution(asked, result) : { kind: 'error', reason: result.reason, detail: result.detail });
+    createProxy(sourceUrl, lease).then((result) => {
+      if (cancelled || resolutionRef.current !== current) return;
+      const next = resolutionOf(sourceUrl, result);
+      if (current.kind !== 'proxied' || next.kind !== 'proxied' || next.origin !== current.origin) setResolution(next);
     }, () => {});
     return () => { cancelled = true; };
-  }, [allowedKey]);
+  }, [allowedKey, sourceUrl, lease]);
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back
@@ -652,7 +638,6 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
     onClick: (e: MouseEvent) => { e.stopPropagation(); action(); },
   });
   const titleId = useId();
-  const allow = offer && onAllow ? onAllow : undefined;
   return (
     <div role="alertdialog" aria-labelledby={titleId} className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg px-6 text-center">
       <div className="max-w-md text-sm text-foreground">
@@ -667,9 +652,9 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
-        {allow && (
-          <button type="button" disabled={busy} {...press(() => void run(allow))} className={modalActionButton({ tone: 'secondary' })}>
-            Allow {offer!.label} ({offer!.prefixes.join(', ')})
+        {offer && onAllow && (
+          <button type="button" disabled={busy} {...press(() => void run(onAllow))} className={modalActionButton({ tone: 'secondary' })}>
+            Allow {offer.label} ({offer.prefixes.join(', ')})
           </button>
         )}
         {onOpenInAgentBrowser && (
