@@ -23,8 +23,10 @@ import { TERMS_PAGE } from "./Terms";
 const PUBLISHED: Record<string, string> = {
   "privacy/2026-10-30": "8ea8f468b67b3abc6ba55caf290b1e082bed01b57846e94ec7450b576d7f6b64",
   "privacy/2026-11-03": "97b754d37b337864dc8be72ea822c4ffcc3be82a9fb181440d61932c8cb8d1fc",
+  "privacy/2026-11-05": "0e9f397ed43c34d41fd5543a95faff18afbcdc32d1b50e885d31e77aef5f07d2",
   "terms/2026-10-30": "d4a503ae7844db998d774afc873bfba3aab09b4c3fb93f43aa2278746da803bf",
   "terms/2026-11-03": "e470548890e0fe385c597d81a78b24a000e01631bd4a9763bbab28de0b32762e",
+  "terms/2026-11-05": "9e53cca0c1539a420118623903cef59375da1b6389b544da2af39ab830c5a8c3",
 };
 
 const PUBLIC = resolve(dirname(fileURLToPath(import.meta.url)), "../../public");
