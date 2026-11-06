@@ -12,6 +12,7 @@ export default [
   route("playground/pocket", "./pages/PocketPlayground.tsx"),
   route("pocket", "./pages/Pocket.tsx"),
   route("privacy", "./pages/Privacy.tsx"),
+  route("subscribed", "./pages/Subscribed.tsx"),
   route("terms", "./pages/Terms.tsx"),
   ...DOCS_PAGES.map((page) => route(page.path.slice(1), page.module)),
   // Not in the rail: the standalone updater deep-links it after an update
