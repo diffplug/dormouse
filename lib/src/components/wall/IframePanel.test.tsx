@@ -825,6 +825,31 @@ describe('external origins', () => {
     expect(container.textContent).toContain('Page on another device');
   });
 
+  it('asks again when a network is removed while a Reload is in flight', async () => {
+    const { createProxy, emit } = await renderGated(`${TAILNET_PAGE}/guide`, stubActions(), {
+      level: 'local', allowed: [TAILNET], autoUpdate: false,
+    });
+    expect(container.querySelector('iframe')?.getAttribute('src')).toBe(`${PROXY}/guide`);
+
+    // The host answers the Reload under the networks it read before Settings removes one.
+    const answer = createProxy.getMockImplementation()!;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    createProxy.mockImplementationOnce(async (target: string) => {
+      const result = answer(target);
+      await held;
+      return result;
+    });
+    await act(async () => { getAgentBrowserScreenController('iframe-external')!.chromeActions.reload(); });
+    const asked = createProxy.mock.calls.length;
+    await act(async () => { emit({ level: 'local', allowed: [], autoUpdate: false }); });
+    await act(async () => { release(); });
+    await act(async () => {});
+    expect(createProxy.mock.calls.length).toBe(asked + 1);
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).toContain('Page on another device');
+  });
+
   it('offers no Allow for a public page, only agent-browser, the browser, and Cancel', async () => {
     await renderGated(`${EXTERNAL}/guide`);
     expect(container.textContent).toContain('Website on the internet');
