@@ -24,7 +24,7 @@ export function accountApp(
   ) => Response | Promise<Response>,
   bindings: (env: AccountEnv) => AccountEnv,
   configure?: (app: Hono<{ Bindings: AccountEnv }>) => void,
-  /** The mail billing sends, a withdrawal's acknowledgement: Postmark unless a preview's inbox. */
+  /** The mail billing sends, its notices and the billing alert: Postmark unless a preview's inbox. */
   mail: (env: AccountEnv) => EmailSender = (env) => noticeMail(env.POSTMARK_SERVER_TOKEN),
 ) {
   return workerApp<AccountEnv>({

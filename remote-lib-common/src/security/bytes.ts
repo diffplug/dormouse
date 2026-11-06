@@ -72,7 +72,7 @@ export function base64UrlLength(byteLength: number): number {
 /**
  * Decode base64url. Trailing `=` padding is tolerated; anything else invalid
  * (bad characters, impossible length, nonzero trailing bits) throws, so a
- * given byte string has exactly one accepted encoding.
+ * given byte string has exactly one accepted unpadded encoding.
  */
 export function fromBase64Url(text: string): Uint8Array {
   let end = text.length;
