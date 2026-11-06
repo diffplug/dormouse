@@ -297,7 +297,7 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
 
 ## Support runbooks
 
-Owner: (to be named before launch). Monitored address: `support@dormouse.sh`.
+Owner: `support@dormouse.sh`, which answers every request within 24 hours. A deadline that needs sooner says so.
 
 SQL runs as the migration role. `stripe` commands run from the Stripe CLI logged in to the live account (add `--live`), or the Dashboard's Workbench shell.
 
@@ -315,7 +315,7 @@ The Terms let us verify ownership, and forbid requiring account recovery. Most r
 
 ### Cancel for someone who cannot sign in
 
-Deadline: the Terms state no number of days, but the cancellation must land before the next renewal, so do it the day the email arrives. If a renewal charged after their request arrived, refund it in full, which also ends the plan.
+Deadline: the Terms state no number of days, but the cancellation must land before the next renewal, so do it within those 24 hours. If a renewal charged after their request arrived, refund it in full, which also ends the plan.
 
 1. [Find and verify the customer](#find-and-verify-the-customer).
 2. Stop the renewal, keeping access through the period they paid for: in the Dashboard, cancel the subscription at the end of the current period, or:
@@ -330,9 +330,9 @@ Deadline: the Terms state no number of days, but the cancellation must land befo
 
 ### Close an account by email
 
-Deadline: the Terms state no number of days. Closing takes effect as soon as they confirm, so act that day. The refunds are the cron's.
+Deadline: the Terms state no number of days. Closing takes effect as soon as they confirm, so act within those 24 hours. The refunds are the cron's.
 
-1. [Find and verify the customer](#find-and-verify-the-customer). An account with no Stripe customer has only its sign-in email to reply from (`SELECT id FROM "user" WHERE email = '...' AND "emailVerified";`). A provider-only account with neither has nothing to verify against: send it to the owner, and never delete on an unverified request.
+1. [Find and verify the customer](#find-and-verify-the-customer). An account with no Stripe customer has only its sign-in email to reply from (`SELECT id FROM "user" WHERE email = '...' AND "emailVerified";`). A provider-only account with neither has nothing to verify against: never delete it on the request. Reply that it can be closed from the account page after signing in with that provider, which needs no recovery, and that without a sign-in nothing shows the account is theirs.
 2. Explain, then wait for their yes, as the account page does before it closes (`closureTerms` in `hosted/src/Closure.tsx`): the plan ends now and never renews; a first payment, or a yearly or founding renewal, inside the last 30 days is refunded in full with tax, and otherwise the time left is not; withdrawal and the 30-day guarantee for an earlier payment stay open by email; cancelling renewal instead keeps access through the period.
 3. End each current subscription in Stripe, without a refund or a final invoice, then confirm with step 3 of finding the customer that it shows `ended_at`:
 
@@ -350,7 +350,7 @@ Deadline: the Terms state no number of days. Closing takes effect as soon as the
 
 ### Voluntary 30-day refund
 
-Deadline: they must ask within 30 days of the payment, counted to the day their email arrived. The Terms state no number of days for paying it. Pay it that day: a founding seat returns only if the subscription ends within 30 days of its start.
+Deadline: they must ask within 30 days of the payment, counted to the day their email arrived. The Terms state no number of days for paying it. Pay it within those 24 hours, and a founding first payment asked about on its 30th day that same day: a founding seat returns only if the subscription ends within 30 days of its start.
 
 | Payment | Refund it? |
 | --- | --- |
