@@ -47,18 +47,20 @@ async function submit() {
 }
 
 describe("NotifySignupForm", () => {
-  it("posts to the disclosed MailerLite form without JavaScript", () => {
+  it("posts to the MailerLite form without JavaScript", () => {
     const markup = renderToStaticMarkup(
       <NotifySignupForm buttonLabel="Get the email" variant="docs" />,
     );
     expect(markup).toContain(`action="${ENDPOINT}"`);
     expect(markup).toContain('method="post"');
-    expect(markup).toContain("MailerLite keeps the list");
+    expect(markup).toContain("You’ll get one email to");
     expect(markup).toContain("text-[var(--docs-button-text)]");
 
     const template = document.createElement("template");
     template.innerHTML = markup;
     const form = template.content.querySelector("form")!;
+    // The list provider is an implementation detail, never user-facing copy.
+    expect(template.content.textContent).not.toMatch(/mailerlite/i);
     const input = form.querySelector<HTMLInputElement>('input[type="email"]')!;
     expect(input.name).toBe("fields[email]");
     expect(form.checkValidity()).toBe(false);
@@ -85,7 +87,7 @@ describe("NotifySignupForm", () => {
     expect(url).toBe(ENDPOINT);
     expect(init.method).toBe("POST");
     expect(String(init.body)).toBe("fields%5Bemail%5D=dev%40example.com&ml-submit=1&anticsrf=true");
-    expect(container!.querySelector('[role="status"]')?.textContent).toContain("sent dev@example.com a link to confirm");
+    expect(container!.querySelector('[role="status"]')?.textContent).toBe("Check your inbox. Click the link we sent to dev@example.com and you’re on the list.");
     expect(container!.querySelector("form")).toBeNull();
     expect(sessionStorage.getItem("dormouse:notify-email:notify-email")).toBeNull();
   });

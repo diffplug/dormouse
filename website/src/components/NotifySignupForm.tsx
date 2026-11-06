@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ACCENT_BORDER_CLASS, ACTION_TEXT_CLASS, FIELD_CLASS, FIELD_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
+import { sitePath } from "../lib/site-meta";
 import { SITE_LINK_CLASS } from "./site-tokens";
 
 const EMAIL_STORAGE_PREFIX = "dormouse:notify-email:";
@@ -13,7 +14,6 @@ const EMAIL_STORAGE_PREFIX = "dormouse:notify-email:";
 const SUBSCRIBE_URL = "https://assets.mailerlite.com/jsonp/2773191/forms/203349323128243736/subscribe";
 const EMAIL_FIELD = "fields[email]";
 const HIDDEN_FIELDS = { "ml-submit": "1", anticsrf: "true" } as const;
-const MAILERLITE_PRIVACY_URL = "https://www.mailerlite.com/legal/privacy-policy";
 
 type Status = "idle" | "sending" | "sent" | { error: string };
 
@@ -88,7 +88,7 @@ export function NotifySignupForm({
         return;
       }
     } catch {
-      setStatus({ error: "Couldn’t reach MailerLite. Please try again." });
+      setStatus({ error: "Couldn’t sign you up just now. Please try again." });
       return;
     }
     setStatus("sent");
@@ -102,7 +102,7 @@ export function NotifySignupForm({
   if (status === "sent")
     return (
       <p role="status" className={`text-base leading-snug ${palette.accent}`}>
-        Check your inbox: MailerLite sent {email} a link to confirm. You’re on the list once you click it.
+        Check your inbox. Click the link we sent to {email} and you’re on the list.
       </p>
     );
 
@@ -155,12 +155,12 @@ export function NotifySignupForm({
         </p>
       )}
       <p className={`mt-3 text-base leading-snug ${palette.muted}`}>
-        This joins Dormouse’s email list, where I’ll announce {announcement}. MailerLite keeps the
-        list and emails you a link to confirm (
-        <a href={MAILERLITE_PRIVACY_URL} className={palette.link}>
-          its privacy policy
+        This joins Dormouse’s email list, where I’ll announce {announcement}. You’ll get one email to
+        confirm, and you can unsubscribe any time (
+        <a href={sitePath("/privacy")} className={palette.link}>
+          privacy policy
         </a>
-        ); you can unsubscribe any time.
+        ).
       </p>
     </>
   );
