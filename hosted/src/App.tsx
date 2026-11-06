@@ -89,7 +89,7 @@ async function recordContinued() {
   sessionStorage.removeItem(CONTINUED_KEY);
 }
 
-// Pre-launch: a signed-out visitor is sent to the devlog's email signup
+// Pre-launch: a signed-out visitor is sent to Dormouse's email signup
 // instead of the sign-in form; `/login?signin` still opens it, as does a
 // failed provider callback's `?error`, which only a sign-in started there
 // reaches, so its message shows. Delete this, and its use below, at launch.

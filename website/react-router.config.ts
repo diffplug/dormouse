@@ -13,6 +13,7 @@ export default {
       "/playground/pocket",
       "/pocket",
       "/privacy",
+      "/subscribed",
       "/terms",
       ...DOCS_PAGES.map((page) => page.path),
     ];
