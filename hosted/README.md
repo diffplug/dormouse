@@ -68,7 +68,7 @@ Public identifiers recorded during provisioning on 2026-09-29; secret values rem
 | --- | --- |
 | Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Workers `dormouse-hosted`, `dormouse-relay`, `dormouse-voice`, `dormouse-frames`; the account's Hyperdrive ID in `wrangler.jsonc`, the relay's and voice's in `wrangler.relay.jsonc` and `wrangler.voice.jsonc` once provisioned (all zeros until then) |
 | Neon | Project `young-dust-56119072`; production branch `br-billowing-brook-b4cuf3y4`; database `neondb`; migration role `neondb_owner`; SQL-created runtime role `dormouse_app`, the account Worker's; `dormouse_relay` and `dormouse_voice`, created NOLOGIN and granted by the release, then given LOGIN by hand for the relay's and voice's Hyperdrives |
-| Postmark | Server `21034461`, `dormouse-hosted`; sender `signin@dormouse.sh`; return path `pm-bounces.dormouse.sh` |
+| Postmark | Server `21034461`, `dormouse-hosted`; senders `signin@dormouse.sh` and `support@dormouse.sh`, each also an Apple Private Email Relay source; return path `pm-bounces.dormouse.sh` |
 | GitHub OAuth | DiffPlug organization app `3890420`; client ID `Ov23liX1HSz03AAN3Psf` |
 | Google | Project `diffplug-dormouse`; client ID `168454028617-aecm16ka4nodv6a72u2aolgqurkr4gaj.apps.googleusercontent.com` |
 | Microsoft | DiffPlug tenant `cf6a3474-e2f1-498a-9109-706289336d8a`; client ID `be9f84a1-fc52-4a50-afcb-c659c11a1f17` |
