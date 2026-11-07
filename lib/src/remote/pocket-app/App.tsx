@@ -315,7 +315,7 @@ export default function App({
   const isPushOn = (burrowId: string): boolean =>
     pushSubscriptionCurrent && (pushSubscribedBurrowIds?.has(burrowId) ?? false);
 
-  /** Tear down the live session and return to the burrows list. */
+  /** Dispose the adapter and its terminal sessions; the socket and phase are the caller's. */
   const teardownAdapter = useCallback(() => {
     void adapterRef.current?.dispose();
     adapterRef.current = null;

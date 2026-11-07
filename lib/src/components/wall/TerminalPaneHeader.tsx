@@ -175,7 +175,6 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
             <div className="ml-1 shrink-0">
               <HeaderActionButton
                 className="flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10"
-                onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   setMouseOverride(id, inOverride ? 'off' : 'temporary');
