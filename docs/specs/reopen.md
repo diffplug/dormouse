@@ -14,7 +14,7 @@ Source of truth: `closeKind` in `lib/src/components/wall/close-kind.ts`; `reques
 
 ## Reopenable kinds
 
-A reopened Surface is rebuilt from its record: a new Session and process. "Lost" lists what the user cannot get back. (rationale)
+"Lost" names what Reopen cannot recover. (rationale)
 
 | Surface at close | Reopen rebuilds | Lost | Confirms? |
 |---|---|---|---|
@@ -74,6 +74,6 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 - **Must finalize through the kill path** when the countdown completes or the user finalizes it early from `PendingKillOverlay`; a pending Workspace closes every member, and comes back if a helper's work refuses.
 - **Restoring a pending kill reattaches the same Surface or Workspace**, id and process intact, at its slot; it is not a rebuild. One that cannot come back now (a helper whose parent closed or whose replacement holds work) stays pending, its countdown untouched. **Must reopen the newest restorable entry across pending kills, local records, and closed windows** ([Reopen verb](#reopen-verb)), passing over pending entries that cannot return.
 - **Must silence alerts from pending Sessions and omit them from `dor` listings and Clients**; a `dor` request naming one by id, made by one, or reaching a pending Workspace's Wall fails as a pending kill.
-- **Must count pending running work in the quit and window-close gates, then finalize every pending kill as either tears down.** A Workspace leaving for another window or closing finalizes its own. Nothing pending is persisted, so none survives a restart.
+- **Must count pending running work in the quit and window-close gates, then finalize every pending kill as either tears down. **Must join matching finalizations already running and prevent their late refusal from restoring a Workspace during teardown** (rationale).** A Workspace leaving for another window or closing finalizes its own. Nothing pending is persisted, so none survives a restart.
 
 Source of truth: `lib/src/lib/pending-kills.ts`; `pendKillRef` in `lib/src/components/Wall.tsx`; `pendWorkspace` in `lib/src/components/wall/workspace-lifecycle.ts`; `resetHelper` in `lib/src/lib/helper-terminal.ts`; `lib/src/components/PendingKillOverlay.tsx`; `lib/src/lib/labs-settings.ts`.

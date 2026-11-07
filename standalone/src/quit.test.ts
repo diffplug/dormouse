@@ -133,7 +133,7 @@ describe("quit orchestrator", () => {
     const adapter = fakeAdapter(order);
     await triggerQuit(adapter);
     await new Promise((r) => setTimeout(r, 20));
-    expect(finalize).toHaveBeenCalledWith(true);
+    expect(finalize).toHaveBeenCalledWith({ teardown: true });
     expect(order.slice(0, 2)).toEqual(["finalized", "captureRecovery"]);
   });
 

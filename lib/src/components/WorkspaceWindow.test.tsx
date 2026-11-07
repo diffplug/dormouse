@@ -38,7 +38,7 @@ import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleCo
 import { resetTodoSpotlight } from '../lib/todo-spotlight';
 import { _reopenRecordsForTesting, _resetReopenStackForTesting } from '../lib/reopen-stack';
 import { reopenClosed } from './wall/reopen';
-import { _resetPendingKillsForTesting, finalizePendingKill, getPendingKills, pendingKillKey, restorePendingKill } from '../lib/pending-kills';
+import { _resetPendingKillsForTesting, finalizePendingKill, finalizePendingKills, getPendingKills, pendingKillKey, restorePendingKill } from '../lib/pending-kills';
 import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../lib/labs-settings';
 import {
   closeWorkspace,
@@ -1525,6 +1525,25 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([only])); });
     // Its going is no close of the user's, so Reopen has nothing to bring back.
     expect(_reopenRecordsForTesting()).toHaveLength(0);
+  });
+
+  it.each([false, true])('a running finalizer restores a refused Workspace only outside teardown (%s)', async (teardown) => {
+    const first = await pendSecond();
+    const handle = getWallHandle('workspace:2')!;
+    let answer!: (refusal: string | null) => void;
+    const closing = vi.spyOn(handle, 'closeAll').mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+    await act(async () => { finalizePendingKill(pendingKillKey('workspace', 'workspace:2')); });
+    expect(closing).toHaveBeenCalledOnce();
+    let drained = false;
+    const drain = finalizePendingKills(undefined, { teardown }).then(() => { drained = true; });
+    await act(async () => { await Promise.resolve(); });
+    expect(drained).toBe(false);
+    await act(async () => { answer('helper has work'); await drain; });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(
+      teardown ? [first, 'workspace:3'] : [first, 'workspace:2', 'workspace:3'],
+    );
+    expect(closing).toHaveBeenCalledOnce();
   });
 
   it('closes through every member Surface when finalized, then lets its Wall go', async () => {
