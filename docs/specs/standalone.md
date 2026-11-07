@@ -308,6 +308,21 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 
 **Never back the session blob with WebKit `localStorage`** — a WAL that grows without bound (rationale). The blob rides the `SessionKeyValueStore` seam over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection still persists on `localStorage` (`docs/specs/theme.md`).
 
+**Must serialize the native session-store writes and distinguish the read cache from the last successful disk write.** This is the complete write-pipeline model after boot hydration; dirty capture belongs to `docs/specs/layout.md` → Session persistence.
+
+| Pipeline | Event | Next state / effect |
+|---|---|---|
+| Idle | Value equals both the read cache and last successful write | Idle; no write |
+| Idle | New value, or retry of an unchanged failed value | Writing; update the read cache and send the value |
+| Writing, with or without queued value | Same cached value requested | Unchanged; coalesce |
+| Writing | Different value requested | Writing with queued value; update the read cache |
+| Writing with queued value | Another different value requested | Keep only the latest queued value |
+| Writing, with or without queued value | Write succeeds | Advance the successful value; write the queued value if any, otherwise idle |
+| Writing, with or without queued value | Write fails | Log; leave successful value unchanged; write the queued value if any, otherwise idle |
+| Any | Drain requested | Resolve only when idle; later queued writes extend the wait |
+
+**Never interpret a resolved drain as proof every write succeeded.**
+
 **Rust file store.** `save_session` / `load_session` persist the blob as one atomic file per Tauri window, `<state root>/sessions/<label>.json`:
 
 - **The label is sanitized** so it cannot escape the directory.
@@ -319,7 +334,7 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 
 **The session store is owner-only before any bytes are written** (`docs/specs/security-local.md` -> "Persisted state"; rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory.
 
-**Must await the store pipeline before exiting**, under the quit timeout (§Quit flow; rationale): `drainSessionSaves` resolves when it goes idle, a rejected write included. Drain is a completion barrier, not a guarantee of successful persistence.
+**Must await the store pipeline before exiting**, under the quit timeout (§Quit flow; rationale).
 
 Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`; `restoreWindowOrFresh` in `standalone/src/window-restore.ts`; `TauriSessionStore` in `standalone/src/tauri-session-store.ts`; `discard_other_formats` / `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
 

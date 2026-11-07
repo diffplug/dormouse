@@ -13,9 +13,20 @@ On launch the updater, in order:
 2. Reads the network policy over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), calls `check()`: no update is silent, an update raises the approval prompt.
 3. Shows the reminder if due, recording `remindedAt`.
 
-**Must skip that `check()` once an update is approved**, including through Check now, and drop its result if approval lands while it runs. The reminder is re-evaluated periodically while the app runs, reading no policy and never checking, never over an undismissed notice or before the clock is set. **Only approval starts the background `download()`**; a failed download leaves the update available, so a second approval retries, and only a successful one makes it pending.
+**Must follow this approval/download model independently of the notice state.** The states describe the held update, not `UpdateBannerState`; checks and installation belong to their sections below.
 
-Check now (`checkNow()`) joins a check in flight, and shows an approved update's progress instead of checking, which would offer it for approval twice. **Must record `checkedAt` on every successful check**, automatic or asked for (§localStorage).
+| Held update | Event | Next state / effect |
+|---|---|---|
+| None or offered, unapproved | Successful check finds an update | Offered; release a replaced unapproved handle |
+| None or offered, unapproved | Check finds none or fails | Held update unchanged |
+| Offered | Approval | Downloading |
+| Downloading | Another approval | Join the same download |
+| Downloading | Download succeeds | Pending install |
+| Downloading | Download fails | Offered; another approval retries |
+| Downloading or pending install | Check requested | Keep the approved update; Check now reveals its progress |
+| Downloading or pending install | An earlier check answers | Keep the approved handle; release a different returned handle |
+
+**Must coalesce concurrent checks**, recording `checkedAt` on every successful check (§localStorage). The reminder is re-evaluated periodically, reading no policy and never checking, never over an undismissed notice or before the clock is set.
 
 **Never check from a self-host build** (`docs/specs/relay.md` → "Relay origin"): the updater acts only when the webview's baked mode is `hosted`.
 

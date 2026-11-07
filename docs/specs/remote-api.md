@@ -216,8 +216,18 @@ A Client shows an embedded page by framing it at an origin of its own, the *fram
 - **Must answer every body identity-encoded**, decoding a compressed one, since a response a Client synthesizes is never decoded.
 - **Every `http.request` and `ws.open` is answered** — the head or the open, else a failure, a cancel or a closing frame included — except on a disposed session.
 - **Must hold Burrow→Client body bytes, each message costing `FRAME_FLOW_MESSAGE_COST` more, unacknowledged by `flow.ack` within `FRAME_FLOW_WINDOW_BYTES` across the session**, pausing every source while it is full and keeping events in order behind it (rationale). **Must drop what a cancelled exchange or a closed frame left queued before answering**, a finished exchange's included, since the Client stops listening at that answer and would ack none of it. **A Client must acknowledge every body byte and message cost on receipt**, whatever became of its exchange, and hold an exchange its page stopped reading with `flow.pause`, so one stalled page never holds the session's window. **A Client must send a request body only through `http.write`, and hold body bytes unanswered by `http.write` and `ws.send` within the same bound across the session** (rationale); each is answered once the upstream took it.
-- **Must refuse, before the upstream sees it**, a method that is not an RFC 9110 token or is `CONNECT`, a path not in origin-form, a header value carrying CR, LF, or NUL, and anything past the per-session bounds in `frame-wire.ts`. **A Client must queue its HTTP exchanges behind theirs**, as a page can ask for hundreds at once; a socket past its bound fails, as one past a browser's own limit does. **Must settle a queued Client HTTP request on abandonment or frame closure without waiting for another exchange to release its slot** (rationale). A WebSocket message crosses as fragments, `fin` on the last.
+- **Must refuse, before the upstream sees it**, a method that is not an RFC 9110 token or is `CONNECT`, a path not in origin-form, a header value carrying CR, LF, or NUL, and anything past the per-session bounds in `frame-wire.ts`. **A Client must queue its HTTP exchanges behind theirs**, as a page can ask for hundreds at once; a socket past its bound fails, as one past a browser's own limit does. A WebSocket message crosses as fragments, `fin` on the last.
 - An absolute-origin subresource the page names (`http://localhost:5173/...`) never reaches the tunnel.
+
+**Must follow this Client admission model before an HTTP exchange exists** (rationale). Admitted requests follow the exchange and flow-control rules above; cancellation never grants another frame's capacity.
+
+| State | Event | Next state / effect |
+|---|---|---|
+| Waiting for a slot | Capacity becomes available | Admitted; recheck frame lifetime and cancellation before sending |
+| Waiting for a slot | Request abandoned | Rejected immediately; remove the waiter, send nothing |
+| Waiting for a slot | Its frame ends | Rejected immediately, even while other frames occupy every slot |
+| Admitted, before sending | Request abandoned or frame ended | Return the slot; reject without sending |
+| Admitted | Exchange takes ownership | The exchange releases the slot when it ends or its cancellation is answered |
 
 Source of truth: `remote-lib-common/src/remote/frame-wire.ts`, `FrameTunnel` in `lib/src/remote/burrow/frame-tunnel.ts`, `createBurrowFrameHost` in `lib/src/host/remote/frame-host.ts`, `FrameClient` in `lib/src/remote/client/frame-client.ts`.
 
