@@ -402,7 +402,18 @@ Three save triggers, in ascending urgency:
 - Content changes with no Lath commit only mark the session dirty; a heartbeat persists only when dirty, so an idle app stops writing.
 - PTY exit, `onRequestSessionFlush`, `pagehide`, unmount, and extension shutdown requests flush immediately and unconditionally — the net for any dirty-trigger gap (a program calling `chdir()` emits no event, so its persisted CWD may go stale until the next output — accepted).
 
-**A save must clear dirty only up to the generation it captured before serializing**, so a change arriving mid-save leaves the session dirty for the next heartbeat; a fresh Wall starts dirty, so the first heartbeat after boot persists. Source of truth: `createSessionDirtyTracker` in `lib/src/lib/session-dirty.ts`.
+**Must keep dirty state independent of a save in flight**, applying this capture model; a fresh Wall starts dirty.
+
+| Event | Dirty state | Save obligation |
+|---|---|---|
+| Owned content-change notification | Dirty | Preserve the change even while a capture is outstanding |
+| Save begins | Unchanged | Capture the current dirty generation before serializing |
+| Another flush arrives during capture | Unchanged | Coalesce a follow-up using the latest request's options |
+| Capture fulfills | Clean only through its captured generation | A newer change remains dirty |
+| Capture rejects | Unchanged | Retain dirty state; still run a queued follow-up |
+| Flush resolves | Independent of dirty state | All queued captures have settled, not necessarily succeeded |
+
+**Never publish a Workspace capture after its ownership revision changed or the Workspace closed.** Host disk acknowledgement is `docs/specs/standalone.md` → Persistence, beyond the Wall's capture pipeline.
 
 Under a Workspace, a Wall publishes its record to the Window aggregator instead of the platform slot, comparing each save against its own Workspace's previous record (`docs/specs/transport.md` → "Persisted session types"). **A Wall must mark itself dirty only for Surfaces it owns.** VS Code persists one Workspace per webview.
 
@@ -428,7 +439,7 @@ flowchart TD
 - Restore (app restart, cold start): each pane respawns with saved cwd and title, plus the single-use agent resume invocation (`docs/compatible-agents.md` → "Cold restore") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Every PTY a restore or the one new pane spawns uses the current default shell selection.
 - A visible browser Surface is rebuilt only from the saved layout, which alone carries its params; a browser Door returns with the saved Doors.
 
-Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers); `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority).
+Source of truth: `lib/src/components/wall/use-session-persistence.ts` (capture and save triggers); `createSessionDirtyTracker` in `lib/src/lib/session-dirty.ts`; `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority).
 
 ### Activity state
 

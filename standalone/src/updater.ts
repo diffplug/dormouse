@@ -289,19 +289,22 @@ export function checkNow(): void {
 }
 
 async function runManualCheck(): Promise<void> {
-  setState({ status: 'checking' });
+  const checking: UpdateBannerState = { status: 'checking' };
+  setState(checking);
   let update: Update | null;
   try {
     update = await performCheck();
   } catch (e) {
     console.error('[updater] Check failed:', e);
-    setState({ status: 'check-failed' });
+    if (state === checking) setState({ status: 'check-failed' });
     return;
   }
   // An update found is already offered (`performCheck`).
   if (update) return;
   currentVersion ||= await getAppVersion().catch(() => '');
-  showBriefly({ status: 'up-to-date', version: currentVersion });
+  // Version lookup is another host round trip: a newer check, approval or
+  // dismissal can have taken the notice while this one waited.
+  if (state === checking) showBriefly({ status: 'up-to-date', version: currentVersion });
 }
 
 /** Quit now and relaunch; the quit installs the pending update on its way out

@@ -13,3 +13,7 @@ A touched idle shell is never reopenable, even at lower fidelity: replaying scro
 ## Workspaces and windows
 
 The ids are remapped when a window reopens, not when it closes: reserving a whole window's ids at close put a host round trip and a flushed write in front of every close, and burned numbers for a Reopen that rarely comes. The fresh ids are saved at once because a reload that read the closed window's ids again would remap over the Sessions the first boot started.
+
+## Labs: No-confirm delayed kill
+
+A countdown removes its entry from the undo list before a Workspace's asynchronous close finishes. Treating that absence as completion let quit move on to recovery capture and persistence while the Workspace was still closing; a helper's refusal could even restore it after teardown started. Finalization therefore remains tracked separately, and an overlapping teardown upgrades its context before awaiting it (regression reproduced with deferred close completion, 2026-11). A Workspace-scoped drain does not take responsibility for another Workspace's close.

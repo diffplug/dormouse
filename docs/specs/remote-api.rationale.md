@@ -90,6 +90,8 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 ## Frames
 
+A queued HTTP request has no Burrow exchange to cancel. Checking its abort only after admission left its promise pending indefinitely when other frames held every slot with stalled responses. Frame closure had the same hole because queued requests had not joined the frame's live-exchange set. Removing cancelled waiters locally fixes both without sending an exchange or disturbing another frame (deferred-session regressions, 2026-11).
+
 **Why `frame.open` names the page origin.** The Client derives its frame origin from its directory snapshot while the Burrow resolves the current page, so a surface that moved from A to B meanwhile would serve B at A's origin, with A's storage. A synthetic `Clear-Site-Data` response does not clear it (Codex's review, Chromium, 2026-11).
 
 **Why the owner decides, and silence is no answer.** A collect started before a frame opens can answer after it, naming the old page, which closed a frame showing the right one (Codex's review, reproduced on `FrameTunnel`, 2026-11). A window slow to answer read as its Surfaces closing, which unloaded a phone's copy of a Tool, unsaved edits included (a blank-session Codex review, reproduced on `PocketWall`, 2026-11).
