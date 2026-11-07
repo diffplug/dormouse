@@ -42,4 +42,4 @@ Dormouse should feel like focused efficiency that cares about beginners and onbo
 
 4. **No chrome, all content** — Minimize UI chrome. Terminals are the content. Headers, tabs, and controls should be minimal and recede. Every pixel of chrome competes with terminal output.
 
-5. **Theme-adaptive** — Never hardcode colors. Always derive from the host theme (VSCode variables, or a standalone theme system later). Support light and dark from day one.
+5. **Theme-adaptive** — Never hardcode colors. Always derive from the host theme (VSCode variables, or the selected Dormouse theme elsewhere). Support light and dark from day one.

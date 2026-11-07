@@ -24,7 +24,7 @@ describe('FakePtyAdapter', () => {
     return { adapter, dataEvents, exitEvents };
   }
 
-  // --- Core (Story 11.1) ---
+  // --- Core ---
 
   it('records ordered dirty reports from ordinary PTYs without inferring clean on exit', () => {
     const { adapter } = createAdapter();
@@ -337,7 +337,7 @@ describe('FakePtyAdapter', () => {
     expect(dataEvents).toEqual([{ id: 't1', data: 'after-reset' }]);
   });
 
-  // --- Scenario Playback (Story 11.2) ---
+  // --- Scenario Playback ---
 
   const twoChunkScenario: FakeScenario = {
     name: 'two-chunks',
@@ -467,7 +467,7 @@ describe('FakePtyAdapter', () => {
     expect(dataEvents).toEqual([{ id: 't1', data: 'echo-works' }]);
   });
 
-  // --- Bulk cleanup (for destroyAllTerminals-like usage) ---
+  // --- Bulk cleanup ---
 
   it('killing all spawned terminals fires exit for each', () => {
     const { adapter, exitEvents } = createAdapter();

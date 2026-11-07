@@ -1,10 +1,5 @@
 import * as vscode from 'vscode';
-
-export interface ShellEntry {
-  name: string;
-  path: string;
-  args: string[];
-}
+import type { ShellEntry } from './pty-manager';
 
 const KEY = 'dormouse.selectedShellPath';
 

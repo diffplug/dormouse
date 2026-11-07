@@ -55,9 +55,10 @@ export function getWorkspaceBootPlan(workspaceId: WorkspaceId): WallBootProps {
   return plans.get(workspaceId) ?? EMPTY_PLAN;
 }
 
-/** Drop one Workspace's parked plan: its mount was unwound before the store's
- *  lifecycle would have pruned it (`discardArrival` in
- *  `standalone/src/workspace-move.ts`). */
+/** Drop one Workspace's parked plan before the store's lifecycle would have
+ *  pruned it: its mount was unwound (`discardArrival` in
+ *  `standalone/src/workspace-move.ts`), or a Surface move left its Wall empty
+ *  (`discardWorkspace` in `./surface-move.ts`). */
 export function forgetWorkspaceBootPlan(workspaceId: WorkspaceId): void {
   plans.delete(workspaceId);
 }
