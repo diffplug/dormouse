@@ -33,7 +33,19 @@ Directories in inventory-only rows are discovery boundaries, to be narrowed to e
 
 ## Findings
 
-No confirmed findings yet. Candidates are being checked against callers and deterministic interleavings before classification.
+### SM-01: an obsolete manual check replaces an approved update notice
+
+Impact: misleading update status and loss of the visible Restart now action; the approved download itself remains pending. Confirmed by two failing regressions on the original implementation in `standalone/src/updater.test.ts`.
+
+Sequence: Check now returns no update → app-version lookup waits → a second Check now finds an update → approve and finish its download → the first lookup resolves → the old completion replaces `downloaded` with `up-to-date`. Dismissing during the lookup is also undone. The async continuation in `runManualCheck` did not check whether it still owned the notice.
+
+Fix: use the checking notice's identity to fence its empty-result and error continuations. The timestamp still records a successful check; approval and install state are independent. Contract: `docs/specs/auto-update.md` → Update notice in the Baseboard. Status: fixed; all 79 updater tests pass, including both regressions.
+
+### SM-02: quit overlooks a Workspace finalizer already running
+
+Impact: teardown can capture or persist work whose pending close has not settled; a refused close can restore a Workspace after quit has begun. Higher priority than SM-01. The countdown removes its record before awaiting `closeAll`; `finalizePendingKills` sees an empty queue and resolves while that close is outstanding. The original regression in `lib/src/lib/pending-kills.test.ts` fails because drain completes before the deferred finalizer.
+
+Callers: `expire` → `finalizePendingKill`; `runQuitTeardown` / `runCloseTeardown` → `finalizePendingKills`; `pendWorkspace` supplies the asynchronous finalizer. Contract: `docs/specs/reopen.md` → Labs: No-confirm delayed kill. Status: fix in progress.
 
 ## Validation
 

@@ -122,6 +122,38 @@ describe('updater', () => {
     mocks.platform = { requestAppRestart: mocks.requestAppRestart, burrow: { command: mocks.burrowCommand } };
   });
 
+  it('keeps a newer approved update when an older empty check finishes reading the app version', async () => {
+    let version!: (value: string) => void;
+    mocks.getVersion.mockReturnValueOnce(new Promise<string>(resolve => { version = resolve; }));
+    checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.getVersion).toHaveBeenCalledOnce();
+
+    const update = makeUpdate();
+    mocks.check.mockResolvedValueOnce(update);
+    checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    approveUpdate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readBannerState()).toEqual({ status: 'downloaded', version: update.version });
+
+    version('0.4.0');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readBannerState()).toEqual({ status: 'downloaded', version: update.version });
+    expect(hasPendingUpdate()).toBe(true);
+  });
+
+  it('keeps a dismissal while an empty manual check reads the app version', async () => {
+    let version!: (value: string) => void;
+    mocks.getVersion.mockReturnValueOnce(new Promise<string>(resolve => { version = resolve; }));
+    checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    dismissBanner();
+    version('0.4.0');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readBannerState()).toEqual({ status: 'dismissed' });
+  });
+
   it('does not reoffer an approved download when the delayed launch check begins', async () => {
     mocks.check.mockResolvedValue(makeUpdate('0.5.0'));
     startUpdateCheck();

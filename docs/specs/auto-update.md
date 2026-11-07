@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Baseboard / Door vocabulary.
 > - Owns the standalone updater's lifecycle; the release pipeline that publishes the update manifest it fetches, and the updater's configuration, are `docs/specs/deploy.md`, and the quit orchestrator that drives the install is `docs/specs/standalone.md` §Quit flow.
 
-The standalone app checks for updates on launch, where the network policy allows it, and prompts in the Baseboard. **Never download or install an update until the user approves its prompt**; the download then runs in the background, the install at quit.
+**Never download or install an update until the user approves its prompt**; the download then runs in the background, the install at quit.
 
 ## How it works
 
@@ -36,6 +36,8 @@ Only `main` checks, so only it can hold a download, which lives in its webview's
 Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/layout.md`), one per updater state (`UpdateBannerState`). The `available` notice carries the approval; a notice's changelog link opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" must call `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now", since the refusal holds until relaunch; the update stays pending. **Must retain the refusal through dismissal and Check now**, which shows it again.
 
 **Must let every state be dismissed, and never cancel an approved download or install by it**; dismissing an unapproved `available` approves nothing, and Check now may offer it again.
+
+**Must let a manual check publish its empty-result or failure notice only while it still owns the checking notice**, including after the app-version lookup; a later check, approval, or dismissal supersedes it.
 
 ### Threading
 
