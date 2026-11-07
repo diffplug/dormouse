@@ -81,12 +81,14 @@ describe('AboutPanel', () => {
 
   it('copies the details without rendering the user agent', async () => {
     const writeText = vi.fn(async () => {});
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    // Spreading jsdom's navigator copies none of its prototype getters, so name the agent.
+    vi.stubGlobal('navigator', { ...navigator, userAgent: 'TestAgent/1.0', clipboard: { writeText } });
     const facts: AboutFacts = { stamp: STAMP, relay: SELF_HOST };
     await render(facts);
-    expect(container.textContent).not.toContain(navigator.userAgent);
+    expect(container.textContent).not.toContain('TestAgent/1.0');
     await act(async () => button('Copy details').click());
     expect(writeText).toHaveBeenCalledWith(aboutDiagnostics(facts));
+    expect(aboutDiagnostics(facts)).toContain('TestAgent/1.0');
     expect(button('Copied')).toBeTruthy();
   });
 
