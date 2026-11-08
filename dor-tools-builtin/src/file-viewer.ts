@@ -117,7 +117,9 @@ export async function startFileViewer(input: string, { onDirty = () => {}, onOpe
       const { path: canonical } = await localRealpath(path);
       if (!isInsideRoot(root, canonical)) return;
       if (resources.size >= ASSET_LIMIT) throw new ViewerLimitError('local preview exceeds 256 referenced files');
-      const type = fileViewerFormat(canonical);
+      // The opened file takes the handler's format: under `builtin:code` an
+      // HTML or SVG source streams as text, never as markup on the editor origin.
+      const type = path === target ? format : fileViewerFormat(canonical);
       if (!type) return;
       const file = await openRegularFile(canonical);
       const resource = { file, mime: type.mime };

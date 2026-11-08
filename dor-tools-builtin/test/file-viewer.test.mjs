@@ -77,6 +77,10 @@ test('builtin:code opens Markdown, HTML, and SVG as source in Monaco, and refuse
     assert.match(page.body, /assets\/editor\.js/);
     assert.ok(!page.body.includes('bad()'));
     assert.equal(JSON.parse((await get(viewer, viewer.path.replace(/view$/, 'source'))).body).text, text);
+    // The retained raw grant streams the source as text, not runnable markup.
+    const raw = await get(viewer, viewer.path.replace(/view$/, `file/${name}`));
+    assert.equal(raw.status, 200);
+    assert.match(raw.headers['content-type'], /^text\/plain/);
     // The Markdown editor's image routes belong to builtin:file.
     assert.equal((await get(viewer, viewer.path.replace(/view$/, 'images/a.png'))).status, 404);
   }
