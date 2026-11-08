@@ -153,6 +153,7 @@ describe('RemotePtyAdapter directory', () => {
 
   it('requestInit re-emits the cached list without re-watching', async () => {
     const client = new FakeClient();
+    const watch = vi.spyOn(client, 'watchDirectory');
     const adapter = new RemotePtyAdapter(client);
     await adapter.init();
     client.pushSnapshot([entry('s1')]);
@@ -162,6 +163,7 @@ describe('RemotePtyAdapter directory', () => {
     adapter.requestInit();
 
     expect(lists).toEqual([[{ id: 's1', alive: true }]]);
+    expect(watch).toHaveBeenCalledTimes(1);
     expect(client.attaches).toHaveLength(0);
   });
 });
