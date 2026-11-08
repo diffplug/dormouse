@@ -1136,7 +1136,7 @@ async function ringFromBurrow(ctx) {
   // then a ring that never arrived, not a keystroke that went missing.
   const startedAt = Date.now();
   const sent = await proveCommand(ctx, NOTIFY_PROOF, { prefix: `${NOTIFY_SEQUENCE}; ` });
-  await pocket.run(['click', 'button[aria-label="Sessions input mode"]']);
+  await showPocketSessions(pocket);
   // **The row has to be *this* notification's.** Waiting for any ringing row
   // could be satisfied by one left over from an earlier command — the assertion
   // would pass having proved nothing — so the row must also carry the escape in
@@ -1152,7 +1152,7 @@ async function ringFromBurrow(ctx) {
     notification: {
       sequence: NOTIFY_SEQUENCE,
       deliveredInMs: sent.roundTripMs,
-      // Enter to an alarm on the phone, the tap that opens the session list
+      // Enter to an alarm on the phone, the tap that opens the Sessions screen
       // included — the ring is normally there before the list is looked at.
       visibleInMs: Date.now() - startedAt,
       row,
@@ -1165,12 +1165,21 @@ async function ringFromBurrow(ctx) {
  * Leave the wall and come back the way a phone comes back from a dropped socket
  * (`docs/specs/relay.md` → "Guardrails", no resume protocol): the Burrows view, then Connect.
  *
+ * The way out is on the Sessions screen, the leading button of the connection
+ * header Pocket puts above the screen's own bar (`sessionsHeader` in
+ * `lib/src/remote/pocket-app/App.tsx`), so the first `header button` inside it.
+ *
  * Also the only screenshot of the Burrows view with a row on it — every earlier
  * step passes straight through it.
  */
 async function leaveAndReconnect(ctx) {
   const pocket = ctx.state.pocketBrowser;
-  await clickElement(pocket, `return document.querySelector('header button');`, "Pocket's back button");
+  await showPocketSessions(pocket);
+  await clickElement(
+    pocket,
+    `return document.querySelector('section[aria-label="Sessions"] header button');`,
+    "Pocket's back button",
+  );
   const row = await pocket.waitUntil(burrowRowExpr(), {
     what: 'the Burrows view to list the paired computer',
     timeoutMs: 60_000,
@@ -1215,7 +1224,10 @@ async function proveCommand(ctx, name, { prefix = '' } = {}) {
   await focusPocketInput(pocket);
   const startedAt = Date.now();
   await pocket.keyboard('inserttext', command);
-  await pocket.press('Enter');
+  // Send, not Enter: Enter in the composer's textarea is a newline. Send closes
+  // the composer, so the spare Enters below reach the terminal as a physical
+  // keyboard's would.
+  await clickElement(pocket, composerSendExpr(), "the composer's Send");
   let lastEnter = Date.now();
   const text = await waitFor(
     async () => {
@@ -1237,21 +1249,34 @@ async function proveCommand(ctx, name, { prefix = '' } = {}) {
 }
 
 /**
- * Put the caret in Pocket's hidden terminal input.
+ * Open Pocket's composer with the caret in it.
  *
- * Through the Type reserve's own button, because that is the only surface
+ * Through the bar's Type button, because the composer is the only surface
  * allowed to open a keyboard: a touch on the pane is consumed by the touch mode,
  * and every input the terminal itself creates is deliberately made unfocusable
- * (`docs/specs/mobile-terminal-ui.md` → Keyboard focus).
+ * (`docs/specs/mobile-terminal-ui.md` → "Keyboard focus invariant"). The
+ * composer closes on the Sessions screen, so the terminal comes back first.
  */
 async function focusPocketInput(pocket) {
-  await pocket.run(['click', 'button[aria-label="Type input mode"]']);
-  await pocket.run(['click', 'button[aria-label="Focus terminal input"]']);
-  // xterm's own helper textarea answers to the same label, and typing into it
+  const onSessions = await pocket.eval(`return !!document.querySelector('section[aria-label="Sessions"]');`);
+  if (onSessions) await pocket.run(['click', 'button[aria-label="Back to terminal"]']);
+  await pocket.run(['click', 'section[aria-label="Touch mode"] button[aria-label="Type"]']);
+  // The composer's own field, never xterm's helper textarea: typing into that
   // would prove nothing about the composition this step is here to exercise.
   const focused = await pocket.eval(`const el = document.activeElement;
-    return !!el && el.tagName === 'TEXTAREA' && el.closest('.xterm') === null;`);
-  if (!focused) throw new Error("Pocket's terminal input did not take focus");
+    return !!el && el.tagName === 'TEXTAREA' && el.closest('[data-mobile-composer]') !== null;`);
+  if (!focused) throw new Error("Pocket's composer did not take focus");
+}
+
+/** Open the full-screen Sessions screen through the wall header's Session title. */
+async function showPocketSessions(pocket) {
+  const open = await pocket.eval(`return !!document.querySelector('section[aria-label="Sessions"]');`);
+  if (open) return;
+  await clickElement(pocket, `return document.querySelector('button[title="Show sessions"]');`, "the wall header's Session title");
+  await pocket.waitUntil(`return !!document.querySelector('section[aria-label="Sessions"]');`, {
+    what: 'the Sessions screen to open',
+    timeoutMs: 10_000,
+  });
 }
 
 /**
@@ -1292,29 +1317,35 @@ async function clickElement(ab, js, what) {
 }
 
 /**
- * The connected wall, ready to be typed into. The Type reserve's focus button is
- * both the proof that `MobileTerminalUi` mounted and the affordance the next
+ * The connected wall, ready to be typed into. The touch-mode bar's Type button
+ * is both the proof that `MobileTerminalUi` mounted and the affordance the next
  * step uses.
  */
 function wallReadyExpr() {
-  return `return !!document.querySelector('button[aria-label="Focus terminal input"]')
+  return `return !!document.querySelector('section[aria-label="Touch mode"] button[aria-label="Type"]')
     && !!document.querySelector('.xterm');`;
 }
 
+/** The composer's Send: the last of its buttons, after Cancel. */
+function composerSendExpr() {
+  return `const buttons = document.querySelectorAll('[data-mobile-composer] button');
+    return buttons[buttons.length - 1] || null;`;
+}
+
 /**
- * The session list as the reserve renders it, found by position rather than by
- * class: it is the block directly under the input-mode selector, and each row is
+ * The session list as the Sessions screen renders it, found by position rather
+ * than by class: it is the screen's last block, under its bar, and each row is
  * one button carrying the pane's title, its TODO pill, and — when the Burrow says
  * the pane is ringing — an alarm inset, an overlay span inside the button
  * (`lib/src/components/MobileTerminalUi.tsx`).
  *
  * A statement, not an expression: it leaves the rows in `rows` (falsy while the
- * reserve is not up) and the caller says what it wants out of them.
+ * screen is not up) and the caller says what it wants out of them.
  */
 function sessionRowsExpr() {
-  return `const modes = document.querySelector('section[aria-label="Input mode"]');
-    const reserve = modes && modes.nextElementSibling;
-    const rows = reserve && [...reserve.querySelectorAll('button')].map((row) => ({
+  return `const screen = document.querySelector('section[aria-label="Sessions"]');
+    const list = screen && screen.lastElementChild;
+    const rows = list && [...list.querySelectorAll('button')].map((row) => ({
       text: row.innerText.trim(),
       todo: [...row.querySelectorAll('span')].some((el) => el.textContent.trim() === 'TODO'),
       ringing: row.querySelector('[data-alert-ring-inset]') !== null,
