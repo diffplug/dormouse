@@ -224,6 +224,10 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     const cwd = await helperDirectory(parentId);
     requireHelperMutable(parentId);
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
+    // A restore during the round trip put a helper back; replacing it would
+    // orphan its live PTY.
+    const restored = helpers.get(parentId);
+    if (restored && registry.has(restored.id)) return restored;
     const id = mintSurfaceId();
     const helper: HelperTerminal = { id, parentId };
     helpers.set(parentId, helper);
