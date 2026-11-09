@@ -268,7 +268,12 @@ export function cwdFromOsc7(rawUriInput: string, now = Date.now()): CwdState | n
 }
 
 export function cwdFromOsc9_9(rawPath: string, now = Date.now()): CwdState | null {
-  const path = boundedCwdValue(rawPath);
+  // Prompts written for Windows Terminal and ConEmu quote the path, and both
+  // drop one surrounding pair.
+  const unquoted = rawPath.length >= 2 && rawPath.startsWith('"') && rawPath.endsWith('"')
+    ? rawPath.slice(1, -1)
+    : rawPath;
+  const path = boundedCwdValue(unquoted);
   if (!path) return null;
   return {
     path,
