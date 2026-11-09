@@ -1515,10 +1515,8 @@ const RECLAIM_JITTER_MS = 250;
  * reach. Unlinking only the file that refused ({@link unlinkIfStill}) narrows
  * that to a few microseconds; this catches what is left.
  *
- * A path that has *gone* is the same failure on unix: somebody unlinked it after
- * our bind, so every window dialing it will miss us. Only Windows may read that
- * as ours — named pipes are not filesystem objects, cannot be stat-ed, and die
- * with the process that made them, so nothing there can displace us.
+ * A path that has *gone* is the same failure: somebody unlinked it after our
+ * bind, so every window dialing it will miss us.
  */
 interface SocketFileIdentity {
   dev: bigint;
@@ -1575,12 +1573,11 @@ function unlinkIfStill(path: string, expected: SocketFileIdentity): void {
 }
 
 async function stillOurs(path: string): Promise<boolean> {
-  const unstattable = process.platform === 'win32';
   const mine = boundSocketFile;
-  if (!mine) return unstattable;
+  if (!mine) return false;
   await delay(RECLAIM_VERIFY_MS);
   const now = await socketFileIdentity(path);
-  if (!now) return unstattable;
+  if (!now) return false;
   return sameSocketFile(now, mine);
 }
 

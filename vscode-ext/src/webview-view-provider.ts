@@ -111,8 +111,4 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       shown: { current: () => view.visible, onDidChange: view.onDidChangeVisibility },
     });
   }
-
-  focus(): void {
-    this.view?.show?.(true);
-  }
 }

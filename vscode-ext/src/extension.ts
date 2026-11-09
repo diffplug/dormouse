@@ -48,10 +48,7 @@ function setupPanel(
     ? mergeAlertStates(savedState, getAlertStates())
     : undefined;
 
-  panel.iconPath = {
-    light: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-light.png')),
-    dark: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-dark.png')),
-  };
+  panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny.png'));
   const savedSession = readPersistedSession(initialState);
   // A panel's panes are interrupted by the teardown capture along with every
   // other live PTY, so they have a recovery command waiting too — claimed by
