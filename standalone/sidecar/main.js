@@ -157,8 +157,14 @@ rl.on('line', (line) => {
 });
 
 function handleLine(line) {
+  let event, data;
   try {
-    const { event, data } = JSON.parse(line);
+    ({ event, data } = JSON.parse(line));
+  } catch (err) {
+    console.error(`[sidecar] Failed to parse message:`, err.message);
+    return;
+  }
+  try {
     // A closed window's iframe views are gone with it: end their leases. The
     // shared host takes the same event for the Burrow and the alerts.
     if (event === 'burrow:windows' && Array.isArray(data?.labels)) retainIframeProxyOwners(data.labels.filter((label) => typeof label === 'string'));
@@ -270,7 +276,7 @@ function handleLine(line) {
       default: console.error(`[sidecar] Unknown event: ${event}`);
     }
   } catch (err) {
-    console.error(`[sidecar] Failed to parse message:`, err.message);
+    console.error(`[sidecar] ${event} failed:`, err.message);
   }
 }
 
