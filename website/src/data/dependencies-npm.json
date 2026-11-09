@@ -3029,7 +3029,7 @@
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
       "homepage": "https://github.com/syntax-tree/mdast-util-gfm-table",
       "versions": [
-        "2.0.0"
+        "2.0.1"
       ]
     },
     {
