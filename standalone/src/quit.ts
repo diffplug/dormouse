@@ -118,6 +118,10 @@ async function runQuitTeardown(last: boolean): Promise<void> {
     // (docs/specs/reopen.md → "Labs: No-confirm delayed kill").
     await withTimeout(finalizePendingKills(undefined, { teardown: true }), PENDING_KILL_FINALIZE_MS,
       `[quit] pending kills took over ${PENDING_KILL_FINALIZE_MS}ms; proceeding`);
+    // The capture and save below are budgeted against Rust's per-phase watchdog
+    // on their own: the drain above sits outside their ceiling, so its bound
+    // must not come out of their budget.
+    void invoke("quit_progress").catch(() => {}); // capture and save begin
     if (adapter) {
       await withTimeout(
         (async () => {

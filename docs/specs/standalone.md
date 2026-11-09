@@ -271,7 +271,7 @@ sequenceDiagram
 - **A refused arrival hands the shells back**: Rust drops the record and the source clears **transferring**. With both ends gone the shells are reaped.
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed at `begin_arrival`, retiring only the record it was armed for.
 - **A hand-back replays what the marked ids missed** (rationale): each marked id stays suppressed until its since-mark replay lands in the source's existing xterm; an id never stamped goes straight back. **Must retain source cuts from `pty:marked` through target replay and natural exit until settlement, and discard them on explicit kill.** **Must apply a handed-back PTY's exit status after its replay**, leaving its pane dead with no running command.
-- **`take_arrivals` does not consume**; the record settles at `adopt_done` or `adopt_failed`. **Never adopt from a list taken before another adoption settled**: a window drains one pass at a time, each over a fresh answer (rationale).
+- **`take_arrivals` does not consume**; the record settles at `adopt_done` or `adopt_failed`. **Never adopt from a list taken before another adoption settled** (rationale).
 - **`AWAITING_REPLAY_MAX` fails open only for suppressions no arrival claims** (rationale).
 - **`begin_arrival` journals the arrival in `sessions/arrivals.json` before ownership moves**, never in either window's snapshot (rationale); **a failed write refuses the move with nothing changed**. **Must retain the record until both snapshots reflect the outcome** — marked settled at adoption, its durable destination reversed on hand-back — and **tombstone settled arrivals into a deliberately closed Window until both snapshots omit them**; failed writes are logged and block nothing live.
 - **A record left at boot merges into its recorded destination before `restore_windows`**, so the Workspace restores once, with fresh shells. **Must retain a failed merge's record for retry, roll back the target if trimming the source fails, and preserve a settled arrival's newer target record.**
@@ -408,16 +408,17 @@ Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`; `W
 
 ### Teardown ordering
 
-**Every step of `runQuitTeardown` is individually bounded, and the whole sits under a ceiling derived from the sum of those bounds, never a literal**, counting Rust's round-trip margin for the two steps that reach the sidecar (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by `lib/src/lib/mirrored-constants.test.ts`). The steps:
+**Every step of `runQuitTeardown` is individually bounded, and steps 2–7 sit under a ceiling derived from the sum of their bounds, never a literal**, counting Rust's round-trip margin for the two steps that reach the sidecar (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by `lib/src/lib/mirrored-constants.test.ts`). The steps:
 
-1. `captureAgentRecovery` — **first**, since an agent's resume invocation exists only between the interrupt and the kill (§Agent recovery; rationale). **A failed capture must not abort the steps behind it.**
-2. `requestSessionFlush` — while PTYs are alive, so CWDs are fresh.
-3. `gracefulKillPtys` — this window's PTYs (§Rust ↔ sidecar bridge).
-4. `requestSessionFlush({ probeCwd: false })` — the post-exit state (`docs/specs/transport.md` → "Persisted session types"; rationale).
-5. `flushWindowSession` — the one Window blob, bounded like the rest.
-6. `drainSessionSaves` (§Persistence).
-7. **In the last window only**, if an update is pending, a fresh `quit_progress` then `installPendingUpdate()`, strictly after the save (`docs/specs/auto-update.md`); the phase-3 watchdog backstops a hung installer.
-8. **Always** `quit_window_done`, or `quit_proceed` in the last window, in `finally`.
+1. `finalizePendingKills` (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), then a fresh `quit_progress`, so its bound never comes out of the watchdog budget the ceiling is pinned under.
+2. `captureAgentRecovery` — **before any save or kill**, since an agent's resume invocation exists only between the interrupt and the kill (§Agent recovery; rationale). **A failed capture must not abort the steps behind it.**
+3. `requestSessionFlush` — while PTYs are alive, so CWDs are fresh.
+4. `gracefulKillPtys` — this window's PTYs (§Rust ↔ sidecar bridge).
+5. `requestSessionFlush({ probeCwd: false })` — the post-exit state (`docs/specs/transport.md` → "Persisted session types"; rationale).
+6. `flushWindowSession` — the one Window blob, bounded like the rest.
+7. `drainSessionSaves` (§Persistence).
+8. **In the last window only**, if an update is pending, a fresh `quit_progress` then `installPendingUpdate()`, strictly after the save (`docs/specs/auto-update.md`); the phase-3 watchdog backstops a hung installer.
+9. **Always** `quit_window_done`, or `quit_proceed` in the last window, in `finally`.
 
 ### Restart
 
