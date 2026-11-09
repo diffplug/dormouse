@@ -249,6 +249,22 @@ describe('processed pty streams', () => {
     expect(source.subscribed).toBe(0);
   });
 
+  it('ends the sinks of a generation a respawn displaces, which never reports its exit', () => {
+    const source = fakeSource();
+    const streams = source.streams();
+    const watching = sink();
+    const stop = streams.streamPty('pty-1', watching);
+
+    streams.endGeneration('pty-1');
+    source.emitData('pty-1', { data: 'the old generation, still talking' });
+
+    expect(watching.exits).toEqual([0]);
+    expect(watching.data).toEqual([]);
+    expect(source.subscribed).toBe(0);
+    expect(source.exitListeners).toBe(0);
+    expect(() => stop()).not.toThrow();
+  });
+
   it('gives a re-attach after an exit a stream of its own', () => {
     const source = fakeSource();
     const streams = source.streams();

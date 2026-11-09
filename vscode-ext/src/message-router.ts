@@ -594,6 +594,7 @@ export function attachRouter(
         // onto the new PTY's first bytes.
         alertHost.respawn(msg.id, alert);
         if (msg.options?.helper) alertManager.setHelper(msg.id, true);
+        processedPtyStreams.endGeneration(msg.id);
         ownerPtyStreams.delete(msg.id);
         if (!spawnOptions.cwd) {
           spawnOptions.cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
