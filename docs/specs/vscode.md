@@ -43,7 +43,7 @@ Source of truth: `connectWebview` / `reportWindowPresence` in `vscode-ext/src/me
 
 ## Shell selection
 
-The selected shell is `dormouse.selectedShellPath`, read from `workspaceState` before `globalState`; **a global save clears the workspace value** so it cannot shadow the new default. `dormouse:selectedShell` keeps the webview's default-shell slot current. `dormouse.newTerminal`, and a changed pick in `dormouse.selectShell`'s QuickPick, open a terminal with the selected shell (`docs/specs/layout.md` -> "Session lifecycle and terminal registry").
+The selected shell is `dormouse.selectedShellPath`, read from `workspaceState` before `globalState`; **a global save clears the workspace value** so it cannot shadow the new default. `dormouse:selectedShell` keeps every webview's default-shell slot current. `dormouse.newTerminal`, and a changed pick in `dormouse.selectShell`'s QuickPick, open a terminal with the selected shell (`docs/specs/layout.md` -> "Session lifecycle and terminal registry").
 
 **The QuickPick is the only shell control here**: `VSCodeAdapter` sets `hostOwnsShells`, so the shared Settings dialog hides its Shell row. Source of truth: `vscode-ext/src/shell-selection.ts`.
 

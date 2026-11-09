@@ -175,6 +175,14 @@ function broadcastToWebviews(message: ExtensionMessage): void {
   for (const router of activeRouters) router.send(message);
 }
 
+/**
+ * Keep every webview's default-shell slot current, the view's and each editor
+ * panel's alike: a panel otherwise learns the shell only at its next init.
+ */
+export function broadcastSelectedShell(selected: { shell?: string; args?: string[] } | null): void {
+  broadcastToWebviews({ type: 'dormouse:selectedShell', shell: selected?.shell, args: selected?.args });
+}
+
 const activeRouters = new Set<ActiveRouter>();
 let nextFlushRequestId = 0;
 /** Tags each router's engagement viewer in the shared alert manager. */

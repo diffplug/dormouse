@@ -828,6 +828,22 @@ describe('an editor panel re-initializing', () => {
   });
 });
 
+it('tells the view and every editor panel a newly selected shell', () => {
+  const view = fakeWebview();
+  const panel = fakeWebview();
+  const viewRouter = router.attachRouter(view.channel, {});
+  const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
+  try {
+    router.broadcastSelectedShell({ shell: '/bin/zsh', args: ['-l'] });
+    for (const webview of [view, panel]) {
+      expect(webview.posted).toContainEqual({ type: 'dormouse:selectedShell', shell: '/bin/zsh', args: ['-l'] });
+    }
+  } finally {
+    viewRouter.dispose();
+    panelRouter.dispose();
+  }
+});
+
 // The shared collector finishes on one replay per listed PTY
 // (collectLivePtys), so an empty buffer still gets one rather than leaving the
 // reconnect to wait out its timeout.

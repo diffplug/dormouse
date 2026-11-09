@@ -31,11 +31,6 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
 
   setSelectedShell(opts: { shell?: string; args?: string[] } | null): void {
     this.selectedShell = opts;
-    void this.postMessage({
-      type: 'dormouse:selectedShell',
-      shell: opts?.shell,
-      args: opts?.args,
-    });
   }
 
   getSelectedShell(): { shell?: string; args?: string[] } | null {
