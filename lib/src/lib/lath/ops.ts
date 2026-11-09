@@ -201,7 +201,8 @@ export function restore(
       if (resolved) {
         const sibling = nodeAtPath(resolved.tree, resolved.path);
         if (sibling && structureFingerprint(sibling) === token.siblingFingerprint) {
-          const r = insert(tree, token.leafId, siblingTarget, token.weight);
+          // The siblings share `1 - weight`, as in the parent-split branch above.
+          const r = insertImpl(tree, token.leafId, siblingTarget, token.weight, true);
           if (r.ok) return { tree: r.tree, ok: true, tier: 'exact' };
         }
       }
