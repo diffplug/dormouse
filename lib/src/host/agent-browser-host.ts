@@ -144,12 +144,14 @@ function cdpCalls(socket: WebSocket, event: (method: string, params: Record<stri
   let nextId = 1;
   const replies = new Map<number, (result: unknown) => void>();
   socket.on('message', (data: Buffer) => {
-    let message: { id?: unknown; method?: unknown; params?: Record<string, unknown>; result?: unknown };
+    let message: { id?: unknown; method?: unknown; params?: Record<string, unknown>; result?: unknown } | null;
     try {
       message = JSON.parse(data.toString());
     } catch {
       return;
     }
+    // `null` parses, and reading a property of it throws in a socket handler.
+    if (!message || typeof message !== 'object') return;
     if (typeof message.id === 'number') {
       replies.get(message.id)?.(message.result);
       replies.delete(message.id);
@@ -426,10 +428,14 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
           if (answer.length > DAEMON_ANSWER_MAX_BYTES) settle('answer too long');
           return;
         }
-        let parsed: { success?: unknown; error?: unknown };
+        let parsed: { success?: unknown; error?: unknown } | null;
         try {
           parsed = JSON.parse(answer.slice(0, end));
         } catch {
+          settle('unreadable answer');
+          return;
+        }
+        if (!parsed || typeof parsed !== 'object') {
           settle('unreadable answer');
           return;
         }
@@ -786,6 +792,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       } catch {
         return;
       }
+      if (!message || typeof message !== 'object') return;
       if (message.type === 'frame' && typeof message.data === 'string') {
         if (headed || lastFrame?.equals(data)) return;
         lastFrame = data;
