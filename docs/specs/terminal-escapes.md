@@ -71,11 +71,11 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 9 ; 9 ; <cwd> ST` | CWD (Windows Terminal / ConEmu) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 9 ; <n> [; ...] ST` | Any other ConEmu subcommand — sleep, tab title, GuiMacro, the `9;12` prompt mark, a bare `9;9`; consumed and ignored | [alert.md](alert.md#terminal-reports) |
 | `OSC 99 ; <metadata> ; <payload> ST` | kitty desktop notification. Dormouse also **answers** the `p=?` capability query with `OSC 99 ; [i=<id>:]p=? ; o=always:p=title,body ST`. | [alert.md](alert.md#terminal-reports) |
-| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries, `C` optionally carrying the command line (`cmdline_url=` / `cmdline=`); command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
+| `OSC 133 ; A/B/C/D [...] ST` | Prompt/command boundaries, `C` optionally carrying the command line (`cmdline_url=` / `cmdline=`); command-exit alert input; others ignored | [terminal-state.md](terminal-state.md#supported-osc-inputs), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; A/B/C/D ST` | VS Code prompt/command boundaries, which Dormouse's shell integration emits; command-exit alert input | [terminal-state.md](terminal-state.md#supported-osc-inputs) and [its injection](terminal-state.md#shell-integration-injection), [alert.md](alert.md#command-exit-track) |
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
-| `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
-| `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
+| `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code); any other `633` ignored | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
+| `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification; others ignored | [alert.md](alert.md#terminal-reports) |
 | `OSC 367 ; serve ; <json> ST` | Dor Tool announcement: selects a bound port and optional same-origin path, plus a reserved name and runtime re-key | [dor-tool.md](dor-tool.md#osc-367) |
 | `OSC 367 ; state ; <json> ST` | Tool-reported unsaved state | [dor-tool.md](dor-tool.md#unsaved-changes) |
 | `OSC 367 ; open ; <json> ST` | A Tool run's request to open a local path as `dor open`, preview or not, or with a disposition and optional fragment as a document-link navigation; live output of the run the host launched only | [dor-tool.md](dor-tool.md#osc-367), [document navigation](dor-tool.md#document-navigation) |
@@ -105,7 +105,7 @@ A Workspace transfer carries the modes a running app set: [transport.md](transpo
 
 | Sequence | Role | Disposition | Where |
 |---|---|---|---|
-| `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q` are recognized, each also with its default `0` written out, **in ground text only** (rationale). | [transport.md](transport.md#iterm2-identity) |
+| `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q`, with or without `0`, are recognized **in ground text only** (rationale). | [transport.md](transport.md#iterm2-identity) |
 | `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed without consuming; xterm.js still handles the sequence. | [mouse-and-clipboard.md](mouse-and-clipboard.md#61-state-matrix), §8.5 |
 | Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
 | `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows (rationale) | Advertised **only on Windows**; off for a pane while any kitty consumer is on its protocol stack, the two being mutually exclusive in xterm.js (rationale). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
