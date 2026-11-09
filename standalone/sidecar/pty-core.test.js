@@ -318,12 +318,17 @@ test('resolveSpawnConfig strips another terminal\'s inherited identity', () => {
         TERMINAL: 'kitty',
         MY_TMUX_SETTING: 'kept',
         CLAUDE_CODE_USE_BEDROCK: '1',
+        // What the VS Code pty-host runs with, as Electron run as Node.
+        ELECTRON_RUN_AS_NODE: '1',
+        ELECTRON_NO_ATTACH_CONSOLE: '1',
       },
       osModule: { homedir: () => '/Users/tester', tmpdir: () => '/tmp' },
     },
   );
 
   for (const key of Object.keys(FOREIGN_TERMINAL_IDENTITY)) assert.equal(config.env[key], undefined, key);
+  assert.equal(config.env.ELECTRON_RUN_AS_NODE, undefined);
+  assert.equal(config.env.ELECTRON_NO_ATTACH_CONSOLE, undefined);
   // Dormouse's own identity still goes on after the strip.
   assert.equal(config.env.TERM_PROGRAM, 'iTerm.app');
   assert.equal(config.env.LC_TERMINAL, 'iTerm2');

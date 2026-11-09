@@ -188,6 +188,12 @@ function withoutInternalDormouseEnv(env) {
   // One rehydrated Tool's payload, never every pane a host launched from it
   // spawns (docs/specs/dor-tool.md -> Reaping). Set below from `dehydrate`.
   delete next.DORMOUSE_DEHYDRATE;
+  // The VS Code pty-host is Electron run as Node, which these flags make it.
+  // A pane inheriting them would start every Electron program (`electron .`,
+  // Cypress, an editor launched by name) as plain Node instead. Both `dor`
+  // launchers set ELECTRON_RUN_AS_NODE themselves.
+  delete next.ELECTRON_RUN_AS_NODE;
+  delete next.ELECTRON_NO_ATTACH_CONSOLE;
   return next;
 }
 
