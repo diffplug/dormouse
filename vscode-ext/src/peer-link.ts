@@ -1388,7 +1388,7 @@ async function attempt(): Promise<boolean> {
         }
         // Another window cleared the same corpse after we published, so the
         // path now names its socket (or nothing) and ours is unreachable.
-        // Stand down rather than run a second Host: `link` is only the arbiter
+        // Stand down rather than run a second Burrow: `link` is only the arbiter
         // when nobody unlinks. Our close leaves the path alone, so the loop's
         // next round finds that window and connects.
         await closeServer(false);

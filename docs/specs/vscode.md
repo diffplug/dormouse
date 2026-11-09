@@ -37,7 +37,7 @@ Each webview's union (`ringing` / `todo`) is computed over its router's `ownedPt
 
 Source of truth: `notifyUnion` in `vscode-ext/src/message-router.ts`; `vscode-ext/src/workspace-chrome.ts`.
 
-**`alert:speak` goes only to a connected router whose `ownedPtyIds` hold its Session**; a due push goes to `pushAlert`: this window's service, else the broker's as an unanswered `push` peer frame, else dropped, never held. **This window is one more alert viewer, with no focus, present while `WindowState` reports it `focused` and `active`**; one that never reports `active` adds none (rationale).
+**`alert:speak` goes only to a connected router whose `ownedPtyIds` hold its Session**; a due push goes to `pushAlert`: this window's service, else the broker's as an unanswered `push` peer frame, else dropped, never held. **This window is one more alert viewer, with no focus, present while `WindowState` reports it `focused` and `active`** (rationale).
 
 Source of truth: `connectWebview` / `reportWindowPresence` in `vscode-ext/src/message-router.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`.
 

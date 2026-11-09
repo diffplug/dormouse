@@ -201,15 +201,12 @@ const alertManager = alertHost.manager;
  * active, the window is one more viewer — with no focus, so it engages no
  * Session — which holds back a push: the user may be working outside the
  * Dormouse webview (`docs/specs/alert.md` -> Alarm
- * settings). `WindowState.active` is finalized in 1.89, below the supported
- * 1.92, but `@types/vscode` stays at 1.85, so it is read defensively; focus
- * alone must not count, or a focused window left behind would silence the
- * walked-away channel.
+ * settings). Focus alone must not count, or a focused window left behind
+ * would silence the walked-away channel.
  */
 const WINDOW_VIEWER = 'vscode-window';
 export function reportWindowPresence(state: vscode.WindowState): void {
-  const active = (state as { active?: unknown }).active === true;
-  alertManager.setViewer(WINDOW_VIEWER, { present: state.focused && active, focusId: null });
+  alertManager.setViewer(WINDOW_VIEWER, { present: state.focused && state.active, focusId: null });
 }
 /** Every PTY write, as the alerts must see it. */
 const alertedPtys = alertedPty(alertManager, ptyManager);

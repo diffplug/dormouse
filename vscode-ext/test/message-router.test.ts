@@ -738,7 +738,7 @@ describe('alarm delivery', () => {
   });
 
   it('holds a push back while this VS Code window is focused and active', () => {
-    const moveWindow = (state: { focused: boolean; active?: boolean }) =>
+    const moveWindow = (state: { focused: boolean; active: boolean }) =>
       router.reportWindowPresence(state as never);
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
@@ -750,11 +750,11 @@ describe('alarm delivery', () => {
       vi.advanceTimersByTime(1_000);
       expect(wiring.pushes).toEqual([]);
 
-      // Focus alone is not presence: an older VS Code reports no `active`.
+      // Focus alone is not presence: VS Code lapses `active` without input.
       alert(webview, { op: 'dismiss', id: 'pty-1' });
       webview.send({ type: 'pty:input', id: 'pty-1', data: 'y\r' });
       ptys.callbacks!.onData('pty-1', 'output');
-      moveWindow({ focused: true });
+      moveWindow({ focused: true, active: false });
       ptys.callbacks!.onData('pty-1', REPORT);
       // One isolated chunk is not confirmed work, so nothing defers the ring.
       vi.advanceTimersByTime(999);

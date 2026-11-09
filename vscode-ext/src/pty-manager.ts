@@ -186,12 +186,12 @@ const dorControlCancelListeners = new Set<(cancel: DorControlCancel) => void>();
 const dorControlToken = randomBytes(24).toString('hex');
 
 // Always run the pty host under the editor's own Node — Electron's bundled
-// runtime (process.execPath, re-execed as Node via ELECTRON_RUN_AS_NODE, which
-// is inherited through `env` at the fork site). VSCode's integrated terminal
-// drives node-pty against Electron the same way, and node-pty ships N-API
-// prebuilds that load across runtimes, so there's no need to hunt for a
-// user-installed system Node — which was unreliable and, on Windows, caused
-// multi-second fork stalls.
+// runtime (process.execPath, run as Node via ELECTRON_RUN_AS_NODE, which
+// Electron's `child_process.fork` sets in the child's environment). VSCode's
+// integrated terminal drives node-pty against Electron the same way, and
+// node-pty ships N-API prebuilds that load across runtimes, so there's no need
+// to hunt for a user-installed system Node — which was unreliable and, on
+// Windows, caused multi-second fork stalls.
 function resolveNodeBinary(): string {
   return process.execPath;
 }
