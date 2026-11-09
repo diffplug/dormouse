@@ -404,7 +404,6 @@ export interface SidecarHostPtyManager extends SidecarPtyManager {
   /** `parentWindow`: an HWND's native-order bytes as hex. */
   setParentWindow(ids: string[], parentWindow: string): void;
   kill(id: string): void;
-  gracefulKill(ids: string[], timeout?: unknown): void;
   list(ids: unknown, forWindow: unknown, requestId: unknown, marks: unknown): void;
 }
 
@@ -587,13 +586,18 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           if (isString(id)) alerts.remove(id);
           mgr.kill(id as string);
           return true;
-        // A closed window's leftover PTYs: gone like a kill, but gracefully.
-        // Never `pty:gracefulKill`, which the quit flush sends while windows
-        // still own their PTYs.
+        // A closed window's leftover PTYs: killed, their alert entries with
+        // them. A kill and not the graceful stop, whose POSIX signal an
+        // interactive shell ignores: with the owner gone nothing could send a
+        // second one, and the shell would run on with no pane. Never
+        // `pty:gracefulKill`, which the quit flush sends while windows still
+        // own their PTYs.
         case 'pty:reap': {
           const ids = Array.isArray(detail.ids) ? detail.ids.filter(isString) : [];
-          for (const reaped of ids) alerts.remove(reaped);
-          mgr.gracefulKill(ids, detail.timeout);
+          for (const reaped of ids) {
+            alerts.remove(reaped);
+            mgr.kill(reaped);
+          }
           return true;
         }
         // One window's own PTYs, and the answer names it so the host can route

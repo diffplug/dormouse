@@ -964,9 +964,10 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     }
 }
 
-/// Gracefully stop the PTYs a window left behind (`docs/specs/transport.md` ->
-/// Graceful shutdown), and drop their Sessions' alert entries with them: no
-/// window will ever show those Sessions again.
+/// Kill the PTYs a window left behind, and drop their Sessions' alert entries
+/// with them: no window will ever show those Sessions again. A kill, not the
+/// graceful stop: an interactive shell ignores that one's POSIX signal, and
+/// nothing owns these PTYs to send another.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its
@@ -989,7 +990,7 @@ fn reap_orphaned_ptys(app: &AppHandle, label: &str, ids: Vec<String>) {
 /// The `pty:reap` line `reap_orphaned_ptys` sends. Not `pty:gracefulKill`,
 /// which the quit teardown sends for PTYs whose windows still show them.
 fn pty_reap_message(ids: &[String]) -> String {
-    sidecar_line("pty:reap", serde_json::json!({ "ids": ids, "timeout": 2000 }))
+    sidecar_line("pty:reap", serde_json::json!({ "ids": ids }))
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -5474,7 +5475,7 @@ mod tests {
     fn an_orphan_reap_removes_the_sessions_it_kills() {
         assert_eq!(
             parse_line(&super::pty_reap_message(&["t1".to_string(), "t2".to_string()])),
-            serde_json::json!({ "event": "pty:reap", "data": { "ids": ["t1", "t2"], "timeout": 2000 } })
+            serde_json::json!({ "event": "pty:reap", "data": { "ids": ["t1", "t2"] } })
         );
     }
 
