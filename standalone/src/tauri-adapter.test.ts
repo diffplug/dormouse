@@ -24,9 +24,10 @@ import { TauriAdapter } from "./tauri-adapter";
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("TauriAdapter session-flush handshake", () => {
+  // A minute-long bound outlasts vitest's 5 s test timeout, so only the fast path passes.
   it("resolves immediately when no flush handler is registered", async () => {
     const adapter = new TauriAdapter();
-    await adapter.requestSessionFlush(50);
+    await adapter.requestSessionFlush(60_000);
   });
 
   it("fans a requestId out to handlers and resolves on completion", async () => {
@@ -83,7 +84,7 @@ describe("TauriAdapter session-flush handshake", () => {
 
   it("drainSessionSaves resolves immediately when the store pipeline is idle", async () => {
     const adapter = new TauriAdapter();
-    await adapter.drainSessionSaves(1000);
+    await adapter.drainSessionSaves(60_000);
   });
 });
 
@@ -202,7 +203,7 @@ describe("TauriAdapter window persistence", () => {
 
   it("starts fresh on a blob an older build wrote", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify({ ...session, version: 3 }) : undefined));
+    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify({ ...windowBlob, version: 1 }) : undefined));
     expect(adapter.getWindowState()).toBeNull();
     adapter.shutdown();
     info.mockRestore();
