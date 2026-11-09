@@ -44,9 +44,3 @@ export function initDropCaret(): void {
     set(event.payload ? caretFor(event.payload) : null);
   });
 }
-
-/** @internal Reset module state for testing. */
-export function _resetDropCaretForTesting(): void {
-  caretX = null;
-  listeners.clear();
-}

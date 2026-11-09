@@ -147,7 +147,7 @@ Two consecutive ticks, not one, because an owner is disabled before its dialog i
 
 Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* close acked and stopped, which is the same unbounded wait reached by a different route. Voting is right because the window really is ending.
 
-**Why the walk ends on `main`.** Only `main` holds the updater grant, so ending the walk there makes the install the last thing a quit does; why the grant stays in `main` is `docs/specs/auto-update.rationale.md` → Quit-time install. The periodic check stays in `main` because it is a timer, not a capability, and one per window would be N checks against the endpoint.
+**Why the walk ends on `main`.** Only `main` holds the updater grant, so ending the walk there makes the install the last thing a quit does; why the grant stays in `main` is `docs/specs/auto-update.rationale.md` → Quit-time install. The hourly reminder stays in `main` because it is a timer, not a capability, and one per window would be N reminders.
 
 **Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
 
