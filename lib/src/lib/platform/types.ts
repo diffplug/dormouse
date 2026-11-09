@@ -7,7 +7,7 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
-import type { IframeExternalRefusal, IframeNetworkOffer, IframeProxyResult } from './iframe-proxy-types';
+import type { IframeNetworkOffer, IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
 import type { ManagedVoicePort } from './managed-voice-types';
 
@@ -126,7 +126,7 @@ export const SURFACE_ID_RESERVE_TIMEOUT_MS = SURFACE_ID_RESERVE_WAIT_MS + 5_000;
 
 export type AlertStateDetail = { id: string } & AlertState;
 
-export type { IframeExternalRefusal, IframeNetworkOffer, IframeProxyResult };
+export type { IframeNetworkOffer, IframeProxyResult };
 
 /**
  * The webview end of a Node-resident Burrow

@@ -96,7 +96,7 @@ const host: AccountRoutesHost = {
   closeSessions: async () => {},
   nudgeBurrows: async () => {},
   setup: () => billing,
-  // A withdrawal's acknowledgement lands in the local inbox beside sign-in codes.
+  // Billing's notices and alert land in the local inbox beside sign-in codes.
   mail: () => email,
 };
 accountRoutes(app, () => host);
