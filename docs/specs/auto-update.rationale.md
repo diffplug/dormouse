@@ -2,6 +2,10 @@
 
 > Informative companion to [auto-update.md](auto-update.md): evidence and design history keyed by that spec's headings. Nothing here is normative.
 
+## Update notice in the Baseboard
+
+An empty manual check still awaits the host's app-version lookup before showing its result. While that lookup waits, a later check can find an update and its approved download can finish; the older completion then hid Restart now behind an up-to-date notice. Dismissal was likewise undone. Checking notice identity at the continuation prevents both overwrites without changing the held update (deferred-version regressions in `standalone/src/updater.test.ts`, 2026-11).
+
 ## Quit-time install
 
 **Why install runs last.** On Windows `install()` starts NSIS and then calls `std::process::exit` itself (`tauri-plugin-updater-2.11.0/src/updater.rs`, checked 2026-09), so starting it early interrupts teardown. What it protects is the window's persisted structure; the save/drain hooks are `docs/specs/standalone.rationale.md` → Quit flow.

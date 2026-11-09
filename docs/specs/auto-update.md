@@ -48,7 +48,7 @@ Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/lay
 
 **Must let every state be dismissed, and never cancel an approved download or install by it**; dismissing an unapproved `available` approves nothing, and Check now may offer it again.
 
-**Must let a manual check publish its empty-result or failure notice only while it still owns the checking notice**, including after the app-version lookup; a later check, approval, or dismissal supersedes it.
+**Must let a manual check publish its empty-result or failure notice only while it still owns the checking notice**, including after the app-version lookup; a later check, approval, or dismissal supersedes it (rationale).
 
 ### Threading
 
