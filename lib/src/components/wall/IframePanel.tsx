@@ -236,6 +236,11 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // accurate focus model, and real error pages. Reachability is diagnosed by
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
+  // The allowed networks, read here so an answer can tell whether they changed
+  // while it was in flight (the re-ask effect below skips a resolving pane).
+  const allowedKey = useSyncExternalStore(subscribeToNetworkPolicy, allowedNetworksKey);
+  const allowedKeyRef = useRef(allowedKey);
+  allowedKeyRef.current = allowedKey;
   const resolutionRef = useRef(resolution);
   resolutionRef.current = resolution;
   // This mounted view's lease on its proxy grant (docs/specs/dor-browser.md →
@@ -286,9 +291,13 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     // The lease arrives with the first effect pass.
     if (lease === null) return;
     let cancelled = false;
+    const askedUnder = allowedKeyRef.current;
     createProxy(sourceUrl, lease).then(
       (result: IframeProxyResult) => {
-        if (!cancelled) setResolution(resolutionOf(sourceUrl, result));
+        if (cancelled) return;
+        // The host may have read the networks before the change: ask again under the new ones.
+        if (askedUnder !== null && allowedKeyRef.current !== askedUnder) setReloadNonce((n) => n + 1);
+        else setResolution(resolutionOf(sourceUrl, result));
       },
       () => {
         if (!cancelled) setResolution({ kind: 'error', reason: 'unreachable' });
@@ -302,7 +311,6 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // refused page once one is added, and a framed one once one is removed, so
   // that preview closes with its grant. The first reading is the baseline the
   // pane was resolved under.
-  const allowedKey = useSyncExternalStore(subscribeToNetworkPolicy, allowedNetworksKey);
   const seenAllowedKeyRef = useRef(allowedKey);
   useEffect(() => {
     const before = seenAllowedKeyRef.current;
