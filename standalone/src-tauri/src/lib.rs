@@ -4635,7 +4635,6 @@ const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 /// key programs read as `Ctrl+T`.
 const REOPEN_MENU_ITEM_ID: &str = "dormouse-reopen-closed";
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     panic_policy::abort_on_panic();
     tauri::Builder::default()
