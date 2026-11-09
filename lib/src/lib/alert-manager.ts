@@ -326,8 +326,8 @@ interface AlertEntry {
  * observe→claim→ring seam, so await can claim completions before suppression. */
 export class AlertManager {
   private entries = new Map<string, AlertEntry>();
-  /** Blocks late output or input from recreating a removed entry. Only a semantic
-   * or protocol event proves a reused id belongs to a live replacement. */
+  /** Blocks anything the killed generation still emits from recreating a
+   * removed entry. Only `restart` — a new PTY generation — clears one. */
   private removed = new Set<string>();
   private claimants = new Map<string, Set<CompletionClaimant>>();
   private awaits = new Map<string, AwaitGroup>();
@@ -778,7 +778,8 @@ export class AlertManager {
 
   notifyFromProtocol(id: string, notification: ActivityNotification): void {
     if (this.inert(id)) return;
-    const entry = this.reportedEntry(id);
+    const entry = this.streamEntry(id);
+    if (!entry) return;
     const normalized = normalizeActivityNotification(notification);
     if (!normalized) return;
 
@@ -788,7 +789,8 @@ export class AlertManager {
   /** `OSC 9;4`: active updates move the cycle; its end is a report completion. */
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
     if (this.inert(id)) return;
-    const entry = this.reportedEntry(id);
+    const entry = this.streamEntry(id);
+    if (!entry) return;
     const { progress: live } = entry;
 
     if (progress.state === 'clear' || progress.state === 'error' || (progress.state === 'normal' && progress.percent === 100)) {
@@ -852,7 +854,8 @@ export class AlertManager {
 
   applyTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
     if (events.length === 0) return;
-    const entry = this.reportedEntry(id);
+    const entry = this.streamEntry(id);
+    if (!entry) return;
     let changed = false;
 
     for (const event of events) {
@@ -1193,13 +1196,15 @@ export class AlertManager {
 
   toggleTodo(id: string): void {
     if (this.inert(id)) return;
-    const entry = this.getOrCreateEntry(id);
+    const entry = this.streamEntry(id);
+    if (!entry) return;
     this.setTodoForUser(id, entry, !entry.todo);
   }
 
   clearTodo(id: string): void {
     if (this.inert(id)) return;
-    this.setTodoForUser(id, this.getOrCreateEntry(id), false);
+    const entry = this.streamEntry(id);
+    if (entry) this.setTodoForUser(id, entry, false);
   }
 
   /** A TODO verb: the ring goes, on keeps the ring's detail, and off drops the
@@ -1338,24 +1343,14 @@ export class AlertManager {
   // --- Internals ---
 
   /**
-   * The entry a raw-output event should feed, or `null` if the Session was
-   * removed and nothing has claimed the id since. Such an event may still be a
-   * live Session's first, so the entry is created on demand — but a retired one
-   * must not be rebuilt by bytes that were already on their way when the pane
-   * was killed (see `removed`).
+   * The entry an event or control should feed, or `null` if the Session was
+   * removed and no new generation has claimed the id since. Such an event may
+   * still be a live Session's first, so the entry is created on demand — but a
+   * retired one must not be rebuilt by what was already on its way when the
+   * pane was killed (see `removed`).
    */
   private streamEntry(id: string): AlertEntry | null {
     if (this.removed.has(id)) return null;
-    return this.getOrCreateEntry(id);
-  }
-
-  /**
-   * The entry a semantic or protocol event should feed. Unlike raw output, one
-   * of these is evidence that a live Session owns the id — including a
-   * replacement pane that reused it — so it retires the tombstone.
-   */
-  private reportedEntry(id: string): AlertEntry {
-    this.removed.delete(id);
     return this.getOrCreateEntry(id);
   }
 

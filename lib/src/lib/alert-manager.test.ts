@@ -2039,8 +2039,18 @@ describe('AlertManager in isolation', () => {
       press(manager, id);
       expect(manager.getState(id)).toEqual(DEFAULT_ALERT_STATE);
 
-      // A replacement pane may reuse the id; its first reported command is the
-      // evidence that somebody is home, and the rule set applies immediately.
+      // What a program prints as SIGHUP kills it — a title reset, a progress
+      // clear, a bell — is the dying generation's too, as is a TODO control
+      // racing the kill.
+      manager.applyTerminalSemanticEvents(id, [{ type: 'title', title: 'bye' }]);
+      manager.notifyFromProtocol(id, REPORT);
+      manager.updateProtocolProgress(id, { state: 'normal', percent: 50 });
+      manager.toggleTodo(id);
+      expect(manager.getState(id)).toEqual(DEFAULT_ALERT_STATE);
+
+      // A replacement pane reusing the id is a new generation, and the rule
+      // set applies to it immediately.
+      manager.restart(id);
       runWatchedCommand(id);
       expect(manager.getState(id).watchingEnabled).toBe(true);
     });
