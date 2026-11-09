@@ -24,7 +24,7 @@ The October 2026 audit read tend 0.3.5's `claude/action.yaml`, `restore-sensitiv
 
 **Watching is not a permission change.** `notifications` is already in the PAT scopes, and watching reads rather than writes. What sits in the prompt instead of the trigger is the notifications skill, which says to respond on an existing thread only when the activity addresses the bot, while a new issue or PR from an external author may be triaged or reviewed outright.
 
-**Why the inert `anthropic_api_key` input is handled by enforcement, not deletion.** The input is upstream-generated and cannot be removed locally without being overwritten by the next nightly regen. The moment anyone adds an `ANTHROPIC_API_KEY` secret for an unrelated reason, eight bot-triggered workflows would start reading it with no code change and no review.
+**Why the inert `anthropic_api_key` input is handled by enforcement, not deletion.** The input is upstream-generated and cannot be removed locally without being overwritten by the next nightly regen. The moment anyone adds an `ANTHROPIC_API_KEY` secret for an unrelated reason, every tend workflow that passes the input would start reading it with no code change and no review.
 
 **The org secrets that no longer need accepting.** `BUILDCACHE_USER` and `NEXUS_USER` were org-wide shares — visible to every `diffplug` repository, not grants made to this one — and were previously accepted on the grounds that they are usernames rather than the paired credentials. They have since been narrowed to `selected` visibility over the repositories that actually consume them, which excludes this one, so the acceptance no longer has to be made. Every `diffplug` org secret is now `selected`, and none lists `diffplug/dormouse`.
 
