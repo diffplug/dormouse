@@ -723,6 +723,12 @@ describe('terminal-registry alert behavior', () => {
     restoreBrowserSurfaceTodo({ id: browserId, surfaceType: 'browser', alert: { status: 'WATCHING_DISABLED', todo: true } });
     expect(getActivity(browserId).todo).toBe(true);
 
+    // A record without the TODO clears a stale one (a Workspace returning to a
+    // window that still holds its old entry).
+    restoreBrowserSurfaceTodo({ id: browserId, surfaceType: 'browser', alert: null });
+    expect(getActivity(browserId).todo).toBe(false);
+    restoreBrowserSurfaceTodo({ id: browserId, surfaceType: 'browser', alert: { status: 'WATCHING_DISABLED', todo: true } });
+
     // Killing/replacing the pane clears the local surface activity entirely.
     clearLocalSurfaceActivity(browserId);
     expect(getActivity(browserId).todo).toBe(false);
