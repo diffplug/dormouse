@@ -206,7 +206,7 @@ stateDiagram-v2
     [*] --> Quiet
     Quiet --> Candidate: output
     Candidate --> Candidate: output within the candidate gap
-    Candidate --> MIGHT_BE_BUSY: output spanning the candidate gap
+    Candidate --> MIGHT_BE_BUSY: a second chunk, once the candidate gap has passed
     Candidate --> Quiet: candidate history expires, or reset
     MIGHT_BE_BUSY --> BUSY: output
     MIGHT_BE_BUSY --> Candidate: no output for the confirm gap, the last chunk a new candidate
