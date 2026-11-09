@@ -65,11 +65,10 @@ test("style-src keeps 'unsafe-inline' in a packaged build", () => {
     .map((part) => part.trim().split(/\s+/))
     .find((parts) => parts[0] === 'style-src');
   assert.ok(styleSrc.includes("'unsafe-inline'"));
-  const exempt = conf.app.security.dangerousDisableAssetCspModification;
-  assert.ok(
-    exempt === true || (Array.isArray(exempt) && exempt.includes('style-src')),
-    'Tauri may not add a nonce to style-src',
-  );
+  // Named, never `true`: that would also drop the nonces Tauri adds to
+  // `script-src`, which carries no `'unsafe-inline'` and relies on them.
+  assert.deepEqual(conf.app.security.dangerousDisableAssetCspModification, ['style-src'],
+    'Tauri may not add a nonce to style-src, and must keep rewriting every other directive');
 });
 
 test('localhost stays allowed for dev and the loopback proxies', () => {
