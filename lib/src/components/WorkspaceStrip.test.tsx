@@ -655,7 +655,7 @@ describe('WorkspaceStrip', () => {
     expect(getWorkspaceUiSnapshot().renamingId).toBe(first);
   });
 
-  it('does not accept a pending kill during transfer and releases its keyboard lease on departure', async () => {
+  it('does not accept a pending confirmation during transfer and releases its keyboard lease on departure', async () => {
     createWorkspace({ id: 'workspace:2' });
     const closeAll = vi.fn(async () => null);
     stubHandle('workspace:2', { needsCloseConfirmation: () => true, closeAll });
