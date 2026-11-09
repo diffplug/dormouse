@@ -110,6 +110,18 @@ describe('PTY manager lifetime and buffers', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('answers a pending request at once when the child exits before replying', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, child } = await startManager();
+      let shells: unknown;
+      void manager.getAvailableShells().then((answer) => { shells = answer; });
+      child.emit('exit', 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shells).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('forwards a Burrow repaint to the PTY child that owns all size writers', async () => {
     const { manager, child } = await startManager();
     manager.resize('pane-a', 80, 24, true);

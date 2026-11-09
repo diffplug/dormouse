@@ -392,23 +392,35 @@ export interface ShellEntry {
 
 let shellsCache: Promise<ShellEntry[]> | null = null;
 
-/** One correlated round trip to the PTY host child; rejects on timeout. */
+/**
+ * One correlated round trip to the PTY host child; rejects on timeout, or as
+ * soon as the child exits, since an exited child can never answer.
+ */
 function requestChild<T>(message: Record<string, unknown>, matches: (msg: any) => boolean, timeoutMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
     // Fork the child before attaching the listener: on the cold path `child`
     // is null until then and the handler would never be registered.
-    ensureChild(extensionPath_);
+    const target = ensureChild(extensionPath_);
+    const stopListening = () => {
+      clearTimeout(timeout);
+      target.off('message', handler);
+      target.off('exit', onExit);
+    };
     const timeout = setTimeout(() => {
-      child?.off('message', handler);
+      stopListening();
       reject(new Error('PTY host request timed out'));
     }, timeoutMs);
     const handler = (msg: any) => {
       if (!matches(msg)) return;
-      clearTimeout(timeout);
-      child?.off('message', handler);
+      stopListening();
       resolve(msg);
     };
-    child?.on('message', handler);
+    const onExit = () => {
+      stopListening();
+      reject(new Error('PTY host exited'));
+    };
+    target.on('message', handler);
+    target.on('exit', onExit);
     sendToChild(message);
   });
 }
