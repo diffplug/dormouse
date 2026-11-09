@@ -1418,7 +1418,6 @@ describe('AlertManager in isolation', () => {
       expect(seen).toEqual([{
         kind: 'commandFinished',
         displayCommand: 'npm test',
-        watchKey: 'npm test',
         exitCode: 0,
         seen: true,
       }]);
@@ -1441,7 +1440,6 @@ describe('AlertManager in isolation', () => {
       expect(seen).toEqual([{
         kind: 'commandFinished',
         displayCommand: 'pnpm build',
-        watchKey: 'pnpm build',
         exitCode: 0,
         seen: true,
       }]);
@@ -1554,7 +1552,6 @@ describe('AlertManager in isolation', () => {
         event: {
           kind: 'commandFinished',
           displayCommand: 'pnpm build',
-          watchKey: 'pnpm build',
           exitCode: 1,
           seen: true,
         },

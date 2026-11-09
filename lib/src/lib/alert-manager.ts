@@ -7,7 +7,6 @@ import {
   resolveCommandStart,
   watchRuleFor,
   DEFAULT_COMMAND_TITLE,
-  type CommandRunSource,
   type TerminalSemanticEvent,
 } from './terminal-state';
 
@@ -165,7 +164,6 @@ interface CommandExitWatch {
   displayCommand: string;
   /** `commandWatchKey` of the command line; null without one to key on. */
   watchKey: string | null;
-  source: CommandRunSource;
   /** Engaged at its start, or engaged or acknowledged since: its exit may ring. */
   seen: boolean;
 }
@@ -209,7 +207,6 @@ export type CompletionEvent =
   | {
       kind: 'commandFinished';
       displayCommand: string;
-      watchKey: string | null;
       exitCode: number | undefined;
       /** The run was seen: engaged at its start, or engaged or acknowledged since. */
       seen: boolean;
@@ -902,7 +899,6 @@ export class AlertManager {
     entry.commandExitWatch = {
       displayCommand: resolved.displayCommand,
       watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
-      source: resolved.source,
       seen: this.isEngaged(id),
     };
     this.eachWaiter(id, (waiter) => waiter.onCommandStart());
@@ -925,7 +921,6 @@ export class AlertManager {
       this.dispatchCompletion(id, entry, {
         kind: 'commandFinished',
         displayCommand: watch.displayCommand,
-        watchKey: watch.watchKey,
         exitCode,
         seen: watch.seen,
       });

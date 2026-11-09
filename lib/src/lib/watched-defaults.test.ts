@@ -16,7 +16,7 @@ afterEach(() => { vi.unstubAllGlobals(); });
 describe('fresh watch preferences', () => {
   it('seeds absent preferences from the agent registry', async () => {
     const store = await import('./watched-commands');
-    expect(store.getWatchedCommands()).toEqual(DEFAULT_WATCHED_COMMANDS);
+    expect(store.getWatchedCommandsSnapshot()).toEqual(DEFAULT_WATCHED_COMMANDS);
   });
 
   it.each([
@@ -28,20 +28,20 @@ describe('fresh watch preferences', () => {
   ])('preserves saved preferences: %s', async (raw, expected) => {
     localStorage.setItem(KEY, raw);
     const store = await import('./watched-commands');
-    expect(store.getWatchedCommands()).toEqual(expected);
+    expect(store.getWatchedCommandsSnapshot()).toEqual(expected);
   });
 
   it('persists removing every default through a reload', async () => {
     const store = await import('./watched-commands');
     for (const command of DEFAULT_WATCHED_COMMANDS) store.setCommandWatched(command, false);
     vi.resetModules();
-    expect((await import('./watched-commands')).getWatchedCommands()).toEqual([]);
+    expect((await import('./watched-commands')).getWatchedCommandsSnapshot()).toEqual([]);
   });
 
   it('replaces fresh defaults with the authoritative host preferences', async () => {
     const store = await import('./watched-commands');
     store.applyWatchedCommandsFromHost(['npm test']);
     vi.resetModules();
-    expect((await import('./watched-commands')).getWatchedCommands()).toEqual(['npm test']);
+    expect((await import('./watched-commands')).getWatchedCommandsSnapshot()).toEqual(['npm test']);
   });
 });

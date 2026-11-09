@@ -55,10 +55,6 @@ function replaceWatched(next: string[]): void {
   saveJson(STORAGE_KEY, watched);
 }
 
-export function getWatchedCommands(): string[] {
-  return watched;
-}
-
 /** Stable-identity snapshot for `useSyncExternalStore`. */
 export function getWatchedCommandsSnapshot(): string[] {
   return watched;
