@@ -465,7 +465,7 @@ describe('doored leaves', () => {
     expect(store.getSnapshot().parked.size).toBe(0);
 
     store.doorLeaf('b', { park: true });
-    store.insertLeaf('b', leafMeta(), { kind: 'edge', leafId: 'a', edge: 'bottom', path: [] });
+    store.insertLeaf('b', leafMeta(), { kind: 'edge', edge: 'bottom', path: [] });
     expect(store.getSnapshot().parked.size).toBe(0);
 
     store.doorLeaf('b', { park: true });

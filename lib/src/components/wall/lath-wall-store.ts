@@ -73,7 +73,7 @@ export type LathWallStore = {
   addLeaf(id: LeafId, meta: LeafMeta, position: AddLeafPosition): { ok: boolean };
 
   /** Remove `id` and delete its meta. On success returns the core `RestoreToken`
-   *  for the caller to persist on the resulting Door. Destroys the leaf's meta —
+   *  `remove` produced. Destroys the leaf's meta —
    *  use `doorLeaf` to detach one that lives on as a Door. */
   removeLeaf(id: LeafId): { ok: boolean; token: RestoreToken | null };
 
