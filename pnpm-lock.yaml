@@ -164,7 +164,7 @@ settings:
 
 overrides:
   mermaid@11>katex@<0.18.2: 0.19.1
-  archiver-utils>glob@<14.0.2: 14.0.3
+  archiver-utils>glob@<14.0.2: 14.0.4
   node-pg-migrate>glob@<14.0.2: 14.0.3
   '@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2': 14.0.4
   '@vscode/vsce>minimatch@<11.0.1': 11.0.5
@@ -10700,7 +10700,7 @@ snapshots:
 
   archiver-utils@5.0.2:
     dependencies:
-      glob: 14.0.3
+      glob: 14.0.4
       graceful-fs: 4.2.11
       is-stream: 2.0.1
       lazystream: 1.0.1
