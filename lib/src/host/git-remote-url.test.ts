@@ -68,6 +68,8 @@ describe('canonicalRemoteUrl', () => {
       'https://github.com',             // host only, no repo
       'https://github.com/',
       'ftp://host/o/r',                 // not a scheme git addresses a host with
+      'C:\\Users\\me\\repo',            // a Windows drive path, which git reads as local
+      'D:repo',                         // drive-relative, ditto
     ]) {
       expect(canonicalRemoteUrl(raw), JSON.stringify(raw)).toBeNull();
     }
