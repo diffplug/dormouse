@@ -490,7 +490,7 @@ describe('LathHost — pane props contract', () => {
     expect(tabProps['a']).toMatchObject({ id: 'a', title: 'A' });
   });
 
-  it('does not re-render leaf content on a geometry-only frame', () => {
+  it.each([false, true])('does not re-render leaf content on a geometry-only frame (StrictMode: %s)', (strict) => {
     // A resize commit changes the tree geometry but no leaf's meta, so the memoized
     // LathLeafContent (header + body) must not re-render — only the positioned wrapper.
     const bodyRenders: Record<string, number> = {};
@@ -505,16 +505,15 @@ describe('LathHost — pane props contract', () => {
     };
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const engine = createLathWallEngine(store, { durationMs: 0 });
-    act(() => {
-      root.render(
-        <LathHost
-          lath={engine}
-          onCommitResize={vi.fn()}
-          onLeafFocused={vi.fn()}
-          componentsOverride={{ bodies: { terminal: CountingBody }, tabs: { terminal: CountingTab } }}
-        />,
-      );
-    });
+    const host = (
+      <LathHost
+        lath={engine}
+        onCommitResize={vi.fn()}
+        onLeafFocused={vi.fn()}
+        componentsOverride={{ bodies: { terminal: CountingBody }, tabs: { terminal: CountingTab } }}
+      />
+    );
+    act(() => { root.render(strict ? <StrictMode>{host}</StrictMode> : host); });
     const before = { ba: bodyRenders['a'], bb: bodyRenders['b'], ta: tabRenders['a'], tb: tabRenders['b'] };
 
     act(() => store.resizeBoundary([], 0, 40)); // geometry-only: weights change, meta does not
