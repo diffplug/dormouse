@@ -149,15 +149,19 @@ function fakePlatform(
   opts: { answer?: boolean; marks?: Record<string, number>; stamp?: boolean; beforeReplay?: () => void } = {},
 ): PlatformAdapter {
   const platform = new FakePtyAdapter();
-  let listHandler: ((detail: { ptys: PtyInfo[]; requestId?: string }) => void) | null = null;
-  let replayHandler: ((detail: { id: string; data: string; requestId?: string }) => void) | null = null;
-  vi.spyOn(platform, "onPtyList").mockImplementation((handler) => { listHandler = handler; });
-  vi.spyOn(platform, "offPtyList").mockImplementation(() => { listHandler = null; });
-  vi.spyOn(platform, "onPtyReplay").mockImplementation((handler) => { replayHandler = handler; });
-  vi.spyOn(platform, "offPtyReplay").mockImplementation(() => { replayHandler = null; });
+  // Fanned out to every subscriber, as `TauriAdapter` does: one slot would let
+  // a second collector silently unsubscribe the first.
+  const listHandlers = new Set<(detail: { ptys: PtyInfo[]; requestId?: string }) => void>();
+  const replayHandlers = new Set<(detail: { id: string; data: string; requestId?: string }) => void>();
+  const listHandler = (detail: { ptys: PtyInfo[]; requestId?: string }) => { for (const handler of [...listHandlers]) handler(detail); };
+  const replayHandler = (detail: { id: string; data: string; requestId?: string }) => { for (const handler of [...replayHandlers]) handler(detail); };
+  vi.spyOn(platform, "onPtyList").mockImplementation((handler) => { listHandlers.add(handler); });
+  vi.spyOn(platform, "offPtyList").mockImplementation((handler) => { listHandlers.delete(handler); });
+  vi.spyOn(platform, "onPtyReplay").mockImplementation((handler) => { replayHandlers.add(handler); });
+  vi.spyOn(platform, "offPtyReplay").mockImplementation((handler) => { replayHandlers.delete(handler); });
   // What Rust routes to this window unasked: a hand-back's since-mark replay.
-  deliverReplay = (detail) => replayHandler?.(detail);
-  deliverList = (detail) => listHandler?.(detail);
+  deliverReplay = replayHandler;
+  deliverList = listHandler;
   let markedHandler: ((detail: { id: string; mark: number; requestId?: string }) => void) | null = null;
   (platform as unknown as { onPtyMarked: unknown }).onPtyMarked = (handler: typeof markedHandler) => {
     markedHandler = handler;
@@ -194,12 +198,12 @@ function fakePlatform(
       // The host echoes the collector's own token, and lists exactly this
       // arrival's ids: two arrivals at once must not finish on each other's.
       const requestId = (args as { requestId?: string } | undefined)?.requestId;
-      listHandler?.({
+      listHandler({
         ptys: arrival.terminalIds.map((id) => ({ id, alive: true }) as PtyInfo),
         requestId,
       });
       for (const id of arrival.terminalIds) {
-        replayHandler?.({ id, data: `scrollback:${id}`, requestId });
+        replayHandler({ id, data: `scrollback:${id}`, requestId });
       }
     }
     return undefined;
@@ -676,6 +680,50 @@ describe("the target half", () => {
     await settle();
 
     expect(getWorkspacesSnapshot().workspaces.filter((w) => w.id === WORKSPACE_ID)).toHaveLength(1);
+  });
+
+  it("never adopts an arrival again from a drain that started before it settled", async () => {
+    // Two Workspaces queued for one window, and a nudge while the first is
+    // still resuming. A second loop over its own copy of the queue would adopt
+    // the quick one; the first loop, reaching its now stale copy, would adopt
+    // it again, be refused, and discard the Workspace that had mounted.
+    vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      const platform = fakePlatform();
+      const host = mocks.invoke.getMockImplementation()!;
+      let answerSlow!: () => void;
+      const slowAnswered = new Promise<void>((resolve) => { answerSlow = resolve; });
+      mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        const id = (args as { workspaceId?: string } | undefined)?.workspaceId;
+        if (cmd === "adopt_ready" && id === "ws-slow") await slowAnswered;
+        if (cmd.startsWith("adopt_")) order.push(`${cmd}:${id}`);
+        return host(cmd, args);
+      });
+      const arrival = (id: string, pane: string): WorkspaceTransferPayload => payload({
+        workspaceId: id,
+        workspace: { ...payload().workspace, id, session: { version: 4, panes: [{ id: pane, title: pane, cwd: "/tmp", untouched: false, alert: null }] } },
+        terminalIds: [pane],
+        allIds: [pane],
+      });
+      arrivals = [arrival("ws-slow", "pane-slow"), arrival("ws-fast", "pane-fast")];
+
+      initWorkspaceMoves(platform);
+      await vi.advanceTimersByTimeAsync(0);
+      const calls = mocks.listen.mock.calls as unknown as Array<[string, (e: { payload: unknown }) => void]>;
+      calls.find(([name]) => name === "dormouse://workspace-arriving")![1]({ payload: undefined });
+      await vi.advanceTimersByTimeAsync(10);
+      answerSlow();
+      // Past the collector's timeout, which is how long a refused re-adoption
+      // takes to discard what it finds mounted.
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(order.filter((entry) => entry.endsWith(":ws-fast"))).toEqual(["adopt_ready:ws-fast", "adopt_done:ws-fast"]);
+      expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toEqual(expect.arrayContaining(["ws-slow", "ws-fast"]));
+      expect(getTerminalInstance("pane-fast")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lands at the slot the payload names, ahead of the pointer's", async () => {

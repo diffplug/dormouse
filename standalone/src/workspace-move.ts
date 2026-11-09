@@ -383,14 +383,6 @@ function acceptHandBackReplay(workspaceId: WorkspaceId, ids: readonly string[]):
 // --- Target ------------------------------------------------------------------
 
 /**
- * Workspaces this Window is mounting right now. `take_arrivals` answers with
- * every record still in flight — the boot drain and the listener drain overlap
- * by design — so the same payload can be handed over twice before `adopt_done`
- * has retired it.
- */
-const adopting = new Set<WorkspaceId>();
-
-/**
  * Resume the arriving Workspace's Sessions and build the plan its Wall mounts
  * from. `adopt_ready` is the hop that removes the "arrived before armed" bug
  * class: the host does not list or replay anything until the collector below is
@@ -472,17 +464,18 @@ function discardArrival(payload: MovePayload): void {
   forgetWorkspaceBootPlan(payload.workspaceId);
 }
 
-/** Settle one arrival with Rust, whichever way it went. */
-function settle(command: "adopt_done" | "adopt_failed", workspaceId: WorkspaceId, reason?: string): void {
-  void invoke(command, { workspaceId, ...(reason === undefined ? {} : { reason }) }).catch((err) =>
-    console.error(`[workspace-move] ${command} failed`, err));
+/**
+ * Tell Rust an arrival failed here. Resolves once the record is retired, which
+ * is what lets the next `take_arrivals` leave it out; never rejects.
+ */
+function settleFailed(workspaceId: WorkspaceId, reason: string): Promise<void> {
+  return invoke<void>("adopt_failed", { workspaceId, reason }).catch((err) =>
+    console.error("[workspace-move] adopt_failed failed", err));
 }
 
 /** Mount an arriving Workspace, then release its source. */
 async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): Promise<void> {
   const { id, session } = payload.workspace;
-  if (adopting.has(id)) return;
-  adopting.add(id);
   try {
     const plan = await planArrival(platform, payload);
     // Before `createWorkspace`, which mounts the Wall that reads it.
@@ -517,12 +510,9 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
   } catch (err) {
     console.error("[workspace-move] adoption failed; handing the Workspace back", err);
     discardArrival(payload);
-    settle("adopt_failed", id, reasonOf(err));
-  } finally {
-    adopting.delete(id);
+    await settleFailed(id, reasonOf(err));
   }
 }
-
 
 /**
  * Every Workspace Rust is still holding for this window.
@@ -530,8 +520,8 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
  * Drained rather than pushed: an `emit_to` a window with no listener yet is
  * lost, and a window still booting — or torn out moments ago — is a legal drop
  * target (`docs/specs/standalone.md` → "Arrival queue"). The answer is not
- * consumed by the drain, so `adopting` is what keeps one from being mounted
- * twice.
+ * consumed by the drain: a record leaves it only at `adopt_done` or
+ * `adopt_failed`, so a list is current only until the next adoption settles.
  */
 async function drainArrivals(): Promise<MovePayload[]> {
   try {
@@ -545,8 +535,27 @@ async function drainArrivals(): Promise<MovePayload[]> {
 /** Listen for Workspaces arriving in, and leaving, this window. */
 export function initWorkspaceMoves(platform: PlatformAdapter): void {
   movePlatform = platform;
+  // One drain at a time, each pass over a fresh `take_arrivals`. A nudge that
+  // lands mid-pass asks for another pass rather than starting a second loop:
+  // two loops each walk their own copy of the queue, and the slower one would
+  // adopt again, from its stale copy, a Workspace the other had already
+  // settled, then discard the mounted Workspace when Rust refused it.
+  let draining = false;
+  let nudged = false;
   const adoptQueued = async () => {
-    for (const payload of await drainArrivals()) await adoptWorkspace(platform, payload);
+    if (draining) {
+      nudged = true;
+      return;
+    }
+    draining = true;
+    try {
+      do {
+        nudged = false;
+        for (const payload of await drainArrivals()) await adoptWorkspace(platform, payload);
+      } while (nudged);
+    } finally {
+      draining = false;
+    }
   };
   void listenToWindow("dormouse://workspace-arriving", () => {
     void adoptQueued();
@@ -579,7 +588,6 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   const [first, ...rest] = await drainArrivals();
   if (!first?.workspace) return null;
   const { id, session } = first.workspace;
-  adopting.add(id);
   let plan: WallBootPlans[string];
   try {
     plan = await planArrival(platform, first);
@@ -589,8 +597,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
     // the queue is left for `initWorkspaceMoves` to drain over it.
     console.error("[workspace-move] the torn-out Workspace could not be resumed", err);
     discardArrival(first);
-    settle("adopt_failed", id, reasonOf(err));
-    adopting.delete(id);
+    await settleFailed(id, reasonOf(err));
     return null;
   }
   try {
@@ -598,7 +605,6 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   } catch (err) {
     console.error("[workspace-move] torn-out adoption refused; starting fresh", err);
     discardArrival(first);
-    adopting.delete(id);
     return null;
   }
   // Nothing on disk yet: this window's first aggregator flush writes its
@@ -606,7 +612,6 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   // plan, so a refused arrival leaves no half-installed Window behind.
   installWindowPersistence(platform, { version: PERSISTED_WINDOW_VERSION, workspaces: [workspaceRecord(first.workspace, session)], activeWorkspaceId: id });
   publishWorkspaceSession(id, session);
-  adopting.delete(id);
   // A second Workspace dropped on this window between the tear-out and this
   // drain rides in the same queue.
   for (const payload of rest) await adoptWorkspace(platform, payload);
@@ -617,5 +622,4 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
 export function _resetWorkspaceMovesForTesting(): void {
   for (const id of inFlight.keys()) setWorkspaceTransferPending(id, false);
   inFlight.clear();
-  adopting.clear();
 }
