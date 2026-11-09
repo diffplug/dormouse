@@ -499,6 +499,9 @@ export function resumeTerminal(
   if (isDead) {
     entry.terminal.write(`\r\n[Process exited with code ${exitInfo.exitCode ?? -1}]\r\n`);
     entry.exited = true;
+    // As a live exit does: an exited buffer can replay a command start its
+    // process never finished, and that command must not read as running.
+    applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: exitInfo.exitCode ?? -1 }]);
   }
   const savedTitle = exitInfo?.title?.trim();
   if (savedTitle && savedTitle !== UNNAMED_PANEL_TITLE) {

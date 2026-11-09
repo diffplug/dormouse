@@ -56,6 +56,7 @@ import { doPaste, pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
 import { commandWatchKey } from './terminal-state';
 import { REPLAY_MODE_RESET } from './terminal-report-filter';
+import { parseReplay } from './platform/replay-parse';
 import { cfg } from '../cfg';
 import { TerminalWebglRenderer } from './terminal-webgl';
 import { parkElement } from './terminal-lifecycle';
@@ -1408,6 +1409,19 @@ describe('resume replay mode-reset tail', () => {
     const exitAt = entry.terminal.writes.indexOf('\r\n[Process exited with code 7]\r\n');
     expect(resetAt).toBeGreaterThanOrEqual(0);
     expect(exitAt).toBeGreaterThan(resetAt);
+  });
+
+  it('finishes the command a DEAD session\'s replay left running, as a live exit does', () => {
+    // What a host adapter does with an exited buffer before the resume: the
+    // shell ran `exit`, so the replay starts a command that nothing finishes.
+    const id = 'resume-dead-running';
+    const visible = parseReplay(id, '\x1b]633;A\x07$ \x1b]633;B\x07exit\r\n\x1b]633;E;exit\x07\x1b]633;C\x07');
+    expect(countRunningSessions()).toBe(1);
+
+    resumeTerminal(id, visible, { alive: false, exitCode: 0 });
+
+    expect(getTerminalPaneState(id).currentCommand).toBeNull();
+    expect(countRunningSessions()).toBe(0);
   });
 
   it('a live PTY exit emits the reset tail before the exit line, as a dead replay does', async () => {
