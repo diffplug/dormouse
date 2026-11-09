@@ -149,8 +149,8 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data`, `terminal:semanticEvents`, `terminal:toolEvents` | `data.id` | the window showing it; after the mark, dropped until its replay, which carries the bytes and from which the receiving window re-derives the events (rationale) |
-| `pty:exit` | `data.id` | the window showing it, never suppressed |
+| `pty:data`, `terminal:semanticEvents`, `terminal:toolEvents`, `terminal:clipboardOffer` | `data.id` | the window showing it; after the mark, dropped until its replay, from whose bytes the receiving window re-derives the events (rationale) |
+| `pty:exit`, `terminal:clientInput` | `data.id` | the window showing it, never suppressed; id-less input dropped |
 | `pty:replay` | `data.forWindow`, then `data.id` | the requesting window, including exited buffers; without an address, its owner; never suppressed |
 | `pty:marked` | `data.id` | the window showing it; the id then falls silent until its replay |
 | `pty:list` | `data.forWindow` | the window that asked |
