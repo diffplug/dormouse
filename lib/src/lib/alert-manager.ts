@@ -417,8 +417,8 @@ export class AlertManager {
 
   /**
    * Replace the set of command keys WATCHING applies to (`docs/specs/alert.md`).
-   * Pushed from the renderer, which owns the persisted copy — the extension host
-   * has no `localStorage` of its own.
+   * Pushed from the renderer, which owns the persisted copy — neither host
+   * process has `localStorage` of its own.
    */
   setWatchedCommands(names: string[]): void {
     const next = new Set(names);

@@ -172,7 +172,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
   });
 
-  it('reproduces the exact user scenario: alert set, 5s task, collapse after 2s, wait 60s', () => {
+  it('rings for a watched 5s task once it has gone quiet', () => {
     const id = 'user-scenario';
 
     runWatchedCommand(id);
@@ -249,8 +249,6 @@ describe('AlertManager in isolation', () => {
   });
 
   // --- Boolean TODO tests ---
-  // (The previous soft-TODO bucket tests — 4-keypress letter-striking, per-letter
-  //  recovery timers — were removed when TODO was simplified to a plain boolean.)
 
   /** Register a claimant that records every event it is offered and answers `claims`. */
   function recordingClaimant(id: string, claims: boolean): CompletionEvent[] {
@@ -435,7 +433,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).todo).toBe(false);
   });
 
-  it('protocol notifications ring and create TODO detail even when WATCHING is disabled', () => {
+  it('protocol notifications ring even when WATCHING is disabled, and a dismiss keeps their detail on the TODO', () => {
     const id = 'osc-notification';
 
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
@@ -461,7 +459,7 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('terminal bell notifications ring and create TODO detail even when WATCHING is disabled', () => {
+  it('terminal bell notifications ring with their detail even when WATCHING is disabled', () => {
     const id = 'terminal-bell';
 
     applyTerminalEvents(manager, id, [

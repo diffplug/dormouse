@@ -11,10 +11,11 @@ import { getRunningCommandWatchKey } from './terminal-state-store';
  * command, not of a Session — enabling it while `claude` runs enables it for
  * every Session running `claude`, now and later. See `docs/specs/alert.md`.
  *
- * This renderer-side copy drives the UI and persists to `localStorage`. In
- * VS Code it is a mirror of the extension host's authoritative copy: the first
- * renderer seeds the host, mutations are sent as individual command deltas,
- * and the host broadcasts its canonical snapshot to every webview.
+ * This renderer-side copy drives the UI and persists to `localStorage`. It is
+ * a mirror of the host's authoritative copy (the sidecar's or the extension
+ * host's): the first renderer seeds the host, mutations are sent as individual
+ * command deltas, and the host broadcasts its canonical snapshot to every
+ * webview.
  */
 const STORAGE_KEY = 'dormouse:watched-commands';
 
