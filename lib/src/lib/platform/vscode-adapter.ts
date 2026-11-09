@@ -276,13 +276,9 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.alerts.dispose();
   }
 
+  /** The extension host owns shell selection here; the webview never lists shells. */
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
-    const result = await this.requestResponse(
-      'pty:getShells', 'pty:shells', {},
-      (msg) => msg.shells as { name: string; path: string; args?: string[] }[],
-      5000,
-    );
-    return result ?? [];
+    return [];
   }
 
   async terminalContext(request: TerminalContextRequest): Promise<TerminalContextInfo> {

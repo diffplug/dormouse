@@ -38,7 +38,7 @@
     "innerdogfood": "pnpm --filter dormouse-standalone innerdogfood",
     "dev:relay": "pnpm --filter dormouse-lib build:pocket && pnpm --filter relay dev",
     "dev:website": "pnpm --filter dormouse-website dev",
-    "build:vscode": "pnpm --filter dormouse-lib build && pnpm --filter dormouse build:frontend && pnpm --filter dormouse build",
+    "build:vscode": "pnpm --filter dormouse-lib typecheck && pnpm --filter dormouse build:frontend && pnpm --filter dormouse build",
     "build:standalone": "pnpm --filter dormouse-standalone tauri build",
     "build:website": "pnpm --filter dormouse-website build",
     "dogfood:vscode": "pnpm run build:vscode && pnpm --filter dormouse dogfood",

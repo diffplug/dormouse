@@ -93,7 +93,7 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 | Any waiting state | Another collection's answer | Ignore |
 | Complete | Late answer | No effect |
 
-**Must keep collection tokens unique across webview reloads.** A host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it (rationale). **Must accept an answer carrying no token** for hosts with one collector per JS realm (VS Code, Pocket, website). **Never interpret `timedOut` as an accepted empty list**: the host may still hold live shells.
+**Must keep collection tokens unique across webview reloads.** A host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it (rationale). **Must accept an answer carrying no token** for hosts with one collector per JS realm (VS Code, Pocket). **Never interpret `timedOut` as an accepted empty list**: the host may still hold live shells.
 
 Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
 

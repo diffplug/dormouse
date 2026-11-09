@@ -44,7 +44,7 @@ import { log } from './log';
 import { configureManagedVoice, handleVoiceCommand } from './managed-voice';
 import type { WebviewChannel } from './webview-messaging';
 
-const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
+const clipboardOps = require('../../standalone/sidecar/clipboard-ops.js') as {
   readClipboardFilePaths(): Promise<string[]>;
   readClipboardImageAsFilePath(): Promise<string | null>;
 };
@@ -623,13 +623,6 @@ export function attachRouter(
       case 'pty:getOpenPortsMany':
         ptyManager.getOpenPortsMany(msg.ids).then((ports) => {
           post({ type: 'pty:openPortsMany', ports, requestId: msg.requestId } satisfies ExtensionMessage);
-        });
-        break;
-      case 'pty:getShells':
-        ptyManager.getAvailableShells().then((shells) => {
-          post({
-            type: 'pty:shells', shells, requestId: msg.requestId,
-          } satisfies ExtensionMessage);
         });
         break;
       case 'surface:reserveIds':

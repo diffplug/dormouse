@@ -1569,8 +1569,7 @@ fn pty_get_cwd(
 }
 
 /// Every id's cwd in one sidecar round trip. A save probes each terminal pane,
-/// and the sidecar resolves them with a synchronous process scan on its only
-/// event loop, so N panes must cost one scan rather than N
+/// and the sidecar resolves N pids with one process scan rather than N spawns
 /// (docs/specs/transport.md -> "Persisted session").
 #[tauri::command(async)]
 fn pty_get_cwds(
@@ -1628,8 +1627,7 @@ fn pty_get_open_ports(
 
 /// Every id's listening ports in one sidecar round trip, for a listing that spans
 /// terminals (`dor list --ports`, and `--all` across every Workspace). The
-/// sidecar resolves them with synchronous process scans on its only event loop,
-/// so N terminals must cost one scan rather than N.
+/// sidecar resolves them in one pass, so N terminals cost one scan rather than N.
 #[tauri::command(async)]
 fn pty_get_open_ports_many(
     state: tauri::State<'_, SidecarState>,
