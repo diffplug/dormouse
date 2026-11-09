@@ -42,7 +42,7 @@ Each page POST is its own connection, so two can arrive out of order. In a live 
 
 ## Editing files
 
-Monaco 0.57 vendors DOMPurify 3.4.15 inside its ESM sources, so overriding its npm dependency would leave the viewer's sanitizer unchanged. The 0.58.0-dev-20261103 prerelease vendors 3.4.17 as well as declaring it, fixing the five DOMPurify alerts tracked in #1574; this is a temporary pin until a stable Monaco release contains that fix (verified from the published tarballs, 2026-11).
+Monaco 0.57 vendors DOMPurify 3.4.15 inside its ESM sources, so overriding its npm dependency would leave the viewer's sanitizer unchanged. The 0.58.0-dev prereleases from 20261103 on vendor 3.4.17 as well as declaring it, fixing the five DOMPurify alerts tracked in #1574; this is a temporary pin until a stable Monaco release contains that fix (verified from the published tarballs, 2026-11).
 
 Windows tests in 2026-10 (Node 22.22.3) showed an atomic Node rename failing with EPERM while the raw grant retained a descriptor. A protected owner-only document also acquired its parent directory's broader DACL after the ordinary rename path. Native replacement succeeded with the original grant still open and retained the document ACL. [Microsoft's ReplaceFileW contract](https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-replacefilew) records the metadata and ACL merge; ignoring merge errors would weaken the permission guarantee.
 
