@@ -69,7 +69,7 @@ describe('addLeaf', () => {
 
   it('falls back to splitting beside the last leaf via autoEdge when position is null', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry(RECT);
     const r = store.addLeaf('c', leafMeta(), null);
     expect(r.ok).toBe(true);
     // last leaf is 'b'; wide row rect → autoEdge picks a right split beside it.
@@ -154,7 +154,7 @@ describe('replaceLeaf', () => {
 describe('restoreLeaf', () => {
   it('restores a removed leaf (neighbor tier) and sets its meta', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry(RECT);
     const removed = store.removeLeaf('b');
     expect(removed.ok).toBe(true);
     const r = store.restoreLeaf(leafMeta({ component: 'browser', title: 'B-back' }), removed.token!, { fallbackRef: 'a' });
@@ -255,7 +255,7 @@ describe('enter hints (derived inside the mutators)', () => {
 
   it('addLeaf derives a hint from its null-position autoEdge fallback', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry(RECT);
     const edge = store.autoEdgeFor('b'); // the last leaf it splits beside
     store.addLeaf('c', leafMeta(), null);
     expect(store.consumeEnterHints().get('c')).toBe(oppositeEdge(edge));
@@ -263,7 +263,7 @@ describe('enter hints (derived inside the mutators)', () => {
 
   it('restoreLeaf derives the hint from the token edge, and consume drains the map', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry(RECT);
     const removed = store.removeLeaf('b');
     store.restoreLeaf(leafMeta(), removed.token!, { fallbackRef: 'a' });
     expect(store.consumeEnterHints().get('b')).toBe(oppositeEdge(removed.token!.edge));
@@ -273,7 +273,7 @@ describe('enter hints (derived inside the mutators)', () => {
   it('restoreLeaf and insertLeaf start parked ids from their held rect', () => {
     for (const reattach of ['restore', 'insert'] as const) {
       const store = seeded();
-      store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+      store.setLayoutGeometry(RECT);
       const held = layout(twoLeafRow(), RECT, LATH_LAYOUT_OPTS).get('b')!;
       const { token } = store.doorLeaf('b', { park: true });
 
@@ -321,7 +321,7 @@ describe('enter hints (derived inside the mutators)', () => {
 describe('resizeBoundary', () => {
   it('adjusts weights using the reported geometry', () => {
     const store = seeded();
-    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry(RECT);
     const r = store.resizeBoundary([], 0, 100);
     expect(r.ok).toBe(true);
     const root = store.getSnapshot().tree.root;
@@ -412,16 +412,16 @@ describe('doored leaves', () => {
     // authority for a minimized Surface's title/params.
     expect(s.leafMeta.get('b')?.title).toBe('B');
     // ...but an unparked Door keeps no DOM.
-    expect(store.parkedIds()).toEqual([]);
+    expect([...store.getSnapshot().parked.keys()]).toEqual([]);
   });
 
   it('doorLeaf({ park: true }) additionally holds the DOM at its last rect', () => {
     const store = seeded();
-    store.setLayoutGeometry({ x: 0, y: 0, width: 100, height: 100 }, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry({ x: 0, y: 0, width: 100, height: 100 });
     store.doorLeaf('b', { park: true });
     const s = store.getSnapshot();
     expect(s.leafMeta.get('b')?.title).toBe('B');
-    expect(store.parkedIds()).toEqual(['b']);
+    expect([...store.getSnapshot().parked.keys()]).toEqual(['b']);
     expect(s.parked.get('b')).toMatchObject({ width: expect.any(Number), height: expect.any(Number) });
   });
 
@@ -498,14 +498,6 @@ describe('doored leaves', () => {
     });
   });
 
-  it('parkedIds exposes insertion order', () => {
-    const store = seeded();
-    store.addLeaf('c', leafMeta({ component: 'browser' }), { refId: 'a', edge: 'right' });
-    store.doorLeaf('b', { park: true });
-    store.doorLeaf('c', { park: true });
-    expect(store.parkedIds()).toEqual(['b', 'c']);
-  });
-
   it('retains the oldest document and its live metadata until the Door is killed', () => {
     const store = seeded();
     store.doorLeaf('b', { park: true });
@@ -518,7 +510,7 @@ describe('doored leaves', () => {
     }
 
     expect(store.getSnapshot().parked.has('b')).toBe(true);
-    expect(store.parkedIds()).toHaveLength(33);
+    expect([...store.getSnapshot().parked.keys()]).toHaveLength(33);
     expect(store.getSnapshot().leafMeta.get('b')?.params).toEqual({ url: 'https://after-park.example' });
 
     store.updateParams('b', { session: 'acquired-late' });
@@ -549,33 +541,6 @@ describe('doored leaves', () => {
     store.addDoor('a', leafMeta({ title: 'clobber' }));
     store.addDoor('born', leafMeta({ title: 'clobber' }));
     expect(store.getSnapshot()).toBe(before);
-  });
-
-  it('seed unparks by TREE membership, not by the meta it is handed', () => {
-    const store = seeded();
-    store.doorLeaf('b', { park: true });
-    // Hydration hands `seed` the Doors' meta alongside the tree's leaves. A parked id
-    // that appears only as a Door row must STAY parked — unparking it would unmount
-    // the DOM the park exists to preserve, and would queue its held rect as an enter
-    // hint for a leaf that never enters.
-    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()], ['b', leafMeta({ component: 'browser' })]]);
-    expect(store.parkedIds()).toEqual(['b']);
-    expect(store.consumeEnterHints().has('b')).toBe(false);
-  });
-
-  it('seed keeps parked leaves, minus any it admits to the new tree', () => {
-    const store = seeded();
-    store.doorLeaf('b', { park: true });
-    // Hydration may reseed a store that already holds parked documents —
-    // clearing here would unmount exactly what parking preserved.
-    store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()]]);
-    expect(store.parkedIds()).toEqual(['b']);
-    // The park's meta has to survive with it, or the store would be holding DOM it
-    // knows nothing about.
-    expect(store.getSnapshot().leafMeta.get('b')?.title).toBe('B');
-    // ...and switching back re-admits it rather than leaving a duplicate.
-    store.seed({ root: { kind: 'leaf', id: 'b' } }, [['b', leafMeta({ component: 'browser' })]]);
-    expect(store.parkedIds()).toEqual([]);
   });
 });
 
@@ -618,7 +583,7 @@ describe('queries', () => {
   it('neighborOf uses the seeded geometry (null without it)', () => {
     const store = seeded();
     expect(store.neighborOf('a', 'right')).toBeNull(); // no geometry yet
-    store.setLayoutGeometry(RECT, LATH_LAYOUT_OPTS);
+    store.setLayoutGeometry(RECT);
     expect(store.neighborOf('a', 'right')).toBe('b');
     expect(store.neighborOf('b', 'left')).toBe('a');
     expect(store.neighborOf('a', 'left')).toBeNull();

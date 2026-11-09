@@ -340,7 +340,7 @@ export function LathHost({
     const measure = (entries?: ResizeObserverEntry[]) => {
       // Workspace presentation can scale this subtree; layout stays full-size.
       const r = entries?.[0]?.contentRect ?? el.getBoundingClientRect();
-      store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height }, LATH_LAYOUT_OPTS);
+      store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height });
       setSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }));
     };
     measure();

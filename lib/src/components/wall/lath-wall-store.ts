@@ -145,11 +145,11 @@ export type LathWallStore = {
   /** Presentation-only zoom target (the tree is untouched). No-op if unchanged. */
   setZoomed(id: LeafId | null): void;
 
-  /** LathHost reports the rect + opts it renders with; the store keeps the latest
+  /** LathHost reports the rect it renders with; the store keeps the latest
    *  to feed `restoreLeaf`, `resizeBoundary`, `neighborOf`, and `addLeaf`'s
    *  `autoEdge`. Not part of the snapshot — it drives queries, not rendering — so
    *  it never notifies. */
-  setLayoutGeometry(rect: Rect, opts: LayoutOpts): void;
+  setLayoutGeometry(rect: Rect): void;
 
   /** Record where a soon-to-be-added leaf should enter from (drained at the next
    *  retarget). An explicit call wins over edge derivation (e.g. the auto-spawn
@@ -162,8 +162,6 @@ export type LathWallStore = {
 
   /** Pre-order leaf ids of the current tree. */
   leafIds(): LeafId[];
-  /** Parked leaf ids in park order (oldest first). */
-  parkedIds(): LeafId[];
   /** Whether `id` is a leaf in the current tree. */
   has(id: LeafId): boolean;
   /** Nearest neighbor of `id` in `direction` under the last reported geometry, or
@@ -185,7 +183,7 @@ export function createLathWallStore(): LathWallStore {
     revision: 0,
   });
   // Last geometry LathHost rendered with; drives queries, never part of a snapshot.
-  let geometry: { rect: Rect; opts: LayoutOpts } | null = null;
+  let geometry: { rect: Rect } | null = null;
   // Enter hints drained per retarget by LathHost. Side state, never in the snapshot.
   const enterHints = new Map<string, EnterFrom>();
   const listeners = new Set<() => void>();
@@ -264,7 +262,7 @@ export function createLathWallStore(): LathWallStore {
   function leafRect(id: LeafId): Rect | null {
     if (!geometry) return null;
     const path = findLeafPath(snapshot.tree, id);
-    return path ? nodeRectAtPath(snapshot.tree, geometry.rect, geometry.opts, path) : null;
+    return path ? nodeRectAtPath(snapshot.tree, geometry.rect, LATH_LAYOUT_OPTS, path) : null;
   }
 
   /** The shared body of `removeLeaf` / `doorLeaf`: one core `remove`, differing only
@@ -300,19 +298,9 @@ export function createLathWallStore(): LathWallStore {
     restoreSnapshot(saved) { commit(saved); },
 
     seed(tree, meta) {
-      // Hydration supplies tree leaves and Doors. Retain metadata for existing
-      // parked documents so reseeding cannot strand their DOM; incoming metadata
-      // wins. Workspace switching does not seed: each Workspace keeps its own Wall.
-      //
-      // Unparking is keyed off the TREE, not off `meta`: a parked id handed in only as
-      // a Door row is still a Door, and must keep both its DOM and its held rect.
-      const next = new Map<string, LeafMeta>();
-      for (const id of snapshot.parked.keys()) {
-        const held = snapshot.leafMeta.get(id);
-        if (held) next.set(id, held);
-      }
-      for (const [id, m] of meta) next.set(id, m);
-      commit({ tree, leafMeta: next, ...admit(leaves(tree)), zoomedId: null });
+      // Hydration supplies tree leaves and Doors, once, into an empty store: each
+      // Workspace keeps its own Wall, so nothing is parked yet.
+      commit({ tree, leafMeta: new Map(meta), zoomedId: null });
     },
 
     addLeaf(id, meta, position) {
@@ -336,7 +324,7 @@ export function createLathWallStore(): LathWallStore {
         const ids = leaves(tree);
         refId = ids[ids.length - 1];
         edge = refId !== undefined && geometry
-          ? autoEdge(tree, geometry.rect, refId, geometry.opts)
+          ? autoEdge(tree, geometry.rect, refId, LATH_LAYOUT_OPTS)
           : 'right';
       }
       if (refId === undefined) return { ok: false };
@@ -394,7 +382,7 @@ export function createLathWallStore(): LathWallStore {
       const r = restore(snapshot.tree, token, {
         fallbackRef: opts?.fallbackRef,
         rect: geometry?.rect,
-        layoutOpts: geometry?.opts,
+        layoutOpts: LATH_LAYOUT_OPTS,
       });
       if (!r.ok) return { ok: false, tier: r.tier };
       // Enter from the boundary the door lands beside (opposite the token's edge). An
@@ -435,7 +423,7 @@ export function createLathWallStore(): LathWallStore {
 
     resizeBoundary(splitPath, boundary, deltaPx) {
       if (!geometry) return { ok: false };
-      const r = resize(snapshot.tree, splitPath, boundary, deltaPx, geometry.rect, geometry.opts);
+      const r = resize(snapshot.tree, splitPath, boundary, deltaPx, geometry.rect, LATH_LAYOUT_OPTS);
       if (!r.ok) return { ok: false };
       commit({ tree: r.tree });
       return { ok: true };
@@ -464,7 +452,7 @@ export function createLathWallStore(): LathWallStore {
       commit({ zoomedId: id });
     },
 
-    setLayoutGeometry(rect, opts) {
+    setLayoutGeometry(rect) {
       // Reject a degenerate (zero-area) measurement so it can never poison the
       // geometry-derived queries (`autoEdge`, `neighbors`). `autoEdge` on a 0×0 rect
       // returns `'bottom'` for every split, so a seed reading it would stack every
@@ -472,7 +460,7 @@ export function createLathWallStore(): LathWallStore {
       // Keeping the last good geometry (or none yet) lets those readers hit their
       // benign fallback until the container actually has a size.
       if (rect.width <= 0 || rect.height <= 0) return;
-      geometry = { rect, opts };
+      geometry = { rect };
     },
 
     setEnterHint(id, enterFrom) {
@@ -485,15 +473,14 @@ export function createLathWallStore(): LathWallStore {
     },
 
     leafIds: () => leaves(snapshot.tree),
-    parkedIds: () => [...snapshot.parked.keys()],
     has: (id) => findLeafPath(snapshot.tree, id) !== null,
     neighborOf(id, direction) {
       if (!geometry) return null;
-      return neighbors(snapshot.tree, geometry.rect, id, direction, geometry.opts);
+      return neighbors(snapshot.tree, geometry.rect, id, direction, LATH_LAYOUT_OPTS);
     },
     autoEdgeFor(id) {
       if (!geometry) return 'right';
-      return autoEdge(snapshot.tree, geometry.rect, id, geometry.opts);
+      return autoEdge(snapshot.tree, geometry.rect, id, LATH_LAYOUT_OPTS);
     },
   };
 }
