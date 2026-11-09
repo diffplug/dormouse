@@ -1109,6 +1109,15 @@ describe('Surface moves between Workspaces', () => {
     await act(async () => { await expect(moveSurface('surface:a', request({ new: true }))).rejects.toThrow('only Surface'); });
   });
 
+  it('selects the moved Surface in a new Workspace a neutral CLI move creates', async () => {
+    await twoWalls();
+    let moved!: NonNullable<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { moved = (await moveSurface('surface:a', request({ new: true })))!; });
+    await act(async () => { setActiveWorkspace(moved.workspaceId); });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(wallFor(moved.workspaceId).querySelector('[data-session-id="surface:a"][data-focused="true"]')).not.toBeNull();
+  });
+
   it('rolls back layout and ownership when destination adoption fails', async () => {
     const source = await twoWalls();
     const target = getWallHandle('workspace:2')!;

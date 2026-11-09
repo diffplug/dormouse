@@ -1938,6 +1938,8 @@ export function Wall({
       movingSurfaceRef.current = true;
       const ref = livePaneId();
       if (!lath.store.addLeaf(id, meta, ref ? { refId: ref, edge: lath.store.autoEdgeFor(ref) } : null).ok) throw new Error('Could not place the Surface');
+      // A Wall created for the move skips the seed that selects its first pane.
+      if (selectedIdRef.current === null) selectPane(id);
       publishMembership();
       return rollback;
     },
