@@ -1485,7 +1485,17 @@ async function attemptPublished(token: string): Promise<boolean> {
     await closeServer(true);
     return true;
   }
-  if (!(await publishEndpoint(raw))) {
+  let publishedOurs: boolean;
+  try {
+    publishedOurs = await publishEndpoint(raw);
+  } catch (error) {
+    // Nothing names our bind, so no window can reach it: give it up, or the
+    // contention loop would end holding a server it never confirms.
+    log.error(`[peer-link] could not publish the peer endpoint ${endpointPath()}: ${String(error)}`);
+    await closeServer(false);
+    return false;
+  }
+  if (!publishedOurs) {
     // Another window published first, so it is the broker and we are not.
     await closeServer(false);
     const winner = await readEndpoint();

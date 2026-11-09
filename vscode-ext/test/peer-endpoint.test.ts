@@ -51,6 +51,21 @@ vi.mock('../src/peer-endpoint', async (importOriginal) => {
 
 vi.mock('../src/log', () => ({ log: { init() {}, info() {}, error() {} } }));
 
+/** How many exclusive creates of the endpoint file still fail with `EPERM`. */
+const publishFailures = vi.hoisted(() => ({ remaining: 0 }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs/promises')>();
+  const writeFile: typeof real.writeFile = (path, data, options) => {
+    const exclusive = typeof options === 'object' && options?.flag === 'wx';
+    if (exclusive && String(path).endsWith('burrow.peer-endpoint') && publishFailures.remaining > 0) {
+      publishFailures.remaining -= 1;
+      return Promise.reject(Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }));
+    }
+    return real.writeFile(path, data, options);
+  };
+  return { ...real, writeFile };
+});
+
 let dir: string;
 let realTmp: string | undefined;
 const opened: LinkModule[] = [];
@@ -119,6 +134,7 @@ function listen(server: Server, path: string): Promise<void> {
 }
 
 beforeEach(async () => {
+  publishFailures.remaining = 0;
   dir = await tempStorageDir();
   // Short, for macOS's ~104-byte socket path cap; private, like the real names.
   endpoint.dir = process.platform === 'win32' ? '' : await mkdtemp('/tmp/dpe-');
@@ -170,6 +186,20 @@ describe('published endpoint', () => {
     const secondName = await published();
     expect(secondName).toBeTruthy();
     expect(secondName).not.toBe(firstName);
+  }, 15_000);
+
+  it('gives up a bind it could not publish and settles on a later round', async () => {
+    // A scanner holding the file, or one still pending deletion, fails the
+    // exclusive create with something other than `EEXIST`.
+    publishFailures.remaining = 1;
+    const mod = await openWindow();
+    const roles: boolean[] = [];
+    void mod.ensurePeerNet((held) => roles.push(held));
+
+    await waitFor(() => roles.length > 0, 10_000);
+    expect(publishFailures.remaining).toBe(0);
+    expect(roles).toEqual([true]);
+    expect(await published()).toBeTruthy();
   }, 15_000);
 
   it.skipIf(process.platform === 'win32')('publishes the name in a file only this user can read', async () => {
