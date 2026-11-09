@@ -219,6 +219,16 @@ A Client shows an embedded page by framing it at an origin of its own, the *fram
 - **Must refuse, before the upstream sees it**, a method that is not an RFC 9110 token or is `CONNECT`, a path not in origin-form, a header value carrying CR, LF, or NUL, and anything past the per-session bounds in `frame-wire.ts`. **A Client must queue its HTTP exchanges behind theirs**, as a page can ask for hundreds at once; a socket past its bound fails, as one past a browser's own limit does. A WebSocket message crosses as fragments, `fin` on the last.
 - An absolute-origin subresource the page names (`http://localhost:5173/...`) never reaches the tunnel.
 
+**Must follow this Client admission model before an HTTP exchange exists** (rationale). Admitted requests follow the exchange and flow-control rules above; cancellation never grants another frame's capacity.
+
+| State | Event | Next state / effect |
+|---|---|---|
+| Waiting for a slot | Capacity becomes available | Admitted; recheck frame lifetime and cancellation before sending |
+| Waiting for a slot | Request abandoned | Rejected immediately; remove the waiter, send nothing |
+| Waiting for a slot | Its frame ends | Rejected immediately, even while other frames occupy every slot |
+| Admitted, before sending | Request abandoned or frame ended | Return the slot; reject without sending |
+| Admitted | Exchange takes ownership | The exchange releases the slot when it ends or its cancellation is answered |
+
 Source of truth: `remote-lib-common/src/remote/frame-wire.ts`, `FrameTunnel` in `lib/src/remote/burrow/frame-tunnel.ts`, `createBurrowFrameHost` in `lib/src/host/remote/frame-host.ts`, `FrameClient` in `lib/src/remote/client/frame-client.ts`.
 
 ## Input authority and multiple viewers

@@ -14,7 +14,7 @@ Source of truth: `closeKind` in `lib/src/components/wall/close-kind.ts`; `reques
 
 ## Reopenable kinds
 
-A reopened Surface is rebuilt from its record: a new Session and process. "Lost" lists what the user cannot get back. (rationale)
+"Lost" names what Reopen cannot recover. (rationale)
 
 | Surface at close | Reopen rebuilds | Lost | Confirms? |
 |---|---|---|---|
@@ -71,9 +71,24 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 | `dor` command closes | Unchanged: immediate |
 
 - **Must detach a pending Surface the way minimize does** (keep the token, park its page, keep the PTY Live) without creating a Door. **A pending Workspace leaves the strip** — a successor activates, or a fresh replacement if it was the last — **while its Wall stays mounted and inactive**.
-- **Must finalize through the kill path** when the countdown completes or the user finalizes it early from `PendingKillOverlay`; a pending Workspace closes every member, and comes back if a helper's work refuses.
-- **Restoring a pending kill reattaches the same Surface or Workspace**, id and process intact, at its slot; it is not a rebuild. One that cannot come back now (a helper whose parent closed or whose replacement holds work) stays pending, its countdown untouched. **Must reopen the newest restorable entry across pending kills, local records, and closed windows** ([Reopen verb](#reopen-verb)), passing over pending entries that cannot return.
+- **Restoring a pending kill reattaches the same Surface or Workspace**, id and process intact, at its slot; it is not a rebuild. **Must reopen the newest restorable entry across pending kills, local records, and closed windows** ([Reopen verb](#reopen-verb)), passing over pending entries that cannot return.
 - **Must silence alerts from pending Sessions and omit them from `dor` listings and Clients**; a `dor` request naming one by id, made by one, or reaching a pending Workspace's Wall fails as a pending kill.
-- **Must count pending running work in the quit and window-close gates, then finalize every pending kill as either tears down.** A Workspace leaving for another window or closing finalizes its own. Nothing pending is persisted, so none survives a restart.
+- **Must count pending running work in the quit and window-close gates and drain pending kills during teardown** (rationale). Nothing pending is persisted, so none survives a restart.
+
+**Must follow this complete pending-kill lifecycle**, independent of countdown pause state. Pending entries are undoable; finalizing entries have left the undo list but still belong to drains. Settled entries leave this lifecycle.
+
+| State | Event / guard | Next state / effect |
+|---|---|---|
+| Pending | Hold or release countdown | Pending; preserve remaining time while held |
+| Pending | Restore accepted | Settled; reattach |
+| Pending | Restore refused | Pending; countdown unchanged |
+| Pending | Countdown ends, early finalize, or owning drain | Finalizing; run the kill path once, closing every member for a Workspace |
+| Finalizing | Matching drain | Finalizing; join the existing completion |
+| Finalizing | Matching teardown drain | Finalizing; prohibit restoration, including after an outstanding close answers |
+| Finalizing | Workspace close refuses outside teardown | Settled; restore the Workspace |
+| Finalizing | Otherwise completes or fails | Settled; log a failure |
+| Settled | Late countdown or repeated finalize | No action |
+
+**Must scope a drain to its selected entries**, leaving unrelated finalizers' completion and teardown status alone. Source closure and transfer use scoped drains; quit and window close use all entries.
 
 Source of truth: `lib/src/lib/pending-kills.ts`; `pendKillRef` in `lib/src/components/Wall.tsx`; `pendWorkspace` in `lib/src/components/wall/workspace-lifecycle.ts`; `resetHelper` in `lib/src/lib/helper-terminal.ts`; `lib/src/components/PendingKillOverlay.tsx`; `lib/src/lib/labs-settings.ts`.

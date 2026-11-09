@@ -79,10 +79,23 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 
 1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`) under a fresh token.
 2. The host answers `pty:list` (one `PtyInfo` per owned PTY), then one `pty:replay` for each, empty or not, then `alert:state` for each.
-3. Listed PTYs resume with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content"), saved minimized ones as Doors; an empty list cold-restores.
-4. With no answer in time, a collector given `retryTimeoutMs` asks once more (rationale), then reports `timedOut`: an arrival refuses, since its shells are still running; a boot cold-restores.
 
-**Must keep collection tokens unique across webview reloads.** **A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
+**Must interpret collection outcomes through this table.** Listed PTYs resume with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` → "8.6 Paste Content"), saved minimized ones as Doors.
+
+| Collector state | Event | Outcome |
+|---|---|---|
+| No accepted list | Empty accepted list | Complete with no PTYs; cold restore |
+| No accepted list | Nonempty accepted list | Collect its replays |
+| Collecting replays | Every listed replay arrives | Complete; resume listed PTYs |
+| Collecting replays | Deadline | Complete with available replay; never infer that listed PTYs are absent |
+| No accepted list | Deadline, retry configured and unused | Ask once more under a fresh token (rationale) |
+| No accepted list | Deadline, no retry left | `timedOut`; arrival refuses, boot cold-restores |
+| Any waiting state | Another collection's answer | Ignore |
+| Complete | Late answer | No effect |
+
+**Must keep collection tokens unique across webview reloads.** A host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it (rationale). **Must accept an answer carrying no token** for hosts with one collector per JS realm (VS Code, Pocket, website). **Never interpret `timedOut` as an accepted empty list**: the host may still hold live shells.
+
+Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs); the seed also skips `<unnamed>`, the default panel placeholder (rationale).
 

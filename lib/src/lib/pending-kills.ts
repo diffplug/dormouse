@@ -37,16 +37,26 @@ export interface PendingKill {
   resumedAt: number | null;
 }
 
+export interface PendingKillFinalization {
+  /** Becomes true if teardown joins an already-running finalizer. Read after
+   *  awaits before deciding whether a refused close may restore its owner. */
+  readonly teardown: boolean;
+}
+
 export interface PendingKillActions {
   /** Bring it back as it was; `focus` brings it into view, as a gesture does.
    *  `false` refuses — it cannot come back now — leaving it pending as it was. */
   restore(focus: boolean): boolean | void;
   /** End it through today's kill path, settling once it has. `teardown` is a
    *  quit or window close, where nothing may come back instead. */
-  finalize(teardown: boolean): void | Promise<void>;
+  finalize(context: PendingKillFinalization): void | Promise<void>;
 }
 
 type Entry = { kill: PendingKill; actions: PendingKillActions };
+type Finalizing = { kill: PendingKill; context: { teardown: boolean }; done: Promise<void> };
+// An entry leaves the undo list when finalization starts, but teardown and
+// ownership drains still owe its asynchronous close a wait.
+const finalizing = new Set<Finalizing>();
 
 const entries = new Map<string, Entry>();
 const listeners = new Set<() => void>();
@@ -102,16 +112,6 @@ export function addPendingKill(
   publish();
 }
 
-/** Take an entry out of the store and run one of its actions. */
-function settle(key: string, run: (actions: PendingKillActions) => void): boolean {
-  const entry = entries.get(key);
-  if (!entry) return false;
-  entries.delete(key);
-  publish();
-  run(entry.actions);
-  return true;
-}
-
 /** Restore one pending kill; false when there is none, or it refused and
  *  stays pending with its countdown untouched. */
 export function restorePendingKill(key: string, focus = true): boolean {
@@ -125,28 +125,52 @@ export function restorePendingKill(key: string, focus = true): boolean {
 }
 
 export function finalizePendingKill(key: string): boolean {
-  return settle(key, actions => { void runFinalize(actions, false); });
+  return startFinalizing(key, false) !== null;
+}
+
+/** Register before publishing or invoking actions: either can re-enter a drain. */
+function startFinalizing(key: string, teardown: boolean): Finalizing | null {
+  const entry = entries.get(key);
+  if (!entry) return null;
+  entries.delete(key);
+  let settle!: () => void;
+  const flight: Finalizing = {
+    kill: entry.kill, context: { teardown },
+    done: new Promise<void>(resolve => { settle = resolve; }),
+  };
+  finalizing.add(flight);
+  publish();
+  void runFinalize(entry.actions, flight.context).finally(() => {
+    finalizing.delete(flight);
+    settle();
+  });
+  return flight;
 }
 
 /** One finalize, its failure logged rather than stopping its caller. */
-async function runFinalize(actions: PendingKillActions, teardown: boolean): Promise<void> {
+async function runFinalize(actions: PendingKillActions, context: PendingKillFinalization): Promise<void> {
   try {
-    await actions.finalize(teardown);
+    await actions.finalize(context);
   } catch (error) {
     console.warn('[pending-kill] finalize failed', error);
   }
 }
 
-/** Finalize every pending kill `which` keeps, settling once all have: a
- *  Workspace leaving, or — every one, as `teardown` — a quit or window close. */
+/** Finalize every pending kill `which` keeps, including a finalization already
+ *  running, settling once all have. Teardown also prevents their late refusal
+ *  from restoring a Workspace in a window that is going away. */
 export async function finalizePendingKills(
   which: (kill: PendingKill) => boolean = () => true,
   { teardown = false }: { teardown?: boolean } = {},
 ): Promise<void> {
+  const draining = [...finalizing].filter(flight => which(flight.kill));
+  for (const flight of draining) if (teardown) flight.context.teardown = true;
   const due = [...entries.entries()].filter(([, { kill }]) => which(kill));
-  for (const [key] of due) entries.delete(key);
-  if (due.length) publish();
-  await Promise.all(due.map(([, { actions }]) => runFinalize(actions, teardown)));
+  for (const [key] of due) {
+    const flight = startFinalizing(key, teardown);
+    if (flight) draining.push(flight);
+  }
+  await Promise.all(draining.map(flight => flight.done));
 }
 
 /** Hold or release one countdown, as the pointer over its entry does. */
@@ -178,15 +202,16 @@ export function getPendingKill(kind: PendingKillKind, id: string): PendingKill |
  *  pending Surface or helper, or a member of a pending Workspace. Hidden from
  *  Clients and silenced (`docs/specs/reopen.md`). */
 export function isPendingKillSession(id: string): boolean {
-  return entries.size > 0 && pendingKillSessionIds().includes(id);
+  return pendingKillSessionIds().includes(id);
 }
 
 /** Every Session a pending kill keeps alive, including the auxiliary helpers
  *  of its Surface or Workspace members. */
 export function pendingKillSessionIds(): string[] {
-  if (entries.size === 0) return [];
+  if (entries.size === 0 && finalizing.size === 0) return [];
   const membership = getWorkspaceSurfacesSnapshot();
-  const ids = new Set(snapshot.flatMap(kill => kill.kind === 'workspace' ? membership.get(kill.id) ?? [] : [kill.id]));
+  const kills = [...snapshot, ...[...finalizing].map(flight => flight.kill)];
+  const ids = new Set(kills.flatMap(kill => kill.kind === 'workspace' ? membership.get(kill.id) ?? [] : [kill.id]));
   // Workspace membership holds primary Surfaces; helper work must still reach
   // the shutdown gate while its source is out of the layout.
   for (const [id, entry] of registry) {
@@ -213,6 +238,7 @@ export function pendingKillProgress(kill: PendingKill, now = Date.now()): number
 /** @internal */
 export function _resetPendingKillsForTesting(): void {
   entries.clear();
+  finalizing.clear();
   if (timer !== null) clearTimeout(timer);
   timer = null;
   snapshot = [];

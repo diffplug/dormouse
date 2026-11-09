@@ -249,13 +249,13 @@ function pendWorkspace(id: WorkspaceId): void {
   };
   addPendingKill({ kind: 'workspace', id, workspaceId: id, title: meta.name, label: 'Workspace' }, {
     restore,
-    finalize: async (teardown) => {
+    finalize: async (context) => {
       const handle = getWallHandle(id);
       // Unsaved Tool edits are discarded: the pending kill was the decision.
       const refusal = handle ? await handle.closeAll(handle.dirtyToolIds()) : null;
       // Work that refuses to close (a helper's) brings the Workspace back to
       // say so, except when the window is going anyway.
-      if (refusal && !teardown) restore(false);
+      if (refusal && !context.teardown) restore(false);
       else release();
     },
   });
