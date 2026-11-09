@@ -301,6 +301,10 @@ async function shutdown() {
 
 rl.on('close', shutdown);
 process.on('SIGTERM', shutdown);
+// Under Tauri the sidecar leads its own process group, but the browser-dev
+// harness runs it in the terminal's foreground group, where Ctrl-C reaches it
+// directly and the default action would skip the shutdown above.
+process.on('SIGINT', shutdown);
 
 // Watchdog: if the Tauri host crashes or is force-killed, stdin EOF isn't
 // always delivered (esp. on Windows), leaving us as an orphan that locks
