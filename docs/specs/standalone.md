@@ -124,11 +124,11 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **The label is the window's persistence identity**: `main` for the first window (fixed in `tauri.conf.json`), `ws-<n>` for every later one, never reused (§Workspace registry). Journal-only labels reserve numbers without opening windows.
 
-**Every new window is cloned from `app.windows[0]`**, so its window settings and CSP carry across with no second copy.
+**Every new window is cloned from `app.windows[0]`**, window settings and CSP included. **Never let Tauri add a nonce to the CSP's `style-src`** (`dangerousDisableAssetCspModification`; rationale).
 
 **Never let a window's webview throttle or suspend in the background**: `app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op on Windows and Linux; rationale).
 
-**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default`, `core:app:allow-version`, and `core:resources:allow-close` (an update handle's release) to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins the label, the throttling, and both capabilities.
+**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default`, `core:app:allow-version`, and `core:resources:allow-close` (an update handle's release) to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins these.
 
 ### Workspace registry
 

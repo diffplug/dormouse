@@ -54,6 +54,24 @@ test('the directives without a default-src fallback admit nothing', () => {
   for (const name of ['base-uri', 'form-action', 'frame-ancestors']) assert.deepEqual(directives.get(name), ["'none'"], name);
 });
 
+// xterm appends runtime `<style>` elements and sets `style` attributes with no
+// nonce, so it needs `'unsafe-inline'`. A packaged build gives every bundled
+// `<style>` element a nonce and adds it to `style-src`, and a source list with
+// a nonce ignores `'unsafe-inline'` — unless `style-src` is exempted from that
+// rewrite. Neither `tauri dev` nor the browser harness applies this policy.
+test("style-src keeps 'unsafe-inline' in a packaged build", () => {
+  const styleSrc = csp
+    .split(';')
+    .map((part) => part.trim().split(/\s+/))
+    .find((parts) => parts[0] === 'style-src');
+  assert.ok(styleSrc.includes("'unsafe-inline'"));
+  const exempt = conf.app.security.dangerousDisableAssetCspModification;
+  assert.ok(
+    exempt === true || (Array.isArray(exempt) && exempt.includes('style-src')),
+    'Tauri may not add a nonce to style-src',
+  );
+});
+
 test('localhost stays allowed for dev and the loopback proxies', () => {
   assert.ok(csp.includes('http://localhost:*') && csp.includes('ws://localhost:*'));
   assert.ok(csp.startsWith("default-src 'self'"));
