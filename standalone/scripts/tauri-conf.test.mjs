@@ -108,3 +108,15 @@ test('only the first window may check for or install an update', () => {
     assert.ok(!dflt.permissions.includes(permission), `default does not hold ${permission}`);
   }
 });
+
+// Every window close and destroy runs in Rust, behind the close and quit
+// interception. A webview able to destroy its own window would skip
+// `CloseRequested`, and with it that whole interception. Nothing in the app
+// asks for it: the JS API destroys only from `onCloseRequested`, which the app
+// does not use.
+test('no window may destroy itself', () => {
+  for (const name of ['default', 'main-only']) {
+    assert.ok(!capability(name).permissions.includes('core:window:allow-destroy'), name);
+  }
+});
+
