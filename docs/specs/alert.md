@@ -321,7 +321,7 @@ stateDiagram-v2
     Queued --> Silent: the engine never starts
     Queued --> Speaking: engine start — speaking
     Speaking --> Spoken: end, or error after start — spoken
-    Speaking --> CutOff: the episode ends
+    Speaking --> CutOff: the episode ends, or speech turned off
     Spoken --> [*]: the episode ends
   }
 ```
