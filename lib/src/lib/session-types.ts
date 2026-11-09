@@ -302,7 +302,7 @@ function isEmptyState(raw: unknown): boolean {
   return raw == null || (typeof raw === 'string' && raw.trim() === '');
 }
 
-// --- Window container (stage 2b) ---
+// --- Window container ---
 
 // Structural gate only: a current Window with a workspaces array and an active id.
 // Each Workspace element is validated (and dropped if bad) per-item in

@@ -2,14 +2,14 @@
  * Settle a batch of best-effort answers under one shared deadline.
  *
  * Every entry is raced against the *same* timer rather than arming one apiece,
- * so a close waiting on twenty PTYs waits once. An entry that rejects or does
+ * so a batch of twenty lookups waits once. An entry that rejects or does
  * not arrive in time yields `fallback` and nothing else: the answers that did
  * arrive are kept, in input order. The timer is cleared as soon as the batch
  * settles, so an early completion leaves nothing pending behind it.
  *
- * Every caller here is asking a host something it would rather have than not —
- * a live process's working directory — where a missing answer is a fallback,
- * never a failure.
+ * Every caller is asking for something it would rather have than not — a git
+ * lookup, a browser's answer, a capture — where a missing answer is a
+ * fallback, never a failure.
  */
 export function settleAllWithin<T>(
   works: readonly Promise<T>[],
