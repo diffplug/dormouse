@@ -57,6 +57,18 @@ describe('PTY manager lifetime and buffers', () => {
     expect(await answer).toEqual(ports);
   });
 
+  it('asks the child once for every cwd a save probes', async () => {
+    const { manager, child } = await startManager();
+    const answer = manager.getCwds(['pane-a', 'pane-b', 'pane-c']);
+    const request = child.send.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'getCwds', ids: ['pane-a', 'pane-b', 'pane-c'] });
+    const cwds = { 'pane-a': '/repo', 'pane-b': '/tmp', 'pane-c': null };
+    child.emit('message', { type: 'cwds', cwds: { 'pane-a': '/elsewhere' }, requestId: 'someone-else' });
+    child.emit('message', { type: 'cwds', cwds, requestId: request.requestId });
+    expect(await answer).toEqual(cwds);
+    expect(child.send).toHaveBeenCalledTimes(2);
+  });
+
   it('caps even a single oversized output chunk and retains absolute stream positions', async () => {
     const { manager, child } = await startManager();
     const data = 'prefix' + 'x'.repeat(1_000_000);

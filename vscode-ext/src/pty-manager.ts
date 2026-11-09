@@ -457,6 +457,17 @@ export function getCwd(id: string): Promise<string | null> {
     .then((msg) => msg.cwd, () => null);
 }
 
+let cwdsSequence = 0;
+/**
+ * Every id's cwd from one pty-host scan, so a save of N panes spawns one
+ * process scan rather than N. Bounded like standalone's `pty_get_cwds`.
+ */
+export function getCwds(ids: string[]): Promise<Record<string, string | null>> {
+  const requestId = `cwds-${++cwdsSequence}`;
+  return requestChild<{ cwds?: Record<string, string | null> }>({ type: 'getCwds', ids, requestId }, (msg) => msg.type === 'cwds' && msg.requestId === requestId, 2000)
+    .then((msg) => msg.cwds || {}, () => ({}));
+}
+
 export function getOpenPorts(id: string): Promise<OpenPort[]> {
   return getOpenPortsMany([id]).then((ports) => ports[id] ?? []);
 }

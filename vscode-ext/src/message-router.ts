@@ -622,6 +622,11 @@ export function attachRouter(
           post({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
+      case 'pty:getCwds':
+        ptyManager.getCwds(msg.ids).then((cwds) => {
+          post({ type: 'pty:cwds', cwds, requestId: msg.requestId } satisfies ExtensionMessage);
+        });
+        break;
       case 'pty:getOpenPorts':
         ptyManager.getOpenPorts(msg.id).then((ports) => {
           post({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);

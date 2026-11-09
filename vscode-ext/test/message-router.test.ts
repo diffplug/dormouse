@@ -90,6 +90,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   getBufferedPtys: () => new Map(ptys.buffered),
   getScrollback: (id: string) => ptys.scrollback.get(id) ?? null,
   ptyIds: () => ptys.buffered.keys(),
+  getCwds: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, ptys.cwd])),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
     await ptys.cwdWait;
@@ -187,6 +188,18 @@ it('answers a voice command under its request id, null where the window has no m
   try {
     webview.send({ type: 'voice:command', payload: { op: 'status' }, requestId: 'req-7' });
     await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'voice:result', requestId: 'req-7', result: null }));
+  } finally { disposable.dispose(); }
+});
+
+it('answers a batched cwd probe under its request id', async () => {
+  ptys.cwd = '/repo';
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    webview.send({ type: 'pty:getCwds', ids: ['pty-1', 'pty-2'], requestId: 'req-3' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({
+      type: 'pty:cwds', cwds: { 'pty-1': '/repo', 'pty-2': '/repo' }, requestId: 'req-3',
+    }));
   } finally { disposable.dispose(); }
 });
 
