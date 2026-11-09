@@ -105,7 +105,7 @@ A Workspace transfer carries the modes a running app set: [transport.md](transpo
 
 | Sequence | Role | Disposition | Where |
 |---|---|---|---|
-| `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q` are recognized, **in ground text only** (rationale). | [transport.md](transport.md#iterm2-identity) |
+| `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q` are recognized, each also with its default `0` written out, **in ground text only** (rationale). | [transport.md](transport.md#iterm2-identity) |
 | `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed without consuming; xterm.js still handles the sequence. | [mouse-and-clipboard.md](mouse-and-clipboard.md#61-state-matrix), §8.5 |
 | Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
 | `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows (rationale) | Advertised **only on Windows**; off for a pane while any kitty consumer is on its protocol stack, the two being mutually exclusive in xterm.js (rationale). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
