@@ -65,7 +65,7 @@ overrides:
   # an upstream dependency removal or fixed-only range makes its entry inactive.
   "archiver-utils>glob@<14.0.2": 14.0.3
   "node-pg-migrate>glob@<14.0.2": 14.0.3
-  "@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2": 14.0.3
+  "@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2": 14.0.4
   "@vscode/vsce>minimatch@<11.0.1": 11.0.5
 minimumReleaseAgeExclude:
   - pgstencil
