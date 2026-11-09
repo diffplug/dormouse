@@ -2,16 +2,12 @@ export type { SessionStatus } from './alert-manager';
 export type { TodoState } from './alert-manager';
 export type { AlertRingState, AlertSpeechState } from './alert-speech-state';
 export type { ActivityState } from './session-activity-store';
-export type { TerminalEntry, TerminalOverlayDims } from './terminal-store';
 export type {
   CommandRun,
   CwdState,
-  DerivedHeader,
   ShellActivity,
   TerminalPaneState,
-  TerminalSemanticEvent,
   TerminalTitle,
-  TerminalTitleCandidates,
 } from './terminal-state';
 
 export {
@@ -58,7 +54,6 @@ export {
   setTerminalFontSize,
   unmountElement,
 } from './terminal-lifecycle';
-export type { SurfaceFocusHandle } from './terminal-lifecycle';
 export { markSessionTouched } from './terminal-store';
 
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
@@ -72,7 +67,6 @@ export {
 
 export {
   applyAlertSettingsFromHost,
-  clampAlertDelayMs,
   getAlertSettings,
   subscribeToAlertSettings,
   updateAlertSettings,
@@ -84,12 +78,9 @@ export {
   refreshPushDevicesNow,
   resetPushDevices,
   setPushDevices,
-  setPushDevicesRefresher,
   subscribeToPushDevices,
 } from './push-devices';
-export type { PushDevice, PushDevicesState } from './push-devices';
-
-export { deriveSessionLabel } from './session-label';
+export type { PushDevicesState } from './push-devices';
 
 export {
   getAlertSpeechState,
@@ -100,14 +91,11 @@ export {
 export {
   applyTerminalSemanticEvents,
   countRunningSessions,
-  ensureTerminalPaneState,
-  fillTerminalProcessCwd,
   getRunningCommandWatchKey,
   getInheritableCwd,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   isPaneOscDriven,
-  isReservedUserTitle,
   removeTerminalPaneState,
   resetTerminalPaneState,
   seedTerminalManualCwd,
@@ -117,26 +105,16 @@ export {
 export type { SetTerminalUserTitleResult } from './terminal-state-store';
 
 export {
-  cwdDisplay,
   cwdFromManualPath,
   cwdFromOsc1337,
   cwdFromOsc633,
   cwdFromOsc7,
   cwdFromOsc9_9,
   cwdFromProcessPath,
-  cwdIdentity,
   buildAppTitleResolver,
-  DEFAULT_COMMAND_TITLE,
-  DEFAULT_IDLE_TITLE,
   deriveHeader,
   groupTerminalPanes,
-  notificationDisplayTitle,
-  reduceTerminalState,
   resolveDisplayPrimary,
-  shortestUniqueCwdLabels,
   summarizeCommandLine,
-  terminalTitleFromNotification,
-  titleCandidatesForDisplay,
-  titleSourceLabel,
   UNNAMED_PANEL_TITLE,
 } from './terminal-state';
