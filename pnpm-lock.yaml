@@ -303,8 +303,8 @@ importers:
         specifier: 11.17.2
         version: 11.17.2
       monaco-editor:
-        specifier: 0.58.0-dev-20261103
-        version: 0.58.0-dev-20261103
+        specifier: 0.58.0-dev-20261108
+        version: 0.58.0-dev-20261108
       react:
         specifier: ^19.3.0
         version: 19.3.1
@@ -5969,8 +5969,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  monaco-editor@0.58.0-dev-20261103:
-    resolution: {integrity: sha512-AAB587iFn26qxVTPkkgEeprOGXunQqwLGO61ARykgo0mTQH5yc5GHx6sGZkN5PIDjmtqhmd4GarT0FnRAZqN5g==}
+  monaco-editor@0.58.0-dev-20261108:
+    resolution: {integrity: sha512-x24VHCPfPGUVZMsB1ZzhCKY6P8FFLR1xFz/Xf0Z+lXX2/Am4WjXDEOod9puPzSUA/SG+kWdcHOIju5GIzylHGg==}
 
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
@@ -12711,7 +12711,7 @@ snapshots:
 
   mkdirp@3.0.1: {}
 
-  monaco-editor@0.58.0-dev-20261103:
+  monaco-editor@0.58.0-dev-20261108:
     dependencies:
       dompurify: 3.4.17
       marked: 14.0.0
