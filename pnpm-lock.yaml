@@ -167,7 +167,7 @@ overrides:
   archiver-utils>glob@<14.0.2: 14.0.3
   node-pg-migrate>glob@<14.0.2: 14.0.3
   '@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2': 14.0.3
-  '@vscode/vsce>minimatch@<11.0.1': 11.0.4
+  '@vscode/vsce>minimatch@<11.0.1': 11.0.5
 
 importers:
 
@@ -1859,6 +1859,9 @@ packages:
 
   '@isaacs/nonrecursive-glob-match@1.0.3':
     resolution: {integrity: sha512-SI7kyKHq4XXDRozw+r9GlRZkia1ZkFrpLW98r2IC2Bpr8YkFGE3fvjzmxCG0x78A++69HmDNrDvSMYBZmHGpKA==}
+
+  '@isaacs/nonrecursive-glob-match@1.1.0':
+    resolution: {integrity: sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==}
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0':
     resolution: {integrity: sha512-qvsTEwEFefhdirGOPnu9Wp6ChfIwy2dBCRuETU3uE+4cC+PFoxMSiiEhxk4lOluA34eARHA0OxqsEUYDqRMgeQ==}
@@ -5939,6 +5942,10 @@ packages:
     resolution: {integrity: sha512-/UJ1dEoVQTjPNDh6SGlUo+ueLMmoHTas4q+8yaAR/5t6nLAIiBDJtoYUh20IYleix7ehiQkgczb84PE3uzHkxg==}
     engines: {node: 20 || >=22}
 
+  minimatch@11.0.5:
+    resolution: {integrity: sha512-snPlVppFcYWfLLFQGhDxUyBcHNtMlWmn3jtj7pEaO+DP8pqL0IvAzXhMYmn1z9ASNtgmwLBdFxSf4tMUB0OTKA==}
+    engines: {node: 20 || >=22}
+
   minimatch@5.1.9:
     resolution: {integrity: sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==}
     engines: {node: '>=10'}
@@ -8518,6 +8525,8 @@ snapshots:
 
   '@isaacs/nonrecursive-glob-match@1.0.3': {}
 
+  '@isaacs/nonrecursive-glob-match@1.1.0': {}
+
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@7.0.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       glob: 14.0.3
@@ -10597,7 +10606,7 @@ snapshots:
       jsonc-parser: 3.3.1
       marked: 18.1.1
       mime: 1.6.0
-      minimatch: 11.0.4
+      minimatch: 11.0.5
       parse5: 8.0.1
       proper-lockfile: 4.1.2
       read: 1.0.7
@@ -12673,6 +12682,11 @@ snapshots:
   minimatch@11.0.4:
     dependencies:
       '@isaacs/nonrecursive-glob-match': 1.0.3
+      brace-expansion: 5.0.12
+
+  minimatch@11.0.5:
+    dependencies:
+      '@isaacs/nonrecursive-glob-match': 1.1.0
       brace-expansion: 5.0.12
 
   minimatch@5.1.9:
