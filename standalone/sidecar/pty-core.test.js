@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const {
   create,
@@ -1423,6 +1424,38 @@ test('resolveSpawnConfig injects WSL bash integration via a sh -c detector', () 
     + "'/mnt/c/Program Files/Dormouse/shell-integration/bash/shellIntegration.bash' -i;; esac; fi; "
     + 'exec "${login:-/bin/sh}" -l';
   assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'sh', '-c', detector]);
+});
+
+// The integration scripts live under the user's profile directory, and a
+// Windows user name may hold an apostrophe.
+test('resolveSpawnConfig quotes an apostrophe in the integration path for PowerShell and WSL', () => {
+  const runtime = (integrationDir) => ({
+    platform: 'win32',
+    env: { USERPROFILE: 'C:\\Users\\tester', DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir },
+    osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+    fsModule: integrationFsModule,
+  });
+  const pwsh = (name) => resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+    runtime(`C:\\Users\\${name}\\AppData\\Local\\Dormouse Terminal\\shell-integration`),
+  ).shellArgs;
+  assert.deepEqual(pwsh("O'Brien"), ['-NoExit', '-Command',
+    ". 'C:\\Users\\O''Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration\\pwsh\\shellIntegration.ps1'"]);
+  // PowerShell also closes a single-quoted string at U+2018–U+201B.
+  assert.deepEqual(pwsh('O\u2019Brien'), ['-NoExit', '-Command',
+    ". 'C:\\Users\\O\u2019\u2019Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration\\pwsh\\shellIntegration.ps1'"]);
+
+  const wsl = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
+    runtime("C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration"),
+  ).shellArgs;
+  const detector = wsl[wsl.length - 1];
+  assert.ok(detector.includes(
+    "exec bash --init-file '/mnt/c/Users/O'\\''Brien/AppData/Local/Dormouse Terminal/shell-integration/bash/shellIntegration.bash' -i;;",
+  ), detector);
+  // The detector is one sh program, so it must still parse.
+  const parsed = spawnSync('sh', ['-n', '-c', detector], { encoding: 'utf8' });
+  assert.equal(parsed.status, 0, parsed.stderr);
 });
 
 test('resolveSpawnConfig starts a WSL shell in its Linux directory, which Windows cannot resolve', () => {

@@ -57,8 +57,10 @@ function bashArgsAreInjectable(shellArgs) {
 
 // Build the PowerShell argument list that dot-sources our integration script,
 // or return null to leave the launch untouched. Profiles still load (no
-// -NoProfile). The path is single-quoted so spaces (e.g. "Program Files")
-// survive; it's host-controlled and won't contain a single quote.
+// -NoProfile). The path is a single-quoted literal so spaces (e.g. "Program
+// Files") survive; it sits under the user's profile directory, whose name may
+// hold a quote, so PowerShell's closing quotes (`'` and U+2018–U+201B) are
+// doubled, as `powerShellLiteral` in clipboard-ops.js does.
 //
 // We key on interactivity rather than "are there args": a launch that already
 // runs a startup command (e.g. the VS "Developer PowerShell", which is
@@ -67,7 +69,7 @@ function bashArgsAreInjectable(shellArgs) {
 // installs after it. A non-interactive one-off (a -Command/-File/-EncodedCommand
 // without -NoExit) is returned as null so we don't alter it.
 function powerShellIntegratedArgs(shellArgs, script) {
-  const dotSource = `. '${script}'`;
+  const dotSource = `. '${script.replace(/['\u2018-\u201b]/g, (c) => c + c)}'`;
   const args = [...(shellArgs || [])];
 
   // No args at all → a plain interactive REPL; add our own dot-source.
@@ -383,13 +385,15 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
       // execs bash with our init-file when bash exists (covering bash and an empty
       // detection — the safe default, since bash is near-universal on WSL); and
       // falls back to the login shell only when bash is absent (e.g. Alpine). The
-      // init-file path is single-quoted for sh so spaces ("Program Files") survive.
+      // init-file path is single-quoted for sh so spaces ("Program Files") survive,
+      // with each `'` (a user name may hold one) written as `'\''`.
       // One sh statement per line for readability; joined into a single -c string.
+      const quotedMount = `'${mount.replace(/'/g, "'\\''")}'`;
       const detector = [
         'u=$(whoami 2>/dev/null);',
         'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7);',
         'if command -v bash >/dev/null 2>&1; then',
-        `case "$login" in *zsh|*fish) exec "$login" -l;; *) exec bash --init-file '${mount}' -i;; esac; fi;`,
+        `case "$login" in *zsh|*fish) exec "$login" -l;; *) exec bash --init-file ${quotedMount} -i;; esac; fi;`,
         'exec "${login:-/bin/sh}" -l',
       ].join(' ');
       return { env, shellArgs: [...shellArgs, '--', 'sh', '-c', detector] };
