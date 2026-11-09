@@ -60,6 +60,10 @@ export interface WorkspaceStripDrag {
 export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDrag {
   let dragId: WorkspaceId | null = null;
   let startIndex = 0;
+  /** The tab after the dragged one at the press, null when it was last. A cancel
+   *  puts the tab back before it: the strip can change under a drag (a `dor`
+   *  verb, an arrival from another window), which makes `startIndex` stale. */
+  let startNext: WorkspaceId | null = null;
   let startX = 0;
   let startY = 0;
   let active = false;
@@ -76,7 +80,11 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
 
   function end(restore: boolean): void {
     if (dragId === null) return;
-    if (restore) host.move(dragId, startIndex);
+    if (restore) {
+      const order = host.order();
+      const next = startNext === null ? -1 : order.indexOf(startNext);
+      host.move(dragId, next === -1 ? startIndex : next - (order.indexOf(dragId) < next ? 1 : 0));
+    }
     clickIsDragTail = active;
     active = false;
     // jsdom (and a gesture that never reached the threshold) throws here; the
@@ -188,7 +196,9 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       if (event.button !== 0 || event.ctrlKey || dragId !== null) return;
       dragId = id;
       pointerId = event.pointerId;
-      startIndex = host.order().indexOf(id);
+      const order = host.order();
+      startIndex = order.indexOf(id);
+      startNext = order[startIndex + 1] ?? null;
       startX = event.clientX;
       startY = event.clientY;
       active = false;
