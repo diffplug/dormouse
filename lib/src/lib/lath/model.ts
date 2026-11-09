@@ -223,3 +223,20 @@ export function structureFingerprint(node: LathNode): string {
       : { k: 'split', dir: n.dir, children: n.children.map((c) => strip(c.node)) };
   return JSON.stringify(strip(node));
 }
+
+/** A `structureFingerprint` with each leaf id passed through `rename`, so a
+ *  restore token still matches its tree after every leaf is renamed. Key order
+ *  survives the round trip, so the result equals the renamed tree's own
+ *  fingerprint. A string that is not JSON is returned as written. */
+export function renameFingerprint(fingerprint: string, rename: (id: string) => string): string {
+  const walk = (n: unknown): unknown => {
+    if (!isRecord(n)) return n;
+    if (n.k === 'leaf' && typeof n.id === 'string') return { ...n, id: rename(n.id) };
+    return Array.isArray(n.children) ? { ...n, children: n.children.map(walk) } : n;
+  };
+  try {
+    return JSON.stringify(walk(JSON.parse(fingerprint)));
+  } catch {
+    return fingerprint;
+  }
+}
