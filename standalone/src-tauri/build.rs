@@ -16,11 +16,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=NODE_BINARY");
     println!("cargo:rerun-if-env-changed=PATH");
 
-    // tauri-build doesn't expand bundle.resources globs into rerun-if-changed
-    // entries, so edits to ../sidecar/*.js wouldn't rerun this script and the
-    // staged copy under target/<profile>/_up_/sidecar/ would go stale.
-    println!("cargo:rerun-if-changed=../sidecar");
-
     bundle_node_runtime().expect("failed to prepare bundled Node.js runtime");
     tauri_build::build()
 }
