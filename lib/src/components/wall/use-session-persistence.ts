@@ -259,8 +259,10 @@ export function useSessionPersistence({
           platform.notifySessionFlushComplete(detail.requestId);
         });
     };
+    // No CWD probe: the page is torn down before a host round trip answers,
+    // so a probing save would never publish. Each pane keeps its last cwd.
     const handlePageHide = () => {
-      void flushSessionSave().catch(() => undefined);
+      void flushSessionSave({ probeCwd: false }).catch(() => undefined);
     };
 
     // One subscription: every store commit (add/remove/resize/swap/meta, including
