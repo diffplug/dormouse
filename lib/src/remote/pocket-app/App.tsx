@@ -561,10 +561,9 @@ export default function App({
             await loadBurrows();
             return;
           }
-          if (!result.ok) {
-            await loadBurrows();
-            throw new Error(result.message);
-          }
+          // The catch below leaves the screen and re-reads the list; re-reading
+          // here too would let a failed read replace the refusal's message.
+          if (!result.ok) throw new Error(result.message);
           // Approving on the laptop should land the phone in a terminal, not back
           // on a list. Re-labelling busy keeps the screen showing progress.
           setBusy('connect');
