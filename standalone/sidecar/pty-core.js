@@ -702,12 +702,6 @@ function parseCwdsFromLsof(output) {
 
 module.exports.parseCwdsFromLsof = parseCwdsFromLsof;
 
-function parseCwdFromLsof(output, pid) {
-  return parseCwdsFromLsof(output).get(Number(pid)) ?? null;
-}
-
-module.exports.parseCwdFromLsof = parseCwdFromLsof;
-
 /**
  * `pid -> cwd` for every pid that could be resolved, in ONE pass.
  *
@@ -1251,7 +1245,6 @@ function parseMsysPs(output) {
   }
   return rows;
 }
-module.exports.parseMsysPs = parseMsysPs;
 
 /** The MSYS `ps.exe` beside a Git Bash shell (`bin\bash.exe` or `usr\bin\bash.exe`). */
 function msysPsFor(shell, fsModule = fs) {
@@ -1284,7 +1277,6 @@ function adoptMsysDescendants(owned, children, msysRows) {
     }
   }
 }
-module.exports.adoptMsysDescendants = adoptMsysDescendants;
 
 const SURFACE_ID_PATTERN = /^[A-Za-z0-9:._-]+$/;
 
@@ -1300,7 +1292,6 @@ function wslPortScript(surfaceIds) {
     "echo '#tcp'; cat /proc/net/tcp 2>/dev/null; echo '#tcp6'; cat /proc/net/tcp6 2>/dev/null",
   ].join(' ');
 }
-module.exports.wslPortScript = wslPortScript;
 
 /** Listening ports from `wslPortScript` output, each tagged with the surface
  *  id its process carries. */
@@ -1326,7 +1317,6 @@ function parseWslPortScan(output) {
     ...parseProcNetTcp(tables.tcp6, 'IPv6', inodeToPid),
   ].map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
 }
-module.exports.parseWslPortScan = parseWslPortScan;
 
 /** Listening ports inside every running distro for `surfaceIds`, inside the
  *  socket scan's budget; [] on any failure. */

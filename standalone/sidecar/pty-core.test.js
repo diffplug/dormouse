@@ -6,7 +6,6 @@ const { spawnSync } = require('node:child_process');
 const {
   create,
   detectAvailableShells,
-  parseCwdFromLsof,
   parseCwdsFromLsof,
   getCwdsForPids,
   resolveSpawnConfig,
@@ -1044,20 +1043,6 @@ test('gracefulKill with nothing live waits one grace tick', async () => {
   await done;
 
   assert.deepEqual(events, [{ event: 'gracefulKillDone', data: { requestId: 'req-1' } }]);
-});
-
-test('parseCwdFromLsof returns the cwd for the requested pid', () => {
-  const output = [
-    'p100',
-    'fcwd',
-    'n/',
-    'p4242',
-    'fcwd',
-    'n/home/tester/project',
-    '',
-  ].join('\n');
-
-  assert.equal(parseCwdFromLsof(output, 4242), '/home/tester/project');
 });
 
 // ── resolveSpawnConfig shell/args override ──────────────────────────────
