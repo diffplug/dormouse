@@ -61,7 +61,6 @@ describe('PTY manager lifetime and buffers', () => {
     const { manager, child } = await startManager();
     const data = 'prefix' + 'x'.repeat(1_000_000);
     child.emit('message', { type: 'data', id: 'pane-a', data });
-    expect(manager.getReplayData('pane-a')).toBe('x'.repeat(1_000_000));
     expect(manager.getScrollback('pane-a')).toBe('x'.repeat(1_000_000));
     expect(manager.getScrollbackReceived('pane-a')).toBe(data.length);
     expect(manager.getScrollbackSince('pane-a', data.length - 3)).toBe('xxx');

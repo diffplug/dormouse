@@ -14,7 +14,7 @@ The shared frontend runs in the bottom-panel `WebviewView` and in independent ed
 
 - **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive** for its next router alone.
 - Each VS Code window gets its own extension host, and therefore its own pty-host child.
-- **Must cap each PTY's replay and scrollback at 1,000,000 characters**, replay clearing on first read; **a pty-host child crash reports every live PTY exited and keeps its buffer**, ignoring a replaced child's late output and exits.
+- **Must cap each PTY's retained scrollback at 1,000,000 characters and replay all of it to every router that adopts the PTY**; **a pty-host child crash reports every live PTY exited and keeps its buffer**, ignoring a replaced child's late output and exits.
 - **Never let a resuming router steal another webview's PTYs**: a PTY id is in at most one router's `ownedPtyIds`.
 - **A Session's alert state follows its PTY**: `pty:spawn` starts it over from `options.alert`, and **every kill removes the entry**.
 - **`retainContextWhenHidden` is set on both `WebviewPanel` and `WebviewView`**, so xterm.js DOM, scrollback, and PTY subscriptions survive hide/show without a resume.

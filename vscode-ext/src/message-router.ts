@@ -828,15 +828,12 @@ export function attachRouter(
         };
         post(list);
         for (const [id] of reconnectable) {
-          // For already-owned PTYs the replay buffer was consumed on first connect,
-          // so use scrollback (full history, never cleared).
-          // For newly-claimed PTYs use replay (all data since spawn, clears buffer).
-          const data = previouslyOwned.has(id)
-            ? ptyManager.getScrollback(id)
-            : ptyManager.getReplayData(id);
+          // The whole retained history, for a router that kept the PTY and for
+          // one adopting it alike: an adoption that drained a buffer would
+          // leave the next adopter only the output since.
           // One per listed PTY, empty or not: the collector finishes on a
           // replay for each, and would otherwise wait out its timeout.
-          post({ type: 'pty:replay', id, data: data ?? '' } satisfies ExtensionMessage);
+          post({ type: 'pty:replay', id, data: ptyManager.getScrollback(id) ?? '' } satisfies ExtensionMessage);
         }
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
