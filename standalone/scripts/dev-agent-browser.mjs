@@ -3,7 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { AGENT_BROWSER_SOCKET_DIR_ENV, sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
@@ -452,6 +452,13 @@ async function callerToolId() {
   }
 }
 
+// Both directories belong to this run alone, so they go with it. Removed only
+// once the children are gone, since the sidecar writes its state there while
+// it shuts down.
+function removeRunDirs() {
+  for (const dir of [stateDir, agentBrowserDir]) rmSync(dir, { recursive: true, force: true });
+}
+
 async function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -471,10 +478,12 @@ async function shutdown(code = 0) {
   // Bound cleanup even when a child or open request stops responding.
   const timeout = setTimeout(() => {
     for (const child of children) child.kill('SIGKILL');
+    removeRunDirs();
     process.exit(code);
   }, 3000);
   await Promise.all([vite?.close(), ...childrenClosed]);
   clearTimeout(timeout);
+  removeRunDirs();
   process.exit(code);
 }
 
