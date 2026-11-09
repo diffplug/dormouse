@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { existsSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -286,5 +286,29 @@ test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line'
     assert.match(printed, /n=4 s=7/);
   } finally {
     await bash.close();
+  }
+});
+
+// Setting ZDOTDIR in ~/.zshenv is how a user moves the rest of their zsh
+// dotfiles. The integration sources that .zshenv itself, so it must follow the
+// ZDOTDIR it leaves, or such a user's .zprofile and .zshrc never run.
+test('zsh: a ZDOTDIR set in the user\'s .zshenv still finds their .zprofile and .zshrc', { skip: !ZSH }, () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'dormouse-zsh-'));
+  try {
+    const moved = path.join(home, '.config', 'zsh');
+    mkdirSync(moved, { recursive: true });
+    writeFileSync(path.join(home, '.zshenv'), 'ZDOTDIR="$HOME/.config/zsh"\n');
+    writeFileSync(path.join(moved, '.zprofile'), 'PROFILE_MARK=profile\n');
+    writeFileSync(path.join(moved, '.zshrc'), 'RC_MARK=rc\n');
+    const out = execFileSync(ZSH, ['-l', '-i', '-c', 'print -r -- "$PROFILE_MARK $RC_MARK $ZDOTDIR"'], {
+      encoding: 'utf8',
+      cwd: home,
+      // What applyShellIntegration hands a zsh pane whose environment has no ZDOTDIR.
+      env: { PATH: process.env.PATH, HOME: home, TERM: 'xterm-256color', ZDOTDIR: path.join(dir, 'shell-integration/zsh'), USER_ZDOTDIR: home },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    assert.equal(out.trim(), `profile rc ${moved}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
