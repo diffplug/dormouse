@@ -480,13 +480,13 @@ export function resolveCommandStart(
 // integration reports its cwd as a POSIX path (`/c/Users/...`) while the `dor`
 // CLI sends a native Windows path (`C:\Users\...`) for the very same folder, so
 // an exact compare never matches and every ensure spawns a duplicate. This
-// normalizes the MSYS drive form (`/c/` -> `C:\`), slash direction, and
+// normalizes the MSYS drive form (`/c/` or a bare drive root `/c` -> `C:\`), slash direction, and
 // drive-letter case. It is anchored to leave genuine POSIX paths (`/Users/...`,
 // `/home/...`) untouched — only a single-letter root segment, i.e. an MSYS drive,
 // is rewritten — so it is a no-op on macOS/Linux. Applied symmetrically, so
 // already-equal paths stay equal.
 function canonicalizeCwdForMatch(path: string): string {
-  const withDrive = path.replace(/^\/([A-Za-z])\//, (_match, drive: string) => `${drive}:/`);
+  const withDrive = path.replace(/^\/([A-Za-z])(?:\/|$)/, (_match, drive: string) => `${drive}:/`);
   if (!/^[A-Za-z]:[\\/]/.test(withDrive)) return path;
   const unified = withDrive.replace(/\//g, '\\');
   return unified.charAt(0).toUpperCase() + unified.slice(1);

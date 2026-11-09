@@ -473,6 +473,9 @@ test('canonicalizeWindowsCwd folds MSYS drive, slashes, and drive-letter case', 
   assert.equal(canonicalizeWindowsCwd('c:/Users/me/app'), 'C:\\Users\\me\\app');
   assert.equal(canonicalizeWindowsCwd('c:\\Users\\me\\app'), 'C:\\Users\\me\\app');
   assert.equal(canonicalizeWindowsCwd('C:\\Users\\me\\app'), 'C:\\Users\\me\\app');
+  // At a drive root Git Bash reports a bare `/c`.
+  assert.equal(canonicalizeWindowsCwd('/c'), 'C:\\');
+  assert.equal(canonicalizeWindowsCwd('/c/'), 'C:\\');
   // Non-drive paths (POSIX dirs, UNC, empty) pass through unchanged.
   assert.equal(canonicalizeWindowsCwd('/home/me/app'), '/home/me/app');
   assert.equal(canonicalizeWindowsCwd('\\\\server\\share'), '\\\\server\\share');

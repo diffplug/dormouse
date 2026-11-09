@@ -124,11 +124,11 @@ function directoryExists(cwd, fsModule = fs) {
 // (`c:\...`). Whatever spelling we pass propagates verbatim into `process.cwd()`
 // of the shell and of anything launched in it (e.g. Claude Code, which keys
 // per-directory state case-sensitively, so `c:\` vs `C:\` fragments its history).
-// Fold to one canonical Windows form: MSYS drive -> `X:\`, slashes unified,
+// Fold to one canonical Windows form: MSYS drive (a drive root is a bare `/c`) -> `X:\`, slashes unified,
 // drive letter upper-cased. Non-drive paths (UNC, already-relative) pass through.
 function canonicalizeWindowsCwd(cwd) {
   if (!cwd) return cwd;
-  const withDrive = cwd.replace(/^\/([A-Za-z])\//, (_match, drive) => `${drive}:/`);
+  const withDrive = cwd.replace(/^\/([A-Za-z])(?:\/|$)/, (_match, drive) => `${drive}:/`);
   if (!/^[A-Za-z]:[\\/]/.test(withDrive)) return cwd;
   const unified = withDrive.replace(/\//g, '\\');
   return unified.charAt(0).toUpperCase() + unified.slice(1);
