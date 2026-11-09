@@ -55,13 +55,13 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 
 **Must bound every deactivation step and continue after any failure or timeout**, in this order:
 
-1. Start closing browser sessions.
+1. Start closing browser sessions and saving revocations.
 2. Capture agent recovery commands.
 3. Flush every webview's session.
-4. Refresh saved state from the still-live PTYs (CWD).
+4. Refresh saved state from the live PTYs (CWD).
 5. Graceful kill (`docs/specs/transport.md` → Graceful shutdown), then force kill.
 
-**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `shutdown` in `vscode-ext/src/shutdown.ts`.
+**Must capture before the flush and kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `shutdown` in `vscode-ext/src/shutdown.ts`.
 
 **On activate**, saved state loads through `readPersistedSession()` and is injected into the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then claim their own pane ids' recovery commands from the single record (`docs/compatible-agents.md` → "Recovery record"); **a panel's pane ids come from the `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery needs no host-side per-panel store.
 
