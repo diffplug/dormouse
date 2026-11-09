@@ -126,9 +126,10 @@ export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlph
  * both loop this list, so the CSS variable, the static fallback, and the
  * per-theme AA check come with it.
  *
- * `tintVar` is resolved off the live `body`, so it follows the reader's theme
- * where the token does (`--color-text`) and stays fixed where it does not
- * (`--color-caramel`). The class strings above are still written out: Tailwind
+ * `tintVar` is looked up in `docsTokensFor`'s tint table, which maps
+ * `--color-text` to the theme's foreground and pins `--color-caramel`; a new
+ * `tintVar` needs an entry there too, or its surface keeps the static
+ * fallback. The class strings above are still written out: Tailwind
  * scans source statically and never sees an interpolated utility, so the alpha
  * here is the one that must match the literal beside it.
  */
