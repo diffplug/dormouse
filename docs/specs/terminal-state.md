@@ -85,7 +85,7 @@ Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/
 
 **Emitted fields must be filtered before they are written — a security boundary.** An attacker-chosen directory name or command can carry an OSC terminator (BEL, `ESC \`, or the C1 ST `U+009C`) that ends the `633` sequence early, so the remainder arrives as a fresh, fully-trusted OSC. **The parser cannot defend against this** — it scans raw bytes (rationale). The field grammar the parser decodes:
 
-- **`E` escapes** BEL, ESC and the C1 ST alongside `\`, `;`, LF and CR; the parser decodes `\xNN` back, so it still reports verbatim.
+- **`E` escapes** BEL, CAN, SUB, ESC and the C1 ST alongside `\`, `;`, LF and CR; the parser decodes `\xNN` back, so it still reports verbatim.
 - **`Cwd=` is read verbatim**, no `\xNN` decoding, so a Windows path's backslashes arrive intact — its control characters are therefore *removed*, not escaped.
 
 Source of truth: `applyShellIntegration` in `standalone/sidecar/pty-core.js`; the scripts under `standalone/sidecar/shell-integration/`; pinned by `standalone/sidecar/shell-integration.test.js`.

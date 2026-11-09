@@ -30,9 +30,10 @@ function findShell(name) {
 const BASH = findShell('bash');
 const ZSH = findShell('zsh');
 
-// The three sequences that terminate an OSC string (terminal-protocol.ts →
-// findOscTerminator): BEL, ST, and the C1 ST.
-const TERMINATORS = ['\x07', '\x1b\\', '\u009c'];
+// The sequences that end an OSC string (`stringControlEndScan` in
+// lib/src/lib/terminal-controls.ts): BEL, ST, the C1 ST, and the CAN and SUB
+// that abort one.
+const TERMINATORS = ['\x07', '\x1b\\', '\u009c', '\x18', '\x1a'];
 
 /**
  * Source a shell's integration script, call one of its helpers, and echo the
@@ -71,8 +72,8 @@ assert.ok(BASH, 'bash must be available to test the shell-integration emitters')
 
 for (const [name, bin] of shells) {
   test(`${name}: safe_cwd removes every OSC terminator`, () => {
-    // One fixture carrying all three, rather than one spawn per terminator for
-    // a byte-identical hazard set.
+    // One fixture carrying all of them, rather than one spawn per terminator
+    // for a byte-identical hazard set.
     const hostile = `/tmp/evil${TERMINATORS.join('x')}\x1b]9;PWNED\x07`;
     const out = callHelper(bin, '__dormouse_633_safe_cwd', hostile);
     for (const t of TERMINATORS) {
@@ -100,7 +101,7 @@ for (const [name, bin] of shells) {
   });
 
   test(`${name}: escape neutralizes terminators in the E command line`, () => {
-    const hostile = `echo hi\x07\x1b]9;PWNED\x07`;
+    const hostile = `echo hi${TERMINATORS.join('x')}\x1b]9;PWNED\x07`;
     const out = callHelper(bin, '__dormouse_633_escape', hostile);
     for (const t of TERMINATORS) {
       assert.ok(!out.includes(t), `${name}: ${JSON.stringify(t)} survived in ${JSON.stringify(out)}`);
@@ -108,6 +109,8 @@ for (const [name, bin] of shells) {
     // Escaped, not dropped — the parser decodes \xNN back, so E stays verbatim.
     assert.ok(out.includes('\\x07'), `${name}: expected \\x07 in ${JSON.stringify(out)}`);
     assert.ok(out.includes('\\x1b'), `${name}: expected \\x1b in ${JSON.stringify(out)}`);
+    assert.ok(out.includes('\\x18'), `${name}: expected \\x18 in ${JSON.stringify(out)}`);
+    assert.ok(out.includes('\\x1a'), `${name}: expected \\x1a in ${JSON.stringify(out)}`);
   });
 
   test(`${name}: escape still handles what it always did`, () => {
