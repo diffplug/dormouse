@@ -151,6 +151,10 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
     unsubscribeCancel = subscribeDragCancel(() => finish(false));
+    // From the press, not the threshold: a pane's iframe starts right under its
+    // header, so the pointer can reach it before the window sees the drag start,
+    // and the frame would then take the moves and the release.
+    releaseShield = shieldFrames();
   };
 
   const runHitTest = (): void => {
@@ -260,7 +264,6 @@ export function createDragController(deps: DragControllerDeps): DragController {
     if (!d.active) {
       if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD_PX) return;
       d.active = true;
-      releaseShield = shieldFrames();
       if (!d.external) {
         deps.latestRef.current.onDragStart?.(d.id); // Wall applies its selection policy
         const el = deps.leafElsRef.current.get(d.id);

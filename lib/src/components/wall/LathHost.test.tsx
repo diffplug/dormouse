@@ -1009,7 +1009,7 @@ describe('LathHost — pane / Door drag', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
     const { onProposeMove } = mountDrag(store);
     act(() => down(header('a'), 100, 15));
-    expect(shielded()).toBe(false); // not before the threshold
+    expect(shielded()).toBe(true); // from the press, before the threshold
     focusFrameIn('a'); // the header press selects a Tool, focusing its body
     act(() => window.dispatchEvent(new Event('blur')));
     act(() => moveTo(601, 300));
@@ -1142,6 +1142,7 @@ describe('LathHost — pane / Door drag', () => {
     act(() => up());
     expect(onDragStart).not.toHaveBeenCalled();
     expect(onProposeMove).not.toHaveBeenCalled();
+    expect(shielded()).toBe(false);
   });
 
   it('swallows the click and dblclick a drag\'s release fires, never a sub-threshold press\'s', () => {
@@ -1206,6 +1207,7 @@ describe('LathHost — pane / Door drag', () => {
     // "no drop" so the Door's own click-reattach is what actually restores it.
     expect(onExternalDrop).toHaveBeenCalledWith(null);
     expect(overlayEl()).toBeNull();
+    expect(shielded()).toBe(false);
   });
 
   it('hit-tests the LIVE tree when a background commit lands mid-drag', async () => {
