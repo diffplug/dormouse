@@ -7,7 +7,6 @@ export interface HeaderActionButtonProps {
   ariaLabel: string;
   ariaDescription?: string;
   tooltip?: string | null;
-  onMouseDown?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
 }
@@ -17,7 +16,6 @@ export function HeaderActionButton({
   ariaLabel,
   ariaDescription,
   tooltip,
-  onMouseDown,
   onClick,
   children,
 }: HeaderActionButtonProps) {
@@ -59,7 +57,6 @@ export function HeaderActionButton({
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          onMouseDown?.(e);
         }}
         onClick={(e) => {
           e.stopPropagation();
