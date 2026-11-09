@@ -61,6 +61,29 @@ fn bundle_node_runtime() -> Result<(), Box<dyn Error>> {
         fs::set_permissions(&node_dest, perms)?;
     }
 
+    // tauri-build registers the staged runtime as `rerun-if-changed`, and Cargo
+    // compares inputs against the time this script started. A copy stamped
+    // "now" (`fs::copy` on Linux, the GUI patch's write on Windows) would rerun
+    // the script and relink the crate on every build, so the staged file keeps
+    // the source's mtime, which predates the run.
+    copy_mtime(&node_source, &node_dest)?;
+
+    Ok(())
+}
+
+fn copy_mtime(source: &Path, dest: &Path) -> Result<(), Box<dyn Error>> {
+    let modified = fs::metadata(source)?.modified()?;
+    // Setting a time needs write access; on Windows `fs::copy` carries over a
+    // read-only source's attribute (see `force_windows_gui_subsystem`).
+    let mut perms = fs::metadata(dest)?.permissions();
+    if perms.readonly() {
+        perms.set_readonly(false);
+        fs::set_permissions(dest, perms)?;
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .open(dest)?
+        .set_modified(modified)?;
     Ok(())
 }
 
