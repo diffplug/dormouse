@@ -123,7 +123,7 @@ One extension host can hold multiple Dormouse webviews, so the request carries `
 
 **Every valid request must preserve `host ceiling < client socket < server reaper`.** The client sends its own `timeoutMs` as a hint and the server reaps 10s above it. `dor await`'s host ceiling is at most 24h (`--timeout` takes 1–86400 whole seconds, the host's `MAX_AWAIT_TIMEOUT_MS`) and its socket deadline 5s later, so the server accepts hints up to 24h + 5s; an absent or nonsense hint (non-finite, ≤ 0, or above that) falls back to 65s, which clears the longest fixed client deadline (`dor ensure --restart` at 60s).
 
-**Must answer a malformed control request with an error before forwarding it, and keep serving the connection** (`standalone/sidecar/dor-control-server.test.js`).
+**Must answer a malformed control request with an error before forwarding it, and keep serving later connections** (`standalone/sidecar/dor-control-server.test.js`).
 
 **Some requests outlive their client.** Standalone routes their cancel by request id, which requires that **`dor-*` request ids never collide with Rust's own `req-*` invoke ids**; VS Code broadcasts it, since only the webview holding that id has anything to abort. **A handler that parks must release whatever it armed when the signal fires** — nothing it responds with afterwards can reach the client.
 
