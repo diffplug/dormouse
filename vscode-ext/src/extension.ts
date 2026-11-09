@@ -64,7 +64,6 @@ function setupPanel(
   const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.(), recoveryCommands);
 
   const router = attachRouter(channel, {
-    reconnect: !!savedState,
     killOnDispose: true,
     getSelectedShell,
     // Reflect this panel's Workspace union onto the editor-tab title

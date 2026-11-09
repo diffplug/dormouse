@@ -761,15 +761,15 @@ describe('alarm delivery', () => {
  */
 it('leaves a disposed view\'s PTYs for the view, not a re-initializing panel', () => {
   const view = fakeWebview();
-  const viewRouter = router.attachRouter(view.channel, { reconnect: true });
+  const viewRouter = router.attachRouter(view.channel, {});
   view.send({ type: 'dormouse:init' });
   view.send({ type: 'pty:spawn', id: 'view-pty', options: { cwd: '/repo' } });
   viewRouter.dispose();
 
   const panel = fakeWebview();
-  const panelRouter = router.attachRouter(panel.channel, { reconnect: true, killOnDispose: true });
+  const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
   const reopened = fakeWebview();
-  const reopenedRouter = router.attachRouter(reopened.channel, { reconnect: true });
+  const reopenedRouter = router.attachRouter(reopened.channel, {});
   try {
     panel.send({ type: 'dormouse:init' });
     expect(panel.posted.filter((message) => message.type === 'pty:list').at(-1)).toMatchObject({ ptys: [] });
@@ -782,18 +782,64 @@ it('leaves a disposed view\'s PTYs for the view, not a re-initializing panel', (
   }
 });
 
+/**
+ * VS Code reloads an editor tab's document under the same router when it moves
+ * the tab to another window; the reloaded page resumes only if it is told its
+ * PTYs are still here.
+ */
+describe('an editor panel re-initializing', () => {
+  it('lists nothing to a brand-new panel, so it boots a fresh terminal', () => {
+    // A disposed view's orphan is about, which the panel must not adopt.
+    const view = fakeWebview();
+    const viewRouter = router.attachRouter(view.channel, {});
+    view.send({ type: 'dormouse:init' });
+    view.send({ type: 'pty:spawn', id: 'view-pty', options: { cwd: '/repo' } });
+    viewRouter.dispose();
+
+    const panel = fakeWebview();
+    const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
+    try {
+      panel.send({ type: 'dormouse:init' });
+      expect(panel.posted.filter((message) => message.type === 'pty:list')).toEqual([{ type: 'pty:list', ptys: [] }]);
+      expect(panel.posted.filter((message) => message.type === 'pty:replay')).toEqual([]);
+    } finally {
+      panelRouter.dispose();
+    }
+  });
+
+  it('lists its own live PTYs to its reloaded document, with their history', () => {
+    const panel = fakeWebview();
+    const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
+    try {
+      panel.send({ type: 'dormouse:init' });
+      panel.send({ type: 'pty:spawn', id: 'panel-pty', options: { cwd: '/repo' } });
+      ptys.scrollback.set('panel-pty', 'history');
+      panel.posted.length = 0;
+
+      panel.send({ type: 'dormouse:init' });
+      expect(panel.posted.filter((message) => message.type === 'pty:list'))
+        .toMatchObject([{ ptys: [{ id: 'panel-pty', alive: true }] }]);
+      expect(panel.posted.filter((message) => message.type === 'pty:replay'))
+        .toEqual([{ type: 'pty:replay', id: 'panel-pty', data: 'history' }]);
+      expect(ptys.order).not.toContain('kill panel-pty');
+    } finally {
+      panelRouter.dispose();
+    }
+  });
+});
+
 // The shared collector finishes on one replay per listed PTY
 // (collectLivePtys), so an empty buffer still gets one rather than leaving the
 // reconnect to wait out its timeout.
 it('replays every listed PTY at a reconnect, an empty buffer included', () => {
   const view = fakeWebview();
-  const viewRouter = router.attachRouter(view.channel, { reconnect: true });
+  const viewRouter = router.attachRouter(view.channel, {});
   view.send({ type: 'dormouse:init' });
   view.send({ type: 'pty:spawn', id: 'quiet-pty', options: { cwd: '/repo' } });
   viewRouter.dispose();
 
   const reopened = fakeWebview();
-  const reopenedRouter = router.attachRouter(reopened.channel, { reconnect: true });
+  const reopenedRouter = router.attachRouter(reopened.channel, {});
   try {
     reopened.send({ type: 'dormouse:init' });
     expect(reopened.posted.filter((message) => message.type === 'pty:replay'))
@@ -808,7 +854,7 @@ it('replays the whole retained history to every router that adopts a PTY', () =>
   // the router and a new one adopts the PTY. An adoption that drained a buffer
   // left the second one only the output since the first.
   const first = fakeWebview();
-  const firstRouter = router.attachRouter(first.channel, { reconnect: true });
+  const firstRouter = router.attachRouter(first.channel, {});
   first.send({ type: 'dormouse:init' });
   first.send({ type: 'pty:spawn', id: 'moved-pty', options: { cwd: '/repo' } });
   ptys.scrollback.set('moved-pty', 'history');
@@ -816,7 +862,7 @@ it('replays the whole retained history to every router that adopts a PTY', () =>
 
   for (const _move of [1, 2]) {
     const view = fakeWebview();
-    const viewRouter = router.attachRouter(view.channel, { reconnect: true });
+    const viewRouter = router.attachRouter(view.channel, {});
     try {
       view.send({ type: 'dormouse:init' });
       expect(view.posted.filter((message) => message.type === 'pty:replay'))

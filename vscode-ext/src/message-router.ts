@@ -352,7 +352,6 @@ export async function flushAllSessions(timeoutMs = 1000): Promise<void> {
 export function attachRouter(
   channel: WebviewChannel,
   options?: {
-    reconnect?: boolean;
     killOnDispose?: boolean;
     onSaveState?: (state: unknown) => void | PromiseLike<void>;
     getSelectedShell?: () => { shell?: string; args?: string[] } | null;
@@ -366,7 +365,6 @@ export function attachRouter(
     shown?: { current(): boolean; onDidChange: vscode.Event<unknown> };
   },
 ): vscode.Disposable {
-  const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
   // Only a router whose PTYs outlive it (the WebviewView's) leaves live PTYs
   // unowned, so only such a router claims them back at `dormouse:init`; a
@@ -783,11 +781,11 @@ export function attachRouter(
           } satisfies ExtensionMessage);
         }
 
-        if (!reconnect) {
-          // Fresh instance — no existing PTYs to restore
-          post({ type: 'pty:list', ptys: [] } satisfies ExtensionMessage);
-          break;
-        }
+        // Every init lists what this router owns, a panel's too: a panel's
+        // document is reloaded under the same router when VS Code moves it to
+        // another window, and an empty list would have it cold-restore over
+        // its own live PTYs. A brand-new webview owns nothing yet, so it is
+        // listed none.
         // Snapshot IDs owned before claiming so we can choose the right data source below
         const previouslyOwned = new Set(ownedPtyIds);
 
