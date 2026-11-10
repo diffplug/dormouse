@@ -50,6 +50,10 @@ test('help snapshots cover every command in global help', async (t) => {
   await assertSnapshotInventory(['dor', ...commandNames]);
 });
 
+test('dor help o is dor help open', async () => {
+  assert.deepEqual(await runCli(['help', 'o']), await runCli(['help', 'open']));
+});
+
 test('every help JSON output example parses as JSON', async () => {
   for (const name of (await readdir(snapshotsDir)).filter((file) => file.endsWith('.md'))) {
     const lines = (await readFile(join(snapshotsDir, name), 'utf8')).split('\n');

@@ -66,9 +66,10 @@ const COMMANDS = [
  * both run it. */
 export async function runCli(rawArgv: string[], options: CliOptions): Promise<CliResult> {
   // `dor o` is `dor open` from here on, so preParse, help patches, and the
-  // command lookup see one name.
+  // command lookup see one name; so is `dor help o`.
   const [verb, ...rest] = normalizeVersionAlias(rawArgv);
   const argv = verb === undefined ? [] : [canonicalDorVerb(verb), ...rest];
+  if (argv[0] === 'help' && argv[1] !== undefined) argv[1] = canonicalDorVerb(argv[1]);
   // `dor agent-browser <args...>` and `dor playwright <args...>` forward args verbatim to the
   // provider's CLI, so they must never reach stricli's flag parser. Only a bare
   // `--help`/`-h` falls through to stricli; `dor help agent-browser` starts with
