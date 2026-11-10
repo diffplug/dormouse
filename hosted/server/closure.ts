@@ -35,6 +35,12 @@ export const ACCOUNT_CLOSING = "This account is being closed.";
 const CLOSING_HOLD_MINUTES = 15;
 
 /**
+ * How far Stripe's clock, which stamps a subscription's `ended_at`, may run
+ * ahead of this Worker's, which stamps a hold's `cancelingBy`.
+ */
+const STRIPE_CLOCK_SKEW_MINUTES = 5;
+
+/**
  * Whether `owner`'s account is gone or being closed. Checkout asks once it has
  * opened a checkout and before it answers its URL: a closure that started
  * after this read then expires that checkout, since it writes its row before
@@ -68,18 +74,26 @@ async function endSubscriptions(billing: Billing<Plan>, owner: string): Promise<
     await billing.db.selectFrom("subscriptions").select("id").where("owner_id", "=", owner).where("status", "in", SUBSCRIBED).execute()
   ).map(({ id }) => id);
   // Recorded before the first cancel and kept across a failed attempt: a
-  // cancel that lands in Stripe but not here leaves no other trace.
+  // cancel that lands in Stripe but not here leaves no other trace. Such a
+  // cancel ends its subscription during the attempt that named it, which
+  // lasts at most the hold (`cancelingBy`); one named that ended later lapsed
+  // for another reason, and is dropped before this attempt names its own.
   await run(
     billing.db,
     `UPDATE public.dormouse_account_closing
-    SET "canceling" = "canceling" || ARRAY(SELECT id FROM unnest($2::text[]) id WHERE id <> ALL ("canceling"))
+    SET "canceling" = ARRAY(
+        SELECT c.id FROM unnest("canceling") AS c(id) WHERE NOT EXISTS (
+          SELECT FROM pgstencil_billing.subscriptions s
+          WHERE s.id = c.id AND s.ended_at > "cancelingBy" + make_interval(mins => $4)))
+      || ARRAY(SELECT id FROM unnest($2::text[]) id WHERE id <> ALL ("canceling")),
+      "cancelingBy" = $3::timestamptz + make_interval(mins => $5)
     WHERE "userId" = $1`,
-    [owner, current],
+    [owner, current, billing.time.now(), STRIPE_CLOCK_SKEW_MINUTES, CLOSING_HOLD_MINUTES],
   );
   for (const id of current) await billing.end(owner, id, { reason: END_REASONS.closure });
   // Read after the cancels, so a concurrent closure's are seen. While the
   // account stands, a subscription ended for closure is an earlier attempt's,
-  // as is one this closure was canceling that ended for no other reason.
+  // as is one still named on the hold that ended for no other reason.
   const earlier = await run<{ id: string }>(
     billing.db,
     `SELECT s.id FROM pgstencil_billing.subscriptions s

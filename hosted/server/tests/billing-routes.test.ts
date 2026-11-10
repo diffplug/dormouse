@@ -1551,6 +1551,8 @@ test("a closure cut off after Stripe's cancel, before Hosted records it, refunds
   expect((await close(cut.who)).status).toBe(503);
   f.failing.lostCancels = false;
   expect([await present(cut.who.id), f.refunds]).toEqual([true, []]);
+  // Retried days later, it still ended during the attempt that named it.
+  f.time.advanceMilliseconds(10 * DAY_MS);
   expect((await close(cut.who)).status).toBe(204);
   expect(f.refunds).toEqual([{ paymentIntent: "pi_cut", withdrawal: null, closure: cut.subscription.id }]);
   expect(await closure(cut.who.id)).toEqual([{ canceled: [cut.subscription.id], settled: true }]);
@@ -1601,6 +1603,27 @@ test("an interrupted closure past the refund window refunds nothing on the retry
   expect((await close(late)).status).toBe(204);
   expect(f.refunds).toEqual([]);
   expect(await closure(late.id)).toEqual([{ canceled: [lateMonthly.id], settled: true }]);
+});
+
+test("a hold's subscription that lapsed long after its failed attempt is no closure's, and refunds nothing", async ({ onTestFinished }) => {
+  const { f, close, closure, present } = await interrupted(onTestFinished);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "monthly");
+  f.paidInvoices.set("pi_lapsed", subscription.id);
+  // Two days in, the close fails before Stripe acts on its cancel, retry included.
+  f.time.advanceMilliseconds(2 * DAY_MS);
+  f.failing.cancels = 2;
+  expect((await close(member)).status).toBe(503);
+  expect([await present(member.id), f.cancels]).toEqual([true, []]);
+  // The member stays and lets it lapse at its period end, 28 days after it started.
+  f.time.advanceMilliseconds(26 * DAY_MS);
+  f.dev.transition(subscription.id, "cancel");
+  await f.deliver();
+  // Closing days later owes nothing: the month was used.
+  f.time.advanceMilliseconds(4 * DAY_MS);
+  expect((await close(member)).status).toBe(204);
+  expect(f.refunds).toEqual([]);
+  expect(await closure(member.id)).toEqual([{ canceled: [], settled: true }]);
 });
 
 test("closing answers billing's refusal, such as a checkout still being created, and keeps the account", async ({

@@ -70,7 +70,7 @@ const PINNED: Record<string, string> = {
   "028_billing_alerts.sql":
     "1ef723bd2e37de6a5e129d6218d145d79f1f098ab62b248c23d54ee4d8a0f456",
   "029_account_closing_canceling.sql":
-    "48c77cde8ed38bfaddd122c6c11bbc2d4840d113808df96d7fe509480186a307",
+    "c669d3e5a9cf3f92dab1545d8da4a3edf53f6c8d2e3a3d6d744ecff9b95e10bc",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);
