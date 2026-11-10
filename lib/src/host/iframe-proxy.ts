@@ -599,6 +599,11 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     path,
     headers,
   }, (upstreamRes) => {
+    if (!isRelayableStatus(upstreamRes.statusCode)) {
+      upstreamRes.destroy();
+      serveErrorPage(grant, res, unreachablePage(grant.upstream, `invalid status ${upstreamRes.statusCode}`));
+      return;
+    }
     // Only with an embedder to ask: without one the frame gets the redirect as
     // sent, as it gets every other upstream header. So does a tunneled grant's,
     // since Pocket ignores the page's way out and would be left at a dead end.
@@ -662,6 +667,15 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   // If the frame navigates away or is closed, stop fetching upstream.
   res.on('close', () => { if (!res.writableEnded) upstreamReq.destroy(); });
   req.pipe(upstreamReq);
+}
+
+/**
+ * Whether `writeHead` takes this status. Node's client accepts any three
+ * digits and `writeHead` throws on one below 100, which inside a response
+ * handler is an uncaught exception in the host process.
+ */
+function isRelayableStatus(status: number | undefined): boolean {
+  return status === undefined || (status >= 100 && status <= 999);
 }
 
 // Non-HTML upstream responses are forwarded verbatim apart from the stripped
@@ -893,6 +907,11 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
     upstream.pipe(socket);
   });
   upstreamReq.on('response', (response) => {
+    if (!isRelayableStatus(response.statusCode)) {
+      response.destroy();
+      socket.destroy();
+      return;
+    }
     // A rejected upgrade is still an ordinary response with the same cookie boundary.
     const res = new http.ServerResponse(req);
     res.assignSocket(socket);
