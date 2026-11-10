@@ -19,7 +19,7 @@ import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './t
 import { resolveUpstreamUrl } from './git-upstream';
 import { resolveToolInput, type ToolInput } from './tool-input';
 
-export const TOOL_FILE_NAME = 'dormouse.yml';
+const TOOL_FILE_NAME = 'dormouse.yml';
 /**
  * Cap on a `dormouse.yml`. This read happens before the trust check —
  * deliberately, so the approval dialog can name the command — so both the file

@@ -13,7 +13,7 @@ import { getTerminalPaneState } from './terminal-state-store';
 
 /** Outlasts the host's longest wait after its interrupt: 15s for the prompt to
  *  come back, then up to 15s more for the retyped run to report. */
-export const HOST_HOLD_MS = 31_000;
+const HOST_HOLD_MS = 31_000;
 
 interface Hold {
   /** The run being interrupted, if one was running. */

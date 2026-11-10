@@ -128,7 +128,6 @@ export function parseBrowserSection(text: string, path: string): BrowserConfigLa
  *  unrecognized `$NAME` is a parse error, never a literal, because a typo kept
  *  as a constant string dedupes across every worktree on the machine. */
 const SUBSTITUTIONS = ['$PROJECT_ROOT', '$CWD', '$TARGET'] as const;
-export type Substitution = (typeof SUBSTITUTIONS)[number];
 
 // `$` followed by an identifier. Matches the whole token so an unknown one can
 // be named in the error rather than silently surviving as text.

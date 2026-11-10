@@ -61,7 +61,7 @@ export function toolLeaves(lath: LathWallEngine, doors: readonly DooredItem[]): 
  *  browser panel remains mounted behind the terminal half, so its controller
  *  must be released explicitly rather than waiting for an unmount that will not
  *  happen — closing its session with it. */
-export function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): boolean {
+function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): boolean {
   if (browserUrlFromParams(params) === null && toolPortConflictFromParams(params) === null) return false;
   closeBrowserSurface(id, params);
   lath.store.updateParams(id, {

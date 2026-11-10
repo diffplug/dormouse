@@ -23,16 +23,16 @@ import { retireToolRun } from './use-tool-serving';
 import { clearHoldLapse } from '../../lib/tool-run-hold';
 
 /** The canonical path an `open` gave this Tool, or null for a named Tool. */
-export function toolTargetFromParams(params: unknown): string | null {
+function toolTargetFromParams(params: unknown): string | null {
   return stringParam((params as { toolTarget?: unknown } | null | undefined)?.toolTarget) ?? null;
 }
 
 /** A resolved Tool, as a launch compares it with a Surface's params. */
-export interface ResolvedTool { scope?: ToolKeyScope; name?: string; run: string | readonly string[] }
+interface ResolvedTool { scope?: ToolKeyScope; name?: string; run: string | readonly string[] }
 
 /** Whether a Tool Surface was launched from this resolved Tool: the same scope,
  *  name, and run. Its target is compared separately. */
-export function runsSameTool(params: unknown, tool: ResolvedTool): boolean {
+function runsSameTool(params: unknown, tool: ResolvedTool): boolean {
   if (!isToolParams(params) || toolScopeFromParams(params) !== tool.scope || params.toolName !== tool.name) return false;
   if (typeof tool.run === 'string') return params.toolArgv === undefined && params.command === tool.run;
   return toolKeysEqual(params.toolArgv, tool.run);
@@ -40,7 +40,7 @@ export function runsSameTool(params: unknown, tool: ResolvedTool): boolean {
 
 /** What a Tool launch does about the preview slot, in the decision order of
  *  `docs/specs/dor-tool.md` -> Preview slot. */
-export type PreviewSlotDecision =
+type PreviewSlotDecision =
   /** Answer with this Surface as it stands, revealed — focus-neutrally when
    *  `quiet` — pinning it first when `pin`. */
   | { kind: 'existing'; id: string; quiet: boolean; pin: boolean }
