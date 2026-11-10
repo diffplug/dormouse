@@ -2054,8 +2054,9 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     const tick = () => {
       if (!targets.some((id) => ptys.has(id))) setTimeout(done, 50);
       else if (Date.now() >= deadline) {
-        // A process that outlives the hangup (one trapping it) is killed: the
-        // caller drops these ids next, and nothing could reach it after. The
+        // A PTY whose own process outlives the hangup (a shell trapping it) is
+        // killed: the caller drops these ids next, and nothing could reach it
+        // after. Only that process: a descendant ignoring the hangup lives on. The
         // same grace tick lets its exit, which follows SIGKILL within
         // milliseconds, reach the host before the acknowledgement.
         if (platform !== 'win32') {

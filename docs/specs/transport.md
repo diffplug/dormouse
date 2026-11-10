@@ -34,7 +34,7 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 ### Graceful shutdown
 
 - **Must stop only the explicitly named live PTYs**: use SIGHUP on POSIX and ConPTY close on Windows, never a signal argument there (rationale).
-- **Must SIGKILL a named POSIX PTY still alive at the caller's timeout** (rationale).
+- **Must SIGKILL a named POSIX PTY's own process still alive at the caller's timeout** (rationale).
 - **Must acknowledge after the targets exit, or the timeout passes, and a final-output grace tick**, forwarding output received during the wait; an empty target set still gets the grace tick.
 - **Must allow cleanup to follow or overlap graceful shutdown without closing a Windows PTY twice.**
 - **Never promise shell-history or final-output flushing from Windows ConPTY close**; recovery capture precedes shutdown (`docs/compatible-agents.md` → Capture).

@@ -8,7 +8,7 @@ const { create } = require('./pty-core');
 
 // The POSIX graceful stop on a real interactive bash under the pinned node-pty
 // (docs/specs/transport.md -> Graceful shutdown): the hangup ends a shell at
-// once, and what outlives it is killed at the deadline.
+// once, and a shell that ignores it is killed at the deadline.
 const BASH = process.platform === 'win32' ? null
   : ['/bin/bash', '/usr/bin/bash'].find((candidate) => existsSync(candidate)) ?? null;
 
