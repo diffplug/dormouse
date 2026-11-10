@@ -6,6 +6,7 @@ Invocation: `dor tool --help`
 USAGE
   dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]
   dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
+  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]
   dor tool --list [--global] [--cwd path] [--json]
   dor tool --help
 
@@ -26,6 +27,8 @@ Where the tool lands: typed alone at a prompt in a visible, integrated plain ter
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
 --list runs nothing: it prints the Tools `dor tool <name>` would find from the working directory — the nearest project dormouse.yml and whether you have approved it, then the user file. Each Tool shows its command, render, port strategy, and whether it has a key, then the comment block directly above its entry, which is where a Tool is documented. A user Tool that a project Tool of the same name hides is marked shadowed. --global lists only user Tools.
+
+Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --minimize, --fresh, --surface, or --workspace asks for a launch.
 
 Text output:
   created surface:3  "pnpm storybook"
