@@ -102,7 +102,6 @@
     }
   },
   "scripts": {
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "build:frontend": "vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "pnpm typecheck && vitest run",

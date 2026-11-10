@@ -94,3 +94,15 @@ test('no package.json script builds an internal package dist by name; build-work
   }
   assert.deepEqual(offenders, [], 'call `node ../scripts/build-workspace-deps.mjs` instead');
 });
+
+test('no workspace manifest declares an install lifecycle script', () => {
+  // pnpm runs a project's own lifecycle scripts in the platform shell, which is
+  // cmd.exe on Windows, so a POSIX one-liner there fails `pnpm install`.
+  const offenders = [];
+  for (const { dir, manifest } of [...packages, { dir: '.', manifest: JSON.parse(readRepoFile('package.json')) }]) {
+    for (const script of ['preinstall', 'install', 'postinstall', 'prepare']) {
+      if (manifest.scripts?.[script] !== undefined) offenders.push(`${dir}: ${script}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
