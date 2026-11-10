@@ -67,6 +67,18 @@ describe('buildDirectoryEntry', () => {
     expect('exitCode' in entry).toBe(false);
   });
 
+  it('carries a browser Surface’s user-set TODO, the one activity it has', () => {
+    const entry = buildDirectoryEntry({
+      paneRef: 'surface:2',
+      surfaceId: 'surface:2',
+      title: 'Docs',
+      focused: false,
+      hasTODO: true,
+      browser: { render: 'iframe', url: 'http://localhost:5173/' },
+    });
+    expect(entry).toMatchObject({ type: 'browser', ringing: false, hasTODO: true });
+  });
+
   it('passes alive straight through (true for a live pane, false for an exited one)', () => {
     expect(buildDirectoryEntry(input({ alive: true })).alive).toBe(true);
     // An exited pane lingering in the registry: exitCode may still be present,
