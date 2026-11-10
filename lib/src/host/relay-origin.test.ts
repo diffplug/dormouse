@@ -78,10 +78,10 @@ describe('the baked relay origin', () => {
 
   it('names the origins Hosted deploys its Workers at', async () => {
     const { account, try: tryWorker, relay, voice } = await readConfigs();
-    expect(HOSTED_ONE_TIME_ORIGIN).toBe(tryWorker.vars.APP_ORIGIN);
-    expect(DEFAULT_RELAY_ORIGIN).toBe(relay.vars.APP_ORIGIN);
-    expect(HOSTED_VOICE_ORIGIN).toBe(voice.vars.APP_ORIGIN);
-    expect(HOSTED_ACCOUNT_ORIGIN).toBe(account.vars.APP_ORIGIN);
+    expect(HOSTED_ONE_TIME_ORIGIN).toBe(tryWorker.vars?.APP_ORIGIN);
+    expect(DEFAULT_RELAY_ORIGIN).toBe(relay.vars?.APP_ORIGIN);
+    expect(HOSTED_VOICE_ORIGIN).toBe(voice.vars?.APP_ORIGIN);
+    expect(HOSTED_ACCOUNT_ORIGIN).toBe(account.vars?.APP_ORIGIN);
   });
 
   it('approves enrollment at the fixed account origin, in a Hosted build only', () => {

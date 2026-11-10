@@ -100,7 +100,7 @@
   },
   "scripts": {
     "build:frontend": "vite build --config vite.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm typecheck && vitest run",
     "test:smoke": "vitest run --config vitest.smoketest.config.mts",
     "prebuild": "node ../scripts/build-workspace-deps.mjs",

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult, type ViewerInput, type ViewerSyncIntent } from '../../lib/platform/browser-automation';
@@ -68,11 +68,13 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
-function makeSink(): AgentBrowserViewSink & {
-  updateParameters: ReturnType<typeof vi.fn>;
-  setTitle: ReturnType<typeof vi.fn>;
-  requestRenderSwap: ReturnType<typeof vi.fn>;
-  launchFailed: ReturnType<typeof vi.fn>;
+type Sink = AgentBrowserViewSink;
+
+function makeSink(): Sink & {
+  updateParameters: Mock<Sink['updateParameters']>;
+  setTitle: Mock<Sink['setTitle']>;
+  requestRenderSwap: Mock<Sink['requestRenderSwap']>;
+  launchFailed: Mock<Sink['launchFailed']>;
 } {
   return {
     canvas: document.createElement('canvas'),

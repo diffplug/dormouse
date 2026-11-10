@@ -35,11 +35,11 @@ Opening a second window: drag a Workspace tab out of the strip and release it ou
 Per package, from the worktree root:
 
 ```
-(cd lib && npx tsc -b && npx vitest run)                     # tsconfig.json is a references root: `-p .` checks nothing
+(cd lib && npx tsc -b && npx vitest run)                     # tsconfig.json is a references root (`-p .` checks nothing); tsconfig.test.json carries the tests and .storybook
 (cd standalone && npx tsc --noEmit -p . && npx vitest run && node --test scripts/*.test.mjs)
 (cd standalone/sidecar && node --test)
 (cd dor && node --test)                                        # help snapshots
-(cd vscode-ext && npx vitest run)
+(cd vscode-ext && pnpm test)                                   # tsc on src/, then on test/ (tsconfig.test.json), then vitest
 (cd website && pnpm test)                                      # tsc --noEmit, then vitest: the website's only typecheck
 pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loop
 pnpm test                                                      # CI's two test jobs; not the smoketests, cargo, or Hosted's database suites
