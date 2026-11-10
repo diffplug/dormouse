@@ -183,17 +183,17 @@ Source of truth: `createPasskeySync` in `lib/src/remote/burrow/passkey-sync.ts`,
 
 ## Access log
 
-**The Burrow records who reached it, on this machine, and never what they did.** One bounded, append-only log per machine, not per enrollment, since a one-time connection needs none. **A refusal evicts only an older refusal**: `pairing-denied`, `connection-denied`, and `one-time-denied` share `ACCESS_LOG_MAX_REFUSALS` of the `ACCESS_LOG_MAX_ENTRIES`, every other event the rest, and past its share a kind's oldest entry goes. **Never by device id**, which a sender makes fresh at will (rationale).
+**The Burrow records who reached it.** One bounded, append-only log per machine, not per enrollment, since a one-time connection needs none. **A refusal evicts only an older refusal**: `pairing-denied`, `connection-denied`, and `one-time-denied` share `ACCESS_LOG_MAX_REFUSALS` of the `ACCESS_LOG_MAX_ENTRIES`, every other event the rest, and past its share a kind's oldest entry goes. **Never by device id**, which a sender makes fresh at will (rationale).
 
 | Event | Recorded |
 | --- | --- |
 | `paired`, `pairing-denied` | a pairing's ending, with its outcome code |
 | `connected` | a promotion, with how presence was shown: a proof or the window |
 | `connection-denied` | a refusal, with the specific ACL miss or presence failure the outcome never carries ([Connection](#connection)) |
-| `attached` | an attach that succeeded, with its surface id |
+| `attached`, `closed` | an attach that succeeded, or a Tool or page closed, with its surface id |
 | `ended` | a session's end, with its path (relayed or direct) and duration |
 | `revoked` | each browser a [revocation](#revocation) cut off, with who asked, the Relay included |
-| `one-time-connected`, `one-time-denied`, `one-time-ended` | a [one-time connection](#one-time-connection)'s confirmation, refusal, and end |
+| `one-time-connected`, `one-time-denied`, `one-time-ended` | a [one-time connection](#one-time-connection)'s direct switch, refusal, and end |
 
 - **Never terminal content**: an entry holds a time, an event, the device's mapped label and id, and at most a path, presence kind, duration, refusal reason, surface id, and requester.
 - **A ceremony on which no Client transport message decrypted logs nothing**, so it names no device and moves no Last seen: message 1 alone can be a replay (rationale).
