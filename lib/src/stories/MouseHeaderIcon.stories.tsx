@@ -7,8 +7,8 @@ import {
   WallActionsContext,
   RenamingIdContext,
   type WallMode,
-  type WallActions,
 } from '../components/Wall';
+import { noopActions } from './story-wall';
 import { MouseOverrideBanner } from '../components/wall/MouseOverrideBanner';
 import {
   setMouseReporting,
@@ -19,22 +19,6 @@ import {
 
 const SESSION_ID = 'surface:1';
 
-const noopActions: WallActions = {
-  onKill: () => {},
-  onMinimize: () => {},
-  onSplitH: () => {},
-  onSplitV: () => {},
-  onZoom: () => {},
-  onClickPanel: () => {},
-  onEnterPanel: () => {},
-  onFrameLeader: () => {},
-  onFocusPane: () => {},
-  onStartRename: () => {},
-  onFinishRename: () => ({ accepted: true }),
-  onCancelRename: () => {},
-  onSwapRenderMode: () => {},
-  onResolveToolApproval: () => {},
-};
 
 function MouseIconStoryFrame({
   mouseReporting = 'none' as MouseTrackingMode,

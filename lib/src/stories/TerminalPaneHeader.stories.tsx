@@ -10,6 +10,7 @@ import {
   type WallMode,
   type WallActions,
 } from '../components/Wall';
+import { noopActions } from './story-wall';
 import type { ActivityNotification, SessionStatus } from '../lib/alert-manager';
 import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
 import { commandWatchKey, cwdFromOsc633 } from '../lib/terminal-state';
@@ -21,22 +22,6 @@ import { requireElement, settleTerminalContext, TODO_SPOTLIGHT_HELD_CLASS, waitF
 
 const SESSION_ID = 'surface:1';
 
-const noopActions: WallActions = {
-  onKill: () => {},
-  onMinimize: () => {},
-  onSplitH: () => {},
-  onSplitV: () => {},
-  onZoom: () => {},
-  onClickPanel: () => {},
-  onEnterPanel: () => {},
-  onFrameLeader: () => {},
-  onFocusPane: () => {},
-  onStartRename: () => {},
-  onFinishRename: () => ({ accepted: true }),
-  onCancelRename: () => {},
-  onSwapRenderMode: () => {},
-  onResolveToolApproval: () => {},
-};
 
 function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {
   const rejection: SetTerminalUserTitleResult = { accepted: false, reason };
