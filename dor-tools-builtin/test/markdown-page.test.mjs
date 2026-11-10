@@ -173,3 +173,45 @@ test('a save leaves a table cell mid-composition to the input method, and writes
     assert.equal(saves(posts).at(-1), TABLE.replace('| 2 |', '| 2 漢 |'));
   } });
 });
+
+/** `text` after the word `wrod` in a paragraph before it is fixed and saved;
+ * `also` runs in the same update, given the editor's nodes. */
+async function fixedAndSaved(text, also) {
+  let saved;
+  await open(`Intro wrod.\n\n${text}`, { act: async (w, posts) => {
+    const root = w.document.querySelector('.mdxeditor-root-contenteditable [data-lexical-editor]').__lexicalEditor;
+    root.update(() => {
+      const node = [...root.getEditorState()._nodeMap.values()].find(each => each.getType() === 'text' && each.getTextContent() === 'Intro wrod.');
+      node.setTextContent('Intro word.');
+      also?.([...root.getEditorState()._nodeMap.values()]);
+    }, { discrete: true });
+    await settle();
+    saveKey(w);
+    await settle();
+    saved = saves(posts).at(-1);
+  } });
+  return saved;
+}
+
+for (const [text, saved = text] of [
+  ['Line one\\\nLine two\n'],
+  // A spelling change, not a rendering one: the break stays hard.
+  ['Line one  \nLine two\n', 'Line one\\\nLine two\n'],
+  ['- line one\\\n  line two\n- next\n'],
+  ['Line one\nLine two\n'],
+  ['- first para\n\n  second para\n- next\n'],
+]) {
+  test(`a save keeps hard and soft line breaks: ${JSON.stringify(text)}`, { timeout: 30_000 }, async () => {
+    assert.equal(await fixedAndSaved(text), `Intro word.\n\n${saved}`);
+  });
+}
+
+test('a save keeps a line break that ends its paragraph from writing a literal backslash', { timeout: 30_000 }, async () => {
+  // As Shift+Enter at the end of a line leaves it.
+  const saved = await fixedAndSaved('Line one\\\nLine two\n', nodes => {
+    const lineBreak = nodes.find(each => each.getType() === 'linebreak');
+    nodes.find(each => each.getType() === 'text' && each.getTextContent() === 'Line two').insertAfter(new lineBreak.constructor());
+  });
+  assert.ok(!saved.trimEnd().endsWith('\\'), saved);
+  assert.ok(saved.startsWith('Intro word.\n\nLine one\\\nLine two'), saved);
+});

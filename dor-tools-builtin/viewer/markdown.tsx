@@ -2,17 +2,17 @@ import { createRef, useEffect, useMemo, useRef, useState, useSyncExternalStore, 
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
 import {
-  $getNodeByKey, $getNearestNodeFromDOMNode, COMMAND_PRIORITY_HIGH, FOCUS_COMMAND, getNearestEditorFromDOMNode, HISTORIC_TAG, SKIP_DOM_SELECTION_TAG,
+  $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, COMMAND_PRIORITY_HIGH, FOCUS_COMMAND, getNearestEditorFromDOMNode, HISTORIC_TAG, SKIP_DOM_SELECTION_TAG,
   type LexicalCommand, type LexicalEditor,
 } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
-  $isImageNode, addTableCellEditorChild$, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
+  $isImageNode, addExportVisitor$, addTableCellEditorChild$, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, initialMarkdownNormalize$, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, NESTED_EDITOR_UPDATED_COMMAND, quotePlugin, realmPlugin,
-  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
+  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type LexicalVisitor, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
 import { checked, documentSession, loadingState, request, stateLabel, textSource, type DocumentState } from './document-session';
@@ -209,9 +209,24 @@ function ImageChrome(props: ImageChromeProps) {
  * `upload` answered, until its insertion takes it. */
 const uploadedWidths = new Map<string, number>();
 
+/** MDXEditor saves every line break as a newline in text, which Markdown
+ * reads as a soft break, so a hard break would render as a space; this saves
+ * it as a break. Outranks MDXEditor's own. */
+const lineBreakVisitor: LexicalVisitor = {
+  priority: 1,
+  testLexicalNode: $isLineBreakNode,
+  visitLexicalNode({ lexicalNode, mdastParent, actions }) {
+    // Two in a row are MDXEditor's paragraph boundary inside a list item, and a
+    // break that ends its block would save as a literal backslash.
+    const paired = $isLineBreakNode(lexicalNode.getNextSibling()) || $isLineBreakNode(lexicalNode.getPreviousSibling());
+    actions.appendToParent(mdastParent, paired || lexicalNode.getNextSibling() === null ? { type: 'text', value: '\n' } : { type: 'break' });
+  },
+};
+
 const capture = realmPlugin({
   init(r) {
     realm = r;
+    r.pub(addExportVisitor$, lineBreakVisitor);
     r.pub(addTableCellEditorChild$, CellEdits);
     const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<ImageChromeProps>;
     if (toolbar !== ImageChrome) DefaultImageToolbar = toolbar;
