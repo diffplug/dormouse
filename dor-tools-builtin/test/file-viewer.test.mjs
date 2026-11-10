@@ -111,6 +111,17 @@ test('known formats override source-name heuristics, PDFs never preview, and pro
   assert.equal(fileViewerFormat('file.constructor'), null);
 });
 
+test('builtin:file opens no font, which an HTML document it previews may still load', async () => {
+  const file = builtinHandler('tool', 'builtin:file');
+  for (const name of ['a.woff', 'a.woff2', 'a.ttf', 'a.otf']) {
+    assert.equal(file.format(name), null, name);
+    assert.equal(file.offered(name), false, name);
+  }
+  await writeFile(join(root, 'a.woff2'), 'font');
+  const viewer = await start('page.html', '<style>@font-face { font-family: x; src: url(a.woff2) }</style>');
+  assert.equal((await get(viewer, asset(viewer, 'a.woff2'))).status, 200);
+});
+
 test('keeps text out of the editor HTML and requires the per-run token on every method', async () => {
   const viewer = await start('README', '<script>bad()</script> & hello');
   const good = await get(viewer);
