@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, parseRenderMode, parseStreamPort, renderModeFor, sessionForKey } from '../dist/browser-providers.js';
+import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary, parseRenderMode, parseStreamPort, renderModeFor, sessionForKey } from '../dist/browser-providers.js';
 
 test('sessionForKey namespaces a key under the workspace', () => {
   assert.equal(sessionForKey('default'), 'dormouse.1.default');
@@ -57,4 +57,11 @@ test('parseStreamPort reads a top-level or nested port, and nothing from malform
   for (const stdout of ['not json', JSON.stringify({ data: {} }), JSON.stringify({ port: 'nope' }), JSON.stringify({ port: 0 }), JSON.stringify({ port: 70000 }), JSON.stringify({ port: 80.5 })]) {
     assert.equal(parseStreamPort(stdout), undefined, stdout);
   }
+});
+
+test('the provider gate refuses a PowerShell shim, which spawnAndCapture cannot run', () => {
+  assert.equal(isAllowedAgentBrowserBinary('C:\\npm\\agent-browser.ps1'), false);
+  assert.equal(isAllowedPlaywrightBinary('C:\\npm\\playwright-cli.ps1'), false);
+  assert.equal(isAllowedAgentBrowserBinary('C:\\npm\\agent-browser.cmd'), true);
+  assert.equal(isAllowedPlaywrightBinary('C:\\npm\\playwright-cli.cmd'), true);
 });
