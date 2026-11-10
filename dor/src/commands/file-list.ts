@@ -4,6 +4,7 @@
  * tree: git's view of `cwd` when it is in a work tree, otherwise a concurrent
  * walk that hands each work tree it reaches to git.
  */
+import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, resolveBinaryPath, spawnAndCapture, untrustedGitEnv } from 'dor-lib-common';
@@ -104,8 +105,10 @@ async function gitFiles(git: string, cwd: string): Promise<string[] | null> {
   });
   if (!listed.ok || listed.exitCode !== 0) return null;
   // Each entry is `<tag> <path>`; a deleted file is listed again tagged `R`,
-  // and an unmerged one once per stage.
+  // and an unmerged one once per stage. A skip-worktree file, tagged `S`, is
+  // never reported deleted: a sparse checkout leaves it off disk, while one
+  // skipped by `update-index --skip-worktree` stays.
   const entries = listed.stdout.split('\0').filter(Boolean);
-  const gone = new Set(entries.filter(entry => entry.startsWith('R ')).map(entry => entry.slice(2)));
+  const gone = new Set(entries.filter(entry => entry.startsWith('R ') || (entry.startsWith('S ') && !existsSync(join(cwd, entry.slice(2))))).map(entry => entry.slice(2)));
   return [...new Set(entries.map(entry => entry.slice(2)))].filter(path => !gone.has(path)).sort(byPath);
 }
