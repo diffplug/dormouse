@@ -95,6 +95,22 @@ test('no package.json script builds an internal package dist by name; build-work
   assert.deepEqual(offenders, [], 'call `node ../scripts/build-workspace-deps.mjs` instead');
 });
 
+// pnpm skips `pre<name>` (and `post<name>`) when the body of `<name>` contains
+// that hook's name anywhere, a guard against a script that calls its own hook.
+// A path is enough to trip it: `rm -rf dist/node-pty/prebuilds` in a `build`
+// script silently drops `prebuild`, and with it the workspace `dist` builds.
+test('no script body contains the name of its own pre or post hook', () => {
+  const manifests = [{ dir: '.', manifest: JSON.parse(readRepoFile('package.json')) }, ...packages];
+  const skipped = manifests.flatMap(({ dir, manifest }) =>
+    Object.entries(manifest.scripts ?? {}).flatMap(([name, body]) =>
+      [`pre${name}`, `post${name}`]
+        .filter((hook) => manifest.scripts[hook] && body.includes(hook))
+        .map((hook) => `${dir}/package.json: "${name}" contains "${hook}", so pnpm never runs that hook`),
+    ),
+  );
+  assert.deepEqual(skipped, []);
+});
+
 test('every internal package source is in the shipped scope the network lints scan', () => {
   const unscanned = Object.values(WORKSPACE_SOURCES).filter((dir) => !SHIPPED_DIRS.some((shipped) => `${dir}/`.startsWith(shipped)));
   assert.deepEqual(unscanned, []);
