@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, join, posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCli } from '../dist/cli.js';
+import { NODE_HOST } from '../dist/node-host.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
 import { browserBinaryIsMissing as agentBrowserIsMissing, binaryCandidateNames, isExecutableFile } from 'dor-lib-common';
 import { msysToWindowsCwd } from '../dist/commands/shared.js';
@@ -1881,6 +1882,44 @@ test('list json carries one spelling of each id', async () => {
 test('list refuses the retired --id-format', async () => {
   const result = await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
   assert.notEqual(result.exitCode, 0);
+});
+
+test('list --cwd matches Git Bash and native Windows spellings', async () => {
+  const host = { ...NODE_HOST, platform: 'win32', resolvePath: win32.resolve };
+  for (const [pwd, reported] of [
+    ['/c', '/c'],
+    ['/c/', '/c/'],
+    ['C:\\', '/c'],
+    ['/c', 'c:/'],
+    ['/c/Users/me/site', '/c/Users/me/site'],
+    ['C:\\Users\\me\\site', 'c:/Users/me/site'],
+  ]) {
+    const client = fixtureClient([
+      { ...fixtureSurfaces[0], cwd: reported },
+      { ...fixtureSurfaces[1], cwd: '/d' },
+      { ...fixtureSurfaces[2], cwd: null },
+    ]);
+    const result = await runCli(['list', '--json', '--cwd', '.'], { client, host, env: { PWD: pwd } });
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).surfaces.map(surface => surface.id), ['surface:1'], `${pwd} matches ${reported}`);
+  }
+});
+
+test('list --cwd preserves directory-name case and POSIX path distinctions', async () => {
+  for (const [platform, path, pwd, different] of [
+    ['win32', win32, 'C:\\Users\\me\\site', '/c/Users/me/Site'],
+    ['linux', posix, '/c', '/d'],
+    ['darwin', posix, '/Users/me/site', '/Users/me/Site'],
+  ]) {
+    const client = fixtureClient([
+      { ...fixtureSurfaces[0], cwd: pwd },
+      { ...fixtureSurfaces[1], cwd: different },
+    ]);
+    const host = { ...NODE_HOST, platform, resolvePath: path.resolve };
+    const result = await runCli(['list', '--json', '--cwd', '.'], { client, host, env: { PWD: pwd } });
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout).surfaces.map(surface => surface.id), ['surface:1']);
+  }
 });
 
 test('list filters by kind, view, command, and cwd without port scanning', async () => {

@@ -37,7 +37,9 @@ The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`, t
 
 **Must convert MSYS drive paths to native Windows paths before sending a caller cwd.**
 
-Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, `withoutInheritedMsysOriginalPath` in `standalone/sidecar/pty-core.js`, `callerWorkingDirectory` in `dor/src/commands/shared.ts`.
+**Must compare discovery and reuse cwds with the same normalization:** MSYS drive paths (including bare drive roots), Windows slash direction, and drive-letter case are equivalent; directory-name case remains significant, and missing cwds never match.
+
+Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, `withoutInheritedMsysOriginalPath` in `standalone/sidecar/pty-core.js`, `callerWorkingDirectory` in `dor/src/commands/shared.ts`, `cwdPathsEqual` in `dor/src/commands/cwd.ts`.
 
 ### WSL interop
 
