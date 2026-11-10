@@ -15,7 +15,7 @@ import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { Baseboard } from './Baseboard';
 import { installLocalStorageStub } from '../lib/test-local-storage';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
-import { createDialogKeyboardCoordinator, DialogKeyboardContext, SelectedIdContext, WorkspaceIdContext } from './wall/wall-context';
+import { createDialogKeyboardCoordinator, DialogKeyboardContext, SelectedIdContext, WorkspaceActiveContext, WorkspaceIdContext } from './wall/wall-context';
 import { createWorkspace, getWorkspace, resetWorkspaces } from '../lib/workspace-store';
 import type { DoorChip } from './wall/wall-types';
 import { RETAINED_PAGES_WARN_ABOVE } from './RetainedPagesIndicator';
@@ -163,6 +163,29 @@ describe('Baseboard settings controls', () => {
     expect(dialog?.textContent).toContain('Settings');
     // Not a VS Code host, so the Theme row is offered (`hostOwnsTheme` absent).
     expect(dialog?.textContent).toContain('Theme:');
+  });
+
+  it('hides Settings and releases its keyboard lease while its Workspace is hidden', () => {
+    const keyboardActive = { current: false };
+    const keyboardOwner = createDialogKeyboardCoordinator(keyboardActive);
+    const render = (active: boolean) => act(() => root.render(
+      <WorkspaceActiveContext.Provider value={active}>
+        <DialogKeyboardContext.Provider value={keyboardOwner}>
+          <Baseboard items={[]} onReattach={() => {}} />
+        </DialogKeyboardContext.Provider>
+      </WorkspaceActiveContext.Provider>,
+    ));
+    render(true);
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(keyboardActive.current).toBe(true);
+
+    render(false);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(keyboardActive.current).toBe(false);
+
+    render(true);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it.each(['speech', 'push'])('opens workspace controls from %s and restores inheritance', (sink) => {

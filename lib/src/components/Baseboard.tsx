@@ -22,7 +22,7 @@ import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { OneTimeIndicator } from './OneTimeIndicator';
 import { RetainedPagesIndicator } from './RetainedPagesIndicator';
-import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner } from './wall/wall-context';
+import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner, WorkspaceActiveContext } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
 import {
@@ -171,9 +171,13 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   };
   const showSettingsAt = useCallback((topic: TopicId) => setSettingsOpen({ dialog: 'application', topic }), []);
 
+  // Only the active Wall shows its dialogs; a hidden one keeps them open for
+  // its return, as it keeps a kill prompt.
+  const workspaceActive = useContext(WorkspaceActiveContext);
+  const dialog = workspaceActive ? settingsOpen : null;
   // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.
-  useDialogKeyboardOwner(settingsOpen !== null);
+  useDialogKeyboardOwner(dialog !== null);
   const openWorkspaceSettings = (event: MouseEvent<HTMLButtonElement> | KeyboardEvent<HTMLButtonElement>) => {
     if (!workspaceId) return;
     event.preventDefault();
@@ -461,13 +465,13 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         />
       )}
 
-      {settingsOpen?.dialog === 'application' && (
+      {dialog?.dialog === 'application' && (
         <SettingsDialog
-          initialTopic={settingsOpen.topic}
+          initialTopic={dialog.topic}
           onClose={() => setSettingsOpen(null)}
         />
       )}
-      {settingsOpen?.dialog === 'workspace' && (
+      {dialog?.dialog === 'workspace' && (
         <WorkspaceAlarmSettingsDialog onClose={() => {
           setSettingsOpen(null);
           workspaceSettingsTrigger.current?.focus();
