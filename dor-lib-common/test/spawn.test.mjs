@@ -228,6 +228,8 @@ test('Windows ends a timed-out child\'s whole tree with taskkill by absolute pat
     binary: 'D:\\Win\\System32\\taskkill.exe', args: ['/PID', '42', '/T', '/F'],
   });
   assert.equal(treeKillCommand(42, {}, true).binary, 'C:\\Windows\\System32\\taskkill.exe');
+  // A plain-object env may spell the name in any case, as Windows does.
+  assert.equal(treeKillCommand(42, { Systemroot: 'D:\\Win' }, true).binary, 'D:\\Win\\System32\\taskkill.exe');
 });
 
 test('bounds combined output without returning captured secrets', async () => {

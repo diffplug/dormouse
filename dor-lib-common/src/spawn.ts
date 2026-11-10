@@ -38,8 +38,16 @@ export function treeKillCommand(
   isWindows: boolean,
 ): { binary: string; args: string[] } | null {
   if (!isWindows) return null;
-  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
-  return { binary: path.win32.join(systemRoot, 'System32', 'taskkill.exe'), args: ['/PID', String(pid), '/T', '/F'] };
+  return { binary: windowsSystemPath(env, 'System32', 'taskkill.exe'), args: ['/PID', String(pid), '/T', '/F'] };
+}
+
+/**
+ * The absolute path of a program Windows ships, under `%SystemRoot%` read in
+ * any case, as Windows reads its environment. Never a bare name, which Windows
+ * looks up in the working directory before `PATH`.
+ */
+export function windowsSystemPath(env: { readonly [key: string]: string | undefined }, ...segments: string[]): string {
+  return path.win32.join(envValue(env, 'SYSTEMROOT', true) || 'C:\\Windows', ...segments);
 }
 
 /**
@@ -50,7 +58,7 @@ export function treeKillCommand(
 export function windowsCommandShell(env: { readonly [key: string]: string | undefined }): string {
   const comspec = envValue(env, 'COMSPEC', true);
   if (comspec && /^[A-Za-z]:[\\/]/.test(comspec)) return comspec;
-  return path.win32.join(envValue(env, 'SYSTEMROOT', true) || 'C:\\Windows', 'System32', 'cmd.exe');
+  return windowsSystemPath(env, 'System32', 'cmd.exe');
 }
 
 /**

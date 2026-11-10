@@ -8,7 +8,14 @@ const path = require('node:path');
  * instead (docs/specs/security-local.md -> "Spawned programs").
  */
 function windowsSystemPath(env, ...segments) {
-  return path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', ...segments);
+  return path.win32.join(envValue(env, 'SYSTEMROOT') || 'C:\\Windows', ...segments);
+}
+
+/** `env[name]` (`name` upper-case) in any case, as Windows reads its environment. */
+function envValue(env, name) {
+  if (env[name] !== undefined) return env[name];
+  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === name);
+  return key === undefined ? undefined : env[key];
 }
 
 /** Windows PowerShell 5.1, which every supported Windows ships. */
@@ -20,7 +27,7 @@ function windowsPowerShellPath(env) {
  *  under `%SystemRoot%`. Mirrors `windowsCommandShell` in
  *  `dor-lib-common/src/spawn.ts`, which this CommonJS module cannot load. */
 function windowsCommandShell(env) {
-  const comspec = env.ComSpec || env.COMSPEC;
+  const comspec = envValue(env, 'COMSPEC');
   return comspec && /^[A-Za-z]:[\\/]/.test(comspec) ? comspec : windowsSystemPath(env, 'System32', 'cmd.exe');
 }
 

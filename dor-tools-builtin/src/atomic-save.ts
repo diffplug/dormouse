@@ -1,7 +1,7 @@
 import { rename } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { win32 } from 'node:path';
 import { promisify } from 'node:util';
+import { windowsSystemPath } from 'dor-lib-common';
 
 export interface SaveFileOperations {
   /** Move `temporary` over `target`; on Windows the original moves to `backup`. */
@@ -18,7 +18,7 @@ const REPLACE = '$ErrorActionPreference = "Stop"; $ProgressPreference = "Silentl
 export function windowsReplaceCommand(temporary: string, target: string, backup: string) {
   return {
     // The absolute system .exe needs no PATHEXT or batch-shim handling.
-    file: win32.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    file: windowsSystemPath(process.env, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(REPLACE, 'utf16le').toString('base64')],
     env: { ...process.env, DORMOUSE_SAVE_SIBLING: temporary, DORMOUSE_SAVE_TARGET: target, DORMOUSE_SAVE_BACKUP: backup },
   };
