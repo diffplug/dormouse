@@ -1032,10 +1032,12 @@ it('bounds an upstream off this machine by the policy, never by the request', as
   const disposable = router.attachRouter(webview.channel);
   try {
     iframeProxy.create.mockClear();
-    webview.send({
-      type: 'iframe:createProxyUrl', url: 'http://docs.example/', embedderOrigins: [], requestId: 'r',
+    // Fields the message type lacks, which a compromised webview can send anyway.
+    const widening = {
+      type: 'iframe:createProxyUrl' as const, url: 'http://docs.example/', embedderOrigins: [], requestId: 'r',
       allowExternal: true, allowedNetworks: ['0.0.0.0/0'],
-    });
+    };
+    webview.send(widening);
     const access = iframeProxy.create.mock.calls[0]![3] as { allowedNetworks: () => Promise<string[]> };
     expect(Object.keys(access)).toEqual(['allowedNetworks']);
     expect(await access.allowedNetworks()).toEqual(['100.64.0.0/10']);

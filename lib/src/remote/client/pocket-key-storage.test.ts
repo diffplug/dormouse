@@ -31,7 +31,7 @@ it('reports a rejected key clone before pairing, and cleans up', async () => {
 
 it('rejects a successful write whose private key does not survive readback', async () => {
   const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value) {
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value) {
     return put.call(this, { ...value, clientStaticKeyPair: { privateKey: null } });
   });
   await expect(probePocketKeyStorage()).rejects.toThrow('Diagnostic: validate-record / Error.');
@@ -40,7 +40,7 @@ it('rejects a successful write whose private key does not survive readback', asy
 it('rejects a readback key that derives the wrong secret', async () => {
   const other = await crypto.subtle.generateKey('X25519', false, ['deriveBits']);
   const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value) {
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value) {
     return put.call(this, { ...value, clientStaticKeyPair: { privateKey: other.privateKey } });
   });
   await expect(probePocketKeyStorage()).rejects.toThrow('Diagnostic: compare-key-agreement / Error.');
@@ -50,7 +50,7 @@ it('identifies read failures without echoing browser error contents', async () =
   vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementation(() => {
     throw new DOMException('private browser details', 'UnknownError');
   });
-  const error = await probePocketKeyStorage().catch(error => error as Error);
+  const error = await probePocketKeyStorage().then(() => { throw new Error('the probe passed'); }, (error: Error) => error);
   expect(error.message).toContain('Diagnostic: read-record / UnknownError.');
   expect(error.message).not.toContain('private browser details');
 });

@@ -59,7 +59,7 @@ describe('BurrowRuntime direct-only sessions', () => {
   let socket: FakeSocket;
   let burrow: BurrowRuntime;
   let clock: ReturnType<typeof createTestClock>;
-  let approvals: PendingPairing[];
+  let approvals: Omit<PendingPairing, 'kind'>[];
   let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }>;
   let warn: ReturnType<typeof vi.spyOn>;
   let refusals: PathRefusal[];
