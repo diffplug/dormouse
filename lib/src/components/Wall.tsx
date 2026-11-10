@@ -166,21 +166,9 @@ type ShellSpawnNoticeState = {
   duration: number;
 };
 
-export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallBootProps, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
-export {
-  DialogKeyboardContext,
-  DoorElementsContext,
-  ModeContext,
-  WorkspaceActiveContext,
-  WallActionsContext,
-  RenamingIdContext,
-  SelectedIdContext,
-  WindowFocusedContext,
-  ZoomedIdContext,
-} from './wall/wall-context';
+export type { DoorChip, WallEvent, WallMode } from './wall/wall-types';
+export { ModeContext, WallActionsContext, RenamingIdContext, SelectedIdContext } from './wall/wall-context';
 export type { WallActions } from './wall/wall-context';
-export { SelectionRing } from './wall/SelectionRing';
-export { roundedRectPath } from '../lib/ring-geometry';
 export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 /** What a pending kill's entry calls each kind of Surface. */
