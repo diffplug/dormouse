@@ -122,8 +122,9 @@ export interface ListSurfacesRequest extends WorkspaceScopedRequest {
   window?: string;
   /** Omitted means `workspace`. */
   scope?: ListScope;
-  /** Enumerate each terminal Surface's listening ports. The host shells out per
-   *  pane (lsof / PowerShell), so callers opt in; remote sessions report none. */
+  /** Enumerate each terminal Surface's listening ports. Each listing costs the
+   *  host one process-table and socket scan, so callers opt in; remote sessions
+   *  report none. */
   includePorts?: boolean;
 }
 
