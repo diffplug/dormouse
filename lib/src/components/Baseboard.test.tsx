@@ -119,6 +119,13 @@ describe('Baseboard settings controls', () => {
     expect(container.querySelector('[data-door-id="b"]')).toBeNull();
   });
 
+  it('keeps the off-screen measuring Doors out of the tab order', () => {
+    renderBaseboard(['a', 'b'].map(id => ({ id, title: id, kind: 'terminal' as const })));
+    const hiddenTabStops = [...container.querySelectorAll<HTMLButtonElement>('[aria-hidden] button')]
+      .filter(button => button.tabIndex >= 0 && !button.closest('[inert]'));
+    expect(hiddenTabStops).toEqual([]);
+  });
+
   // #610: minimized iframes are never evicted, so many of them earn a quiet note.
   it('counts the minimized pages that stay live, quietly, only past the threshold', () => {
     const doors = (n: number): DoorChip[] => Array.from({ length: n }, (_, i) => ({

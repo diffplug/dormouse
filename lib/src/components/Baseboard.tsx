@@ -362,7 +362,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     >
       {/* Hidden measurement pass — doors + the widest overflow arrow. Overflow
           counts are assumed single-digit, so `9` measures every arrow. */}
-      <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
+      <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden inert>
         {items.map(item => <Door key={item.id} {...doorProps(item)} />)}
       </div>
       <div className="absolute -left-[9999px] flex" aria-hidden>
