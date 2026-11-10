@@ -213,10 +213,10 @@ importers:
         specifier: 6.1.0-beta.336
         version: 6.1.0-beta.336
       react:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1
       react-dom:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1(react@19.3.1)
     devDependencies:
       '@storybook/react':
@@ -226,10 +226,10 @@ importers:
         specifier: 11.0.0-alpha.8
         version: 11.0.0-alpha.8(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rollup@4.62.2)(storybook@11.0.0-alpha.8(@types/react@19.3.0)(prettier@3.9.6)(react@19.3.1))(supports-color@10.2.2)(typescript@7.0.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@types/react':
-        specifier: ^19.2.14
+        specifier: ^19.3.0
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.2.3
+        specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       storybook:
         specifier: 11.0.0-alpha.8
@@ -254,10 +254,10 @@ importers:
         version: link:../dor-tools-builtin
     devDependencies:
       '@types/node':
-        specifier: ^24.13.4
+        specifier: ^24.13.6
         version: 24.19.2
       esbuild:
-        specifier: ^0.28.0
+        specifier: ^0.28.2
         version: 0.28.2
       typescript:
         specifier: ^7.0.0
@@ -270,7 +270,7 @@ importers:
         version: 7.0.6
     devDependencies:
       '@types/node':
-        specifier: ^24.0.0
+        specifier: ^24.13.6
         version: 24.19.2
       typescript:
         specifier: ^7.0.0
@@ -313,7 +313,7 @@ importers:
         version: 19.3.1(react@19.3.1)
     devDependencies:
       '@types/node':
-        specifier: ^24.13.4
+        specifier: ^24.13.6
         version: 24.19.2
       '@types/react':
         specifier: ^19.3.0
@@ -322,7 +322,7 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       esbuild:
-        specifier: ^0.28.0
+        specifier: ^0.28.2
         version: 0.28.2
       typescript:
         specifier: ^7.0.0
@@ -364,10 +364,10 @@ importers:
         specifier: ^0.4.3
         version: 0.4.3(cheerio@1.2.0)(kysely@0.29.8)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4)
       react:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1
       react-dom:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1(react@19.3.1)
       remote-lib-common:
         specifier: workspace:*
@@ -389,10 +389,10 @@ importers:
         specifier: ^24.13.6
         version: 24.19.2
       '@types/react':
-        specifier: ^19.2.14
+        specifier: ^19.3.0
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.2.3
+        specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: ^6.0.2
@@ -482,10 +482,10 @@ importers:
         specifier: ^4.0.7
         version: 4.0.7
       react:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1
       react-dom:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1(react@19.3.1)
       remote-lib-common:
         specifier: workspace:*
@@ -531,10 +531,10 @@ importers:
         specifier: ^4.0.3
         version: 4.0.3
       '@types/react':
-        specifier: ^19.2.14
+        specifier: ^19.3.0
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.2.3
+        specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       '@types/ws':
         specifier: ^8.18.1
@@ -582,13 +582,13 @@ importers:
   relay:
     dependencies:
       '@hono/node-server':
-        specifier: ^2.0.0
+        specifier: ^2.0.10
         version: 2.1.5(hono@4.13.16)
       '@hono/node-ws':
         specifier: ^1.3.1
         version: 1.3.1(@hono/node-server@2.1.5(hono@4.13.16))(hono@4.13.16)
       hono:
-        specifier: ^4.6.0
+        specifier: ^4.13.8
         version: 4.13.16
       remote-lib-common:
         specifier: workspace:*
@@ -598,7 +598,7 @@ importers:
         version: 3.6.7(supports-color@10.2.2)
     devDependencies:
       '@types/node':
-        specifier: ^24.0.0
+        specifier: ^24.13.6
         version: 24.19.2
       '@types/web-push':
         specifier: ^3.6.4
@@ -653,10 +653,10 @@ importers:
         specifier: workspace:*
         version: link:../lib
       react:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1
       react-dom:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1(react@19.3.1)
     devDependencies:
       '@tailwindcss/vite':
@@ -666,10 +666,10 @@ importers:
         specifier: ^2.11.2
         version: 2.12.4
       '@types/react':
-        specifier: ^19.2.14
+        specifier: ^19.3.0
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.2.3
+        specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: ^6.0.2
@@ -681,7 +681,7 @@ importers:
         specifier: workspace:*
         version: link:../dor-lib-common
       esbuild:
-        specifier: ^0.28.0
+        specifier: ^0.28.2
         version: 0.28.2
       jsdom:
         specifier: ^30.0.0
@@ -745,20 +745,20 @@ importers:
         specifier: 1.2.0-beta.18
         version: 1.2.0-beta.18
       ws:
-        specifier: ^8.18.0
+        specifier: ^8.21.3
         version: 8.22.1
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.0
         version: 4.3.3(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@types/node':
-        specifier: ^24.0.0
+        specifier: ^24.13.6
         version: 24.19.2
       '@types/vscode':
         specifier: 1.92.0
         version: 1.92.0
       '@types/ws':
-        specifier: ^8.5.0
+        specifier: ^8.18.1
         version: 8.18.2
       '@vitejs/plugin-react':
         specifier: ^6.0.2
@@ -767,7 +767,7 @@ importers:
         specifier: ^4.0.0
         version: 4.1.0(supports-color@10.2.2)
       esbuild:
-        specifier: ^0.28.0
+        specifier: ^0.28.2
         version: 0.28.2
       ovsx:
         specifier: ^1.0.0
@@ -831,10 +831,10 @@ importers:
         specifier: ^1.438.24
         version: 1.444.0(@types/react@19.3.0)(react@19.3.1)
       react:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1
       react-dom:
-        specifier: ^19.2.6
+        specifier: ^19.3.0
         version: 19.3.1(react@19.3.1)
       react-router:
         specifier: ^8.0.0
@@ -850,13 +850,13 @@ importers:
         specifier: ^4.3.0
         version: 4.3.3(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@types/node':
-        specifier: ^24.13.3
+        specifier: ^24.13.6
         version: 24.19.2
       '@types/react':
-        specifier: ^19.2.14
+        specifier: ^19.3.0
         version: 19.3.0
       '@types/react-dom':
-        specifier: ^19.2.3
+        specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       jsdom:
         specifier: ^30.0.0
