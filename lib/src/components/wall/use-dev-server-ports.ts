@@ -53,7 +53,8 @@ import { servesLoopback } from './port-url';
 const DEBOUNCE_MS = 600;
 // Re-scan delays after a wake while a wanted port has no match yet (a server
 // takes a moment to bind), then stop until the next wake. Once matched, a port
-// is settled and not rescanned until a reload, navigation, or Wall change.
+// is settled and not rescanned until a reload, navigation, its owner's
+// command ending, or Wall change.
 export const PENDING_REFRESH_MS = [4000, 8000, 16000, 32000, 60000];
 // Upper bound on how long the idle scan may be deferred before it's forced.
 const IDLE_TIMEOUT_MS = 2000;
@@ -87,10 +88,11 @@ const sources = new Set<CandidateSource>();
 let stopLoop: (() => void) | null = null;
 let scheduleScanNow: ((delay: number) => void) | null = null;
 
-/** Ports already matched to a Surface. Not rescanned until a reload (clears the
- *  whole set), the port leaves "wanted" (navigation), or the set of Walls
+/** Ports already matched, to the Surface that owns each and the command it was
+ *  running then. Not rescanned until a reload (clears the whole set), the port
+ *  leaves "wanted" (navigation), that command ends, or the set of Walls
  *  changes — a Wall arriving or leaving can change who owns a port. */
-const settled = new Set<number>();
+const settled = new Map<number, { owner: string; run: string | undefined }>();
 
 /** A Wall arriving or leaving changes who can own a port, so re-validate:
  *  a resolution settled without it may now be ambiguous, or newly resolvable. */
@@ -130,7 +132,7 @@ function startCorrelationLoop(): () => void {
 
     const wanted = getWantedDevServerPorts();
     // Drop settled ports that are no longer on screen (navigated away).
-    for (const port of [...settled]) {
+    for (const port of [...settled.keys()]) {
       if (!wanted.includes(port)) settled.delete(port);
     }
     if (wanted.length === 0) return 'idle';
@@ -166,7 +168,7 @@ function startCorrelationLoop(): () => void {
         // two+ (ambiguous) ⇒ no match; leave it unsettled so we keep looking
         // (e.g. the dev server is still starting up).
         if (list.length === 1) {
-          settled.add(port);
+          settled.set(port, { owner: list[0], run: getTerminalPaneState(list[0]).currentCommand?.id });
           setDevServerResolution(port, { paneId: list[0], fallbackTitle: titles.get(list[0]) ?? null });
         } else {
           setDevServerResolution(port, null);
@@ -227,6 +229,13 @@ function startCorrelationLoop(): () => void {
   const unsubscribeRuns = subscribeToTerminalPaneState((id) => {
     if (!id) return;
     const run = getTerminalPaneState(id).currentCommand?.id;
+    // The server a settled port named ended with its command (or its Surface):
+    // find the port's owner again.
+    let ended = false;
+    for (const [port, match] of settled) {
+      if (match.owner === id && match.run !== undefined && match.run !== run) { settled.delete(port); ended = true; }
+    }
+    if (ended) scheduleScan(DEBOUNCE_MS);
     if (!run) { runs.delete(id); return; }
     if (runs.get(id) === run) return;
     runs.set(id, run);
