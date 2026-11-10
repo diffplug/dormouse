@@ -61,7 +61,13 @@ pnpm lint:specs   # docs/specs conventions only
 | `standalone/` | Tauri desktop app and its Node PTY sidecar |
 | `vscode-ext/` | VS Code extension (the README there is the canonical product guide) |
 | `relay/` | Selfhost coordinating Relay for remote control |
+| `hosted/` | The Hosted service's Cloudflare Workers: accounts, the Hosted Relay, one-time connections, voice |
 | `dor/` | The `dor` CLI staged onto every Dormouse terminal's `PATH` |
+| `dor-tools-builtin/` | The built-in Tools: file viewer and editors, code editor, folder |
+| `dor-tools-lib/` | The Tool integration protocol, for Tools and their hosts (MIT) |
+| `remote-lib-common/`, `dor-lib-common/` | Shared remote-control security and wire code; shared process spawning |
+| `deploy/` | Self-host Relay installers and the Blyg changelog site |
+| `canopy/` | Experimental 3D/WebXR terminal rendering (Storybook only) |
 | `docs/specs/` | Internal specs — the reference for how everything actually behaves |
 
 ### Agent strategy
@@ -71,5 +77,7 @@ This project was built with a combination of Claude, Codex, and Devin. We make h
 ## License
 
 [FSL-1.1-MIT](LICENSE) — Copyright 2026 DiffPlug LLC
+
+`dor-tools-lib/` is [MIT](dor-tools-lib/LICENSE).
 
 [Supply chain](https://dormouse.sh/supply-chain)
