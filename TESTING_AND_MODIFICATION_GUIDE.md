@@ -72,7 +72,7 @@ Per package, from the worktree root:
 (cd vscode-ext && npx vitest run)
 (cd website && pnpm test)                                      # tsc --noEmit, then vitest: the website's only typecheck
 pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loop
-pnpm test                                                      # full CI test gate
+pnpm test                                                      # CI's two test jobs; not the smoketests, cargo, or Hosted's database suites
 cargo test                                                     # see §2
 ```
 

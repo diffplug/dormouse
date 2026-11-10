@@ -48,7 +48,7 @@ pnpm dogfood:standalone              # installs your local build overtop of your
 pnpm dogfood:standalone --no-install # builds and runs the standalone app from the build dir, without installing
 
 pnpm storybook    # http://localhost:6006
-pnpm test         # runs all tests (spec lint first)
+pnpm test         # lints (spec lint first), then each package's tests but Hosted's database suites
 pnpm lint:specs   # docs/specs conventions only
 ```
 
