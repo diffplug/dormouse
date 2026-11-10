@@ -783,6 +783,27 @@ describe('agent-browser host viewer', () => {
     expect([...viewer.frames.find((f) => f.kind === 'crisp')!.jpeg]).toEqual([0xff, 0xd8, 0x99]);
   });
 
+  it('ignores a stream message that is the JSON text null', async () => {
+    // `null` parses; reading its `type` would throw inside the socket handler,
+    // which is an uncaught exception in the host process.
+    running(session);
+    const daemon = await fakeServer();
+    writeState(session, 'stream', daemon.port);
+    const errors: unknown[] = [];
+    const onUncaught = (error: unknown) => { errors.push(error); };
+    process.on('uncaughtException', onUncaught);
+    try {
+      const viewer = await view(daemon.port);
+      await daemon.connected();
+      daemon.send('null');
+      daemon.send({ type: 'url', url: 'https://example.com/' });
+      await vi.waitFor(() => expect(viewer.states).toEqual([{ type: 'url', url: 'https://example.com/' }]));
+      expect(errors).toEqual([]);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+  });
+
   it.each([false, true])('routes a tab list or URL too large to tell from a frame by size as state (headed: %s)', async (headed) => {
     running(session);
     const daemon = await fakeServer();
