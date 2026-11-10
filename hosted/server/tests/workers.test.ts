@@ -721,6 +721,13 @@ test("pre-launch, production signs in only the allowlist's verified emails", asy
   });
   expect(refused.status).toBe(403);
   expect(await refused.json()).toEqual({ message: PRELAUNCH_REFUSAL });
+  // A body past the adapter's cap is refused before the gate parses it.
+  const oversized = await stranger.post("email-otp/send-verification-otp", {
+    email: "stranger@example.test",
+    type: "sign-in",
+    padding: "x".repeat(16 * 1024),
+  });
+  expect(oversized.status).toBe(413);
   expect(
     (
       await stranger.post("sign-in/email-otp", {

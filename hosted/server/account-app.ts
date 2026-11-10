@@ -1,6 +1,6 @@
 import type { Context, ExecutionContext, Hono } from "hono";
 import type { EmailSender } from "pgstencil";
-import { openAuthRead, ownPageRead } from "./account-gate";
+import { openAuthRead, ownPageRead, smallBody } from "./account-gate";
 import { accountCron, accountRoutes, type AccountRoutesHost } from "./account-routes";
 import { billingSetup } from "./billing";
 import type { AccountEnv } from "./bindings";
@@ -34,7 +34,10 @@ export function accountApp(
     unavailable: "Sign-in is temporarily unavailable. Please try again.",
     routes(app) {
       configure?.(app);
-      app.all("/api/auth/*", (c) =>
+      // The packed adapter's own cap, applied here too so nothing that wraps
+      // `fetchAuth` (production's pre-launch gate parses a POST's body) reads
+      // more than the adapter would accept.
+      app.all("/api/auth/*", smallBody(16 * 1024), (c) =>
         c.req.method !== "POST" &&
         !openAuthRead(c.req.path) &&
         !ownPageRead(c.req.raw, c.env.APP_ORIGIN)
