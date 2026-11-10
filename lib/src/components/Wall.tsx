@@ -840,6 +840,8 @@ export function Wall({
    *  human gestures acknowledge at their own handlers, and spawns, reveals, and
    *  embeds focusing themselves never do. */
   const enterTerminalMode = useCallback((id: string) => {
+    // Passthrough takes the keys a staged kill prompt waits for.
+    setConfirmKill(null);
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');

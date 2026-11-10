@@ -4087,6 +4087,26 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('cancels a Kill prompt when a Door click enters another Surface', async () => {
+    const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+      await flush();
+      await act(async () => { container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:b"] button[aria-label="Minimize"]')!.click(); });
+      await flush();
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(confirmKillOverlay()).not.toBeNull();
+      await act(async () => { container.querySelector<HTMLElement>('[data-door-id="surface:b"] button')!.click(); });
+      await flush();
+      expect(container.querySelector('[data-lath-leaf="surface:b"]')).not.toBeNull();
+      expect(confirmKillOverlay()).toBeNull();
+    } finally {
+      untouched.mockRestore();
+    }
+  });
+
   /** pane-a is an untouched shell owning a helper whose own entry is `helperEntry`. */
   function untouchedShellWithHelper(helperEntry: Partial<TerminalEntry>): () => void {
     registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
