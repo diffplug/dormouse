@@ -717,7 +717,6 @@ export class PushSubscriptionStore extends JsonFileStore {
  * `MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT` in `remote-lib-common`). This Relay has
  * one account, so the per-account cap bounds the whole file.
  */
-export { MAX_PUSH_SUBSCRIPTIONS_PER_BURROW };
 export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT;
 
 /**
@@ -810,10 +809,6 @@ export interface StoredVapidKeys {
 export class VapidStore extends JsonFileStore {
   constructor(stateDir: string, now: () => number = () => Date.now()) {
     super(stateDir, 'vapid.json', now);
-  }
-
-  async load(): Promise<StoredVapidKeys | null> {
-    return (await this.loadRecord(VAPID_RECORD)) ?? null;
   }
 
   /** Return the persisted keypair, generating and saving one on first call. */

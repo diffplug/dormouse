@@ -78,8 +78,8 @@ export const WS_CLOSE_TRY_AGAIN_LATER = 1013;
 
 /**
  * The session behind this socket is gone. The same pair the `/ws/client`
- * upgrade answers with, so a socket closed after the fact is indistinguishable
- * from one refused at the door and Pocket needs no second recovery.
+ * route closes with when the session expired between its gate and the open,
+ * so the sweep and that re-check end a socket alike.
  */
 export const WS_CLOSE_UNAUTHORIZED = 1008;
 export const WS_CLOSE_UNAUTHORIZED_REASON = 'unauthorized';

@@ -422,7 +422,10 @@ export function relayPushRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       unknown: recipients.length - targets.length,
       failed: results.filter((r) => r.result === "failed").length,
     };
-    recordMetric(c, c.env.HYPERDRIVE.connectionString, "push.sent", "", res.delivered);
+    // A send to phones that never subscribed delivers nothing, and adding 0
+    // would cost a database connection.
+    if (res.delivered > 0)
+      recordMetric(c, c.env.HYPERDRIVE.connectionString, "push.sent", "", res.delivered);
     return c.json(res);
   });
 }

@@ -15,8 +15,13 @@ export default accountApp(
   auth.fetch,
   accountPreviewBindings,
   (app) => {
+    // Text fields only: never the captured HTML, headers, or other recipients.
     app.get("/api/dev/emails", async (c) =>
-      c.json(await postgresInbox(c.env.HYPERDRIVE.connectionString).all()),
+      c.json(
+        (await postgresInbox(c.env.HYPERDRIVE.connectionString).all()).map(
+          ({ id, capturedAt, to, subject, text }) => ({ id, capturedAt, to, subject, text }),
+        ),
+      ),
     );
     app.get("/dev/emails", async (c) =>
       c.html(

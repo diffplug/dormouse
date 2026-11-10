@@ -83,11 +83,12 @@ export function oneTimePageMoved(app: Hono<{ Bindings: RelayEnv }>) {
 }
 
 /**
- * A content-hashed asset's answer: the file itself, or a 404 — never HTML,
- * which would be cached as immutable under the hashed name.
+ * A content-hashed asset's answer: the file itself, its 304 to a matching
+ * `If-None-Match`, or a 404 — never HTML, which would be cached as immutable
+ * under the hashed name.
  */
 export function assetOrNotFound(c: Context, response: Response) {
-  return response.ok &&
+  return (response.ok || response.status === 304) &&
     !(response.headers.get("content-type") ?? "").includes("text/html")
     ? response
     : c.notFound();

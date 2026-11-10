@@ -127,6 +127,17 @@ test('dev ignores the app state root an older Dormouse terminal leaks', async t 
   await assert.rejects(access(installed));
 });
 
+test('the headless fake Burrow enrolls against a dev Relay at its origin', async t => {
+  const a = await fixture(t);
+  const { origin } = await a.start().listening();
+  const child = spawn(process.execPath, [path.join(relay, 'scripts', 'fake-burrow.mjs'), origin], {
+    env: { ...CLEAN_ENV, DORMOUSE_STATE_DIR: path.join(a.dir, 'data') }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => stopRelay(child));
+  const run = runner(child, 'fake-burrow.mjs');
+  await run.wait(/enrolled burrow \S+ \(origin /);
+});
+
 test('production still rejects PORT=0 before creating state', async t => {
   const a = await fixture(t);
   const stateDir = path.join(a.dir, 'production-state');
