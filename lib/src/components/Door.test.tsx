@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe('Door alarm state', () => {
-  it('rings with a static inset ring and no label until the speech sink acts', () => {
+  it('rings with an inset ring and no label until the speech sink acts', () => {
     act(() => root.render(
       <Door title="build-server" status="ALERT_RINGING" todo episode={EPISODE} />,
     ));

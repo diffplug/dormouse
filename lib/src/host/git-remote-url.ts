@@ -38,6 +38,9 @@ export function canonicalRemoteUrl(raw: string): string | null {
   const unprefixed = trimmed.replace(/^git\+/, '');
 
   const scp = SCP_LIKE.exec(unprefixed);
+  // A one-letter "host" is a Windows drive (`C:\x`, `D:repo`), which git on
+  // Windows reads as a local path, not scp.
+  if (scp && /^[A-Za-z]$/.test(scp[2])) return null;
   const normalized = scp ? `ssh://${scp[1] ? `${scp[1]}@` : ''}${scp[2]}/${scp[3]}` : unprefixed;
 
   let url: URL;

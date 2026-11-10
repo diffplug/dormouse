@@ -393,6 +393,21 @@ describe('a first run, from the scan to the terminal', () => {
     expect(buttonNamed(container, 'Refresh')).not.toBeNull();
   });
 
+  it('reports the refusal even when re-reading the Burrows list fails', async () => {
+    const { url } = await invitationUrl();
+    fake.pair.mockResolvedValue({
+      ok: false,
+      message: PAIRING_DENIAL_MESSAGES['user-denied'],
+    });
+    await boot();
+    fake.listBurrows.mockRejectedValue(new Error('offline'));
+
+    await pasteCode(url);
+
+    expect(alertText(container)).toBe(PAIRING_DENIAL_MESSAGES['user-denied']);
+    expect(buttonNamed(container, 'Refresh')).not.toBeNull();
+  });
+
   /**
    * `pair` reports denials as a result but *throws* for a Burrow-static mismatch,
    * a dismissed authenticator prompt, and a lost passkey cache. The two-digit

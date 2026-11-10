@@ -147,8 +147,7 @@ export interface BurrowServiceOptions {
   frames?: BurrowFrameHost;
   /**
    * Which app this Burrow is. A closed set rather than a display string, so
-   * nothing can pass a name that names neither; read only by
-   * {@link suggestedBurrowLabel} today.
+   * nothing can pass a name that names neither.
    */
   kind: BurrowKind;
   /** Emit one of the `burrow:*` events to the webview. */

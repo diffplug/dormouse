@@ -72,6 +72,8 @@ const ptys = vi.hoisted(() => ({
   cwdAsked: [] as string[],
   cwdWait: null as Promise<void> | null,
   buffered: new Map<string, { alive: boolean }>(),
+  /** What the pty host retains for each PTY. */
+  scrollback: new Map<string, string>(),
   /** `'write'`, `'kill <id>'` and `'resize <id>'`, in the order they happened. */
   order: [] as string[],
   /** Called on each PTY write, as the pty host receives it. */
@@ -86,6 +88,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   },
   spawn: (id: string) => { ptys.buffered.set(id, { alive: true }); },
   getBufferedPtys: () => new Map(ptys.buffered),
+  getScrollback: (id: string) => ptys.scrollback.get(id) ?? null,
   ptyIds: () => ptys.buffered.keys(),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
@@ -168,6 +171,7 @@ beforeEach(async () => {
   ptys.cwdAsked = [];
   ptys.cwdWait = null;
   ptys.buffered.clear();
+  ptys.scrollback.clear();
   ptys.order = [];
   ptys.onWrite = null;
   router = (await import('../src/message-router')) as RouterModule;
@@ -796,6 +800,30 @@ it('replays every listed PTY at a reconnect, an empty buffer included', () => {
       .toEqual([{ type: 'pty:replay', id: 'quiet-pty', data: '' }]);
   } finally {
     reopenedRouter.dispose();
+  }
+});
+
+it('replays the whole retained history to every router that adopts a PTY', () => {
+  // The view dragged to another container and back, twice: each move disposes
+  // the router and a new one adopts the PTY. An adoption that drained a buffer
+  // left the second one only the output since the first.
+  const first = fakeWebview();
+  const firstRouter = router.attachRouter(first.channel, { reconnect: true });
+  first.send({ type: 'dormouse:init' });
+  first.send({ type: 'pty:spawn', id: 'moved-pty', options: { cwd: '/repo' } });
+  ptys.scrollback.set('moved-pty', 'history');
+  firstRouter.dispose();
+
+  for (const _move of [1, 2]) {
+    const view = fakeWebview();
+    const viewRouter = router.attachRouter(view.channel, { reconnect: true });
+    try {
+      view.send({ type: 'dormouse:init' });
+      expect(view.posted.filter((message) => message.type === 'pty:replay'))
+        .toEqual([{ type: 'pty:replay', id: 'moved-pty', data: 'history' }]);
+    } finally {
+      viewRouter.dispose();
+    }
   }
 });
 

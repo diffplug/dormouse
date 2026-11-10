@@ -38,7 +38,7 @@ import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleCo
 import { resetTodoSpotlight } from '../lib/todo-spotlight';
 import { _reopenRecordsForTesting, _resetReopenStackForTesting } from '../lib/reopen-stack';
 import { reopenClosed } from './wall/reopen';
-import { _resetPendingKillsForTesting, finalizePendingKill, getPendingKills, pendingKillKey, restorePendingKill } from '../lib/pending-kills';
+import { _resetPendingKillsForTesting, finalizePendingKill, finalizePendingKills, getPendingKills, pendingKillKey, restorePendingKill } from '../lib/pending-kills';
 import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../lib/labs-settings';
 import {
   closeWorkspace,
@@ -1109,6 +1109,15 @@ describe('Surface moves between Workspaces', () => {
     await act(async () => { await expect(moveSurface('surface:a', request({ new: true }))).rejects.toThrow('only Surface'); });
   });
 
+  it('selects the moved Surface in a new Workspace a neutral CLI move creates', async () => {
+    await twoWalls();
+    let moved!: NonNullable<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { moved = (await moveSurface('surface:a', request({ new: true })))!; });
+    await act(async () => { setActiveWorkspace(moved.workspaceId); });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(wallFor(moved.workspaceId).querySelector('[data-session-id="surface:a"][data-focused="true"]')).not.toBeNull();
+  });
+
   it('rolls back layout and ownership when destination adoption fails', async () => {
     const source = await twoWalls();
     const target = getWallHandle('workspace:2')!;
@@ -1525,6 +1534,25 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([only])); });
     // Its going is no close of the user's, so Reopen has nothing to bring back.
     expect(_reopenRecordsForTesting()).toHaveLength(0);
+  });
+
+  it.each([false, true])('a running finalizer restores a refused Workspace only outside teardown (%s)', async (teardown) => {
+    const first = await pendSecond();
+    const handle = getWallHandle('workspace:2')!;
+    let answer!: (refusal: string | null) => void;
+    const closing = vi.spyOn(handle, 'closeAll').mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+    await act(async () => { finalizePendingKill(pendingKillKey('workspace', 'workspace:2')); });
+    expect(closing).toHaveBeenCalledOnce();
+    let drained = false;
+    const drain = finalizePendingKills(undefined, { teardown }).then(() => { drained = true; });
+    await act(async () => { await Promise.resolve(); });
+    expect(drained).toBe(false);
+    await act(async () => { answer('helper has work'); await drain; });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(
+      teardown ? [first, 'workspace:3'] : [first, 'workspace:2', 'workspace:3'],
+    );
+    expect(closing).toHaveBeenCalledOnce();
   });
 
   it('closes through every member Surface when finalized, then lets its Wall go', async () => {

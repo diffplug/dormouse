@@ -27,7 +27,7 @@
     "dor-tools-lib": "workspace:*",
     "lexical": "0.48.0",
     "mermaid": "11.17.2",
-    "monaco-editor": "0.58.0-dev-20261103",
+    "monaco-editor": "0.58.0-dev-20261108",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

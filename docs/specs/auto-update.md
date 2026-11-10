@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Baseboard / Door vocabulary.
 > - Owns the standalone updater's lifecycle; the release pipeline that publishes the update manifest it fetches, and the updater's configuration, are `docs/specs/deploy.md`, and the quit orchestrator that drives the install is `docs/specs/standalone.md` §Quit flow.
 
-The standalone app checks for updates on launch, where the network policy allows it, and prompts in the Baseboard. **Never download or install an update until the user approves its prompt**; the download then runs in the background, the install at quit.
+**Never download or install an update until the user approves its prompt**; the download then runs in the background, the install at quit.
 
 ## How it works
 
@@ -13,9 +13,20 @@ On launch the updater, in order:
 2. Reads the network policy over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), calls `check()`: no update is silent, an update raises the approval prompt.
 3. Shows the reminder if due, recording `remindedAt`.
 
-**Must skip that `check()` once an update is approved**, including through Check now, and drop its result if approval lands while it runs. The reminder is re-evaluated periodically while the app runs, reading no policy and never checking, never over an undismissed notice or before the clock is set. **Only approval starts the background `download()`**; a failed download leaves the update available, so a second approval retries, and only a successful one makes it pending.
+**Must follow this approval/download model independently of the notice state.** The states describe the held update, not `UpdateBannerState`; checks and installation belong to their sections below.
 
-Check now (`checkNow()`) joins a check in flight, and shows an approved update's progress instead of checking, which would offer it for approval twice. **Must record `checkedAt` on every successful check**, automatic or asked for (§localStorage).
+| Held update | Event | Next state / effect |
+|---|---|---|
+| None or offered, unapproved | Successful check finds an update | Offered; release a replaced unapproved handle |
+| None or offered, unapproved | Check finds none or fails | Held update unchanged |
+| Offered | Approval | Downloading |
+| Downloading | Another approval | Join the same download |
+| Downloading | Download succeeds | Pending install |
+| Downloading | Download fails | Offered; another approval retries |
+| Downloading or pending install | Check requested | Keep the approved update; Check now reveals its progress |
+| Downloading or pending install | An earlier check answers | Keep the approved handle; release a different returned handle |
+
+**Must coalesce concurrent checks**, recording `checkedAt` on every successful check (§localStorage). The reminder is re-evaluated periodically, reading no policy and never checking, never over an undismissed notice or before the clock is set.
 
 **Never check from a self-host build** (`docs/specs/relay.md` → "Relay origin"): the updater acts only when the webview's baked mode is `hosted`.
 
@@ -36,6 +47,8 @@ Only `main` checks, so only it can hold a download, which lives in its webview's
 Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/layout.md`), one per updater state (`UpdateBannerState`). The `available` notice carries the approval; a notice's changelog link opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" must call `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now", since the refusal holds until relaunch; the update stays pending. **Must retain the refusal through dismissal and Check now**, which shows it again.
 
 **Must let every state be dismissed, and never cancel an approved download or install by it**; dismissing an unapproved `available` approves nothing, and Check now may offer it again.
+
+**Must let a manual check publish its empty-result or failure notice only while it still owns the checking notice**, including after the app-version lookup; a later check, approval, or dismissal supersedes it (rationale).
 
 ### Threading
 
@@ -75,4 +88,4 @@ Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/lay
 
 ## Configuration
 
-`plugins.updater` in `standalone/src-tauri/tauri.conf.json` — the endpoint, the key releases are signed against, the Windows install mode — is `docs/specs/deploy.md` → "Tauri auto-updater". Updater, app-version, and shell-open calls need capability entries; custom Tauri commands need none.
+`plugins.updater` in `standalone/src-tauri/tauri.conf.json` — the endpoint, the key releases are signed against, the Windows install mode — is `docs/specs/deploy.md` → "Tauri auto-updater". Updater, app-version, update-handle release (`core:resources:allow-close`), and shell-open calls need capability entries; custom Tauri commands need none.

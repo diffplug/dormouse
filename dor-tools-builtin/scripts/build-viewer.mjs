@@ -1,7 +1,6 @@
 import { build } from 'esbuild';
 import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { realpathSync } from 'node:fs';
 import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 
 const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
@@ -49,10 +48,4 @@ export async function buildViewerAssets(outdir) {
       outdir, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true,
     }),
   ]);
-}
-
-// `node scripts/build-viewer.mjs <outdir>`
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (!process.argv[2]) throw new Error('usage: build-viewer.mjs <outdir>');
-  await buildViewerAssets(process.argv[2]);
 }

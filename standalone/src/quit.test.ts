@@ -133,8 +133,25 @@ describe("quit orchestrator", () => {
     const adapter = fakeAdapter(order);
     await triggerQuit(adapter);
     await new Promise((r) => setTimeout(r, 20));
-    expect(finalize).toHaveBeenCalledWith(true);
+    expect(finalize).toHaveBeenCalledWith({ teardown: true });
     expect(order.slice(0, 2)).toEqual(["finalized", "captureRecovery"]);
+  });
+
+  it("starts a fresh watchdog phase once the pending kills are drained", async () => {
+    // The drain is bounded on its own, outside the ceiling that guards the
+    // capture and save. Without a phase signal behind it, a slow drain spends
+    // the budget Rust's watchdog allows the save.
+    const order: string[] = [];
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      order.push(cmd);
+      return undefined;
+    });
+    const finalize = vi.fn(async () => { await new Promise((r) => setTimeout(r, 5)); order.push("finalized"); });
+    addPendingKill({ kind: "workspace", id: "w2", workspaceId: "w2", title: "t", label: "Workspace" }, { restore: vi.fn(), finalize });
+    await triggerQuit(fakeAdapter(order));
+    await new Promise((r) => setTimeout(r, 20));
+    const finalized = order.indexOf("finalized");
+    expect(order.slice(finalized, finalized + 3)).toEqual(["finalized", "quit_progress", "captureRecovery"]);
   });
 
   it("runs teardown steps capture → flush → kill → flush → window → drain → install → proceed in order", async () => {
@@ -154,11 +171,13 @@ describe("quit orchestrator", () => {
     await triggerQuit(fakeAdapter(order));
 
     // The capture is first: an agent's resume invocation exists only between the
-    // interrupt and the kill. `quit_progress` marks each phase boundary (teardown
-    // start, install start) so Rust's watchdog budgets them separately.
+    // interrupt and the kill. `quit_progress` marks each phase boundary (the
+    // pending-kill drain, the capture and save, the install) so Rust's watchdog
+    // budgets them separately.
     expect(order).toEqual([
       "quit_ack",
       "quit_vote",
+      "quit_progress",
       "quit_progress",
       "captureRecovery",
       "flush",
@@ -261,9 +280,9 @@ describe("quit orchestrator", () => {
     await triggerQuit(fakeAdapter());
 
     expect(mocks.installPendingUpdate).not.toHaveBeenCalled();
-    // Exactly one phase signal: teardown began, but there is no install phase.
+    // The drain's signal and the save's, but none for an install phase.
     const progress = mocks.invoke.mock.calls.filter((c) => c[0] === "quit_progress").length;
-    expect(progress).toBe(1);
+    expect(progress).toBe(2);
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 

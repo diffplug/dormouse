@@ -12,7 +12,7 @@ const read = (relative: string) => readFileSync(new URL(relative, import.meta.ur
 const hostSource = read('../src/pty-host.js');
 const managerSource = read('../src/pty-manager.ts');
 
-const { create } = createRequire(import.meta.url)('../../lib/pty-core.cjs');
+const { create } = createRequire(import.meta.url)('../../standalone/sidecar/pty-core.js');
 
 describe('pty-host wiring', () => {
   it('reaches pty-core only through functions it exports', () => {

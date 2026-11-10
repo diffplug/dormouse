@@ -118,16 +118,6 @@ export interface TerminalNotificationTitleLike {
   body?: string | null;
 }
 
-export const DEFAULT_TERMINAL_PANE_STATE: TerminalPaneState = Object.freeze({
-  cwd: null,
-  activity: Object.freeze({ kind: 'unknown' } as ShellActivity),
-  pendingCommandLine: null,
-  currentCommand: null,
-  lastCommand: null,
-  title: null,
-  titleCandidates: Object.freeze({}),
-});
-
 export const DEFAULT_IDLE_TITLE = '<idle>';
 // Appended to the idle title when the last command exited non-zero. Kept as a
 // plain glyph in the title string so tab/OS-level titles carry it too; the pane
@@ -205,7 +195,7 @@ export function reduceTerminalState(
         return { ...state, activity: next };
       }
       const finishedAt = event.finishedAt ?? now();
-      const finalTerminalTitle = snapshotInRunTerminalTitle(state, state.currentCommand, finishedAt);
+      const finalTerminalTitle = findInRunTerminalTitle(state, { ...state.currentCommand, finishedAt });
       const finishedCommand: CommandRun = {
         ...state.currentCommand,
         finishedAt,
@@ -1563,24 +1553,6 @@ function terminalTitleForCommand(pane: TerminalPaneState, command: CommandRun): 
   }
   const inRun = findInRunTerminalTitle(pane, command)?.title;
   return inRun ? meaningfulTerminalTitle(inRun) : null;
-}
-
-function snapshotInRunTerminalTitle(
-  state: TerminalPaneState,
-  command: CommandRun,
-  finishedAt: number,
-): TerminalTitle | undefined {
-  // Same scan as findInRunTerminalTitle but with an explicit upper bound, used by the reducer
-  // before `command.finishedAt` is set.
-  let best: TerminalTitle | undefined;
-  for (const source of HEADER_APP_TITLE_SOURCES) {
-    const candidate = state.titleCandidates[source];
-    if (!candidate) continue;
-    if (candidate.updatedAt < command.startedAt) continue;
-    if (candidate.updatedAt > finishedAt) continue;
-    if (!best || candidate.updatedAt > best.updatedAt) best = candidate;
-  }
-  return best;
 }
 
 function findInRunTerminalTitle(pane: TerminalPaneState, command: CommandRun): TerminalTitle | null {

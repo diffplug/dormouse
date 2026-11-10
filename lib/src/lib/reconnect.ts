@@ -115,7 +115,7 @@ export const LIST_RETRY_MS = 3000;
  * or two arrivals — would otherwise let each finish on the other's list and
  * conclude the host holds nothing. The token rides the `requestInit` and comes
  * back on the list and each replay; an answer carrying none is a host that does
- * not echo it (VS Code, Pocket, the website), which has one collector anyway.
+ * not echo it (VS Code, Pocket), which has one collector anyway.
  *
  * **Asks twice before believing silence**, on `retryTimeoutMs`: the whole
  * difference between "the host holds nothing" and "the host never answered" is

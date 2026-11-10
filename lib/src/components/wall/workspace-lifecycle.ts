@@ -177,8 +177,10 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     // Running helper work refuses a close outright; it is no pending kill.
-    if (isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds())) {
-      if (isCurrent() && !closeInFlight) pendWorkspace(id);
+    const pend = isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds());
+    if (!isCurrent() || workspaceCloseRefusal(id)) return;
+    if (pend) {
+      pendWorkspace(id);
       return;
     }
     // An immediate close reveals the Workspace itself.
@@ -249,13 +251,13 @@ function pendWorkspace(id: WorkspaceId): void {
   };
   addPendingKill({ kind: 'workspace', id, workspaceId: id, title: meta.name, label: 'Workspace' }, {
     restore,
-    finalize: async (teardown) => {
+    finalize: async (context) => {
       const handle = getWallHandle(id);
       // Unsaved Tool edits are discarded: the pending kill was the decision.
       const refusal = handle ? await handle.closeAll(handle.dirtyToolIds()) : null;
       // Work that refuses to close (a helper's) brings the Workspace back to
       // say so, except when the window is going anyway.
-      if (refusal && !teardown) restore(false);
+      if (refusal && !context.teardown) restore(false);
       else release();
     },
   });

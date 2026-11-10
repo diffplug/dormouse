@@ -326,14 +326,36 @@ describe('what a Client sends', () => {
     expect(calls).toHaveLength(MAX_HTTP_EXCHANGES_PER_SESSION);
     const abandoned = new AbortController();
     const waiting = frame.request({ method: 'POST', path: '/save', headers: [], signal: abandoned.signal });
-    const refused = expect(waiting).rejects.toThrow('abandoned');
+    let rejected = false;
+    const refused = expect(waiting).rejects.toThrow('abandoned').then(() => { rejected = true; });
     abandoned.abort();
+    await settle();
+    expect(rejected).toBe(true); // Cancellation cannot wait for unrelated upstreams.
     calls.shift()!.answer({ status: 200, statusText: 'OK', headers: [] });
     void (await first).body.cancel();
     await settle();
     calls.find((call) => call.method === FRAME_METHODS.httpCancel)!.answer({});
     await refused;
     expect(calls.some((call) => call.params.path === '/save')).toBe(false);
+  });
+
+  it("rejects a closed frame's queued request while other frames hold every slot", async () => {
+    const { calls, frames } = heldSession();
+    const busy = await frames.open(OPEN);
+    for (let i = 0; i < MAX_HTTP_EXCHANGES_PER_SESSION; i += 1) void busy.request({ method: 'GET', path: `/${i}`, headers: [] });
+    await settle();
+    const closing = await frames.open({ ...OPEN, surfaceId: 'surface:2' });
+    let rejected = false;
+    const waiting = closing.request({ method: 'GET', path: '/never', headers: [] }).catch(error => {
+      expect(error.message).toBe('the frame is closed');
+      rejected = true;
+    });
+    closing.close();
+    calls.find(call => call.method === FRAME_METHODS.frameClose)!.answer({});
+    await settle();
+    expect(rejected).toBe(true);
+    await waiting;
+    expect(calls.filter(call => call.method === FRAME_METHODS.httpRequest)).toHaveLength(MAX_HTTP_EXCHANGES_PER_SESSION);
   });
 
   it('cancels an upload the page abandons before its head', async () => {

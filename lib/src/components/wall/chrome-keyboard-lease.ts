@@ -2,8 +2,8 @@ import { createDialogKeyboardCoordinator, type AcquireDialogKeyboard } from './w
 
 /**
  * Command-mode keyboard suppression for chrome that lives OUTSIDE every Wall —
- * today the Workspace strip's rename editor and close confirmation, which sit in
- * the AppBar (`docs/specs/layout.md` → "Keyboard shortcuts (command mode)").
+ * the Workspace strip's editors, menus, and dialogs in the AppBar, and host
+ * confirmations such as quit (`docs/specs/layout.md` → "Keyboard shortcuts (command mode)").
  * The Wall's dispatch listener is capture-phase on `window`, so a field up there
  * cannot stop it with `stopPropagation`; it takes a lease instead.
  *

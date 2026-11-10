@@ -602,11 +602,13 @@ describe('AgentBrowserPanel after its controller is released', () => {
 });
 
 describe('AgentBrowserPanel visibility parking', () => {
-  // Three things hide a surface (`useSurfaceVisibility`): a backgrounded window,
-  // a hidden Workspace, and a PARKED leaf — minimized, so mounted but out of the
-  // tree (docs/specs/tiling-engine.md → "Parked leaves"). A window transition is a
+  // A surface is hidden (`useSurfaceVisibility`) by a backgrounded window, a
+  // webview the host reports hidden, a hidden Workspace, another leaf zoomed over
+  // it, or a PARKED leaf — minimized, so mounted but out of the tree
+  // (docs/specs/tiling-engine.md → "Parked leaves"). A window transition is a
   // `visibilitychange` event, driven here by overriding `document.visibilityState`;
-  // a Workspace and a park transition are both props, driven by re-rendering.
+  // the host's report goes through `setHostShown`; the Workspace, zoom, and park
+  // transitions are driven by re-rendering.
   function setDocumentHidden(hidden: boolean): void {
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -821,20 +823,6 @@ describe('AgentBrowserPanel visibility parking', () => {
     // Popped out is exempt: the stream observer that drives window-close
     // auto-revert must keep running.
     expect(socket?.readyState).toBe(1);
-  });
-
-  it('parks when the document is hidden (raw visibilitychange event)', async () => {
-    await renderVisibilityPanel({
-      surfaceType: 'browser', session: 'browser-session', stream: 4321,
-    });
-
-    const socket = liveStreamSocket(4321);
-    expect(socket?.readyState).toBe(1);
-
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
-    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
-    expect(socket?.readyState).toBe(3);
   });
 
   it('does not park when a hide is reversed within the delay', async () => {

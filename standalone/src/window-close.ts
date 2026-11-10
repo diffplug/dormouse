@@ -25,7 +25,7 @@ import { listenToWindow } from "./window-label";
  */
 
 const GRACEFUL_KILL_MS = 2000;
-/** The whole teardown, past the human decision. Well under Rust's own budget. */
+/** Bounds the PTY kill step, which `GRACEFUL_KILL_MS` alone does not. */
 const CLOSE_TEARDOWN_CEILING_MS = 8000;
 
 let closeAdapter: TauriAdapter | null = null;

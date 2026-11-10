@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events';
 import { request as httpRequest } from 'node:http';
+import { connect } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { decodeViewerFrame, type ViewerFrame, type ViewerState } from '../lib/platform/browser-automation';
@@ -432,6 +433,40 @@ describe('the viewer listener', () => {
       await expect(openViewer(url)).rejects.toThrow('403');
       viewer.socket.close();
     } finally {
+      await server.close();
+    }
+  });
+
+  it('survives a refused peer that resets instead of reading its answer', async () => {
+    // Any local process, or a page in any browser, can open this socket. An
+    // upgraded socket has no `error` listener of Node's own, so an unhandled
+    // reset here would be an uncaught exception in the host process.
+    const server = createViewerServer();
+    const errors: unknown[] = [];
+    const onUncaught = (error: unknown) => { errors.push(error); };
+    process.on('uncaughtException', onUncaught);
+    try {
+      const { port } = new URL(await server.grant(() => {}));
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise<void>((resolve) => {
+          const peer = connect({ host: '127.0.0.1', port });
+          peer.on('error', () => {});
+          peer.on('close', () => resolve());
+          peer.on('connect', () => {
+            peer.write(`GET /view/${'0'.repeat(64)} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+            peer.resetAndDestroy();
+          });
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(errors).toEqual([]);
+      // And the listener still serves a real viewer.
+      const opened: WebSocket[] = [];
+      const viewer = await openViewer(await server.grant((socket) => opened.push(socket)));
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      viewer.socket.close();
+    } finally {
+      process.off('uncaughtException', onUncaught);
       await server.close();
     }
   });

@@ -164,10 +164,10 @@ settings:
 
 overrides:
   mermaid@11>katex@<0.18.2: 0.19.1
-  archiver-utils>glob@<14.0.2: 14.0.3
-  node-pg-migrate>glob@<14.0.2: 14.0.3
-  '@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2': 14.0.3
-  '@vscode/vsce>minimatch@<11.0.1': 11.0.4
+  archiver-utils>glob@<14.0.2: 14.0.4
+  node-pg-migrate>glob@<14.0.2: 14.0.4
+  '@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2': 14.0.4
+  '@vscode/vsce>minimatch@<11.0.1': 11.0.5
 
 importers:
 
@@ -180,8 +180,8 @@ importers:
         specifier: 2.0.1
         version: 2.0.1(supports-color@10.2.2)
       mdast-util-gfm-table:
-        specifier: 2.0.0
-        version: 2.0.0(supports-color@10.2.2)
+        specifier: 2.0.1
+        version: 2.0.1(supports-color@10.2.2)
       mdast-util-mdx:
         specifier: 3.0.0
         version: 3.0.0(supports-color@10.2.2)
@@ -303,8 +303,8 @@ importers:
         specifier: 11.17.2
         version: 11.17.2
       monaco-editor:
-        specifier: 0.58.0-dev-20261103
-        version: 0.58.0-dev-20261103
+        specifier: 0.58.0-dev-20261108
+        version: 0.58.0-dev-20261108
       react:
         specifier: ^19.3.0
         version: 19.3.1
@@ -344,10 +344,10 @@ importers:
         version: 5.3.0
       '@hono/node-server':
         specifier: ^2.0.10
-        version: 2.1.5(hono@4.13.16)
+        version: 2.1.6(hono@4.13.17)
       '@pgstencil/auth':
         specifier: ^0.4.3
-        version: 0.4.3(hono@4.13.16)(kysely@0.29.8)(pg@8.23.1)(pgstencil@0.4.3(cheerio@1.2.0)(kysely@0.29.8)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
+        version: 0.4.3(hono@4.13.17)(kysely@0.29.8)(pg@8.23.1)(pgstencil@0.4.3(cheerio@1.2.0)(kysely@0.29.8)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
       '@pgstencil/stripe':
         specifier: ^0.4.3
         version: 0.4.3(kysely@0.29.8)(pgstencil@0.4.3(cheerio@1.2.0)(kysely@0.29.8)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(stripe@22.6.2(@types/node@24.19.2))
@@ -359,7 +359,7 @@ importers:
         version: link:../lib
       hono:
         specifier: ^4.13.8
-        version: 4.13.16
+        version: 4.13.17
       kysely:
         specifier: ^0.29.5
         version: 0.29.8
@@ -501,7 +501,7 @@ importers:
         version: 0.1.3
       ws:
         specifier: ^8.21.3
-        version: 8.22.1
+        version: 8.22.2
       yaml:
         specifier: ^2.9.0
         version: 2.9.1
@@ -550,7 +550,10 @@ importers:
         version: 5.0.5(playwright@1.64.1)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(vitest@5.0.5)
       fake-indexeddb:
         specifier: ^6.2.5
-        version: 6.2.7
+        version: 6.2.8
+      jsdom:
+        specifier: ^30.0.0
+        version: 30.1.3(@noble/hashes@2.4.0)
       playwright:
         specifier: ^1.63.0
         version: 1.64.1
@@ -580,13 +583,13 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.0
-        version: 2.1.5(hono@4.13.16)
+        version: 2.1.6(hono@4.13.17)
       '@hono/node-ws':
         specifier: ^1.3.1
-        version: 1.3.1(@hono/node-server@2.1.5(hono@4.13.16))(hono@4.13.16)
+        version: 1.3.1(@hono/node-server@2.1.6(hono@4.13.17))(hono@4.13.17)
       hono:
         specifier: ^4.6.0
-        version: 4.13.16
+        version: 4.13.17
       remote-lib-common:
         specifier: workspace:*
         version: link:../remote-lib-common
@@ -740,7 +743,7 @@ importers:
         version: 1.2.0-beta.18
       ws:
         specifier: ^8.18.0
-        version: 8.22.1
+        version: 8.22.2
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.0
@@ -1542,8 +1545,8 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  '@hono/node-server@2.1.5':
-    resolution: {integrity: sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==}
+  '@hono/node-server@2.1.6':
+    resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
@@ -1857,8 +1860,8 @@ packages:
       '@types/node':
         optional: true
 
-  '@isaacs/nonrecursive-glob-match@1.0.3':
-    resolution: {integrity: sha512-SI7kyKHq4XXDRozw+r9GlRZkia1ZkFrpLW98r2IC2Bpr8YkFGE3fvjzmxCG0x78A++69HmDNrDvSMYBZmHGpKA==}
+  '@isaacs/nonrecursive-glob-match@1.1.0':
+    resolution: {integrity: sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==}
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0':
     resolution: {integrity: sha512-qvsTEwEFefhdirGOPnu9Wp6ChfIwy2dBCRuETU3uE+4cC+PFoxMSiiEhxk4lOluA34eARHA0OxqsEUYDqRMgeQ==}
@@ -5094,8 +5097,8 @@ packages:
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
 
-  fake-indexeddb@6.2.7:
-    resolution: {integrity: sha512-g0ghQ+BmU3CSZaHup5FigEAAtCmtNyxkrmID7OAeK2qONHghw1aQ2l2T1RxmfhP1H1tEXVRWArUTGVCk5832ww==}
+  fake-indexeddb@6.2.8:
+    resolution: {integrity: sha512-mpVW/HLUqwKXJ6F/s0hMgdK1eQfM4ncTHDioNGHWL0WKV3VcZCoZq1NKgboBbAge07aRCO7L48yziKssL59XEQ==}
     engines: {node: '>=18'}
 
   fast-deep-equal@3.1.3:
@@ -5189,8 +5192,8 @@ packages:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==}
     engines: {node: '>= 6'}
 
-  glob@14.0.3:
-    resolution: {integrity: sha512-A1vjIwC3qpdCso45Iw127gnp7sPhqgY8lUQhDrArIs+GbmfaaVPFuoyy7WyLT9EPZCRZ7j7aLdwUhQmHWesEow==}
+  glob@14.0.4:
+    resolution: {integrity: sha512-mMiwNKoJZ4HAIRVJxotO6LsNRReA30gQwP9E2/p94tfLv+jygCNpKDjhhSL6OLY6LE371EZm5EAf7RpYuUqlsw==}
     engines: {node: 18 || 20 || >=22}
 
   globalthis@1.0.4:
@@ -5218,8 +5221,8 @@ packages:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
 
-  hono@4.13.16:
-    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
+  hono@4.13.17:
+    resolution: {integrity: sha512-vZIcbkvjOR5hHRWERbGkr8fGfF0GGM1ooYkuH448iO3b2AdVEr3AXZSw4Z3Kn+1L5z0CVoVeyV29VGYmFh05kQ==}
     engines: {node: '>=16.9.0'}
 
   hosted-git-info@4.1.0:
@@ -5739,8 +5742,8 @@ packages:
   mdast-util-gfm-strikethrough@2.0.1:
     resolution: {integrity: sha512-OuJHqvr455pwu2OaOrir7dbzqs4jlWKOtlu9L6GjcIjjQwNyw02VntQsr/Ek6/A13vgnXfUhBekWRUP1OkNivw==}
 
-  mdast-util-gfm-table@2.0.0:
-    resolution: {integrity: sha512-78UEvebzz/rJIxLvE7ZtDd/vIQ0RHv+3Mh5DR96p7cS7HsBhYIICDBCu8csTNWNO6tBWfqXPWekRuj2FNOGOZg==}
+  mdast-util-gfm-table@2.0.1:
+    resolution: {integrity: sha512-fiIjPrAy4kz68/eFbPHhsiWDGHhqUSVoU1XsfLM5DsEPXw7MxgiVVyulUggFRckVWeT1KXQXkg5vm3kv4oMSOA==}
 
   mdast-util-gfm-task-list-item@2.0.0:
     resolution: {integrity: sha512-IrtvNvjxC1o06taBAVJznEnkiHxLFTzgonUdy8hzFVeDun0uTjxxrRGVaNFqkU1wJR3RBPEfsxmU6jDWPofrTQ==}
@@ -5935,8 +5938,8 @@ packages:
   minimalistic-assert@1.0.1:
     resolution: {integrity: sha512-UtJcAD4yEaGtjPezWuO9wC4nwUnVH/8/Im3yEHQP4b67cXlD/Qr9hdITCU1xDbSEXg2XKNaP8jsReV7vQd00/A==}
 
-  minimatch@11.0.4:
-    resolution: {integrity: sha512-/UJ1dEoVQTjPNDh6SGlUo+ueLMmoHTas4q+8yaAR/5t6nLAIiBDJtoYUh20IYleix7ehiQkgczb84PE3uzHkxg==}
+  minimatch@11.0.5:
+    resolution: {integrity: sha512-snPlVppFcYWfLLFQGhDxUyBcHNtMlWmn3jtj7pEaO+DP8pqL0IvAzXhMYmn1z9ASNtgmwLBdFxSf4tMUB0OTKA==}
     engines: {node: 20 || >=22}
 
   minimatch@5.1.9:
@@ -5958,8 +5961,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  monaco-editor@0.58.0-dev-20261103:
-    resolution: {integrity: sha512-AAB587iFn26qxVTPkkgEeprOGXunQqwLGO61ARykgo0mTQH5yc5GHx6sGZkN5PIDjmtqhmd4GarT0FnRAZqN5g==}
+  monaco-editor@0.58.0-dev-20261108:
+    resolution: {integrity: sha512-x24VHCPfPGUVZMsB1ZzhCKY6P8FFLR1xFz/Xf0Z+lXX2/Am4WjXDEOod9puPzSUA/SG+kWdcHOIju5GIzylHGg==}
 
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
@@ -7320,8 +7323,8 @@ packages:
       utf-8-validate:
         optional: true
 
-  ws@8.22.1:
-    resolution: {integrity: sha512-oyL6OPYme/CmiFvNuGzeoxCJ4nOrZE2O1FwM9MWM1AsGri6nLXB2pg+lNA8aLeXMSav0J6eIVS1j6vUPzUtK9g==}
+  ws@8.22.2:
+    resolution: {integrity: sha512-/rEZ2ejown2N5gxVTHUu9bVVC7ttu0/Tgzf5hbTOixR3Fs7mbbXgn2DbdbcKgJOmpQMtrIUWivtYuVMnp/W/yA==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -8264,15 +8267,15 @@ snapshots:
       protobufjs: 7.6.6
       yargs: 17.7.3
 
-  '@hono/node-server@2.1.5(hono@4.13.16)':
+  '@hono/node-server@2.1.6(hono@4.13.17)':
     dependencies:
-      hono: 4.13.16
+      hono: 4.13.17
 
-  '@hono/node-ws@1.3.1(@hono/node-server@2.1.5(hono@4.13.16))(hono@4.13.16)':
+  '@hono/node-ws@1.3.1(@hono/node-server@2.1.6(hono@4.13.17))(hono@4.13.17)':
     dependencies:
-      '@hono/node-server': 2.1.5(hono@4.13.16)
-      hono: 4.13.16
-      ws: 8.22.1
+      '@hono/node-server': 2.1.6(hono@4.13.17)
+      hono: 4.13.17
+      ws: 8.22.2
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -8516,11 +8519,11 @@ snapshots:
     optionalDependencies:
       '@types/node': 24.19.2
 
-  '@isaacs/nonrecursive-glob-match@1.0.3': {}
+  '@isaacs/nonrecursive-glob-match@1.1.0': {}
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@7.0.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
-      glob: 14.0.3
+      glob: 14.0.4
       react-docgen-typescript: 2.4.0(typescript@7.0.2)
       vite: 8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
     optionalDependencies:
@@ -8928,7 +8931,7 @@ snapshots:
       mdast-util-from-markdown: 2.1.0(supports-color@10.2.2)
       mdast-util-frontmatter: 2.0.1(supports-color@10.2.2)
       mdast-util-gfm-strikethrough: 2.0.1(supports-color@10.2.2)
-      mdast-util-gfm-table: 2.0.0(supports-color@10.2.2)
+      mdast-util-gfm-table: 2.0.1(supports-color@10.2.2)
       mdast-util-gfm-task-list-item: 2.0.0(supports-color@10.2.2)
       mdast-util-highlight-mark: 1.2.2
       mdast-util-mdx: 3.0.0(supports-color@10.2.2)
@@ -9249,10 +9252,10 @@ snapshots:
   '@oxc-resolver/binding-win32-x64-msvc@11.21.2':
     optional: true
 
-  '@pgstencil/auth@0.4.3(hono@4.13.16)(kysely@0.29.8)(pg@8.23.1)(pgstencil@0.4.3(cheerio@1.2.0)(kysely@0.29.8)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)':
+  '@pgstencil/auth@0.4.3(hono@4.13.17)(kysely@0.29.8)(pg@8.23.1)(pgstencil@0.4.3(cheerio@1.2.0)(kysely@0.29.8)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)':
     dependencies:
       better-auth: 1.7.16(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
-      hono: 4.13.16
+      hono: 4.13.17
       jose: 6.2.15
       kysely: 0.29.8
       openid-client: 6.8.9
@@ -10481,7 +10484,7 @@ snapshots:
       sirv: 3.0.2
       tinyrainbow: 3.2.0
       vitest: 5.0.5(@types/node@24.19.2)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
-      ws: 8.22.1
+      ws: 8.22.2
     transitivePeerDependencies:
       - bufferutil
       - msw
@@ -10597,7 +10600,7 @@ snapshots:
       jsonc-parser: 3.3.1
       marked: 18.1.1
       mime: 1.6.0
-      minimatch: 11.0.4
+      minimatch: 11.0.5
       parse5: 8.0.1
       proper-lockfile: 4.1.2
       read: 1.0.7
@@ -10687,7 +10690,7 @@ snapshots:
 
   archiver-utils@5.0.2:
     dependencies:
-      glob: 14.0.3
+      glob: 14.0.4
       graceful-fs: 4.2.11
       is-stream: 2.0.1
       lazystream: 1.0.1
@@ -11603,7 +11606,7 @@ snapshots:
 
   extend@3.0.2: {}
 
-  fake-indexeddb@6.2.7: {}
+  fake-indexeddb@6.2.8: {}
 
   fast-deep-equal@3.1.3: {}
 
@@ -11686,9 +11689,9 @@ snapshots:
     dependencies:
       is-glob: 4.0.3
 
-  glob@14.0.3:
+  glob@14.0.4:
     dependencies:
-      minimatch: 11.0.4
+      minimatch: 11.0.5
       minipass: 7.1.3
       path-scurry: 3.0.0
 
@@ -11713,7 +11716,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.13.16: {}
+  hono@4.13.17: {}
 
   hosted-git-info@4.1.0:
     dependencies:
@@ -12202,13 +12205,15 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-gfm-table@2.0.0(supports-color@10.2.2):
+  mdast-util-gfm-table@2.0.1(supports-color@10.2.2):
     dependencies:
       '@types/mdast': 4.0.4
       devlop: 1.1.0
       markdown-table: 3.0.4
       mdast-util-from-markdown: 2.1.0(supports-color@10.2.2)
       mdast-util-to-markdown: 2.1.3
+      mdast-util-to-string: 4.0.0
+      unist-util-visit: 5.1.0
     transitivePeerDependencies:
       - supports-color
 
@@ -12227,7 +12232,7 @@ snapshots:
       mdast-util-gfm-autolink-literal: 2.0.1
       mdast-util-gfm-footnote: 2.1.0(supports-color@10.2.2)
       mdast-util-gfm-strikethrough: 2.0.1(supports-color@10.2.2)
-      mdast-util-gfm-table: 2.0.0(supports-color@10.2.2)
+      mdast-util-gfm-table: 2.0.1(supports-color@10.2.2)
       mdast-util-gfm-task-list-item: 2.0.0(supports-color@10.2.2)
       mdast-util-to-markdown: 2.1.3
     transitivePeerDependencies:
@@ -12670,9 +12675,9 @@ snapshots:
 
   minimalistic-assert@1.0.1: {}
 
-  minimatch@11.0.4:
+  minimatch@11.0.5:
     dependencies:
-      '@isaacs/nonrecursive-glob-match': 1.0.3
+      '@isaacs/nonrecursive-glob-match': 1.1.0
       brace-expansion: 5.0.12
 
   minimatch@5.1.9:
@@ -12687,7 +12692,7 @@ snapshots:
 
   mkdirp@3.0.1: {}
 
-  monaco-editor@0.58.0-dev-20261103:
+  monaco-editor@0.58.0-dev-20261108:
     dependencies:
       dompurify: 3.4.17
       marked: 14.0.0
@@ -12741,7 +12746,7 @@ snapshots:
 
   node-pg-migrate@9.0.0(pg@8.23.1):
     dependencies:
-      glob: 14.0.3
+      glob: 14.0.4
       jiti: 2.7.0
       pg: 8.23.1
       yargs: 18.0.0
@@ -13497,7 +13502,7 @@ snapshots:
       oxc-resolver: 11.21.2
       semver: 7.8.5
       use-sync-external-store: 1.6.0(react@19.3.1)
-      ws: 8.22.1
+      ws: 8.22.2
     optionalDependencies:
       '@types/react': 19.3.0
       prettier: 3.9.6
@@ -14046,7 +14051,7 @@ snapshots:
 
   ws@8.21.0: {}
 
-  ws@8.22.1: {}
+  ws@8.22.2: {}
 
   wsl-utils@0.1.0:
     dependencies:

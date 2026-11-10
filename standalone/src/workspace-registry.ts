@@ -117,7 +117,7 @@ export async function installWorkspaceRegistry(host: RegistryHost, restored: Per
       boot.then((ids) => ids.surfaces),
     ),
     host.invoke<WorkspaceRegistrySnapshot>("workspace_registry").then(acceptRegistrySnapshot).catch(() => {
-      // A host without the registry (an older dev harness) leaves it empty.
+      // A failed fetch leaves it empty until the next broadcast.
     }),
   ]);
   schedule();

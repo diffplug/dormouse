@@ -103,9 +103,26 @@ class Gate {
     this.#free = capacity;
   }
 
-  acquire(amount = 1): Promise<void> {
-    return new Promise((go) => {
-      this.#waiting.push({ amount, go });
+  acquire(amount = 1, signals: readonly AbortSignal[] = []): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        for (const signal of signals) signal.removeEventListener('abort', cancel);
+      };
+      const waiting = { amount, go: () => { cleanup(); resolve(); } };
+      const cancel = () => {
+        const index = this.#waiting.indexOf(waiting);
+        if (index < 0) return; // Already admitted; its owner now releases it.
+        this.#waiting.splice(index, 1);
+        cleanup();
+        reject(new Error('the request was abandoned'));
+        this.#admit();
+      };
+      if (signals.some(signal => signal.aborted)) {
+        reject(new Error('the request was abandoned'));
+        return;
+      }
+      this.#waiting.push(waiting);
+      for (const signal of signals) signal.addEventListener('abort', cancel, { once: true });
       this.#admit();
     });
   }
@@ -215,6 +232,7 @@ class ClientFrame implements OpenFrame {
   readonly #forget: () => void;
   readonly #live = new Set<Live>();
   #ended = false;
+  readonly #lifetime = new AbortController();
 
   constructor(
     id: string,
@@ -236,7 +254,13 @@ class ClientFrame implements OpenFrame {
 
   async request(init: FrameRequestInit): Promise<FrameResponse> {
     if (this.#ended) throw new Error('the frame is closed');
-    await this.#slots.acquire();
+    // A queued request owns no exchange yet. Abandoning it or closing its
+    // frame must settle it without waiting for another frame's stalled body.
+    try {
+      await this.#slots.acquire(1, init.signal ? [this.#lifetime.signal, init.signal] : [this.#lifetime.signal]);
+    } catch {
+      throw new Error(this.#ended ? 'the frame is closed' : 'the request was abandoned');
+    }
     if (this.#ended || init.signal?.aborted) {
       this.#slots.release();
       throw new Error(this.#ended ? 'the frame is closed' : 'the request was abandoned');
@@ -420,6 +444,7 @@ class ClientFrame implements OpenFrame {
   ended(reason: string): void {
     if (this.#ended) return;
     this.#ended = true;
+    this.#lifetime.abort();
     for (const live of [...this.#live]) live(reason);
     this.#forget();
   }

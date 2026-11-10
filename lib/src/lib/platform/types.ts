@@ -7,7 +7,7 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
-import type { IframeExternalRefusal, IframeNetworkOffer, IframeProxyResult } from './iframe-proxy-types';
+import type { IframeNetworkOffer, IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
 import type { ManagedVoicePort } from './managed-voice-types';
 
@@ -126,7 +126,7 @@ export const SURFACE_ID_RESERVE_TIMEOUT_MS = SURFACE_ID_RESERVE_WAIT_MS + 5_000;
 
 export type AlertStateDetail = { id: string } & AlertState;
 
-export type { IframeExternalRefusal, IframeNetworkOffer, IframeProxyResult };
+export type { IframeNetworkOffer, IframeProxyResult };
 
 /**
  * The webview end of a Node-resident Burrow
@@ -320,10 +320,9 @@ export interface PlatformAdapter {
   getCwd(id: string): Promise<string | null>;
   /**
    * One answer per id, for the whole set a save is about to persist. Present
-   * where a host can resolve many at once: standalone probes cwds with a
-   * synchronous process scan on the sidecar's only event loop, so N panes must
-   * cost one scan rather than N (`docs/specs/transport.md` -> "Persisted
-   * session"). Absent falls back to `getCwd` per id.
+   * where a host can resolve many at once: standalone's sidecar runs one
+   * `lsof` for N pids rather than N spawns (`docs/specs/transport.md` ->
+   * "Persisted session"). Absent falls back to `getCwd` per id.
    */
   getCwds?(ids: string[]): Promise<Record<string, string | null>>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
@@ -408,7 +407,7 @@ export interface PlatformAdapter {
    *  collector's token: a host serving several windows echoes it on the answer
    *  so two collections in one webview cannot finish on each other's list
    *  (docs/specs/transport.md -> "Reconnection"). The hosts that do not echo it
-   *  (VS Code, Pocket, the website) run one collector per JS realm, so their
+   *  (VS Code, Pocket) run one collector per JS realm, so their
    *  answers carry none and the collector takes them. */
   requestInit(requestId?: string): void;
   onPtyList(handler: (detail: PtyListDetail) => void): void;

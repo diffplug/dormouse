@@ -625,7 +625,8 @@ export class TauriAdapter implements PlatformAdapter {
       this.pendingFlushRequests.set(requestId, resolve);
       // Timeout is a synthetic completion; a stale timer after a real completion
       // hits notify's map-miss guard. Fan out after registering so a synchronous
-      // completion still finds the entry (first notify wins — one Wall ships).
+      // completion still finds the entry (first notify wins — `WorkspaceWindow`
+      // answers once for all of its Walls).
       setTimeout(() => this.notifySessionFlushComplete(requestId), timeoutMs);
       for (const handler of this.flushHandlers) handler({ requestId, ...options });
     });

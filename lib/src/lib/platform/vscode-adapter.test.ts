@@ -8,12 +8,10 @@ import { mintSurfaceId, resetSurfaceIdPool } from '../surface-ids';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
   applyTerminalSemanticEvents: vi.fn(),
-  removeTerminalPaneState: vi.fn(),
 }));
 
 vi.mock('../terminal-state-store', () => ({
   applyTerminalSemanticEvents: terminalStateStoreMocks.applyTerminalSemanticEvents,
-  removeTerminalPaneState: terminalStateStoreMocks.removeTerminalPaneState,
 }));
 
 const terminalThemeMocks = vi.hoisted(() => ({
@@ -96,7 +94,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
     vi.clearAllMocks();
   });
 
-  it('keeps semantic pane state when a PTY exits naturally', () => {
+  it('forwards a natural PTY exit to its subscribers', () => {
     const adapter = new VSCodeAdapter();
     const exits: Array<{ id: string; exitCode: number }> = [];
     adapter.onPtyExit((detail) => exits.push(detail));
@@ -104,15 +102,13 @@ describe('VSCodeAdapter PTY exit handling', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:exit', id: 'pane-1', exitCode: 7 }));
 
     expect(exits).toEqual([{ id: 'pane-1', exitCode: 7 }]);
-    expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
   });
 
-  it('lets lifecycle cleanup remove semantic pane state after explicitly killing a PTY', () => {
+  it('posts pty:kill for an explicit kill', () => {
     const adapter = new VSCodeAdapter();
 
     adapter.killPty('pane-1');
 
-    expect(terminalStateStoreMocks.removeTerminalPaneState).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: 'pty:kill', id: 'pane-1' });
   });
 

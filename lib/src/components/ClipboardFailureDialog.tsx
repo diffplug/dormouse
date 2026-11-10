@@ -8,12 +8,16 @@ import {
   type ClipboardFailure,
 } from '../lib/clipboard-failure';
 import { ExternalTextLink } from './ExternalTextLink';
+import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
+import { useDialogKeyboardOwner } from './wall/wall-context';
 import { MODAL_OVERLAY_INSET, modalActionButton, ModalCloseButton, ModalFrame, OVERLAY_MAX_HEIGHT } from './design';
 
 /** Opens on a clipboard write that failed every way it could, asking the user
  *  to post its report to the tracking issue. */
 export function ClipboardFailureGlobal() {
   const failure = useSyncExternalStore(subscribeToClipboardFailure, getClipboardFailure, getClipboardFailure);
+  // Mounted outside every Wall, so it holds the chrome lease that mutes them all.
+  useDialogKeyboardOwner(failure !== null, acquireChromeKeyboardLease);
   return failure ? <ClipboardFailureDialog failure={failure} onClose={dismissClipboardFailure} /> : null;
 }
 

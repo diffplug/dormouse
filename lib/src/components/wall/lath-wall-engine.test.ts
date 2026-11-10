@@ -121,16 +121,18 @@ describe('lath-wall-engine listPanes projection', () => {
     // Split p1 → p2 on the right (explicit edge, so no geometry is needed). State ops
     // go through the store; the engine's `listPanes` projection reflects them.
     engine.store.addLeaf('p2', { component: 'terminal', tabComponent: 'terminal', title: 'P2' }, { refId: 'p1', edge: 'right' });
-    expect(engine.listPanes().map((p) => p.id).sort()).toEqual(['p1', 'p2']);
+    const ids = () => engine.listPanes().map((p) => p.id);
+    expect(ids()).toEqual(['p1', 'p2']);
+    expect(engine.listPanes()[1]).toMatchObject({ id: 'p2', title: 'P2' });
 
     // Minimize p2 → token; restore should reinstate it.
     const { token } = engine.store.removeLeaf('p2');
-    expect(engine.store.has('p2')).toBe(false);
+    expect(ids()).toEqual(['p1']);
     expect(token).not.toBeNull();
-    const meta = { component: 'terminal', tabComponent: 'terminal', title: 'P2' };
+    const meta = { component: 'terminal', tabComponent: 'terminal', title: 'P2 restored' };
     const { ok } = engine.store.restoreLeaf(meta, token!, { fallbackRef: 'p1' });
     expect(ok).toBe(true);
-    expect(engine.store.has('p2')).toBe(true);
+    expect(engine.listPanes()).toMatchObject([{ id: 'p1' }, { id: 'p2', title: 'P2 restored' }]);
   });
 });
 
@@ -154,7 +156,7 @@ describe('lath-wall-engine parking policy', () => {
       engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
       engine.store.doorLeaf(id, { park: true });
     }
-    const parked = engine.store.parkedIds();
+    const parked = [...engine.store.getSnapshot().parked.keys()];
     expect(parked).toHaveLength(32);
     // Every document remains mounted until it is reattached or killed.
     expect(parked).toEqual(ids);

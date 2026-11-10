@@ -701,11 +701,11 @@ fn exit_after_cleanup(app: &AppHandle) -> bool {
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
-// Phase 3: per-phase budget once teardown is running. Each reported phase
-// (teardown, install) refreshes it, so it bounds a single stalled phase, not the
-// sum of all teardown work. Sits above the webview's own teardown
-// ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
-// `standalone/src/quit.ts`, pinned under this by
+// Phase 3: per-phase budget once teardown is running. Each reported phase (the
+// pending-kill drain, the capture and save, the install) refreshes it, so it
+// bounds a single stalled phase, not the sum of all teardown work. Sits above
+// the webview's own teardown ceiling (docs/specs/standalone.md §Quit flow) —
+// `QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`, pinned under this by
 // `lib/src/lib/mirrored-constants.test.ts`. Also above `kill_sidecar_and_wait`'s
 // ~5s cap, which the Windows install phase awaits under one refresh.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
@@ -964,9 +964,10 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     }
 }
 
-/// Gracefully stop the PTYs a window left behind (`docs/specs/transport.md` ->
-/// Graceful shutdown), and drop their Sessions' alert entries with them: no
-/// window will ever show those Sessions again.
+/// Kill the PTYs a window left behind, and drop their Sessions' alert entries
+/// with them: no window will ever show those Sessions again. A kill, not the
+/// graceful stop: an interactive shell ignores that one's POSIX signal, and
+/// nothing owns these PTYs to send another.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its
@@ -989,7 +990,7 @@ fn reap_orphaned_ptys(app: &AppHandle, label: &str, ids: Vec<String>) {
 /// The `pty:reap` line `reap_orphaned_ptys` sends. Not `pty:gracefulKill`,
 /// which the quit teardown sends for PTYs whose windows still show them.
 fn pty_reap_message(ids: &[String]) -> String {
-    sidecar_line("pty:reap", serde_json::json!({ "ids": ids, "timeout": 2000 }))
+    sidecar_line("pty:reap", serde_json::json!({ "ids": ids }))
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -1569,8 +1570,7 @@ fn pty_get_cwd(
 }
 
 /// Every id's cwd in one sidecar round trip. A save probes each terminal pane,
-/// and the sidecar resolves them with a synchronous process scan on its only
-/// event loop, so N panes must cost one scan rather than N
+/// and the sidecar resolves N pids with one process scan rather than N spawns
 /// (docs/specs/transport.md -> "Persisted session").
 #[tauri::command(async)]
 fn pty_get_cwds(
@@ -1628,8 +1628,7 @@ fn pty_get_open_ports(
 
 /// Every id's listening ports in one sidecar round trip, for a listing that spans
 /// terminals (`dor list --ports`, and `--all` across every Workspace). The
-/// sidecar resolves them with synchronous process scans on its only event loop,
-/// so N terminals must cost one scan rather than N.
+/// sidecar resolves them in one pass, so N terminals cost one scan rather than N.
 #[tauri::command(async)]
 fn pty_get_open_ports_many(
     state: tauri::State<'_, SidecarState>,
@@ -4003,8 +4002,9 @@ fn quit_vote(app: AppHandle, window: tauri::Window, state: tauri::State<'_, Quit
 
 // This window has started (or advanced) its teardown: the vote wait is over,
 // and this phase boundary refreshes the watchdog's per-phase deadline. Sent at
-// teardown start and again before installing an update, so a long install gets
-// its own budget instead of sharing the teardown clock.
+// teardown start, again once the pending kills are drained, and again before
+// installing an update, so the save and a long install each get their own
+// budget instead of sharing one clock.
 #[tauri::command]
 fn quit_progress(window: tauri::Window, state: tauri::State<'_, QuitState>) {
     guard(&state.machine).progress(window.label());
@@ -5476,7 +5476,7 @@ mod tests {
     fn an_orphan_reap_removes_the_sessions_it_kills() {
         assert_eq!(
             parse_line(&super::pty_reap_message(&["t1".to_string(), "t2".to_string()])),
-            serde_json::json!({ "event": "pty:reap", "data": { "ids": ["t1", "t2"], "timeout": 2000 } })
+            serde_json::json!({ "event": "pty:reap", "data": { "ids": ["t1", "t2"] } })
         );
     }
 

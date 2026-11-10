@@ -379,9 +379,11 @@ describe('UTF-16 detection', () => {
 
 describe('errorPageHtml', () => {
   it('renders a frameable page, escaping the target', () => {
-    const html = errorPageHtml(unreachablePage(new URL('http://example.com/a"b'), 'ECONNREFUSED'));
-    expect(html).toContain('Nothing responding');
-    expect(html).not.toContain('a"b'); // escaped
+    expect(errorPageHtml(unreachablePage(new URL('http://example.com/'), 'ECONNREFUSED'))).toContain('Nothing responding');
+    // A URL arrives percent-encoded, so the markup goes through the error detail.
+    const html = errorPageHtml(unreachablePage(new URL('http://example.com/'), '<b class="x">&'));
+    expect(html).toContain('&lt;b class=&quot;x&quot;&gt;&amp;');
+    expect(html).not.toContain('<b class');
   });
 
   it('renders a timed-out page that suggests reloading', () => {

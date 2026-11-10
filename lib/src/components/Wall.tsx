@@ -42,7 +42,6 @@ import {
   clearLocalSurfaceActivity,
   disposeSession,
   focusSession,
-  toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
   getInheritableCwd,
@@ -166,21 +165,14 @@ type ShellSpawnNoticeState = {
   duration: number;
 };
 
-export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallBootProps, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
+export type { DoorChip, WallEvent, WallMode } from './wall/wall-types';
 export {
-  DialogKeyboardContext,
-  DoorElementsContext,
   ModeContext,
-  WorkspaceActiveContext,
   WallActionsContext,
   RenamingIdContext,
   SelectedIdContext,
-  WindowFocusedContext,
-  ZoomedIdContext,
 } from './wall/wall-context';
 export type { WallActions } from './wall/wall-context';
-export { SelectionRing } from './wall/SelectionRing';
-export { roundedRectPath } from '../lib/ring-geometry';
 export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
 
 /** What a pending kill's entry calls each kind of Surface. */
@@ -480,8 +472,10 @@ export function Wall({
     const ck = confirmKillRef.current;
     if (!ck || ck.exit) return;
     doorKillReturnRef.current = null;
-    setConfirmKill({ ...ck, exit: 'shake' });
-    shakeTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_SHAKE_MS);
+    const staged = { ...ck, exit: 'shake' as const };
+    setConfirmKill(staged);
+    // Only this prompt: a Kill clicked meanwhile may have raised the next one.
+    shakeTimerRef.current = setTimeout(() => setConfirmKill(current => current === staged ? null : current), KILL_SHAKE_MS);
   }, []);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
@@ -831,21 +825,21 @@ export function Wall({
     setConfirmKill(staged);
     if (ck.action === 'break') void breakToolRef.current(ck.id);
     else void closeSurface(ck.id, 'ask');
-    confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
+    confirmTimerRef.current = setTimeout(() => setConfirmKill(current => current === staged ? null : current), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
-  /** Enter terminal mode for the given panel. This only moves focus there: the
+  /** Enter passthrough on the given panel. This only moves focus there: the
    *  human gestures acknowledge at their own handlers, and spawns, reveals, and
    *  embeds focusing themselves never do. */
-  const enterTerminalMode = useCallback((id: string) => {
+  const enterPassthrough = useCallback((id: string) => {
+    // Passthrough takes the keys a staged kill prompt waits for.
+    setConfirmKill(null);
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
   }, [selectPane]);
-  const enterTerminalModeRef = useRef(enterTerminalMode);
-  enterTerminalModeRef.current = enterTerminalMode;
 
   /** Minimize a pane: detach the leaf (capturing its restore token) and add a Door.
    *
@@ -856,6 +850,9 @@ export function Wall({
    *  "Parked leaves"). Terminals do not park: their state lives in the PTY and the
    *  registry retains it across remove/restore. */
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
+    // A dying pane's kill already ran its teardown; dooring it would skip the
+    // disposal its fade timer finishes with.
+    if (lath.isDying(id)) return;
     setTerminalContext(current => current?.id === id ? null : current);
     const meta = lath.getMeta(id);
     if (!meta) return;
@@ -905,8 +902,8 @@ export function Wall({
     insertDoorAt(index >= 0 ? index + 1 : doorsRef.current.length, item, select);
   }, [insertDoorAt]);
 
-  /** Exit terminal mode */
-  const exitTerminalMode = useCallback(() => {
+  /** Leave passthrough for command mode. */
+  const enterCommandMode = useCallback(() => {
     // Giving keyboard focus back to the Wall ends zoom even though command-mode
     // selection remains on the pane.
     releaseZoomExcept();
@@ -1063,6 +1060,14 @@ export function Wall({
       if (leavesChanged) {
         prevLeafIdsRef.current = new Set(currentIds);
         publishMembership();
+        // A rename editor that leaves with its pane may never blur (WebKit drops
+        // focus from a removed node silently), and its open gate would mute
+        // command mode until another rename ends.
+        const renaming = renamingRef.current;
+        if (renaming !== null && !lath.store.has(renaming)) {
+          renamingRef.current = null;
+          setRenamingPaneId(null);
+        }
       }
       if (closingWorkspaceRef.current || movingSurfaceRef.current) return;
       // A commit that empties the tree took every pre-commit leaf with it.
@@ -1202,7 +1207,7 @@ export function Wall({
     item: DooredItem,
     options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction; focusNeutral?: boolean },
   ) => {
-    const enterPassthrough = options?.enterPassthrough ?? true;
+    const passthrough = options?.enterPassthrough ?? true;
     const afterRestore = options?.afterRestore;
 
     // Every Door has store meta; the fallback keeps a reattach from being lost if
@@ -1217,8 +1222,8 @@ export function Wall({
       return;
     }
     removeDoorAndSelect(item.id);
-    if (enterPassthrough) {
-      enterTerminalMode(item.id);
+    if (passthrough) {
+      enterPassthrough(item.id);
     } else {
       modeRef.current = 'command';
       setMode('command');
@@ -1240,7 +1245,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterTerminalMode, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterPassthrough, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -1258,10 +1263,10 @@ export function Wall({
       insertDoorAt(placement.index, { id, token: { ...(placement.token as RestoreToken), leafId: id } }, focus);
     } else {
       restoreFromToken(id, meta, { ...placement.token, leafId: id });
-      if (focus) enterTerminalMode(id);
+      if (focus) enterPassthrough(id);
     }
     return id;
-  }, [restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
+  }, [restoreFromToken, enterPassthrough, insertDoorAt, lath]);
 
   /**
    * A pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"):
@@ -1304,7 +1309,7 @@ export function Wall({
           return;
         }
         restoreFromToken(id, lath.getMeta(id) ?? meta, token);
-        if (focus) enterTerminalMode(id);
+        if (focus) enterPassthrough(id);
       },
       finalize: () => {
         closeHelperParent(id);
@@ -1338,13 +1343,13 @@ export function Wall({
   const revealSurface = useCallback((id: string, options?: { focusNeutral?: boolean }): boolean => {
     const focusNeutral = options?.focusNeutral === true;
     if (nav.hasPane(id)) {
-      if (!focusNeutral) enterTerminalMode(id);
+      if (!focusNeutral) enterPassthrough(id);
       return true;
     }
     const door = doorsRef.current.find((item) => item.id === id);
     if (door) handleReattachRef.current(door, focusNeutral ? { focusNeutral } : undefined);
     return nav.hasPane(id);
-  }, [nav, enterTerminalMode]);
+  }, [nav, enterPassthrough]);
 
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
@@ -1697,14 +1702,14 @@ export function Wall({
       lath.store.addLeaf(newId, terminalLeafMeta(), edge ? { refId: selectedPaneId!, edge } : null);
       // A host New Terminal action is an interactive spawn: put the user straight
       // into the new shell. Replacement paths above preserve their existing mode.
-      enterTerminalMode(newId);
+      enterPassthrough(newId);
       if (detail.announce) {
         showShellSpawnNotice(newId, `Opened ${shellName}`);
       }
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav, transferRefusal]);
+  }, [selectPane, enterPassthrough, showShellSpawnNotice, lath, nav, transferRefusal]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
   // A tool grows its browser when its command starts serving.
@@ -1922,7 +1927,7 @@ export function Wall({
             if (!lath.store.removeLeaf(id).ok) throw new Error('Could not detach the Surface');
           } else { removeDoor(id); lath.store.forgetLeaf(id); }
           if (selectedIdRef.current === id) {
-            exitTerminalMode();
+            enterCommandMode();
             const nextId = livePaneId();
             if (nextId) selectPane(nextId);
             else { selectedIdRef.current = null; setSelectedId(null); lastPaneIdRef.current = null; }
@@ -1938,6 +1943,8 @@ export function Wall({
       movingSurfaceRef.current = true;
       const ref = livePaneId();
       if (!lath.store.addLeaf(id, meta, ref ? { refId: ref, edge: lath.store.autoEdgeFor(ref) } : null).ok) throw new Error('Could not place the Surface');
+      // A Wall created for the move skips the seed that selects its first pane.
+      if (selectedIdRef.current === null) selectPane(id);
       publishMembership();
       return rollback;
     },
@@ -1947,7 +1954,7 @@ export function Wall({
     },
     focusSurface: (id, acknowledge) => {
       if (acknowledge) wallActionsRef.current.onFocusPane(id);
-      else enterTerminalMode(id);
+      else enterPassthrough(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
     showNotice: (text, id = livePaneId()) => {
@@ -1967,10 +1974,10 @@ export function Wall({
     dirtyToolIds: () => memberSurfaceIds().filter(id => isToolDirty(id, lath.getMeta(id)?.params)),
     enterSelectedPane: () => {
       const id = livePaneId();
-      if (id) enterTerminalMode(id);
+      if (id) enterPassthrough(id);
     },
-    enterCommandMode: exitTerminalMode,
-    selectWorkspaceTab: () => { exitTerminalMode(); selectWorkspace(effectiveWorkspaceId); },
+    enterCommandMode,
+    selectWorkspaceTab: () => { enterCommandMode(); selectWorkspace(effectiveWorkspaceId); },
     enterNextTodo: () => {
       const next = nextTodo();
       // Exactly the gesture a click on it is — a pane body's or a Door's — so
@@ -2061,20 +2068,17 @@ export function Wall({
     lath.store.addLeaf(newId, terminalLeafMeta(), refId ? { refId, edge } : null);
     // Manual split is an intent to use the new terminal: select it, enter
     // passthrough, and defer DOM focus through the shared focus path.
-    enterTerminalMode(newId);
+    enterPassthrough(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
-  }, [enterTerminalMode, lath, nav, transferRefusal]);
+  }, [enterPassthrough, lath, nav, transferRefusal]);
 
   // --- Wall actions (for tab buttons) ---
 
   const wallActions: WallActions = useMemo(() => ({
     onKill: (id: string) => {
       // The confirm keystroke must reach the Wall, not the pane's xterm.
-      exitTerminalMode();
+      enterCommandMode();
       requestKill(id);
-    },
-    onToggleTodo: (id: string) => {
-      toggleSessionTodo(id);
     },
     onMinimize: (id: string) => {
       minimizePane(id);
@@ -2101,7 +2105,7 @@ export function Wall({
           selectedIdRef.current !== id
         )
       ) {
-        enterTerminalMode(id);
+        enterPassthrough(id);
       }
       // A gesture on this Session whichever way it goes, in passthrough or not.
       acknowledgeSession(id);
@@ -2109,20 +2113,20 @@ export function Wall({
     },
     onClickPanel: (id: string) => {
       setConfirmKill(null);
-      enterTerminalMode(id);
+      enterPassthrough(id);
       acknowledgeSession(id);
     },
     onEnterPanel: (id: string) => {
       setConfirmKill(null);
-      enterTerminalMode(id);
+      enterPassthrough(id);
     },
-    onFrameLeader: exitTerminalMode,
+    onFrameLeader: enterCommandMode,
     onFocusPane: (id: string) => {
       setConfirmKill(null);
       // Visible pane → jump straight in; minimized (a door) → reattach first.
       const visible = nav.hasPane(id);
       if (visible) {
-        enterTerminalMode(id);
+        enterPassthrough(id);
       } else {
         const door = doorsRef.current.find((item) => item.id === id);
         if (!door) return;
@@ -2270,7 +2274,7 @@ export function Wall({
       // xterm. Break always asks, since nothing rejoins what it splits.
       const params = lath.getMeta(id)?.params;
       if (!isToolParams(params) || toolFace(params) === 'pending-approval' || !nav.hasPane(id) || lath.isDying(id)) return;
-      exitTerminalMode();
+      enterCommandMode();
       setConfirmKill({ id, char: randomKillChar(), action: 'break', serving: browserUrlFromParams(params) !== null });
     },
     onBrowserLaunchFailed: (id, error) => {
@@ -2296,7 +2300,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
@@ -2359,7 +2363,7 @@ export function Wall({
           preparedId, params, title: hostPathDisplay(entry.url, true) });
         if (!created.ok) throw new Error(created.message);
         committed = true;
-        enterTerminalMode(created.value.id);
+        enterPassthrough(created.value.id);
       } finally {
         discard();
       }
@@ -2369,7 +2373,7 @@ export function Wall({
     try { await operation; dismiss(); } finally {
       if (contextPortLaunches.current.get(key) === launch) contextPortLaunches.current.delete(key);
     }
-  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, lath, nav, cancelContextPortLaunches]);
+  }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterPassthrough, revealSurface, updateSurfaceParams, lath, nav, cancelContextPortLaunches]);
   breakToolRef.current = async (id: string) => {
     if (transferRefusal(id)) return;
     // docs/specs/dor-tool.md -> Run end: the Tool becomes the plain
@@ -2400,7 +2404,7 @@ export function Wall({
       reference,
       title: hostPathDisplay(shownUrl, true),
     });
-    if (created.ok) enterTerminalMode(created.value.id);
+    if (created.ok) enterPassthrough(created.value.id);
   };
 
   const contextActions = useMemo(() => ({
@@ -2427,10 +2431,10 @@ export function Wall({
       }
       finishPromotion(id);
       setTerminalContext(null);
-      enterTerminalMode(helper.id);
+      enterPassthrough(helper.id);
     },
     openPort: openContextPort,
-  }), [contextSourceId, terminalContext, lath, nav, enterTerminalMode, openContextPort, cancelContextPortLaunches]);
+  }), [contextSourceId, terminalContext, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -2463,8 +2467,8 @@ export function Wall({
     selectDoor,
     selectWorkspace,
     returnToPane,
-    enterTerminalMode,
-    exitTerminalMode,
+    enterPassthrough,
+    enterCommandMode,
     minimizePane,
     openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
     requestKill,
@@ -2484,11 +2488,11 @@ export function Wall({
   const onLeafFocused = useCallback((id: string) => {
     if (modeRef.current === 'passthrough') {
       // The embed moved DOM focus; no human gesture reached this Session.
-      if (selectedIdRef.current !== id) enterTerminalMode(id);
+      if (selectedIdRef.current !== id) enterPassthrough(id);
       return;
     }
     if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
-  }, [enterTerminalMode, selectPane]);
+  }, [enterPassthrough, selectPane]);
 
   // Stable so LathHost's sash-drag effect never re-subscribes on a Wall re-render.
   const onCommitResize = useCallback((splitPath: number[], boundary: number, deltaPx: number) => {

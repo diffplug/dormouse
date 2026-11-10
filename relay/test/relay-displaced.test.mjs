@@ -44,13 +44,16 @@ test('frames from a displaced burrow socket are ignored', () => {
   assert.equal(client.burrowId, null);
   assert.ok(clientSocket.sent.some((f) => f.t === 'burrow-gone'));
 
+  // The client binds to the replacement, so only the displaced-socket guard,
+  // not the binding check, can stop the old socket's queued frame.
+  hub.onClientFrame(client, clientFrame(BURROW_A));
+  assert.equal(client.burrowId, BURROW_A, 'precondition: rebound');
+  assert.ok(newSocket.sent.some((f) => f.t === 'e2e'));
   const sentBefore = clientSocket.sent.length;
   hub.onBurrowFrame(oldConn, burrowFrame(client.clientId));
   assert.equal(clientSocket.sent.length, sentBefore, 'no frames routed from the displaced socket');
 
   // The replacement socket still works end to end.
-  hub.onClientFrame(client, clientFrame(BURROW_A));
-  assert.ok(newSocket.sent.some((f) => f.t === 'e2e'));
   hub.onBurrowFrame(newConn, burrowFrame(client.clientId, { ct: 'bGl2ZQ' }));
   assert.ok(clientSocket.sent.some((f) => f.t === 'e2e' && f.ct === 'bGl2ZQ'));
 });

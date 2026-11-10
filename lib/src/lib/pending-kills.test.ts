@@ -68,4 +68,58 @@ describe('pending kills', () => {
     expect([a.finalize, b.finalize].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
     expect(getPendingKills()).toEqual([]);
   });
+  it('waits for a countdown finalizer already running when quit starts', async () => {
+    let finish!: () => void;
+    const finalize = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    addPendingKill({ kind: 'workspace', id: 'ws', workspaceId: 'ws', title: 'ws', label: 'Workspace' }, {
+      restore: () => {}, finalize,
+    });
+    vi.advanceTimersByTime(PENDING_KILL_MS);
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(getPendingKills()).toEqual([]);
+
+    let drained = false;
+    const draining = finalizePendingKills(undefined, { teardown: true }).then(() => { drained = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drained).toBe(false);
+    finish();
+    await draining;
+    expect(drained).toBe(true);
+    expect(finalize).toHaveBeenCalledOnce();
+  });
+
+  it('a scoped drain does not wait for or escalate another Workspace finalizing', async () => {
+    let finish!: () => void;
+    const context = { teardown: false };
+    addPendingKill({ kind: 'workspace', id: 'other', workspaceId: 'other', title: 'other', label: 'Workspace' }, {
+      restore: () => {},
+      finalize: async (current) => {
+        await new Promise<void>(resolve => { finish = resolve; });
+        context.teardown = current.teardown;
+      },
+    });
+    vi.advanceTimersByTime(PENDING_KILL_MS);
+    await finalizePendingKills(kill => kill.workspaceId === 'mine', { teardown: true });
+    finish();
+    await finalizePendingKills();
+    expect(context.teardown).toBe(false);
+  });
+
+  it('drains a rejected finalizer without running it twice', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let reject!: (error: Error) => void;
+    const finalize = vi.fn(() => new Promise<void>((_, no) => { reject = no; }));
+    addPendingKill({ kind: 'workspace', id: 'ws', workspaceId: 'ws', title: 'ws', label: 'Workspace' }, {
+      restore: () => {}, finalize,
+    });
+    vi.advanceTimersByTime(PENDING_KILL_MS);
+    const draining = finalizePendingKills(undefined, { teardown: true });
+    reject(new Error('close failed'));
+    await draining;
+    await finalizePendingKills(undefined, { teardown: true });
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
 });
