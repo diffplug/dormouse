@@ -44,3 +44,11 @@ test('a Ctrl-C to the sidecar runs its shutdown instead of ending it at once', (
   // socket file, the inner browsers, and the Burrow's last save are left behind.
   assert.match(source, /process\.on\('SIGINT',\s*shutdown\)/);
 });
+
+test('the AppImage launcher\'s environment is dropped before anything spawns', () => {
+  // Without it git, lsof, clipboard helpers, and a browser's launch shell load
+  // the bundle's libraries (pty-core.js -> withoutAppImageEnv).
+  const scrub = source.indexOf('withoutAppImageEnv(process.env)');
+  assert.ok(scrub > 0);
+  assert.ok(scrub < source.indexOf('createBrowserHost('), 'before the hosts are built');
+});

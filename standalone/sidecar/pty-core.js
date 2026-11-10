@@ -178,6 +178,41 @@ function withoutForeignTerminalEnv(env, platform) {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !foreign.test(key)));
 }
 
+// What the Linux AppImage's launcher adds to the app's environment (measured on
+// v1.3.0): the bundle's Python, GTK, and libraries, which break system programs
+// (`python3` fails to start; `curl` loads the bundle's older libnghttp2).
+const APPIMAGE_SET = ['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD', 'PYTHONHOME', 'GDK_PIXBUF_MODULE_FILE',
+  'GIO_MODULE_DIR', 'GI_TYPELIB_PATH', 'GTK_DATA_PREFIX', 'GTK_EXE_PREFIX', 'GTK_IM_MODULE_FILE', 'GTK_PATH'];
+const APPIMAGE_PATH_LISTS = ['PATH', 'LD_LIBRARY_PATH', 'PYTHONPATH', 'PERLLIB', 'QT_PLUGIN_PATH', 'XDG_DATA_DIRS',
+  'GSETTINGS_SCHEMA_DIR', 'GST_PLUGIN_SYSTEM_PATH', 'GST_PLUGIN_SYSTEM_PATH_1_0'];
+
+/** `env` without the AppImage launcher's additions, when it ran (`APPDIR` set):
+ *  its variables go, and its entries under `$APPDIR` leave the path lists. The
+ *  launcher overwrote any value the user had for the variables it sets, so
+ *  those are gone before the app starts; the two it sets to fixed values are
+ *  kept when they hold something else. A no-op anywhere else (VS Code). */
+function withoutAppImageEnv(env) {
+  if (!env.APPDIR) return env;
+  const norm = (entry) => entry.replace(/\/{2,}/g, '/').replace(/(.)\/$/, '$1');
+  const appDir = norm(env.APPDIR);
+  const next = { ...env };
+  for (const key of APPIMAGE_SET) delete next[key];
+  if (next.PYTHONDONTWRITEBYTECODE === '1') delete next.PYTHONDONTWRITEBYTECODE;
+  if (next.GTK_THEME === 'Adwaita:light' || next.GTK_THEME === 'Adwaita:dark') delete next.GTK_THEME;
+  for (const key of APPIMAGE_PATH_LISTS) {
+    if (next[key] === undefined) continue;
+    // An empty entry, such as the trailing `:` the launcher leaves, means the
+    // current directory in LD_LIBRARY_PATH: never keep one.
+    const kept = next[key].split(':').filter((entry) => {
+      const path = norm(entry);
+      return path !== '' && path !== appDir && !path.startsWith(`${appDir}/`);
+    });
+    if (kept.length) next[key] = kept.join(':');
+    else delete next[key];
+  }
+  return next;
+}
+
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
@@ -407,7 +442,8 @@ function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
   const platform = runtime.platform || process.platform;
   const env = {
-    ...(runtime.env || process.env),
+    // Before `DORMOUSE_CLI_BIN` goes on PATH, which may lie under `$APPDIR`.
+    ...withoutAppImageEnv(runtime.env || process.env),
     ...(options?.env || {}),
   };
   const osModule = runtime.osModule || os;
@@ -474,6 +510,7 @@ module.exports.resolveSpawnConfig = resolveSpawnConfig;
 module.exports.DEHYDRATE_LIMIT = DEHYDRATE_LIMIT;
 module.exports.WSL_CLI_ENV = WSL_CLI_ENV;
 module.exports.withPrependedPath = withPrependedPath;
+module.exports.withoutAppImageEnv = withoutAppImageEnv;
 module.exports.canonicalizeWindowsCwd = canonicalizeWindowsCwd;
 
 // ── Subprocesses ───────────────────────────────────────────────────────────
