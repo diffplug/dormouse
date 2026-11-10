@@ -288,6 +288,8 @@ describe("TutRunner snapshots", () => {
     expect(lastFrame()).toContain('Tap "Select" to enable drag-to-copy');
     expect(lastFrame()).toContain("\x1b[33m●");
     expect(lastFrame()).not.toContain("Click the cursor icon");
+    // The hint quotes the paragraph Pocket shows, not the desktop's.
+    expect(lastFrame()).not.toContain("Some terminal programs");
 
     setPocketTouchMode("selection");
     expect(lastFrame()).toContain("Select is active");
