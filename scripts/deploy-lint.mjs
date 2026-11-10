@@ -207,6 +207,17 @@ export const RULES = [
     },
   },
   {
+    // cmd.exe misparses an LF-only batch file (`.gitattributes` pins every
+    // checked-in `.cmd` to CRLF), and the here-string carries whatever newlines
+    // the installer was checked out with.
+    rule: 'Mechanism — Windows writes bin\\manage.cmd with CRLF line endings',
+    patterns: {
+      Windows: /\[IO\.File\]::WriteAllText\(\(Join-Path \$BIN_DIR 'manage\.cmd'\), \(\$manageCmd -replace "`r\?`n", "`r`n"\) \+ "`r`n"\)/,
+    },
+    exactMatches: { Windows: 1 },
+    skip: { macOS: 'no batch shim', Linux: 'no batch shim' },
+  },
+  {
     // The probe's verdict, and on unix the one call into the helper holding it:
     // a helper nobody calls keeps its message and asserts nothing.
     rule: 'Network posture — manage verify probes the plaintext port on the Tailscale IP',

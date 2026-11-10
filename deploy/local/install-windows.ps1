@@ -2069,7 +2069,9 @@ rem .cmd from another batch script ends that script too; it is meant to be run
 rem directly.
 "$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage.ps1" %* & exit
 "@
-  [IO.File]::WriteAllText((Join-Path $BIN_DIR 'manage.cmd'), $manageCmd + "`r`n")
+  # A here-string keeps this script's own newlines, LF on a checkout without
+  # autocrlf, and cmd.exe misparses an LF-only batch file.
+  [IO.File]::WriteAllText((Join-Path $BIN_DIR 'manage.cmd'), ($manageCmd -replace "`r?`n", "`r`n") + "`r`n")
   Write-Ok "bin\manage.cmd"
 
   # --------------------------------------------------------- candidate check ---
