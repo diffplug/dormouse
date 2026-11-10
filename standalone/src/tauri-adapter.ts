@@ -320,9 +320,9 @@ export class TauriAdapter implements PlatformAdapter {
       unlisten();
     }
     this.unlistenFns = [];
-    // Nothing will answer what is outstanding once the sidecar is gone.
+    // Nothing will answer what is outstanding once this window stops
+    // listening. The sidecar stays: every window shares it.
     this.burrowClient.dispose();
-    invoke("kill_sidecar_now");
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
