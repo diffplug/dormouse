@@ -3,7 +3,7 @@
 
 const path = require('path');
 const nodePty = require(path.join(__dirname, 'node-pty'));
-const { create } = require('../../lib/pty-core.cjs');
+const { create } = require('../../standalone/sidecar/pty-core.js');
 const { createDorControlServer } = require('../../standalone/sidecar/dor-control-server.js');
 // Bundled from TypeScript by esbuild, as the standalone sidecar's `git-info.cjs` is.
 const { canonicalLocalDirectory, resolveBinaryPath } = require('../../lib/src/host/local-directory');

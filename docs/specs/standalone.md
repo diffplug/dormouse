@@ -128,7 +128,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **Never let a window's webview throttle or suspend in the background**: `app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op on Windows and Linux; rationale).
 
-**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default` and `core:app:allow-version` to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins the label, the throttling, and both capabilities.
+**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default`, `core:app:allow-version`, and `core:resources:allow-close` (an update handle's release) to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins the label, the throttling, and both capabilities.
 
 ### Workspace registry
 
@@ -162,7 +162,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the window going away, and reassigned by a transfer. **Never dropped by an exit, nor does an exit end a transfer's marking phase** (rationale). Minting clears any suppression left under that id. `pty_kill` drops the owner before the sidecar removes the Session's alert entry, so the removal's state reaches no window.
-- **A PTY event no window owns is dropped, and the shell is reaped** (rationale). `Destroyed` sends `pty:reap` for whatever the departing window still owned; the sidecar removes those Sessions' alert entries and stops them gracefully (`docs/specs/transport.md` -> "Graceful shutdown"). **The quit teardown's `pty:gracefulKill` removes no entry**: windows still show those PTYs.
+- **A PTY event no window owns is dropped, and the shell is reaped** (rationale). `Destroyed` sends `pty:reap` for whatever the departing window still owned; the sidecar removes their alert entries and kills them: shells can ignore the graceful stop (`docs/specs/transport.md` -> "Graceful shutdown"). **The quit teardown's `pty:gracefulKill` removes no entry**: windows still show those PTYs.
 - **A `dor` request naming a Surface no window owns is answered with an error**, never handed to a sibling.
 - **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target the invoking window's own PTYs and take no ids**: a window tearing down must never touch a sibling's terminals. Each also excludes what an arrival claims (§Arrival queue).
 - **Every webview listener names its own window**: Tauri delivers an `emit_to` event to any listener with the default `Any` target (rationale). `listenToWindow` in `standalone/src/window-label.ts` is the only caller of the event API, pinned by `standalone/scripts/window-listeners.test.mjs`.
@@ -271,7 +271,7 @@ sequenceDiagram
 - **A refused arrival hands the shells back**: Rust drops the record and the source clears **transferring**. With both ends gone the shells are reaped.
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed at `begin_arrival`, retiring only the record it was armed for.
 - **A hand-back replays what the marked ids missed** (rationale): each marked id stays suppressed until its since-mark replay lands in the source's existing xterm; an id never stamped goes straight back. **Must retain source cuts from `pty:marked` through target replay and natural exit until settlement, and discard them on explicit kill.** **Must apply a handed-back PTY's exit status after its replay**, leaving its pane dead with no running command.
-- **`take_arrivals` does not consume**; the record settles at `adopt_done` and the webview dedupes by id (rationale).
+- **`take_arrivals` does not consume**; the record settles at `adopt_done` or `adopt_failed`. **Never run two arrival drains in one window at once** (rationale).
 - **`AWAITING_REPLAY_MAX` fails open only for suppressions no arrival claims** (rationale).
 - **`begin_arrival` journals the arrival in `sessions/arrivals.json` before ownership moves**, never in either window's snapshot (rationale); **a failed write refuses the move with nothing changed**. **Must retain the record until both snapshots reflect the outcome** — marked settled at adoption, its durable destination reversed on hand-back — and **tombstone settled arrivals into a deliberately closed Window until both snapshots omit them**; failed writes are logged and block nothing live.
 - **A record left at boot merges into its recorded destination before `restore_windows`**, so the Workspace restores once, with fresh shells. **Must retain a failed merge's record for retry, roll back the target if trimming the source fails, and preserve a settled arrival's newer target record.**
@@ -385,7 +385,7 @@ Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
 1. **always `quit_ack`s first**, even if it then dedupes the event out;
 2. **`quit_vote`s** when ready — at once when all-idle, else after the user confirms; **a vote is not a teardown**;
-3. `quit_progress`es when its own `quit-teardown` arrives and at the install phase boundary;
+3. `quit_progress`es when its own `quit-teardown` arrives, after the pending-kill drain, and at the install phase boundary;
 4. tears down (§Teardown ordering), then `quit_window_done`, or `quit_proceed` in the last window, which approves and calls `app.exit(0)`;
 5. on a dialog cancel, calls `quit_cancel`, which bumps `seq` and drops every window's dialog. **Nothing else cancels.**
 
@@ -408,16 +408,17 @@ Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`; `W
 
 ### Teardown ordering
 
-**Every step of `runQuitTeardown` is individually bounded, and the whole sits under a ceiling derived from the sum of those bounds, never a literal**, counting Rust's round-trip margin for the two steps that reach the sidecar (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by `lib/src/lib/mirrored-constants.test.ts`). The steps:
+**Every step of `runQuitTeardown` is individually bounded, and steps 2–7 sit under a ceiling derived from the sum of their bounds, never a literal**, counting Rust's round-trip margin for the two steps that reach the sidecar (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by `lib/src/lib/mirrored-constants.test.ts`). The steps:
 
-1. `captureAgentRecovery` — **first**, since an agent's resume invocation exists only between the interrupt and the kill (§Agent recovery; rationale). **A failed capture must not abort the steps behind it.**
-2. `requestSessionFlush` — while PTYs are alive, so CWDs are fresh.
-3. `gracefulKillPtys` — this window's PTYs (§Rust ↔ sidecar bridge).
-4. `requestSessionFlush({ probeCwd: false })` — the post-exit state (`docs/specs/transport.md` → "Persisted session types"; rationale).
-5. `flushWindowSession` — the one Window blob, bounded like the rest.
-6. `drainSessionSaves` (§Persistence).
-7. **In the last window only**, if an update is pending, a fresh `quit_progress` then `installPendingUpdate()`, strictly after the save (`docs/specs/auto-update.md`); the phase-3 watchdog backstops a hung installer.
-8. **Always** `quit_window_done`, or `quit_proceed` in the last window, in `finally`.
+1. `finalizePendingKills` (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), then a fresh `quit_progress`, so its bound never spends the ceiling's watchdog budget.
+2. `captureAgentRecovery` — **before any save or kill**, since an agent's resume invocation exists only between the interrupt and the kill (§Agent recovery; rationale). **A failed capture must not abort the steps behind it.**
+3. `requestSessionFlush` — while PTYs are alive, so CWDs are fresh.
+4. `gracefulKillPtys` — this window's PTYs (§Rust ↔ sidecar bridge).
+5. `requestSessionFlush({ probeCwd: false })` — the post-exit state (`docs/specs/transport.md` → "Persisted session types"; rationale).
+6. `flushWindowSession` — the one Window blob, bounded like the rest.
+7. `drainSessionSaves` (§Persistence).
+8. **In the last window only**, if an update is pending, a fresh `quit_progress` then `installPendingUpdate()`, strictly after the save (`docs/specs/auto-update.md`); the phase-3 watchdog backstops a hung installer.
+9. **Always** `quit_window_done`, or `quit_proceed` in the last window, in `finally`.
 
 ### Restart
 

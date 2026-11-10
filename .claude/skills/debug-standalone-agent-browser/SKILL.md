@@ -184,7 +184,7 @@ pnpm --filter dormouse-standalone build
 After changing webview/lib code under `lib/src` (e.g. the agent-browser connection, panel, or controller), run from `lib/`:
 
 ```sh
-npx tsc --noEmit -p tsconfig.json
+npx tsc -b                                  # tsconfig.json is a references root: `-p` checks nothing
 npx vitest run src/components/wall          # whole wall suite, or the specific *.test.ts
 ```
 

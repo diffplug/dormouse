@@ -65,7 +65,7 @@ Opening a second window: drag a Workspace tab out of the strip and release it ou
 Per package, from the worktree root:
 
 ```
-(cd lib && npx tsc --noEmit -p . && npx vitest run)          # ~3000 tests
+(cd lib && npx tsc -b && npx vitest run)                     # tsconfig.json is a references root: `-p .` checks nothing
 (cd standalone && npx tsc --noEmit -p . && npx vitest run && node --test scripts/*.test.mjs)
 (cd standalone/sidecar && node --test)
 (cd dor && node --test)                                        # help snapshots

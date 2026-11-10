@@ -83,7 +83,9 @@ test('only the first window may check for or install an update', () => {
   const mainOnly = capability('main-only');
   assert.deepEqual(dflt.windows, ['main', 'ws-*'], 'torn-out windows need the AppBar controls');
   assert.deepEqual(mainOnly.windows, ['main']);
-  for (const permission of ['updater:default', 'core:app:allow-version']) {
+  // `core:resources:allow-close` is what `Update.close()` invokes: without it
+  // the release of a replaced update handle is a swallowed ACL rejection.
+  for (const permission of ['updater:default', 'core:app:allow-version', 'core:resources:allow-close']) {
     assert.ok(mainOnly.permissions.includes(permission), `main-only holds ${permission}`);
     assert.ok(!dflt.permissions.includes(permission), `default does not hold ${permission}`);
   }

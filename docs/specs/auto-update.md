@@ -88,4 +88,4 @@ Update status is a text notice in the Baseboard's `notice` slot (`docs/specs/lay
 
 ## Configuration
 
-`plugins.updater` in `standalone/src-tauri/tauri.conf.json` — the endpoint, the key releases are signed against, the Windows install mode — is `docs/specs/deploy.md` → "Tauri auto-updater". Updater, app-version, and shell-open calls need capability entries; custom Tauri commands need none.
+`plugins.updater` in `standalone/src-tauri/tauri.conf.json` — the endpoint, the key releases are signed against, the Windows install mode — is `docs/specs/deploy.md` → "Tauri auto-updater". Updater, app-version, update-handle release (`core:resources:allow-close`), and shell-open calls need capability entries; custom Tauri commands need none.

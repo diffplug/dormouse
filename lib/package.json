@@ -61,6 +61,7 @@
     "@vitest/browser": "^5.0.0",
     "@vitest/browser-playwright": "^5.0.0",
     "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.0.0",
     "playwright": "^1.63.0",
     "playwright-core": "^1.63.0",
     "remark-gfm": "^4.0.1",

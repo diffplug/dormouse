@@ -760,7 +760,6 @@ describe('the sidecar host', () => {
         write: record('write', true),
         resize: record('resize', true),
         kill: record('kill'),
-        gracefulKill: record('gracefulKill'),
         list: record('list'),
         hasPty: () => true,
       },
@@ -858,17 +857,18 @@ describe('the sidecar host', () => {
   // Rust reaps what a closed window left behind. Its alert state goes with it,
   // and all that goes out for those Sessions is the empty state, which no
   // window can persist as a TODO — Rust drops it anyway, owner gone.
-  it('leaves no alert state for the PTYs a closed window left, and kills them gracefully', () => {
+  it('leaves no alert state for the PTYs a closed window left, and kills them', () => {
     host.alerts.notifyFromProtocol('left-1', REPORT);
     host.alerts.toggleTodo('left-2');
     host.alerts.notifyFromProtocol('kept', REPORT);
     out = [];
 
-    host.handleCommand('pty:reap', { ids: ['left-1', 'left-2', 7], timeout: 2000 });
+    host.handleCommand('pty:reap', { ids: ['left-1', 'left-2', 7] });
     expect(host.alerts.has('left-1')).toBe(false);
     expect(host.alerts.has('left-2')).toBe(false);
     expect(host.alerts.has('kept')).toBe(true);
-    expect(calls.map((call) => [call.op, call.args])).toEqual([['gracefulKill', [['left-1', 'left-2'], 2000]]]);
+    // A kill each, never the graceful stop: nothing owns these to stop them again.
+    expect(calls.map((call) => [call.op, call.args])).toEqual([['kill', ['left-1']], ['kill', ['left-2']]]);
     for (const line of out) expect(line.data).toMatchObject({ todo: false, notification: null, status: 'WATCHING_DISABLED' });
 
     // The quit flush's kill is not a reap: its windows still own their PTYs.

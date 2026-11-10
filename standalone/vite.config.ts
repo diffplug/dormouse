@@ -42,8 +42,6 @@ export default defineConfig(({ command }) => ({
       allow: [...Object.values(workspaceSourceAliases()), "."],
     },
   },
-  // Tauri CLI reads this env var to know where the dev server is
-  envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {
     // Tauri uses Chromium on Windows and WebKit on macOS/Linux
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari15",

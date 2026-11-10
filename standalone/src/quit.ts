@@ -105,7 +105,8 @@ const QUIT_TEARDOWN_CEILING_MS = STEP_BUDGET_TOTAL_MS + 1000;
 
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown
 // ordering). `quit_progress` marks each phase boundary so Rust's watchdog gives
-// teardown and install separate budgets rather than one shared clock.
+// the pending-kill drain, the capture and save, and the install separate
+// budgets rather than one shared clock.
 //
 // Every host step here is scoped to this window by Rust — the capture, the kill
 // and the snapshot are all keyed by the invoking window's label — so a window
@@ -113,11 +114,15 @@ const QUIT_TEARDOWN_CEILING_MS = STEP_BUDGET_TOTAL_MS + 1000;
 async function runQuitTeardown(last: boolean): Promise<void> {
   const adapter = quitAdapter;
   try {
-    void invoke("quit_progress").catch(() => {}); // teardown phase begins
+    void invoke("quit_progress").catch(() => {}); // teardown begins, with the pending-kill drain
     // Nothing pending survives a quit, nor is captured for resume
     // (docs/specs/reopen.md → "Labs: No-confirm delayed kill").
     await withTimeout(finalizePendingKills(undefined, { teardown: true }), PENDING_KILL_FINALIZE_MS,
       `[quit] pending kills took over ${PENDING_KILL_FINALIZE_MS}ms; proceeding`);
+    // The capture and save below are budgeted against Rust's per-phase watchdog
+    // on their own: the drain above sits outside their ceiling, so its bound
+    // must not come out of their budget.
+    void invoke("quit_progress").catch(() => {}); // capture and save begin
     if (adapter) {
       await withTimeout(
         (async () => {

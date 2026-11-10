@@ -2,7 +2,7 @@
  * Which window this webview is, resolved once at boot.
  *
  * The Tauri label is a Window's persistence identity (`docs/specs/glossary.md`)
- * and the only window that runs the periodic update check is `main`
+ * and the only window that checks for updates is `main`
  * (`docs/specs/auto-update.md`), so several modules need the answer
  * synchronously after boot. The browser-dev harness has no windows at all and
  * answers `main`.
