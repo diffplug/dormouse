@@ -381,8 +381,15 @@ const HOLDER_ID_BYTES = 16;
 /** Bytes of the random id that names one service instance to the webviews. */
 const SERVICE_ID_BYTES = 16;
 
-/** How long a revocation goes unsaved before the next try, and how long a person waits on a write that has not failed. */
+/** How long a revocation goes unsaved before the next try. */
 export const REVOCATION_SAVE_RETRY_MS = 30_000;
+
+/**
+ * How long a person waits on a revocation's write that has not failed: under
+ * the webview's own command budget (`BURROW_COMMAND_TIMEOUT_MS`), which would
+ * otherwise answer "timed out" for a phone already refused.
+ */
+export const REVOCATION_ANSWER_MS = 10_000;
 
 /** One entry of `BurrowService.#unsavedRevocations`. */
 interface HeldRevocation {
@@ -1331,7 +1338,7 @@ export class BurrowService {
       await Promise.race([
         this.#saveHeldRevocations(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('the write has not finished')), REVOCATION_SAVE_RETRY_MS);
+          timer = setTimeout(() => reject(new Error('the write has not finished')), REVOCATION_ANSWER_MS);
           timer.unref?.();
         }),
       ]);

@@ -128,6 +128,7 @@ import {
   type BurrowServiceOptions,
 } from './service';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
+import { BURROW_COMMAND_TIMEOUT_MS } from './link-client';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
   BurrowStatusEvent,
@@ -2130,8 +2131,10 @@ describe('paired devices and revocation', () => {
       expect((await pairedResult()).unsavedRevocations).toBeUndefined();
 
       const eventsBefore = accessEvents();
-      await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS);
-      expect((await revoking).error).toMatch(/refused.*has not finished/);
+      // Answered before the webview's own command budget gives up on it.
+      await vi.advanceTimersByTimeAsync(BURROW_COMMAND_TIMEOUT_MS - 1);
+      const answered = await Promise.race([revoking, Promise.resolve(null)]);
+      expect(answered?.error).toMatch(/refused.*has not finished/);
       expect(accessEvents()).toBeGreaterThan(eventsBefore);
       expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
 
