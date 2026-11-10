@@ -327,7 +327,8 @@ export default function App({
    * without an adapter.** Every way out of a live wall lands here — leaving it,
    * an expired session, an adapter that could not stand up — so the three
    * cannot drift into different ideas of what "ended" means. The two paths that
-   * deliberately do only half are `setOnBurrowGone` (the socket is already gone)
+   * deliberately do only half are `setOnBurrowGone` (the session is already
+   * gone; the relay socket may still be open, and the next Connect reuses it)
    * and `onCancelPairing` (there is no adapter yet).
    */
   const endSession = useCallback(() => {
