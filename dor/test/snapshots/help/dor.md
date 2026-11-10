@@ -17,11 +17,12 @@ USAGE
   dor await <surface> --until condition [--json] [--timeout seconds] [--workspace ref]
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
   dor reopen [--json]
-  dor move [--new] [--focus] [--dangerously-destroy-iframe-page-state] [--json] [--workspace ref] <args>...
+  dor move <surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]
   dor iframe [--json] [--minimize] [--surface handle] [--workspace ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
-  dor playwright [--key name] [--session name] [--surface handle] [--workspace ref] <args>...
-  dor list [--all] [--command text] [--cwd path] [--json] [--kind terminal|browser|tool] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces] [--window label]
+  dor playwright [--key name|--session name|--surface handle] [--workspace ref] [args...]
+  dor list [--workspace ref|--all] [--window label] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]
+  dor list --workspaces [--window label] [--json]
   dor workspace new|rename|pin|unpin|close|switch|move [args...] [flags...]
   dor app restart [--json]
   dor --help

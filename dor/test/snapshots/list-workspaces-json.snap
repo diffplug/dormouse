@@ -5,6 +5,7 @@ stdout:
     {
       "id": "workspace:1",
       "name": "Workspace 1",
+      "auto": true,
       "pinned": false,
       "active": true,
       "ringing": false,
@@ -14,6 +15,7 @@ stdout:
     {
       "id": "workspace:2",
       "name": "build",
+      "auto": false,
       "pinned": true,
       "active": false,
       "ringing": true,

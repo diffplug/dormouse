@@ -62,7 +62,7 @@ const INDEX_LIMIT = 512 * 1024 * 1024;
 /**
  * The repository git finds from `dir`, or null when there is none, or when a
  * path git would follow to find or open it is a share or device path or a
- * link to one: a `.git` entry, the `gitdir:` a `.git` file names, a
+ * link to one, or is neither a file nor a directory: a `.git` entry, the `gitdir:` a `.git` file names, a
  * `commondir`, an entry git opens inside, a file one of those names (the
  * shared index a split index names, an alternate object directory, a ref
  * `HEAD` names), or a path the repository's config names. Any `include` in
@@ -105,7 +105,7 @@ export async function localGitRepository(dir: string, options: GitRepositoryOpti
  *  this takes; `untrustedGitEnv` stops it going higher. */
 async function repositoryAt(level: string, options: GitRepositoryOptions): Promise<LocalGitRepository | null> {
   const path = options.path ?? nodePath;
-  const dotGit = await localRealpathIfExists(path.join(level, '.git'), options);
+  const dotGit = await gitEntry(path.join(level, '.git'), options);
   if (dotGit?.stats.isFile()) {
     // A linked worktree's or a submodule's `.git` file, where git stops
     // whether or not it names a repository.
@@ -127,19 +127,19 @@ async function repositoryAt(level: string, options: GitRepositoryOptions): Promi
  *  git reads to judge it is checked before the answer, as git reads them all. */
 async function gitDirectory(candidate: string, options: GitRepositoryOptions): Promise<{ gitDir: string; commonDir: string } | null> {
   const path = options.path ?? nodePath;
-  const gitDir = await localRealpathIfExists(candidate, options);
+  const gitDir = await gitEntry(candidate, options);
   if (!gitDir?.stats.isDirectory()) return null;
-  const head = await localRealpathIfExists(path.join(gitDir.path, 'HEAD'), options);
-  const commondir = await localRealpathIfExists(path.join(gitDir.path, 'commondir'), options);
+  const head = await gitEntry(path.join(gitDir.path, 'HEAD'), options);
+  const commondir = await gitEntry(path.join(gitDir.path, 'commondir'), options);
   let commonDir: LocalPath | null = gitDir;
   if (commondir) {
     const named = (await readFile(commondir.path, GITFILE_LIMIT, options)).replace(/[\r\n]*$/, '');
     if (isUncOrDevicePath(named)) throw new NonLocalPathError();
-    commonDir = await localRealpathIfExists(path.resolve(gitDir.path, named), options);
+    commonDir = await gitEntry(path.resolve(gitDir.path, named), options);
     if (!commonDir?.stats.isDirectory()) return null;
   }
-  const objects = await localRealpathIfExists(path.join(commonDir.path, 'objects'), options);
-  const refs = await localRealpathIfExists(path.join(commonDir.path, 'refs'), options);
+  const objects = await gitEntry(path.join(commonDir.path, 'objects'), options);
+  const refs = await gitEntry(path.join(commonDir.path, 'refs'), options);
   if (!head || !objects?.stats.isDirectory() || !refs?.stats.isDirectory()) return null;
   return { gitDir: gitDir.path, commonDir: commonDir.path };
 }
@@ -164,41 +164,57 @@ export function untrustedGitEnv(repository: LocalGitRepository, env: NodeJS.Proc
 async function checkRepository({ gitDir, commonDir, workTree }: LocalGitRepository, options: GitRepositoryOptions): Promise<void> {
   const path = options.path ?? nodePath;
   for (const base of new Set([gitDir, commonDir])) {
-    for (const name of REPOSITORY_ENTRIES) await localRealpathIfExists(path.join(base, name), options);
+    for (const name of REPOSITORY_ENTRIES) await gitEntry(path.join(base, name), options);
     await checkDirectory(path.join(base, 'reftable'), options);
   }
   for (const name of LEGACY_REMOTE_DIRS) await checkDirectory(path.join(commonDir, name), options);
   let hashLength = 20;
+  const entries: GitConfigEntry[] = [];
   for (const config of [path.join(commonDir, 'config'), path.join(gitDir, 'config.worktree')]) {
-    const file = await localRealpathIfExists(config, options);
+    const file = await gitEntry(config, options);
     if (!file?.stats.isFile()) continue;
-    const entries = gitConfigEntries(await readFile(file.path, CONFIG_LIMIT, options));
-    if (!entries) throw new Error('a config git would refuse');
-    for (const { section, key, value } of entries) {
-      if (section === 'include' || section.startsWith('includeif.')) throw new NonLocalPathError();
-      if (section === 'extensions' && key === 'objectformat' && value.toLowerCase() === 'sha256') hashLength = 32;
-      if (!PATH_KEYS.has(`${section}.${key}`)) continue;
-      if (isUncOrDevicePath(value) || /^~[^/\\]/.test(value)) throw new NonLocalPathError();
-      // `core.worktree` is relative to the git directory, the others to the work tree.
-      const base = key === 'worktree' ? gitDir : workTree ?? gitDir;
-      const named = value.startsWith('~') ? path.join(options.home ?? homedir(), value.slice(1)) : path.resolve(base, value);
-      await localRealpathIfExists(named, options);
-    }
+    const parsed = gitConfigEntries(await readFile(file.path, CONFIG_LIMIT, options));
+    if (!parsed) throw new Error('a config git would refuse');
+    entries.push(...parsed);
+  }
+  // git opens a relative excludes or attributes file from its own cwd: the
+  // work tree of an ordinary repository, but the caller's directory for a bare
+  // one, and wherever `core.worktree` leads otherwise, which no check here knows.
+  const cwdUnknown = workTree === null || entries.some(({ section, key }) => section === 'core' && key === 'worktree');
+  for (const { section, key, value } of entries) {
+    if (section === 'include' || section.startsWith('includeif.')) throw new NonLocalPathError();
+    if (section === 'extensions' && key === 'objectformat' && value.toLowerCase() === 'sha256') hashLength = 32;
+    if (!PATH_KEYS.has(`${section}.${key}`)) continue;
+    // The null device names no file, and reading it ends at once: no excludes
+    // or attributes. Only its exact spelling; a link to it is still a device.
+    if (key !== 'worktree' && isNullDevice(value, path.sep)) continue;
+    if (isUncOrDevicePath(value) || /^~[^/\\]/.test(value)) throw new NonLocalPathError();
+    if (key !== 'worktree' && cwdUnknown && !value.startsWith('~') && !path.isAbsolute(value)) throw new NonLocalPathError();
+    // `core.worktree` is relative to the git directory, the others to the work tree.
+    const base = key === 'worktree' ? gitDir : workTree ?? gitDir;
+    const named = value.startsWith('~') ? path.join(options.home ?? homedir(), value.slice(1)) : path.resolve(base, value);
+    await gitEntry(named, options);
   }
   await checkHeadRefs(gitDir, commonDir, options);
-  const objects = await localRealpathIfExists(path.join(commonDir, 'objects'), options);
+  const objects = await gitEntry(path.join(commonDir, 'objects'), options);
   if (objects) await checkAlternates(objects.path, 0, new Set(), options);
   if (options.index !== false) await checkIndex(gitDir, hashLength, options);
+}
+
+/** Whether `value` is `os.devNull` for the platform whose separator is `sep`:
+ *  `/dev/null`, or Windows' `\\.\nul` in any case. */
+function isNullDevice(value: string, sep: string): boolean {
+  return sep === '\\' ? value.toLowerCase() === '\\\\.\\nul' : value === '/dev/null';
 }
 
 /** Each file in `dir`, when it is a directory, is local. */
 async function checkDirectory(dir: string, options: GitRepositoryOptions): Promise<void> {
   const path = options.path ?? nodePath;
-  const local = await localRealpathIfExists(dir, options);
+  const local = await gitEntry(dir, options);
   if (!local?.stats.isDirectory()) return;
   const files = await (options.fs?.readdir ?? readdir)(local.path);
   if (files.length > DIRECTORY_LIMIT) throw new Error('too many files');
-  for (const file of files) await localRealpathIfExists(path.join(local.path, file), options);
+  for (const file of files) await gitEntry(path.join(local.path, file), options);
 }
 
 /** The loose refs git opens resolving `HEAD`, as `remote get-url` does to
@@ -207,7 +223,7 @@ async function checkHeadRefs(gitDir: string, commonDir: string, options: GitRepo
   const path = options.path ?? nodePath;
   let name = 'HEAD';
   for (let depth = 0; depth <= SYMREF_DEPTH; depth++) {
-    const ref = await localRealpathIfExists(path.join(PER_WORKTREE_REF.test(name) ? gitDir : commonDir, name), options);
+    const ref = await gitEntry(path.join(PER_WORKTREE_REF.test(name) ? gitDir : commonDir, name), options);
     if (!ref?.stats.isFile()) return;
     const target = /^ref:\s*(.*?)\s*$/s.exec(await readFile(ref.path, GITFILE_LIMIT, options))?.[1];
     if (target === undefined) return;
@@ -222,14 +238,14 @@ async function checkHeadRefs(gitDir: string, commonDir: string, options: GitRepo
  *  entry is relative to the objects directory naming it. */
 async function checkAlternates(objects: string, depth: number, seen: Set<string>, options: GitRepositoryOptions): Promise<void> {
   const path = options.path ?? nodePath;
-  const file = await localRealpathIfExists(path.join(objects, 'info', 'alternates'), options);
+  const file = await gitEntry(path.join(objects, 'info', 'alternates'), options);
   // git reads the file one level past its depth, and follows none of it.
   if (!file?.stats.isFile() || depth > ALTERNATES_DEPTH) return;
   for (const entry of (await readFile(file.path, CONFIG_LIMIT, options)).split('\n')) {
     if (!entry || entry.startsWith('#')) continue;
     // A quoted entry is C-unquoted, which this does not decode.
     if (entry.startsWith('"') || isUncOrDevicePath(entry)) throw new NonLocalPathError();
-    const dir = await localRealpathIfExists(path.resolve(objects, entry), options);
+    const dir = await gitEntry(path.resolve(objects, entry), options);
     if (!dir?.stats.isDirectory() || seen.has(dir.path)) continue;
     if (seen.add(dir.path).size > ALTERNATES_LIMIT) throw new Error('too many alternates');
     await checkAlternates(dir.path, depth + 1, seen, options);
@@ -240,11 +256,11 @@ async function checkAlternates(objects: string, depth: number, seen: Set<string>
  *  no sparse index, whose expansion opens tree objects by name. */
 async function checkIndex(gitDir: string, hashLength: number, options: GitRepositoryOptions): Promise<void> {
   const path = options.path ?? nodePath;
-  const index = await localRealpathIfExists(path.join(gitDir, 'index'), options);
+  const index = await gitEntry(path.join(gitDir, 'index'), options);
   if (!index?.stats.isFile()) return;
   const base = indexBase(await readBytes(index.path, INDEX_LIMIT, options), hashLength);
   if (!base) return;
-  const shared = await localRealpathIfExists(path.join(gitDir, `sharedindex.${base}`), options);
+  const shared = await gitEntry(path.join(gitDir, `sharedindex.${base}`), options);
   if (shared?.stats.isFile() && indexBase(await readBytes(shared.path, INDEX_LIMIT, options), hashLength)) throw new Error('a shared index that is split');
 }
 
@@ -302,6 +318,15 @@ export function indexBase(index: Buffer, hashLength = 20): string | null {
     offset = next;
   }
   return base;
+}
+
+/** A path git follows or opens, resolved; null when it does not exist. Throws
+ *  for one that is neither a file nor a directory: git, and every reader of
+ *  it, blocks opening a FIFO, and reads a device without end. */
+async function gitEntry(input: string, options: GitRepositoryOptions): Promise<LocalPath | null> {
+  const entry = await localRealpathIfExists(input, options);
+  if (entry && !entry.stats.isFile() && !entry.stats.isDirectory()) throw new Error('neither a file nor a directory');
+  return entry;
 }
 
 async function readFile(path: string, limit: number, options: GitRepositoryOptions): Promise<string> {

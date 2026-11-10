@@ -9,12 +9,17 @@ interface MoveFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
 }
 
+const MOVE_USAGE = '<surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]';
+
 export const moveCommand: Command = {
   name: 'move',
+  helpPatches: [
+    { scope: 'root', findReplace: ['  dor move [--new]<TO-EOL>', `  dor move ${MOVE_USAGE}\n`] },
+  ],
   command: buildCommand<MoveFlags, string[], DorCommandContext>({
     docs: {
       brief: 'Move a surface to another workspace.',
-      customUsage: ['<surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]'],
+      customUsage: [MOVE_USAGE],
       fullDescription: `Moves a Surface within this Window, keeping its id. Focus stays put unless --focus is set. --new creates a Workspace; it is refused for the source's only Surface.
 
 Plain iframes reopen at their saved URL and require --dangerously-destroy-iframe-page-state. Dirty or pending Tools cannot move, even with that flag.

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installWorkspaceAutoNaming, type GitInfoQuery } from './workspace-autoname-controller';
 import { removeTerminalPaneState, resetTerminalPaneState } from './terminal-state-store';
 import type { CwdState, TerminalPaneState } from './terminal-state';
+import type { GitInfoResult } from './platform/git-types';
 import { createWorkspace, getWorkspace, renameWorkspace, resetWorkspaces } from './workspace-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from './workspace-surfaces';
 import { DEFAULT_WORKSPACE_ID } from './session-types';
@@ -147,7 +148,7 @@ describe('installWorkspaceAutoNaming', () => {
   });
 
   it('stops holding the name for a mount that stays hung, so healthy members name it', async () => {
-    const gitInfo = vi.fn<GitInfoQuery>(async (paths) =>
+    const gitInfo = vi.fn<GitInfoQuery>(async (paths): Promise<GitInfoResult> =>
       (paths.includes('/p/a') ? { '/p/a': { repo: 'a', branch: 'main' } } : {}));
     pane('p1', '/p/a');
     pane('p2', '/mnt/hung');

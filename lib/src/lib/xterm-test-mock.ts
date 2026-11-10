@@ -70,10 +70,6 @@ export class Terminal {
   emitInput(data: string): void {
     this.dataListeners.forEach((listener) => listener(data));
   }
-
-  emitResize(cols: number, rows: number): void {
-    this.resizeListeners.forEach((listener) => listener({ cols, rows }));
-  }
 }
 
 export class FitAddon {

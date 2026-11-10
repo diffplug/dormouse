@@ -23,7 +23,7 @@ describe('registerPushServiceWorker', () => {
    */
   it('registers /sw.js at the root scope, classic', async () => {
     const registration = { scope: '/' };
-    const register = vi.fn(async () => registration);
+    const register = vi.fn(async (_url: string, _options?: RegistrationOptions) => registration);
     fakeServiceWorkerContainer(register);
 
     registerPushServiceWorker();

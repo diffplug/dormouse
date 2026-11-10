@@ -78,6 +78,15 @@ for (const [name, source] of FIXTURES) {
   );
 }
 
+// Every shipped package is in scope, not only the one `TARGET` sits in.
+const PACKAGE_TARGET = 'dor-tools-lib/src/protocol.ts';
+selftest.withMutationReporting(
+  PACKAGE_TARGET,
+  append(FIXTURES[0][1]),
+  `spells ${FIXTURES[0][0]} with no OUTBOUND_SITES entry`,
+  `${PACKAGE_TARGET}\n      a network form in a shipped package outside SHIPPED_DIRS passes outbound-lint`,
+);
+
 // A form inside a comment opens nothing, and a test file is out of scope; both
 // must stay green, or the lint pushes people to delete comments and tests.
 selftest.withAppendedOutput(

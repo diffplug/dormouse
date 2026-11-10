@@ -10,7 +10,7 @@ const params = {
   session: 'dormouse.1.tool-one', stream: 9222, toolAnnouncedPort: 6006, toolAnnouncedPath: '/token/view',
 };
 
-function engine(initial = params) {
+function engine(initial: Parameters<typeof toolLeafMeta>[1] = params) {
   const lath = createLathWallEngine();
   lath.store.addLeaf('tool', toolLeafMeta('Storybook', initial), null);
   return lath;

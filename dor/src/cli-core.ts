@@ -155,8 +155,11 @@ function getHelpTarget(argv: string[]): HelpTarget | undefined {
     return { scope: 'root' };
   }
 
+  // Past `--` stricli reads no flag: a `-h` there belongs to the command it runs.
   const commandName = argv[0];
-  if (commandName && isCommandName(commandName) && argv.some((arg) => arg === '--help' || arg === '-h')) {
+  const end = argv.indexOf('--');
+  const flags = end === -1 ? argv : argv.slice(0, end);
+  if (commandName && isCommandName(commandName) && flags.some((arg) => arg === '--help' || arg === '-h')) {
     return { scope: 'command', commandName };
   }
 

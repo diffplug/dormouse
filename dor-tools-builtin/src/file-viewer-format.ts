@@ -50,8 +50,15 @@ function codeFormat(path: string): FileFormat | null {
   return format && (format.text || /^text\/|^image\/svg\+xml$/.test(format.mime)) ? { mime: 'text/plain; charset=utf-8', text: true } : null;
 }
 
-function describeFile(path: string): string {
+/** What `builtin:file` opens: every viewer format but fonts, which it serves
+ * only as an HTML document's dependencies, since a frame shows nothing of one. */
+function documentFormat(path: string): FileFormat | null {
   const format = fileViewerFormat(path);
+  return format && !format.mime.startsWith('font/') ? format : null;
+}
+
+function describeFile(path: string): string {
+  const format = documentFormat(path);
   if (!format) return 'file viewer (unsupported format)';
   if (format.markdown) return 'Markdown editor';
   if (format.text) return 'code editor';
@@ -64,7 +71,7 @@ function describeFile(path: string): string {
 /** Defaults first: `builtin:file` for files, `builtin:folder` for folders. */
 export const BUILTIN_HANDLERS: readonly BuiltinHandler[] = [
   { tool: 'builtin:file', opens: 'file', kind: 'file', argv: '__view-file', editor: true,
-    format: fileViewerFormat, offered: path => fileViewerFormat(path) !== null, describe: describeFile },
+    format: documentFormat, offered: path => documentFormat(path) !== null, describe: describeFile },
   // Markdown, HTML, and SVG as source (docs/specs/dor-tools-builtin.md -> Code
   // editor); every other text format already opens in Monaco under builtin:file.
   { tool: 'builtin:code', opens: 'file', kind: 'code', argv: '__view-code', editor: true,

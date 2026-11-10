@@ -22,6 +22,7 @@ import {
   utf8Encode,
   type DirectoryEntry,
   type OneTimeLink,
+  type SurfaceCloseResult,
 } from 'remote-lib-common';
 
 import {
@@ -116,7 +117,8 @@ class OnePaneProvider implements BurrowSurfaceProvider {
   streamPty = (_ptyId: string, sink: PtySink) => {
     this.#sinks.add(sink);
     return { stop: () => void this.#sinks.delete(sink), ready: Promise.resolve() };
-  };
+  };  resolveBrowser = async (): Promise<string | null> => null;
+  closeSurface = async (): Promise<SurfaceCloseResult> => ({ outcome: 'refused', message: 'not in this test' });
 }
 
 let clock: TestClock;
@@ -160,7 +162,7 @@ function makeRuntime(
     linkOrigin: ORIGIN,
     createWebSocket: (url) => rendezvous.createBurrowSocket(url),
     createSession: ({ burrowId, send, label }) =>
-      new RemoteApiSession({ burrowId, send, provider, holder: { id: 'holder-1', label } }),
+      new RemoteApiSession({ burrowId, send, provider, holder: { id: 'holder-1', label, serviceId: 'service-1' } }),
     directPeering: {
       createPeer: options.createDirectPeer === undefined ? () => network.createAnswerer() : options.createDirectPeer,
       ...(options.pathPolicy ? { pathPolicy: options.pathPolicy } : {}),

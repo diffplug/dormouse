@@ -77,8 +77,13 @@ export const renameBoundScripts = (durableObjects, rename) => ({
 /** A Wrangler config: JSON, plus `//` comments on lines of their own. */
 export const parseConfig = (text) => JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""));
 
-/** Each Worker's checked-in config, keyed as `WORKERS` is. */
+/**
+ * Each Worker's checked-in config, keyed as `WORKERS` is.
+ *
+ * @returns {Promise<Record<keyof typeof WORKERS, { vars?: Record<string, string> }>>}
+ */
 export async function readConfigs() {
+  /** @type {Record<string, { vars?: Record<string, string> }>} */
   const configs = {};
   for (const [worker, { config }] of Object.entries(WORKERS))
     configs[worker] = parseConfig(await readFile(new URL(config, hosted), "utf8"));

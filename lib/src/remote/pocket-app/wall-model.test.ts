@@ -200,7 +200,7 @@ describe('activatePane', () => {
   });
 
   it('waits for an async attach before signaling onAttached', async () => {
-    let release: (() => void) | null = null;
+    let release: (() => void) | undefined;
     const adapter: PaneActivator = {
       setActivePane: () => new Promise<void>((resolve) => { release = resolve; }),
     };

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -97,7 +97,7 @@ const HANDLERS = [
   { tool: 'builtin:code', description: 'code editor (source)', reason: 'built-in' },
 ];
 
-function pickerClient({ handlers = async () => ({ target: '/x', directory: false, handlers: HANDLERS, config: '/home/me/.config/dormouse/dormouse.yml', warnings: [] }) } = {}) {
+function pickerClient({ handlers = async () => ({ handlers: HANDLERS, config: '/home/me/.config/dormouse/dormouse.yml' }) } = {}) {
   return {
     requests: [],
     async openHandlers(request) {
@@ -404,6 +404,49 @@ test('runs no git in a folder whose .git names a share, listing it by walking in
     assert.deepEqual(decoy, ['y.log']);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a sparse checkout lists only the skipped files still on disk', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'dor-sparse-'));
+  try {
+    const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repo });
+    git('init', '-q');
+    for (const path of ['keep/a.txt', 'skip/b.txt', 'local.txt']) {
+      await mkdir(join(repo, path, '..'), { recursive: true });
+      await writeFile(join(repo, path), '');
+    }
+    git('add', '.');
+    git('commit', '-qm', 'x');
+    git('sparse-checkout', 'set', '--cone', 'keep');
+    // Skip-worktree set by hand leaves the file in place.
+    git('update-index', '--skip-worktree', 'local.txt');
+    const files = [];
+    await listFiles(repo, { onFiles: paths => files.push(...paths) });
+    assert.deepEqual(files, ['keep/a.txt', 'local.txt']);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test('a skipped file replaced by a link is listed without following the link', { skip: process.platform === 'win32' }, async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'dor-skip-link-'));
+  try {
+    const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repo });
+    git('init', '-q');
+    await writeFile(join(repo, 'local.txt'), '');
+    git('add', '.');
+    git('commit', '-qm', 'x');
+    git('update-index', '--skip-worktree', 'local.txt');
+    // The link's target does not exist, so only a check that follows it calls
+    // the path absent.
+    await rm(join(repo, 'local.txt'));
+    await symlink(join(repo, 'nowhere'), join(repo, 'local.txt'));
+    const files = [];
+    await listFiles(repo, { onFiles: paths => files.push(...paths) });
+    assert.deepEqual(files, ['local.txt']);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
   }
 });
 

@@ -168,7 +168,7 @@ export interface ViewerFrame {
 export const VIEWER_FRAME_HEADER_BYTES = 16;
 const FRAME_KIND_CODE: Record<ViewerFrameKind, number> = { provisional: 1, crisp: 2 };
 
-export function encodeViewerFrame({ kind, jpeg, size, windowWidth }: ViewerFrame): Uint8Array {
+export function encodeViewerFrame({ kind, jpeg, size, windowWidth }: ViewerFrame): Uint8Array<ArrayBuffer> {
   const message = new Uint8Array(VIEWER_FRAME_HEADER_BYTES + jpeg.byteLength);
   const header = new DataView(message.buffer);
   header.setUint8(0, FRAME_KIND_CODE[kind]);

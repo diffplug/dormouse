@@ -1,4 +1,4 @@
-import { GenericHTMLNode, ImageNode, $isImageNode, realmPlugin, addExportVisitor$, type LexicalVisitor } from '@mdxeditor/editor';
+import { $createGenericHTMLNode, GenericHTMLNode, ImageNode, $isImageNode, isMdastHTMLNode, realmPlugin, addExportVisitor$, addImportVisitor$, type LexicalVisitor, type MdastHTMLNode, type MdastImportVisitor } from '@mdxeditor/editor';
 import './markdown-link-url';
 
 // The page keeps 'unsafe-inline' scripts for the host's injected iframe shim,
@@ -31,6 +31,18 @@ function safeCreateDOM(this: GenericHTMLNode): HTMLElement {
 }
 GenericHTMLNode.prototype.createDOM = safeCreateDOM;
 
+/** MDXEditor imports a `<span>` whose one attribute is `style` as a styled
+ * text node, which Lexical renders with that CSS; this keeps every `<span>` an
+ * HTML node, so it renders through `safeCreateDOM`. Outranks MDXEditor's own. */
+const spanVisitor: MdastImportVisitor<MdastHTMLNode> = {
+  priority: 0,
+  testNode: node => isMdastHTMLNode(node) && node.name === 'span',
+  // As MDXEditor's own visitor does, it keeps expression attributes too; `safeCreateDOM` skips them.
+  visitNode({ mdastNode, actions }) {
+    actions.addAndStepInto($createGenericHTMLNode('span', mdastNode.type, mdastNode.attributes as Parameters<typeof $createGenericHTMLNode>[2]));
+  },
+};
+
 // Elements of a document without a browsing context never load or run handlers.
 const inert = document.implementation.createHTMLDocument('');
 
@@ -60,5 +72,8 @@ const safeImageVisitor: LexicalVisitor = {
 };
 
 export const markdownSafetyPlugin = realmPlugin({
-  init(realm) { realm.pub(addExportVisitor$, safeImageVisitor); },
+  init(realm) {
+    realm.pub(addImportVisitor$, spanVisitor);
+    realm.pub(addExportVisitor$, safeImageVisitor);
+  },
 });

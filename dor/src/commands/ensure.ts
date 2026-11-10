@@ -46,7 +46,7 @@ const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
 
 // stricli treats a bare `--` as "rest are positionals", but it can't express
 // "everything after `--` is one required command tail, and only these flags may
-// precede it". `cli.ts` runs this before stricli parses so the argv-tail contract
+// precede it". `cli-core.ts` runs this before stricli parses so the argv-tail contract
 // (and its friendly messages) is enforced next to the flag definitions above.
 export function validateEnsureDelimiter(args: string[]): ParseResult<void> {
   const delimiterIndex = args.indexOf('--');
@@ -150,10 +150,6 @@ JSON output:
 };
 
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
-  if (commandArgs.length === 0) {
-    return new Error('dor ensure requires a command after --');
-  }
-
   const client = requireControlClient(this.options, flags.restart === true ? RESTART_TIMEOUT_MS : ENSURE_TIMEOUT_MS);
   if (client instanceof Error) return client;
 

@@ -23,8 +23,6 @@ import {
   type EnrollmentOffer,
 } from 'remote-lib-common';
 
-export type { EnrollmentOffer };
-
 const OFFER_FILE = 'enroll-offer.json';
 
 /**

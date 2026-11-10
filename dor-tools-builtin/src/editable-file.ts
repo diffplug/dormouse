@@ -9,6 +9,11 @@ import { PATH_CHANGED_MESSAGE, STALE_MESSAGE } from './editor-routes.js';
 import type { SizeBound } from './image-format.js';
 
 const tooLarge = (bound: SizeBound) => new HttpError(413, bound.message);
+/** Rethrows a permission refusal as a 403 saying `message`, which the page shows. */
+const refused = (message: string) => (error: unknown): never => {
+  const code = (error as NodeJS.ErrnoException).code;
+  throw code === 'EACCES' || code === 'EPERM' || code === 'EROFS' ? new HttpError(403, message) : error;
+};
 const revision = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 /** The first `size + 1` bytes of `file`; a longer result than `size` means it grew. */
@@ -27,7 +32,9 @@ export async function readUpTo(file: FileHandle, size: number): Promise<Buffer> 
  * the path and descriptor each time; a symlink substitution grants nothing. */
 export async function readEditable(target: string, bound: SizeBound) {
   const canonical = await localRealpath(target).then(local => local.path, (error: unknown) => {
-    if (error instanceof NonLocalPathError) return null;
+    // Deleted, or a folder on its path replaced: the path no longer names it.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (error instanceof NonLocalPathError || code === 'ENOENT' || code === 'ENOTDIR') return null;
     throw error;
   });
   if (canonical !== target) throw new HttpError(409, PATH_CHANGED_MESSAGE);
@@ -54,18 +61,21 @@ export async function replaceEditable(target: string, version: string, bound: Si
   const bytes = encode(current.bytes);
   if (bytes.length > bound.limit) throw tooLarge(bound);
   // Check document write permission even if the directory permits replacement.
-  const writable = await open(target, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  const writable = await open(target, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)).catch(refused('This file is read-only.'));
   try {
     const stat = await writable.stat();
     if (!stat.isFile() || stat.dev !== current.stat.dev || stat.ino !== current.stat.ino) throw new HttpError(409, 'The file changed on disk.');
   } finally { await writable.close(); }
   const name = join(dirname(target), `.dor-save-${randomBytes(16).toString('hex')}`);
   const temporary = `${name}.tmp`, backup = `${name}.orig`;
-  const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+  const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600).catch(refused('This folder does not allow saving.'));
   let cleanup = true;
   try {
     try {
       await file.writeFile(bytes);
+      // The document's group too: a new file takes the saver's (or the folder's).
+      // Only a group the saver belongs to can be set; the mode, after it, stays.
+      await file.chown(-1, current.stat.gid).catch(() => {});
       await file.chmod(current.stat.mode & 0o777);
       await file.sync();
     } finally { await file.close(); }
