@@ -89,6 +89,11 @@ tools:
     expect(parse('tools:\n  t:\n    run: x\n    port: auto\n').tools.get('t')?.port).toBe('auto');
   });
 
+  it('names the argv element to quote rather than calling the list empty', () => {
+    expect(() => parse('tools:\n  t:\n    run: [vite, --port, 3000]\n')).toThrow(/'run' elements must be strings; quote 3000/);
+    expect(() => parse('tools:\n  t:\n    run: []\n')).toThrow(/'run' must be a non-empty argument list/);
+  });
+
   it('rejects an unknown port mode', () => {
     expect(() => parse('tools:\n  t:\n    run: x\n    port: 6006\n')).toThrow(/'port' must be one of/);
     expect(() => parse('tools:\n  t:\n    run: x\n    port: first\n')).toThrow(/'port' must be one of/);

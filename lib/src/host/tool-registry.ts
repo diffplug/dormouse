@@ -218,7 +218,12 @@ export function parseToolFile(
 
     const run = rawEntry.run;
     if (Array.isArray(run)) {
-      if (!run.length || !run.every(arg => typeof arg === 'string') || !run[0].trim()) {
+      // YAML reads an unquoted `3000` as a number; say which element to quote.
+      const nonString: unknown = run.find(arg => typeof arg !== 'string');
+      if (nonString !== undefined) {
+        throw new ToolFileError(`${where}: 'run' elements must be strings; quote ${JSON.stringify(nonString)}`);
+      }
+      if (!run.length || !run[0].trim()) {
         throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
       }
       if (run.some(hasControlOrFormatCharacters)) throw new ToolFileError(`${where}: run cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
