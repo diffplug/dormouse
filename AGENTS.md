@@ -122,7 +122,7 @@ Specs are written ahead of the code: a new component's spec starts as a full des
 
 `scripts/spec-lint.mjs` (`pnpm lint:specs`, the first step of the root `pnpm test`) enforces the mechanically checkable conventions above — its header comment lists the checks — and ratchets size: every spec, this file, `SECURITY.md`, and `SELF_HOST.md` carry a word budget in `scripts/spec-word-budgets.json`, its size rounded up to the nearest 50. Rationale files carry none. Over budget: cut to fit, or re-baseline with `node scripts/spec-lint.mjs --ratchet <spec>` in the same PR. `SECURITY.md`, `SELF_HOST.md`, and `docs/compatible-agents.md` ride the same checks. Advisory prose reviews follow `docs/prose-audit.md` (`pnpm audit:prose`).
 
-Eight sibling lints run in `pnpm test`. Seven enforce one invariant a spec states in prose and name the line they enforce; only `public-docs-lint` and `e2e-lint` read that prose and fail when the line is gone. `ps1-cmdlet-lint` guards the one shipped file nothing else can parse:
+Eight sibling lints run in `pnpm test`. Seven enforce one invariant a spec states in prose and name the line they enforce; only `public-docs-lint` (for its image-base and guide-section contracts) and `e2e-lint` read that prose and fail when the line is gone. `ps1-cmdlet-lint` guards the one shipped file nothing else can parse:
 
 | Lint | Enforces |
 |---|---|

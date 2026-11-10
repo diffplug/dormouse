@@ -192,7 +192,9 @@ function checkImageBaseUrl() {
   if (!readRepoFile(SPEC).includes(claim)) {
     fail(`${SPEC}: no longer says ${claim} — the rule and its prose must move together`);
   }
-  const callers = ['vscode-ext/package.json', '.github/workflows/release.yml'];
+  // Every workflow, package script, and shell script, so a packaging call added
+  // anywhere is held to the rule.
+  const callers = trackedFiles().filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f) || /(?:^|\/)package\.json$/.test(f) || f.endsWith('.sh'));
   let found = 0;
   for (const rel of callers) {
     for (const line of readRepoFile(rel).split('\n')) {
@@ -203,7 +205,7 @@ function checkImageBaseUrl() {
       }
     }
   }
-  if (found === 0) fail(`no source-packaging \`vsce\` or \`ovsx\` invocation found in ${callers.join(', ')}`);
+  if (found === 0) fail('no source-packaging `vsce` or `ovsx` invocation found in any workflow, package.json, or shell script');
 }
 
 /**
