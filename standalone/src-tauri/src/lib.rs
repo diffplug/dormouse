@@ -2572,11 +2572,15 @@ struct CachedRect {
 
 impl CachedRect {
     /// Fold in a window event, which carries only the half that changed.
+    ///
+    /// Minimizing on Windows reports a `(-32000, -32000)` origin and a 0x0
+    /// size; the cache keeps the last visible box instead, because a close
+    /// while minimized records it for Reopen and the drag hit test reads it.
     fn apply(&mut self, origin: Option<(i32, i32)>, size: Option<(u32, u32)>) {
-        if let Some(origin) = origin {
+        if let Some(origin) = origin.filter(|&(x, y)| x > -32000 || y > -32000) {
             self.origin = origin;
         }
-        if let Some(size) = size {
+        if let Some(size) = size.filter(|&(w, h)| w > 0 && h > 0) {
             self.size = size;
         }
     }
@@ -6727,6 +6731,12 @@ mod tests {
         // A `Moved` carries only the origin, a `Resized` only the size.
         rect.apply(Some((100, 40)), None);
         rect.apply(None, Some((1000, 700)));
+        assert_eq!(rect.origin, (100, 40));
+        assert_eq!(rect.size, (1000, 700));
+
+        // A minimized window's placeholder box never replaces the visible one.
+        rect.apply(Some((-32000, -32000)), None);
+        rect.apply(None, Some((0, 0)));
         assert_eq!(rect.origin, (100, 40));
         assert_eq!(rect.size, (1000, 700));
 
