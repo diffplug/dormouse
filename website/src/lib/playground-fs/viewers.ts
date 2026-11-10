@@ -45,7 +45,7 @@ export interface ViewerResponse {
 
 type Viewer = { terminalId: string } & (
   | { kind: "editor"; editor: EditorKind; root: string; routes: ReturnType<typeof editorRoutes> }
-  | { kind: "folder"; root: string }
+  | { kind: "folder"; root: string; view?: unknown }
   | { kind: "error"; target: string; message: string }
 );
 
@@ -230,14 +230,21 @@ export class PlaygroundViewers {
 
   private async folderRoute(viewer: Extract<Viewer, { kind: "folder" }>, { method, route, search, contentType, body }: ViewerRequest): Promise<Reply> {
     if (method === "POST") {
-      if (route !== "select" && route !== "activate") throw new HttpError(404);
+      if (route !== "select" && route !== "activate" && route !== "state") throw new HttpError(404);
       const data = await parseJsonBody(mediaType(contentType), FOLDER_BODY_LIMIT, (limit) => bodyBytes(body, limit));
+      // The page's view, kept only to hand back to it after a reload: nothing
+      // here dehydrates it, so it needs none of the Node viewer's path checks.
+      if (route === "state") {
+        if (data && typeof data === "object" && !Array.isArray(data)) viewer.view = data;
+        return json({ ok: true });
+      }
       const path = (data as { path?: unknown } | null)?.path;
       if (typeof path !== "string" || !path) throw new HttpError(400);
       this.write(viewer.terminalId, openSequence({ path: this.inside(viewer.root, path), preview: route === "select" }));
       return json({ ok: true, status: "sent" });
     }
     if (route === "") return html(instrumentHtml(folderViewerPage(viewer.root), this.embedderOrigin));
+    if (route === "state") return json(viewer.view ?? null);
     if (route !== "list") throw new HttpError(404);
     const dir = this.inside(viewer.root, new URLSearchParams(search).get("dir") ?? "");
     const entries = this.fs.list(dir);
