@@ -875,6 +875,8 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
   expect(await detail.text()).toContain("&lt;img");
   const page = await f.worker.dispatchFetch(origin + "/dev/emails");
   expect(await page.text()).not.toContain("<script>");
+  const listed = await f.worker.dispatchFetch(origin + "/api/dev/emails");
+  expect(await listed.text()).not.toContain('"html"');
   expect(
     (await f.worker.dispatchFetch("https://wrong.invalid/dev/emails")).status,
   ).toBe(421);
