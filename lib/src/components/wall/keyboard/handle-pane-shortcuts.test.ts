@@ -54,7 +54,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     },
     handleReattachRef: { current: vi.fn() },
     selectPane: vi.fn(),
-    enterTerminalMode: vi.fn(),
+    enterPassthrough: vi.fn(),
     openTerminalContext: vi.fn(),
     requestKill: vi.fn(),
     reopenClosed: vi.fn(),
@@ -81,7 +81,7 @@ describe('handlePaneShortcuts kill behavior', () => {
       expect(handlePaneShortcuts(event, ctx, { current: null }), key).toBe(false);
       expect(event.defaultPrevented, key).toBe(false);
       expect(ctx.requestKill).not.toHaveBeenCalled();
-      expect(ctx.enterTerminalMode).not.toHaveBeenCalled();
+      expect(ctx.enterPassthrough).not.toHaveBeenCalled();
       expect(ctx.setRenamingPaneId).not.toHaveBeenCalled();
       expect(ctx.wallActionsRef.current.onSplitV).not.toHaveBeenCalled();
     }
@@ -196,7 +196,7 @@ describe('comma rename eligibility', () => {
       if (selectedType === 'door') {
         expect(ctx.handleReattachRef.current).toHaveBeenCalled();
       } else {
-        expect(ctx.enterTerminalMode).toHaveBeenCalledWith('pane-a');
+        expect(ctx.enterPassthrough).toHaveBeenCalledWith('pane-a');
       }
     } finally {
       await act(async () => root.unmount());

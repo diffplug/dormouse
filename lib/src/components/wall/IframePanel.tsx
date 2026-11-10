@@ -495,8 +495,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     return () => window.removeEventListener('blur', onWindowBlur);
   }, [id, resolution.kind, actions]);
 
-  // Register a focus handle so onClickPanel → enterTerminalMode can focus the
-  // frame like any other surface, and exitTerminalMode can hand focus back.
+  // Register a focus handle so onClickPanel → enterPassthrough can focus the
+  // frame like any other surface, and enterCommandMode can hand focus back.
   // Focusing the element moves keyboard focus into the frame.
   useEffect(() => {
     if (resolution.kind !== 'proxied' && resolution.kind !== 'raw') return;

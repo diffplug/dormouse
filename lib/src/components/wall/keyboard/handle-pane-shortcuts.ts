@@ -58,7 +58,7 @@ export function handlePaneShortcuts(
       if (!item) return true;
       ctx.handleReattachRef.current(item);
     } else {
-      ctx.enterTerminalMode(sid);
+      ctx.enterPassthrough(sid);
     }
     acknowledgeSession(sid);
     return true;
