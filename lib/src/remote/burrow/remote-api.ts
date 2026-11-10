@@ -392,7 +392,6 @@ export class RemoteApiSession {
           );
           return;
         }
-        this.#onAttach?.(params.surfaceId);
       },
       (error) => {
         // No handle to release through, and the owner may hold the pane anyway.
@@ -503,6 +502,7 @@ export class RemoteApiSession {
       }
       const result: TerminalAttachResult = { cols: size.cols, rows: size.rows };
       this.#ok(request, result);
+      this.#onAttach?.(params.surfaceId);
       streaming = true;
       for (const event of pendingEvents) {
         this.#event(subId, event.event, event.data);

@@ -25,7 +25,7 @@ import type {
   SurfaceHandle,
   SurfaceHold,
 } from './burrow-surface-provider';
-import { RemoteApiSession } from './remote-api';
+import { RemoteApiSession, type RemoteApiSessionOptions } from './remote-api';
 
 type SentPayload = RemoteResponse | RemoteEventMsg;
 
@@ -215,13 +215,17 @@ function gate(): { promise: Promise<void>; release: () => void } {
 /** Who the session under test is to the panes it sizes. */
 const HOLDER = { id: 'holder-1', label: 'iPhone', serviceId: 'service-1' };
 
-function makeSession(provider: FakeProvider): { session: RemoteApiSession; sent: SentPayload[] } {
+function makeSession(
+  provider: FakeProvider,
+  extra: Partial<RemoteApiSessionOptions> = {},
+): { session: RemoteApiSession; sent: SentPayload[] } {
   const sent: SentPayload[] = [];
   const session = new RemoteApiSession({
     burrowId: 'burrow-1',
     send: (payload) => void sent.push(payload),
     provider,
     holder: HOLDER,
+    ...extra,
   });
   return { session, sent };
 }
@@ -1239,7 +1243,8 @@ describe('RemoteApiSession teardown', () => {
   it('fails the attach when the PTY exits while surface resolution is in flight', async () => {
     const provider = new FakeProvider();
     provider.addSurface('surface:1', 'pty-1', 80, 24);
-    const { session, sent } = makeSession(provider);
+    const onAttach = vi.fn();
+    const { session, sent } = makeSession(provider, { onAttach });
     const held = gate();
     provider.resolveGate = held.promise;
 
@@ -1269,6 +1274,18 @@ describe('RemoteApiSession teardown', () => {
     // A dead PTY is never bounced or otherwise resized after the replay.
     expect(provider.ptyResizes).toEqual([]);
     expect(provider.handleResizes).toEqual([]);
+    // Nor logged as attached: the access log's `attached` is a success.
+    expect(onAttach).not.toHaveBeenCalled();
+  });
+
+  it('reports an attach that succeeded, once, when it is answered', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    const onAttach = vi.fn();
+    const { session, sent } = makeSession(provider, { onAttach });
+    await attach(session, 80, 24);
+    expect(reply(sent, 'attach-1')).toMatchObject({ ok: true });
+    expect(onAttach.mock.calls).toEqual([['surface:1']]);
   });
 
   it('tears down the attachment when the attached PTY exits', async () => {
