@@ -1982,6 +1982,13 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Purge {
+  # bin\run-relay.ps1 is what "uninstall" removes. While it is here the Relay is
+  # still registered: it keeps the setup password it loaded at boot, recreates
+  # state\ on its next write, and restarts forever once config\ is gone.
+  if (Test-Path -LiteralPath (Join-Path $Root 'bin\run-relay.ps1')) {
+    [Console]::Error.WriteLine(('the Relay is still installed; run "{0}\bin\manage.cmd" uninstall first' -f $Root))
+    return 1
+  }
   Write-Host ""
   Write-Host "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Burrows, push"
   Write-Host "subscriptions, the VAPID key, and any unspent enrollment offer:"
@@ -2000,17 +2007,15 @@ function Invoke-Purge {
     Remove-Tree $p
   }
   Write-Host 'purged.'
-  # bin\run-relay.ps1 is what "uninstall" removes, so its absence means the
-  # Scheduled Task and the code are already gone and this script is the last
-  # thing standing. It cannot delete itself out from under the shell running it.
-  if (-not (Test-Path -LiteralPath (Join-Path $Root 'bin\run-relay.ps1'))) {
-    Write-Host ""
-    Write-Host "the Scheduled Task and code were already uninstalled; this script"
-    Write-Host "is all that remains:"
-    Write-Host ""
-    Write-Host ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
-    Write-Host ""
-  }
+  # The Scheduled Task and the code are already gone, so this script is the
+  # last thing standing. It cannot delete itself out from under the shell
+  # running it.
+  Write-Host ""
+  Write-Host "the Scheduled Task and code were already uninstalled; this script"
+  Write-Host "is all that remains:"
+  Write-Host ""
+  Write-Host ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
+  Write-Host ""
   return 0
 }
 

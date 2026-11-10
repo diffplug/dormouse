@@ -32,8 +32,8 @@
  * if a helper ever exists twice — once in the installer body and once inside
  * the `MANAGE_EOF` heredoc. Today `env_file_value` and `serve_origin_root`
  * are defined twice, and each pair is checked identical. `owner_only`,
- * `has_off_loopback`, `names_credential`, `serve_proxies_root` and
- * `check_tailscale_plaintext` are in the heredoc (the
+ * `has_off_loopback`, `names_credential`, `serve_proxies_root`,
+ * `check_tailscale_plaintext` and `cmd_purge` are in the heredoc (the
  * `manage` copy); `create_release_stage`, `env_missing_keys` and
  * `serve_state` are in the installer body.
  *
@@ -436,6 +436,7 @@ export function run() {
           'serve_state',
           'serve_proxies_root',
           'check_tailscale_plaintext',
+          'cmd_purge',
         ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
@@ -488,6 +489,20 @@ export function run() {
         `create_release_stage ${quotedStage}; printf keep > ${quotedStage}/marker; if create_release_stage ${quotedStage} 2>/dev/null; then echo overwritten; else cat ${quotedStage}/marker; fi`,
         'keep',
       ]);
+      // `purge` deletes state only once `uninstall` has removed bin/run-relay:
+      // a Relay still registered keeps its setup password and recreates state/.
+      const purgeRoot = sq(join(fixtureDir, `purge-${platform}`));
+      const purge = (installed) =>
+        `ROOT=${purgeRoot}/${installed ? 'installed' : 'uninstalled'}; STATE_DIR="$ROOT/state"; ` +
+        'LOG_DIR="$ROOT/logs"; LOG_ROOT="$LOG_DIR"; C_RED=""; C_OFF=""; ' +
+        'mkdir -p "$ROOT/bin" "$STATE_DIR" "$ROOT/config" "$ROOT/run"; ' +
+        (installed ? ': > "$ROOT/bin/run-relay"; ' : '') +
+        "if cmd_purge <<< 'DELETE DORMOUSE STATE' > /dev/null 2>&1; then r=purged; else r=refused; fi; " +
+        'if [ -d "$STATE_DIR" ]; then echo "$r kept"; else echo "$r deleted"; fi';
+      allCases.push(
+        ['cmd_purge: refuses while the Relay is still installed', purge(true), 'refused kept'],
+        ['cmd_purge: deletes state once uninstalled', purge(false), 'purged deleted'],
+      );
       if ((platform === 'macOS' && process.platform === 'darwin') ||
           (platform === 'Linux' && process.platform === 'linux')) {
         for (const [path, expected] of [[protectedDir, 'pass'], [publicDir, 'fail']]) {

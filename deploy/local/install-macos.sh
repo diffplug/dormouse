@@ -1161,6 +1161,13 @@ cmd_uninstall() {
 }
 
 cmd_purge() {
+  # bin/run-relay is what "uninstall" removes. While it is here the Relay is
+  # still registered: it keeps the setup password it loaded at boot, recreates
+  # state/ on its next write, and restarts forever once config/ is gone.
+  if [ -e "$ROOT/bin/run-relay" ]; then
+    printf 'the Relay is still installed; run "%s" uninstall first\n' "$ROOT/bin/manage" >&2
+    return 1
+  fi
   printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Burrows, push\n' "$C_RED" "$C_OFF"
   printf 'subscriptions, the VAPID key, and any unspent enrollment offer:\n  %s\n  %s\n  %s\n\n' \
     "$STATE_DIR" "$ROOT/config" "$ROOT/run"
@@ -1174,16 +1181,13 @@ cmd_purge() {
   # just deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
   rm -rf "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'purged.\n'
-  # bin/run-relay is what "uninstall" removes, so its absence means the
-  # LaunchAgent and the code are already gone and this script is the last thing
-  # standing. It cannot delete itself out from under the shell running it. The
-  # logs live outside ROOT on a real install, so LOG_DIR has to be named too or
-  # the printed command leaves them behind. (~/Library/Logs/Dormouse Relay is
+  # The LaunchAgent and the code are already gone, so this script is the last
+  # thing standing. It cannot delete itself out from under the shell running it.
+  # The logs live outside ROOT on a real install, so LOG_DIR has to be named too
+  # or the printed command leaves them behind. (~/Library/Logs/Dormouse Relay is
   # dormouse-owned, so deleting it leaves no empty directory behind.)
-  if [ ! -e "$ROOT/bin/run-relay" ]; then
-    printf '\nthe LaunchAgent and code were already uninstalled; what remains\n'
-    printf 'is this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_DIR"
-  fi
+  printf '\nthe LaunchAgent and code were already uninstalled; what remains\n'
+  printf 'is this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_DIR"
 }
 
 case "${1:-status}" in
