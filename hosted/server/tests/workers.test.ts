@@ -85,7 +85,6 @@ const voiceBundles = {
   production: bundleWorker(ENTRIES.voice),
   preview: bundleWorker("server/voice-preview-worker.ts"),
 };
-type Result = Awaited<ReturnType<Miniflare["dispatchFetch"]>>;
 type Handler = (
   request: WorkerRequest,
 ) => WorkerResponse | Promise<WorkerResponse>;

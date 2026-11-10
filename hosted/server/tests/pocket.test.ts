@@ -13,7 +13,7 @@ import {
   signEnrollDeviceCode,
   toBase64Url,
 } from "remote-lib-common";
-import { RUNS_NOTHING_POLICY, oneTimePagePolicy } from "../headers";
+import { RUNS_NOTHING_POLICY } from "../headers";
 import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, alone, bundleWorker, miniflareOptions } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
 
