@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   readClipboardImageAsFilePath: vi.fn<() => Promise<string | null>>(),
   writePty: vi.fn<(id: string, data: string) => void>(),
   readText: vi.fn<() => Promise<string>>(),
+  /** The adapter's native text read, absent unless a case sets it. */
+  nativeText: undefined as (() => Promise<string>) | undefined,
   shellKind: 'posix' as 'cmd' | 'posix' | 'powershell',
   bracketedPaste: false,
 }));
@@ -16,6 +18,7 @@ vi.mock('./platform', () => ({
   getPlatform: () => ({
     readClipboardFilePaths: mocks.readClipboardFilePaths,
     readClipboardImageAsFilePath: mocks.readClipboardImageAsFilePath,
+    readClipboardText: mocks.nativeText,
     writePty: mocks.writePty,
   }),
 }));
@@ -35,7 +38,7 @@ vi.mock('./terminal-registry', () => ({
   writeUserInput: (id: string, data: string) => mocks.writePty(id, data),
 }));
 
-import { CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
+import { CLIPBOARD_READ_NOTICE, CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
 import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 
 describe('doPaste three-tier fallthrough', () => {
@@ -43,6 +46,7 @@ describe('doPaste three-tier fallthrough', () => {
     vi.clearAllMocks();
     mocks.shellKind = 'posix';
     mocks.bracketedPaste = false;
+    mocks.nativeText = undefined;
     Object.defineProperty(globalThis, 'navigator', {
       value: { clipboard: { readText: mocks.readText } },
       configurable: true,
@@ -202,6 +206,25 @@ describe('doPaste three-tier fallthrough', () => {
 
     expect(mocks.writePty).not.toHaveBeenCalled();
     expect(showNotice).toHaveBeenCalledWith(UNQUOTABLE_PATH_NOTICE, 't1');
+  });
+
+  it('says so when a native read fails and nothing else pastes, but not for an empty clipboard', async () => {
+    mocks.readClipboardFilePaths.mockResolvedValue([]);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    const showNotice = vi.fn();
+    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: (id) => id === 't1', showNotice }));
+    try {
+      mocks.nativeText = vi.fn(async () => { throw new Error('the clipboard did not answer'); });
+      await doPaste('t1');
+      expect(showNotice).toHaveBeenCalledExactlyOnceWith(CLIPBOARD_READ_NOTICE, 't1');
+      showNotice.mockClear();
+      mocks.nativeText = vi.fn(async () => '');
+      await doPaste('t1');
+      expect(showNotice).not.toHaveBeenCalled();
+    } finally {
+      unregister();
+    }
+    expect(mocks.writePty).not.toHaveBeenCalled();
   });
 
   it('leaves an unbracketed paste byte-for-byte, matching xterm', async () => {

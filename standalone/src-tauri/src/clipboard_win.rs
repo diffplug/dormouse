@@ -12,11 +12,8 @@
 //! path (`pbpaste`/`xclip` never pop a console window), so this module is
 //! Windows-only.
 
-use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
 use windows::Win32::System::DataExchange::{
@@ -26,11 +23,6 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT};
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
-
-/// Image temp files are deleted this long after a paste — long enough that any
-/// command the user launched against the path has had time to read it, matching
-/// the sidecar's DROP_TTL_MS.
-const DROP_TTL: Duration = Duration::from_secs(5 * 60);
 
 /// RAII wrapper around OpenClipboard/CloseClipboard. Opening can fail transiently
 /// while another process holds the clipboard, so retry briefly before giving up.
@@ -192,18 +184,13 @@ pub fn read_file_paths() -> Vec<String> {
 pub fn read_image_as_file_path() -> Option<String> {
     let dib = read_dib_bytes()?;
     let header = bmp_file_header(&dib)?;
-    let path = unique_drop_path("clipboard.bmp");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok()?;
-    }
     // Write the 14-byte file header and the DIB back-to-back rather than
     // allocating a third full-image buffer to concatenate them (a clipboard
     // screenshot DIB can be tens of MB).
-    let mut file = File::create(&path).ok()?;
-    file.write_all(&header).ok()?;
-    file.write_all(&dib).ok()?;
-    schedule_cleanup(path.clone());
-    Some(path.to_string_lossy().into_owned())
+    crate::clipboard_read::write_drop_file("clipboard.bmp", |file| {
+        file.write_all(&header)?;
+        file.write_all(&dib)
+    })
 }
 
 fn read_dib_bytes() -> Option<Vec<u8>> {
@@ -282,31 +269,6 @@ fn bmp_file_header(dib: &[u8]) -> Option<[u8; 14]> {
     // bytes 6..10 (bfReserved1/2) stay zero.
     header[10..14].copy_from_slice(&(off_bits as u32).to_le_bytes());
     Some(header)
-}
-
-static DROP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn unique_drop_path(name: &str) -> PathBuf {
-    // The parent dir name (timestamp + atomic counter) is already unique per
-    // call, so the file inside it needs no further disambiguation.
-    let counter = DROP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir()
-        .join(format!("dormouse-drops-{nanos}-{counter}"))
-        .join(name)
-}
-
-fn schedule_cleanup(path: PathBuf) {
-    std::thread::spawn(move || {
-        std::thread::sleep(DROP_TTL);
-        let _ = std::fs::remove_file(&path);
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::remove_dir(parent);
-        }
-    });
 }
 
 #[cfg(test)]
