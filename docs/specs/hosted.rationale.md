@@ -87,3 +87,7 @@ A `RelayRoom` that opened a Postgres connection through Hyperdrive could not be 
 ## Metrics
 
 Rows are kept forever because none describes anyone: a row holds a day, an event, a fixed label, and a count, never an identifier (`docs/specs/security-hosted.md` -> "Account boundary").
+
+## Billing
+
+The webhook refuses any event whose `api_version` differs from the installed `stripe` SDK's (`STRIPE_API_VERSION`, re-exported by `@pgstencil/stripe`), and production's endpoint renders events at the version it was created with. The SDK moves that version in minor releases, and every test builds its events from the same constant, so a routine bump passed the whole suite and would have refused every production webhook (2026-11, stripe 22.6.2 at `2026-08-26.dahlia`, a v23 update at `2026-10-28.endive` waiting). So a test pins the literal, Renovate holds both packages for approval, and a move is the endpoint procedure, not a dependency update.
