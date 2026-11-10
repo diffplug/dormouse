@@ -219,7 +219,7 @@ describe('asking the webview', () => {
     // went. Waiting on the rest would spend the whole budget on every attach.
     vi.useFakeTimers();
     bridge.setWindows(['main', 'ws-2', 'ws-3']);
-    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 });
+    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 }, HOLD);
     const ask = asks()[0]!;
     bridge.setAskDelivery({ burrowRequestId: ask.burrowRequestId, windows: ['ws-2'] });
     answer(ask, [{ ptyId: 'p1', cols: 80, rows: 24 }], 'ws-2');
@@ -340,7 +340,7 @@ describe('resolveSurface', () => {
   });
 
   it('is null when nobody owns the surface', async () => {
-    const pending = bridge.provider.resolveSurface('gone', {});
+    const pending = bridge.provider.resolveSurface('gone', {}, HOLD);
     answer(asks()[0]!, []);
     expect(await pending).toBeNull();
   });
@@ -373,7 +373,7 @@ describe('resolveSurface', () => {
   });
 
   it('fails when nobody answers a resize and retains only the cached dimensions', async () => {
-    const attach = bridge.provider.resolveSurface('s1', {});
+    const attach = bridge.provider.resolveSurface('s1', {}, HOLD);
     answer(asks()[0]!, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
     const handle = (await attach)!;
 
