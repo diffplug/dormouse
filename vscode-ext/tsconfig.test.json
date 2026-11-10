@@ -1,0 +1,13 @@
+// Check-only, like `tsconfig.json`: the Vitest tests in `test/`, which run as
+// ESM on the pinned Node (24) and reach `lib` components (JSX) through the
+// shared modules they exercise.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx"
+  },
+  "include": ["test/**/*", "../lib/src/globals.d.ts"]
+}

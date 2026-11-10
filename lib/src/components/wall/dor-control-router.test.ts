@@ -7,6 +7,7 @@ import { installDorControlRouter, resolveDorControlRoute } from './dor-control-r
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
+import type { WindowControlParams } from './workspace-control';
 import { getPlatformOrNull, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import {
@@ -212,9 +213,12 @@ describe('dor control routing', () => {
       expect(resolveDorControlRoute(request({ method, surfaceId: 'pane-a' })))
         .toEqual({ kind: 'window', container: true });
     }
-    expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'all' } })))
+    // `scope` is a Window param, beyond what a Wall reads.
+    const all: WindowControlParams = { scope: 'all' };
+    const workspace: WindowControlParams = { scope: 'workspace' };
+    expect(resolveDorControlRoute(request({ method: 'surface.list', params: all })))
       .toEqual({ kind: 'window', container: false });
-    expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'workspace' } })).kind)
+    expect(resolveDorControlRoute(request({ method: 'surface.list', params: workspace })).kind)
       .toBe('handle');
   });
 

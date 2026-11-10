@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient, type TerminalHandlers } from './remote-adapter';
-import type { PtyDataDetail, PtyInfo } from '../../lib/platform/types';
+import type { PlatformAdapter, PtyDataDetail, PtyInfo } from '../../lib/platform/types';
 
 interface AttachCall {
   surfaceId: string;
@@ -90,7 +90,9 @@ function entry(surfaceId: string, over: Partial<DirectoryEntry> = {}): Directory
 
 describe('RemotePtyAdapter clipboard', () => {
   it('has no native write, so a copy lands on the phone, never the Burrow\'s machine', () => {
-    expect(new RemotePtyAdapter(new FakeClient()).writeClipboardText).toBeUndefined();
+    // Read through the interface, where the native write is an optional port.
+    const adapter: PlatformAdapter = new RemotePtyAdapter(new FakeClient());
+    expect(adapter.writeClipboardText).toBeUndefined();
   });
 });
 

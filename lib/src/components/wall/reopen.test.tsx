@@ -72,6 +72,13 @@ function control<T>(method: string, params: Record<string, unknown> = {}): Promi
   });
 }
 
+/** The newest record, which the test expects to be a Surface's. */
+function newestSurfaceRecord(): SurfaceReopenRecord {
+  const record = _reopenRecordsForTesting()[0];
+  if (record?.kind !== 'surface') throw new Error(`expected a Surface record, got ${record?.kind ?? 'none'}`);
+  return record;
+}
+
 const leafIds = (): string[] => Array.from(harness.container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map(el => el.dataset.lathLeaf!);
 
 async function pressU(): Promise<void> {
@@ -250,7 +257,7 @@ describe('Reopen', () => {
     try {
       await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:slot', confirmation: { mode: 'dangerously' } });
       await harness.flush();
-      expect(_reopenRecordsForTesting()[0]?.kind === 'surface' && _reopenRecordsForTesting()[0].meta.params).not.toHaveProperty('toolPreview');
+      expect(newestSurfaceRecord().meta.params).not.toHaveProperty('toolPreview');
     } finally {
       terminalRegistry.removeTerminalPaneState('surface:slot');
       resetToolDirty();
@@ -350,7 +357,7 @@ describe('Reopen', () => {
     await harness.flush();
     expect(harness.container.querySelector('[data-door-id]')).toBeNull();
     expect(leafIds()).toEqual(['surface:a']);
-    expect(_reopenRecordsForTesting()[0]?.placement.kind).toBe('door');
+    expect(newestSurfaceRecord().placement.kind).toBe('door');
   });
 
   it('puts a reopened Door back at its slot on the Baseboard', async () => {
@@ -371,7 +378,7 @@ describe('Reopen', () => {
 it.each([false, true])('keeps a Surface reopen record while its destination Workspace is transferring (gesture: %s)', async (gesture) => {
   await renderTerminalBesideBrowser();
   await act(async () => {
-    getWallHandle(DEFAULT_WORKSPACE_ID)!.handleDorControl({ method: SURFACE_CONTROL_METHODS.kill,
+    getWallHandle(DEFAULT_WORKSPACE_ID)!.handleDorControl({ requestId: 'kill', method: SURFACE_CONTROL_METHODS.kill,
       params: { surface: 'surface:web', confirmation: { mode: 'dangerously' } }, respond: vi.fn() });
   });
   await harness.flush();

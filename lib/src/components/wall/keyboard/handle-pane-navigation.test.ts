@@ -21,7 +21,7 @@ function context(): WallKeyboardCtx {
   return ctx;
 }
 
-beforeEach(() => setWorkspaces({ workspaces: [{ id: 'ws-a', name: 'App' }, { id: 'ws-b', name: 'Build' }], activeId: 'ws-a' }));
+beforeEach(() => setWorkspaces({ workspaces: [{ id: 'ws-a', name: 'App', nameIsAuto: false }, { id: 'ws-b', name: 'Build', nameIsAuto: false }], activeId: 'ws-a' }));
 
 describe('workspace row navigation', () => {
   it('leaves Alt+Arrow to its host instead of navigating the Wall', () => {

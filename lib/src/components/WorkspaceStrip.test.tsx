@@ -3,7 +3,7 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { WorkspaceStrip } from './WorkspaceStrip';
 import { chromeKeyboardHeld, resetChromeKeyboardLeases } from './wall/chrome-keyboard-lease';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall/wall-handles';
@@ -63,11 +63,6 @@ function activateButton(id: string): HTMLButtonElement {
 
 function todoPill(id: string): HTMLButtonElement | null {
   return tabFor(id).querySelector<HTMLButtonElement>('[data-workspace-tab-todo]');
-}
-
-/** What React synthesizes `onMouseEnter` from. */
-function hover(element: Element): void {
-  element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
 }
 
 async function render(node = <WorkspaceStrip />): Promise<void> {
@@ -762,7 +757,7 @@ describe('tab tweens', () => {
   /** A width tween holds its item at its first width until `settle`. */
   let held: Map<Element, number>;
   const frames = installFakeFrames();
-  let measure: ReturnType<typeof vi.spyOn<HTMLElement, 'getBoundingClientRect'>>;
+  let measure: MockInstance<HTMLElement['getBoundingClientRect']>;
 
   const key = (element: HTMLElement) => element.dataset.workspaceTab ?? '+';
   /** Every tween runs to its end. */

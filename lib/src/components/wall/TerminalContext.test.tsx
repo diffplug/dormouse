@@ -30,7 +30,7 @@ beforeEach(() => {
   previousAnimate = cfg.layout.animate;
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
-  props = { title: 'pnpm dev', surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
+  props = { surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
     watchRule: 'pnpm', watching: false, todo: false, explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
     onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
@@ -352,7 +352,7 @@ it('shows both directories in the mismatch warning', () => {
 });
 it('shares header and uncaptured body entry points; captured mouse has no Shift escape', () => {
   const open = vi.fn(); const value = { id: null, mounted: null, open, close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
-  act(() => root.render(<TerminalContextContext.Provider value={value}><TerminalPaneHeader id="parent" /><TerminalPanel id="parent" /></TerminalContextContext.Provider>));
+  act(() => root.render(<TerminalContextContext.Provider value={value}><TerminalPaneHeader id="parent" title={undefined} params={undefined} /><TerminalPanel id="parent" title={undefined} params={undefined} /></TerminalContextContext.Provider>));
   const header = container.querySelector('[data-pane-header-for]')!;
   const body = container.querySelector('textarea')!;
   const rightClick = (target: Element, shiftKey = false) => act(() => target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, shiftKey, clientX: 120, clientY: 90 })));

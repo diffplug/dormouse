@@ -78,6 +78,7 @@ function renderBurrows(
           onEnablePush={overrides.onEnablePush ?? (() => undefined)}
           onRetryPushConfig={overrides.onRetryPushConfig ?? (() => undefined)}
           onSignOut={() => undefined}
+          onForgetThisPhone={() => undefined}
         />
       </StrictMode>,
     );
@@ -276,7 +277,7 @@ describe('SetupOrSignin install guidance', () => {
     );
     expect(notice).not.toBeNull();
     expect(camera).not.toBeUndefined();
-    expect(notice!.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice!.compareDocumentPosition(camera!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('stays quiet on a return visit, which mints no passkey', () => {
