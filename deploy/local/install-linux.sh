@@ -157,7 +157,7 @@ for k in sys.argv[2].split("."):
     if v is None: break
     v = v.get(k) if isinstance(v, dict) else None
 if v is None: sys.exit(1)
-sys.stdout.write(",".join(v) if isinstance(v, list) else str(v))
+sys.stdout.write(",".join(v) if isinstance(v, list) else json.dumps(v) if isinstance(v, bool) else str(v))
 ' "$1" "$2"
       ;;
   esac

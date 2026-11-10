@@ -444,6 +444,7 @@ export function run() {
           'serve_proxies_root',
           'check_tailscale_plaintext',
           'cmd_purge',
+          'json_query',
         ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
@@ -506,6 +507,20 @@ export function run() {
         (installed ? ': > "$ROOT/bin/run-relay"; ' : '') +
         "if cmd_purge <<< 'DELETE DORMOUSE STATE' > /dev/null 2>&1; then r=purged; else r=refused; fi; " +
         'if [ -d "$STATE_DIR" ]; then echo "$r kept"; else echo "$r deleted"; fi';
+      // Both runners must spell a JSON boolean the way callers compare it.
+      const tsStatus = join(fixtureDir, 'ts-status.json');
+      writeFileSync(tsStatus, '{"CurrentTailnet":{"MagicDNSEnabled":true}}');
+      // The python3 runner is the one each installer falls back to: macOS
+      // names /usr/bin/python3, Linux takes it from PATH. Skipped where absent.
+      const python = platform === 'macOS' ? '/usr/bin/python3' : 'python3';
+      const hasPython = spawnSync(python, ['-c', '']).status === 0;
+      for (const runner of hasPython ? ['node', 'python3'] : ['node']) {
+        allCases.push([
+          `json_query: the ${runner} runner prints a boolean as true`,
+          `JSON_RUNNER=${runner}; json_query ${sq(tsStatus)} CurrentTailnet.MagicDNSEnabled`,
+          'true',
+        ]);
+      }
       allCases.push(
         ['cmd_purge: refuses while the Relay is still installed', purge(true), 'refused kept'],
         ['cmd_purge: deletes state once uninstalled', purge(false), 'purged deleted'],
