@@ -34,7 +34,7 @@ function DesktopPlaygroundUnavailable() {
           Desktop playground
         </h1>
         <p className="text-lg leading-relaxed opacity-80 mb-4">
-          This screen is too small to run the desktop playground, but it is perfect for trying the{" "}
+          The desktop playground needs a mouse and a wide window, but this screen is perfect for trying the{" "}
           <Link
             to={POCKET_PLAYGROUND_PATH}
             className={SITE_LINK_CLASS}
@@ -44,7 +44,7 @@ function DesktopPlaygroundUnavailable() {
           .
         </p>
         <p className="text-lg leading-relaxed opacity-80">
-          Alternatively, widen the window to fit the desktop playground and it will pop into view.
+          On a computer, widen the window to fit the desktop playground and it will pop into view.
         </p>
       </main>
     </div>

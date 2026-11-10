@@ -184,7 +184,7 @@ describe("desktop playground hydration", () => {
   it("hydrates the phone fallback without loading or initializing the desktop runtime", async () => {
     const tree = <MemoryRouter><PlaygroundDesktop /></MemoryRouter>;
     const markup = prerender(tree);
-    expect(markup).not.toContain("This screen is too small");
+    expect(markup).not.toContain("The desktop playground needs a mouse");
     installMedia(true);
     const element = createContainer(markup);
     const recoverable = vi.fn();
@@ -194,7 +194,9 @@ describe("desktop playground hydration", () => {
       await vi.dynamicImportSettled();
     });
 
-    expect(element.textContent).toContain("This screen is too small");
+    // A narrow window and a wide coarse-pointer tablet both land here, so the
+    // copy names both causes: "too small" is false on the tablet.
+    expect(element.textContent).toContain("The desktop playground needs a mouse and a wide window");
     expect(element.querySelector('a')?.getAttribute("href")).toBe("/playground/pocket");
     expect(recoverable).not.toHaveBeenCalled();
     expect(desktopRuntime.imported).not.toHaveBeenCalled();
