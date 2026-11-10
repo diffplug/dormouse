@@ -12,6 +12,8 @@ const validator = (...parts: RegExp[]) => new RegExp(`^(?:${parts.map((p) => p.s
 const REPORT_PARTS = [REPORT_CSI, REPORT_SS3, REPORT_OSC, REPORT_APC];
 const REPORT_TOKENS = tokenizer(...REPORT_PARTS);
 const REPORT_VALIDATE = validator(...REPORT_PARTS);
+// A win32-input-mode key record is CSI-shaped but is a keystroke, not a reply.
+const WIN32_KEY_RECORD = /^\x1b\[\d+;\d+;\d+;[01];\d+;\d+_$/;
 const REPLAY_REPORT_CSI = /\x1b\[(?:\??\d+(?:;\d+)*[Rn]|[?>=]?\d*(?:;\d+)*c|\d+(?:;\d+)*[tx]|\??\d+(?:;\d+)*\$y|\?\d+(?:;\d+)*S|\?\d*u)/;
 const REPLAY_REPORT_FOCUS = /\x1b\[[IO]/;
 const REPORT_DCS = /\x1bP[\s\S]*?\x1b\\/;
@@ -27,7 +29,7 @@ export function inputIsSyntheticTerminalReport(data: string): boolean {
   if (data.length === 0) return false;
   const chunks = data.match(REPORT_TOKENS) ?? [];
   if (chunks.length === 0) return false;
-  return chunks.every((chunk) => REPORT_VALIDATE.test(chunk));
+  return chunks.every((chunk) => REPORT_VALIDATE.test(chunk) && !WIN32_KEY_RECORD.test(chunk));
 }
 
 export function inputIsReplayTerminalReport(data: string): boolean {

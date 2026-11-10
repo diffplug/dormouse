@@ -334,6 +334,19 @@ describe('terminal command input via rendered buffer', () => {
     expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('claude');
   });
 
+  it('records a cmd.exe command submitted under win32-input-mode, reading the line from the screen', () => {
+    recordTerminalOutput('pane', 'C:\\Users\\dormouse>');
+    const reader = lineReader('C:\\Users\\dormouse>dir');
+    for (const [vk, uc] of [[68, 100], [73, 105], [82, 114]]) {
+      recordTerminalUserInput('pane', `\x1b[${vk};0;${uc};1;0;1_`, reader);
+      recordTerminalUserInput('pane', `\x1b[${vk};0;${uc};0;0;1_`, reader);
+    }
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+    recordTerminalUserInput('pane', '\x1b[13;28;13;1;0;1_', reader);
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('dir');
+  });
+
   it('detects a Git Bash two-line prompt (bare `$ ` under a context line)', () => {
     recordTerminalOutput('pane', 'dormouse@PC MINGW64 /c/proj (main)\r\n$ ');
     recordTerminalUserInput('pane', 'claude\r', lineReader('$ claude'));
