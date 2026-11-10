@@ -550,8 +550,10 @@ export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
  * pty-host serves one window, and every live PTY in it is ours.
  */
 export function gracefulKillLive(timeoutMs = 2000): Promise<void> {
-  // Extra margin beyond the pty-host's own timeout.
-  return awaitChildAck({ type: 'gracefulKill', ids: liveIds(), timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
+  // Extra margin beyond the pty-host's own timeout: it acknowledges up to
+  // ~600 ms past its deadline (ticks, the wait for a SIGKILLed shell's exit,
+  // `SIGKILL_EXIT_WAIT_MS` in pty-core.js, and a grace tick).
+  return awaitChildAck({ type: 'gracefulKill', ids: liveIds(), timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 1000);
 }
 
 export function killAll(): void {

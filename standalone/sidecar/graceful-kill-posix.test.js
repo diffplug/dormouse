@@ -84,8 +84,12 @@ test('a graceful stop kills a shell that ignores the hangup once the deadline pa
   await until(() => children(pid).length > 0, 'the foreground sleep');
   // The sleep inherits the ignored hangup and outlives its shell.
   leaves(children(pid));
+  // The acknowledgement follows the killed shell's exit: on macOS the exit
+  // comes 1 to 2 ms after the SIGKILL; on Linux the sleep still holds the PTY's
+  // slave, so node-pty reports it only when its 200 ms fallback closes the
+  // master (211 ms measured), within the stop's 500 ms wait for it.
   await stop(300);
-  await until(() => !alive(pid), 'the shell to die', 2_000);
   assert.ok(events.some(({ event, data }) => event === 'exit' && data.id === 'sh'), 'its exit reaches the host');
   assert.equal(mgr.hasPty('sh'), false);
+  assert.equal(alive(pid), false);
 });

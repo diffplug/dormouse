@@ -2029,6 +2029,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    * names the window's own PTYs (`pty_graceful_kill` in
    * standalone/src-tauri/src/lib.rs).
    */
+  /** How long the acknowledgement waits, after the deadline's SIGKILL, for a
+   *  killed target's exit. node-pty reports one when its master socket closes,
+   *  and on Linux a child still holding the PTY's slave keeps it open until
+   *  node-pty's own 200 ms fallback destroys the socket: the exit came 211 ms
+   *  after the SIGKILL with such a child, and 1 to 2 ms without one (Ubuntu
+   *  24.04, node-pty 1.2.0-beta.18, 2026-11-10). Must stay above that fallback. */
+  const SIGKILL_EXIT_WAIT_MS = 500;
+
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
@@ -2056,15 +2064,25 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       else if (Date.now() >= deadline) {
         // A PTY whose own process outlives the hangup (a shell trapping it) is
         // killed: the caller drops these ids next, and nothing could reach it
-        // after. Only that process: a descendant ignoring the hangup lives on. The
-        // same grace tick lets its exit, which follows SIGKILL within
-        // milliseconds, reach the host before the acknowledgement.
+        // after. Only that process: a descendant ignoring the hangup lives on.
+        let killed = false;
         if (platform !== 'win32') {
           for (const [id, p] of stopping) {
-            if (ptys.get(id) === p) try { p.kill('SIGKILL'); } catch { /* already dead */ }
+            if (ptys.get(id) !== p) continue;
+            try { p.kill('SIGKILL'); killed = true; } catch { /* already dead */ }
           }
         }
-        setTimeout(done, 50);
+        if (!killed) { setTimeout(done, 50); return; }
+        // The killed targets' exits reach the host before the acknowledgement,
+        // then the usual grace tick. One still there at the cap is acknowledged
+        // anyway: the host gets the acknowledgement first, and the exit later,
+        // when node-pty reports it, if the id has not been dropped by then.
+        const cap = Date.now() + SIGKILL_EXIT_WAIT_MS;
+        const awaitExits = () => {
+          if (!stopping.some(([id, p]) => ptys.get(id) === p) || Date.now() >= cap) setTimeout(done, 50);
+          else setTimeout(awaitExits, 25);
+        };
+        setTimeout(awaitExits, 25);
       } else setTimeout(tick, 50);
     };
     setTimeout(tick, 50);

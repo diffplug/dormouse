@@ -962,6 +962,40 @@ test('gracefulKill hangs up the named PTYs, kills what outlives the deadline, ec
   });
 });
 
+for (const exitAfter of [200, null]) test(`gracefulKill acknowledges a SIGKILLed target ${exitAfter === null ? 'that never exits at the cap' : 'after its exit, which Linux reports 200 ms late'}`, async () => {
+  const events = [];
+  const listeners = {};
+  let killedAt = 0;
+  const mgr = create((event, data) => events.push({ event, data, at: Date.now() }), { spawn: () => ({
+    pid: 7,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill(signal) {
+      if (signal !== 'SIGKILL') return;
+      killedAt = Date.now();
+      // node-pty's socket-close fallback, when a child holds the slave.
+      if (exitAfter !== null) setTimeout(() => listeners.exit({ exitCode: 0, signal: 9 }), exitAfter);
+    },
+  }) }, { platform: 'linux' });
+  mgr.spawn('pane-1');
+  const acknowledged = new Promise((resolve) => {
+    const check = setInterval(() => { if (events.some(({ event }) => event === 'gracefulKillDone')) { clearInterval(check); resolve(); } }, 5);
+  });
+  mgr.gracefulKill(['pane-1'], 1, 'req');
+  await acknowledged;
+  const done = events.find(({ event }) => event === 'gracefulKillDone');
+  const exit = events.find(({ event }) => event === 'exit');
+  if (exitAfter === null) {
+    assert.equal(exit, undefined);
+    assert.ok(done.at - killedAt >= 500, `acknowledged ${done.at - killedAt} ms after the SIGKILL`);
+  } else {
+    assert.ok(exit && events.indexOf(exit) < events.indexOf(done), 'the exit reaches the host first');
+    assert.ok(done.at - killedAt < 500, `acknowledged ${done.at - killedAt} ms after the SIGKILL`);
+  }
+});
+
 test('gracefulKill resolves early after exits and a final output grace tick', async () => {
   const listeners = {};
   const events = [];
