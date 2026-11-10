@@ -93,8 +93,8 @@ export function normalizeExternalUri(input: string): string | null {
 // - deceptive: visible text is URL-shaped (looks like a URL or bare domain)
 //   but resolves to a different host than the actual URL. The phishing shape.
 // - plain: anything else — a legitimate human label like "see the report",
-//   or a sibling URL on the same host (different path/subdomain still counts
-//   as plain so we don't false-positive on redirects).
+//   or a sibling URL on the same host (a different path still counts as plain
+//   so we don't false-positive on redirects; a different subdomain does not).
 export function classifyDisplayMatch(uri: string, displayText: string): DisplayMatchVerdict {
   const text = displayText.trim();
   if (!text) return 'match';
