@@ -222,8 +222,13 @@ export const RULES = [
     // the user's locale: fi-FI writes `12.34.56`, th-TH the year 2569.
     rule: 'Mechanism — every Windows timestamp is formatted in the invariant culture',
     forbidden: true,
-    violation: '$stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss")',
-    patterns: { Windows: /\.ToString\("yyyy[^"]*"\)/ },
+    violations: {
+      Windows: [
+        '$stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss")',
+        "$stamp = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')",
+      ],
+    },
+    patterns: { Windows: /\.ToString\((?:"yyyy[^"]*"|'yyyy[^']*')\)/ },
     skip: { macOS: '`date` writes its numeric fields and literal separators the same in every locale', Linux: '`date` writes its numeric fields and literal separators the same in every locale' },
   },
   {
