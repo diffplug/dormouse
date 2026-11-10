@@ -20,7 +20,7 @@ import {
   writeStderr,
   writeStdout,
 } from './shared.js';
-import { printableExact, renderToolResponse } from './terminal-text.js';
+import { approvalTag, printableExact, renderToolResponse, toolRunText, toolTags } from './terminal-text.js';
 import { runToolPicker } from './tool-picker.js';
 
 interface ToolFlags {
@@ -42,7 +42,15 @@ export const TOOL_TIMEOUT_MS = 20_000;
 const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
 const BOOLEAN_FLAGS = new Set(['--list', '--json', '--minimize', '--fresh', '--global']);
 
-const MISSING_TARGET = 'dor tool requires a tool name or -- <command...>';
+/** stricli's usage line, which the help replaces with one per form. */
+const STRICLI_USAGE = '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>';
+const LAUNCH_FLAGS = '[--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]';
+const USAGE = [
+  `  dor tool ${LAUNCH_FLAGS} <name> [args...]`,
+  '  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...',
+  `  dor tool ${LAUNCH_FLAGS}`,
+  '  dor tool --list [--global] [--cwd path] [--json]',
+].map(line => `${line}\n`).join('');
 
 /**
  * `dor tool` takes a registered name with inputs, a nameless `--` command tail,
@@ -86,20 +94,8 @@ export const toolCommand: Command = {
   name: 'tool',
   preParse: validateToolArgs,
   helpPatches: [
-    {
-      scope: 'root',
-      findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]\n  dor tool --list [--global] [--cwd path] [--json]\n',
-      ],
-    },
-    {
-      scope: 'command-usage',
-      findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]\n  dor tool --list [--global] [--cwd path] [--json]\n',
-      ],
-    },
+    { scope: 'root', findReplace: [STRICLI_USAGE, USAGE] },
+    { scope: 'command-usage', findReplace: [STRICLI_USAGE, USAGE] },
     {
       scope: 'command-detail',
       remove: ['\nARGUMENTS<TO-EOL><LS>name<TO-EOL>'],
@@ -219,7 +215,7 @@ async function pickTool(context: DorCommandContext, flags: ToolFlags, placing: b
   const { terminal } = context.options;
   if (!terminal || flags.json === true) {
     // A placement flag means the caller meant to launch something.
-    return placing ? new Error(MISSING_TARGET) : listTools(context, flags);
+    return placing ? new Error('dor tool requires a tool name or -- <command...>') : listTools(context, flags);
   }
   const listing = await readToolList(context, flags);
   if (listing instanceof Error) return listing;
@@ -290,17 +286,10 @@ function printToolList(context: DorCommandContext, listing: ToolListResponse, fl
  *  looked for a project, so it reports none. */
 function renderToolList(listing: ToolListResponse, global: boolean): string {
   const lines: string[] = [];
-  if (listing.project) lines.push(`project  ${printableExact(listing.project.path)}  [${listing.project.approved ? 'approved' : 'not approved'}]`);
+  if (listing.project) lines.push(`project  ${printableExact(listing.project.path)}  ${approvalTag(listing.project.approved)}`);
   else if (!global) lines.push('project  [no dormouse.yml found]');
   const tool = (entry: ToolListResponse['tools'][number]) => {
-    lines.push(`  ${[
-      printableExact(entry.name),
-      printableExact(JSON.stringify(entry.run)),
-      `[${entry.render}]`,
-      `[port ${entry.port}]`,
-      ...(entry.keyed ? ['[keyed]'] : []),
-      ...(entry.shadowed ? ['[shadowed]'] : []),
-    ].join('  ')}`);
+    lines.push(`  ${[printableExact(entry.name), toolRunText(entry), ...toolTags(entry)].join('  ')}`);
     for (const line of entry.description?.split('\n') ?? []) lines.push(line ? `      ${printableExact(line)}` : '');
   };
   listing.tools.filter(entry => entry.scope === 'project').forEach(tool);

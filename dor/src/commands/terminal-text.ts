@@ -1,6 +1,6 @@
 // Browser-safe: the website playground's dor prints with these.
 import { CONTROL_CHARACTERS, FORMAT_CHARACTERS } from './shell-quote.js';
-import type { ToolSurfaceResponse, VersionMetadata } from './types.js';
+import type { ToolListEntry, ToolSurfaceResponse, VersionMetadata } from './types.js';
 
 const TERMINAL_CONTROLS = new RegExp(`[${CONTROL_CHARACTERS}]`, 'g');
 const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`, 'gu');
@@ -59,6 +59,22 @@ export function renderToolResponse(response: ToolSurfaceResponse, json: boolean)
   }
   return `${printableExact(`${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}`)}\n`;
 }
+
+/** A listed Tool's command as `dor tool --list` and its picker show it: a
+ *  string quoted, an argument list as JSON. */
+export const toolRunText = (tool: ToolListEntry) => printableExact(JSON.stringify(tool.run));
+
+/** The tags `dor tool --list` and its picker show after a Tool's command. */
+export function toolTags(tool: ToolListEntry): string[] {
+  return [
+    `[${tool.render}]`,
+    `[port ${tool.port}]`,
+    ...(tool.keyed ? ['[keyed]'] : []),
+    ...(tool.shadowed ? ['[shadowed]'] : []),
+  ];
+}
+
+export const approvalTag = (approved: boolean) => (approved ? '[approved]' : '[not approved]');
 
 // The prerelease-style build tag: `<version>+<N>` when the build carries commits
 // past the version tag, `<version>+?` when the count is unknown, else just

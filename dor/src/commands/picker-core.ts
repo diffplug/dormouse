@@ -18,6 +18,20 @@ export const dim = (text: string) => `${SGR.dim}${text}${SGR.reset}`;
 const ENTER_SCREEN = `${CSI}?1049h${CSI}?1000h${CSI}?1006h${CSI}?2004h`;
 const LEAVE_SCREEN = `${CSI}?2004l${CSI}?1006l${CSI}?1000l${CSI}?25h${CSI}?1049l`;
 const DOUBLE_CLICK_MS = 400;
+/** Wide enough for a list and a detail panel beside it. */
+const PANEL_MIN_COLUMNS = 100;
+
+/** Whether a terminal `columns` wide shows a panel beside the list. */
+export const hasPanel = (columns: number) => columns >= PANEL_MIN_COLUMNS;
+/** Columns the list takes: all of them, or its share beside a panel. */
+export const listWidth = (columns: number) => (hasPanel(columns) ? Math.floor(columns * 0.55) : columns);
+/** A list row and the panel line beside it, which is `columns - width - 3` wide. */
+export const besidePanel = (line: string, width: number, side: string) => `${padTo(line, width)} ${dim('│')} ${side}`;
+
+/** A narrow terminal's status line: `head` bold, then `rest` dim, both clipped. */
+export function statusLine(head: string, rest: string, columns: number): string {
+  return `${SGR.bold}${clip(head, columns)}${SGR.reset}${dim(clip(rest, columns - displayWidth(head)))}`;
+}
 
 export interface PickerScreen {
   /** Draws `lines` from the top row, then puts the cursor on the query row at
@@ -69,7 +83,7 @@ export class PickerList {
   rows = 0;
   private lastClick = { row: -1, at: 0 };
 
-  constructor(readonly ranker: Ranker) {}
+  constructor(private readonly ranker: Ranker) {}
 
   /** Applies a query or navigation key; false for a key the picker acts on itself. */
   key(key: Key): boolean {
@@ -88,21 +102,21 @@ export class PickerList {
     }
   }
 
-  move(delta: number): void {
+  private move(delta: number): void {
     const { ranker } = this;
     if (ranker.count > 0) ranker.select(Math.max(0, Math.min(ranker.count - 1, ranker.cursor + delta)));
   }
 
-  /** Selects what a click on list `row` lands on: `repeat` when it is a second
+  /** Selects what a click on list `row` lands on; true when it is a second
    *  click on the selected item, the double-click that accepts it. */
-  click(row: number): 'none' | 'select' | 'repeat' {
+  click(row: number): boolean {
     const index = this.scroll + row - 1;
-    if (row < 1 || row > this.rows || index >= this.ranker.count) return 'none';
+    if (row < 1 || row > this.rows || index >= this.ranker.count) return false;
     const now = Date.now();
     const repeat = this.lastClick.row === row && now - this.lastClick.at < DOUBLE_CLICK_MS && index === this.ranker.cursor;
     this.lastClick = { row, at: now };
     this.ranker.select(index);
-    return repeat ? 'repeat' : 'select';
+    return repeat;
   }
 
   /** Lays the list out in `rows` rows, scrolled to keep the selection on
@@ -219,7 +233,27 @@ export function textCells(text: string, styleAt: (index: number) => string, esca
   return cells;
 }
 
-export const cellsWidth = (cells: readonly Cell[]) => cells.reduce((sum, cell) => sum + cell.width, 0);
+const cellsWidth = (cells: readonly Cell[]) => cells.reduce((sum, cell) => sum + cell.width, 0);
+
+/** `cells` cut to `width` columns, losing their `cut` end to a `…`. */
+export function fitCells(cells: readonly Cell[], width: number, cut: 'start' | 'end'): Cell[] {
+  let total = cellsWidth(cells);
+  if (total <= width) return [...cells];
+  const ellipsis: Cell = { text: '…', style: SGR.dim, width: 1 };
+  if (cut === 'start') {
+    const kept = [...cells];
+    while (kept.length > 0 && total > width - 1) total -= kept.shift()!.width;
+    return [ellipsis, ...kept];
+  }
+  const kept: Cell[] = [];
+  let used = 0;
+  for (const cell of cells) {
+    if (used + cell.width > width - 1) break;
+    kept.push(cell);
+    used += cell.width;
+  }
+  return [...kept, ellipsis];
+}
 
 /** A list row: the pointer when selected, then the cells, bold when selected. */
 export function renderRow(cells: readonly Cell[], selected: boolean): string {

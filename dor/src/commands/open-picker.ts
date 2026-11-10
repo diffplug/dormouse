@@ -7,8 +7,8 @@ import type { OpenHandlersResponse, PickerTerminal } from './types.js';
 import { fuzzyMatch, Ranker } from './fuzzy.js';
 import { printable } from './terminal-text.js';
 import {
-  cellsWidth, clip, dim, displayWidth, openPickerScreen, packHints, padTo, PickerList, renderRow, SGR, shortPath, textCells, wrap,
-  type Key,
+  besidePanel, clip, dim, fitCells, hasPanel, listWidth, openPickerScreen, packHints, PickerList, renderRow, SGR, shortPath, statusLine,
+  textCells, wrap, type Key,
 } from './picker-core.js';
 
 export interface PickerChoice {
@@ -38,8 +38,6 @@ type HandlerState =
 /** A drawn line, and the handler a click on it chooses (-1: the next one). */
 interface Line { text: string; handler?: number }
 
-/** Wide enough for a list and a handler panel beside it. */
-const PANEL_MIN_COLUMNS = 100;
 const HANDLER_DEBOUNCE_MS = 30;
 /** How often streamed files and slices of ranking redraw the screen. */
 const REDRAW_MS = 50;
@@ -138,12 +136,12 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
 
     const click = (row: number, column: number) => {
       const handler = handlerRows.get(row);
-      if (handler !== undefined && (column >= listWidth() + 2 || row > list.rows)) {
+      if (handler !== undefined && (column >= listWidth(terminal.columns()) + 2 || row > list.rows)) {
         if (handler < 0) cycleHandler(1);
         else chooseHandler(handler);
         return;
       }
-      if (column < listWidth() && list.click(row) === 'repeat') accept();
+      if (column < listWidth(terminal.columns()) && list.click(row)) accept();
     };
 
     const onKeys = (keys: Key[]) => {
@@ -163,19 +161,16 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       render();
     };
 
-    const wide = () => terminal.columns() >= PANEL_MIN_COLUMNS;
-    const listWidth = () => (wide() ? Math.floor(terminal.columns() * 0.55) : terminal.columns());
-
     const render = () => {
       const columns = Math.max(20, terminal.columns());
       const rows = Math.max(4, terminal.rows());
-      const panel = wide();
+      const panel = hasPanel(terminal.columns());
       // The panel heads with the key hints; narrow terminals put the handler on
       // a status line above them at the bottom.
       const cursor = list.layout(rows - 1 - (panel ? 0 : 2));
       const { scroll, query } = list;
       if (current() !== handlerFile) requestHandlers();
-      const width = listWidth();
+      const width = listWidth(terminal.columns());
       const lines: string[] = [];
       handlerRows = new Map();
 
@@ -194,7 +189,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
         }
         if (panel) {
           const side = panelLines[row];
-          line = padTo(line, width) + ` ${dim('│')} ` + (side?.text ?? '');
+          line = besidePanel(line, width, side?.text ?? '');
           if (side?.handler !== undefined) handlerRows.set(row + 1, side.handler);
         }
         lines.push(line);
@@ -243,8 +238,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       const handler = handlers[handlerIndex];
       const position = handlers.length > 1 ? ` (${handlerIndex + 1}/${handlers.length})` : '';
       const head = `→ ${printable(handler.tool)}${position}`;
-      const rest = ` · ${printable(handler.description)} · ${printable(handler.reason)}`;
-      return `${SGR.bold}${clip(head, columns)}${SGR.reset}${dim(clip(rest, columns - displayWidth(head)))}`;
+      return statusLine(head, ` · ${printable(handler.description)} · ${printable(handler.reason)}`, columns);
     };
 
     const hints = () => ['Select [↑↓]', 'Open [Enter]', ...(handlerList().length > 1 ? ['Handler [Tab]'] : [])];
@@ -258,18 +252,11 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
   });
 }
 
-
 /** A list row: the directory dim, the basename plain, matched characters
  *  bright; a path too wide loses its leading characters. */
 function renderItem(item: string, positions: readonly number[], selected: boolean, width: number): string {
   const matched = new Set(positions);
   const base = item.lastIndexOf('/') + 1;
-  let cells = textCells(item, index => (matched.has(index) ? SGR.match : index < base ? SGR.dim : ''));
-  const available = width - 2;
-  let total = cellsWidth(cells);
-  if (total > available) {
-    while (cells.length > 0 && total > available - 1) total -= cells.shift()!.width;
-    cells = [{ text: '…', style: SGR.dim, width: 1 }, ...cells];
-  }
-  return renderRow(cells, selected);
+  const cells = textCells(item, index => (matched.has(index) ? SGR.match : index < base ? SGR.dim : ''));
+  return renderRow(fitCells(cells, width - 2, 'start'), selected);
 }
