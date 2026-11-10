@@ -9,6 +9,7 @@ import {
   acceptTerms,
   approveEnrollment,
   closeAccount as closeAccountRequest,
+  CheckoutRefusedError,
   confirmCheckout,
   getAccounts,
   getBilling,
@@ -187,13 +188,17 @@ export function App({
     /** The account's plan, confirming first the checkout Stripe returned from. */
     const readBilling = async () => {
       const checkout = confirmingRef.current;
-      confirmingRef.current = null;
       if (checkout)
         try {
           const confirmedPlan = await confirmCheckout(checkout);
+          confirmingRef.current = null;
           setConfirmed(true);
           return confirmedPlan;
         } catch (error) {
+          // The URL no longer carries the checkout, so only this page can
+          // confirm it: a connection or server failure leaves it for the
+          // next read (Retry, a return to the tab), a refusal ends it.
+          if (error instanceof CheckoutRefusedError) confirmingRef.current = null;
           confirmFailed = error;
         }
       return getBilling().catch(() => null);

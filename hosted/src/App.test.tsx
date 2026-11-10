@@ -486,6 +486,31 @@ describe("billing", () => {
     expect(api.confirmCheckout).toHaveBeenCalledTimes(1);
   });
 
+  it("confirms again on Retry when the confirm could not reach the server", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    vi.mocked(api.confirmCheckout).mockRejectedValueOnce(new Error("Billing is temporarily unavailable. Try again."));
+    await mount(null, { confirming: "op_1" });
+    expect(text()).toContain("Billing is temporarily unavailable. Try again.");
+    vi.mocked(api.confirmCheckout).mockResolvedValue(FOUNDING);
+    await click("Retry connection");
+    expect(api.confirmCheckout).toHaveBeenCalledTimes(2);
+    expect(api.confirmCheckout).toHaveBeenLastCalledWith("op_1");
+    expect(container.querySelector("h1")?.textContent).toBe("You’re subscribed");
+  });
+
+  it("does not confirm again a checkout the server refused", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    vi.mocked(api.confirmCheckout).mockRejectedValue(new api.CheckoutRefusedError("Checkout not found."));
+    await mount(null, { confirming: "op_1" });
+    expect(text()).toContain("Checkout not found.");
+    await click("Retry connection");
+    expect(api.confirmCheckout).toHaveBeenCalledTimes(1);
+  });
+
   it("offers a founder the row unticked, and saves the name they choose", async () => {
     history.replaceState(null, "", "/billing");
     vi.mocked(api.getSession).mockResolvedValue(login());
