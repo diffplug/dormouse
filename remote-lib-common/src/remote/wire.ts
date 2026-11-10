@@ -112,8 +112,8 @@ export const ORIGIN_MISMATCH_ERROR = 'origin mismatch';
 
 /**
  * The `error` the Hosted Relay answers when the account behind a credential is
- * not entitled to it: 403 to a Burrow token, a setup redemption, or an
- * enrollment poll, and 401 to a sign-in. A Burrow keys on it to stop retrying.
+ * not entitled to it: 403 to a Burrow token or an enrollment poll, and 401 to
+ * a sign-in. A Burrow keys on it to stop retrying.
  */
 export const NOT_ENTITLED_ERROR = 'this account is not entitled to the Hosted Relay';
 
