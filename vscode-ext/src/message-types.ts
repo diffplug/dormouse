@@ -1,11 +1,10 @@
 import type { BrowserResult } from '../../lib/src/lib/platform/browser-automation';
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
+import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors, TerminalProtocolEvent } from '../../lib/src/lib/terminal-protocol';
 import type { AlertCommand, AlertEvents } from '../../lib/src/host/alert-protocol';
-import type { PersistedAlertState } from '../../lib/src/lib/session-types';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
+import type { IframeProxyResult, OpenPort, PtyInfo, SpawnPtyOptions, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/service-protocol';
 import type { ManagedVoiceStatus } from '../../lib/src/lib/platform/managed-voice-types';
@@ -13,7 +12,7 @@ import type { ManagedVoiceStatus } from '../../lib/src/lib/platform/managed-voic
 // Messages from webview → extension host
 export type WebviewMessage =
   | { type: 'pty:context'; request: TerminalContextRequest; requestId: string }
-  | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity; alert?: PersistedAlertState; dehydrate?: string } }
+  | { type: 'pty:spawn'; id: string; options?: SpawnPtyOptions }
   | { type: 'pty:input'; id: string; data: string; paced?: boolean; userInput?: true; launch?: true }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   | { type: 'pty:kill'; id: string }
@@ -50,14 +49,6 @@ export type WebviewMessage =
   | { type: 'alert:command'; command: AlertCommand }
   // Managed voice, answered by this window's host (`managed-voice.ts`).
   | { type: 'voice:command'; payload: unknown; requestId: string };
-
-export interface PtyInfo {
-  helper?: HelperIdentity;
-  id: string;
-  alive: boolean;
-  exitCode?: number;
-  shell?: string;
-}
 
 // Messages from extension host → webview
 export type ExtensionMessage =

@@ -1,5 +1,6 @@
 /** The image editor's markup: vector objects drawn above the raster, editable
- * until the image is saved or closed. All coordinates are image pixels. */
+ * until the page closes or reloads; a save flattens a copy. All coordinates
+ * are image pixels. */
 import type { Point, Rect } from './pixels';
 
 interface Base { id: string; color: string; width: number }

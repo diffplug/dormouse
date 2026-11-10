@@ -221,8 +221,9 @@ export class FakePtyAdapter implements PlatformAdapter {
         if (!request.restore) this.helpers.delete(request.id);
         this.alertManager.setHelper(request.id, !!request.restore);
         return {};
-      default:
-        return {};
+      case 'openDirectory':
+        // Refused, so the context shows why its button did nothing.
+        throw new Error('The playground has no file manager.');
     }
   }
 

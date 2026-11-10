@@ -7,25 +7,45 @@ import { build } from 'esbuild';
 import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 
 /** The module at `path` (relative to this folder), bundled and imported. Its
- * `import.meta.url` is its source file's, so a worker URL resolves. */
-export async function load(path) {
+ * `import.meta.url` is its source file's, so a worker URL resolves. A module
+ * that imports a stylesheet or MDXEditor bundles only for `platform: 'node'`. */
+export async function load(path, { platform = 'neutral' } = {}) {
   const url = new URL(path, import.meta.url);
   const bundle = await build({
     entryPoints: [fileURLToPath(url)],
-    bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent',
+    bundle: true, format: 'esm', platform, write: false, logLevel: 'silent', loader: { '.css': 'empty' }, jsx: 'automatic',
     alias: workspaceSourceAliases(),
     define: { 'import.meta.url': JSON.stringify(url.href) },
   });
   return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 }
 
+/** A keydown as React hands it over; `composing` marks the key an IME owns,
+ * as WebKit (keyCode 229) and Chromium (isComposing) each report it. */
+export function keydown(key, composing = null, { shiftKey = false } = {}) {
+  const calls = [];
+  return {
+    key, shiftKey, calls,
+    nativeEvent: { isComposing: composing === 'chromium', keyCode: composing === 'webkit' ? 229 : 13 },
+    preventDefault: () => calls.push('preventDefault'), stopPropagation: () => calls.push('stopPropagation'),
+  };
+}
+
 export const px = await load('../viewer/image/pixels.ts');
 export const WHITE = [255, 255, 255, 255];
+
+/** Paints `rect` of raster `r`, clipped to it, `color`. */
+export function fillRect(r, rect, color) {
+  const c = px.clipRect(r, rect);
+  if (c) for (let y = c.y; y < c.y + c.height; y++) {
+    for (let x = c.x; x < c.x + c.width; x++) r.data.set(color, (y * r.width + x) * 4);
+  }
+}
 
 /** A `width` × `height` raster filled with `color`. */
 export function raster(width, height, color = WHITE) {
   const r = px.createRaster(width, height);
-  px.fillRect(r, { x: 0, y: 0, width, height }, color);
+  fillRect(r, { x: 0, y: 0, width, height }, color);
   return r;
 }
 

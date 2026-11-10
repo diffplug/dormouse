@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 import { $getRoot, $isElementNode, getNearestEditorFromDOMNode, type LexicalEditor, type LexicalNode } from 'lexical';
 import { $isImageNode, $isTableNode, ImageNode, NESTED_EDITOR_UPDATED_COMMAND, type TableNode } from '@mdxeditor/editor';
 import { editableImageType } from '../src/file-viewer-format';
 import { IMAGES_ROUTE } from '../src/image-format';
+import { isComposingKey } from './composing';
 import { message, request } from './document-session';
 
 /** A relative image `src` as the `/`-separated path, relative to the document's
@@ -70,25 +71,50 @@ export function handOffImageEdits(editor: LexicalEditor, key: string): () => voi
   }, { skipInitialization: true });
 }
 
-/** The distinct image sources in the document `root` edits, its table cells'
- * included, in order. */
+/** The image sources in the document `root` edits, its table cells'
+ * included, in order: the first spelling of each local file
+ * (`localImagePath`), and each other source once. */
 export function imageSources(root: LexicalEditor): string[] {
-  const found = new Set<string>();
+  const found = new Map<string, string>();
   const read = (editor: LexicalEditor) => editor.getEditorState().read(() => {
     for (const node of $imagesAndTables()) {
-      if ($isImageNode(node)) found.add(node.getSrc());
-      else nestedEditors(editor.getElementByKey(node.getKey())).forEach(read);
+      if ($isImageNode(node)) {
+        const src = node.getSrc(), file = localImagePath(src) ?? src;
+        if (!found.has(file)) found.set(file, src);
+      } else nestedEditors(editor.getElementByKey(node.getKey())).forEach(read);
     }
   });
   read(root);
-  return [...found];
+  return [...found.values()];
 }
 
-/** `src` with its file name replaced, keeping its folder and spelling style. */
-function renamedSource(src: string, name: string): string {
+/** `src` with its file name replaced by `name`, keeping its folder and
+ * spelling style, so that it reads back as `path`, the renamed file: escaped
+ * when the old name was, or when the raw name would not read back (a `#`,
+ * `?` or `%` in it). */
+export function renamedSource(src: string, name: string, path: string): string {
   const base = src.split(/[?#]/, 1)[0];
   const folder = base.slice(0, base.lastIndexOf('/') + 1);
-  return folder + (/%[\da-f]{2}/i.test(base.slice(folder.length)) ? encodeURIComponent(name) : name);
+  const raw = folder + name;
+  return /%[\da-f]{2}/i.test(base.slice(folder.length)) || localImagePath(raw) !== path ? folder + encodeURIComponent(name) : raw;
+}
+
+/** Points every source in the document `root` edits that names `from`, a
+ * `localImagePath`, however it is spelled, at the file renamed to `to`. */
+export function renameImageSources(root: LexicalEditor, from: string, to: string): void {
+  const name = to.slice(to.lastIndexOf('/') + 1);
+  updateImages(root, node => {
+    const src = node.getSrc();
+    if (localImagePath(src) === from) node.setSrc(renamedSource(src, name, to));
+  });
+}
+
+/** The rename field's keys: Enter commits and Escape reverts, except while an
+ * IME composition owns the key. */
+export function renameKey(event: KeyboardEvent, commit: () => void, revert: () => void): void {
+  if (isComposingKey(event.nativeEvent)) return;
+  if (event.key === 'Enter') { event.preventDefault(); commit(); }
+  if (event.key === 'Escape') { event.preventDefault(); revert(); }
 }
 
 function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: LexicalEditor; generation: number; onEdit(path: string): void }) {
@@ -104,8 +130,7 @@ function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: Le
     setState({ busy: true });
     try {
       await request('rename', { from: path, to: folder + next });
-      const replacement = renamedSource(src, next);
-      updateImages(editor, node => { if (node.getSrc() === src) node.setSrc(replacement); });
+      renameImageSources(editor, path, folder + next);
       setState({});
     } catch (error) { setState({ error: message(error) }); }
   }
@@ -117,10 +142,7 @@ function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: Le
         : <input className="image-name" value={draft} disabled={state.busy} aria-label={`Rename ${name}`} spellCheck={false}
             onChange={event => { setDraft(event.target.value); setState({}); }}
             onBlur={() => void commit()}
-            onKeyDown={event => {
-              if (event.key === 'Enter') { event.preventDefault(); void commit(); }
-              if (event.key === 'Escape') { event.preventDefault(); setDraft(name); setState({}); }
-            }} />}
+            onKeyDown={event => renameKey(event, () => void commit(), () => { setDraft(name); setState({}); })} />}
       {editable !== null && <button type="button" className="image-edit" data-tip-text={`Edit ${name}`} onClick={() => onEdit(editable)}>Edit</button>}
       {folder && <span className="image-folder" data-tip-text={path!}>{folder}</span>}
       {state.error && <span className="image-error" role="alert">{state.error}</span>}

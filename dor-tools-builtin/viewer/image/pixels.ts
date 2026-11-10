@@ -52,13 +52,6 @@ function put(d: Uint8ClampedArray, i: number, [red, green, blue, alpha]: Rgba) {
   d[i] = red; d[i + 1] = green; d[i + 2] = blue; d[i + 3] = alpha;
 }
 
-export function fillRect(r: Raster, rect: Rect, color: Rgba): void {
-  const c = clipRect(r, rect);
-  if (c) for (let y = c.y; y < c.y + c.height; y++) {
-    for (let x = c.x; x < c.x + c.width; x++) put(r.data, (y * r.width + x) * 4, color);
-  }
-}
-
 /** The smallest rectangle holding both; `b` when there is no `a`. */
 export function unionRect(a: Rect | null | undefined, b: Rect): Rect {
   if (!a) return b;

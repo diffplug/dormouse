@@ -289,7 +289,7 @@ test('the editor leaves an image view-only past its byte or pixel bound, read fr
   assert.deepEqual(imageEditability(padded.length, padded.subarray(0, 30000)), { ok: true });
 });
 
-test('8-bit gray, gray with alpha, palette, and RGB rows decode through every filter, as do 16-bit and interlaced rows', async () => {
+test('8-bit gray, gray with alpha, palette, and RGB rows decode through every filter, as do 16-bit rows', async () => {
   const width = 7, height = 10, filters = y => y % 5;
   const value = (x, y, k) => (x * 37 + y * 101 + k * 53 + ((x * y) % 7) * 29) & 255;
   const rows = channels => Array.from({ length: height }, (_, y) => Array.from({ length: width * channels }, (_, i) => value(Math.floor(i / channels), y, i % channels)));

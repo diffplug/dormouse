@@ -108,3 +108,10 @@ it('does not let a queued prompt release a replacement helper early', async () =
     expect(output).toHaveBeenCalledTimes(1);
   } finally { adapter.shutdown(); }
 });
+
+it('refuses to open a directory, having no file manager', async () => {
+  const adapter = new FakePtyAdapter();
+  try {
+    await expect(adapter.terminalContext({ op: 'openDirectory', id: ID, path: '/home/demo' })).rejects.toThrow('no file manager');
+  } finally { adapter.shutdown(); }
+});

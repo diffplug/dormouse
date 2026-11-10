@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { load, px, raster } from './bundle.mjs';
+import { fillRect, keydown, load, px, raster } from './bundle.mjs';
 
 // The canvas the controller paints is out of scope: a stand-in takes its
 // calls, and converts colors as a browser would between sRGB and Display P3
@@ -183,7 +183,7 @@ test('a seam stretches or closes up a redaction with the pixels it hid, the copi
   // Each column's red channel names it, so a pixel's source is known after the seam.
   const columns = () => {
     const r = raster(40, 2);
-    for (let x = 0; x < 40; x++) px.fillRect(r, { x, y: 0, width: 1, height: 2 }, [x, 0, 0, 255]);
+    for (let x = 0; x < 40; x++) fillRect(r, { x, y: 0, width: 1, height: 2 }, [x, 0, 0, 255]);
     return r;
   };
   for (const [name, [hx, hw], mode, from, to] of [
@@ -228,4 +228,34 @@ test('a seam an arrow or a stroke crosses moves only the ends and points past it
   const [arrow, stroke] = ctl.doc.objects;
   assert.deepEqual([arrow.x1, arrow.x2], [2, 34]);
   assert.deepEqual(stroke.points.map(p => p.x), [2, 12, 34]);
+});
+
+test('the label field leaves an IME\'s Enter and Escape to the composition, and every key to itself', async () => {
+  globalThis.matchMedia = () => ({ matches: false });
+  const { labelKey } = await load('../viewer/image/editor.tsx', { platform: 'node' });
+  const finished = [];
+  const ctl = { finishText: commit => finished.push(commit), hooks: {} };
+  for (const composing of ['webkit', 'chromium']) for (const key of ['Enter', 'Escape']) {
+    const event = keydown(key, composing);
+    labelKey(ctl, event);
+    assert.deepEqual(finished, [], `${composing} ${key}`);
+    assert.deepEqual(event.calls, ['stopPropagation'], `${composing} ${key}`);
+  }
+  labelKey(ctl, keydown('Enter', null, { shiftKey: true }));
+  labelKey(ctl, keydown('Enter'));
+  labelKey(ctl, keydown('Escape'));
+  assert.deepEqual(finished, [true, false]);
+});
+
+test('a seam insert stops at the edit bound, so the saved image stays editable', () => {
+  // 8192 wide, so ten rows of room under 2^26 pixels.
+  const ctl = new EditorController(px.createRaster(8192, 8182)), canvas = fakeCanvas();
+  ctl.attach(canvas);
+  ctl.setTool('seam');
+  ctl.set('seamMode', 'insert');
+  for (const [type, y] of [['pointerdown', 0], ['pointermove', 40], ['pointerup', 40]]) {
+    canvas.listeners[type]({ isPrimary: true, button: 0, clientX: 0, clientY: y, pointerId: 1, preventDefault() {} });
+  }
+  const { width, height } = ctl.doc.raster;
+  assert.deepEqual([width, height], [8192, 8192]);
 });
