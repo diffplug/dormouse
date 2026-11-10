@@ -5,6 +5,7 @@ import {
   addInstalledTheme,
   applyTheme,
   fetchExtensionThemes,
+  getBundledThemes,
   getInstalledThemes,
   removeInstalledTheme,
   restoreActiveTheme,
@@ -74,6 +75,8 @@ export function ThemeStoreDialog({
     setError(null);
     try {
       const themes = await fetchExtensionThemes(extension.namespace, extension.name);
+      // The Themes category also lists icon-theme extensions, which carry no color theme.
+      if (themes.length === 0) throw new Error('This extension has no color themes');
       for (const theme of themes) addInstalledTheme(theme);
       if (themes[0]) {
         setActiveThemeId(themes[0].id);
@@ -112,10 +115,17 @@ export function ThemeStoreDialog({
     );
   };
 
+  // Bundled themes came from OpenVSX with the same `<namespace>.<name>.<slug>`
+  // ids an install would write, so installing one would duplicate them.
+  const isBundled = (extension: OpenVSXExtension) => {
+    const prefix = `${extension.namespace}.${extension.name}.`;
+    return getBundledThemes().some((theme) => theme.id.startsWith(prefix));
+  };
+
   return (
     <NativeModalDialog
       onClose={onClose}
-      className={`${modalSurface({ padding: 'none', elevation: 'modal' })} fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] backdrop:bg-black/50`}
+      className={`${modalSurface({ padding: 'none', elevation: 'modal' })} fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] backdrop:bg-app-bg/50`}
     >
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -177,7 +187,9 @@ export function ThemeStoreDialog({
                     {extension.namespace} - {extension.downloadCount.toLocaleString()} downloads
                   </div>
                 </div>
-                {installed ? (
+                {isBundled(extension) ? (
+                  <span className="shrink-0 px-2 py-1 text-sm text-muted">Built in</span>
+                ) : installed ? (
                   <button
                     type="button"
                     onClick={() => handleRemoveExtension(key)}

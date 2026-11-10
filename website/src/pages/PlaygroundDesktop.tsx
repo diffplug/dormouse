@@ -34,7 +34,7 @@ function DesktopPlaygroundUnavailable() {
           Desktop playground
         </h1>
         <p className="text-lg leading-relaxed opacity-80 mb-4">
-          This screen is too small to run the desktop playground, but it is perfect for trying the{" "}
+          The desktop playground needs a mouse and a wide window, but this screen is perfect for trying the{" "}
           <Link
             to={POCKET_PLAYGROUND_PATH}
             className={SITE_LINK_CLASS}
@@ -44,7 +44,7 @@ function DesktopPlaygroundUnavailable() {
           .
         </p>
         <p className="text-lg leading-relaxed opacity-80">
-          Alternatively, widen the window to fit the desktop playground and it will pop into view.
+          On a computer, widen the window to fit the desktop playground and it will pop into view.
         </p>
       </main>
     </div>
@@ -123,8 +123,11 @@ function PlaygroundDesktopExperience() {
       adapterRef.current = adapter;
 
       // Every shell is the playground's own, which prints its prompt on spawn
-      // (`PlaygroundShellRegistry`); no scenario plays. A named shell keeps a
-      // Windows visitor's default from reading as `cmd`, whose Tools are refused.
+      // (`PlaygroundShellRegistry`); no scenario plays. The adapter is shared
+      // across client-side navigations, so drop the default scenario the Pocket
+      // page leaves behind. A named shell keeps a Windows visitor's default from
+      // reading as `cmd`, whose Tools are refused.
+      adapter.clearDefaultScenario();
       shellDefaults.setDefaultShellOpts({ shell: "/bin/fake" });
       const fsHost = playgroundFs.installPlaygroundFs(adapter);
       disposeFsRef.current = fsHost.dispose;

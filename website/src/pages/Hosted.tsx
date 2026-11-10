@@ -60,6 +60,8 @@ import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
 import { takeVisitRef } from "../lib/hosted-ref";
 import type { HostedRef } from "dormouse-lib/lib/hosted-links";
 import { trackEvent, trackPageview, type SiteRouteHandle } from "../lib/site-analytics";
+// The cap the voice Worker enforces and checkout discloses; the Terms point here for it.
+import { VOICE_DAILY_CAP } from "../../../hosted/server/policy-constants";
 
 const PAGE_PATH = "/hosted";
 
@@ -540,7 +542,7 @@ export default function Hosted() {
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           The system voice stays, and stays the fallback: offline, past the daily fair-use
           cap, or if my endpoint fails, Dormouse speaks in the system voice rather than
-          going silent. Natural Voice allows 500 requests per subscriber per UTC day;
+          going silent. Natural Voice allows {VOICE_DAILY_CAP} requests per subscriber per UTC day;
           each alarm spoken is one request, and provider failures count.
         </p>
       </section>

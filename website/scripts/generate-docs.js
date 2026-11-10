@@ -1268,13 +1268,16 @@ export async function generateDocs() {
  * `scripts/public-docs-lint.mjs` consume keeps every field.
  */
 const BUILD_ONLY_FIELDS = ['delta', 'withheldLinks', 'repoLinks', 'localizedLinks'];
+/** Per page, the same: the security pages render only the narrowed `pageBlocks`, never the whole document. */
+const PAGE_BUILD_ONLY_FIELDS = { security: ['blocks', 'headings'] };
 
 /** The pages with a component; the guide has none (`Scope: guide-page-return`). */
 const PUBLISHED_PAGES = ['selfhost', 'security', 'cli', 'skill', 'agents'];
 
-function publishable(value) {
+/** `data[name]` as `docs.<name>.json` ships it. */
+export function publishable(name, value) {
   const out = { ...value };
-  for (const field of BUILD_ONLY_FIELDS) delete out[field];
+  for (const field of [...BUILD_ONLY_FIELDS, ...(PAGE_BUILD_ONLY_FIELDS[name] ?? [])]) delete out[field];
   return out;
 }
 
@@ -1285,7 +1288,7 @@ async function main() {
   // route ship every document in one shared chunk.
   await Promise.all([
     ...PUBLISHED_PAGES.map((name) =>
-      writeFile(join(dataDir, `docs.${name}.json`), `${JSON.stringify(publishable(data[name]), null, 2)}\n`, 'utf8'),
+      writeFile(join(dataDir, `docs.${name}.json`), `${JSON.stringify(publishable(name, data[name]), null, 2)}\n`, 'utf8'),
     ),
     syncGuideMedia(data.guide.media.available),
   ]);

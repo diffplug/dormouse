@@ -42,10 +42,18 @@ vi.mock("dormouse-lib/lib/platform", () => {
   desktopRuntime.imported();
   return { initPlatform: desktopRuntime.initPlatform };
 });
-vi.mock("dormouse-lib/lib/terminal-registry", () => ({}));
+vi.mock("dormouse-lib/lib/terminal-registry", () => ({ initAlertStateReceiver: () => {}, setPendingShellOpts: () => {} }));
 vi.mock("dormouse-lib/lib/mouse-selection", () => ({}));
-vi.mock("dormouse-lib/components/WorkspaceWindow", () => ({}));
-vi.mock("../components/PlaygroundTabs", () => ({}));
+vi.mock("dormouse-lib/lib/alert-settings", () => ({}));
+vi.mock("dormouse-lib/lib/alert-delivery-model", () => ({}));
+vi.mock("dormouse-lib/lib/workspace-store", () => ({ getActiveWorkspaceId: () => "w", renameWorkspace: () => {} }));
+vi.mock("dormouse-lib/lib/shell-defaults", () => ({ setDefaultShellOpts: () => {} }));
+vi.mock("dormouse-lib/components/WorkspaceWindow", () => ({ WorkspaceWindow: () => null, resetWorkspaceWindow: () => {} }));
+vi.mock("dormouse-lib/components/ClipboardFailureDialog", () => ({ ClipboardFailureGlobal: () => null }));
+vi.mock("../components/PlaygroundTabs", () => ({ PlaygroundTabs: () => null }));
+vi.mock("../lib/playground-fs", () => ({ installPlaygroundFs: () => ({ dispose: () => {}, shellFs: { cwd: "/" } }) }));
+vi.mock("../lib/tut-detector", () => ({ TutDetector: class { start() {} dispose() {} handleWallEvent() {} } }));
+vi.mock("../lib/site-analytics", () => ({ trackTutorialCompletion: () => () => {} }));
 vi.mock("dormouse-lib/lib/platform/fake-scenarios", () => ({}));
 vi.mock("../lib/ascii-splash-runner", () => ({}));
 
@@ -176,7 +184,7 @@ describe("desktop playground hydration", () => {
   it("hydrates the phone fallback without loading or initializing the desktop runtime", async () => {
     const tree = <MemoryRouter><PlaygroundDesktop /></MemoryRouter>;
     const markup = prerender(tree);
-    expect(markup).not.toContain("This screen is too small");
+    expect(markup).not.toContain("The desktop playground needs a mouse");
     installMedia(true);
     const element = createContainer(markup);
     const recoverable = vi.fn();
@@ -186,10 +194,30 @@ describe("desktop playground hydration", () => {
       await vi.dynamicImportSettled();
     });
 
-    expect(element.textContent).toContain("This screen is too small");
+    // A narrow window and a wide coarse-pointer tablet both land here, so the
+    // copy names both causes: "too small" is false on the tablet.
+    expect(element.textContent).toContain("The desktop playground needs a mouse and a wide window");
     expect(element.querySelector('a')?.getAttribute("href")).toBe("/playground/pocket");
     expect(recoverable).not.toHaveBeenCalled();
     expect(desktopRuntime.imported).not.toHaveBeenCalled();
     expect(desktopRuntime.initPlatform).not.toHaveBeenCalled();
+  });
+
+  it("plays no scenario the Pocket page left on the shared adapter", async () => {
+    const { FakePtyAdapter } = await vi.importActual<typeof import("dormouse-lib/lib/platform/fake-adapter")>("dormouse-lib/lib/platform/fake-adapter");
+    const adapter = new FakePtyAdapter();
+    adapter.setDefaultScenario({ name: "pocket-prompt", chunks: [], endsWithPrompt: true });
+    desktopRuntime.initPlatform.mockReturnValueOnce(adapter);
+    installMedia(false);
+    const element = createContainer();
+
+    await act(async () => {
+      root = createRoot(element);
+      root.render(<MemoryRouter><PlaygroundDesktop /></MemoryRouter>);
+      await vi.dynamicImportSettled();
+    });
+
+    await vi.waitFor(() => expect(desktopRuntime.initPlatform).toHaveBeenCalled(), { timeout: 10_000 });
+    expect(adapter.scenarioEndsWithPrompt("tut")).toBe(false);
   });
 });
