@@ -37,7 +37,7 @@ static HELD: AtomicBool = AtomicBool::new(false);
 /// `applicationShouldTerminate:`. Informational for a direct `objc_msgSend`,
 /// which is how AppKit calls this, but the runtime stores it and forwarding
 /// machinery reads it.
-const SHOULD_TERMINATE_TYPES: &[u8] = b"L@:@\0";
+const SHOULD_TERMINATE_TYPES: &[u8] = b"Q@:@\0";
 
 /// Our `applicationShouldTerminate:`.
 ///

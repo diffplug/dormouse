@@ -57,8 +57,10 @@ function bashArgsAreInjectable(shellArgs) {
 
 // Build the PowerShell argument list that dot-sources our integration script,
 // or return null to leave the launch untouched. Profiles still load (no
-// -NoProfile). The path is single-quoted so spaces (e.g. "Program Files")
-// survive; it's host-controlled and won't contain a single quote.
+// -NoProfile). The path is a single-quoted literal so spaces (e.g. "Program
+// Files") survive; it sits under the user's profile directory, whose name may
+// hold a quote, so PowerShell's closing quotes (`'` and U+2018–U+201B) are
+// doubled, as `powerShellLiteral` in clipboard-ops.js does.
 //
 // We key on interactivity rather than "are there args": a launch that already
 // runs a startup command (e.g. the VS "Developer PowerShell", which is
@@ -67,7 +69,7 @@ function bashArgsAreInjectable(shellArgs) {
 // installs after it. A non-interactive one-off (a -Command/-File/-EncodedCommand
 // without -NoExit) is returned as null so we don't alter it.
 function powerShellIntegratedArgs(shellArgs, script) {
-  const dotSource = `. '${script}'`;
+  const dotSource = `. '${script.replace(/['\u2018-\u201b]/g, (c) => c + c)}'`;
   const args = [...(shellArgs || [])];
 
   // No args at all → a plain interactive REPL; add our own dot-source.
@@ -188,6 +190,12 @@ function withoutInternalDormouseEnv(env) {
   // One rehydrated Tool's payload, never every pane a host launched from it
   // spawns (docs/specs/dor-tool.md -> Reaping). Set below from `dehydrate`.
   delete next.DORMOUSE_DEHYDRATE;
+  // The VS Code pty-host is Electron run as Node, which these flags make it.
+  // A pane inheriting them would start every Electron program (`electron .`,
+  // Cypress, an editor launched by name) as plain Node instead. Both `dor`
+  // launchers set ELECTRON_RUN_AS_NODE themselves.
+  delete next.ELECTRON_RUN_AS_NODE;
+  delete next.ELECTRON_NO_ATTACH_CONSOLE;
   return next;
 }
 
@@ -377,13 +385,15 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
       // execs bash with our init-file when bash exists (covering bash and an empty
       // detection — the safe default, since bash is near-universal on WSL); and
       // falls back to the login shell only when bash is absent (e.g. Alpine). The
-      // init-file path is single-quoted for sh so spaces ("Program Files") survive.
+      // init-file path is single-quoted for sh so spaces ("Program Files") survive,
+      // with each `'` (a user name may hold one) written as `'\''`.
       // One sh statement per line for readability; joined into a single -c string.
+      const quotedMount = `'${mount.replace(/'/g, "'\\''")}'`;
       const detector = [
         'u=$(whoami 2>/dev/null);',
         'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7);',
         'if command -v bash >/dev/null 2>&1; then',
-        `case "$login" in *zsh|*fish) exec "$login" -l;; *) exec bash --init-file '${mount}' -i;; esac; fi;`,
+        `case "$login" in *zsh|*fish) exec "$login" -l;; *) exec bash --init-file ${quotedMount} -i;; esac; fi;`,
         'exec "${login:-/bin/sh}" -l',
       ].join(' ');
       return { env, shellArgs: [...shellArgs, '--', 'sh', '-c', detector] };
@@ -691,12 +701,6 @@ function parseCwdsFromLsof(output) {
 }
 
 module.exports.parseCwdsFromLsof = parseCwdsFromLsof;
-
-function parseCwdFromLsof(output, pid) {
-  return parseCwdsFromLsof(output).get(Number(pid)) ?? null;
-}
-
-module.exports.parseCwdFromLsof = parseCwdFromLsof;
 
 /**
  * `pid -> cwd` for every pid that could be resolved, in ONE pass.
@@ -1241,7 +1245,6 @@ function parseMsysPs(output) {
   }
   return rows;
 }
-module.exports.parseMsysPs = parseMsysPs;
 
 /** The MSYS `ps.exe` beside a Git Bash shell (`bin\bash.exe` or `usr\bin\bash.exe`). */
 function msysPsFor(shell, fsModule = fs) {
@@ -1274,7 +1277,6 @@ function adoptMsysDescendants(owned, children, msysRows) {
     }
   }
 }
-module.exports.adoptMsysDescendants = adoptMsysDescendants;
 
 const SURFACE_ID_PATTERN = /^[A-Za-z0-9:._-]+$/;
 
@@ -1290,7 +1292,6 @@ function wslPortScript(surfaceIds) {
     "echo '#tcp'; cat /proc/net/tcp 2>/dev/null; echo '#tcp6'; cat /proc/net/tcp6 2>/dev/null",
   ].join(' ');
 }
-module.exports.wslPortScript = wslPortScript;
 
 /** Listening ports from `wslPortScript` output, each tagged with the surface
  *  id its process carries. */
@@ -1316,7 +1317,6 @@ function parseWslPortScan(output) {
     ...parseProcNetTcp(tables.tcp6, 'IPv6', inodeToPid),
   ].map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
 }
-module.exports.parseWslPortScan = parseWslPortScan;
 
 /** Listening ports inside every running distro for `surfaceIds`, inside the
  *  socket scan's budget; [] on any failure. */
@@ -1687,7 +1687,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         session.received += data.length;
         // Drop whole chunks off the front, then trim the head: O(chunk) per write.
         while (session.chunks.length > 1 && session.chars - session.chunks[0].length >= REPLAY_CHARS) session.chars -= session.chunks.shift().length;
-        if (session.chars > REPLAY_CHARS) { session.chunks[0] = session.chunks[0].slice(session.chars - REPLAY_CHARS); session.chars = REPLAY_CHARS; }
+        if (session.chars > REPLAY_CHARS) {
+          let head = session.chunks[0].slice(session.chars - REPLAY_CHARS);
+          // A cut between a surrogate pair leaves a lone low surrogate, which
+          // the host's JSON parser rejects along with the whole replay line.
+          if (/^[\uDC00-\uDFFF]/.test(head)) head = head.slice(1);
+          session.chars -= session.chunks[0].length - head.length;
+          session.chunks[0] = head;
+        }
       }
       send('data', { id, data });
     });

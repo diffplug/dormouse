@@ -18,7 +18,7 @@ flowchart LR
   P -- /ws/burrow --> X[(Relay)]
 ```
 
-**Rust stays thin**: besides the bridge, only the OS-integration edges (window events, menu, file drop, dock icon, logging) and the session file store. All real logic runs in the sidecar, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift.
+**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, file drop, dock icon, logging), the session file store, multi-window state (§Windows), and the quit flow.
 
 ## Boot sequence
 
@@ -30,7 +30,7 @@ Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry 
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri::command]` set) and `standalone/sidecar/main.js` (the dispatch table); `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
-**stdout is the protocol**: sidecar diagnostics go to stderr. Most invokes are thin sidecar forwarders; two carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence) and the Windows clipboard reads and text write (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6).
+**stdout is the protocol**: sidecar diagnostics go to stderr. Invokes on Rust-owned state, and the Windows clipboard reads and text write (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6), never reach the sidecar; the rest are thin forwarders.
 
 **Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
 
@@ -124,11 +124,11 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **The label is the window's persistence identity**: `main` for the first window (fixed in `tauri.conf.json`), `ws-<n>` for every later one, never reused (§Workspace registry). Journal-only labels reserve numbers without opening windows.
 
-**Every new window is cloned from `app.windows[0]`**, so its window settings and CSP carry across with no second copy.
+**Every new window is cloned from `app.windows[0]`**, window settings and CSP included. **Never let Tauri add a nonce to the CSP's `style-src`** (`dangerousDisableAssetCspModification`; rationale).
 
 **Never let a window's webview throttle or suspend in the background**: `app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op on Windows and Linux; rationale).
 
-**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default`, `core:app:allow-version`, and `core:resources:allow-close` (an update handle's release) to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins the label, the throttling, and both capabilities.
+**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default`, `core:app:allow-version`, and `core:resources:allow-close` (an update handle's release) to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins these.
 
 ### Workspace registry
 
@@ -149,8 +149,8 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data`, `terminal:semanticEvents`, `terminal:toolEvents` | `data.id` | the window showing it; after the mark, dropped until its replay, which carries the bytes and from which the receiving window re-derives the events (rationale) |
-| `pty:exit` | `data.id` | the window showing it, never suppressed |
+| `pty:data`, `terminal:semanticEvents`, `terminal:toolEvents`, `terminal:clipboardOffer` | `data.id` | the window showing it; after the mark, dropped until its replay, from whose bytes the receiving window re-derives the events (rationale) |
+| `pty:exit`, `terminal:clientInput` | `data.id` | the window showing it, never suppressed; id-less input dropped |
 | `pty:replay` | `data.forWindow`, then `data.id` | the requesting window, including exited buffers; without an address, its owner; never suppressed |
 | `pty:marked` | `data.id` | the window showing it; the id then falls silent until its replay |
 | `pty:list` | `data.forWindow` | the window that asked |
@@ -183,7 +183,7 @@ Source of truth: `note_geometry` / `restore_windows` / `fit_geometry` in `standa
 
 **Must clear label-keyed ownership, registry, geometry, and close state in the `Destroyed` arm**, when Tauri has removed the window from `webview_windows()` (rationale), and send the remaining live labels to the sidecar. **Must remove incoming arrivals from the reap before killing orphaned PTYs**; the source still holds those Sessions. **Must defer every approved exit until every hand-back worker has completed**, on every exit path, and **force it after `QUIT_PHASE_TIMEOUT_MS`**, logging the timeout, so a stalled disk operation cannot trap the app.
 
-Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
@@ -440,7 +440,7 @@ Behavior: `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
 ## Logging
 
-Windows release builds use the GUI subsystem, so nothing streams to a launching terminal. Rust appends sidecar stderr, malformed stdout, and its own diagnostics to `dormouse.log`, overridable via `DORMOUSE_LOG_FILE`:
+Windows release builds (GUI subsystem) stream nothing to a launching terminal. Rust appends sidecar stderr, stray stdout, an unparseable protocol line's size alone, and its diagnostics to `dormouse.log`, overridable via `DORMOUSE_LOG_FILE`:
 
 | Platform | Directory |
 |---|---|

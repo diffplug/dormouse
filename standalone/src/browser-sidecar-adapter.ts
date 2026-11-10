@@ -149,8 +149,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.unlistenReconnect = null;
     this.unlistenRegistry?.();
     this.unlistenRegistry = null;
+    // The sidecar stays: every window shares it.
     this.burrowClient.dispose();
-    this.host.send("kill_sidecar_now");
     this.host.close();
   }
 
