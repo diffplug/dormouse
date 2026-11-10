@@ -8,6 +8,8 @@
 
 - California notice windows were checked against the [Attorney General's September 2025 guidance](https://oag.ca.gov/node/608083) on 2026-10-07: an annual term's renewal notice 15 to 45 days before renewal, a fee change 7 to 30 days before it takes effect, and an annual reminder that monthly plans get too. The chosen offsets sit inside them with room for cron retries: a price-change notice due at 21 days can be retried for two weeks before the 7-day floor. Subscription notices use the Stripe billing email because provider-only accounts can lack a sign-in email, and Checkout always collects one.
 
+The one grace on access is a renewal's: `docs/specs/hosted.md` -> "Entitlement" keeps an `active` subscription entitling for 15 minutes past its period end, the gap before Stripe's rollover webhook lands. A failed renewal gets none: the founders' 30 days keep the locked price, not access.
+
 ## Paid-launch requirements
 
 - The September 29 account terms promised reasonable advance notice of material changes. The October 8 revision adds a liability cap, business indemnity, and forum clause, so publication is distinguished from acceptance and the notified transition for existing accounts. Its 30-day transition is the chosen contractual process, not a claim that every jurisdiction requires that exact period. An undisplayed account notice is not treated as delivered.

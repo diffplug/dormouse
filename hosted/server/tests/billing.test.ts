@@ -9,7 +9,7 @@ import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../../website/src/lib/
 import { billingSetup, openCohort, resyncBilling, stripeHoldsPrice, withBilling } from "../billing";
 import type { Plan } from "../policy-constants";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
-import { ADMIN_EMAIL, entitled, entitledSql } from "../entitlement";
+import { ADMIN_EMAIL, entitled, entitledSql, RENEWAL_GRACE } from "../entitlement";
 import { migrations } from "../migrations";
 import { ORIGINS, bundleWorker, miniflareOptions, alone } from "./bundle";
 import { workerDatabases } from "./worker-roles";
@@ -188,9 +188,16 @@ test("a subscription entitles its account on every Worker's role while it grants
   await f.deliver();
   expect(await f.entitledOn(member)).toEqual(everywhere(true));
 
-  // A period that ended without a renewal grants nothing, whatever the row's status.
+  // An active period's renewal lands only with Stripe's next webhook: it keeps
+  // granting through the renewal grace, and nothing past it.
   await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() - interval '1 second'`);
+  expect(await f.entitledOn(member)).toEqual(everywhere(true));
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() - interval '${RENEWAL_GRACE}' - interval '1 second'`);
   expect(await f.entitledOn(member)).toEqual(everywhere(false));
+  // A failed renewal gets no grace at all.
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET status = 'past_due', period_end = now() - interval '1 second'`);
+  expect(await f.entitledOn(member)).toEqual(everywhere(false));
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET status = 'active'`);
   await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() + interval '1 day'`);
   // Two current subscriptions grant nothing, as `status()` reads them.
   await f.sql(
@@ -278,10 +285,11 @@ test("the resync repairs a missed renewal, and does nothing while billing is clo
 
   const member = await f.user();
   const subscription = await f.buy(member, "yearly");
-  // Stripe renewed, but the webhook never arrived, and the stored period has ended.
+  // Stripe renewed, but the webhook never arrived, and the stored period has
+  // ended, past the renewal grace.
   f.dev.transition(subscription.id, "renew");
   f.dev.events.length = 0;
-  await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() - interval '1 minute'`);
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() - interval '${RENEWAL_GRACE}' - interval '1 minute'`);
   expect(await f.entitledOn(member)).toEqual(everywhere(false));
   await resyncBilling(f.setup, f.database.url, origin, noMail);
   expect(await f.entitledOn(member)).toEqual(everywhere(true));
@@ -296,7 +304,7 @@ test("the account Worker's cron resyncs through Stripe's API in workerd, and onl
   const subscription = await f.buy(member, "yearly");
   f.dev.transition(subscription.id, "renew");
   f.dev.events.length = 0;
-  await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() - interval '1 minute'`);
+  await f.sql(`UPDATE pgstencil_billing.subscriptions SET period_end = now() - interval '${RENEWAL_GRACE}' - interval '1 minute'`);
 
   const bundle = await bundleWorker("server/tests/worker-entry.ts", [
     fileURLToPath(import.meta.resolve("@pgstencil/auth/better-auth-testing")),
