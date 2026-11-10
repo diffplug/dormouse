@@ -355,6 +355,27 @@ describe('MobileTerminalUi controls inside the host', () => {
     expect(setPointerCapture).not.toHaveBeenCalled();
     expect(acknowledge).not.toHaveBeenCalled();
   });
+
+  // A cancelled touchstart or touchend gets no click from the browser.
+  it('leaves a header button its touch start and end in Mouse mode, but cancels the pane\'s', () => {
+    const { button: control, container } = renderUi({
+      activeTouchMode: 'cursor',
+      cursorTouchAvailable: true,
+      terminal: <div><header><button type="button">Kill</button></header><div data-testid="pane" /></div>,
+    });
+    const button = control('Kill')!;
+    const pane = container.querySelector('[data-testid="pane"]')!;
+    for (const type of ['touchstart', 'touchend']) {
+      const onButton = new Event(type, { bubbles: true, cancelable: true });
+      const onPane = new Event(type, { bubbles: true, cancelable: true });
+      act(() => {
+        button.dispatchEvent(onButton);
+        pane.dispatchEvent(onPane);
+      });
+      expect(onButton.defaultPrevented, type).toBe(false);
+      expect(onPane.defaultPrevented, type).toBe(true);
+    }
+  });
 });
 
 describe('MobileTerminalUi Sessions screen', () => {

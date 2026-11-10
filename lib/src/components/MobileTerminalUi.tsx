@@ -610,6 +610,13 @@ function consumeNativeTouchOrScrollEvent(event: Event): void {
   event.stopImmediatePropagation();
 }
 
+/** Mouse mode's touch start and end: a cancelled touch gets no `click`, so a
+ *  control inside the host keeps its own. Its `touchmove` is still consumed. */
+function consumeCursorTouchEvent(event: Event): void {
+  if (isHostControlTarget(event.target)) return;
+  consumeNativeTouchOrScrollEvent(event);
+}
+
 function isTouchLikePrimaryPointer(event: PointerEvent<HTMLElement>): boolean {
   return event.pointerType !== 'mouse' && event.isPrimary;
 }
@@ -920,15 +927,15 @@ export function MobileTerminalUi({
     if (!host) return;
     const options: AddEventListenerOptions = { capture: true, passive: false };
     if (touchMode === 'cursor') {
-      host.addEventListener('touchstart', consumeNativeTouchOrScrollEvent, options);
+      host.addEventListener('touchstart', consumeCursorTouchEvent, options);
       host.addEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
-      host.addEventListener('touchend', consumeNativeTouchOrScrollEvent, options);
-      host.addEventListener('touchcancel', consumeNativeTouchOrScrollEvent, options);
+      host.addEventListener('touchend', consumeCursorTouchEvent, options);
+      host.addEventListener('touchcancel', consumeCursorTouchEvent, options);
       return () => {
-        host.removeEventListener('touchstart', consumeNativeTouchOrScrollEvent, options);
+        host.removeEventListener('touchstart', consumeCursorTouchEvent, options);
         host.removeEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
-        host.removeEventListener('touchend', consumeNativeTouchOrScrollEvent, options);
-        host.removeEventListener('touchcancel', consumeNativeTouchOrScrollEvent, options);
+        host.removeEventListener('touchend', consumeCursorTouchEvent, options);
+        host.removeEventListener('touchcancel', consumeCursorTouchEvent, options);
       };
     }
     host.addEventListener('wheel', consumeNativeTouchOrScrollEvent, options);
