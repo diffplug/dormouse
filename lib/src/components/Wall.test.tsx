@@ -44,6 +44,7 @@ import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
 import { installSurfaceIdPool, resetSurfaceIdPool } from '../lib/surface-ids';
+import { cfg } from '../cfg';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -4061,6 +4062,29 @@ describe('Wall on the Lath engine', () => {
     await kill('surface:a');
     expect(confirmKillOverlay()).not.toBeNull();
     expect(container.querySelector('[data-lath-leaf="surface:a"]')).not.toBeNull();
+  });
+
+  it.each(['reject', 'accept'] as const)('keeps a Kill prompt raised while the previous one exits (%s)', async (answer) => {
+    const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const pinned = cfg.killConfirm.char;
+    cfg.killConfirm.char = 'q';
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b', 'surface:c']} initialMode="command" />));
+      await flush();
+      const kill = (id: string) => act(async () => {
+        container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${id}"] button[aria-label="Kill"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await kill('surface:a');
+      expect(confirmKillOverlay()).not.toBeNull();
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: answer === 'accept' ? 'q' : '1', bubbles: true, cancelable: true })); });
+      await kill('surface:b');
+      await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+      expect(confirmKillOverlay()).not.toBeNull();
+      expect(container.querySelector('[data-lath-leaf="surface:b"]')).not.toBeNull();
+    } finally {
+      cfg.killConfirm.char = pinned;
+      untouched.mockRestore();
+    }
   });
 
   /** pane-a is an untouched shell owning a helper whose own entry is `helperEntry`. */

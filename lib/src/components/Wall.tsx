@@ -480,8 +480,10 @@ export function Wall({
     const ck = confirmKillRef.current;
     if (!ck || ck.exit) return;
     doorKillReturnRef.current = null;
-    setConfirmKill({ ...ck, exit: 'shake' });
-    shakeTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_SHAKE_MS);
+    const staged = { ...ck, exit: 'shake' as const };
+    setConfirmKill(staged);
+    // Only this prompt: a Kill clicked meanwhile may have raised the next one.
+    shakeTimerRef.current = setTimeout(() => setConfirmKill(current => current === staged ? null : current), KILL_SHAKE_MS);
   }, []);
 
   useEffect(() => { onEventRef.current?.({ type: 'modeChange', mode }); }, [mode]);
@@ -831,7 +833,7 @@ export function Wall({
     setConfirmKill(staged);
     if (ck.action === 'break') void breakToolRef.current(ck.id);
     else void closeSurface(ck.id, 'ask');
-    confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
+    confirmTimerRef.current = setTimeout(() => setConfirmKill(current => current === staged ? null : current), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
   /** Enter terminal mode for the given panel. This only moves focus there: the
