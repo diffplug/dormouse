@@ -175,6 +175,8 @@ const budgetsWith = (edit) => (path) => {
 };
 for (const [name, target, mutate, expected] of [
   ['check 1: a spec AGENTS.md does not index', PLANTED_SPEC, (path) => writeFileSync(path, '# Planted\n\nText.\n'), `spec not indexed -> ${PLANTED_SPEC}`],
+  // `tool.md` is a substring of the indexed `dor-tool.md`, so only a whole index entry counts.
+  ['check 1: a spec whose name only a longer indexed name contains', spec('tool.md'), (path) => writeFileSync(path, '# Planted\n\nText.\n'), `spec not indexed -> ${spec('tool.md')}`],
   ['check 2: a section after ## Future', SPEC, appendText('\n## Future\n\n**Scope: planted-fold** — one item.\n\n## After\n\nText.\n'), '"## Future" must be the last section'],
   ['check 3: a link to a file that does not exist', SPEC, appendText('\nSee [this](no-such-file.md).\n'), 'broken link -> no-such-file.md'],
   ['check 3: a link to an anchor that does not exist', SPEC, appendText('\nSee [this](#no-such-anchor).\n'), 'missing anchor -> #no-such-anchor'],
@@ -182,6 +184,8 @@ for (const [name, target, mutate, expected] of [
   ['check 6: a reference to a scope nobody defines', SPEC, appendText('\nStaged (**Scope: planted-undefined**).\n'), 'reference to undefined scope "planted-undefined"'],
   ['check 6: a bare reference to a scope nobody defines', SPEC, appendText('\nStaged in the **planted-bare** scope.\n'), 'reference to undefined scope "planted-bare"'],
   ['check 7: a Reserved: paragraph that names nothing', SPEC, appendText('\nReserved: nothing here.\n'), '"Reserved:" paragraph names neither'],
+  // Only a bolded name counts: a file name containing a scope's name is not a reference.
+  ['check 7: a Reserved: paragraph whose scope name is only a substring', SPEC, appendText(`\nReserved: the \`${DEFINED_SCOPE}.ts\` field stays.\n`), '"Reserved:" paragraph names neither'],
   ['check 10: a spec over its budget', BUDGETS, budgetsWith((b) => { b[SPEC] = BUDGET_STEP; }), `exceeds its ${BUDGET_STEP}-word budget`],
   ['check 10: a spec with no budget', BUDGETS, budgetsWith((b) => { delete b[SPEC]; }), `no budget for ${SPEC}`],
   ['check 10: a budget for a file that is not a spec', BUDGETS, budgetsWith((b) => { b[spec('no-such-spec.md')] = BUDGET_STEP; }), `stale entry for ${spec('no-such-spec.md')}`],
