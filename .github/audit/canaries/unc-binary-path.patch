@@ -8,8 +8,8 @@ index 46e980958..ca8385e1e 100644
 --- a/dor-lib-common/src/browser-providers.ts
 +++ b/dor-lib-common/src/browser-providers.ts
 @@ -67,10 +67,10 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
- const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
- const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
+ const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com))?$/i;
+ const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com))?$/i;
  
 -// POSIX absolute or Windows drive-absolute. A relative path is refused
 -// outright: it would resolve against the spawner's cwd, which the caller does
