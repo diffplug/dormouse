@@ -62,6 +62,11 @@ import { BROWSER_REQUEST_TIMEOUT_MS } from 'dor-lib-common/browser-providers';
  *  `standalone/src-tauri/src/routing.rs` so hand-back reasons arrive before timeout. */
 const CLOSE_WORKSPACE_TIMEOUT_MS = 30_000;
 
+/** A request that waits on the host's open-port scan, whose own bound grows
+ *  with the terminal count (`openPortRequestTimeoutMs` in
+ *  `lib/src/lib/platform/types.ts`): above it for up to 220 terminals. */
+const PORT_SCAN_TIMEOUT_MS = 30_000;
+
 /** Every `ControlClient` method as the control method it sends, with its
  * deadline; a transport supplies `request`. */
 export abstract class MethodControlClient implements ControlClient {
@@ -70,7 +75,7 @@ export abstract class MethodControlClient implements ControlClient {
   protected abstract request<T>(method: DorControlMethod, params: unknown, options?: { timeoutMs?: number }): Promise<T>;
 
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse> {
-    return this.request<ListSurfacesResponse>(SURFACE_CONTROL_METHODS.list, request);
+    return this.request<ListSurfacesResponse>(SURFACE_CONTROL_METHODS.list, request, request.includePorts ? { timeoutMs: PORT_SCAN_TIMEOUT_MS } : undefined);
   }
 
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse> {
@@ -152,12 +157,18 @@ export abstract class MethodControlClient implements ControlClient {
     return this.request<BrowserDiagnosticsResponse>(SURFACE_CONTROL_METHODS.browserDiagnostics, request);
   }
 
+  // A key's first command waits on a host browser request (measuring its
+  // viewport), which can queue behind capturing the launch environment.
   resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse> {
-    return this.request<ResolveBrowserResponse>(SURFACE_CONTROL_METHODS.resolveBrowser, request);
+    return this.request<ResolveBrowserResponse>(
+      SURFACE_CONTROL_METHODS.resolveBrowser,
+      request,
+      { timeoutMs: BROWSER_REQUEST_TIMEOUT_MS + 5_000 },
+    );
   }
 
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse> {
-    return this.request<ResolveOpenTargetResponse>(SURFACE_CONTROL_METHODS.resolveOpen, request);
+    return this.request<ResolveOpenTargetResponse>(SURFACE_CONTROL_METHODS.resolveOpen, request, { timeoutMs: PORT_SCAN_TIMEOUT_MS });
   }
 
   listWorkspaces(request: ListWorkspacesRequest): Promise<ListWorkspacesResponse> {
