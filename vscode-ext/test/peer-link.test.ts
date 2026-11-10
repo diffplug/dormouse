@@ -1329,7 +1329,7 @@ describe('peer handshake', () => {
     // this installation's terminals. The client must send its hello and nothing
     // else, and must disconnect on a welcome it cannot verify.
     const received: Array<Record<string, unknown>> = [];
-    let squatterSocket: import('node:net').Socket | null = null;
+    let squatterSocket: import('node:net').Socket | undefined;
     let closed = false;
     const squatter: Server = createServer((socket) => {
       squatterSocket = socket;
@@ -1381,7 +1381,7 @@ describe('peer handshake', () => {
   // Windows never depends on the derived name; `peer-endpoint.test.ts` covers
   // what holds a published one.
   it.skipIf(process.platform === 'win32')('rejects a non-object frame from the process holding the socket', async () => {
-    let squatterSocket: import('node:net').Socket | null = null;
+    let squatterSocket: import('node:net').Socket | undefined;
     let window: LinkModule | null = null;
     let closed = false;
     const squatter: Server = createServer((socket) => {

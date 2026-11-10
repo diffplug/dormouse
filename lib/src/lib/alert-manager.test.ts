@@ -2037,7 +2037,7 @@ describe('AlertManager in isolation', () => {
       // What a program prints as SIGHUP kills it — a title reset, a progress
       // clear, a bell — is the dying generation's too, as is a TODO control
       // racing the kill.
-      manager.applyTerminalSemanticEvents(id, [{ type: 'title', title: 'bye' }]);
+      manager.applyTerminalSemanticEvents(id, [{ type: 'title', title: { title: 'bye', source: 'osc2', updatedAt: 0 } }]);
       manager.notifyFromProtocol(id, REPORT);
       manager.updateProtocolProgress(id, { state: 'normal', percent: 50 });
       manager.toggleTodo(id);

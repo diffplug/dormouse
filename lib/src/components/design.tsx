@@ -249,8 +249,6 @@ export const popupButton = tv({
   defaultVariants: { flashed: false },
 });
 
-export type PopupButtonVariants = VariantProps<typeof popupButton>;
-
 /** One row of a popup menu inside a `PopupButtonRow` (the shell picker, the
  *  Workspace tab menu). Keyboard focus takes the hover wash, so arrow keys show
  *  where they are; a disabled row stays focusable and reads as unavailable. */
@@ -398,8 +396,6 @@ export const modalActionButton = tv({
   },
   defaultVariants: { tone: 'secondary' },
 });
-
-export type ModalActionButtonVariants = VariantProps<typeof modalActionButton>;
 
 export const modalReviewBlock = tv({
   base: 'block rounded border border-border bg-app-bg font-mono text-foreground whitespace-pre-wrap',
@@ -877,8 +873,6 @@ export const chromeButton = tv({
   defaultVariants: { kind: 'icon' },
 });
 
-export type ChromeButtonVariants = VariantProps<typeof chromeButton>;
-
 // Buttons that sit on a previewed theme rather than the host's: every theme
 // picker surface paints a *candidate* palette, so these inherit `currentColor`
 // where `modalIconButton` would reach for `text-muted`,
@@ -896,8 +890,6 @@ export const themePreviewButton = tv({
     },
   },
 });
-
-export type ThemePreviewButtonVariants = VariantProps<typeof themePreviewButton>;
 
 /** Pane-header zoom control. The zoomed pane swaps its header foreground and
  * background tokens so Unzoom reads as the active escape hatch in every theme. */

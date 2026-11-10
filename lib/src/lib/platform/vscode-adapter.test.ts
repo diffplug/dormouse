@@ -1,7 +1,7 @@
 import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_WAIT_MS, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS, TERMINAL_CONTEXT_TIMEOUT_MS } from './types';
+import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_WAIT_MS, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS, TERMINAL_CONTEXT_TIMEOUT_MS, type PlatformAdapter } from './types';
 import { hostShown, setHostShown } from '../host-shown';
 import { registry, type TerminalEntry } from '../terminal-store';
 import { mintSurfaceId, resetSurfaceIdPool } from '../surface-ids';
@@ -221,7 +221,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
   it('receives owner-parsed Tool announcements and reconstructs them on replay', () => {
     resetToolAnnounces();
-    const adapter = new VSCodeAdapter();
+    // Constructing it installs the host-message listener.
+    new VSCodeAdapter();
     // In stream order: a start retires the run before it, and a report later
     // in the same batch belongs to the new run.
     windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id: 'tool-1', events: [
@@ -715,7 +716,8 @@ describe('VSCodeAdapter host capabilities', () => {
   beforeEach(stubWebviewEnv);
   afterEach(() => vi.unstubAllGlobals());
   it('owns the theme, the shell, and updates, and offers no updater port', () => {
-    const adapter = new VSCodeAdapter();
+    // Read through the interface, where `updates` is the optional port.
+    const adapter: PlatformAdapter = new VSCodeAdapter();
     expect([adapter.hostOwnsTheme, adapter.hostOwnsShells, adapter.hostOwnsUpdates]).toEqual([true, true, true]);
     // The Marketplace updates the extension, so Settings → Network names it.
     expect(adapter.updates).toBeUndefined();

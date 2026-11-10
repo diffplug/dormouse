@@ -674,11 +674,12 @@ describe('iframe proxy — the two privileges are the embedder’s, not the port
     const policies = ["default-src 'none'; script-src 'self' 'unsafe-inline'", "frame-ancestors 'none'; connect-src 'none'"];
     const meta = '<meta http-equiv="Content-Security-Policy" content="img-src \'none\'">';
     const port = await upstream((_q, s) => {
+      // Two policy headers; `OutgoingHttpHeaders` types this one as a single string.
+      s.setHeader('content-security-policy', policies);
       s.writeHead(200, {
         'content-type': 'text/html',
         'x-dormouse-preserve-csp': '1',
         'x-frame-options': 'DENY',
-        'content-security-policy': policies,
         'content-security-policy-report-only': "default-src 'none'",
       });
       s.end(`<html><head>${meta}</head><body>kept</body></html>`);
@@ -1084,7 +1085,8 @@ describe('iframe proxy leases', () => {
     const seen: string[] = [];
     const port = await upstream((q, s) => { seen.push(q.url!); s.writeHead(200, { 'content-type': 'text/javascript' }); s.end('//'); });
     const url = await frame(`http://127.0.0.1:${port}/`, leased(lease()));
-    for (const headers of [{ 'Service-Worker': 'script' }, { 'Sec-Fetch-Dest': 'serviceworker' }, { 'Service-Worker': 'script', 'Sec-Fetch-Dest': 'serviceworker' }]) {
+    const workerHeaders: Record<string, string>[] = [{ 'Service-Worker': 'script' }, { 'Sec-Fetch-Dest': 'serviceworker' }, { 'Service-Worker': 'script', 'Sec-Fetch-Dest': 'serviceworker' }];
+    for (const headers of workerHeaders) {
       expect((await request(`${url}sw.js`, { headers })).status).toBe(403);
     }
     expect(seen).toEqual([]);

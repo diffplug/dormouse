@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  toBase64Url,
   WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
@@ -27,6 +28,10 @@ const enrollment: BurrowEnrollment = {
   burrowToken: 'tok',
   origin: ORIGIN,
   rpId: 'burrow.example',
+  label: 'Laptop',
+  // Shapes, not real keys: no Client completes a handshake here.
+  noiseStaticPrivateKey: toBase64Url(new Uint8Array(48)),
+  noiseStaticPublicKey: toBase64Url(new Uint8Array(32)),
 };
 
 /** A probe answering each call from `answers`, in order, and counting them. */

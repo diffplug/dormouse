@@ -124,7 +124,6 @@ async function boot(): Promise<void> {
       spawn: () => {},
       setParentWindow: () => {},
       kill: () => {},
-      gracefulKill: () => {},
       list: () => {},
     },
     stateDir: dir,
