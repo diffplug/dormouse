@@ -385,7 +385,7 @@ Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
 1. **always `quit_ack`s first**, even if it then dedupes the event out;
 2. **`quit_vote`s** when ready — at once when all-idle, else after the user confirms; **a vote is not a teardown**;
-3. `quit_progress`es when its own `quit-teardown` arrives and at the install phase boundary;
+3. `quit_progress`es when its own `quit-teardown` arrives, after the pending-kill drain, and at the install phase boundary;
 4. tears down (§Teardown ordering), then `quit_window_done`, or `quit_proceed` in the last window, which approves and calls `app.exit(0)`;
 5. on a dialog cancel, calls `quit_cancel`, which bumps `seq` and drops every window's dialog. **Nothing else cancels.**
 
@@ -410,7 +410,7 @@ Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`; `W
 
 **Every step of `runQuitTeardown` is individually bounded, and steps 2–7 sit under a ceiling derived from the sum of their bounds, never a literal**, counting Rust's round-trip margin for the two steps that reach the sidecar (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by `lib/src/lib/mirrored-constants.test.ts`). The steps:
 
-1. `finalizePendingKills` (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), then a fresh `quit_progress`, so its bound never comes out of the watchdog budget the ceiling is pinned under.
+1. `finalizePendingKills` (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), then a fresh `quit_progress`, so its bound never spends the ceiling's watchdog budget.
 2. `captureAgentRecovery` — **before any save or kill**, since an agent's resume invocation exists only between the interrupt and the kill (§Agent recovery; rationale). **A failed capture must not abort the steps behind it.**
 3. `requestSessionFlush` — while PTYs are alive, so CWDs are fresh.
 4. `gracefulKillPtys` — this window's PTYs (§Rust ↔ sidecar bridge).

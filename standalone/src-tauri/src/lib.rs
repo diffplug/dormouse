@@ -701,11 +701,11 @@ fn exit_after_cleanup(app: &AppHandle) -> bool {
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
-// Phase 3: per-phase budget once teardown is running. Each reported phase
-// (teardown, install) refreshes it, so it bounds a single stalled phase, not the
-// sum of all teardown work. Sits above the webview's own teardown
-// ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
-// `standalone/src/quit.ts`, pinned under this by
+// Phase 3: per-phase budget once teardown is running. Each reported phase (the
+// pending-kill drain, the capture and save, the install) refreshes it, so it
+// bounds a single stalled phase, not the sum of all teardown work. Sits above
+// the webview's own teardown ceiling (docs/specs/standalone.md §Quit flow) —
+// `QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`, pinned under this by
 // `lib/src/lib/mirrored-constants.test.ts`. Also above `kill_sidecar_and_wait`'s
 // ~5s cap, which the Windows install phase awaits under one refresh.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
@@ -4002,8 +4002,9 @@ fn quit_vote(app: AppHandle, window: tauri::Window, state: tauri::State<'_, Quit
 
 // This window has started (or advanced) its teardown: the vote wait is over,
 // and this phase boundary refreshes the watchdog's per-phase deadline. Sent at
-// teardown start and again before installing an update, so a long install gets
-// its own budget instead of sharing the teardown clock.
+// teardown start, again once the pending kills are drained, and again before
+// installing an update, so the save and a long install each get their own
+// budget instead of sharing one clock.
 #[tauri::command]
 fn quit_progress(window: tauri::Window, state: tauri::State<'_, QuitState>) {
     guard(&state.machine).progress(window.label());
