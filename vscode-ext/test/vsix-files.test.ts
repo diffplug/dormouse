@@ -13,6 +13,6 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 
 it('packages only the build output and the listed root files', async () => {
   const files = await listFiles({ cwd: root, packageManager: PackageManager.None });
-  const outsideBuild = files.filter((file) => !/^(dist|media|images)\//.test(file)).sort();
+  const outsideBuild = files.filter((file) => !/^(dist|dor-cli|media|images)\//.test(file)).sort();
   expect(outsideBuild).toEqual(['CHANGELOG.md', 'LICENSE', 'README.md', 'icon-tiny.png', 'icon.png', 'package.json']);
 });
