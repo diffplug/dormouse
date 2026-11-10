@@ -142,8 +142,9 @@ With the user's approval:
 ```
 
 ```powershell
-# Windows, from an ordinary (not elevated) PowerShell
-.\deploy\local\install-windows.ps1
+# Windows, from an ordinary (not elevated) PowerShell; Bypass because the
+# default execution policy refuses every script file
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\local\install-windows.ps1
 ```
 
 ```sh
@@ -229,7 +230,7 @@ Updating is choosing a checkout and rerunning the same command:
 
 ```sh
 git -C <checkout> log --oneline -1     # decide deliberately what to install
-./deploy/local/install-macos.sh        # or .\deploy\local\install-windows.ps1
+./deploy/local/install-macos.sh        # or, on Windows, the Bypass command from checkpoint 2
                                        # or ./deploy/local/install-linux.sh
 ```
 
