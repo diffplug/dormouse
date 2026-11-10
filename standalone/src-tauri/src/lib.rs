@@ -4760,7 +4760,8 @@ pub fn run() {
                         .iter()
                         .map(|p| p.to_string_lossy().into_owned())
                         .collect();
-                    let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
+                    // `emit` broadcasts to every window; the drop belongs to this one.
+                    let _ = app.emit_to(window.label(), "dormouse://files-dropped", serde_json::json!({ "paths": payload }));
                 }
                 // Focus order is the drag hit test's z-order stand-in and the
                 // fallback owner for a `dor` request naming no Surface.
@@ -7051,6 +7052,14 @@ mod tests {
         }
         assert!(offenders.is_empty(), "these open a window without send_window_labels: {offenders:?}");
         assert!(src.contains("restore_windows(app.handle()"), "setup must still restore windows itself");
+    }
+
+    #[test]
+    fn a_file_drop_reaches_only_its_own_window() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let arm = src.split("WindowEvent::DragDrop(DragDropEvent::Drop").nth(1).unwrap()
+            .split("WindowEvent::").next().unwrap();
+        assert!(arm.contains("emit_to(window.label(), \"dormouse://files-dropped\""), "{arm}");
     }
 
     /// The print macros panic when stdout or stderr is closed (a launching
