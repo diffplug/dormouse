@@ -10,6 +10,7 @@ import { center, clampView, fitView, stepZoom, zoomAt, type View } from './view'
 import { encodeImage, over, SRGB_PNG, type ImageFormat } from './io';
 import { imageColors, type ImageColors } from './color';
 import { Signal } from '../signal';
+import { MAX_EDIT_PIXELS } from '../../src/image-editability';
 
 export type Tool =
   | 'select' | 'arrow' | 'rect' | 'ellipse' | 'text' | 'callout' | 'highlight' | 'redact' | 'crop'
@@ -838,7 +839,9 @@ export class EditorController {
         const extent = axis === 'y' ? r.height : r.width, clamp = (n: number) => Math.max(0, Math.min(extent, Math.round(n)));
         const mode = e.altKey ? (this.seamMode === 'insert' ? 'remove' : 'insert') : this.seamMode;
         this.seam = { axis, from: clamp(axis === 'y' ? p.y : p.x), to: clamp(axis === 'y' ? q.y : q.x), mode };
-        if (mode === 'insert') this.seam.to = this.seam.from + Math.abs(Math.round((axis === 'y' ? q.y - p.y : q.x - p.x)));
+        // An insert stops at the edit bound: past it, the saved image would reopen view-only.
+        const room = Math.max(0, Math.floor(MAX_EDIT_PIXELS / (axis === 'y' ? r.width : r.height)) - extent);
+        if (mode === 'insert') this.seam.to = this.seam.from + Math.min(room, Math.abs(Math.round((axis === 'y' ? q.y - p.y : q.x - p.x))));
       },
       up: () => {
         const s = this.seam;

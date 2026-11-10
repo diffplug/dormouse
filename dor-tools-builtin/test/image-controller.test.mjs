@@ -246,3 +246,16 @@ test('the label field leaves an IME\'s Enter and Escape to the composition, and 
   labelKey(ctl, keydown('Escape'));
   assert.deepEqual(finished, [true, false]);
 });
+
+test('a seam insert stops at the edit bound, so the saved image stays editable', () => {
+  // 8192 wide, so ten rows of room under 2^26 pixels.
+  const ctl = new EditorController(px.createRaster(8192, 8182)), canvas = fakeCanvas();
+  ctl.attach(canvas);
+  ctl.setTool('seam');
+  ctl.set('seamMode', 'insert');
+  for (const [type, y] of [['pointerdown', 0], ['pointermove', 40], ['pointerup', 40]]) {
+    canvas.listeners[type]({ isPrimary: true, button: 0, clientX: 0, clientY: y, pointerId: 1, preventDefault() {} });
+  }
+  const { width, height } = ctl.doc.raster;
+  assert.deepEqual([width, height], [8192, 8192]);
+});
