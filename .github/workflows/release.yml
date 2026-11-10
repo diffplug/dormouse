@@ -35,6 +35,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact-name: standalone-win-x64
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -185,6 +186,7 @@ jobs:
   build-vscode:
     name: Build VSCode Extension
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Same rationale as build-standalone: bound the provenance OIDC token to
     # the admin-gated `v*` tag refs. No secrets live in this environment.
     environment:
@@ -261,6 +263,7 @@ jobs:
   security-audit:
     name: Security audit
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: read
       # Dispatch the security-audit workflow and read its run status. We
@@ -352,6 +355,7 @@ jobs:
       - build-vscode
       - security-audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment:
       name: vscode-extension-publish
     steps:
