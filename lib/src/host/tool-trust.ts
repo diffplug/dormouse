@@ -201,7 +201,7 @@ export interface ProjectWalkOptions {
 
 /**
  * Walk up from `startDir` for the nearest `dormouse.yml`. Its directory is
- * `$PROJECT_ROOT` — free, since the host knows where it found the file, and
+ * `$HERE` — free, since the host knows where it found the file, and
  * more robust than shelling out to git (it works in a non-git directory).
  *
  * The walk ends, finding nothing, at the directory that holds the user file:
@@ -316,7 +316,7 @@ export async function lookupTool(
 
   let input: ToolInput;
   try {
-    input = await resolveToolInput(entry, { projectRoot: found.dir, cwd, args });
+    input = await resolveToolInput(entry, { here: found.dir, cwd, args });
   } catch (error) {
     return { status: 'error', message: error instanceof Error ? error.message : String(error) };
   }

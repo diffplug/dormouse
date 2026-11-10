@@ -74,7 +74,7 @@ function namesThisHost(host: string): boolean {
 
 export async function resolveToolInput(
   entry: Pick<ToolEntry, 'name' | 'run' | 'dedupeTemplate'>,
-  context: { cwd: string; projectRoot: string | null; args: readonly string[] },
+  context: { cwd: string; here: string; args: readonly string[] },
 ): Promise<ToolInput> {
   const { args } = context;
   if (args.some(arg => typeof arg !== 'string' || hasShellInputControls(arg))) {

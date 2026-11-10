@@ -10,7 +10,7 @@ import { parseToolFile } from './tool-registry';
 const hostname = vi.hoisted(() => vi.fn(() => 'Dev-Box.local'));
 vi.mock('node:os', async importOriginal => ({ ...await importOriginal<typeof import('node:os')>(), hostname }));
 
-const context = { cwd: '/repo', projectRoot: '/repo', args: [] as string[] };
+const context = { cwd: '/repo', here: '/repo', args: [] as string[] };
 const entry = { name: 'viewer', run: ['viewer', '$ARGS'], dedupeTemplate: null };
 
 describe('Tool argv safety', () => {
@@ -22,7 +22,7 @@ describe('Tool argv safety', () => {
   it('rejects controls introduced by directory substitutions', async () => {
     await expect(resolveToolInput({ ...entry, run: ['viewer', '$CWD'] }, { ...context, cwd: '/repo/\x15printf unwanted\n#' }))
       .rejects.toThrow('terminal control characters');
-    await expect(resolveToolInput({ ...entry, run: ['viewer', '$PROJECT_ROOT'] }, { ...context, projectRoot: '/repo/\x1b[2J' }))
+    await expect(resolveToolInput({ ...entry, run: ['viewer', '$HERE'] }, { ...context, here: '/repo/\x1b[2J' }))
       .rejects.toThrow('terminal control characters');
   });
 
