@@ -18,7 +18,7 @@ flowchart LR
   P -- /ws/burrow --> X[(Relay)]
 ```
 
-**Rust stays thin**: besides the bridge, only the OS-integration edges (window events, menu, file drop, dock icon, logging) and the session file store. All real logic runs in the sidecar, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift.
+**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, file drop, dock icon, logging), the session file store, multi-window state (§Windows), and the quit flow.
 
 ## Boot sequence
 
@@ -30,7 +30,7 @@ Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry 
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri::command]` set) and `standalone/sidecar/main.js` (the dispatch table); `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
-**stdout is the protocol**: sidecar diagnostics go to stderr. Most invokes are thin sidecar forwarders; two carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence) and the Windows clipboard reads and text write (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6).
+**stdout is the protocol**: sidecar diagnostics go to stderr. Invokes on Rust-owned state, and the Windows clipboard reads and text write (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6), never reach the sidecar; the rest are thin forwarders.
 
 **Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
 
@@ -183,7 +183,7 @@ Source of truth: `note_geometry` / `restore_windows` / `fit_geometry` in `standa
 
 **Must clear label-keyed ownership, registry, geometry, and close state in the `Destroyed` arm**, when Tauri has removed the window from `webview_windows()` (rationale), and send the remaining live labels to the sidecar. **Must remove incoming arrivals from the reap before killing orphaned PTYs**; the source still holds those Sessions. **Must defer every approved exit until every hand-back worker has completed**, on every exit path, and **force it after `QUIT_PHASE_TIMEOUT_MS`**, logging the timeout, so a stalled disk operation cannot trap the app.
 
-Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
