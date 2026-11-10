@@ -53,9 +53,11 @@ export function watchDorOpen(state: TutorialState, store: CommandStoreModule): (
       const last = pane.lastCommand;
       if (last && !finished.has(last.id) && last.exitCode !== undefined) {
         finished.add(last.id);
-        // A picker that opened something exits 0; a cancel exits 1.
+        // A picker that opened something exits 0; a cancel exits 1. Help exits 0
+        // too, without ever running the picker.
         const [verb, ...flags] = dorWords(last.rawCommandLine) ?? [];
-        if (last.exitCode === 0 && canonicalDorVerb(verb ?? "") === "open" && flags.every((flag) => flag.startsWith("-"))) {
+        const picked = flags.every((flag) => flag.startsWith("-") && flag !== "--help" && flag !== "-h");
+        if (last.exitCode === 0 && canonicalDorVerb(verb ?? "") === "open" && picked) {
           state.markComplete("op-pick");
         }
       }

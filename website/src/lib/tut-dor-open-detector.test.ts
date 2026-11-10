@@ -58,6 +58,8 @@ describe("watchDorOpen", () => {
   it("credits the picker only when it opened something, and README.md as source", () => {
     const { set, done } = harness();
     set("a", null, run("dor o", 1));
+    set("h", null, run("dor o --help", 0));
+    set("i", null, run("dor open -h", 0));
     set("b", null, run("dor open README.md", 0));
     expect(done()).toEqual([]);
     set("c", run(`dor __view-code ${CWD}/README.md`), run("dor o --preview", 0));
