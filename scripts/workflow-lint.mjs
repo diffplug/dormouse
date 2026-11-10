@@ -150,7 +150,7 @@ export function check(inputs) {
         if (step?.uses?.startsWith(`${TEND_ACTION}@`) && step.with?.merge !== 'restricted') {
           fail(TEND, `${file} job \`${jobId}\` passes \`merge: ${step.with?.merge}\` to \`${TEND_ACTION}\``);
         }
-        if (tend && typeof step?.run === 'string' && /GITHUB_ENV/.test(step.run) && /secrets\./.test(JSON.stringify(step.env ?? {}))) {
+        if (tend && typeof step?.run === 'string' && /GITHUB_ENV/.test(step.run) && /secrets\./.test(JSON.stringify(step))) {
           fail(TEND, `${file} job \`${jobId}\` writes to \`$GITHUB_ENV\` from a step holding a secret`);
         }
       }

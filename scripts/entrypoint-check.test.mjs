@@ -14,10 +14,15 @@ test('every entrypoint check compares real paths', () => {
   const files = execFileSync('git', ['ls-files', '*.mjs', '*.js', '*.cjs', '*.ts'], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n');
   const unsafe = [];
   for (const file of files) {
-    const lines = readFileSync(`${ROOT}/${file}`, 'utf8').split('\n');
+    const text = readFileSync(`${ROOT}/${file}`, 'utf8');
+    const lines = text.split('\n');
     lines.forEach((line, i) => {
       const window = lines.slice(Math.max(0, i - 2), i + 3).join(' ');
-      if (!/^\s*(?:\/\/|\*|\/\*)/.test(line) && line.includes('import.meta.url') && window.includes('process.argv[1]') && !window.includes('realpathSync(process.argv[1])')) {
+      // The guard may compare `argv[1]` against a variable holding the module
+      // path, far from the `import.meta.url` it was computed from.
+      const nearUrl = line.includes('import.meta.url') && window.includes('process.argv[1]');
+      const comparesArgv = line.includes('process.argv[1]') && /[!=]==/.test(line) && text.includes('import.meta.url');
+      if (!/^\s*(?:\/\/|\*|\/\*)/.test(line) && (nearUrl || comparesArgv) && !window.includes('realpathSync(process.argv[1])')) {
         unsafe.push(`${file}:${i + 1}: ${line.trim()}`);
       }
     });

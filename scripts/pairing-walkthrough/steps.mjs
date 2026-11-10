@@ -307,9 +307,6 @@ async function stepRelay(ctx) {
   if (storedPassword === null) throw new Error(`no setup password under ${stateDir}`);
   ctx.state.setupPassword = storedPassword.password;
 
-  // Held for the scenarios that take the Relay away mid-story; nothing on the
-  // happy path touches it.
-  ctx.state.relayHandle = handle;
   ctx.record({ relayStateDir: stateDir, relayBuilt: !skipBuild });
 }
 
@@ -1391,7 +1388,8 @@ async function fillField(ctx, selector, value, ab = ctx.state.burrowBrowser) {
     return el ? el.value : null;`);
   if (seen === value) return;
   ctx.log(`\`fill\` did not stick on ${selector}; forcing the value through React's setter`);
-  ctx.record({ fillFallbacks: [...(ctx.state.fillFallbacks ??= []), selector] });
+  ctx.state.fillFallbacks = [...(ctx.state.fillFallbacks ?? []), selector];
+  ctx.record({ fillFallbacks: ctx.state.fillFallbacks });
   // React's own setter, so the controlled component sees a real change event.
   await ab.eval(`const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) throw new Error('no element at ' + ${JSON.stringify(selector)});

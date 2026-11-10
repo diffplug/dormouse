@@ -8,7 +8,7 @@ The publication contract is in `docs/specs/deploy.md` → “Blyg changelog”; 
 
 ## Publishing
 
-`.github/workflows/blyg-publish.yml` synchronizes on GitHub release publication, changes to `CHANGELOG.md` on `main`, or manual dispatch. It checks out reviewed `main` and needs no package installation. `scripts/publish-blyg.mjs` supports the initial historical import and later corrections through the same path. Entries without a stable, published GitHub release are skipped, including historical extension-only versions without a GitHub release. Old entries retain their release dates in the text; their Blyg publication timestamps are the import time because stock Studio has no backdating API.
+`.github/workflows/blyg-publish.yml` synchronizes on changes to `CHANGELOG.md` on `main` (a release's entry arrives with its release PR, after the release is published) or manual dispatch. It checks out reviewed `main` and needs no package installation. `scripts/publish-blyg.mjs` supports the initial historical import and later corrections through the same path. Entries without a stable, published GitHub release are skipped, including historical extension-only versions without a GitHub release. Old entries retain their release dates in the text; their Blyg publication timestamps are the import time because stock Studio has no backdating API.
 
 Run these from the repository root:
 

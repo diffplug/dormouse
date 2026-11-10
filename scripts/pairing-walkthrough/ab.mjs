@@ -17,11 +17,17 @@ import { exec, signalUntilGone, waitFor } from './proc.mjs';
 const BIN = 'agent-browser';
 
 /**
- * Where `agent-browser` keeps its state — daemon pid files, session configs and
- * its Chrome downloads. `agent-browser doctor` prints it as "State and socket
- * directory"; the CLI has no env var that relocates it, so neither does this.
+ * Where `agent-browser` keeps its state — session configs and its Chrome
+ * downloads. `agent-browser doctor` prints it as "State and socket directory".
  */
 export const AGENT_BROWSER_HOME = join(homedir(), '.agent-browser');
+
+/**
+ * Where a daemon writes its `<session>.pid`: `AGENT_BROWSER_SOCKET_DIR` moves
+ * it, and the `innerdogfood` harness sets that in every inner terminal, so a
+ * walkthrough run from one finds its daemons there.
+ */
+const SOCKET_DIR = process.env.AGENT_BROWSER_SOCKET_DIR || AGENT_BROWSER_HOME;
 
 export class AgentBrowser {
   /** @param {string} session `--session` name. @param {string} cwd repo root. */
@@ -171,7 +177,7 @@ export class AgentBrowser {
    */
   async killDaemon() {
     try {
-      return await stopDaemon(join(AGENT_BROWSER_HOME, `${this.session}.pid`));
+      return await stopDaemon(join(SOCKET_DIR, `${this.session}.pid`));
     } finally {
       rmSync(join(AGENT_BROWSER_HOME, `${this.session}.config`), { force: true });
     }

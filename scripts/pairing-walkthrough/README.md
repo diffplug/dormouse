@@ -52,7 +52,7 @@ Every line about `agent-browser` and Chrome here was probed against `agent-brows
 | 8′ | `cancel` | (`denied`) Presses the modal's Cancel and waits for the panel to report it; same two checks. → `09-burrow-cancelled.png`, `10-pocket-cancelled.png` |
 | 7′ | `dead-code` | (`expired-code`) Replaces the camera's Y4M with a blank frame, opens the scanner, and pastes the Burrow's own code re-issued twice — once stamped with a 2023 expiry, once for another origin as well. Waits for the phone's own sentence each time, and checks the two differ. → `06-pocket-expired.png`, `07-pocket-foreign.png` |
 
-Everything a later step needs from an earlier one is on `ctx.state` — `burrowBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the authenticator), `relayHandle`, `invitationUrl`, `pairingCode`, and `signCount` — or in `summary.json`.
+Everything a later step needs from an earlier one is on `ctx.state` — `burrowBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the authenticator), `invitationUrl`, `pairingCode`, and `signCount` — or in `summary.json`.
 
 Per-step milliseconds land in `summary.json`. With warm builds the whole run is about 15 s, of which the Burrow's boot is a third and step 8 is under 3 s; a cold `lib/dist-pocket` adds however long that build takes.
 

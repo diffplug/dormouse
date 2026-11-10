@@ -5,7 +5,7 @@
 // writes dor's copy, dor/src/generated-version.ts.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -122,4 +122,4 @@ function writeDorVersion(stamp) {
   );
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === scriptPath) writeDorVersion(buildStamp());
+if (process.argv[1] && realpathSync(process.argv[1]) === scriptPath) writeDorVersion(buildStamp());

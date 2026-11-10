@@ -245,17 +245,20 @@ test('one skipped workflow-audit run is INFO inside the 48 hours', () => {
   assert.match(result.info.join('\n'), /one scheduled run was skipped or failed/);
 });
 
-// A 403 under the CI PAT is scope drift and fails; the same 403 under an
-// operator's own login says nothing about the PAT. Any other failed call is
-// unverifiable, never a pass.
+// A 403 under the CI PAT is scope drift and fails, and so is a 404, which is
+// how GitHub answers a fine-grained PAT for an endpoint it cannot reach; the
+// same status under an operator's own login says nothing about the PAT. Any
+// other failed call is unverifiable, never a pass.
 test('an unreadable endpoint is FAIL in CI, UNVERIFIABLE locally, and never PASS', () => {
-  const forbid = (ctx) => { ctx.responses[`${R}/environments`] = { status: 403, body: null }; };
-  const ci = replay(forbid);
-  assert.equal(ci.verdict, 'FAIL');
-  assert.match(ci.results.find((r) => r.clause.includes('every environment')).evidence, /PAT scope drifted/);
-  const local = replay(forbid, { local: true });
-  assert.equal(local.verdict, 'INCONCLUSIVE');
-  assert.equal(lines(local, 'FAIL').length, 0);
+  for (const status of [403, 404]) {
+    const forbid = (ctx) => { ctx.responses[`${R}/environments`] = { status, body: null }; };
+    const ci = replay(forbid);
+    assert.equal(ci.verdict, 'FAIL', `HTTP ${status}`);
+    assert.match(ci.results.find((r) => r.clause.includes('every environment')).evidence, /PAT scope drifted/);
+    const local = replay(forbid, { local: true });
+    assert.equal(local.verdict, 'INCONCLUSIVE', `HTTP ${status} locally`);
+    assert.equal(lines(local, 'FAIL').length, 0);
+  }
   const outage = replay((ctx) => { ctx.responses[`${R}/actions/organization-secrets`] = { status: 502, body: null }; });
   assert.equal(outage.verdict, 'INCONCLUSIVE');
   assert.ok(lines(outage, 'UNVERIFIABLE').includes('no org-level secret is visible to this repository'));

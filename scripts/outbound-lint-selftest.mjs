@@ -14,6 +14,7 @@
  * (`scripts/lint-kit.mjs` owns the sandbox).
  */
 
+import { readFileSync, writeFileSync } from 'node:fs';
 import { appendText as append, makeSelftest, replaceText as replace } from './lint-kit.mjs';
 
 const LINT = 'scripts/outbound-lint.mjs';
@@ -288,6 +289,24 @@ const TAURI = [
     'an HTTP client crate in [dependencies]',
   ],
   [
+    'standalone/src-tauri/Cargo.toml',
+    replace('getrandom = "0.4"\n', 'getrandom = "0.4"\nnetc = { package = "reqwest", version = "0.12" }\n'),
+    'depends on reqwest',
+    'an HTTP client crate renamed with package =',
+  ],
+  [
+    'standalone/src-tauri/Cargo.toml',
+    replace('getrandom = "0.4"\n', 'getrandom = "0.4"\n"reqwest" = "0.12"\n'),
+    'depends on reqwest',
+    'an HTTP client crate under a quoted key',
+  ],
+  [
+    'standalone/src-tauri/Cargo.toml',
+    replace('[target.\'cfg(unix)\'.dependencies]', '[dependencies.reqwest]\nversion = "0.12"\n\n[target.\'cfg(unix)\'.dependencies]'),
+    'depends on reqwest',
+    'an HTTP client crate as a [dependencies.<name>] table',
+  ],
+  [
     'standalone/src-tauri/capabilities/default.json',
     replace('"windows": ["main", "ws-*"],', '"windows": ["main", "ws-*"],\n  "remote": { "urls": ["https://*.example.net"] },'),
     'a remote URL scope',
@@ -301,13 +320,80 @@ const TAURI = [
   ],
   [
     'standalone/src-tauri/tauri.conf.json',
+    replace('"security": {', '"security": {\n      "capabilities": [{ "identifier": "selftest", "windows": ["*"], "remote": { "urls": ["https://*.example.net"] }, "permissions": [] }],'),
+    'a remote URL scope',
+    'an inline capability in tauri.conf.json with a remote scope',
+  ],
+  [
+    'standalone/src-tauri/tauri.conf.json',
     replace('"security": {', '"withGlobalTauri": true,\n    "security": {'),
     'withGlobalTauri',
     'withGlobalTauri enabled',
   ],
 ];
 
-for (const [relative, mutate, expected, label] of [...STRUCTURAL, ...CSP, ...TAURI]) {
+// --- Guards against a vacuous pass ---------------------------------------------
+// The rules that keep the lint from going quietly blind or accepting an
+// unexplained entry. Several mutate the lint itself, since the tree would have
+// to lose every instance of a form at once to trip them.
+const GUARDS = [
+  [
+    LINT,
+    replace("reason: 'Opens a link in the system browser after the user confirms it in the external-link modal.',", "reason: 'Opens links.',"),
+    'OUTBOUND_SITES entry needs a class and a reason',
+    'an OUTBOUND_SITES reason too short to review',
+  ],
+  [
+    LINT,
+    replace("class: 'user:link-click',\n    reason: 'Opens a link in the system browser", "class: 'user:',\n    reason: 'Opens a link in the system browser"),
+    'a user: class names its trigger',
+    'a user: class with no trigger',
+  ],
+  [
+    LINT,
+    replace('  if (hits.length === 0) continue;\n  inventory.push({ rel, hits });', '  continue;\n  inventory.push({ rel, hits });'),
+    'no network primitive matched in any shipped file',
+    'an inventory that records nothing',
+  ],
+  [
+    'vscode-ext/src/webview-html.ts',
+    replace('const csp = [', 'const policy = ['),
+    'found no `const csp = [...]` directive list',
+    'the VS Code CSP moved out of sight',
+  ],
+  [
+    LINT,
+    replace('(\\w*CSP)\\s*=', '(\\w*NO_SUCH_CSP)\\s*='),
+    'found no `const *CSP = "…"`',
+    'the viewer CSPs moved out of sight',
+  ],
+  [
+    'standalone/src-tauri/tauri.conf.json',
+    (path) => writeFileSync(path, readFileSync(path, 'utf8').replace(/"csp": "[^"]*"/, '"csp": ""')),
+    'an empty CSP',
+    'an empty Standalone CSP',
+  ],
+  [
+    'standalone/src-tauri/Cargo.toml',
+    (path) => writeFileSync(path, '[package]\nname = "selftest"\n'),
+    'found no [dependencies]',
+    'a Cargo.toml with no dependency table',
+  ],
+  [
+    LINT,
+    replace("f.startsWith('standalone/src-tauri/capabilities/')", "f.startsWith('standalone/src-tauri/no-such-capabilities/')"),
+    'no capability files found',
+    'capability files out of sight',
+  ],
+  [
+    'standalone/src-tauri/capabilities/default.json',
+    replace('"shell:default"', '"shell:default",\n    "http:default"'),
+    'grants http:default, a network plugin',
+    'a capability granting a network plugin',
+  ],
+];
+
+for (const [relative, mutate, expected, label] of [...STRUCTURAL, ...CSP, ...TAURI, ...GUARDS]) {
   selftest.withMutationReporting(
     relative,
     mutate,

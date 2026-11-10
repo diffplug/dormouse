@@ -12,6 +12,7 @@ jobs:
   build-and-test:
     name: Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -168,6 +169,7 @@ jobs:
   library-test:
     name: Library Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -253,6 +255,7 @@ jobs:
   webview-smoketest:
     name: Webview Boot Smoketest
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # Its own job, in parallel with Build & Test: pinning a browser's cost to a
     # job keeps `pnpm test` free of it. It is also the only check that runs the
     # shipped webview bundle rather than inspecting it — the VS Code webview's CSP is enforced by Chromium, so a
@@ -321,6 +324,7 @@ jobs:
   standalone-smoketest:
     name: Standalone Smoketest
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

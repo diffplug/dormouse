@@ -27,7 +27,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { makeSelftest, repoRoot } from './lint-kit.mjs';
 import {
@@ -89,6 +89,28 @@ for (const rule of RULES) {
       ? `${name}\n      an added use stays green — the count must compare exactly, not as a floor`
       : name,
   );
+
+  // And for `exactly`, one use fewer: the count must not be a ceiling either.
+  if (rule.kind === 'exactly') {
+    const site = filesFor(rule)
+      .flatMap((file) => [...readFileSync(join(repoRoot, file), 'utf8').matchAll(rule.pattern)]
+        .filter((m) => !rule.allow?.(m[0], file))
+        .map((m) => ({ file, index: m.index, length: m[0].length })))[0];
+    if (!site) {
+      selftest.weak.push(`${name}\n      no use found to delete — the deletion case proves nothing`);
+      continue;
+    }
+    // Required to report the count, since a deletion can break another rule.
+    selftest.withMutationReporting(
+      site.file,
+      (path) => {
+        const text = readFileSync(path, 'utf8');
+        writeFileSync(path, text.slice(0, site.index) + text.slice(site.index + site.length));
+      },
+      `expected exactly ${rule.count} — a use went missing`,
+      `${name}\n      deleting one use from ${site.file} stays green — the count must compare exactly, not as a ceiling`,
+    );
+  }
 }
 
 // The two `E2eKind` rules are `require` rules, so the loop above proves only
@@ -417,6 +439,26 @@ for (const { spec, line } of cited.values()) {
     (path) => writeFileSync(path, text.replace(line, '')),
     `deleting "${line}" from ${spec} stays green — a rule would outlive the prose`,
   );
+}
+
+// A tree rule must read every source extension tsc and Node accept, not only
+// the `.ts` files the cases above append to. No `.mts` file is tracked under
+// the trees, so this one plants one and adds it to the sandbox's tracked list
+// (what `trackedFiles` reads there); restoring the list untracks it again.
+{
+  const planted = 'remote-lib-common/src/security/__selftest.mts';
+  const list = process.env.LINT_KIT_TRACKED_FILES;
+  if (!list) selftest.weak.push('no sandbox tracked list — the extension case cannot plant a file');
+  else {
+    selftest.withMutation(
+      relative(repoRoot, list),
+      (path) => {
+        writeFileSync(join(repoRoot, planted), "import { x25519 } from '@noble/curves/ed25519.js';\n");
+        writeFileSync(path, `${readFileSync(path, 'utf8')}\0${planted}`);
+      },
+      `${planted}\n      a forbidden import in a .mts file stays green — the tree rules skip that extension`,
+    );
+  }
 }
 
 selftest.finish(

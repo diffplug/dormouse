@@ -5,7 +5,8 @@
  * package.json). Exits non-zero with a per-violation report.
  *
  * Checks:
- *   1. Every docs/specs/*.md file is indexed in AGENTS.md.
+ *   1. Every docs/specs/*.md file is indexed in AGENTS.md: a bullet led by
+ *      its bolded, backticked path.
  *   2. `## Future` (or `## N. Future`), when present, is the LAST section of
  *      its spec — the fold convention.
  *   3. Every relative markdown link in AGENTS.md + external specs + docs/specs
@@ -24,8 +25,9 @@
  *   6. A named scope (`**Scope: X**` leading a line) is defined exactly once
  *      across the corpus, and every bold reference — `(**Scope: X**)` or the
  *      bare `the **x** scope` form — names a defined scope.
- *   7. Every `Reserved:` paragraph names `## Future` or a defined scope — the
- *      Reservations convention in AGENTS.md.
+ *   7. Every `Reserved:` paragraph names `## Future` (a link to it or the
+ *      heading) or a defined scope in bold — the Reservations convention in
+ *      AGENTS.md.
  *   8. Every `<foo>.rationale.md` pairs with an existing `<foo>.md`, keys its
  *      entries by that spec's headings (each rationale `## X` must exist as a
  *      heading in the spec), and has no `## Future` — rationale files are
@@ -120,6 +122,10 @@ const TOP_LEVEL_DIRS = [
   'lib/', 'standalone/', 'vscode-ext/', 'website/', 'relay/', 'hosted/',
   'remote-lib-common/', 'dor/', 'dor-lib-common/', 'dor-tools-builtin/', 'dor-tools-lib/', 'canopy/', 'docs/',
   'scripts/', 'deploy/', '.github/', '.claude/', '.vscode/',
+  // Plus every top-level directory git tracks, so a new one (`.config/`) is
+  // checked without anyone remembering to list it; the listed ones stay
+  // checkable after a rename removes them.
+  ...trackedFiles().filter((f) => f.includes('/')).map((f) => `${f.split('/')[0]}/`),
 ];
 // Path prefixes that are legitimate references to build/staged/generated
 // output which does not exist in a clean checkout.
@@ -134,12 +140,13 @@ const SKIP_PATH_PREFIXES = [
 const ROOT_FILES = ['AGENTS.md', 'DESIGN.md', 'PRODUCT.md', 'SECURITY.md', 'SELF_HOST.md', 'SELF_HOST.rationale.md', 'package.json', 'pnpm-workspace.yaml'];
 
 /**
- * A backticked token check 4 verifies on disk: a listed root file, or a repo
- * path under a known top-level dir with no glob or placeholder that is not
+ * A backticked token check 4 verifies on disk: a root file, or a repo
+ * path under a top-level dir with no glob or placeholder that is not
  * build output. Check 12 uses the same notion, so "verifiable" means one thing.
  */
+const CHECKABLE_ROOT_FILES = new Set([...ROOT_FILES, ...trackedFiles().filter((f) => !f.includes('/'))]);
 function checkablePath(token) {
-  if (ROOT_FILES.includes(token)) return true;
+  if (CHECKABLE_ROOT_FILES.has(token)) return true;
   if (!token.includes('/')) return false;
   if (/[\s*{<>$%(?\\]|\.\.\.|…/.test(token)) return false;
   if (!TOP_LEVEL_DIRS.some((d) => token.startsWith(d))) return false;
@@ -215,10 +222,11 @@ function blockAt(lines, i, head = lines[i]) {
 }
 
 // --- Check 1: index completeness -------------------------------------------
+// An index entry leads its bullet with the bolded, backticked path; a bare
+// substring would count `tool.md` as indexed through `dor-tool.md`.
 const agents = read('AGENTS.md');
 for (const spec of specFiles) {
-  const base = spec.split('/').pop();
-  if (!agents.includes(base)) {
+  if (!agents.split('\n').some((line) => line.startsWith(`- **\`${spec}\`**`))) {
     problems.push(`AGENTS.md: spec not indexed -> ${spec}`);
   }
 }
@@ -336,7 +344,11 @@ for (const rel of allFiles) {
   lines.forEach((line, i) => {
     if (!/\bReserved:/.test(line)) return;
     const para = blockAt(lines, i);
-    const named = /Future/.test(para) || [...scopeDefs.keys()].some((n) => para.includes(n));
+    // A link to the fold, the fold heading itself, or a defined scope's name
+    // in bold (`**Scope: x**`, `**x**`); a bare substring such as a file name
+    // containing a scope's name is not one.
+    const scopes = [...para.matchAll(SCOPE_RE), ...para.matchAll(/\*\*([a-z0-9-]+)\*\*/g)].map((m) => m[1]);
+    const named = /\]\(#(?:\d+-)?future\)|## (?:\d+\.\s*)?Future\b/.test(para) || scopes.some((n) => scopeDefs.has(n));
     if (!named) {
       problems.push(
         `${rel}:${i + 1}: "Reserved:" paragraph names neither ## Future nor a defined scope`,

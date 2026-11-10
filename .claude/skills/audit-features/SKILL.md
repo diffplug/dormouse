@@ -30,7 +30,7 @@ Derive the feature checklist from the spec index in `AGENTS.md`. Design under `#
 5. Pin it with a regression that fails on the baseline at the intended assertion, not on a fixture that cannot start. Repair broken fixtures without weakening them: [#1320](https://github.com/diffplug/dormouse/pull/1320) uses real Windows junctions rather than mocking directory resolution.
 6. Mark the feature's coverage in the ledger.
 
-For IME, touch, clipboard, focus, and process behavior, say whether the evidence is simulated ordering or native behavior. The [browser harness](../debug-standalone-agent-browser/SKILL.md) simulates one window, and real-Tauri stdio, ConPTY, and sidecar bugs do not reproduce in it (`TESTING_AND_MODIFICATION_GUIDE.md` §8); a feature checked only there is covered "harness only".
+For IME, touch, clipboard, focus, and process behavior, say whether the evidence is simulated ordering or native behavior. The [browser harness](../debug-standalone-agent-browser/SKILL.md) runs the real sidecar but simulates one window and does not run the Rust ↔ sidecar stdio bridge or Windows ConPTY (`TESTING_AND_MODIFICATION_GUIDE.md` §8); a feature checked only there is covered "harness only".
 
 ## PRs
 

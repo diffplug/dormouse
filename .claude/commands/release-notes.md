@@ -11,12 +11,12 @@ You are drafting release notes, recommending and applying a version bump, and up
 Run these commands and read their output:
 
 ```bash
-git describe --tags --abbrev=0
-git log $(git describe --tags --abbrev=0)..HEAD --merges --first-parent --pretty=format:'%H %s'
-git log $(git describe --tags --abbrev=0)..HEAD --first-parent --pretty=format:'%H %s'
+LAST=$(git describe --tags --abbrev=0 --match 'v[0-9]*'); echo "$LAST"
+git log "$LAST"..HEAD --merges --first-parent --pretty=format:'%H %s'
+git log "$LAST"..HEAD --first-parent --pretty=format:'%H %s'
 ```
 
-The second command catches true merge commits; the third catches squash-merged PRs that don't appear as merges. Deduplicate by SHA. If a commit subject contains no PR number (e.g. `(#123)` or `Merge pull request #123`), treat it as a direct push and still include it (link to the commit instead of a PR).
+`--match 'v[0-9]*'` keeps the range on release tags: Hosted production deploys tag `main` as `hosted/<date>`, and a bare `git describe --tags` would start from the latest of those instead. The second command catches true merge commits; the third catches squash-merged PRs that don't appear as merges. Deduplicate by SHA. If a commit subject contains no PR number (e.g. `(#123)` or `Merge pull request #123`), treat it as a direct push and still include it (link to the commit instead of a PR).
 
 For each PR/commit in the range:
 - Read the diff with `git show <sha>` to understand what actually changed — do not rely solely on the commit message
@@ -40,12 +40,10 @@ Run `./scripts/bump-version.sh X.Y.Z` with the recommended version before editin
 
 ## 4. Edit `CHANGELOG.md`
 
-Edit `CHANGELOG.md` directly — insert a new section above the most recent existing release, in this exact shape:
+Edit `CHANGELOG.md` directly — insert a new section directly below `## [Unreleased]` and above the most recent existing release, in this exact shape:
 
 ```markdown
 ## [X.Y.Z] - YYYY-MM-DD
-
-_Recommended bump: **<breaking|added|bugfix>** — <one-sentence justification naming the change that drives it>._
 
 ### Added
 - Summary that affects both artifacts (no leading emoji) ...
@@ -66,6 +64,8 @@ Rules for the entries:
 - Link the PR using `https://github.com/diffplug/dormouse/pull/<N>`. For direct-push commits with no PR, link the commit instead: `https://github.com/diffplug/dormouse/commit/<sha>`
 - Omit any of Added / Changed / Fixed if it would be empty
 - Use today's date (`YYYY-MM-DD`) and the recommended `X.Y.Z`
+- Move every entry under `## [Unreleased]` into the new section (they ship in this release), merging any you also derived from git, and leave `## [Unreleased]` in place with nothing under it
+- Put nothing in the section but the heading and the entries: everything in it is copied into the GitHub Release, the Blyg post, and the website changelog
 
 Do not ask the user to paste it themselves — make the edit. The earlier flat-bullet entries (0.8.0 and below) are legacy; do not reformat them.
 
@@ -73,6 +73,6 @@ Do not ask the user to paste it themselves — make the edit. The earlier flat-b
 
 Do not run `website/scripts/generate-changelog.js` as part of the release-notes command. `website/src/data/changelog.json` is a gitignored generated artifact, and the website `prebuild`, `predev`, and `pretest` lifecycle scripts regenerate it from `CHANGELOG.md`.
 
-Then remind the user of the next step:
+Then tell the user the recommended bump — **breaking**, **added**, or **bugfix** — with a one-sentence justification naming the change that drives it, and remind them of the next step:
 
 > Review the diff, then `git commit -am 'Release vX.Y.Z'` and `git tag vX.Y.Z`.

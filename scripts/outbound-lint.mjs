@@ -721,9 +721,16 @@ if (tauriConf.app?.withGlobalTauri) {
     if (hit) problems.push(`${file}:${lineOf(code, hit.index)}: names ${hit[0]}; the Rust host opens no socket of its own.`);
   }
   const cargo = readRepoFile('standalone/src-tauri/Cargo.toml');
-  const deps = [...cargo.matchAll(/^\[([^\]]*dependencies)\]\n([\s\S]*?)(?=^\[|$(?![\s\S]))/gm)]
-    .filter((m) => !/dev-dependencies|build-dependencies/.test(m[1]))
-    .flatMap((m) => [...m[2].matchAll(/^([\w-]+)\s*=/gm)].map((d) => d[1]));
+  // Every crate a non-dev, non-build dependency table pulls in, under each
+  // spelling Cargo accepts: a bare or quoted key (dotted keys included), a
+  // `[dependencies.<name>]` table, and the real crate behind `package = "…"`.
+  const deps = [...cargo.matchAll(/^\[([^\]\n]*)\]\n([\s\S]*?)(?=^\[|$(?![\s\S]))/gm)]
+    .filter((m) => /(?:^|\.)dependencies(?:\.|$)/.test(m[1]) && !/(?:^|\.)(?:dev|build)-dependencies(?:\.|$)/.test(m[1]))
+    .flatMap((m) => {
+      const table = /(?:^|\.)dependencies\.("?)([\w-]+)\1$/.exec(m[1]);
+      const keys = table ? [table[2]] : [...m[2].matchAll(/^"?([\w-]+)"?(?:\.[\w.-]+)?\s*=/gm)].map((d) => d[1]);
+      return [...keys, ...[...m[2].matchAll(/\bpackage\s*=\s*"([\w-]+)"/g)].map((d) => d[1])];
+    });
   if (deps.length === 0) problems.push('standalone/src-tauri/Cargo.toml: found no [dependencies] — the parse is checking nothing.');
   for (const dep of deps) {
     if (/^tauri-plugin-(?:http|websocket|upload|opener)$|^(?:reqwest|ureq|hyper|hyper-util|isahc|attohttpc|curl|surf|tungstenite|tokio-tungstenite)$/.test(dep)) {
@@ -732,8 +739,11 @@ if (tauriConf.app?.withGlobalTauri) {
   }
   const capabilities = trackedFiles().filter((f) => f.startsWith('standalone/src-tauri/capabilities/') && f.endsWith('.json'));
   if (capabilities.length === 0) problems.push('standalone/src-tauri/capabilities: no capability files found.');
-  for (const file of capabilities) {
-    const cap = JSON.parse(readRepoFile(file));
+  // Tauri also takes a capability inlined in tauri.conf.json, held to the same rules.
+  const inline = (tauriConf.app?.security?.capabilities ?? []).flatMap((cap, i) => (typeof cap === 'object' && cap
+    ? [[`standalone/src-tauri/tauri.conf.json app.security.capabilities[${i}]`, cap]]
+    : []));
+  for (const [file, cap] of [...capabilities.map((f) => [f, JSON.parse(readRepoFile(f))]), ...inline]) {
     if (cap.remote) problems.push(`${file}: a remote URL scope hands the Tauri API to a page off this machine.`);
     const perms = (cap.permissions ?? []).map((p) => (typeof p === 'string' ? p : p.identifier));
     if (!file.endsWith('/main-only.json') && perms.some((p) => /^updater:/.test(p))) {

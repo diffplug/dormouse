@@ -123,7 +123,8 @@ export const SHIPPED_DIRS = [
 /** The shipped code that runs on the phone, never on the computer the policy governs. */
 export const PHONE_DIRS = ['lib/src/remote/pocket-app/', 'lib/src/remote/one-time-app/', 'lib/src/remote/client/'];
 
-const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+/** Every JavaScript and TypeScript source extension tsc and Node accept. */
+export const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 /** Tests, stories, and the helpers only they import, by the names this repo gives them. */
 const TEST_OR_HELPER =
   /(?:\.test\.|\.spec\.|\.stories\.|(?:^|\/)(?:tests?|stories|__tests__)\/|(?:^|\/)test-[^/]*$|test-utils\.|-test-mock\.|-fixtures\.)/;

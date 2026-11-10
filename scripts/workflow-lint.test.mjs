@@ -94,3 +94,13 @@ test('reports: a tend step writing a secret to $GITHUB_ENV', () => {
   edit('tend-review.yaml', '          tend runtime reaction add\n', '          tend runtime reaction add\n          echo "T=$GITHUB_TOKEN" >> "$GITHUB_ENV"\n')(inputs);
   assert.ok(check(inputs).some((f) => f.includes('writes to `$GITHUB_ENV`')));
 });
+
+test('reports: a tend step interpolating a secret into $GITHUB_ENV with no env:', () => {
+  const inputs = structuredClone(real);
+  edit(
+    'tend-review.yaml',
+    '      - run: node scripts/setup-git.mjs\n',
+    '      - run: echo "T=${{ secrets.TEND_BOT_TOKEN }}" >> "$GITHUB_ENV"\n      - run: node scripts/setup-git.mjs\n',
+  )(inputs);
+  assert.ok(check(inputs).some((f) => f.includes('writes to `$GITHUB_ENV`')));
+});
