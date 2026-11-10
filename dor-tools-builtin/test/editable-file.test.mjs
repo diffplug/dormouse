@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm, readFile, writeFile, symlink, rename, stat, readdir } from 'node:fs/promises';
+import { chmod, mkdtemp, realpath, rm, readFile, writeFile, symlink, rename, stat, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -45,6 +45,21 @@ test('rejects a stale save after another editor changes or replaces the file', a
   await assert.rejects(saveText(editorStore(root), file, 'ours', source.version), { status: 409 });
   assert.equal((await readText(editorStore(root), file)).text, 'replacement');
 });
+test('a save that cannot write says why: a read-only file or folder, or a deleted file', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  await writeFile(file, 'original');
+  const source = await readText(editorStore(root), file);
+  await chmod(file, 0o444);
+  await assert.rejects(saveText(editorStore(root), file, 'ours', source.version), { status: 403, message: 'This file is read-only.' });
+  await chmod(file, 0o644);
+  await chmod(root, 0o555);
+  try {
+    await assert.rejects(saveText(editorStore(root), file, 'ours', source.version), { status: 403, message: 'This folder does not allow saving.' });
+  } finally { await chmod(root, 0o755); }
+  assert.equal(await readFile(file, 'utf8'), 'original');
+  await rm(file);
+  await assert.rejects(saveText(editorStore(root), file, 'ours', source.version), { status: 409, message: 'The file path changed. Reopen it before saving.' });
+});
+
 test('refuses a substituted symlink and invalid UTF-8 without changing either file', { skip: process.platform === 'win32' }, async () => {
   await writeFile(file, 'original');
   const source = await readText(editorStore(root), file);
