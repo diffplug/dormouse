@@ -48,9 +48,6 @@ import {
   type SealedPushRecipient,
 } from './wire.js';
 
-/** The bearer shape lives in the wire contract; re-exported for the Relays. */
-export { RELAY_BEARER_BYTE_LENGTH, RELAY_BEARER_LENGTH, isRelayBearer } from './wire.js';
-
 /**
  * The largest relay frame either Relay will read, from either socket kind.
  * Derived from the wire bounds the frame guards enforce — a maximal `ct` plus

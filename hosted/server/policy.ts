@@ -14,7 +14,7 @@ export const authPolicy = {
 
 // The allowlist itself lives in ./providers.js, which the frontend and the
 // plain-node deploy scripts import without this module's dependencies.
-export { providerIds, type ProviderId };
+export { providerIds };
 
 export { LOGIN_FRESH_AGE_MS } from "./policy-constants.js";
 

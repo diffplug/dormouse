@@ -10,12 +10,10 @@ import type { ShellEntry } from '../shell-defaults';
 import type { IframeNetworkOffer, IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
 import type { ManagedVoicePort } from './managed-voice-types';
-
-export type { ManagedVoicePort } from './managed-voice-types';
 import type { GitInfoResult } from './git-types';
 
-export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from './tool-types';
-export type { GitDirInfo, GitInfoResult } from './git-types';
+export type { ToolControlResult, ToolHostRequest } from './tool-types';
+export type { GitInfoResult } from './git-types';
 import type { PersistedAlertState, PersistedWindow } from '../session-types';
 
 export interface PtyInfo {
