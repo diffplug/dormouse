@@ -29,4 +29,4 @@ export {
   setActiveThemeId,
 } from './store';
 export { searchThemes, fetchExtensionThemes } from './openvsx';
-export type { OpenVSXExtension } from './openvsx';
+export type { OpenVSXExtension, OpenVSXSearchResult } from './openvsx';
