@@ -123,8 +123,11 @@ function PlaygroundDesktopExperience() {
       adapterRef.current = adapter;
 
       // Every shell is the playground's own, which prints its prompt on spawn
-      // (`PlaygroundShellRegistry`); no scenario plays. A named shell keeps a
-      // Windows visitor's default from reading as `cmd`, whose Tools are refused.
+      // (`PlaygroundShellRegistry`); no scenario plays. The adapter is shared
+      // across client-side navigations, so drop the default scenario the Pocket
+      // page leaves behind. A named shell keeps a Windows visitor's default from
+      // reading as `cmd`, whose Tools are refused.
+      adapter.clearDefaultScenario();
       shellDefaults.setDefaultShellOpts({ shell: "/bin/fake" });
       const fsHost = playgroundFs.installPlaygroundFs(adapter);
       disposeFsRef.current = fsHost.dispose;
