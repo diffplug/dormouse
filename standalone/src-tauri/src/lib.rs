@@ -4568,7 +4568,9 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
                 break;
             };
             let message = format!("[sidecar] {}", line.trim_end());
-            eprintln!("{message}");
+            // Never `eprintln!`: it panics once the launching terminal or pipe
+            // is gone, and `abort_on_panic` turns that into an abort.
+            let _ = writeln!(std::io::stderr(), "{message}");
             append_log(message);
         }
     });
@@ -7049,6 +7051,16 @@ mod tests {
         }
         assert!(offenders.is_empty(), "these open a window without send_window_labels: {offenders:?}");
         assert!(src.contains("restore_windows(app.handle()"), "setup must still restore windows itself");
+    }
+
+    /// The print macros panic when stdout or stderr is closed (a launching
+    /// shell that exited), and `abort_on_panic` makes that an abort.
+    #[test]
+    fn no_print_macro_can_abort_the_app() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        for mac in ["print!(", "println!(", "dbg!("] {
+            assert!(!src.contains(mac), "use `let _ = writeln!(std::io::stderr(), ..)`, not {mac}");
+        }
     }
 
     #[test]
