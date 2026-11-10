@@ -11,7 +11,7 @@ const TRICKY_ARGV = [
   'a\\', ';echo INJECTED;#',
   "it's", "'", '\\', '\\\\', "\\'", "x\\'; echo INJECTED; '",
   'back\\slash', 'a b', '$(echo INJECTED)', '`echo INJECTED`', '$HOME', '~', '*', '{a,b}',
-  'line\nbreak', 'tab\there', '', '-n', 'café’s', '=sh', '~root', 'a=b',
+  'line\nbreak', 'tab\there', '', '-n', 'café’s', '=sh', '~root', 'a=b', '%self',
 ];
 
 const ECHO_ARGV = 'process.stdout.write(JSON.stringify(process.argv.slice(1)))';
