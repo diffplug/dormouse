@@ -96,8 +96,8 @@ const fixtureSurfaces = [
 // The Window's Workspaces, as the host projects them for `--workspaces` and for
 // the `--all` group headers.
 const fixtureWorkspaces = [
-  { id: 'workspace:1', name: 'Workspace 1', pinned: false, active: true, ringing: false, todo: false, count: 0 },
-  { id: 'workspace:2', name: 'build', pinned: true, active: false, ringing: true, todo: true, count: 2 },
+  { id: 'workspace:1', name: 'Workspace 1', auto: true, pinned: false, active: true, ringing: false, todo: false, count: 0 },
+  { id: 'workspace:2', name: 'build', auto: false, pinned: true, active: false, ringing: true, todo: true, count: 2 },
 ];
 
 // Listening ports the host would attach to a terminal Surface for `--ports`.

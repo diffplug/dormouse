@@ -97,7 +97,7 @@ const HANDLERS = [
   { tool: 'builtin:code', description: 'code editor (source)', reason: 'built-in' },
 ];
 
-function pickerClient({ handlers = async () => ({ target: '/x', directory: false, handlers: HANDLERS, config: '/home/me/.config/dormouse/dormouse.yml', warnings: [] }) } = {}) {
+function pickerClient({ handlers = async () => ({ handlers: HANDLERS, config: '/home/me/.config/dormouse/dormouse.yml' }) } = {}) {
   return {
     requests: [],
     async openHandlers(request) {
