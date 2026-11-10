@@ -126,20 +126,24 @@ const jsonBody = (request: EditorRequest, limit: number) =>
 const LIST_MARKER = /^([-*+]|\d{1,9}[.)])(?=[ \t]|$)( *)/;
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const FENCE = /^(`{3,}|~{3,})/;
-// A heading, an HTML block, or a rule or setext underline: no paragraph
-// continues past one, so the next line may start a code block.
-const OPENS_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|<|(?:[-*_=][ \t]*)+$)/;
+// A heading, or a rule or setext underline: no paragraph continues past one,
+// so the next line may start a code block.
+const OPENS_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[-*_=][ \t]*)+$)/;
+// What may open an HTML block or comment (`<!--`, `<pre`, `<script`, any tag),
+// whose end and contents the scan does not model.
+const HTML_START = /^<[A-Za-z/!?]/;
 const blank = (line: string) => /^[ \t]*$/.test(line);
 
 /**
  * Whether `text` has a line that could start an indented code block: four
  * columns past the content of the list item enclosing it, where a block may
- * start (the document's start, after a blank line, a heading, rule, HTML, or a
+ * start (the document's start, after a blank line, a heading, rule, or a
  * fence's end), outside any fence. A necessary condition, not a detector: one
  * linear pass, no parse, that errs toward a candidate wherever it is unsure (a
- * tab in an indent, a blockquote, a marker that cannot start a list there),
- * because a missed block is a file rewritten on save. List-aware, so what the
- * rich editor writes never passes.
+ * tab in an indent, a blockquote, a marker that cannot start a list there, any
+ * HTML, an empty list item's later lines), because a missed block is a file
+ * rewritten on save. List-aware, so what the rich editor writes never passes.
+ * Only `markdownEditing` past `MARKDOWN_PARSE_BOUND` relies on it.
  */
 export function mayHoldIndentedCode(text: string): boolean {
   /** The content offsets of the list items enclosing the line, innermost last. */
@@ -156,7 +160,8 @@ export function mayHoldIndentedCode(text: string): boolean {
     const rest = line.slice(indent);
     if (fence && indent < fence.offset) fence = null; // its list item ended
     if (fence) {
-      const close = FENCE.exec(rest);
+      // A closing fence is indented at most three columns.
+      const close = indent - fence.offset <= 3 && FENCE.exec(rest);
       if (close && close[1][0] === fence.char && close[1].length >= fence.length && blank(rest.slice(close[1].length))) {
         fence = null;
         blockStart = true;
@@ -176,6 +181,7 @@ export function mayHoldIndentedCode(text: string): boolean {
       const inner = /^[ \t]*/.exec(quoted)![0];
       if (blank(quoted)) blockStart = true;
       else if (blockStart && (inner.includes('\t') || inner.length >= 4)) return true;
+      else if (HTML_START.test(quoted.slice(inner.length))) return true;
       else blockStart = OPENS_BLOCK.test(quoted) || FENCE.test(quoted.slice(inner.length));
       continue;
     }
@@ -188,13 +194,14 @@ export function mayHoldIndentedCode(text: string): boolean {
       content = rest.slice(marker[0].length);
       // Past four spaces the item opens with indented code; a tab, unsure.
       if (!blank(content) && (marker[2].length > 4 || content.startsWith('\t'))) return true;
-      // CommonMark: past four spaces, or none before the line's end, the
-      // content starts one column after the marker.
-      const spaces = blank(content) || marker[2].length > 4 ? 1 : marker[2].length;
-      items.push(indent + marker[1].length + spaces);
+      // An empty item encloses nothing: a blank line after it ends it, so its
+      // later lines are measured against the enclosing item.
       if (blank(content)) { blockStart = true; continue; }
+      // CommonMark: past four spaces the content starts one column after the marker.
+      items.push(indent + marker[1].length + (marker[2].length > 4 ? 1 : marker[2].length));
       content = content.replace(/^ +/, '');
     }
+    if (HTML_START.test(content)) return true;
     const opening = FENCE.exec(content);
     if (opening && !(opening[1][0] === '`' && content.slice(opening[1].length).includes('`'))) {
       fence = { char: opening[1][0], length: opening[1].length, offset: items.length ? items[items.length - 1] : 0 };
@@ -215,11 +222,11 @@ export function parsesIndentedCode(text: string): boolean {
 }
 
 /** Which editor a Markdown document opens in: the rich one, unless it holds an
- * indented code block (`indented`), or may and is too long to parse (`large`),
- * when it opens as source (docs/specs/dor-tools-builtin.md -> Markdown editor). */
+ * indented code block (`indented`), or is too long to parse and the scan finds
+ * a line that may start one (`large`), when it opens as source
+ * (docs/specs/dor-tools-builtin.md -> Markdown editor). */
 export function markdownEditing(text: string, findIndentedCode = parsesIndentedCode): 'rich' | 'indented' | 'large' {
-  if (!mayHoldIndentedCode(text)) return 'rich';
-  if (text.length > MARKDOWN_PARSE_BOUND) return 'large';
+  if (text.length > MARKDOWN_PARSE_BOUND) return mayHoldIndentedCode(text) ? 'large' : 'rich';
   return findIndentedCode(text) ? 'indented' : 'rich';
 }
 

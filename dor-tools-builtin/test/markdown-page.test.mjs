@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 import { markdownPage } from '../dist/editor-page.js';
-import { mayHoldIndentedCode } from '../dist/editor-routes.js';
+import { mayHoldIndentedCode, parsesIndentedCode } from '../dist/editor-routes.js';
 
 // The real Markdown page, bundled as one classic script and mounted in jsdom
 // against a stubbed viewer server: what it shows, and every POST it makes.
@@ -248,8 +248,9 @@ test('a save keeps a line break that ends its paragraph from writing a literal b
   assert.ok(saved.startsWith('Intro word.\n\nLine one\\\nLine two'), saved);
 });
 
-// What the rich editor writes must never look like it could hold indented
-// code, or a document it saved would reopen as source.
+// What the rich editor writes must never hold indented code, which decides a
+// document under the parse bound, nor look like it could to the scan, which
+// decides one past it, or a document it saved would reopen as source.
 for (const text of [
   '- a\n  - b\n    - c\n',
   '1. a\n   1. b\n      1. c\n',
@@ -264,9 +265,10 @@ for (const text of [
   '# H1\n\n## H2\n\ntext\n',
   'Line one\\\nLine two\n\n- item one\\\n  item two\n',
 ]) {
-  test(`what the rich editor saves passes the indented-code scan: ${JSON.stringify(text)}`, { timeout: 30_000 }, async () => {
+  test(`what the rich editor saves reopens rich at any size: ${JSON.stringify(text)}`, { timeout: 30_000 }, async () => {
     const saved = await fixedAndSaved(text);
     assert.ok(saved.startsWith('Intro word.'), saved);
+    assert.ok(!parsesIndentedCode(saved), JSON.stringify(saved));
     assert.ok(!mayHoldIndentedCode(saved), JSON.stringify(saved));
   });
 }

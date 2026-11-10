@@ -247,20 +247,29 @@ test('the scan finds every indented code block CommonMark does', () => {
     '- a\n  ```\n  x\n- b\n\nend\n\n    code after a fence its item ended\n',
     '```\nx\n```\n    code after a fence\n',
     '-     code after a marker\n',
+    // A closing fence indented four columns closes nothing.
+    '```\n    ```\n```\n\n    code\n',
+    // An empty item ends at the blank line after it.
+    '-\n\n    code\n',
+    // HTML blocks and comments, whose ends and contents the scan does not model.
+    'Text\n<!-- a\nb -->\n    code\n',
+    '<!--\n```\n-->\n\n    code\n',
+    '<pre>\n```\n</pre>\n\n    code\n',
   ]) {
     assert.equal(parsesIndentedCode(text), true, `fixture: ${JSON.stringify(text)}`);
     assert.equal(mayHoldIndentedCode(text), true, JSON.stringify(text));
   }
 });
 
-test('only a line that could start indented code costs a parse, and only under the bound', () => {
+test('micromark alone decides under the bound, and the scan past it', () => {
   const calls = [];
   const spy = text => { calls.push(text.length); return parsesIndentedCode(text); };
   for (const text of INDENTED) assert.equal(markdownEditing(text, spy), 'indented');
   for (const text of RICH) assert.equal(markdownEditing(text, spy), 'rich');
-  // None of the rich cases has a candidate line: a list item's continuation
-  // sits within the item, and indented lines in a fence are code already.
-  assert.equal(calls.length, INDENTED.length);
+  assert.equal(calls.length, INDENTED.length + RICH.length);
+  // The scan agrees on these, so each opens the same past the bound: a list
+  // item's continuation sits within the item, and a fence's lines are code.
+  for (const text of RICH) assert.equal(mayHoldIndentedCode(text), false, JSON.stringify(text));
 
   calls.length = 0;
   const prose = 'A paragraph of prose,\nwrapped over lines\n    and a lazy indented one.\n\n'.repeat(Math.ceil(300 * 1024 / 72));
