@@ -86,7 +86,7 @@ export function handlePaneShortcuts(
     const dir = e.key;
     const hist = navHistory.current;
     let targetId: string | null = null;
-    if (hist && ARROW_OPPOSITES[dir] === hist.direction && ctx.nav.hasPane(hist.fromId)) {
+    if (hist && hist.at === sid && ARROW_OPPOSITES[dir] === hist.direction && ctx.nav.hasPane(hist.fromId)) {
       targetId = hist.fromId;
     } else {
       targetId = ctx.nav.findInDirection(sid, dir);
@@ -101,7 +101,7 @@ export function handlePaneShortcuts(
     // partner — the pane now holding the old slot. The opposite Cmd+Arrow then
     // swaps back exactly, and a plain opposite arrow selects that partner;
     // `fromId: sid` here would make both resolve to the selected pane itself.
-    navHistory.current = { direction: dir, fromId: targetId };
+    navHistory.current = { direction: dir, fromId: targetId, at: sid };
     ctx.selectPane(sid);
     return true;
   }

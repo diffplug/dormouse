@@ -213,7 +213,7 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
     const event = new KeyboardEvent('keydown', {
       key: 'ArrowLeft', [modifier]: true, bubbles: true, cancelable: true,
     });
-    const history = { current: { direction: 'ArrowRight' as const, fromId: 'pane-b' } };
+    const history = { current: { direction: 'ArrowRight' as const, fromId: 'pane-b', at: 'pane-a' } };
 
     expect(handlePaneShortcuts(event, ctx, history)).toBe(true);
 
@@ -238,7 +238,7 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
     expect(ctx.selectPane).toHaveBeenCalledWith('pane-a');
     // Selection stayed on pane-a, so the breadcrumb must record the swap
     // partner — recording pane-a would make the backtrack a self-swap no-op.
-    expect(navHistory.current).toEqual({ direction: 'ArrowRight', fromId: 'pane-b' });
+    expect(navHistory.current).toEqual({ direction: 'ArrowRight', fromId: 'pane-b', at: 'pane-a' });
   });
 
   it('backtracks: the opposite Cmd-Arrow swaps back with the pane now in the old slot', () => {
@@ -257,6 +257,22 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
 
     expect(ctx.swapWithNeighbor).toHaveBeenNthCalledWith(2, 'pane-a', 'pane-b');
     expect(ctx.fireEvent).toHaveBeenNthCalledWith(2, { type: 'move', fromId: 'pane-a', toId: 'pane-b' });
+  });
+
+  it('ignores a breadcrumb left on another pane and swaps with the spatial neighbor', () => {
+    const ctx = makeCtx({
+      nav: makeNav({ findInDirection: (id, dir) => (id === 'pane-c' && dir === 'ArrowUp' ? 'pane-d' : null), hasPane: () => true }),
+    });
+    const navHistory = { current: null };
+    expect(handlePaneShortcuts(keydownMeta('ArrowDown'), makeCtx({
+      nav: makeNav({ findInDirection: () => 'pane-b', hasPane: () => true }),
+    }), navHistory)).toBe(true);
+    // A click moved the selection away from where that swap left it.
+    ctx.selectedIdRef.current = 'pane-c';
+
+    expect(handlePaneShortcuts(keydownMeta('ArrowUp'), ctx, navHistory)).toBe(true);
+
+    expect(ctx.swapWithNeighbor).toHaveBeenCalledWith('pane-c', 'pane-d');
   });
 
   it('does nothing when nav finds no neighbor in that direction', () => {

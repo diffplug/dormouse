@@ -315,7 +315,7 @@ Source of truth: `resolvePaneElement` in `lib/src/components/wall/resolve-pane-e
 
 **Must resolve arrow navigation through the engine-neutral `WallNav` seam to Lath's `neighborOf`, never a DOM rect scan.** Neighbor eligibility: `docs/specs/tiling-engine.md` → "Layout".
 
-Back-navigation: a breadcrumb tracks the last navigation direction and origin pane, and **the opposite direction must return to the origin instead of doing a spatial lookup**, so asymmetric layouts navigate reversibly.
+Back-navigation: a breadcrumb tracks the last navigation direction and origin pane, and **the opposite direction must return to the origin instead of doing a spatial lookup**, so asymmetric layouts navigate reversibly. The breadcrumb holds only while the selection is the pane its move left selected; any other selection change voids it.
 
 Pane↔door: Down from a pane with no pane below it selects the first door; Up from a door selects the last pane; Left/Right moves between doors. Doors have no spatial query — they are an ordered list.
 
