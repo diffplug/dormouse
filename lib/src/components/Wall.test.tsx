@@ -3703,6 +3703,27 @@ describe('Wall on the Lath engine', () => {
     return response;
   }
 
+  it('reopens command mode when the pane under rename is killed without a blur', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+    await flush();
+    const key = (name: string) => act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })); });
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:a"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    await key(',');
+    const input = container.querySelector<HTMLInputElement>('[data-pane-header-for="surface:a"] input');
+    expect(input).not.toBeNull();
+    // WebKit removes a focused node without dispatching a blur.
+    const swallow = (e: FocusEvent) => e.stopPropagation();
+    window.addEventListener('focusout', swallow, true);
+    try {
+      expect((await dispatchKill('surface:a'))?.ok).toBe(true);
+      await waitUntil(() => container.querySelector('[data-lath-leaf="surface:a"]') === null);
+      await key('m');
+      expect(container.querySelector('[data-door-id="surface:b"]')).not.toBeNull();
+    } finally {
+      window.removeEventListener('focusout', swallow, true);
+    }
+  });
+
   async function dispatchAgentBrowser(params: Record<string, unknown>): Promise<string> {
     const response = await dispatchAgentBrowserResponse(params);
     expect(response?.ok).toBe(true);

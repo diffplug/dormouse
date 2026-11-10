@@ -1063,6 +1063,14 @@ export function Wall({
       if (leavesChanged) {
         prevLeafIdsRef.current = new Set(currentIds);
         publishMembership();
+        // A rename editor that leaves with its pane may never blur (WebKit drops
+        // focus from a removed node silently), and its open gate would mute
+        // command mode until another rename ends.
+        const renaming = renamingRef.current;
+        if (renaming !== null && !lath.store.has(renaming)) {
+          renamingRef.current = null;
+          setRenamingPaneId(null);
+        }
       }
       if (closingWorkspaceRef.current || movingSurfaceRef.current) return;
       // A commit that empties the tree took every pre-commit leaf with it.
