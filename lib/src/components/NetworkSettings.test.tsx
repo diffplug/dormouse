@@ -3,7 +3,7 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { setPlatform } from '../lib/platform';
 import { setNativeFieldValue } from '../lib/dom';
 import { canonicalCidr } from '../host/remote/network-interfaces';
@@ -324,7 +324,8 @@ describe('pathRefusalSentence', () => {
 let container: HTMLDivElement;
 let root: Root;
 let platform: FakePtyAdapter;
-let command: ReturnType<typeof vi.fn>;
+type Command = (cmd: string, params?: unknown) => Promise<unknown>;
+let command: Mock<Command>;
 
 /** Serve the panel from the stub link, recording every command it sends. */
 function link(primed: PrimedBurrow) {
@@ -333,11 +334,9 @@ function link(primed: PrimedBurrow) {
   platform.burrow = { ...stub, command };
 }
 
-type Command = (cmd: string, params?: unknown) => Promise<unknown>;
-
 /** Wrap the link's `command` so `answer` may answer first; `undefined` falls through to `stub`. */
 function intercept(answer: (cmd: string, params: unknown, stub: Command) => unknown) {
-  const stub = command as Command;
+  const stub = command;
   command = vi.fn(async (cmd: string, params?: unknown) => {
     const answered = answer(cmd, params, stub);
     return answered === undefined ? stub(cmd, params) : answered;

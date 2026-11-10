@@ -116,7 +116,7 @@ import {
   type TestOneTimePhone,
   type TestRendezvous,
 } from '../../remote/test-rendezvous';
-import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
+import type { BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN, HOSTED_ONE_TIME_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import {
@@ -257,7 +257,9 @@ function fakeProvider(): BurrowSurfaceProvider {
     releaseSurface: () => {},
     writePty: () => {},
     resizePty: () => {},
-    streamPty: () => () => {},
+    streamPty: () => ({ stop: () => {}, ready: Promise.resolve() }),
+    resolveBrowser: async () => null,
+    closeSurface: async () => ({ outcome: 'refused', message: 'no surfaces' }),
   };
 }
 
@@ -1209,7 +1211,11 @@ describe('pairing queue', () => {
     const qr = (await command('setupQr')).result as SetupQrResult;
     const invitation = await parsePairingInvitationUrl(qr.url, ORIGIN);
     if (!invitation) throw new Error(`the Burrow composed a URL Pocket cannot read: ${qr.url}`);
-    const before = queueEvents().length;
+    // Not any queue event: a replacement's first one is the dismissal of the
+    // pairing it replaces, and its own entry lands after more WebCrypto.
+    const seen = new Set(queueEvents().flatMap((event) => event.queue.map((entry) => entry.pairingId)));
+    const queued = () =>
+      queueEvents().at(-1)?.queue.find((entry) => entry.clientId === clientId && !seen.has(entry.pairingId));
     const paired = await pairThroughSocket({
       socket,
       burrowId: ENROLLMENT.burrowId,
@@ -1217,9 +1223,9 @@ describe('pairing queue', () => {
       invitation,
       authenticator,
       ...over,
-      until: () => queueEvents().length > before,
+      until: () => queued() !== undefined,
     });
-    const item = queueEvents().at(-1)!.queue.find((entry) => entry.clientId === clientId)!;
+    const item = queued()!;
     return { ...paired, invitation, item };
   }
 
@@ -1303,8 +1309,8 @@ describe('pairing queue', () => {
     let completed = false;
     const approval = command('approve', { clientId: 'c1', pairingId: item.pairingId, code })
       .then(() => { completed = true; });
-    await settle();
-    expect(save).toHaveBeenCalledOnce();
+    // The write comes after the approval's WebCrypto, which no fixed settle outlasts.
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
     expect(completed).toBe(false);
     expect(socket.sent).toHaveLength(framesBefore);
     write.reject(new Error('disk full'));
@@ -1321,12 +1327,12 @@ describe('pairing queue', () => {
     const { item, invitation, session, code } = await pair(socket, 'c1');
     const write = Promise.withResolvers<void>();
     const persist = store.saveAcl.bind(store);
-    vi.spyOn(store, 'saveAcl').mockImplementation(async (burrowId, records) => {
+    const save = vi.spyOn(store, 'saveAcl').mockImplementation(async (burrowId, records) => {
       await write.promise;
       await persist(burrowId, records);
     });
     const approval = command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
-    await settle();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
     let restarted = false;
     const restart = service.start().then(() => { restarted = true; });
     await settle();
@@ -1346,14 +1352,16 @@ describe('pairing queue', () => {
     const { item, code } = await pair(socket, 'c1');
     const write = Promise.withResolvers<void>();
     const persist = store.saveAcl.bind(store);
-    vi.spyOn(store, 'saveAcl')
+    const save = vi
+      .spyOn(store, 'saveAcl')
       .mockImplementationOnce(async (burrowId, records) => {
         await write.promise;
         await persist(burrowId, records);
       })
       .mockRejectedValueOnce(new Error('disk full'));
     const approval = command('approve', { clientId: 'c1', pairingId: item.pairingId, code });
-    await settle();
+    // The revocation must land while the approval's write is out.
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
     const revoking = command('revokeDevice', { id: deviceIdFor(phone.clientStaticPublicKey) });
     await settle();
     write.resolve();
@@ -2531,8 +2539,10 @@ describe('one-time connection', () => {
     expect(rendezvous.rooms).toEqual([]);
     expect(oneTimeStates()).toEqual([]);
     // The same answers a window with no service gives (`vscode-ext/src/burrow.ts`).
-    expect(idleOneTimeState(null)).toEqual({ status: 'unavailable', reason: 'self-host' });
-    expect(idleOneTimeState(HOSTED_ORIGIN)).toEqual({ status: 'idle' });
+    expect(idleOneTimeState(null, 'local')).toEqual({ status: 'unavailable', reason: 'self-host' });
+    expect(idleOneTimeState(null, 'nothing')).toEqual({ status: 'unavailable', reason: 'self-host' });
+    expect(idleOneTimeState(HOSTED_ORIGIN, 'local')).toEqual({ status: 'idle' });
+    expect(idleOneTimeState(HOSTED_ORIGIN, 'nothing')).toEqual({ status: 'unavailable', reason: 'network-off' });
   });
 
   it.each([false, true])('cancels an opening policy read (fresh request: %s)', async (retry) => {
@@ -3475,6 +3485,8 @@ describe('Hosted enrollment', () => {
   let begin: Record<string, unknown>;
   /** A promise is a poll held on the wire until the test settles it. */
   let polls: Array<PollAnswer | Error | Response | Promise<PollAnswer>>;
+  /** Whether the last poll asked was one {@link heldPoll} holds for the test to answer. */
+  let lastPollHeld: boolean;
 
   const reply = (status: number, body: unknown) =>
     ({
@@ -3491,7 +3503,9 @@ describe('Hosted enrollment', () => {
       requests.push({ url, init });
       if (url.endsWith(API_ROUTES.burrowEnrollBegin)) return reply(200, begin);
       if (url.endsWith(API_ROUTES.burrowEnrollPoll)) {
-        const next = await (polls.shift() ?? { status: 200, body: { status: 'pending' } });
+        const queued = polls.shift() ?? { status: 200, body: { status: 'pending' } };
+        lastPollHeld = queued instanceof Promise;
+        const next = await queued;
         if (next instanceof Error) throw next;
         if (next instanceof Response) return next;
         return reply(next.status, next.body);
@@ -3535,21 +3549,40 @@ describe('Hosted enrollment', () => {
     return ((await command('status')).result as BurrowConsoleStatus).hostedEnrollment;
   }
 
-  /** Let the work a fired timer started finish: fetches, WebCrypto, the store. */
-  async function drain(until: () => boolean): Promise<void> {
-    for (let turn = 0; turn < 500 && !until(); turn += 1) {
+  async function approvalStatus(): Promise<string | undefined> {
+    return ((await command('status')).result as BurrowConsoleStatus).hostedEnrollment?.status;
+  }
+
+  /**
+   * Wait, by the wall clock, until `until` holds. **Never a count of
+   * event-loop turns**: a redemption starts its Burrow behind a WebCrypto
+   * check of the Noise static, which runs on a worker thread that no number
+   * of turns outlasts on a loaded machine. Not `vi.waitFor`, which advances
+   * the fake clock and so would fire the next poll.
+   */
+  async function eventually(until: () => boolean | Promise<boolean>): Promise<void> {
+    const deadline = performance.now() + 4000;
+    while (!(await until())) {
+      if (performance.now() > deadline) throw new Error(`timed out waiting for ${String(until)}`);
       await new Promise((resolve) => setImmediate(resolve));
     }
   }
 
-  /** Fire the next poll and wait for it to have asked. */
+  /**
+   * Fire the next poll, wait for it to have asked, and, unless the test holds
+   * its answer, for the approval to have acted on it: the next poll
+   * scheduled, or the code waiting no more (ended, or redeeming).
+   */
   async function nextPoll(): Promise<void> {
     const asked = pollRequests().length;
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 1000);
-    await drain(() => pollRequests().length > asked);
-    // And for what the answer started.
-    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+    await eventually(() => pollRequests().length > asked);
+    if (lastPollHeld) return;
+    await eventually(async () => vi.getTimerCount() > 0 || (await approvalStatus()) !== 'waiting');
   }
+
+  /** Wait for a redemption of the current code to have been kept or to have failed. */
+  const redeemed = () => eventually(async () => (await approvalStatus()) !== 'redeeming');
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
@@ -3563,6 +3596,7 @@ describe('Hosted enrollment', () => {
       interval: INTERVAL_S,
     };
     polls = [];
+    lastPollHeld = false;
   });
 
   afterEach(() => {
@@ -3603,7 +3637,7 @@ describe('Hosted enrollment', () => {
 
     polls.push(enrolledAnswer());
     await nextPoll();
-    await drain(() => store.enrollment !== null);
+    await redeemed();
 
     expect(store.enrollment).toMatchObject({
       relayUrl: HOSTED_ORIGIN,
@@ -3635,7 +3669,7 @@ describe('Hosted enrollment', () => {
     const answer = enrolledAnswer();
     polls.push({ ...answer, body: { ...answer.body, voiceToken } });
     await nextPoll();
-    await drain(() => store.enrollment !== null);
+    await eventually(() => store.enrollment !== null);
     expect(JSON.stringify(sent)).not.toContain(voiceToken);
     expect(store.enrollment).not.toHaveProperty('voiceToken');
     await command('clearEnrollment');
@@ -3679,7 +3713,7 @@ describe('Hosted enrollment', () => {
     // A computer removed at the account, and the kept approval redeems.
     polls.push(enrolledAnswer());
     await nextPoll();
-    await drain(() => store.enrollment !== null);
+    await eventually(() => store.enrollment !== null);
     expect(store.enrollment?.burrowId).toBe(BURROW_ID);
 
     service.dispose();
@@ -3703,12 +3737,12 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toHaveLength(3);
     expect(await hostedEnrollment()).toMatchObject({ status: 'waiting' });
 
-    // The interval grew by five seconds.
+    // The interval grew by five seconds. The fake clock's async advance runs
+    // a real turn after each timer it fires, so a poll it fired has asked.
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 1000);
-    await drain(() => false);
     expect(pollRequests()).toHaveLength(3);
     await vi.advanceTimersByTimeAsync(5_000);
-    await drain(() => pollRequests().length > 3);
+    await eventually(() => pollRequests().length > 3);
     expect(pollRequests()).toHaveLength(4);
   });
 
@@ -3724,7 +3758,6 @@ describe('Hosted enrollment', () => {
     const { result } = await command('beginHostedEnrollment', { label: 'x' });
     expect((result as { expiresAt: number }).expiresAt).toBe(Date.now() + 15 * 60_000);
     await vi.advanceTimersByTimeAsync(15 * 60_000);
-    await drain(() => false);
     expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
     const asked = pollRequests().length;
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
@@ -3833,7 +3866,7 @@ describe('Hosted enrollment', () => {
     await command('cancelHostedEnrollment');
     expect(await hostedEnrollment()).toBeNull();
     answer(enrolledAnswer());
-    await drain(() => store.enrollment !== null);
+    await eventually(() => store.enrollment !== null);
 
     expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID, label: 'Work laptop' });
     expect((await command('status')).result).toMatchObject({ enrolled: true, hostedEnrollment: null });
@@ -3852,11 +3885,12 @@ describe('Hosted enrollment', () => {
     await command('beginHostedEnrollment', { label: 'x' });
     expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', confirmDigits: '99' });
     answer(enrolledAnswer());
-    await drain(() => store.enrollment !== null);
-    await drain(() => vi.getTimerCount() === 0);
+    // The code begun after it goes once the redemption is kept, its Burrow started.
+    await eventually(async () => (await hostedEnrollment()) === null);
 
     expect(store.enrollment?.burrowId).toBe(BURROW_ID);
     expect(await hostedEnrollment()).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
     expect(pollRequests()).toHaveLength(1);
   });
@@ -3872,10 +3906,11 @@ describe('Hosted enrollment', () => {
     await command('beginHostedEnrollment', { label: 'x' });
     polls.push(enrolledAnswer());
     await nextPoll();
-    await drain(() => store.enrollment !== null);
+    await eventually(() => store.enrollment !== null);
 
     late(enrolledAnswer(OTHER));
-    await drain(() => false);
+    // Its hold waits its turn behind the first redemption's Burrow start.
+    await eventually(async () => (await approvalStatus()) === 'ended');
     expect(store.enrollment?.burrowId).toBe(BURROW_ID);
     expect((await command('status')).result).toMatchObject({
       enrolled: true,
@@ -3895,7 +3930,7 @@ describe('Hosted enrollment', () => {
     service.dispose();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     answer(enrolledAnswer());
-    await drain(() => warn.mock.calls.length > 0);
+    await eventually(() => warn.mock.calls.length > 0);
 
     expect(store.enrollment).toBeNull();
     expect(String(warn.mock.calls[0]![0])).toContain(stranded(BURROW_ID));
@@ -3927,8 +3962,7 @@ describe('Hosted enrollment', () => {
     });
     expect(beginRequests()).toHaveLength(1);
     release();
-    await drain(() => store.enrollment !== null);
-    await drain(() => false);
+    await redeemed();
     expect((await command('status')).result).toMatchObject({ enrolled: true, hostedEnrollment: null });
   });
 
@@ -4006,7 +4040,7 @@ describe('Hosted enrollment', () => {
     (answer.body.enrollment as { origin: string }).origin = 'https://relay.example.com';
     polls.push(answer);
     await nextPoll();
-    await drain(() => store.enrollment !== null);
+    await redeemed();
 
     expect(store.enrollment).toBeNull();
     expect(await hostedEnrollment()).toEqual({
@@ -4025,6 +4059,7 @@ describe('Hosted enrollment', () => {
     };
     polls.push(enrolledAnswer());
     await nextPoll();
+    await redeemed();
 
     // A fixed sentence naming the Burrow the Relay recorded, and where to remove it.
     expect(await hostedEnrollment()).toEqual({
@@ -4043,6 +4078,7 @@ describe('Hosted enrollment', () => {
     };
     polls.push(enrolledAnswer());
     await nextPoll();
+    await redeemed();
 
     expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID });
     expect((await command('status')).result).toMatchObject({ enrolled: true });

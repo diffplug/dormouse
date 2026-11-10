@@ -55,6 +55,13 @@ function createPlatform(
     alertClearTodo: vi.fn(),
     onAlertState: vi.fn(),
     onWatchedCommands: vi.fn(),
+    getOpenPorts: vi.fn(async () => []),
+    getOpenPortsMany: vi.fn(async () => ({})),
+    alertPublishSettings: vi.fn(),
+    alertPublishSessions: vi.fn(),
+    alertAwait: vi.fn(),
+    onAlertSettings: vi.fn(),
+    onAlertSpeak: vi.fn(() => () => {}),
     saveState: vi.fn(),
     getState: vi.fn(() => savedState),
   };
@@ -311,7 +318,7 @@ describe('restoreSession', () => {
           cwd: null,
           untouched: false,
           surfaceType: 'browser',
-          alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
+          alert: { status: 'WATCHING_DISABLED', todo: true, notification: null },
         },
       ],
     };

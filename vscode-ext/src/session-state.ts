@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
-import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
+import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedAlertState, type PersistedSession } from '../../lib/src/lib/session-types';
 import {
   captureAgentRecovery,
   DEFAULT_RECOVERY_WAIT_MS,

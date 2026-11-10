@@ -86,7 +86,7 @@ describe('workspace-store', () => {
       expect(() => createWorkspace({ id: DEFAULT_WORKSPACE_ID })).toThrow('Duplicate Workspace id');
       expect(() => setWorkspaces({
         activeId: DEFAULT_WORKSPACE_ID,
-        workspaces: [...initial.workspaces, { id: DEFAULT_WORKSPACE_ID, name: 'Duplicate' }],
+        workspaces: [...initial.workspaces, { id: DEFAULT_WORKSPACE_ID, name: 'Duplicate', nameIsAuto: false }],
       })).toThrow('Duplicate Workspace id');
       expect(getWorkspacesSnapshot()).toBe(initial);
       expect(listener).not.toHaveBeenCalled();
@@ -166,7 +166,7 @@ describe('workspace-store', () => {
   });
 
   it('setWorkspaces loads a list; bad activeId falls back to first; empty resets to default', () => {
-    setWorkspaces({ workspaces: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], activeId: 'gone' });
+    setWorkspaces({ workspaces: [{ id: 'a', name: 'A', nameIsAuto: false }, { id: 'b', name: 'B', nameIsAuto: false }], activeId: 'gone' });
     expect(getActiveWorkspaceId()).toBe('a');
     setWorkspaces({ workspaces: [], activeId: 'x' });
     expect(getWorkspacesSnapshot()).toEqual({
@@ -291,7 +291,7 @@ describe('workspace-store', () => {
 
   it('an exact fallback id resolves before a name, and a number never reads as a name', async () => {
     await installWorkspaceIdPool(minting(7));
-    setWorkspaces({ workspaces: [{ id: 'workspace:abc', name: '2' }, { id: 'workspace:def', name: 'abc' }], activeId: 'workspace:abc' });
+    setWorkspaces({ workspaces: [{ id: 'workspace:abc', name: '2', nameIsAuto: false }, { id: 'workspace:def', name: 'abc', nameIsAuto: false }], activeId: 'workspace:abc' });
     expect(resolveWorkspaceRef('workspace:2').ok).toBe(false);
     expect(resolveWorkspaceRef('workspace:abc')).toMatchObject({ ok: true, id: 'workspace:abc' });
     expect(resolveWorkspaceRef('abc')).toMatchObject({ ok: true, id: 'workspace:abc' });

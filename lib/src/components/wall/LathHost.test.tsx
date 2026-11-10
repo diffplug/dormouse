@@ -1,9 +1,9 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, StrictMode, useContext } from 'react';
+import { act, StrictMode, useContext, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type Mock } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { type ContextHelper, createLathWallEngine } from './lath-wall-engine';
@@ -11,7 +11,7 @@ import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
 import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
-import { leaf, split, tree as treeOf, movePreview as movePreviewAt, landingPreview as landingPreviewAt } from '../../lib/lath/test-util';
+import { edgeTarget, leaf, split, tree as treeOf, movePreview as movePreviewAt, landingPreview as landingPreviewAt } from '../../lib/lath/test-util';
 import { leafMeta } from '../../lib/lath/test-fixtures';
 import { SLIDE_ARM_MS } from './lath-drag-controller';
 import type { PaneProps } from './pane-props';
@@ -27,7 +27,7 @@ const RECT = { x: 0, y: 0, width: W, height: H };
 const movePreview = (t: LathTree, dragged: string, target: DropTarget): Rect =>
   movePreviewAt(t, dragged, target, RECT, LATH_LAYOUT_OPTS);
 const landingPreview = (t: LathTree, dragged: string, target: DropTarget): Rect =>
-  landingPreviewAt(t, dragged, target, RECT, LATH_LAYOUT_OPTS);
+  landingPreviewAt(t, dragged, edgeTarget(target), RECT, LATH_LAYOUT_OPTS);
 
 // The hit-test / sash-preview recompute is coalesced into one requestAnimationFrame;
 // wait a real frame so the pending commit lands before asserting on it.
@@ -110,7 +110,14 @@ afterEach(() => {
 // Wrap the store in an engine (LathHost drives the whole engine now). Default to a
 // 0 duration so the geometry/structure tests see frames applied instantly; animation
 // tests pass a fixed duration and a fake clock.
-function mount(store: LathWallStore, onCommitResize = vi.fn(), onLeafFocused = vi.fn(), durationMs = 0) {
+type LathHostProps = ComponentProps<typeof LathHost>;
+
+function mount(
+  store: LathWallStore,
+  onCommitResize: LathHostProps['onCommitResize'] = vi.fn(),
+  onLeafFocused: LathHostProps['onLeafFocused'] = vi.fn(),
+  durationMs = 0,
+) {
   const engine = createLathWallEngine(store, { durationMs });
   act(() => {
     root.render(
@@ -832,10 +839,10 @@ describe('LathHost — imperative animation frames', () => {
 
 describe('LathHost — pane / Door drag', () => {
   type DragHandlers = {
-    onDragStart: ReturnType<typeof vi.fn>;
-    onProposeMove: ReturnType<typeof vi.fn>;
-    onProposeMinimize: ReturnType<typeof vi.fn>;
-    onExternalDrop: ReturnType<typeof vi.fn>;
+    onDragStart: Mock<NonNullable<LathHostProps['onDragStart']>>;
+    onProposeMove: Mock<NonNullable<LathHostProps['onProposeMove']>>;
+    onProposeMinimize: Mock<NonNullable<LathHostProps['onProposeMinimize']>>;
+    onExternalDrop: Mock<NonNullable<LathHostProps['onExternalDrop']>>;
   };
 
   function mountDrag(

@@ -30,11 +30,12 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
     onFrameLeader: vi.fn(),
     onFocusPane: vi.fn(),
     onStartRename: vi.fn(),
-    onFinishRename: vi.fn(() => ({ accepted: true })),
+    onFinishRename: vi.fn(() => ({ accepted: true as const })),
     onCancelRename: vi.fn(),
     onSwapRenderMode: vi.fn(),
     onPinPreview: vi.fn(),
     onBreakTool: vi.fn(),
+    onResolveToolApproval: vi.fn(),
     ...overrides,
   };
 }
@@ -190,10 +191,10 @@ export function mountWallHarness(): WallHarness {
 
 /** Wait out the host's own 100ms state polls (a tool taking over a pane, a
  *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
-export const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
+export const waitUntil = (ready: () => boolean, timeout = 2_000): Promise<void> => vi.waitFor(async () => {
   await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
   expect(ready()).toBe(true);
-}, { timeout: 2_000, interval: 25 });
+}, { timeout, interval: 25 });
 
 /** The integrated shell in `id` reports `line` as its running command. */
 export const reportRunning = (id: string, line: string): void => applyTerminalSemanticEvents(id, [

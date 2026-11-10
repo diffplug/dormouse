@@ -8,7 +8,6 @@ scripts/
 node_modules/
 *.mts
 icon-no-border.svg
-.gitignore
 tsconfig.json
 icon.svg
 *.vsix

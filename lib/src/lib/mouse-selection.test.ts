@@ -252,7 +252,7 @@ describe('mouse-selection: subscription', () => {
     setBracketedPaste('a', true);
     setOverride('a', 'temporary');
     setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 1, shape: 'linewise', dragging: true });
-    setHintToken('a', { kind: 'path', row: 0, startCol: 0, endCol: 5, text: '/tmp' });
+    setHintToken('a', { kind: 'path', start: { row: 0, col: 0 }, end: { row: 0, col: 5 }, text: '/tmp' });
 
     expect(listener).toHaveBeenCalledTimes(4);
   });
