@@ -1084,7 +1084,7 @@ export class PocketClient {
       try {
         await this.#dropAuthorization(record);
       } catch {
-        this.#core.disposeSession();
+        // Left `paired`, as said above.
       }
     }
     return {
@@ -1108,7 +1108,6 @@ export class PocketClient {
     // Best-effort: the tombstone is what makes this retryable, so a failure
     // here costs a later drain rather than the row.
     await this.#retire(tombstone);
-    this.#core.disposeSession();
   }
 
   async #tombstone(
@@ -1372,10 +1371,11 @@ export class PocketClient {
 
   /**
    * A ceremony that failed before an outcome: relay error, dropped socket, or
-   * expired timer, all of them {@link BURROW_UNAVAILABLE_MESSAGE}.
+   * expired timer, all of them {@link BURROW_UNAVAILABLE_MESSAGE}. Its state was
+   * local to it, so nothing is disposed here: a session already working stays
+   * as it was.
    */
   #unavailable(error: unknown): { readonly ok: false; readonly message: string } {
-    this.#core.disposeSession();
     if (error instanceof SessionExpiredError) throw error;
     return { ok: false, message: BURROW_UNAVAILABLE_MESSAGE };
   }

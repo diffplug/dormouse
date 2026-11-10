@@ -1297,6 +1297,21 @@ describe('the direct path, end to end', () => {
     expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
   });
 
+  it('leaves a working session alone when the replacement’s handshake fails', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+    // A second machine the relay is not connected to: its init earns an error.
+    const offline = await seedRecord(run.harness.knownBurrows, testRoutingId());
+
+    expect(await run.harness.client.connect(offline.burrowId)).toMatchObject({ ok: false });
+
+    expect(gone).not.toHaveBeenCalled();
+    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
+    expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
+  });
+
   it('closes the Burrow’s peer with the client the Relay says is gone', async () => {
     const run = await connectedDirect();
     await run.cutover();
