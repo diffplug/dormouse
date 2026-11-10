@@ -4,7 +4,7 @@
  * tree: git's view of `cwd` when it is in a work tree, otherwise a concurrent
  * walk that hands each work tree it reaches to git.
  */
-import { existsSync } from 'node:fs';
+import { lstatSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, resolveBinaryPath, spawnAndCapture, untrustedGitEnv } from 'dor-lib-common';
@@ -107,8 +107,11 @@ async function gitFiles(git: string, cwd: string): Promise<string[] | null> {
   // Each entry is `<tag> <path>`; a deleted file is listed again tagged `R`,
   // and an unmerged one once per stage. A skip-worktree file, tagged `S`, is
   // never reported deleted: a sparse checkout leaves it off disk, while one
-  // skipped by `update-index --skip-worktree` stays.
+  // skipped by `update-index --skip-worktree` stays. `lstat` asks whether
+  // anything is at the path without following a link there, which in an
+  // untrusted repository may point at a network share.
   const entries = listed.stdout.split('\0').filter(Boolean);
-  const gone = new Set(entries.filter(entry => entry.startsWith('R ') || (entry.startsWith('S ') && !existsSync(join(cwd, entry.slice(2))))).map(entry => entry.slice(2)));
+  const onDisk = (path: string) => { try { lstatSync(join(cwd, path)); return true; } catch { return false; } };
+  const gone = new Set(entries.filter(entry => entry.startsWith('R ') || (entry.startsWith('S ') && !onDisk(entry.slice(2)))).map(entry => entry.slice(2)));
   return [...new Set(entries.map(entry => entry.slice(2)))].filter(path => !gone.has(path)).sort(byPath);
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -424,6 +424,27 @@ test('a sparse checkout lists only the skipped files still on disk', async () =>
     const files = [];
     await listFiles(repo, { onFiles: paths => files.push(...paths) });
     assert.deepEqual(files, ['keep/a.txt', 'local.txt']);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test('a skipped file replaced by a link is listed without following the link', { skip: process.platform === 'win32' }, async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'dor-skip-link-'));
+  try {
+    const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repo });
+    git('init', '-q');
+    await writeFile(join(repo, 'local.txt'), '');
+    git('add', '.');
+    git('commit', '-qm', 'x');
+    git('update-index', '--skip-worktree', 'local.txt');
+    // The link's target does not exist, so only a check that follows it calls
+    // the path absent.
+    await rm(join(repo, 'local.txt'));
+    await symlink(join(repo, 'nowhere'), join(repo, 'local.txt'));
+    const files = [];
+    await listFiles(repo, { onFiles: paths => files.push(...paths) });
+    assert.deepEqual(files, ['local.txt']);
   } finally {
     await rm(repo, { recursive: true, force: true });
   }
