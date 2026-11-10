@@ -376,6 +376,29 @@ describe('MobileTerminalUi physical keyboard', () => {
   });
 });
 
+describe('MobileTerminalUi keyboard focus invariant', () => {
+  it('makes a text input the terminal mounts later a non-keyboard target', async () => {
+    const { terminal } = renderUi();
+    const textarea = document.createElement('textarea');
+    await act(async () => { terminal.appendChild(textarea); });
+    expect([textarea.inputMode, textarea.autocomplete, textarea.readOnly, textarea.tabIndex]).toEqual(['none', 'off', true, -1]);
+  });
+
+  it('blurs a focused pane input on a touch, and again across the window Wall can restore focus in', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    const { terminal } = renderUi();
+    const textarea = terminal.appendChild(document.createElement('textarea'));
+    textarea.focus();
+    act(() => terminal.dispatchEvent(pointerEvent('pointerdown')));
+    expect(document.activeElement).not.toBe(textarea);
+    for (const ms of [16, 50, 150]) {
+      textarea.focus();
+      act(() => vi.advanceTimersByTime(ms));
+      expect(document.activeElement, `after ${ms} ms more`).not.toBe(textarea);
+    }
+  });
+});
+
 describe('MobileTerminalUi controls inside the host', () => {
   // `MobileWall`'s header sits inside the host; a press on its buttons is not pane content.
   it.each<MobileTerminalTouchMode>(['gestures', 'cursor'])('leaves a header button its own press in %s mode', (mode) => {

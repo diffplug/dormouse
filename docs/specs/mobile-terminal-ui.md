@@ -126,7 +126,7 @@ Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobileBro
 
 **Pane-content touches must never open the native keyboard.** The pane content area may focus the terminal internally for key routing or mouse handling, but every text input the terminal surface creates — later-mounted ones included — is a non-keyboard target, blurred when the touch starts there; **that blur repeats across the window in which `Wall` can restore focus** (rationale). **The only mobile UI surface that may open the native keyboard is the composer.**
 
-Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx` and `lib/src/components/MobileWall.test.tsx`.
+Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
 
 ## Future
 

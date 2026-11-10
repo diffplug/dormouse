@@ -894,7 +894,7 @@ export function MobileTerminalUi({
       const hostBottom = rootTop + host.offsetTop + host.offsetHeight;
       const top = Math.max(0, Math.round(visible.top - rootTop));
       const pan = Math.max(0, Math.round(hostBottom - visible.bottom));
-      // iOS fires these through the keyboard's whole animation; most change nothing.
+      // These may fire through the keyboard's whole animation; most change nothing.
       setKeyboardInset((prev) => (prev.top === top && prev.pan === pan ? prev : { top, pan }));
     };
     update();
