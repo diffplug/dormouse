@@ -66,7 +66,8 @@
  *   4. In the shipped directories, nothing binds beyond loopback —
  *      the inbound half of Settings → Network → Nowhere's "phones can't reach
  *      it" (`docs/specs/security-local.md` -> "Network policy"). Every
- *      `.listen(` or `serve({` is one of the loopback bind forms above or a
+ *      `.listen(`, `serve(`, or `new WebSocketServer(` is one of the loopback
+ *      bind forms above (a port-only `ws` server is not), a `noServer` one, or a
  *      `CHECK_4_EXCEPTIONS` call; no `0.0.0.0`, `::`, or `*` host; and a UDP
  *      socket (`createSocket(`, `RTCPeerConnection(`) only where
  *      `CHECK_4_EXCEPTIONS` says why. Its scope is `SHIPPED_DIRS` in
@@ -262,6 +263,13 @@ if (nonTestListeners.length === 0) {
 }
 
 // --- Check 4: nothing shipped binds beyond loopback ---------------------------
+// Every call that can bind, inline options or not, and the forms of it that
+// bind loopback. A `ws` server given only a port binds every interface, so
+// that form is a listener for check 1 but never loopback here; one created
+// with `noServer: true` binds nothing.
+const BIND_CALL = /\.listen\(|\bserve\(|\bnew\s+WebSocket\.?Server\s*\(/g;
+const LOOPBACK_BIND_RE = new RegExp(BIND_FORMS.filter((form) => form.label !== 'ws, port only').map((form) => form.re).join('|'), 'gs');
+const WS_NO_SERVER = new RegExp(`^${WS_NEW}noServer\\s*:\\s*true\\b`, 's');
 const WILDCARD_HOST = /(?:\b(?:host|hostname|address|bindAddress)\s*:\s*|\.listen\([^)]*?,\s*)['"](?:0\.0\.0\.0|::|\*)['"]/g;
 const UDP_BIND = /\bcreateSocket\s*\(|\bRTCPeerConnection\s*\(/g;
 const usedExceptions = new Set();
@@ -281,9 +289,9 @@ for (const rel of sourceFiles().filter(isShippedSource)) {
   if (PHONE_DIRS.some((dir) => rel.startsWith(dir)) || SELF.has(rel)) continue;
   if (!existsSync(join(ROOT, rel))) continue;
   const text = readFileSync(join(ROOT, rel), 'utf-8');
-  const loopbackAt = new Set([...text.matchAll(LISTEN_RE)].map((m) => m.index));
-  for (const call of text.matchAll(/\.listen\(|\bserve\(\s*\{/g)) {
-    if (loopbackAt.has(call.index) || excepted(rel, text, call.index)) continue;
+  const loopbackAt = new Set([...text.matchAll(LOOPBACK_BIND_RE)].map((m) => m.index));
+  for (const call of text.matchAll(BIND_CALL)) {
+    if (loopbackAt.has(call.index) || WS_NO_SERVER.test(text.slice(call.index)) || excepted(rel, text, call.index)) continue;
     problems.push(
       `${rel}:${lineOf(text, call.index)}: a shipped listener with no spelled-out loopback host.\n`
       + '      With no host, Node binds every interface, and a phone on any network can\n'

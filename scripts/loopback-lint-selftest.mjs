@@ -112,6 +112,8 @@ const BEYOND_LOOPBACK = [
   ['.listen({ port }) with no host', '\nexport function __selftest(s: any) { s.listen({ port: 0 }); }\n', 'no spelled-out loopback host'],
   ['.listen(port, host variable)', '\nexport function __selftest(s: any, h: string) { s.listen(0, h); }\n', 'no spelled-out loopback host'],
   ['serve({ port }) with no hostname', '\nexport function __selftest(app: any) { serve({ fetch: app.fetch, port: 0 }); }\n', 'no spelled-out loopback host'],
+  ['serve(options) held in a variable', '\nexport function __selftest(opts: any) { serve(opts); }\n', 'no spelled-out loopback host'],
+  ['a ws server with only a port', '\nexport const __selftest = () => new WebSocketServer({ port: 0 });\n', 'no spelled-out loopback host'],
   ['a 0.0.0.0 host', "\nexport const __selftest = { host: '0.0.0.0' };\n", 'binds every interface'],
   ["a '::' host passed to listen", "\nexport function __selftest(s: any) { s.listen(0, '::'); }\n", 'binds every interface'],
   ['a dgram socket', "\nexport const __selftest = (d: any) => d.createSocket('udp4');\n", 'opens a UDP socket CHECK_4_EXCEPTIONS does not name'],
