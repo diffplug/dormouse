@@ -1,0 +1,18 @@
+{
+  // The tests, their utilities, and the Storybook config, checked apart from
+  // the app so production code never sees what only Vitest's Node runtime
+  // provides. Production files they import are checked again here.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    // Vitest runs on the pinned Node (24), not in a browser.
+    "lib": ["ES2024", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "test-env.d.ts",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*-test-utils.ts",
+    ".storybook/*.ts"
+  ],
+  "exclude": []
+}
