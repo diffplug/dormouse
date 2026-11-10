@@ -249,7 +249,7 @@ export function createLathWallEngine(
 ): LathWallEngine {
   const snapshot = (): LathWallSnapshot => store.getSnapshot();
 
-  // 0 when motion must be instant (reduced motion, or Storybook's animate=false),
+  // 0 when motion must be instant (reduced motion, or the Argos snapshot run's animate=false),
   // so entry/exit/tween all collapse to instant through the very same code path.
   // Tests inject a fixed duration (or 0) via `opts`.
   const durationMs =

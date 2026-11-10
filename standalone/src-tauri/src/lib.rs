@@ -3868,7 +3868,8 @@ fn broadcast_registry(app: &AppHandle, windows: &WindowState) {
 ///
 /// **Not consumed**: the record settles at `adopt_done`, so a webview that
 /// drains at boot and again when its listener is installed sees only what it has
-/// yet to adopt. The webview dedupes what it is already mounting.
+/// yet to adopt. The webview runs one drain at a time, so no settled record is
+/// adopted twice.
 #[tauri::command(async)]
 fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) -> Vec<JsonValue> {
     routing::arrival_payloads(&guard(&windows.arrivals), window.label())

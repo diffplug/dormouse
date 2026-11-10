@@ -50,7 +50,7 @@ export function makeAlertScenario(
 }
 
 /** Collapse a scenario into a single chunk with all data concatenated and delay 0.
- *  Use this for Chromatic / regression tests where you want instant output. */
+ *  Use this for Argos snapshots / regression tests where you want instant output. */
 export function flattenScenario(scenario: FakeScenario): FakeScenario {
   const allData = scenario.chunks.map((c) => c.data).join('');
   return {

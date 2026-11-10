@@ -8,7 +8,7 @@ export function prefersReducedMotion(): boolean {
 }
 
 /** True when chrome motion must resolve instantly: layout animation is disabled
- *  (Storybook) or the user prefers reduced motion. The single snap gate shared
+ *  (the Argos snapshot run) or the user prefers reduced motion. The single snap gate shared
  *  by the Lath animator's duration and the focus ring's travel. */
 export function motionIsInstant(): boolean {
   return !cfg.layout.animate || prefersReducedMotion();
