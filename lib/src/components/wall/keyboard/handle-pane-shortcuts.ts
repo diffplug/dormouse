@@ -136,7 +136,6 @@ export function handlePaneShortcuts(
   }
 
   if (e.key === 't' && sid && ctx.selectedTypeRef.current === 'pane') {
-    if (ctx.dialogKeyboardActiveRef.current) return true;
     e.preventDefault();
     e.stopPropagation();
     toggleSessionTodo(sid);
@@ -144,7 +143,6 @@ export function handlePaneShortcuts(
   }
 
   if (e.key === 'a' && sid && ctx.selectedTypeRef.current === 'pane') {
-    if (ctx.dialogKeyboardActiveRef.current) return true;
     e.preventDefault();
     e.stopPropagation();
     dismissSessionAlert(sid);
