@@ -388,6 +388,29 @@ describe('embedded pages', () => {
     ]);
   });
 
+  it('hides a Surface pending its kill from every Client, and a pending Workspace’s members too', () => {
+    // `docs/specs/reopen.md`: out of the user's sight, so out of every Client's.
+    const terminal = registerSurface('surface:1');
+    registerPage('surface:2', 'http://localhost:5173/');
+    registerSurface('surface:3');
+    setWorkspaceSurfaces('workspace:5', ['surface:3']);
+    const actions = { restore: () => true, finalize: () => {} };
+    addPendingKill({ kind: 'surface', id: 'surface:1', workspaceId: 'workspace:1', title: 'shell', label: 'Terminal' }, actions);
+    addPendingKill({ kind: 'surface', id: 'surface:2', workspaceId: 'workspace:1', title: 'Page', label: 'Browser' }, actions);
+    addPendingKill({ kind: 'workspace', id: 'workspace:5', workspaceId: 'workspace:5', title: 'api', label: 'Workspace' }, actions);
+    try {
+      expect(platform.answer('directory', {})).toEqual([]);
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'resolve' })).toEqual([]);
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'attach', cols: 100, rows: 30 })).toEqual([]);
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:3', op: 'resolve' })).toEqual([]);
+      expect(terminal.resize).not.toHaveBeenCalled();
+      expect(platform.answer('browserOp', { surfaceId: 'surface:2' })).toEqual([]);
+    } finally {
+      _resetPendingKillsForTesting();
+      resetWorkspaceSurfaces();
+    }
+  });
+
   it('tells the Burrow when a page opens or moves', async () => {
     await armed();
     const registration = registerPage('surface:2', 'http://localhost:5173/');
