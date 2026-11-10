@@ -185,6 +185,9 @@ async function checkRepository({ gitDir, commonDir, workTree }: LocalGitReposito
     if (section === 'include' || section.startsWith('includeif.')) throw new NonLocalPathError();
     if (section === 'extensions' && key === 'objectformat' && value.toLowerCase() === 'sha256') hashLength = 32;
     if (!PATH_KEYS.has(`${section}.${key}`)) continue;
+    // The null device names no file, and reading it ends at once: no excludes
+    // or attributes. Only its exact spelling; a link to it is still a device.
+    if (key !== 'worktree' && isNullDevice(value, path.sep)) continue;
     if (isUncOrDevicePath(value) || /^~[^/\\]/.test(value)) throw new NonLocalPathError();
     if (key !== 'worktree' && cwdUnknown && !value.startsWith('~') && !path.isAbsolute(value)) throw new NonLocalPathError();
     // `core.worktree` is relative to the git directory, the others to the work tree.
@@ -196,6 +199,12 @@ async function checkRepository({ gitDir, commonDir, workTree }: LocalGitReposito
   const objects = await gitEntry(path.join(commonDir, 'objects'), options);
   if (objects) await checkAlternates(objects.path, 0, new Set(), options);
   if (options.index !== false) await checkIndex(gitDir, hashLength, options);
+}
+
+/** Whether `value` is `os.devNull` for the platform whose separator is `sep`:
+ *  `/dev/null`, or Windows' `\\.\nul` in any case. */
+function isNullDevice(value: string, sep: string): boolean {
+  return sep === '\\' ? value.toLowerCase() === '\\\\.\\nul' : value === '/dev/null';
 }
 
 /** Each file in `dir`, when it is a directory, is local. */
