@@ -23,6 +23,8 @@ import { encodeViewerFrame } from '../../lib/platform/browser-automation';
 
 // Any test host counts as a Mac for the forwarder's ⌘A exemption.
 vi.mock('../../lib/select-all', () => ({ isMacSelectAll: (e: KeyboardEvent) => e.type === 'keydown' && e.metaKey && e.key === 'a' }));
+// The Cmd+A case is a Mac's: its editing chords take Cmd, not Ctrl.
+vi.mock('../../lib/platform', async (importOriginal) => ({ ...await importOriginal<typeof import('../../lib/platform')>(), IS_MAC: true }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
