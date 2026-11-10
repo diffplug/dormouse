@@ -36,7 +36,7 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "lib/scripts/assert-pocket-worker.mjs",
     "lib/package.json",
     // Pocket's whole import graph, not only its remote modules.
-    "lib/src/components/wall/MobileWall.tsx",
+    "lib/src/components/MobileWall.tsx",
     "lib/src/lib/platform/types.ts",
     "lib/src/index.css",
     "dor-lib-common/src/spawn.ts",
