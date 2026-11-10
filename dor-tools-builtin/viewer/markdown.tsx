@@ -229,7 +229,9 @@ const tokenClasses = [syntaxHighlighting(classHighlighter)];
 // `capture()` comes before `imagePlugin()`, so it reads MDXEditor's own image toolbar first.
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
-  headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin({ onClickLinkCallback: href => {
+  // No auto-linking: its transform runs after the load's normalizing export,
+  // so it would turn every bare URL, inline code included, into an unsaved edit.
+  headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin({ disableAutoLink: true }), linkDialogPlugin({ onClickLinkCallback: href => {
     if (isWebLink(href)) { window.open(href, '_blank', 'noopener,noreferrer'); return; }
     followLink(href);
   } }),
