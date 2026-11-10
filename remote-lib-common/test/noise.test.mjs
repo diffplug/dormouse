@@ -27,6 +27,7 @@ import {
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   noiseNonceBytes,
+  x25519Agree,
 } from '../dist/index.js';
 
 const TAG_LENGTH = 16;
@@ -273,6 +274,28 @@ test('an all-zero remote static is one terminal handshake failure', async () => 
   await assert.rejects(initiator.writeMessage(EMPTY), NoiseError);
   assert.equal(initiator.isComplete, false);
   assert.throws(() => initiator.session, NoiseError);
+});
+
+test('an agreement that answers all zeros is refused, on a runtime that does not throw for it', async () => {
+  // Node throws inside deriveBits for a low-order point, so the module's own
+  // all-zero check runs only where a runtime answers zeros instead.
+  const zeros = {
+    subtle: {
+      importKey: async () => ({ type: 'public', extractable: false, algorithm: {}, usages: [] }),
+      deriveBits: async () => new ArrayBuffer(32),
+    },
+  };
+  await assert.rejects(x25519Agree(zeros, keys.initStatic.privateKey, new Uint8Array(32).fill(1)), NoiseError);
+});
+
+test('a handshake that failed refuses even the message that would have been right', async () => {
+  // Terminal, not retryable: a later step must not resume on half-mixed state.
+  // The first failure here (too short) mixes nothing, so only the latch
+  // refuses the valid message after it.
+  const message1 = await (await newInitiator()).writeMessage(EMPTY);
+  const responder = await newResponder();
+  await assert.rejects(responder.readMessage(message1.subarray(0, 8)), NoiseError);
+  await assert.rejects(responder.readMessage(message1), NoiseError);
 });
 
 test('a remote static of the wrong length is rejected before any crypto', async () => {
