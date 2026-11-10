@@ -121,7 +121,7 @@ export const RULES = [
   {
     rule: 'Credentials at rest — permission checks bind ownership to the installing account',
     patterns: {
-      macOS: /me="\$\(id -u\)"|out="\$\(stat -f '%Lp %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
+      macOS: /me="\$\(id -u\)"|out="\$\(\/usr\/bin\/stat -f '%Lp %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
       Linux: /me="\$\(id -un\)"|out="\$\(stat -c '%a %U' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
       Windows: /\$ownerSid = \$acl\.GetOwner\(\[Security\.Principal\.SecurityIdentifier\]\)\.Value\s+if \(\$ownerSid -ne \$script:CurrentUserSid\) \{\s+return \[pscustomobject\]@\{ Ok = \$false;/,
     },
@@ -146,7 +146,17 @@ export const RULES = [
   },
   {
     rule: 'A 200 does not say who answered — Windows health waits honor the requested release',
-    patterns: { Windows: /\(-not \$ExpectedRelease -or \(Get-ListeningRelease\) -eq \$ExpectedRelease\)/ },
+    // The manage copy reads its own $PORT; the installer copy must pass the
+    // port, which Get-ListeningRelease takes as a mandatory parameter there.
+    patterns: { Windows: /\(-not \$ExpectedRelease -or \(Get-ListeningRelease(?: -Port \$LOOPBACK_PORT)?\) -eq \$ExpectedRelease\)/ },
+    exactMatches: { Windows: 2 },
+    skip: { macOS: 'wait_for_health binds identity directly', Linux: 'service_healthy binds identity directly' },
+  },
+  {
+    // The Relay answers before it writes run\relay.json, so a single read right
+    // after the first 200 can find no file or the previous release's.
+    rule: 'A 200 does not say who answered — Windows install and restore wait for the identity before reading it',
+    patterns: { Windows: /\[void\]\(Wait-Health -Url "http:\/\/127\.0\.0\.1:\$LOOPBACK_PORT\/api\/hello" -Seconds 10 -ExpectedRelease \$(?:RELEASE_ID|OLD_RELEASE)\)/ },
     exactMatches: { Windows: 2 },
     skip: { macOS: 'wait_for_health binds identity directly', Linux: 'service_healthy binds identity directly' },
   },
@@ -168,6 +178,58 @@ export const RULES = [
       Linux: /must set DORMOUSE_BIND_HOST=127\.0\.0\.1/,
       Windows: /must set DORMOUSE_BIND_HOST=127\.0\.0\.1/,
     },
+  },
+  {
+    // The call and its verdict as one span: `installer-verify-test.mjs` drives
+    // `has_off_loopback` itself, so only this pins that `manage verify` still
+    // asks it and fails on its answer.
+    rule: 'Network posture — manage verify fails a listener bound off-loopback',
+    patterns: {
+      macOS: /elif has_off_loopback "\$PORT" "\$listeners"; then\n\s*fail "port \$PORT is bound off-loopback/,
+      Linux: /elif has_off_loopback "\$PORT" "\$listeners"; then\n\s*fail "port \$PORT is bound off-loopback/,
+      Windows:
+        /\$offLoopback = @\(\$listeners \| Where-Object \{ \$_\.LocalAddress -ne '127\.0\.0\.1' \}\)\n\s*if \(\$offLoopback\.Count -gt 0\) \{\n\s*Fail "port \$PORT is bound off-loopback/,
+    },
+    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
+  },
+  {
+    // SELF_HOST.md -> "Definition of done" lists both checks; a missing tool
+    // means the check never ran, which fails rather than notes and passes.
+    rule: 'Definition of done — Linux manage verify fails a check its tool could not run',
+    patterns: {
+      Linux:
+        /if ! command -v ss >\/dev\/null 2>&1; then\n\s*fail "|if command -v systemd-analyze >\/dev\/null 2>&1; then\n\s*fail "unit file fails systemd-analyze verify: \$UNIT_FILE"\n\s*else\n\s*fail "/,
+    },
+    exactMatches: { Linux: 2 },
+    skip: {
+      macOS: 'lsof and plutil ship with the OS',
+      Windows: 'Get-NetTCPConnection and the ScheduledTasks module ship with the OS',
+    },
+  },
+  {
+    // cmd.exe misparses an LF-only batch file (`.gitattributes` pins every
+    // checked-in `.cmd` to CRLF), and the here-string carries whatever newlines
+    // the installer was checked out with.
+    rule: 'Mechanism — Windows writes bin\\manage.cmd with CRLF line endings',
+    patterns: {
+      Windows: /\[IO\.File\]::WriteAllText\(\(Join-Path \$BIN_DIR 'manage\.cmd'\), \(\$manageCmd -replace "`r\?`n", "`r`n"\) \+ "`r`n"\)/,
+    },
+    exactMatches: { Windows: 1 },
+    skip: { macOS: 'no batch shim', Linux: 'no batch shim' },
+  },
+  {
+    // Without a culture, .NET takes the time separator and the calendar from
+    // the user's locale: fi-FI writes `12.34.56`, th-TH the year 2569.
+    rule: 'Mechanism — every Windows timestamp is formatted in the invariant culture',
+    forbidden: true,
+    violations: {
+      Windows: [
+        '$stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss")',
+        "$stamp = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')",
+      ],
+    },
+    patterns: { Windows: /\.ToString\((?:"yyyy[^"]*"|'yyyy[^']*')\)/ },
+    skip: { macOS: '`date` writes its numeric fields and literal separators the same in every locale', Linux: '`date` writes its numeric fields and literal separators the same in every locale' },
   },
   {
     // The probe's verdict, and on unix the one call into the helper holding it:
@@ -320,6 +382,17 @@ export const RULES = [
     },
   },
   {
+    // The unix search above lives in `names_credential`; this pins its one
+    // consumer, call and verdict as one span, as the bind check does.
+    rule: 'Credentials at rest — manage verify fails a service definition that names a credential',
+    patterns: {
+      macOS: /elif names_credential "\$PLIST" "\$ROOT\/bin\/run-relay"; then\n\s*fail "the LaunchAgent or wrapper names a credential/,
+      Linux: /elif names_credential "\$UNIT_FILE" "\$ROOT\/bin\/run-relay"; then\n\s*fail "the unit or wrapper names a credential/,
+    },
+    exactMatches: { macOS: 1, Linux: 1 },
+    skip: { Windows: 'its search is inline in the verify condition, which the search rule above already matches' },
+  },
+  {
     // SELF_HOST.md -> "Definition of done": "a definition it cannot read at all
     // fails rather than passes". Both searches above read the service
     // definition and the `run-relay` wrapper, and on every platform an
@@ -385,12 +458,15 @@ export const RULES = [
     // it killed by SIGPIPE, so the decision rides on a race; capture first,
     // then search the captured text. `ts ip -4 | head -1` sat in both
     // `manage verify`s while every rule above stayed green.
-    rule: 'Network posture — no Tailscale CLI output is piped into `head` or `grep -q`',
+    rule: 'Network posture — no Tailscale CLI output or listening-socket listing is piped into `head` or `grep -q`',
     forbidden: true,
-    violation: 'tsip="$(ts ip -4 2>/dev/null | head -1 || true)"',
+    violations: {
+      macOS: ['tsip="$(ts ip -4 2>/dev/null | head -1 || true)"', 'lsof -nP -iTCP:"$PORT" -sTCP:LISTEN | grep -q LISTEN'],
+      Linux: ['tsip="$(ts ip -4 2>/dev/null | head -1 || true)"', 'ss -lntH "sport = :$PORT" | grep -q LISTEN'],
+    },
     patterns: {
-      macOS: /(?:\btailscale|\bts)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
-      Linux: /(?:\btailscale|\bts)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
+      macOS: /(?:\btailscale|\bts|\blsof)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
+      Linux: /(?:\btailscale|\bts|\bss)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
     },
     skip: { Windows: 'every Tailscale decision is a `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE' },
   },
@@ -410,6 +486,33 @@ export const RULES = [
       Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR" "\$RUN_DIR"/,
       Windows:
         /Protect-Path -Path \$CONFIG_DIR -Directory\n\s*Protect-Path -Path \$STATE_DIR -Directory\n\s*Protect-Path -Path \$RUN_DIR -Directory/,
+    },
+  },
+  {
+    // The guard and the write it gates as one span: the file is written only
+    // when absent, so an update never regenerates it.
+    rule: 'Credentials at rest — an existing config/relay.env is never rewritten',
+    patterns: {
+      macOS: /if \[ ! -f "\$ENV_FILE" \]; then\n\s*umask 077\n\s*cat > "\$ENV_FILE" <<ENV_EOF/,
+      Linux: /if \[ ! -f "\$ENV_FILE" \]; then\n(?:\s*#[^\n]*\n)*\s*: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"\n\s*cat > "\$ENV_FILE" <<ENV_EOF/,
+      Windows: /if \(-not \(Test-Path -LiteralPath \$ENV_FILE\)\) \{\n\s*\$envLines = @\(/,
+    },
+    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
+  },
+  {
+    // The offer's token goes only into its publication file; no output helper
+    // may carry it.
+    rule: 'Credentials at rest — the enroll token is never printed',
+    forbidden: true,
+    violations: {
+      macOS: ['ok "enrollment token: $ENROLL_TOKEN"', 'printf "token: %s\\n" "${ENROLL_TOKEN}"'],
+      Linux: ['ok "enrollment token: $ENROLL_TOKEN"', 'printf "token: %s\\n" "${ENROLL_TOKEN}"'],
+      Windows: ['Write-Ok "enrollment token: $enrollToken"', 'Write-Host $enrollToken'],
+    },
+    patterns: {
+      macOS: /\b(?:echo|printf|step|info|detail|ok|warn|die)\b[^\n]*\$\{?ENROLL_TOKEN\b/,
+      Linux: /\b(?:echo|printf|step|info|detail|ok|warn|die)\b[^\n]*\$\{?ENROLL_TOKEN\b/,
+      Windows: /\b(?:Write-Host|Write-Output|Write-Step|Write-Info|Write-Detail|Write-Ok|Write-Warn2|Die)\b[^\n]*\$enrollToken\b/i,
     },
   },
   {

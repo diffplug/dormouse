@@ -32,7 +32,6 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOOPBACK_PORT=3100
 
 ASSUME_YES=0
-[ "${DORMOUSE_INSTALL_ASSUME_YES:-0}" = "1" ] && ASSUME_YES=1
 TEST_MODE=0
 [ "${DORMOUSE_INSTALL_TEST:-0}" = "1" ] && TEST_MODE=1
 
@@ -138,7 +137,7 @@ for k in sys.argv[2].split("."):
     if v is None: break
     v = v.get(k) if isinstance(v, dict) else None
 if v is None: sys.exit(1)
-sys.stdout.write(",".join(v) if isinstance(v, list) else str(v))
+sys.stdout.write(",".join(v) if isinstance(v, list) else json.dumps(v) if isinstance(v, bool) else str(v))
 ' "$1" "$2"
       ;;
   esac
@@ -232,7 +231,7 @@ printf '%sDormouse selfhost Relay — macOS installer%s\n' "$C_BLD" "$C_OFF"
 
 step "Checking Tailscale"
 
-TS_STATUS_JSON="$(mktemp -t dormouse-ts-status)"
+TS_STATUS_JSON="$(/usr/bin/mktemp -t dormouse-ts-status)"
 trap 'rm -f "$TS_STATUS_JSON"' EXIT
 ts status --json > "$TS_STATUS_JSON" 2>/dev/null || die "\`tailscale status --json\` failed. Is Tailscale running and signed in?"
 
@@ -395,7 +394,7 @@ ok "Relay built"
 # (onFail: download), so this is the pinned runtime, not whatever is on PATH.
 # Write it to a file: pnpm can emit progress chatter on stdout, which would
 # contaminate a command substitution.
-EXECPATH_FILE="$(mktemp -t dormouse-execpath)"
+EXECPATH_FILE="$(/usr/bin/mktemp -t dormouse-execpath)"
 pnpm exec node -e 'require("fs").writeFileSync(process.argv[1], process.execPath)' "$EXECPATH_FILE" >/dev/null 2>&1 \
   || die "could not resolve the pinned Node runtime via pnpm exec."
 NODE_BIN="$(cat "$EXECPATH_FILE")"
@@ -436,7 +435,7 @@ create_release_stage "$STAGE" || die "could not create a new release directory: 
 info "pnpm deploy --prod --legacy"
 WS_STATE_BACKUP=""
 if [ -f "$WS_STATE" ]; then
-  WS_STATE_BACKUP="$(mktemp -t dormouse-wsstate)"
+  WS_STATE_BACKUP="$(/usr/bin/mktemp -t dormouse-wsstate)"
   cp -p "$WS_STATE" "$WS_STATE_BACKUP"
 fi
 pnpm --filter relay deploy --prod --legacy "$STAGE/relay" >/dev/null 2>&1 \
@@ -582,9 +581,10 @@ while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in *=*) ;; *) continue ;; esac
   key="${line%%=*}"
   value="${line#*=}"
+  # Only a whole identifier: `export` under `set -e` exits on any other key,
+  # which would stop the Relay at every start over one hand-added line.
   case "$key" in
-    [A-Za-z_]*) ;;
-    *) continue ;;
+    ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;;
   esac
   case "$value" in
     '"'*'"') value="${value#\"}"; value="${value%\"}" ;;
@@ -707,7 +707,9 @@ release_field() {
 owner_only() {
   local out mode owner me
   me="$(id -u)"
-  out="$(stat -f '%Lp %u' "$1" 2>/dev/null || true)"
+  # BSD stat by absolute path: with GNU coreutils first on PATH, `stat -f`
+  # means file-system status.
+  out="$(/usr/bin/stat -f '%Lp %u' "$1" 2>/dev/null || true)"
   if [ -z "$out" ]; then
     fail "$3 is missing: $1"
     return
@@ -1097,20 +1099,22 @@ cmd_rollback() {
   # installer has no rollback target, whatever the `previous` link suggests.
   [ "$prev" != "$cur" ] || { printf 'previous and current name the same release (%s) — nothing to roll back to\n' "$(basename "$prev")" >&2; return 1; }
   printf 'rolling back: %s -> %s\n' "$(basename "$cur")" "$(basename "$prev")"
-  local node_bin=""
-  for candidate in "$prev/runtime/node" "$ROOT/current/runtime/node"; do
-    if [ -x "$candidate" ]; then node_bin="$candidate"; break; fi
-  done
-  [ -n "$node_bin" ] || { printf 'no usable runtime found to swap the symlinks\n' >&2; return 1; }
-  # `previous` first: node_bin can be "$ROOT/current/runtime/node", and moving
-  # `current` to $prev would repoint it at the runtime that was just rejected.
+  # Swap with the target release's own runtime. Falling back to the one under
+  # `current` would mean reaching through the very symlink being moved, and a
+  # rollback target with no usable runtime cannot be started anyway.
+  local node_bin="$prev/runtime/node"
+  [ -x "$node_bin" ] || { printf 'previous release has no usable runtime: %s\n' "$node_bin" >&2; return 1; }
   if [ -n "$cur" ]; then atomic_symlink "$cur" "$ROOT/previous" "$node_bin"; fi
   atomic_symlink "$prev" "$ROOT/current" "$node_bin"
   if [ "$(readlink "$ROOT/current")" != "$prev" ]; then
     printf 'current did not advance to %s\n' "$prev" >&2
     return 1
   fi
-  launchctl kickstart -k "gui/$UID/$LABEL" || true
+  if ! launchctl kickstart -k "gui/$UID/$LABEL"; then
+    printf '%sthe symlinks were rolled back, but restarting %s failed%s\n' "$C_RED" "$LABEL" "$C_OFF" >&2
+    printf 'inspect: launchctl print gui/%s/%s\n' "$UID" "$LABEL" >&2
+    return 1
+  fi
   if wait_for_health 30; then
     printf '%srolled back and healthy%s\n' "$C_GRN" "$C_OFF"
   else
@@ -1161,6 +1165,13 @@ cmd_uninstall() {
 }
 
 cmd_purge() {
+  # bin/run-relay is what "uninstall" removes. While it is here the Relay is
+  # still registered: it keeps the setup password it loaded at boot, recreates
+  # state/ on its next write, and restarts forever once config/ is gone.
+  if [ -e "$ROOT/bin/run-relay" ]; then
+    printf 'the Relay is still installed; run "%s" uninstall first\n' "$ROOT/bin/manage" >&2
+    return 1
+  fi
   printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Burrows, push\n' "$C_RED" "$C_OFF"
   printf 'subscriptions, the VAPID key, and any unspent enrollment offer:\n  %s\n  %s\n  %s\n\n' \
     "$STATE_DIR" "$ROOT/config" "$ROOT/run"
@@ -1174,16 +1185,13 @@ cmd_purge() {
   # just deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
   rm -rf "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'purged.\n'
-  # bin/run-relay is what "uninstall" removes, so its absence means the
-  # LaunchAgent and the code are already gone and this script is the last thing
-  # standing. It cannot delete itself out from under the shell running it. The
-  # logs live outside ROOT on a real install, so LOG_DIR has to be named too or
-  # the printed command leaves them behind. (~/Library/Logs/Dormouse Relay is
+  # The LaunchAgent and the code are already gone, so this script is the last
+  # thing standing. It cannot delete itself out from under the shell running it.
+  # The logs live outside ROOT on a real install, so LOG_DIR has to be named too
+  # or the printed command leaves them behind. (~/Library/Logs/Dormouse Relay is
   # dormouse-owned, so deleting it leaves no empty directory behind.)
-  if [ ! -e "$ROOT/bin/run-relay" ]; then
-    printf '\nthe LaunchAgent and code were already uninstalled; what remains\n'
-    printf 'is this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_DIR"
-  fi
+  printf '\nthe LaunchAgent and code were already uninstalled; what remains\n'
+  printf 'is this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_DIR"
 }
 
 case "${1:-status}" in
@@ -1225,8 +1233,8 @@ step "Health-checking the candidate release"
 # the live service or the real state while we prove the new code boots, mints
 # its credential, and serves.
 PROBE_PORT="$("$STAGE/runtime/node" -e 'const n=require("net");const s=n.createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>process.stdout.write(String(p)))});')"
-PROBE_STATE="$(mktemp -d -t dormouse-probe-state)"
-PROBE_LOG="$(mktemp -t dormouse-probe-log)"
+PROBE_STATE="$(/usr/bin/mktemp -d -t dormouse-probe-state)"
+PROBE_LOG="$(/usr/bin/mktemp -t dormouse-probe-log)"
 chmod 0700 "$PROBE_STATE"
 
 env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \

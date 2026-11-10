@@ -41,7 +41,6 @@ $INSTALL_ROOT = Join-Path $env:LOCALAPPDATA 'Dormouse Relay'
 $LOOPBACK_PORT = 3100
 
 $ASSUME_YES = $Yes.IsPresent
-if ($env:DORMOUSE_INSTALL_ASSUME_YES -eq '1') { $ASSUME_YES = $true }
 $TEST_MODE = ($env:DORMOUSE_INSTALL_TEST -eq '1')
 
 # A throwaway install root, for exercising path quoting, task generation,
@@ -443,7 +442,7 @@ function Wait-Health {
   $deadline = (Get-Date).AddSeconds($Seconds)
   while ((Get-Date) -lt $deadline) {
     if ((Test-Health -Url $Url -TimeoutSec 2) -and
-        (-not $ExpectedRelease -or (Get-ListeningRelease) -eq $ExpectedRelease)) { return $true }
+        (-not $ExpectedRelease -or (Get-ListeningRelease -Port $LOOPBACK_PORT) -eq $ExpectedRelease)) { return $true }
     Start-Sleep -Milliseconds 500
   }
   return $false
@@ -1002,7 +1001,7 @@ $CmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
 
 function Write-ServiceLog {
   param([string]$Text)
-  $stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+  $stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
   try { [IO.File]::AppendAllText($ErrLog, "[run-relay $stamp] $Text`r`n") } catch { }
 }
 
@@ -1502,7 +1501,7 @@ function Invoke-Status {
   Write-Host "State files ($StateDir)"
   if (Test-Path -LiteralPath $StateDir) {
     Get-ChildItem -LiteralPath $StateDir -Force | ForEach-Object {
-      Write-Host ("  {0,10}  {1}  {2}" -f $_.Length, $_.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss'Z'"), $_.Name)
+      Write-Host ("  {0,10}  {1}  {2}" -f $_.Length, $_.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture), $_.Name)
     }
   } else {
     Write-Host "  ${C_RED}missing$C_OFF"
@@ -1982,6 +1981,13 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Purge {
+  # bin\run-relay.ps1 is what "uninstall" removes. While it is here the Relay is
+  # still registered: it keeps the setup password it loaded at boot, recreates
+  # state\ on its next write, and restarts forever once config\ is gone.
+  if (Test-Path -LiteralPath (Join-Path $Root 'bin\run-relay.ps1')) {
+    [Console]::Error.WriteLine(('the Relay is still installed; run "{0}\bin\manage.cmd" uninstall first' -f $Root))
+    return 1
+  }
   Write-Host ""
   Write-Host "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Burrows, push"
   Write-Host "subscriptions, the VAPID key, and any unspent enrollment offer:"
@@ -2000,17 +2006,15 @@ function Invoke-Purge {
     Remove-Tree $p
   }
   Write-Host 'purged.'
-  # bin\run-relay.ps1 is what "uninstall" removes, so its absence means the
-  # Scheduled Task and the code are already gone and this script is the last
-  # thing standing. It cannot delete itself out from under the shell running it.
-  if (-not (Test-Path -LiteralPath (Join-Path $Root 'bin\run-relay.ps1'))) {
-    Write-Host ""
-    Write-Host "the Scheduled Task and code were already uninstalled; this script"
-    Write-Host "is all that remains:"
-    Write-Host ""
-    Write-Host ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
-    Write-Host ""
-  }
+  # The Scheduled Task and the code are already gone, so this script is the
+  # last thing standing. It cannot delete itself out from under the shell
+  # running it.
+  Write-Host ""
+  Write-Host "the Scheduled Task and code were already uninstalled; this script"
+  Write-Host "is all that remains:"
+  Write-Host ""
+  Write-Host ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
+  Write-Host ""
   return 0
 }
 
@@ -2064,7 +2068,9 @@ rem .cmd from another batch script ends that script too; it is meant to be run
 rem directly.
 "$POWERSHELL_EXE" -NoProfile -ExecutionPolicy Bypass -File "%~dp0manage.ps1" %* & exit
 "@
-  [IO.File]::WriteAllText((Join-Path $BIN_DIR 'manage.cmd'), $manageCmd + "`r`n")
+  # A here-string keeps this script's own newlines, LF on a checkout without
+  # autocrlf, and cmd.exe misparses an LF-only batch file.
+  [IO.File]::WriteAllText((Join-Path $BIN_DIR 'manage.cmd'), ($manageCmd -replace "`r?`n", "`r`n") + "`r`n")
   Write-Ok "bin\manage.cmd"
 
   # --------------------------------------------------------- candidate check ---
@@ -2249,6 +2255,9 @@ rem directly.
     }
     if (Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 40) {
       # Same reason the forward path re-checks: a 200 does not say who answered.
+      # The Relay writes run\relay.json just after it starts answering, so wait
+      # for the identity before reading it once.
+      if (-not $TEST_MODE) { [void](Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 10 -ExpectedRelease $OLD_RELEASE) }
       $restored = if ($TEST_MODE) { $OLD_RELEASE } else { Get-ListeningRelease -Port $LOOPBACK_PORT }
       if ($restored -eq $OLD_RELEASE) {
         Write-Warn2 "the previous release ($OLD_RELEASE) is healthy again."
@@ -2305,7 +2314,10 @@ rem directly.
 
     # A 200 only proves something is listening. Confirm it is THIS release --
     # otherwise an orphan of an older one answering on the same port reads as a
-    # successful update while the old code keeps serving.
+    # successful update while the old code keeps serving. The Relay writes
+    # run\relay.json just after it starts answering, so wait for the identity
+    # before reading it once.
+    [void](Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 10 -ExpectedRelease $RELEASE_ID)
     $listening = Get-ListeningRelease -Port $LOOPBACK_PORT
     if ($listening -ne $RELEASE_ID) {
       Write-Warn2 "port $LOOPBACK_PORT is served by '$(if ($listening) { $listening } else { 'an unidentifiable process' })', not by $RELEASE_ID"

@@ -33,8 +33,11 @@ const DEFECTS = [
     mutate: (text) => text.replace(/\bWrite-Host\b/g, 'Write-Burrow'),
   },
   {
+    // Every call is `(Test-Path …)`, so this also holds the `(` anchor.
     name: 'a rename rewrites the verb half (`Test-Path` → `Check-Path`)',
     mutate: (text) => text.replace(/\bTest-Path\b/g, 'Check-Path'),
+    token: /\bTest-Path\b/g,
+    onlyIn: /\(\s*Test-Path\b/g,
   },
   {
     name: 'a rename eats a cmdlet only ever called in assignment position (`Read-Host` → `Read-Burrow`)',
@@ -50,6 +53,18 @@ const DEFECTS = [
     mutate: (text) => text.replace(/\bInvoke-Native\b/g, 'Invoke-Burrow'),
     token: /\bInvoke-Native\b/g,
     onlyIn: /(?:return|function)\s+Invoke-Native\b/g,
+  },
+  {
+    name: 'a rename eats a cmdlet only ever called as a pipeline stage (`Select-Object` → `Select-Burrow`)',
+    mutate: (text) => text.replace(/\bSelect-Object\b/g, 'Select-Burrow'),
+    token: /\bSelect-Object\b/g,
+    onlyIn: /\|\s*Select-Object\b/g,
+  },
+  {
+    name: 'a rename eats a cmdlet only ever called first in a script block (`Receive-Job` → `Receive-Burrow`)',
+    mutate: (text) => text.replace(/\bReceive-Job\b/g, 'Receive-Burrow'),
+    token: /\bReceive-Job\b/g,
+    onlyIn: /\{\s*Receive-Job\b/g,
   },
 ];
 

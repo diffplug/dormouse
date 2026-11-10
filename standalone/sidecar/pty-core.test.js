@@ -850,6 +850,9 @@ test('a Windows shell goes by an absolute path, a bare name by the PATH file, el
   // The default is cmd.exe by `ComSpec`, else under `%SystemRoot%`.
   assert.equal(shellOf(undefined, { ComSpec: 'cmd.exe', SystemRoot: 'D:\\Win' }), 'D:\\Win\\System32\\cmd.exe');
   assert.equal(shellOf(undefined, { ComSpec: 'E:\\cmd.exe' }), 'E:\\cmd.exe');
+  // Read in any case, as Windows reads its environment.
+  assert.equal(shellOf(undefined, { Systemroot: 'D:\\Win' }), 'D:\\Win\\System32\\cmd.exe');
+  assert.equal(shellOf(undefined, { comspec: 'E:\\cmd.exe' }), 'E:\\cmd.exe');
 });
 
 test('a spawn runs the shell the host resolver finds, and one it finds nowhere never reaches the PTY', () => {

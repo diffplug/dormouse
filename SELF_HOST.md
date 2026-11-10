@@ -142,8 +142,9 @@ With the user's approval:
 ```
 
 ```powershell
-# Windows, from an ordinary (not elevated) PowerShell
-.\deploy\local\install-windows.ps1
+# Windows, from an ordinary (not elevated) PowerShell; Bypass because the
+# default execution policy refuses every script file
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\local\install-windows.ps1
 ```
 
 ```sh
@@ -187,12 +188,12 @@ pkill -f 'Dormouse Relay/current/relay/dist/index.js'
 ```
 
 ```powershell
-# Windows — select by install-root path and command line, never by image name:
-# other node.exe processes on this machine are not the Relay. The supervision
-# loop restarts after a 10s throttle, so wait ~15s before reading status.
+# Windows — only the node.exe running from this install's releases: other
+# node.exe processes are not the Relay, and the run-relay.ps1 supervisor must
+# survive to restart it after its 10s throttle, so wait ~15s before reading status.
 $root = "$env:LOCALAPPDATA\Dormouse Relay"
 Get-CimInstance Win32_Process |
-  Where-Object { $_.ExecutablePath -like "$root\*" -or $_.CommandLine -like "*$root*" } |
+  Where-Object { $_.Name -eq 'node.exe' -and $_.ExecutablePath -like "$root\releases\*" } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 & "$root\bin\manage.cmd" status
 ```
@@ -229,7 +230,7 @@ Updating is choosing a checkout and rerunning the same command:
 
 ```sh
 git -C <checkout> log --oneline -1     # decide deliberately what to install
-./deploy/local/install-macos.sh        # or .\deploy\local\install-windows.ps1
+./deploy/local/install-macos.sh        # or, on Windows, the Bypass command from checkpoint 2
                                        # or ./deploy/local/install-linux.sh
 ```
 
@@ -239,7 +240,7 @@ Prove it once, while the user is watching:
 2. Confirm the release changed as expected and that the `state/` checksums from checkpoint 4 and `config/relay.env` are unchanged.
 3. Run `manage rollback`, confirm the previous release comes back healthy, then return to the desired release.
 
-`manage uninstall` removes the service definition, installed code and `run/`, keeps `config` and `state` and reports where they are, and keeps `manage` itself. `manage purge` is the separate, irreversible deletion behind a typed confirmation phrase; run it after `uninstall`, and it prints the one command that clears whatever is left.
+`manage uninstall` removes the service definition, installed code and `run/`, keeps `config` and `state` and reports where they are, and keeps `manage` itself. `manage purge` is the separate, irreversible deletion behind a typed confirmation phrase; it refuses until `uninstall` has run, and prints the one command that clears whatever is left.
 
 ## Checkpoint 6: limits and backup
 
@@ -343,6 +344,6 @@ Each fails silently unless encoded in every installer it names; single-platform 
 
 `bin/manage` (`bin\manage.ps1`, with a `manage.cmd` shim, on Windows) carries: `status`, `verify`, `logs`, `restart`, `show-password`, `serve` (re-apply the Serve mapping after a dev session repointed it), `rollback`, `uninstall`, and the separately-confirmed `purge`.
 
-**`uninstall` must leave `manage` behind**, so `purge` stays reachable for `config/` and `state/`. **`purge` deletes `run/` along with `state/` and `config/`**, and once uninstalled prints the one command removing the install root and, on macOS and Linux, the log directory outside it. Source of truth: `cmd_uninstall` / `cmd_purge` in `deploy/local/install-linux.sh` and `deploy/local/install-macos.sh`; `Invoke-Uninstall` / `Invoke-Purge` in `deploy/local/install-windows.ps1`.
+**`uninstall` must leave `manage` behind**, so `purge` stays reachable for `config/` and `state/`. **`purge` refuses while the service is installed, and deletes `run/` along with `state/` and `config/`**, then prints the one command removing the install root and, on macOS and Linux, the log directory outside it. Source of truth: `cmd_uninstall` / `cmd_purge` in `deploy/local/install-linux.sh` and `deploy/local/install-macos.sh`; `Invoke-Uninstall` / `Invoke-Purge` in `deploy/local/install-windows.ps1`.
 
 Two test-only hooks, each refused unless `DORMOUSE_INSTALL_TEST=1`: `DORMOUSE_INSTALL_ROOT` puts the whole install under a throwaway path, and — Linux only — `DORMOUSE_INSTALL_ORIGIN` supplies the origin so Tailscale is never consulted. Test mode leaves the service manager and Serve untouched on all three.

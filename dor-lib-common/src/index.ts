@@ -1,5 +1,5 @@
 export { UNTRUSTED_REPO_GIT_ARGS, localGitRepository, untrustedGitEnv } from './git.js';
-export { spawnAndCapture, treeKillCommand, windowsCommandShell, withCommandShell, SPAWN_TIMEOUT_CODE } from './spawn.js';
+export { spawnAndCapture, treeKillCommand, windowsCommandShell, windowsSystemPath, withCommandShell, SPAWN_TIMEOUT_CODE } from './spawn.js';
 export { cmdShimTarget } from './cmd-shim.js';
 export {
   binaryCandidateNames,

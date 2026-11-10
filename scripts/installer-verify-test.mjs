@@ -32,10 +32,10 @@
  * if a helper ever exists twice — once in the installer body and once inside
  * the `MANAGE_EOF` heredoc. Today `env_file_value` and `serve_origin_root`
  * are defined twice, and each pair is checked identical. `owner_only`,
- * `has_off_loopback`, `names_credential`, `serve_proxies_root` and
- * `check_tailscale_plaintext` are in the heredoc (the
- * `manage` copy); `create_release_stage`, `env_missing_keys` and
- * `serve_state` are in the installer body.
+ * `has_off_loopback`, `names_credential`, `serve_proxies_root`,
+ * `check_tailscale_plaintext`, `atomic_symlink`, `cmd_rollback` and
+ * `cmd_purge` are in the heredoc (the `manage` copy); `create_release_stage`,
+ * `env_missing_keys`, `json_query` and `serve_state` are in the installer body.
  *
  * Windows is not run: nothing in CI can run PowerShell, so its Serve reader
  * and gate — the same reading over the same text — are pinned textually by
@@ -217,6 +217,8 @@ function writeEnvFixtures(dir) {
     unmatchedQuote: `${ENV_COMPLETE}\nDORMOUSE_BIND_HOST="127.0.0.1`,
     duplicateOrigin: `${ENV_COMPLETE}\nDORMOUSE_ORIGIN=https://another.tail.ts.net`,
     duplicatePort: `${ENV_COMPLETE}\nPORT=31000`,
+    // Not identifiers: the wrapper must skip them, not die exporting them.
+    invalidKeys: `${ENV_COMPLETE}\nMY-FLAG=1\nPORT =31000\n=orphan`,
   };
   const paths = {};
   for (const [name, body] of Object.entries(files)) {
@@ -257,7 +259,9 @@ function cases(platform, env, definitions) {
     ['', 'fail', 'stat failed or path missing'],
   ].map(([metadata, expected, label]) => [
     `owner_only: ${label}`,
-    `pass() { echo pass; }; fail() { echo fail; }; id() { echo fixture-owner; }; stat() { printf '%s' '${metadata}'; }; owner_only /unused 700 secret`,
+    // macOS calls BSD stat by absolute path; point it at the stub.
+    `pass() { echo pass; }; fail() { echo fail; }; id() { echo fixture-owner; }; stat() { printf '%s' '${metadata}'; }; ` +
+      `eval "$(declare -f owner_only | sed 's#/usr/bin/stat #stat #')"; owner_only /unused 700 secret`,
     expected,
   ]);
   const configCases = [
@@ -275,6 +279,11 @@ function cases(platform, env, definitions) {
   return [
     ...ownerCases,
     ...configCases,
+    [
+      'load_runtime_env: a key that is not an identifier is skipped',
+      `ENV_FILE='${env.invalidKeys}'; load_runtime_env; printf '[%s|%s]\\n' "$DORMOUSE_BIND_HOST" "$PORT"`,
+      '[127.0.0.1|3100]',
+    ],
     [
       'env_missing_keys: a later empty assignment overrides the earlier value',
       `printf '[%s]\\n' "$(env_missing_keys '${env.emptyLastBinding}')"`,
@@ -436,6 +445,10 @@ export function run() {
           'serve_state',
           'serve_proxies_root',
           'check_tailscale_plaintext',
+          'cmd_purge',
+          'json_query',
+          'atomic_symlink',
+          'cmd_rollback',
         ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
@@ -488,6 +501,58 @@ export function run() {
         `create_release_stage ${quotedStage}; printf keep > ${quotedStage}/marker; if create_release_stage ${quotedStage} 2>/dev/null; then echo overwritten; else cat ${quotedStage}/marker; fi`,
         'keep',
       ]);
+      // GNU `mktemp -t` refuses a template without XXX, so macOS names BSD's.
+      if (platform === 'macOS') {
+        checked += 1;
+        const bare = text.split('\n').filter((line) => /(?<![\w/])mktemp (?:-d )?-t /.test(line));
+        if (bare.length) failures.push(`macOS  mktemp -t by bare name:\n    ${bare.join('\n    ')}`);
+      }
+      // `purge` deletes state only once `uninstall` has removed bin/run-relay:
+      // a Relay still registered keeps its setup password and recreates state/.
+      const purgeRoot = sq(join(fixtureDir, `purge-${platform}`));
+      const purge = (installed) =>
+        `ROOT=${purgeRoot}/${installed ? 'installed' : 'uninstalled'}; STATE_DIR="$ROOT/state"; ` +
+        'LOG_DIR="$ROOT/logs"; LOG_ROOT="$LOG_DIR"; C_RED=""; C_OFF=""; ' +
+        'mkdir -p "$ROOT/bin" "$STATE_DIR" "$ROOT/config" "$ROOT/run"; ' +
+        (installed ? ': > "$ROOT/bin/run-relay"; ' : '') +
+        "if cmd_purge <<< 'DELETE DORMOUSE STATE' > /dev/null 2>&1; then r=purged; else r=refused; fi; " +
+        'if [ -d "$STATE_DIR" ]; then echo "$r kept"; else echo "$r deleted"; fi';
+      // `rollback` swaps with the target release's own runtime and reports a
+      // failed restart. The service manager and the health wait are stubbed;
+      // the swap runs the real `atomic_symlink` under the node running this.
+      const rollbackRoot = sq(join(fixtureDir, `rollback-${platform}`));
+      const rollback = (name, { targetRuntime, restart }) =>
+        `ROOT=${rollbackRoot}/${name}; C_RED=""; C_GRN=""; C_OFF=""; LABEL=label; UNIT=unit; ` +
+        `launchctl() { return ${restart}; }; systemctl() { return ${restart}; }; wait_for_health() { return 0; }; ` +
+        'mkdir -p "$ROOT/releases/old/runtime" "$ROOT/releases/new/runtime"; ' +
+        `ln -s ${sq(process.execPath)} "$ROOT/releases/new/runtime/node"; ` +
+        (targetRuntime ? `ln -s ${sq(process.execPath)} "$ROOT/releases/old/runtime/node"; ` : '') +
+        'ln -s "$ROOT/releases/new" "$ROOT/current"; ln -s "$ROOT/releases/old" "$ROOT/previous"; ' +
+        'if cmd_rollback > /dev/null 2>&1; then r=ok; else r=refused; fi; ' +
+        'echo "$r $(basename "$(readlink "$ROOT/current")")"';
+      allCases.push(
+        ['cmd_rollback: swaps to a target with its own runtime', rollback('healthy', { targetRuntime: true, restart: 0 }), 'ok old'],
+        ['cmd_rollback: refuses a target with no runtime, links untouched', rollback('noRuntime', { targetRuntime: false, restart: 0 }), 'refused new'],
+        ['cmd_rollback: a failed restart is a failure', rollback('restartFails', { targetRuntime: true, restart: 1 }), 'refused old'],
+      );
+      // Both runners must spell a JSON boolean the way callers compare it.
+      const tsStatus = join(fixtureDir, 'ts-status.json');
+      writeFileSync(tsStatus, '{"CurrentTailnet":{"MagicDNSEnabled":true}}');
+      // The python3 runner is the one each installer falls back to: macOS
+      // names /usr/bin/python3, Linux takes it from PATH. Skipped where absent.
+      const python = platform === 'macOS' ? '/usr/bin/python3' : 'python3';
+      const hasPython = spawnSync(python, ['-c', '']).status === 0;
+      for (const runner of hasPython ? ['node', 'python3'] : ['node']) {
+        allCases.push([
+          `json_query: the ${runner} runner prints a boolean as true`,
+          `JSON_RUNNER=${runner}; json_query ${sq(tsStatus)} CurrentTailnet.MagicDNSEnabled`,
+          'true',
+        ]);
+      }
+      allCases.push(
+        ['cmd_purge: refuses while the Relay is still installed', purge(true), 'refused kept'],
+        ['cmd_purge: deletes state once uninstalled', purge(false), 'purged deleted'],
+      );
       if ((platform === 'macOS' && process.platform === 'darwin') ||
           (platform === 'Linux' && process.platform === 'linux')) {
         for (const [path, expected] of [[protectedDir, 'pass'], [publicDir, 'fail']]) {
@@ -498,6 +563,18 @@ export function run() {
             expected,
           ]);
         }
+      }
+      // A GNU coreutils `stat` first on PATH, as Homebrew documents for its
+      // gnubin, must not change the macOS answer.
+      if (platform === 'macOS' && process.platform === 'darwin') {
+        const gnubin = join(fixtureDir, 'gnubin');
+        mkdirSync(gnubin);
+        writeFileSync(join(gnubin, 'stat'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+        allCases.push([
+          'owner_only: a foreign stat first on PATH',
+          `PATH=${sq(gnubin)}:"$PATH"; pass() { echo pass; }; fail() { echo fail; }; owner_only ${sq(protectedDir)} 700 secret`,
+          'pass',
+        ]);
       }
       for (const [label, body, expected] of allCases) {
         checked += 1;

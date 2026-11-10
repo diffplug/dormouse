@@ -41,7 +41,6 @@ UNIT_FILE="$UNIT_DIR/$UNIT"
 LOOPBACK_PORT=3100
 
 ASSUME_YES=0
-[ "${DORMOUSE_INSTALL_ASSUME_YES:-0}" = "1" ] && ASSUME_YES=1
 TEST_MODE=0
 [ "${DORMOUSE_INSTALL_TEST:-0}" = "1" ] && TEST_MODE=1
 WANT_LINGER=0
@@ -157,7 +156,7 @@ for k in sys.argv[2].split("."):
     if v is None: break
     v = v.get(k) if isinstance(v, dict) else None
 if v is None: sys.exit(1)
-sys.stdout.write(",".join(v) if isinstance(v, list) else str(v))
+sys.stdout.write(",".join(v) if isinstance(v, list) else json.dumps(v) if isinstance(v, bool) else str(v))
 ' "$1" "$2"
       ;;
   esac
@@ -277,7 +276,7 @@ esac
 # (`DORMOUSE_RUNTIME_FILE`), so the only thing left that needs `ss` is
 # `manage verify`'s bind check — worth a warning, not a refusal.
 command -v ss >/dev/null 2>&1 \
-  || warn "ss not found (iproute2). The install works without it, but \`manage verify\` cannot confirm that port $LOOPBACK_PORT is bound only to 127.0.0.1."
+  || warn "ss not found (iproute2). The install works without it, but \`manage verify\` fails until it can confirm that port $LOOPBACK_PORT is bound only to 127.0.0.1."
 
 if [ "$TEST_MODE" != "1" ]; then
   # A user manager is what runs the service. Without one — a bare `su`, a
@@ -761,9 +760,10 @@ while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in *=*) ;; *) continue ;; esac
   key="${line%%=*}"
   value="${line#*=}"
+  # Only a whole identifier: `export` under `set -e` exits on any other key,
+  # which would stop the Relay at every start over one hand-added line.
   case "$key" in
-    [A-Za-z_]*) ;;
-    *) continue ;;
+    ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;;
   esac
   case "$value" in
     '"'*'"') value="${value#\"}"; value="${value%\"}" ;;
@@ -1112,12 +1112,12 @@ cmd_verify() {
     if systemd-analyze --user verify "$UNIT_FILE" >/dev/null 2>&1; then
       pass "unit file passes systemd-analyze verify"
     else
-      # systemd-analyze is absent on some minimal images; only fail when it ran
-      # and objected.
+      # systemd-analyze is absent on some minimal images. A check that did not
+      # run has shown nothing, so that fails too, with its own message.
       if command -v systemd-analyze >/dev/null 2>&1; then
         fail "unit file fails systemd-analyze verify: $UNIT_FILE"
       else
-        note "skipped systemd-analyze verify (not installed)"
+        fail "could not run systemd-analyze verify (not installed)"
       fi
     fi
     if grep -q '^Restart=always$' "$UNIT_FILE" && grep -q '^WantedBy=default.target$' "$UNIT_FILE"; then
@@ -1179,7 +1179,7 @@ cmd_verify() {
   # release; this only asks what the socket is bound to.
   local listeners
   if ! command -v ss >/dev/null 2>&1; then
-    note "skipped the bind check (ss from iproute2 is not installed)"
+    fail "could not check what port $PORT is bound to: ss (iproute2) is not installed"
   else
     listeners="$(ss -lntH "sport = :$PORT" 2>/dev/null || true)"
     if [ -z "$listeners" ]; then
@@ -1424,6 +1424,13 @@ cmd_uninstall() {
 }
 
 cmd_purge() {
+  # bin/run-relay is what "uninstall" removes. While it is here the Relay is
+  # still registered: it keeps the setup password it loaded at boot, recreates
+  # state/ on its next write, and restarts forever once config/ is gone.
+  if [ -e "$ROOT/bin/run-relay" ]; then
+    printf 'the Relay is still installed; run "%s" uninstall first\n' "$ROOT/bin/manage" >&2
+    return 1
+  fi
   printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Burrows, push\n' "$C_RED" "$C_OFF"
   printf 'subscriptions, the VAPID key, and any unspent enrollment offer:\n  %s\n  %s\n  %s\n\n' \
     "$STATE_DIR" "$ROOT/config" "$ROOT/run"
@@ -1437,15 +1444,12 @@ cmd_purge() {
   # just deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
   rm -rf "$STATE_DIR" "$ROOT/config" "$ROOT/run"
   printf 'purged.\n'
-  # bin/run-relay is what "uninstall" removes, so its absence means the service
-  # and the code are already gone and this script is the last thing standing. It
-  # cannot delete itself out from under the shell running it, so say how. The
-  # logs live outside ROOT on a real install, so LOG_ROOT has to be named too or
-  # the printed command leaves them behind.
-  if [ ! -e "$ROOT/bin/run-relay" ]; then
-    printf '\nthe service and code were already uninstalled; what remains is\n'
-    printf 'this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_ROOT"
-  fi
+  # The service and the code are already gone, so this script is the last thing
+  # standing. It cannot delete itself out from under the shell running it, so
+  # say how. The logs live outside ROOT on a real install, so LOG_ROOT has to be
+  # named too or the printed command leaves them behind.
+  printf '\nthe service and code were already uninstalled; what remains is\n'
+  printf 'this script and the logs:\n\n  rm -rf "%s" "%s"\n\n' "$ROOT" "$LOG_ROOT"
 }
 
 case "${1:-status}" in

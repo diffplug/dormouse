@@ -14,7 +14,7 @@ Why `$XDG_STATE_HOME` rather than the install root on Linux: the install root is
 
 ## Checkpoint 3: verify
 
-Why the Windows kill block selects by path rather than by `Name='node.exe'`: a developer machine routinely has several unrelated `node.exe` processes, and the `Dormouse Relay` command-line substring is not on the supervisor's own `powershell.exe`. Matching the install root against both `ExecutablePath` and `CommandLine` is the same predicate `Get-DormouseProcess` uses inside the installer, and the Mechanism map's "Stopping it" row says why image name is never enough.
+Why the Windows kill block pairs `Name='node.exe'` with an `ExecutablePath` under `releases\`: a developer machine routinely has several unrelated `node.exe` processes, so the image name alone is never enough (the Mechanism map's "Stopping it" row). It is narrower than `Get-DormouseProcess`, which also matches the install root on the command line so that it reaps the supervisor on purpose: the task's `powershell.exe` carries `bin\run-relay.ps1` in its command line, and killing it leaves nothing to perform the restart this checkpoint tests.
 
 ## Invariants
 
