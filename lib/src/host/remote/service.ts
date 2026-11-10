@@ -9,7 +9,6 @@
 
 import { hostname } from 'node:os';
 import { enrollVerificationUrl, SELF_HOST_DEVICE_CODE_REFUSAL } from './hosted-enrollment-url';
-export { enrollVerificationUrl } from './hosted-enrollment-url';
 import {
   API_ROUTES,
   BurrowAcl,

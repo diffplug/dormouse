@@ -122,11 +122,11 @@ import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import {
   BurrowService,
   enqueuePending,
-  enrollVerificationUrl,
   REVOCATION_SAVE_RETRY_MS,
   suggestedBurrowLabel,
   type BurrowServiceOptions,
 } from './service';
+import { enrollVerificationUrl } from './hosted-enrollment-url';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { BURROW_COMMAND_TIMEOUT_MS } from './link-client';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';

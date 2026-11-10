@@ -51,7 +51,7 @@ export const UNENROLLED_STATUS: BurrowConsoleStatus = {
   relayOrigin: DEFAULT_RELAY_ORIGIN,
   relayMode: 'hosted',
   burrowId: null,
-  connection: 'idle',
+  connection: 'stopped',
   pairedClients: 0,
   suggestedLabel: 'ned-mac',
   offer: false,

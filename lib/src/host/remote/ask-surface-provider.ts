@@ -37,9 +37,8 @@ export interface AskSurfaceProvider {
   provider: BurrowSurfaceProvider;
   /**
    * Something a future {@link BurrowSurfaceProvider.collectDirectory} could depend
-   * on changed — a pane, an alert, a focus move, a peer joining. The directory
-   * is the only thing a peer answers, so there is nothing to name: the cheap
-   * direction is always to re-collect.
+   * on changed — a pane, an alert, a focus move, a peer joining. Nothing a peer
+   * answers is named here: the cheap direction is always to re-collect.
    */
   notifyDirectoryChanged(): void;
 }
