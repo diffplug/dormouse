@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Does a real browser run a frame origin? (docs/specs/pocket-app.md -> scope
- * pocket-frames). Serves a page standing in for Pocket and a frame origin, on
- * two loopback ports, using the shipped worker, bootstrap page, bridge, socket
- * shim and Hosted handler. Nothing here reaches a Burrow or reads pairing data.
+ * Does a real browser run a frame origin?
+ * (docs/specs/pocket-app.md -> "Frame origin"). Serves a page standing in for
+ * Pocket and a frame origin, on two loopback ports, using the shipped worker,
+ * bootstrap page, bridge, socket shim and Hosted handler. Nothing here reaches
+ * a Burrow or reads pairing data.
  *
  *   pnpm --filter dormouse-lib build:frame-origin
  *   node scripts/frame-origin-check/serve.mjs --case cross-site --pocket-origin <https url> --frame-origin <https url> --reports <dir>
