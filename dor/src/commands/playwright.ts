@@ -7,6 +7,16 @@ import { diagnosticsHelp, stringParser, workspaceFlag } from './shared.js';
 
 export const playwrightCommand: Command = {
   name: 'playwright' satisfies BrowserAutomationProvider,
+  helpPatches: [
+    {
+      scope: 'root',
+      findReplace: ['playwright [--key name] [--session name] [--surface handle]<TO-EOL>', 'playwright [--key name|--session name|--surface handle] [--workspace ref] [args...]\n'],
+    },
+    {
+      scope: 'command-usage',
+      findReplace: ['playwright [--key name] [--session name] [--surface handle]<TO-EOL>', 'playwright [--key name|--session name|--surface handle] [--workspace ref] [args...]\n'],
+    },
+  ],
   command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string }, string[], DorCommandContext>({
     docs: {
       brief: 'Drive a browser surface via your playwright CLI install.',

@@ -79,6 +79,8 @@ export function extractSessionFlags(
     if (!value || value.startsWith('-')) {
       return { ok: false, message: `${flag} requires a value` };
     }
+    // As stricli refuses a repeated flag: which one wins is never a question.
+    if (values.has(flag)) return { ok: false, message: `${flag} may be given only once` };
     values.set(flag, value);
   }
 

@@ -158,3 +158,16 @@ test('edits immediately after applying a reload are never rebased as saved', asy
   assert.equal(held.text, 'edit after reload');
   assert.equal(doc.dirty(), true);
 });
+
+test('a document whose first load fails reports clean, since it holds no edit', async () => {
+  const requests = [];
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { requests.push([url, init?.body && JSON.parse(init.body)]); return fetch(url, init); };
+  try {
+    const { doc, errors } = session(undefined, undefined, () => Promise.reject(new Error('This editor supports UTF-8 text.')));
+    await doc.load();
+    for (let i = 0; i < 10; i++) await setImmediate();
+    assert.deepEqual(errors, ['This editor supports UTF-8 text.']);
+    assert.deepEqual(requests, [['state', { dirty: false }]]);
+  } finally { globalThis.fetch = fetch; }
+});
