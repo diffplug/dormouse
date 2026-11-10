@@ -2085,6 +2085,12 @@ export function useDorControl({
         return;
       }
 
+      // A cancel can land while the router retries a mounting Workspace's
+      // route, and an abort listener added after the fact never runs.
+      if (detail.signal?.aborted) {
+        detail.respond({ ok: false, error: `await on '${target.id}' was cancelled` });
+        return;
+      }
       const handle = getPlatform().alertAwait(target.id, { until, timeoutMs });
       // The client hung up (Ctrl-C) or the control server's deadline passed:
       // release the wait so it stops absorbing completions nobody can receive.

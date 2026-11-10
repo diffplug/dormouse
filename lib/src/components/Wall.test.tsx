@@ -862,6 +862,25 @@ describe('Wall on the Lath engine', () => {
     expect(typeof timedOut?.result?.waitedMs).toBe('number');
   });
 
+  it('never parks a dor await whose client already hung up', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:1']} initialMode="command" />);
+    });
+    await flush();
+    const park = vi.spyOn(fake, 'alertAwait');
+    const respond = vi.fn();
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.await,
+        params: { surface: 'surface:1', until: 'quiet', timeoutMs: 60_000 },
+        signal: AbortSignal.abort(),
+        respond,
+      } }));
+    });
+    expect(park).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: "await on 'surface:1' was cancelled" });
+  });
+
   it('parks a minimized browser surface so its DOM survives, and unparks it on kill', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
