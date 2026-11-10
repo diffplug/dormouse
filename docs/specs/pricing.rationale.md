@@ -10,6 +10,8 @@
 
 The one grace on access is a renewal's: `docs/specs/hosted.md` -> "Entitlement" keeps an `active` subscription entitling for 15 minutes past its period end, the gap before Stripe's rollover webhook lands. A failed renewal gets none: the founders' 30 days keep the locked price, not access.
 
+The founders' 30 days to fix a failed renewal are delivered by Stripe's retry window, not by code: while Stripe retries, paying the invoice restores the same subscription at the founding Price; once its retries end it cancels the subscription, and `foundingLapsed` then sells the founder list price. So the promise holds exactly while the window is at least 30 days. Stripe's presets are 1, 2, and 3 weeks, 1 month (28 days, short of 30), 2 months (63 days), and custom; 2 months is the shortest that covers it. Set on 2026-11-10 under Settings → Billing → Subscriptions and emails → Manage failed payments → Card payments: Smart Retries, up to 8 times within 2 months; on a first failed renewal attempt and on a dispute, leave the subscription past due; when every retry fails, cancel it. That is now the setting on the main account in test mode (it had been 2 weeks) and on the sandbox (already 2 months); the main account has no live mode yet, pending business verification.
+
 ## Paid-launch requirements
 
 - The September 29 account terms promised reasonable advance notice of material changes. The October 8 revision adds a liability cap, business indemnity, and forum clause, so publication is distinguished from acceptance and the notified transition for existing accounts. Its 30-day transition is the chosen contractual process, not a claim that every jurisdiction requires that exact period. An undisplayed account notice is not treated as delivered.

@@ -54,7 +54,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 ## Checkout and entitlement
 
 - **Must use Stripe Billing, Stripe-hosted Checkout, and its customer portal through `@pgstencil/stripe`; DiffPlug is the seller and merchant of record**, responsible for refunds and applicable tax registration, collection, filing, and remittance; Stripe Tax calculates the tax. **Never receive or store full card numbers in Dormouse.** A founding lock is a per-cohort Price; cohort counts come from the billing provider's completed subscriptions.
-- **The entitlement is the account's subscription, read on the server on every voice and Relay request** (`docs/specs/hosted.md` -> "Entitlement"). No licence, no offline verification, and no grace past what the subscription grants but a short renewal grace (rationale); a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
+- **The entitlement is the account's subscription, read on the server on every voice and Relay request** (`docs/specs/hosted.md` -> "Entitlement"). No licence, no offline verification, and no grace but a short renewal one (rationale); a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
 - **Cohorts close by count, never by date**: completed purchases at the billing provider; a purchase ending within the 30-day refund window, as a full refund or finally reversed payment ends it, returns its seat to its cohort. **Never reopen the ladder at a lower step** once a cohort has closed. **When a cohort closes the price rises one step and the counter resets to 100**, and **founding closes only when the ladder reaches list**: founding means bought at launch pricing, and the Hosted Relay shipping does not close it.
 - **Never sell founding to an account whose earlier founding subscription ended and kept its seat**, by cancelling, non-payment, or a refund past the window: a lapsed founder subscribes again at list. One ended within the 30-day refund window returned its seat, so its buyer may buy founding again. The rule reads the account: a closure deletes it, so a closed founder returning under a new account is not recognized. The restoration "Tiers" promises is made in Stripe, on the founder's own Price, never through checkout, which only sells the open cohort's.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
@@ -73,6 +73,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 - **Must offer a full refund within 30 days of the first Hosted payment or any yearly renewal**, including collected tax, by email to support; monthly renewals, plan changes, and resubscriptions do not restart this voluntary first-payment guarantee. **Must preserve mandatory legal remedies.**
 - **Must refund unused prepaid service, including corresponding collected tax, on permanent discontinuation or termination unrelated to customer breach**, and offer the same remedy for a material service reduction or rejected material terms change during a prepaid term; the 30-day window never limits it. Support computes it by hand and ends the plan, which a partial refund does not.
 - **Must preserve a founder's lock through billing-provider migrations and failures caused by DiffPlug, allowing payment restoration**, by a subscription support creates on the locked Price.
+- **A failed founding renewal keeps its lock while Stripe retries: its card retry window must reach 30 days** (rationale).
 - **Must email renewal notices, annual reminders, and price-change notices with cancellation instructions to the billing email, each recorded before it is sent, inside California's windows**; a price change applies only from a renewal its notice reached in time, never to a founding Price (`docs/specs/hosted.md` -> "Billing notices"; rationale).
 - **Must email the customer when a payment dispute suspends the subscription and when it is restored**, preserving refund and dispute rights.
 - **Closing an account cancels its subscription at once** (`docs/specs/hosted.md` -> "Account closure"). **Closing within 30 days of a subscription's first payment, or of a yearly renewal payment, refunds that payment in full.** **Must say before closing** that access ends now and renewal stops, which payment it refunds, that withdrawal stays open through support, and that cancelling renewal keeps access instead. **Must confirm the closure once done**, stating which payments it refunds, to where, that withdrawal stays open through support, and how to ask about a refund.
@@ -85,7 +86,7 @@ Source of truth: `withBilling`, `openCohort`, and `foundingLapsed` in `hosted/se
 
 1. **Opening checkout** ("Checkout"): production's Stripe bindings, then `CHECKOUT_OPEN`.
 2. **Managed voice for members**: one voice per Pane.
-3. **Renewal and transfer**: a failed founding renewal's grace.
+3. **Transfer** ("Transfer").
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
 
@@ -126,9 +127,8 @@ What is built — the endpoint, what a request carries, the daily cap, and the f
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.
 - **Pocket speaks only in the foreground** — a web app cannot voice a background push — so the desktop is the primary voice sink. A native Pocket is out of scope here.
 
-### Renewal and transfer
+### Transfer
 
-- **A failed founding renewal gets 30 days of grace before the lock is lost.**
 - **A subscription is personal and non-transferable.**
 
 ### Paid-launch requirements
@@ -143,7 +143,7 @@ EEA/UK representative appointment is excluded from the internal release gate by 
 - **Must send notices other than subscription notices to the account contact email, or show them at sign-in when none exists**, recording delivery or presentation before a notice period starts.
 - **Must give at least 30 days' advance notice of discontinuation, material reductions, or material terms changes**, except urgent legal or security requirements; no retroactive terms changes for disputes. Nothing sends or records these; `hosted/README.md` -> "Notices the first time" is the by-hand path, which cannot reach an account without an email.
 - **Must name the support owner and exercise each of `hosted/README.md` -> "Support runbooks", with a monitored `support@dormouse.sh` and collected post, before charging**: they are written against the code and Terms, not yet run on a release candidate.
-- **Must verify the permitted sales territories and tax setup before accepting payment**, and confirm refund, cancellation, failed-payment, and founder-lock behavior against the published offer. Stripe Billing does not transfer the seller's tax obligations.
+- **Must verify the permitted sales territories and tax setup before accepting payment**, and confirm refund, cancellation, failed-payment (the retry window rechecked in live mode), and founder-lock behavior against the published offer. Stripe Billing does not transfer the seller's tax obligations.
 - **Must support worldwide sales only where lawful**; EEA and UK withdrawal is "Checkout and entitlement".
 - **Must complete the EEA and UK provider privacy arrangements before launch**: execute applicable processor agreements, document provider transfer safeguards and assessments, and publish the applicable contacts and means to obtain the safeguards. **Never claim a transfer certification, contract, or representative that has not been verified** (rationale).
 - **Must recheck ElevenLabs' training opt-out or contractual no-training protection and the applicable processing agreement before enabling paid voices**, and keep the public disclosure consistent with the verified practice. History deletion alone is not evidence of either protection (rationale).
