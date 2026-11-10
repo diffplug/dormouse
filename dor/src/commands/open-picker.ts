@@ -5,7 +5,11 @@
  */
 import type { OpenHandlersResponse, PickerTerminal } from './types.js';
 import { fuzzyMatch, Ranker } from './fuzzy.js';
-import { printable, stripControls } from './terminal-text.js';
+import { printable } from './terminal-text.js';
+import {
+  cellsWidth, clip, dim, displayWidth, openPickerScreen, packHints, padTo, PickerList, renderRow, SGR, shortPath, textCells, wrap,
+  type Key,
+} from './picker-core.js';
 
 export interface PickerChoice {
   /** Relative to the listing directory, `/`-separated. */
@@ -37,39 +41,23 @@ interface Line { text: string; handler?: number }
 /** Wide enough for a list and a handler panel beside it. */
 const PANEL_MIN_COLUMNS = 100;
 const HANDLER_DEBOUNCE_MS = 30;
-const DOUBLE_CLICK_MS = 400;
 /** How often streamed files and slices of ranking redraw the screen. */
 const REDRAW_MS = 50;
 
-const ESC = '\x1b';
-const CSI = `${ESC}[`;
-const SGR = {
-  reset: `${CSI}0m`, bold: `${CSI}1m`, dim: `${CSI}2m`,
-  match: `${CSI}1;36m`, accent: `${CSI}1;33m`,
-};
 const NUMBER = new Intl.NumberFormat('en-US');
-const dim = (text: string) => `${SGR.dim}${text}${SGR.reset}`;
-const ENTER_SCREEN = `${CSI}?1049h${CSI}?1000h${CSI}?1006h${CSI}?2004h`;
-const LEAVE_SCREEN = `${CSI}?2004l${CSI}?1006l${CSI}?1000l${CSI}?25h${CSI}?1049l`;
 
 export function runFilePicker(options: PickerOptions): Promise<PickerChoice | null> {
   const { terminal } = options;
   /** Null while listing, then whether the limit cut the listing short. */
   let listed: { truncated: boolean } | null = null;
-  let query = '';
-  let scroll = 0;
   let handlerIndex = 0;
   let handlerFile: string | undefined;
   const handlerCache = new Map<string, HandlerState>();
   let handlerTimer: ReturnType<typeof setTimeout> | undefined;
   let handlerInFlight = false;
-  let lastClick = { row: -1, at: 0 };
   /** Screen rows (0-based) whose click chooses a handler. */
   let handlerRows = new Map<number, number>();
-  let listRows = 0;
   let redrawTimer: ReturnType<typeof setTimeout> | undefined;
-  let previousLines: string[] = [];
-  let previousSize = '';
   const listing = new AbortController();
 
   return new Promise((resolve) => {
@@ -81,8 +69,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       clearTimeout(redrawTimer);
       listing.abort();
       ranker.dispose();
-      stop();
-      terminal.write(LEAVE_SCREEN);
+      screen.close();
       resolve(choice);
     };
 
@@ -90,6 +77,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     const ranker = new Ranker(() => {
       if (redrawTimer === undefined) redrawTimer = setTimeout(() => { redrawTimer = undefined; if (!done) render(); }, REDRAW_MS);
     });
+    const list = new PickerList(ranker);
 
     const current = (): string | undefined => ranker.at(ranker.cursor);
     const handlerState = (): HandlerState | undefined => {
@@ -126,10 +114,6 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       }, HANDLER_DEBOUNCE_MS);
     };
 
-    const move = (delta: number) => {
-      if (ranker.count > 0) ranker.select(Math.max(0, Math.min(ranker.count - 1, ranker.cursor + delta)));
-    };
-
     /** Choosing a handler also holds its file under the cursor as results arrive. */
     const chooseHandler = (index: number) => {
       handlerIndex = index;
@@ -152,42 +136,19 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       finish(handler ? { file, tool: handler.tool } : { file });
     };
 
-    const setQuery = (next: string) => {
-      if (next === query) return;
-      query = next;
-      ranker.setQuery(query);
-    };
-
     const click = (row: number, column: number) => {
       const handler = handlerRows.get(row);
-      if (handler !== undefined && (column >= listWidth() + 2 || row > listRows)) {
+      if (handler !== undefined && (column >= listWidth() + 2 || row > list.rows)) {
         if (handler < 0) cycleHandler(1);
         else chooseHandler(handler);
         return;
       }
-      if (row < 1 || row > listRows || column >= listWidth()) return;
-      const index = scroll + row - 1;
-      if (index >= ranker.count) return;
-      const now = Date.now();
-      const repeat = lastClick.row === row && now - lastClick.at < DOUBLE_CLICK_MS && index === ranker.cursor;
-      lastClick = { row, at: now };
-      ranker.select(index);
-      if (repeat) accept();
+      if (column < listWidth() && list.click(row) === 'repeat') accept();
     };
 
-    const onInput = (chunk: string) => {
-      for (const key of parseKeys(chunk)) {
-        switch (key.kind) {
-          case 'text': setQuery(query + key.text); break;
-          case 'backspace': setQuery(Array.from(query).slice(0, -1).join('')); break;
-          case 'clear': setQuery(''); break;
-          case 'word': setQuery(query.replace(/\S*\s*$/, '')); break;
-          case 'up': move(-1); break;
-          case 'down': move(1); break;
-          case 'pageUp': move(-Math.max(1, listRows - 1)); break;
-          case 'pageDown': move(Math.max(1, listRows - 1)); break;
-          case 'home': move(-ranker.count); break;
-          case 'end': move(ranker.count); break;
+    const onKeys = (keys: Key[]) => {
+      for (const key of keys) {
+        if (!list.key(key)) switch (key.kind) {
           case 'nextHandler': cycleHandler(1); break;
           case 'previousHandler': cycleHandler(-1); break;
           case 'enter': accept(); break;
@@ -211,10 +172,8 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       const panel = wide();
       // The panel heads with the key hints; narrow terminals put the handler on
       // a status line above them at the bottom.
-      listRows = rows - 1 - (panel ? 0 : 2);
-      const cursor = ranker.cursor;
-      if (cursor < scroll) scroll = cursor;
-      if (cursor >= scroll + listRows) scroll = cursor - listRows + 1;
+      const cursor = list.layout(rows - 1 - (panel ? 0 : 2));
+      const { scroll, query } = list;
       if (current() !== handlerFile) requestHandlers();
       const width = listWidth();
       const lines: string[] = [];
@@ -222,11 +181,11 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
 
       const total = `${NUMBER.format(ranker.size)}${!listed ? '…' : listed.truncated ? '+ · capped, run from a subfolder' : ''}`;
       const count = `${NUMBER.format(ranker.count)}${ranker.scanning ? '…' : ''}/${total}`;
-      const shown = clip(printable(query), columns - 4 - count.length);
-      lines.push(padTo(`${SGR.accent}>${SGR.reset} ${shown}`, columns - count.length) + dim(count));
+      const head = list.queryRow(columns, count);
+      lines.push(head.line);
 
       const panelLines = panel ? renderPanel(columns - width - 3) : [];
-      for (let row = 0; row < listRows; row++) {
+      for (let row = 0; row < list.rows; row++) {
         let line: string;
         if (ranker.size === 0 && row === 0) line = dim(listed ? '  No files here' : '  Listing files…');
         else {
@@ -246,20 +205,8 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
         lines.push(dim(clip(hints().join('  '), columns)));
       }
 
-      // Handler replies and ranking ticks often change nothing visible. Keep
-      // those frames silent, and leave unchanged rows alone on real updates.
-      // A resize invalidates the cache because the terminal may reflow rows.
-      // Erasing before writing keeps a character in the last column, where an
-      // erase after it would land on that character.
-      const size = `${columns}x${rows}`;
-      let out = '';
-      lines.forEach((line, index) => {
-        if (size === previousSize && line === previousLines[index]) return;
-        out += `${CSI}${index + 1};1H${CSI}2K${line}${SGR.reset}`;
-      });
-      previousLines = lines;
-      previousSize = size;
-      if (out) terminal.write(`${CSI}?2026h${CSI}?25l${out}${CSI}1;${3 + displayWidth(shown)}H${CSI}?25h${CSI}?2026l`);
+      // Handler replies and ranking ticks often change nothing visible.
+      screen.paint(lines, columns, rows, head.cursorColumn);
     };
 
     const renderPanel = (width: number): Line[] => {
@@ -302,8 +249,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
 
     const hints = () => ['Select [↑↓]', 'Open [Enter]', ...(handlerList().length > 1 ? ['Handler [Tab]'] : [])];
 
-    terminal.write(ENTER_SCREEN);
-    const stop = terminal.listen(onInput, () => { if (!done) render(); });
+    const screen = openPickerScreen(terminal, onKeys, () => { if (!done) render(); });
     render();
     options.listFiles(paths => ranker.add(paths), listing.signal).then(
       result => { listed = result; },
@@ -312,175 +258,18 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
   });
 }
 
+
 /** A list row: the directory dim, the basename plain, matched characters
  *  bright; a path too wide loses its leading characters. */
 function renderItem(item: string, positions: readonly number[], selected: boolean, width: number): string {
   const matched = new Set(positions);
   const base = item.lastIndexOf('/') + 1;
-  let cells: { text: string; style: string; width: number }[] = [];
-  let index = 0;
-  for (const char of item) {
-    const style = matched.has(index) ? SGR.match : index < base ? SGR.dim : '';
-    const text = printable(char);
-    cells.push({ text, style, width: displayWidth(text) });
-    index += char.length;
-  }
+  let cells = textCells(item, index => (matched.has(index) ? SGR.match : index < base ? SGR.dim : ''));
   const available = width - 2;
-  let total = cells.reduce((sum, cell) => sum + cell.width, 0);
+  let total = cellsWidth(cells);
   if (total > available) {
     while (cells.length > 0 && total > available - 1) total -= cells.shift()!.width;
     cells = [{ text: '…', style: SGR.dim, width: 1 }, ...cells];
   }
-  const pointer = selected ? `${SGR.accent}›${SGR.reset} ` : '  ';
-  let body = '';
-  let style: string | undefined;
-  for (const cell of cells) {
-    if (cell.style !== style) body += `${SGR.reset}${selected ? SGR.bold : ''}${(style = cell.style)}`;
-    body += cell.text;
-  }
-  return `${pointer}${body}${SGR.reset}`;
-}
-
-/** Keys as the picker acts on them: a paste is text, a wheel notch an arrow. */
-type Key =
-  | { kind: 'text'; text: string }
-  | { kind: 'click'; row: number; column: number }
-  | { kind: 'backspace' | 'clear' | 'word' | 'up' | 'down' | 'pageUp' | 'pageDown' | 'home' | 'end'
-      | 'nextHandler' | 'previousHandler' | 'enter' | 'cancel' };
-
-const CSI_KEYS: Record<string, Key['kind']> = {
-  A: 'up', B: 'down', C: 'nextHandler', D: 'previousHandler', Z: 'previousHandler', H: 'home', F: 'end',
-  '5~': 'pageUp', '6~': 'pageDown', '1~': 'home', '4~': 'end', '7~': 'home', '8~': 'end',
-};
-const CONTROL_KEYS: Record<string, Key['kind']> = {
-  '\r': 'enter', '\n': 'enter', '\t': 'nextHandler', '\x7f': 'backspace', '\b': 'backspace',
-  '\x03': 'cancel', '\x07': 'cancel', '\x04': 'cancel', '\x15': 'clear', '\x17': 'word',
-  '\x10': 'up', '\x0e': 'down', '\x0b': 'up',
-};
-const PASTE_START = `${CSI}200~`;
-const PASTE_END = `${CSI}201~`;
-
-/** Raw terminal input, one chunk at a time, as picker keys. A lone ESC ending
- *  a chunk is Escape; unknown sequences are dropped. Rows and columns of a
- *  click are 0-based. */
-export function parseKeys(chunk: string): Key[] {
-  const keys: Key[] = [];
-  let i = 0;
-  while (i < chunk.length) {
-    if (chunk.startsWith(PASTE_START, i)) {
-      const end = chunk.indexOf(PASTE_END, i);
-      const stop = end < 0 ? chunk.length : end;
-      keys.push({ kind: 'text', text: stripControls(chunk.slice(i + PASTE_START.length, stop).replace(/[\r\n\t]+/g, ' ')) });
-      i = end < 0 ? chunk.length : end + PASTE_END.length;
-      continue;
-    }
-    const char = chunk[i];
-    if (char === ESC) {
-      const mouse = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/.exec(chunk.slice(i));
-      if (mouse) {
-        const [whole, button, column, row, kind] = mouse;
-        const code = Number(button);
-        if (code === 64) keys.push({ kind: 'up' });
-        else if (code === 65) keys.push({ kind: 'down' });
-        else if (code === 0 && kind === 'M') keys.push({ kind: 'click', row: Number(row) - 1, column: Number(column) - 1 });
-        i += whole.length;
-        continue;
-      }
-      const sequence = /^\x1b(?:\[([0-9;]*)([A-Za-z~])|O([A-Za-z]))/.exec(chunk.slice(i));
-      if (sequence) {
-        const final = sequence[3] ?? (sequence[2] === '~' ? `${sequence[1].split(';')[0]}~` : sequence[2]);
-        const kind = CSI_KEYS[final];
-        if (kind) keys.push({ kind } as Key);
-        i += sequence[0].length;
-        continue;
-      }
-      if (i === chunk.length - 1) keys.push({ kind: 'cancel' });
-      // Alt+key: drop the ESC and its key.
-      i += 2;
-      continue;
-    }
-    const control = CONTROL_KEYS[char];
-    if (control) { keys.push({ kind: control } as Key); i++; continue; }
-    const codePoint = chunk.codePointAt(i)!;
-    const text = String.fromCodePoint(codePoint);
-    if (stripControls(text) === text) {
-      const last = keys[keys.length - 1];
-      if (last?.kind === 'text') last.text += text;
-      else keys.push({ kind: 'text', text });
-    }
-    i += text.length;
-  }
-  return keys;
-}
-
-/** `path` with `home` spelled `~`. */
-export function shortPath(path: string, home: string | undefined): string {
-  return home && (path === home || path.startsWith(`${home}/`) || path.startsWith(`${home}\\`)) ? `~${path.slice(home.length)}` : path;
-}
-
-/** Columns a code point occupies: 0 for combining marks and joiners, 2 for
- *  East Asian wide and emoji, else 1. */
-function charWidth(char: string): number {
-  const code = char.codePointAt(0)!;
-  if (/\p{M}|‍|[︀-️]/u.test(char)) return 0;
-  if ((code >= 0x1100 && code <= 0x115f) || (code >= 0x2e80 && code <= 0xa4cf) || (code >= 0xac00 && code <= 0xd7a3)
-    || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe30 && code <= 0xfe4f) || (code >= 0xff00 && code <= 0xff60)
-    || (code >= 0xffe0 && code <= 0xffe6) || (code >= 0x1f300 && code <= 0x1faff) || (code >= 0x20000 && code <= 0x3fffd)) return 2;
-  return 1;
-}
-
-function displayWidth(text: string): number {
-  let width = 0;
-  for (const char of stripSgr(text)) width += charWidth(char);
-  return width;
-}
-
-function stripSgr(text: string): string {
-  return text.replace(/\x1b\[[0-9;]*m/g, '');
-}
-
-/** Plain text cut to `width` columns, ending in `…` when cut. */
-function clip(text: string, width: number): string {
-  if (width <= 0) return '';
-  if (displayWidth(text) <= width) return text;
-  let out = '';
-  let used = 0;
-  for (const char of text) {
-    const next = charWidth(char);
-    if (used + next > width - 1) break;
-    out += char;
-    used += next;
-  }
-  return `${out}…`;
-}
-
-/** Styled text padded with spaces to `width` columns. */
-function padTo(text: string, width: number): string {
-  return text + SGR.reset + ' '.repeat(Math.max(0, width - displayWidth(text)));
-}
-
-/** Hints packed whole onto lines of at most `width` columns. */
-function packHints(hints: readonly string[], width: number): string[] {
-  const lines: string[] = [];
-  for (const hint of hints) {
-    const last = lines[lines.length - 1];
-    if (last !== undefined && displayWidth(`${last}  ${hint}`) <= width) lines[lines.length - 1] = `${last}  ${hint}`;
-    else lines.push(clip(hint, width));
-  }
-  return lines;
-}
-
-/** Plain text broken at spaces into lines of at most `width` columns. */
-function wrap(text: string, width: number): string[] {
-  if (width <= 1) return [];
-  const lines: string[] = [];
-  let line = '';
-  for (const word of text.split(' ')) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (displayWidth(candidate) <= width) { line = candidate; continue; }
-    if (line) lines.push(line);
-    line = displayWidth(word) <= width ? word : clip(word, width);
-  }
-  if (line) lines.push(line);
-  return lines;
+  return renderRow(cells, selected);
 }
