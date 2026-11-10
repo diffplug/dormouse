@@ -310,7 +310,7 @@ describe('painting', () => {
     const { host, controller } = await paintFixture();
     let resolveClipboard!: (text: string) => void;
     (host.platform as PlatformAdapter).readClipboardText = () => new Promise((resolve) => { resolveClipboard = resolve; });
-    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: !IS_MAC, metaKey: IS_MAC, altKey: false, shiftKey: false });
     host.answers.launch = async () => ({ ok: true, stream: 7777 });
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     await flushMicrotasks();
@@ -327,7 +327,7 @@ describe('painting', () => {
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
     expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', text: 'a' });
     // A paste goes as text, whichever provider: the host inserts it.
-    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: !IS_MAC, metaKey: IS_MAC, altKey: false, shiftKey: false });
     await flushMicrotasks();
     expect(sent().at(-1)).toEqual({ type: 'input_text', text: 'pasted\ntext' });
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: !IS_MAC, metaKey: IS_MAC, altKey: false, shiftKey: false });
@@ -337,6 +337,10 @@ describe('painting', () => {
     controller.handleKeyDownLike({ key: 'c', code: 'KeyC', ctrlKey: IS_MAC, metaKey: !IS_MAC, altKey: false, shiftKey: false });
     expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'c' });
     expect(host.requests('edit')).toHaveLength(1);
+    // So is its Ctrl+V, a web terminal's quoted-insert: no paste.
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: IS_MAC, metaKey: !IS_MAC, altKey: false, shiftKey: false });
+    await flushMicrotasks();
+    expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'v' });
     // A view remounted over the open socket asks the host for the last frame.
     controller.attachView(makeSink());
     expect(sent().at(-1)).toEqual({ type: 'repaint' });
@@ -1857,7 +1861,7 @@ describe('Playwright provider', () => {
     controller.attachView(makeSink());
     await flushMicrotasks();
 
-    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', metaKey: IS_MAC, ctrlKey: !IS_MAC, altKey: false, shiftKey: false });
     await flushMicrotasks();
 
     // Two messages, where a key pair per character was ~16k: the host's input
