@@ -592,21 +592,6 @@ export interface SetupRetireRequest {
 export const MAX_TOKENS_PER_BURROW = 8;
 
 /**
- * The longest setup token this Burrow will put in a QR.
- *
- * A real one is base64url of 32 bytes (43 characters). The bound is what keeps
- * a 200 off a hostile or broken Relay from reaching the QR encoder, which
- * throws above its capacity — inside the app-wide ErrorBoundary, taking every
- * terminal down with it.
- */
-const SETUP_TOKEN_MAX_LENGTH = 128;
-
-/** Base64url, bounded, non-empty — the shape of a setup token on this wire. */
-function isSetupTokenHandle(value: unknown): value is string {
-  return isBoundedBase64Url(value, SETUP_TOKEN_MAX_LENGTH);
-}
-
-/**
  * Structural validation of a {@link SetupTokenResponse}, beside the type so a
  * field added here cannot be silently accepted by the Burrow that reads one.
  *
@@ -620,7 +605,7 @@ export function isSetupTokenResponse(value: unknown): value is SetupTokenRespons
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
   return (
-    isSetupTokenHandle(candidate.token) &&
+    isRelayBearer(candidate.token) &&
     typeof candidate.expiresAt === 'number' &&
     Number.isFinite(candidate.expiresAt) &&
     candidate.expiresAt > 0
