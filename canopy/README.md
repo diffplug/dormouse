@@ -14,7 +14,7 @@ pnpm dev:canopy   # storybook on http://localhost:6007
 
 ## Regression harness
 
-The `UpstreamVsFork` story renders identical content through three renderers stacked: pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false` (isolates the instance-layout/shader changes), and the fork with `sdf: true` (isolates the SDF glyph path). The upstream pin must be the same commit as the fork base — the `@xterm/*` beta counters are independent, so the numbers never match (addon `0.20.0-beta.329` == core `6.1.0-beta.336` == commit `08829c7e`); re-derive it with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases, or let `node scripts/xterm-bump.mjs --canopy <forkVersion>` pick the matching addon.
+The `UpstreamVsFork` story renders identical content through three renderers stacked: pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false` (isolates the instance-layout/shader changes), and the fork with `sdf: true` (isolates the SDF glyph path). The upstream pin must be the same commit as the fork base — the `@xterm/*` beta counters are independent, so the numbers never match (addon `0.20.0-beta.330` == core `6.1.0-beta.337` == commit `f70764dd`); re-derive it with `npm view @xterm/addon-webgl@<ver> gitHead` when the fork rebases, or let `node scripts/xterm-bump.mjs --canopy <forkVersion>` pick the matching addon.
 
 Story content writes PUA glyphs (powerline chevrons etc.) as `\uE0BX` escapes, never literal characters — the literals are invisible in editors and were once silently dropped in a file rewrite, which presented as a rendering regression.
 
