@@ -99,6 +99,13 @@ describe("column weights", () => {
     expect(markup).toMatch(/<table class="[^"]*\btable-fixed\b/);
   });
 
+  it("aligns the columns its delimiter row aligns", () => {
+    const markup = renderToStaticMarkup(<MarkdownDocument blocks={[{ ...table, align: [null, "center"] }]} />);
+    expect(markup).toMatch(/<th class="[^"]*">Guarantee<\/th>/);
+    expect(markup).toMatch(/<th class="[^"]*" style="text-align:center">Pinned by<\/th>/);
+    expect(markup).toMatch(/<td class="[^"]*" style="text-align:center">p<\/td>/);
+  });
+
   it("leaves a table no weights name to size by its content", () => {
     for (const columnWeights of [undefined, () => undefined]) {
       const markup = renderToStaticMarkup(<MarkdownDocument blocks={[table]} columnWeights={columnWeights} />);

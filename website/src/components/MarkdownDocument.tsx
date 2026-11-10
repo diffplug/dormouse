@@ -37,7 +37,7 @@ export type BlockNode =
   | { type: "paragraph"; tight?: boolean; children: InlineNode[] }
   | { type: "code"; lang: string | null; value: string }
   | { type: "list"; ordered: boolean; start?: number; items: { type: "listItem"; children: BlockNode[] }[] }
-  | { type: "table"; align: (string | null)[]; header: InlineNode[][]; rows: InlineNode[][][] }
+  | { type: "table"; align: ("left" | "center" | "right" | null)[]; header: InlineNode[][]; rows: InlineNode[][][] }
   | { type: "blockquote"; children: BlockNode[] }
   | { type: "thematicBreak" };
 
@@ -249,7 +249,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
             <thead>
               <tr className={TABLE_HEAD_ROW_CLASS}>
                 {node.header.map((cell, i) => (
-                  <th key={i} className={weights ? TH_WRAP_CLASS : TH_CLASS}>
+                  <th key={i} className={weights ? TH_WRAP_CLASS : TH_CLASS} style={node.align[i] ? { textAlign: node.align[i]! } : undefined}>
                     <Inline nodes={cell} />
                   </th>
                 ))}
@@ -259,7 +259,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
               {node.rows.map((row, r) => (
                 <tr key={r} className={TABLE_ROW_CLASS}>
                   {row.map((cell, c) => (
-                    <td key={c} className={`py-2 pr-4 align-top ${MUTED_TEXT_CLASS}`}>
+                    <td key={c} className={`py-2 pr-4 align-top ${MUTED_TEXT_CLASS}`} style={node.align[c] ? { textAlign: node.align[c]! } : undefined}>
                       <Inline nodes={cell} />
                     </td>
                   ))}
