@@ -14,7 +14,7 @@ import { migrations } from "../migrations";
 import { previewMigrations } from "../preview-migrations";
 import { postgresInbox } from "../preview-inbox";
 import { smoke } from "../../scripts/preview-smoke.mjs";
-import { providerIds } from "../policy";
+import { providerIds } from "../providers.js";
 import {
   betterAuthCredentials,
   endpointPaths,
