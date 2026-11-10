@@ -24,7 +24,7 @@ Pocket is:
 
 **Scanning is the only way in** — no setup password, no typed credential; the code on the computer's screen is both account setup and pairing.
 
-**A QR the native camera opened is origin bootstrap only.** The `#pair?` fragment is erased before the first render, parsed or not; nothing is retained, no call is made, the token is not spent, and the auth screen asks for a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned hash** — Camera opens Safari, a different partition. (rationale)
+**A QR the native camera opened is origin bootstrap only.** The `#pair?` fragment is erased before the first render, and on any later `hashchange`, parsed or not; nothing is retained, no call is made, the token is not spent, and the auth screen asks for a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned hash** — Camera opens Safari, a different partition. (rationale)
 
 **Must parse scanned or pasted text with `parsePairingInvitationUrl`, never navigate** ([relay.md](./relay.md) owns the grammar; rationale). **Must keep invitations in memory only, clearing them on every terminal outcome.** **Must discard parses finishing after Cancel or teardown.**
 
