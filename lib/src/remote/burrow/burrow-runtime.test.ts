@@ -457,6 +457,8 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(burrow.trackedClientCount).toBe(0);
     expect(socket.sent).toHaveLength(framesBefore);
     expect(invitationEvents.some((event) => event.outcome === 'paired')).toBe(false);
+    // The record is live, so the owner's log says so.
+    expect(accessEntries.map(({ event }) => event)).toEqual(['paired']);
   });
 
   it('gives the confirmation exactly one attempt', async () => {

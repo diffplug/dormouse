@@ -1549,15 +1549,16 @@ export class BurrowRuntime {
         if (this.#policy === approval.policy) {
           this.#presenceWindows.seed(pending.clientStaticPublicKey, record, approval.verifiedAt);
         }
-        // Consent already happened, so a successful save stays committed even
-        // after transport loss. Never answer on a retired or replacement pipe.
-        if (this.#clients.get(clientId)?.pairing !== pending) return;
+        // Logged with the record, which is live whatever became of the pipe.
         this.#logAccess({
           at: this.#now(),
           event: 'paired',
           device: record.label,
           deviceId: deviceIdFor(record.clientStaticPublicKey),
         });
+        // Consent already happened, so a successful save stays committed even
+        // after transport loss. Never answer on a retired or replacement pipe.
+        if (this.#clients.get(clientId)?.pairing !== pending) return;
         this.#sendPairingOutcome(clientId, pending, {
           ok: true,
           burrowStaticPublicKey: this.#enrollment.noiseStaticPublicKey,
