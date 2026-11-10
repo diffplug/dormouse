@@ -383,6 +383,33 @@ describe("TutRunner snapshots", () => {
     dispose();
   });
 
+  it("draws Flappy Term only while the bird is in flight", () => {
+    vi.useFakeTimers();
+    try {
+      const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
+      const { adapter, sendKeys, lastFrame, dispose } = mountRunner(allItemIds);
+      let writes = 0;
+      adapter.onPtyData(() => { writes += 1; });
+      sendKeys(extraRow("flappy") + ENTER);
+
+      writes = 0;
+      vi.advanceTimersByTime(1000);
+      expect(writes).toBe(0);
+
+      sendKeys(" ");
+      vi.advanceTimersByTime(30_000);
+      expect(writes).toBeGreaterThan(0);
+      expect(lastFrame()).toContain("GAME OVER");
+
+      writes = 0;
+      vi.advanceTimersByTime(1000);
+      expect(writes).toBe(0);
+      dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens Flappy Term, shows the start hint, and exits back to the menu", () => {
     const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
     const { sendKeys, lastFrame, dispose } = mountRunner(allItemIds);
