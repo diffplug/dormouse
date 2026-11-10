@@ -22,7 +22,7 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 ## Features
 
 - **Alerts when something needs you.** Terminal notification protocols (`BEL`, `OSC 9/9;4/99/777`) and unattended command exits alert with no setup; supported agents are watched by default when no watch list has been saved, and you can watch other command names to be alerted when they go quiet.
-- **tmux-compatible keybindings.** Same prefix, same splits, same pane navigation. Muscle memory transfers.
+- **tmux-style keybindings.** Tap Left then Right Shift (or ⌘) for command mode, where tmux's split, kill, and arrow-key navigation keys (`%` `"` `x` `←` `→`) work as you expect.
 - **Full mouse support.** Click to split, drag to resize, scroll to navigate. Or stay on the keyboard.
 - **Copy-paste that works.** Click and drag selects text the way you'd expect, even in mouse-aware TUIs that normally swallow it as escape codes.
 - **Minimize to doors.** Minimize a terminal to a compact status indicator. It keeps running and keeps reporting whether its task needs attention.
