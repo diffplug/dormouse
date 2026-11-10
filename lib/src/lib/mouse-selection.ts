@@ -286,15 +286,15 @@ export function isDragging(id: string): boolean {
 
 /**
  * Extend the in-progress selection to fully cover a detected token (spec §5.3).
- * No-op when no drag is active. Preserves the drag anchor; adjusts the end
- * toward whichever token boundary is farther from the anchor so the drag
- * direction is respected.
+ * No-op when no drag is active. Preserves the drag anchor and moves the end to
+ * the token boundary in the drag's direction, read from the end against the
+ * anchor so a drag that began inside the token keeps what it covered.
  */
 export function extendSelectionToToken(id: string, token: BufferToken): void {
   const s = states.get(id);
   if (!s?.selection?.dragging) return;
   const sel = s.selection;
-  const forward = comparePos({ row: sel.startRow, col: sel.startCol }, token.start) <= 0;
+  const forward = comparePos({ row: sel.startRow, col: sel.startCol }, { row: sel.endRow, col: sel.endCol }) <= 0;
   const edge = forward ? token.end : token.start;
   s.selection = { ...sel, endRow: edge.row, endCol: edge.col };
   notify();

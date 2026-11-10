@@ -214,7 +214,7 @@ A token is whitespace-delimited and **runs on across soft wraps**. Trailing char
 
 ### 5.3 Extension Action
 
-- **e** during a drag over a qualifying token extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary away from it. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
+- **e** during a drag over a qualifying token extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary in the drag's direction, even from an anchor inside the token. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
 - **e** with no qualifying token is consumed (per §3.6) but extends nothing; once the drag has ended, `e` is the editor's expand instead (§4.3). Release finalizes whatever boundaries the drag, extensions included, produced.
 - **Only this single extension step is offered mid-drag**, and no "open URL" action (§9.1); the editor's scopes are the wider steps (§4.2).
 - **Must preserve extension on keys that leave the shape unchanged.** Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.

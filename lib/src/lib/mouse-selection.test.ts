@@ -171,6 +171,17 @@ describe('mouse-selection: smart extension', () => {
     extendSelectionToToken('a', token);
     expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 4, startCol: 30, endRow: 3, endCol: 50 });
 
+    // A drag that began inside the token keeps its direction.
+    beginDrag('a', { row: 3, col: 55, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: 4, col: 5, altKey: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 55, endRow: 4, endCol: 9 });
+
+    beginDrag('a', { row: 4, col: 5, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: 3, col: 55, altKey: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 4, startCol: 5, endRow: 3, endCol: 50 });
+
     // An anchor on the token's first cell reads as a forward drag.
     beginDrag('a', { row: 3, col: 50, altKey: false, startedInScrollback: false });
     extendSelectionToToken('a', token);
