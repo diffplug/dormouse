@@ -4,7 +4,7 @@
  *
  * Only tool-designated Sessions are scanned. An ordinary terminal that opens a
  * port never transforms — that is the Dev-Server Chip's job, and panes must not
- * flip under the user (`docs/specs/dor-tool.md` -> Security).
+ * flip under the user (`docs/specs/security-local.md` -> Dor Tool configuration).
  */
 import { useEffect, useRef } from 'react';
 import { getTerminalPaneState } from '../../lib/terminal-registry';

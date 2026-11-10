@@ -39,7 +39,7 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
         <div className="text-foreground">dor tool {printableExact(name)}</div>
         <div>will launch</div>
         <code className="rounded bg-app-bg px-2 py-1 text-foreground">{printableExact(run)}</code>
-        <div>and then open a browser</div>
+        <div>and show any page it serves</div>
       </div>
 
       {refused ? <div role="alert" className="text-error">This Tool contains terminal control characters, so it cannot be approved.</div>
