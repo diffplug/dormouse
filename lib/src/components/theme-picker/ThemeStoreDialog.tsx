@@ -74,6 +74,8 @@ export function ThemeStoreDialog({
     setError(null);
     try {
       const themes = await fetchExtensionThemes(extension.namespace, extension.name);
+      // The Themes category also lists icon-theme extensions, which carry no color theme.
+      if (themes.length === 0) throw new Error('This extension has no color themes');
       for (const theme of themes) addInstalledTheme(theme);
       if (themes[0]) {
         setActiveThemeId(themes[0].id);

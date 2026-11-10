@@ -183,6 +183,28 @@ describe('ThemeStoreDialog', () => {
     }
   });
 
+  it('reports an extension that has no color themes', async () => {
+    searchThemesMock.mockImplementationOnce(async () => ({
+      extensions: [extension('icons', 'Some Icon Theme')],
+    }));
+    vi.mocked(fetchExtensionThemes).mockResolvedValueOnce([]);
+    const onThemesChanged = vi.fn();
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        root.render(<ThemeStoreDialog onClose={() => {}} onThemesChanged={onThemesChanged} />);
+      });
+      await search('icons');
+      await act(async () => { installButton('Some Icon Theme').click(); });
+
+      expect(container.textContent).toContain('This extension has no color themes');
+      expect(onThemesChanged).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps a row installing while another install settles', async () => {
     searchThemesMock.mockImplementationOnce(async () => ({
       extensions: [extension('dracula', 'Dracula Official'), extension('nord', 'Nord Theme')],
