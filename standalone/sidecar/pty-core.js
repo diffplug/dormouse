@@ -1656,9 +1656,8 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     // A spawn over a live generation — a cold restore that believed a host
     // silent through both list asks (`collectLivePtys`) — leaves the old shell
     // unreachable: nothing can write to it, and its output and exit no longer
-    // speak for the id. Stop it rather than leak it — with node-pty's default
-    // SIGHUP, not the graceful SIGTERM: an interactive bash ignores SIGTERM, and
-    // no later kill can reach a PTY that is no longer in `ptys`.
+    // speak for the id. Stop it rather than leak it: no later kill can reach a
+    // PTY that is no longer in `ptys`.
     const displaced = ptys.get(id);
     ptys.set(id, p);
     if (displaced) {
@@ -1820,10 +1819,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   // before onExit can crash the owner, so graceful shutdown and later cleanup
   // share a guard keyed by the PTY object (never by a reusable Session id).
   const closingPtys = new WeakSet();
-  function stopPty(p, graceful = false) {
+  // On POSIX, node-pty's default SIGHUP: an interactive bash or zsh ignores
+  // SIGTERM, and honours the hangup a closing terminal sends.
+  function stopPty(p) {
     if (platform !== 'win32') {
-      if (graceful) p.kill('SIGTERM');
-      else p.kill();
+      p.kill();
       return;
     }
     if (closingPtys.has(p)) return;
@@ -2036,12 +2036,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
     if (targets.length === 0) { setTimeout(done, 50); return; }
-    for (const id of targets) {
+    // By object, not id: a spawn under the same id meanwhile is not this stop's.
+    const stopping = targets.map((id) => [id, ptys.get(id)]);
+    for (const [, p] of stopping) {
       try {
         // WindowsTerminal rejects signals (possibly in a deferred callback,
         // beyond this catch). kill() closes the ConPTY; the pinned addon can
         // terminate its shell immediately, so this is no flush guarantee.
-        stopPty(ptys.get(id), true);
+        stopPty(p);
       } catch { /* already dead */ }
     }
     // Resolve early once every target has exited (onExit removes it) instead
@@ -2051,8 +2053,18 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     const deadline = Date.now() + timeout;
     const tick = () => {
       if (!targets.some((id) => ptys.has(id))) setTimeout(done, 50);
-      else if (Date.now() >= deadline) done();
-      else setTimeout(tick, 50);
+      else if (Date.now() >= deadline) {
+        // A process that outlives the hangup (one trapping it) is killed: the
+        // caller drops these ids next, and nothing could reach it after. The
+        // same grace tick lets its exit, which follows SIGKILL within
+        // milliseconds, reach the host before the acknowledgement.
+        if (platform !== 'win32') {
+          for (const [id, p] of stopping) {
+            if (ptys.get(id) === p) try { p.kill('SIGKILL'); } catch { /* already dead */ }
+          }
+        }
+        setTimeout(done, 50);
+      } else setTimeout(tick, 50);
     };
     setTimeout(tick, 50);
   }

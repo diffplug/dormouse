@@ -923,7 +923,7 @@ test('interrupt with no live PTYs still reports done', async () => {
   assert.deepEqual(events.at(-1), { event: 'interruptDone', data: { requestId: 'req-empty' } });
 });
 
-test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final output', async () => {
+test('gracefulKill hangs up the named PTYs, kills what outlives the deadline, echoes requestId, forwards final output', async () => {
   const events = [];
   const killSignals = [];
   const listeners = {};
@@ -948,8 +948,9 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
   listeners.data?.('final output');
   await done;
 
-  // SIGTERM was delivered, and the done event carries the caller's requestId.
-  assert.deepEqual(killSignals, ['SIGTERM']);
+  // node-pty's default SIGHUP, then SIGKILL for a PTY still there at the
+  // deadline; the done event carries the caller's requestId.
+  assert.deepEqual(killSignals, [undefined, 'SIGKILL']);
   assert.deepEqual(events.at(-1), {
     event: 'gracefulKillDone',
     data: { requestId: 'req-42' },
@@ -2550,7 +2551,7 @@ for (const platform of ['linux', 'win32']) test(`gracefulKill targets only the n
   mgr.gracefulKill(['a'], 1, 'req-1');
   await done;
 
-  assert.deepEqual(pty.killed, [['a', platform === 'win32' ? undefined : 'SIGTERM']]);
+  assert.deepEqual(pty.killed, platform === 'win32' ? [['a', undefined]] : [['a', undefined], ['a', 'SIGKILL']]);
   assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
 });
 
@@ -2626,8 +2627,8 @@ test('PTY owner streams only the current generation and stops the one a spawn di
   generations[0].onData('old shell');
   generations[1].onData('new shell');
   assert.deepEqual(sent.filter(([type]) => type === 'data').map(([, msg]) => msg.data), ['new shell']);
-  // `kill()` with no argument is node-pty's SIGHUP; an interactive bash ignores
-  // SIGTERM, so a graceful stop would leave the unreachable shell running.
+  // `kill()` with no argument is node-pty's SIGHUP, which an interactive shell
+  // honours (it ignores SIGTERM).
   assert.deepEqual(generations[0].kills, [undefined]);
   assert.deepEqual(generations[1].kills, []);
   mgr.killAll();
