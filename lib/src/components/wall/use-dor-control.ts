@@ -14,13 +14,14 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
+  ToolOrigin,
   ToolSurfaceResponse,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal, NAVIGATION_CANCELLED_ERROR, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import { pendingSurfaceRefusal } from '../../lib/pending-kills';
 import type { OpenPort, PtyDataDetail } from '../../lib/platform/types';
-import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
+import { toolOriginOf, type ToolKeyScope, type ToolRender } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, buildWindowsPortableCommand, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
 import {
   getDefaultShellOpts,
@@ -1276,6 +1277,7 @@ export function useDorControl({
         // rather than tie-breaking; a declared tool opts in with one line.
         let port: 'announced' | 'auto' = 'auto';
         let openTarget: string | undefined;
+        let origin: ToolOrigin | undefined;
         const toolShell = getDefaultShellOpts()?.shell;
         /** Approval and spawn both require an OSC 633-integrated shell. */
         const refuseCmdShell = (): boolean => {
@@ -1388,6 +1390,7 @@ export function useDorControl({
               port = lookup.port;
               warnings = lookup.warnings;
               openTarget = lookup.target;
+              origin = toolOriginOf(lookup);
               break;
             case 'no-file':
               detail.respond({ ok: false, error: `no dormouse.yml found in '${cwd}' or any parent directory` });
@@ -1549,6 +1552,7 @@ export function useDorControl({
           ...(key ? { toolKey: key } : {}),
           ...(toolName ? { toolName } : {}),
           ...(openTarget !== undefined ? { toolTarget: openTarget } : {}),
+          ...(origin ? { toolOrigin: origin } : {}),
         };
         const toolParams = { surfaceType: 'tool', cwd, ...identity };
 

@@ -6,6 +6,7 @@ import { browserPersistedPane, isToolCommandArgv, PERSISTED_SESSION_VERSION, rea
 import { getActivity, getInheritableCwd, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { isToolReaped } from './tool-reap-store';
+import { isRecord } from './is-record';
 
 function previousPaneMap(previous: PersistedSession | null): Map<string, PersistedPane> {
   if (!previous) return new Map();
@@ -201,6 +202,7 @@ function toolMetadataFromParams(params: Record<string, unknown> | undefined): Pe
     render, port, ...(key ? { key } : {}), ...(isBrowserViewportSetting(params.browserViewport) ? { viewport: params.browserViewport } : {}),
     ...(params.toolPreview === true ? { preview: true as const } : {}),
     ...(typeof params.toolTarget === 'string' ? { target: params.toolTarget } : {}),
+    ...(isRecord(params.toolOrigin) && typeof params.toolOrigin.file === 'string' ? { origin: { file: params.toolOrigin.file } } : {}),
   };
 }
 

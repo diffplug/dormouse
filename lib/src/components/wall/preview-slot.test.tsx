@@ -132,7 +132,7 @@ function viewerParams(file: string, extra: Record<string, unknown> = {}) {
   return {
     surfaceType: 'tool', command: `view ${target}`, toolArgv: ['view', target], cwd: '/repo', toolName: 'viewer',
     toolScope: 'user', toolRender: 'iframe', toolPort: 'announced', toolKey: ['viewer', target], toolTarget: target,
-    toolPreview: true, ...extra,
+    toolOrigin: { file: '/config/dormouse.yml' }, toolPreview: true, ...extra,
   };
 }
 
@@ -850,6 +850,10 @@ describe('a folder in the slot', () => {
     expect(await paramsOf('surface:slot')).toMatchObject({
       toolScope: 'builtin', toolName: 'folder', toolTarget: '/repo/docs', toolKey: ['folder', '/repo/docs'], toolPreview: true,
     });
+    // The user Tool's origin went with it: a built-in has none.
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolOrigin');
+    expect(await listRow('surface:slot')).toMatchObject({ toolName: 'folder', toolScope: 'builtin' });
+    expect(await listRow('surface:slot')).not.toHaveProperty('toolOrigin');
   });
 
   it('pins a folder viewer in the slot when it selects a file, previewing that file in a new slot beside it', async () => {

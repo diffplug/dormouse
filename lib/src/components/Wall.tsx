@@ -31,7 +31,7 @@ const RemotePairingModalHost = lazy(() =>
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { BROWSER_PROVIDER_GUI, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
 import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
-import { isToolRender } from '../lib/platform/tool-types';
+import { isToolRender, toolOriginOf } from '../lib/platform/tool-types';
 import { acquireAgentBrowserSurfaceController, closeBrowserSurface, requestBrowserRenderMode } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { StrayKeyModal } from './StrayKeyPrompt';
@@ -97,7 +97,7 @@ import {
   retainsLivePage,
   browserUrlFromParams,
   surfaceKindFromParams,
-  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolFace, toolPendingFromParams,
+  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolFace, toolListIdentity, toolPendingFromParams,
 } from './wall/browser-surface';
 import { usePreviewSlotPin } from './wall/preview-slot';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './wall/browser-url';
@@ -1410,6 +1410,7 @@ export function Wall({
         todo: activity?.todo === true,
         awaited: activity?.awaited === true,
         ...(isPreviewSlotParams(source.params) ? { preview: true } : {}),
+        ...toolListIdentity(source.params),
       };
     });
   }, [lath]);
@@ -1832,6 +1833,7 @@ export function Wall({
           browserViewport: resolved.viewport,
           toolPort: resolved.port,
           ...(key ? { toolKey: key } : {}),
+          toolOrigin: toolOriginOf(resolved),
         });
         // Hand the leaf its command only now. The approval marker stays in place
         // until after this write, so TerminalPanel cannot consume default options

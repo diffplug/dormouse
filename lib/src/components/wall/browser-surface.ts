@@ -9,7 +9,7 @@ import {
   type BrowserDisplayMode,
   type RenderMode,
 } from './agent-browser-screen';
-import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
+import type { BrowserBinding, Surface, SurfaceKind, ToolOrigin } from 'dor/commands/types';
 import { isToolKeyScope, type ToolKeyScope, type ToolRender } from '../../lib/platform/tool-types';
 import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
@@ -81,12 +81,14 @@ export interface ToolIdentityParams {
   toolKey?: string[];
   browserViewport?: BrowserViewportSetting;
   toolTarget?: string;
+  /** The host lookup's answer, never the renderer's or the Tool's. */
+  toolOrigin?: ToolOrigin;
 }
 
 // Keyed by the interface, so an identity param added there fails to compile until it is listed here.
 const TOOL_IDENTITY_KEYS: Record<keyof ToolIdentityParams, true> = {
   command: true, toolArgv: true, toolName: true, toolScope: true, toolRender: true,
-  toolPort: true, toolKey: true, browserViewport: true, toolTarget: true,
+  toolPort: true, toolKey: true, browserViewport: true, toolTarget: true, toolOrigin: true,
 };
 export const TOOL_IDENTITY_PARAMS: ReadonlySet<string> = new Set(Object.keys(TOOL_IDENTITY_KEYS));
 
@@ -201,6 +203,18 @@ export function namespacedToolKey(
 export function toolScopeFromParams(params: unknown): ToolKeyScope | undefined {
   const scope = asParams(params).toolScope;
   return isToolKeyScope(scope) ? scope : undefined;
+}
+
+/** A named Tool's declared identity as `dor list` reports it: nothing for
+ *  another kind or an anonymous Tool, and no origin for a built-in. */
+export function toolListIdentity(params: unknown): Pick<Surface, 'toolName' | 'toolScope' | 'toolOrigin'> {
+  if (!isToolParams(params) || typeof params.toolName !== 'string') return {};
+  const origin = params.toolOrigin as Partial<ToolOrigin> | undefined;
+  return {
+    toolName: params.toolName,
+    toolScope: toolScopeFromParams(params) ?? 'project',
+    ...(typeof origin?.file === 'string' ? { toolOrigin: { file: origin.file } } : {}),
+  };
 }
 
 /** Whether params mark the Workspace's preview slot (`docs/specs/dor-tool.md`

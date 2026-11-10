@@ -2490,6 +2490,8 @@ describe('Wall on the Lath engine', () => {
       // drops it: reconnect.test.ts), and it ends with the run.
       const lath = engine.mock.results[0].value as lathWallEngine.LathWallEngine;
       expect(lath.getMeta(toolId!)?.params?.toolSharesCallerShell).toBe(status === 'takeover' ? true : undefined);
+      // Either placement keeps the user file that declared the Tool.
+      expect(lath.getMeta(toolId!)?.params?.toolOrigin).toEqual({ file: '/config/dormouse.yml' });
       if (status === 'takeover') {
         await act(async () => window.dispatchEvent(new Event('pagehide')));
         await flush();
@@ -2549,6 +2551,22 @@ describe('Wall on the Lath engine', () => {
       }
       expect(new Set(ids).size).toBe(3);
       expect(leafCount()).toBe(4);
+      // A project and a user Tool keep the file the host answered; a built-in
+      // keeps none, whatever path its answer carries.
+      const listed = await new Promise<Array<Record<string, unknown>>>(resolve => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.list, params: {}, respond: (response: { result: { surfaces: Array<Record<string, unknown>> } }) => resolve(response.result.surfaces),
+        } }));
+      });
+      expect(ids.map(id => {
+        const row = listed.find(surface => surface.id === id)!;
+        return [row.toolName, row.toolScope, row.toolOrigin];
+      })).toEqual([
+        ['file', 'project', { file: '/repo/dormouse.yml' }],
+        ['file', 'user', { file: '/repo/dormouse.yml' }],
+        ['file', 'builtin', undefined],
+      ]);
+      expect(listed.find(surface => surface.id === 'surface:a')).not.toHaveProperty('toolName');
 
       // Host resolution gives both spellings the same canonical document key.
       const reused = await requestTool({ file: './docs/../docs/readme.md' });
@@ -2587,6 +2605,7 @@ describe('Wall on the Lath engine', () => {
       return { ...common, status: 'ok', render: 'iframe', port: 'auto', key: null, warnings: [] };
     });
     Object.assign(fake, { toolControl });
+    const engine = vi.spyOn(lathWallEngine, 'createLathWallEngine');
     let id: string | undefined;
     try {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
@@ -2615,6 +2634,8 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-session-id="${id}"]`)).not.toBeNull();
       expect(container.querySelector('[role="alert"]')).toBeNull();
       expect(pendingShellOpts.get(id!)?.command).toBe('view /repo/file.md');
+      expect((engine.mock.results[0].value as lathWallEngine.LathWallEngine).getMeta(id!)?.params?.toolOrigin)
+        .toEqual({ file: '/repo/dormouse.yml' });
       act(() => {
         terminalRegistry.seedTerminalManualCwd(id!, '/repo');
         reportRunning(id!, 'view /repo/file.md');
