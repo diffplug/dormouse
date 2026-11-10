@@ -224,7 +224,7 @@ export class FileBurrowStateStore implements BurrowStateStore {
    *  Burrow", so the write is the shared owner-only atomic one. `#mutate`
    *  already keeps this process's saves apart. */
   #write(state: BurrowStateFile): Promise<void> {
-    return writeJsonAtomic(this.#dir, this.#path, state);
+    return writeJsonAtomic(this.#dir, this.#path, state, { durable: true });
   }
 }
 

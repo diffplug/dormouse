@@ -21,6 +21,13 @@ const fsProbe = vi.hoisted(() => ({
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:fs/promises')>();
+  const tmpWrite = async (): Promise<void> => {
+    if (fsProbe.tmpWriteError) throw fsProbe.tmpWriteError;
+    fsProbe.steps.push('write');
+    if (fsProbe.tmpWriteDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, fsProbe.tmpWriteDelayMs));
+    }
+  };
   return {
     ...real,
     chmod: async (path: string, mode: number) => {
@@ -32,14 +39,24 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       return real.readFile(path, options);
     },
     writeFile: async (path: string, data: never, options: never) => {
-      if (String(path).endsWith('.tmp')) {
-        if (fsProbe.tmpWriteError) throw fsProbe.tmpWriteError;
-        fsProbe.steps.push('write');
-        if (fsProbe.tmpWriteDelayMs) {
-          await new Promise((resolve) => setTimeout(resolve, fsProbe.tmpWriteDelayMs));
-        }
-      }
+      if (String(path).endsWith('.tmp')) await tmpWrite();
       return real.writeFile(path, data, options);
+    },
+    // A durable write goes through a handle: its write and its flush.
+    open: async (path: string, flags: never, mode: never) => {
+      const handle = await real.open(path, flags, mode);
+      if (!String(path).endsWith('.tmp')) return handle;
+      return Object.assign(Object.create(handle) as typeof handle, {
+        writeFile: async (data: string) => {
+          await tmpWrite();
+          return handle.writeFile(data);
+        },
+        sync: async () => {
+          fsProbe.steps.push('sync');
+          return handle.sync();
+        },
+        close: () => handle.close(),
+      });
     },
     rename: async (from: string, to: string) => {
       fsProbe.steps.push('rename');
@@ -292,7 +309,9 @@ describe('FileBurrowStateStore', () => {
       store.saveEnrollment(ENROLLMENT),
     ]);
 
-    expect(fsProbe.steps).toEqual(['write', 'rename', 'write', 'rename']);
+    // Each flushed before its rename: these records decide who is authorized,
+    // and a save reported done must survive a power loss.
+    expect(fsProbe.steps).toEqual(['write', 'sync', 'rename', 'write', 'sync', 'rename']);
     // And the file the last one left is whole, with both changes in it.
     const parsed = JSON.parse(await readFile(file(), 'utf8')) as {
       enrollment: BurrowEnrollment;
