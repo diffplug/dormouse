@@ -9,10 +9,12 @@ import type { WallKeyboardCtx } from './keyboard/types';
 
 vi.mock('./keyboard/handle-editable-clipboard', () => ({ handleEditableClipboard: () => false }));
 
-// Stands in for the copy editor taking Ctrl+C.
+const copyEditor = vi.hoisted(() => ({ open: true }));
+
+// Stands in for the copy editor taking Ctrl+C while it is open.
 vi.mock('./keyboard/handle-mouse-selection-keys', () => ({
   handleMouseSelectionKeys: (e: KeyboardEvent) => {
-    if (!(e.ctrlKey && e.key === 'c')) return false;
+    if (!(copyEditor.open && e.ctrlKey && e.key === 'c')) return false;
     e.preventDefault();
     e.stopImmediatePropagation();
     return true;
@@ -30,13 +32,17 @@ describe('useWallKeyboard keyup', () => {
   let root: Root;
   let xterm: HTMLTextAreaElement;
   let released: string[];
+  let received: string[];
 
   beforeEach(async () => {
+    copyEditor.open = true;
     xterm = document.createElement('textarea');
     xterm.className = 'xterm-helper-textarea';
     document.body.appendChild(xterm);
     released = [];
+    received = [];
     xterm.addEventListener('keyup', (e) => released.push(e.code));
+    xterm.addEventListener('keydown', (e) => received.push(e.code));
     function Harness() {
       useWallKeyboard(makeCtx());
       return null;
@@ -50,8 +56,20 @@ describe('useWallKeyboard keyup', () => {
     xterm.remove();
   });
 
-  const press = (type: 'keydown' | 'keyup', key: string, code: string, ctrlKey = false) =>
-    xterm.dispatchEvent(new KeyboardEvent(type, { key, code, ctrlKey, bubbles: true, cancelable: true }));
+  const press = (type: 'keydown' | 'keyup', key: string, code: string, ctrlKey = false, repeat = false) =>
+    xterm.dispatchEvent(new KeyboardEvent(type, { key, code, ctrlKey, repeat, bubbles: true, cancelable: true }));
+
+  // The key that answered the Wall can move focus into the terminal (Enter
+  // entering passthrough, a copy closing its editor); its held repeats must not
+  // follow it there.
+  it('keeps the auto-repeat of a consumed key from the terminal', () => {
+    press('keydown', 'c', 'KeyC', true);
+    copyEditor.open = false;
+    expect(press('keydown', 'c', 'KeyC', true, true)).toBe(false);
+    press('keyup', 'c', 'KeyC', true);
+    press('keydown', 'c', 'KeyC', true);
+    expect(received).toEqual(['KeyC']);
+  });
 
   // Under win32-input-mode xterm reports the release to the program: a consumed
   // Ctrl+C would arrive as a lone key-up, and as user input close the editor.
