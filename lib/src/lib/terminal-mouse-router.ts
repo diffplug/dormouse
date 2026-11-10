@@ -262,6 +262,10 @@ export function attachTerminalMouseRouter({
           }));
         }
       }
+      // A press left unconsumed reaches xterm.js, whose own selection follows a
+      // move under the drag threshold across a cell's midpoint; a click must
+      // leave none painted.
+      if (terminal.hasSelection()) terminal.clearSelection();
       if (pendingDrag.multiClick) openCopyEditor(id, terminal);
       clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;
