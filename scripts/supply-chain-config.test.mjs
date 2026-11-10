@@ -121,3 +121,16 @@ for (const [name, mutate, expected] of [
     assert.ok(failures.some((f) => f.includes(expected)), `expected "${expected}"; got:\n${failures.join('\n')}`);
   });
 }
+
+// A standing allowance for a package the lockfile no longer holds waves the
+// next one through unreviewed, so each entry must still name an installed one.
+test('every peer and build allowance names an installed package', () => {
+  const lock = readRepoFile('pnpm-lock.yaml');
+  const installed = new Set([...lock.matchAll(/^ {2}'?(@?[^@'\s]+)@/gm)].map((m) => m[1]));
+  const workspace = YAML.parse(readRepoFile('pnpm-workspace.yaml'));
+  const stale = [
+    ...Object.keys(workspace.peerDependencyRules?.allowedVersions ?? {}).map((key) => [key, key.split('>')[0]]),
+    ...Object.keys(workspace.allowBuilds ?? {}).map((key) => [`allowBuilds ${key}`, key]),
+  ].filter(([, name]) => !installed.has(name)).map(([entry]) => entry);
+  assert.deepEqual(stale, []);
+});
