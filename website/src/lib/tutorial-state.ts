@@ -6,6 +6,12 @@ const STAR_STORAGE_KEY = "dormouse-tut-star-v1";
 const FLAPPY_HIGH_SCORE_KEY = "dormouse-flappy-high-v1";
 const KNOWN_IDS: ReadonlySet<ItemId> = new Set(ITEM_IDS);
 
+function loadCompleted(): ItemId[] {
+  return loadJson<unknown[]>(STORAGE_KEY, [], Array.isArray).filter(
+    (entry): entry is ItemId => typeof entry === "string" && KNOWN_IDS.has(entry as ItemId),
+  );
+}
+
 export class TutorialState {
   private completed = new Set<ItemId>();
   private starPromptResolved = false;
@@ -24,11 +30,7 @@ export class TutorialState {
       this.flappyHighScore = Math.floor(high);
     }
 
-    for (const entry of loadJson<unknown[]>(STORAGE_KEY, [], Array.isArray)) {
-      if (typeof entry === "string" && KNOWN_IDS.has(entry as ItemId)) {
-        this.completed.add(entry as ItemId);
-      }
-    }
+    for (const id of loadCompleted()) this.completed.add(id);
   }
 
   subscribe(listener: () => void): () => void {
@@ -67,7 +69,9 @@ export class TutorialState {
     if (this.completed.has(id)) return false;
     this.completed.add(id);
     this.notify();
-    saveJson(STORAGE_KEY, [...this.completed]);
+    // Another tab may have credited items since this one loaded, so add to
+    // the stored set rather than overwrite it with this tab's.
+    saveJson(STORAGE_KEY, [...new Set([...loadCompleted(), ...this.completed])]);
     return true;
   }
 
