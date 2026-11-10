@@ -30,7 +30,7 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 - **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, as well as on a trusted lookup.
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never a command to execute; future computed keys get fields of their own (rationale).
 - **Must reject an empty `prespawn_dedupe` list, and `$TARGET` in a `prespawn_dedupe` whose `run` is a shell-command string**, which takes no inputs.
-- **Must warn when a repo-local key omits `$HERE`, or a `$TARGET` run has a key without `$TARGET`**, still allowing intentional cross-checkout or cross-file dedupe.
+- **Must warn when a project file's key omits `$HERE` (never an imported one's), or a `$TARGET` run has a key without `$TARGET`**, still allowing intentional cross-checkout or cross-file dedupe.
 
 **May import one Tool into the user file from another `dormouse.yml`**: an entry takes exactly one of `run` or `from` (that file's directory, relative to the user file or absolute), plus an optional `tool` naming it there.
 

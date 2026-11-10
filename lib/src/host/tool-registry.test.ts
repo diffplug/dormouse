@@ -11,6 +11,7 @@ import {
 
 const REPO = { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' as const };
 const USER = { path: '/home/me/.config/dormouse/tools.yml', dir: '/home/me/.config/dormouse', scope: 'user' as const };
+const IMPORTED = { ...REPO, scope: 'import' as const };
 
 function parse(text: string, opts: Parameters<typeof parseToolFile>[1] = REPO) {
   return parseToolFile(text, opts);
@@ -385,6 +386,18 @@ open:
 
   it('is user-file only', () => {
     expect(() => parse('tools:\n  pridm:\n    from: pridm\n')).toThrow("tools.pridm: 'from' imports a Tool only in the user file");
+    expect(() => parse('tools:\n  pridm:\n    from: pridm\n', IMPORTED)).toThrow("tools.pridm: 'from' imports a Tool only in the user file");
+  });
+
+  it('parses an imported file as a project file without the checkout lint', () => {
+    const text = 'tools:\n  solo:\n    run: [solo, $TARGET]\n    prespawn_dedupe: solo\nopen:\n  - {match: "*", tool: solo}\n';
+    expect(parse(text).warnings).toContain("/repo/dormouse.yml: tools.solo: prespawn_dedupe has no $HERE, so it dedupes across every checkout of this repo");
+    const file = parse(text, IMPORTED);
+    expect(file.open).toEqual([]);
+    expect(file.warnings).toEqual([
+      "/repo/dormouse.yml: tools.solo: prespawn_dedupe has no $TARGET, so different files reuse the first file's Tool",
+      '/repo/dormouse.yml: project open rules are ignored; configure associations in the user file',
+    ]);
   });
 
   it.each([

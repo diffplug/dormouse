@@ -54,34 +54,35 @@ export async function readUserToolFile(path: string): Promise<UserToolFile | nul
 /** Read each import's one entry. A failure breaks only that import, so a
  *  clone's update or an uninitialised submodule cannot break the rest. */
 async function resolveToolImports(file: ToolFile, path: string): Promise<UserToolFile> {
+  // Read concurrently, then fold in file order, which the listing and warnings keep.
+  const imported = await Promise.all(file.names.map(name => {
+    const spec = file.imports.get(name);
+    return spec && readImportedTool(spec, path, file.dir);
+  }));
   const tools = new Map<string, UserToolEntry>();
   const broken = new Map<string, BrokenToolImport>();
   const warnings = [...file.warnings];
-  for (const name of file.names) {
-    const declared = file.tools.get(name);
-    if (declared) {
-      tools.set(name, { ...declared, path, dir: file.dir, imported: false });
-      continue;
+  file.names.forEach((name, index) => {
+    const result = imported[index];
+    if (!result) tools.set(name, { ...file.tools.get(name)!, path, dir: file.dir, imported: false });
+    else if ('reason' in result) broken.set(name, result);
+    else {
+      tools.set(name, result.entry);
+      warnings.push(...result.warnings);
     }
-    const spec = file.imports.get(name)!;
-    const imported = await readImport(spec, file.dir);
-    if ('reason' in imported) {
-      broken.set(name, { path: imported.path, reason: imported.reason,
-        message: `${path}: tools.${name} imports '${spec.tool}': ${imported.reason}`, description: spec.description });
-      continue;
-    }
-    const { entry, path: from, dir, warnings: lint } = imported;
-    tools.set(name, { ...entry, name, description: spec.description ?? entry.description, path: from, dir, imported: true });
-    warnings.push(...lint);
-  }
+  });
   return { ...file, tools, broken, warnings };
 }
 
-/** One import's entry, read as a project file's: so `$HERE` is its directory,
- *  and a `from` in it is an error, which keeps imports from chaining. */
-async function readImport(
-  spec: ToolImport, userDir: string,
-): Promise<{ entry: ToolEntry; path: string; dir: string; warnings: string[] } | { path: string; reason: string }> {
+/** One import's entry, read as a project file's (scope `import`): so `$HERE`
+ *  is its directory, and a `from` in it is an error, which keeps imports from
+ *  chaining. */
+async function readImportedTool(
+  spec: ToolImport, userPath: string, userDir: string,
+): Promise<{ entry: UserToolEntry; warnings: string[] } | BrokenToolImport> {
+  const broken = (path: string, reason: string): BrokenToolImport => ({
+    path, reason, message: `${userPath}: tools.${spec.name} imports '${spec.tool}': ${reason}`, description: spec.description,
+  });
   const lexical = resolve(userDir, spec.from);
   let path = join(lexical, TOOL_FILE_NAME);
   try {
@@ -89,17 +90,20 @@ async function readImport(
     // A file there fails the read below as ENOTDIR.
     const dir = (await localRealpath(lexical)).path;
     path = join(dir, TOOL_FILE_NAME);
-    const file = parseToolFile(await readToolFile(path), { path, dir, scope: 'repo' });
+    const file = parseToolFile(await readToolFile(path), { path, dir, scope: 'import' });
     const entry = file.tools.get(spec.tool);
-    if (!entry) return { path, reason: `${path}: no Tool '${spec.tool}' (declares: ${[...file.tools.keys()].join(', ') || 'none'})` };
-    // Only its own lint: the file's other entries are not the user's.
-    return { entry, path, dir, warnings: file.warnings.filter(warning => warning.startsWith(`${path}: tools.${spec.tool}: `)) };
+    if (!entry) return broken(path, `${path}: no Tool '${spec.tool}' (declares: ${[...file.tools.keys()].join(', ') || 'none'})`);
+    return {
+      entry: { ...entry, name: spec.name, description: spec.description ?? entry.description, path, dir, imported: true },
+      // Only its own lint: the file's other entries are not the user's.
+      warnings: file.warnings.filter(warning => warning.startsWith(`${path}: tools.${spec.tool}: `)),
+    };
   } catch (error) {
-    if (error instanceof ToolFileError) return { path, reason: error.message };
-    if (error instanceof NonLocalPathError) return { path, reason: `${path}: not a folder on this machine` };
+    if (error instanceof ToolFileError) return broken(path, error.message);
+    if (error instanceof NonLocalPathError) return broken(path, `${path}: not a folder on this machine`);
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return { path, reason: `${path}: not found` };
-    return { path, reason: `${path}: cannot read (${code ?? 'unknown error'})` };
+    if (code === 'ENOENT' || code === 'ENOTDIR') return broken(path, `${path}: not found`);
+    return broken(path, `${path}: cannot read (${code ?? 'unknown error'})`);
   }
 }
 

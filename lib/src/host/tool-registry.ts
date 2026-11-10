@@ -15,8 +15,10 @@ import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/too
 import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
 import { parseBrowserConfig, parseViewportSelection, type BrowserConfigLayer } from './browser-config';
 
-/** Where a tool file came from. */
-export type ToolScope = 'repo' | 'user';
+/** Where a tool file came from. `import` is a file a user-file import reads:
+ * parsed as a project file, minus the checkout lint, since its one clone
+ * resolves as a user Tool. */
+export type ToolScope = 'repo' | 'user' | 'import';
 
 
 /** How Dormouse learns which port to frame absent an announcement: `announced`
@@ -192,7 +194,7 @@ function validateSubstitutions(template: readonly string[], where: string): void
 
 /**
  * Parse a tool file. `dir` is the absolute directory holding it and becomes
- * `$HERE`, in either scope. Throws `ToolFileError` with a
+ * `$HERE`, in every scope. Throws `ToolFileError` with a
  * `<path>: <problem>` message for anything malformed; lint-level problems come
  * back as `warnings`.
  */
@@ -224,7 +226,7 @@ export function parseToolFile(
     if (!isRecord(rawEntry)) throw new ToolFileError(`${where}: entry must be a mapping`);
 
     if (rawEntry.from !== undefined) {
-      imports.set(name, readImport(rawEntry, { name, where, scope, description: descriptions.get(name) ?? null }));
+      imports.set(name, parseImportEntry(rawEntry, { name, where, scope, description: descriptions.get(name) ?? null }));
       continue;
     }
 
@@ -306,24 +308,23 @@ export function parseToolFile(
   }
 
   // Associations are user-only (`docs/specs/dor-tool.md` -> Opening local files).
-  if (scope === 'repo' && doc.open !== undefined) {
+  if (scope !== 'user' && doc.open !== undefined) {
     warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
   }
-  const open = scope === 'repo' ? [] : parseOpenRules(doc.open, tools, imports, path);
+  const open = scope !== 'user' ? [] : parseOpenRules(doc.open, tools, imports, path);
   return { scope, dir, tools, imports, names: Object.keys(toolsNode), warnings, open, ...(browser ? { browser } : {}) };
 }
 
 const IMPORT_FIELDS = ['from', 'tool'];
 
-/** An import has no overrides, so any other field is an error. Never in a
- *  project file: that also keeps an imported file, parsed as one, from
- *  importing in turn. */
-function readImport(
+/** An import has no overrides, so any other field is an error. Only in the
+ *  user file: that also keeps an imported file from importing in turn. */
+function parseImportEntry(
   rawEntry: Record<string, unknown>,
   { name, where, scope, description }: { name: string; where: string; scope: ToolScope; description: string | null },
 ): ToolImport {
   // Reserved: project-file imports (`docs/specs/dor-tool.md` -> Future).
-  if (scope === 'repo') throw new ToolFileError(`${where}: 'from' imports a Tool only in the user file`);
+  if (scope !== 'user') throw new ToolFileError(`${where}: 'from' imports a Tool only in the user file`);
   if (rawEntry.run !== undefined) throw new ToolFileError(`${where}: an entry takes exactly one of 'run' or 'from'`);
   const extra = Object.keys(rawEntry).find(field => !IMPORT_FIELDS.includes(field));
   if (extra !== undefined) {

@@ -392,6 +392,12 @@ browser:
         .toMatchObject({ status: 'ok', path: join(clone, 'dormouse.yml'), key: ['pridm', clone] });
     });
 
+    it('carries no checkout warning for an imported key without $HERE: an import has one clone', async () => {
+      await writeFile(join(supertools, 'dormouse.yml'), 'tools:\n  pr-dashboard:\n    run: [dash]\n    prespawn_dedupe: dash\n');
+      expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'prs', cwd: repo, global: true }))
+        .toMatchObject({ status: 'ok', key: ['dash'], warnings: [`${join(clone, 'dormouse.yml')}: tools.pridm: ignoring unknown field 'colour'`] });
+    });
+
     it('lists an import with the file it came from and the local comment over the imported one', async () => {
       const result = await createToolHost({ userConfigPath: userPath }).handle({ op: 'list', cwd: repo, global: true });
       expect(result).toEqual({ status: 'list', listing: {
@@ -428,7 +434,7 @@ browser:
         await mkdir(join(config, 'empty'));
         await write(join(config, 'malformed', 'dormouse.yml'), 'tools:\n  malformed:\n    render: iframe\n');
         await write(join(config, 'chained', 'dormouse.yml'), 'tools:\n  chained:\n    from: ../pridm\n');
-        await writeFile(userPath, `${USER_IMPORTS(supertools)}${Object.entries(BROKEN).map(([name, [entry]]) => `  ${name}:\n    ${entry}\n`).join('')}`
+        await writeFile(userPath, `${USER_IMPORTS(supertools)}${Object.entries(BROKEN).map(([name, [entry]]) => `  # Why ${name}.\n  ${name}:\n    ${entry}\n`).join('')}`
           + 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\n');
       });
 
@@ -446,7 +452,7 @@ browser:
         const result = await host.handle({ op: 'list', cwd: repo, global: true });
         expect(result.status === 'list' && result.listing.tools.map(tool => tool.name)).toEqual(['pridm', 'prs', 'scratch', ...Object.keys(BROKEN)]);
         expect(result.status === 'list' && result.listing.tools.find(tool => tool.name === 'nodir')).toEqual({
-          name: 'nodir', scope: 'user', description: null, shadowed: false,
+          name: 'nodir', scope: 'user', description: 'Why nodir.', shadowed: false,
           from: join(config, 'missing', 'dormouse.yml'), broken: `${join(config, 'missing', 'dormouse.yml')}: not found`,
         });
       });
