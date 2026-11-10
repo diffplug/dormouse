@@ -965,6 +965,30 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     expect(sentMouse().at(-1)).toEqual(expect.objectContaining({ x: -1, y: -1 }));
   });
 
+  it('ends the page\'s drag, then its hover, when the press is released off the canvas', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0, buttons: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 1, relatedTarget: document.body }));
+      document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 1400, clientY: 50, button: 0 }));
+    });
+    expect(sentMouse().map((m) => [m.eventType, m.x, m.y, m.buttons])).toEqual([
+      ['mousePressed', 100, 50, 1], ['mouseReleased', 1400, 50, 0], ['mouseMoved', -1, -1, 0],
+    ]);
+  });
+
+  it('sends no release for a press it never forwarded', async () => {
+    const canvas = await renderWithMode('command', null);
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+    });
+    await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+    });
+    expect(sentMouseEvents()).toHaveLength(0);
+  });
+
   it('keeps its own drag through a leave, and skips the moves of a drag that began elsewhere', async () => {
     const canvas = await renderWithMode('passthrough', 'ab-panel');
     await act(async () => {

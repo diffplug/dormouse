@@ -179,6 +179,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   }, [controller]);
 
   const buttonsHeldRef = useRef(0);
+  const releaseListenersRef = useRef(new Set<(e: MouseEvent) => void>());
+  useEffect(() => () => {
+    for (const listener of releaseListenersRef.current) window.removeEventListener('mouseup', listener, true);
+  }, []);
   const lastMoveRef = useRef(0);
   // Whether a hover move has gone to the page since its last leave.
   const hoveringRef = useRef(false);
@@ -210,6 +214,20 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     const point = toDevice(e);
     if (!point) return;
     buttonsHeldRef.current |= MOUSE_BUTTON_MASKS[e.button] ?? 0;
+    // A release off the canvas (a drag past its edge) still ends the page's
+    // drag, then its hover; the canvas's own handler takes one over it.
+    const pressed = e.button;
+    const releaseOff = (up: MouseEvent) => {
+      if (up.button !== pressed) return;
+      window.removeEventListener('mouseup', releaseOff, true);
+      releaseListenersRef.current.delete(releaseOff);
+      if (up.target === canvasRef.current || !releasePressed(up)) return;
+      if (buttonsHeldRef.current) return;
+      hoveringRef.current = false;
+      controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: -1, y: -1, button: 'none', buttons: 0, modifiers: 0 });
+    };
+    window.addEventListener('mouseup', releaseOff, true);
+    releaseListenersRef.current.add(releaseOff);
     controller.send({
       type: 'input_mouse',
       eventType: 'mousePressed',
@@ -222,16 +240,16 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     });
   };
 
-  const onCanvasMouseUp = (e: React.MouseEvent) => {
-    // Pair with onCanvasMouseDown: gate on passthrough (not full `interactive`)
-    // so the release of a first, pane-selecting click still completes the click.
-    if (!passthroughRef.current) return;
+  /** Send the release of a button whose press this canvas forwarded; any
+   *  other release (a press dropped in command mode, a drag begun in another
+   *  pane) is not the page's. */
+  const releasePressed = (e: MouseEvent | React.MouseEvent): boolean => {
     const button = MOUSE_BUTTONS[e.button];
-    if (!button) return;
-    e.preventDefault();
+    const mask = MOUSE_BUTTON_MASKS[e.button] ?? 0;
+    if (!button || !(buttonsHeldRef.current & mask)) return false;
+    buttonsHeldRef.current &= ~mask;
     const point = toDevice(e);
-    if (!point) return;
-    buttonsHeldRef.current &= ~(MOUSE_BUTTON_MASKS[e.button] ?? 0);
+    if (!point) return true;
     controller.send({
       type: 'input_mouse',
       eventType: 'mouseReleased',
@@ -242,6 +260,16 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       clickCount: lastClickRef.current.count,
       modifiers: modifiers(e),
     });
+    return true;
+  };
+
+  const onCanvasMouseUp = (e: React.MouseEvent) => {
+    // Pair with onCanvasMouseDown: gate on passthrough (not full `interactive`)
+    // so the release of a first, pane-selecting click still completes the click.
+    if (!passthroughRef.current) return;
+    if (!MOUSE_BUTTONS[e.button]) return;
+    e.preventDefault();
+    releasePressed(e);
   };
 
   const onCanvasMouseMove = (e: React.MouseEvent) => {
