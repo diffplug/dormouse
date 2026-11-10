@@ -187,12 +187,12 @@ pkill -f 'Dormouse Relay/current/relay/dist/index.js'
 ```
 
 ```powershell
-# Windows — select by install-root path and command line, never by image name:
-# other node.exe processes on this machine are not the Relay. The supervision
-# loop restarts after a 10s throttle, so wait ~15s before reading status.
+# Windows — only the node.exe running from this install's releases: other
+# node.exe processes are not the Relay, and the run-relay.ps1 supervisor must
+# survive to restart it after its 10s throttle, so wait ~15s before reading status.
 $root = "$env:LOCALAPPDATA\Dormouse Relay"
 Get-CimInstance Win32_Process |
-  Where-Object { $_.ExecutablePath -like "$root\*" -or $_.CommandLine -like "*$root*" } |
+  Where-Object { $_.Name -eq 'node.exe' -and $_.ExecutablePath -like "$root\releases\*" } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 & "$root\bin\manage.cmd" status
 ```
