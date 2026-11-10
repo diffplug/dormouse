@@ -104,6 +104,15 @@ describe('Run end', () => {
     expect(after.params).toBeUndefined();
   });
 
+  it('ends a run whose shell-reported line the parser collapsed', async () => {
+    const command = "view '/repo/3.05 PM  a.md'";
+    await mountTool({ ...PARAMS, command });
+    // What `sanitizeCommandLine` keeps of the line the shell reports.
+    await run("view '/repo/3.05 PM a.md'");
+    await finish();
+    expect((await leaf()).component).toBe('terminal');
+  });
+
   it('ends nothing before the first designated run: a takeover still at the dor line', async () => {
     await mountTool();
     await run('dor open a.md');

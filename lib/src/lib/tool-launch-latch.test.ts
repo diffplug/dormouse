@@ -60,6 +60,14 @@ describe('ToolLaunchLatch', () => {
     expect(admitted(start('view /a'), finish + start('view /a') + open('/a'), open('/b'))).toEqual([]);
   });
 
+  it('admits the launched run whose reported line the parser rewrote: a whitespace run, U+202F, or past the length cap', () => {
+    for (const typed of ["dor builtin-file '/x/a  b.md'", "dor builtin-file '/x/3.05.12\u202fPM.png'", `dor builtin-file '/x/${'a'.repeat(2100)}'`]) {
+      const { latch, admitted } = pty();
+      latch.arm(`${typed}\r`);
+      expect(admitted(start(typed) + open('/a')), typed.slice(0, 40)).toEqual(['/a']);
+    }
+  });
+
   it('ends the launched run at a second start or a prompt, never resuming it', () => {
     for (const ending of [start('view /a'), osc('133;C'), osc('633;A'), osc('133;D;0')]) {
       const { latch, admitted } = pty();

@@ -1,4 +1,5 @@
 import { isUncOrDevicePath } from 'dor-lib-common/browser-providers';
+import { isReportedCommandLine } from './osc-sanitize';
 import { POSIX_ESCAPABLE } from './posix-escape';
 
 export type CwdSource = 'osc7' | 'osc9_9' | 'osc633' | 'osc1337' | 'process' | 'manual';
@@ -509,8 +510,7 @@ export function surfaceRunsCommand(
   cwdPath: string,
 ): boolean {
   const run = state.currentCommand;
-  if (!run || run.rawCommandLine === null) return false;
-  if (run.rawCommandLine !== command) return false;
+  if (!run || !isReportedCommandLine(run.rawCommandLine, command)) return false;
   return cwdPathsEqual(run.cwdAtStart?.path ?? state.cwd?.path, cwdPath);
 }
 

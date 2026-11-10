@@ -25,6 +25,7 @@ import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 import type { CommandRun } from '../../lib/terminal-state';
+import { isReportedCommandLine } from '../../lib/osc-sanitize';
 
 // A serving command usually binds within a second or two of starting, but a
 // cold `pnpm` boot can take much longer, so this keeps polling for as long as
@@ -129,7 +130,7 @@ export function useToolServing({
         const runId = run?.id ?? null;
         const runChanged = observedRuns.current.has(leaf.id) && observedRuns.current.get(leaf.id) !== runId;
         observedRuns.current.set(leaf.id, runId);
-        const running = run !== null && run.rawCommandLine === leaf.params.command;
+        const running = run !== null && isReportedCommandLine(run.rawCommandLine, leaf.params.command);
         const announce = running ? getToolAnnounce(leaf.id) : null;
 
         // A runtime re-key re-labels this Surface and nothing else — it never

@@ -6,6 +6,7 @@ import type { DooredItem } from './wall-types';
 import { registry } from '../../lib/terminal-store';
 import { getTerminalPaneState, subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { isToolReaped, isToolStopping } from '../../lib/tool-reap-store';
+import { isReportedCommandLine } from '../../lib/osc-sanitize';
 import { clearHoldLapse, isHoldLapsed, isRunHeld, subscribeToRunHolds } from '../../lib/tool-run-hold';
 
 /**
@@ -21,7 +22,7 @@ export function toolRunEnded(id: string, params: unknown): boolean {
   if (isToolReaped(id) || isToolStopping(id) || isRunHeld(id)) return false;
   if (registry.get(id)?.exited) return false;
   const { currentCommand, lastCommand } = getTerminalPaneState(id);
-  return currentCommand === null && lastCommand !== null && (isHoldLapsed(id) || lastCommand.rawCommandLine === params.command);
+  return currentCommand === null && lastCommand !== null && (isHoldLapsed(id) || isReportedCommandLine(lastCommand.rawCommandLine, params.command));
 }
 
 /** The Tool becomes the plain terminal it runs in, in place: same Session,
@@ -48,7 +49,7 @@ export function useToolRunEnd({ lath, doorsRef, paused }: {
       for (const leaf of toolLeaves(lath, doorsRef.current)) {
         if (changed !== undefined && leaf.id !== changed) continue;
         // The successor the host gave up on came after all.
-        if (getTerminalPaneState(leaf.id).currentCommand?.rawCommandLine === leaf.params.command) clearHoldLapse(leaf.id);
+        if (isReportedCommandLine(getTerminalPaneState(leaf.id).currentCommand?.rawCommandLine, leaf.params.command)) clearHoldLapse(leaf.id);
         if (!toolRunEnded(leaf.id, leaf.params)) continue;
         clearHoldLapse(leaf.id);
         endToolDesignation(lath, leaf.id);
