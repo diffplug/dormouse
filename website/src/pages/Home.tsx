@@ -213,10 +213,24 @@ function FeatureVideo({
   className?: string;
   variant?: keyof typeof FEATURE_VIDEO_VARIANTS;
 }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  // Plays only within a screen of the viewport: `autoPlay` would fetch every
+  // feature video on arrival, before the reader has scrolled past the hero.
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) video.play().catch(() => {});
+      else video.pause();
+    }, { rootMargin: "100% 0px" });
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, []);
   return (
     <video
+      ref={ref}
       src={src}
-      autoPlay
+      preload="none"
       loop
       muted
       playsInline

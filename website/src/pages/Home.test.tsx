@@ -11,4 +11,14 @@ describe("Home prerender", () => {
     expect(markup).not.toMatch(/style="[^"]*visibility:\s*hidden/);
     expect(markup).toContain("data-hero-gate");
   });
+
+  it("fetches no feature video until it nears the viewport", () => {
+    const markup = renderToString(<MemoryRouter><Home /></MemoryRouter>);
+    const videos = [...markup.matchAll(/<video[^>]*>/g)].map(([tag]) => tag).filter((tag) => / src="/.test(tag));
+    expect(videos.length).toBeGreaterThan(0);
+    for (const tag of videos) {
+      expect(tag).not.toMatch(/autoplay/i);
+      expect(tag).toContain('preload="none"');
+    }
+  });
 });
