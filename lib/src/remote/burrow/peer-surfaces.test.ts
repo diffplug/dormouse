@@ -15,6 +15,7 @@ import { setTerminalActivity, clearTerminalActivity } from '../../lib/session-ac
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { clearSizeHold, getSizeHolds, holdSize } from '../../lib/size-hold-store';
+import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import {
   installWorkspaceIdPool,
   renameWorkspace,
@@ -460,6 +461,21 @@ describe('size holds', () => {
     }
     expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'release', hold: PHONE })).toEqual([]);
     expect(getSizeHolds('surface:1')).toEqual([]);
+  });
+
+  it('releases a hold on a pane that is a pending kill, which an undo can restore', () => {
+    registerSurface('surface:1');
+    platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
+    addPendingKill(
+      { kind: 'surface', id: 'surface:1', workspaceId: 'workspace:1', title: 'shell', label: 'Terminal' },
+      { restore: () => true, finalize: () => {} },
+    );
+    try {
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'release', hold: PHONE })).toEqual([]);
+      expect(getSizeHolds('surface:1')).toEqual([]);
+    } finally {
+      _resetPendingKillsForTesting();
+    }
   });
 
   it('keeps each holder’s hold until that holder releases it', () => {
