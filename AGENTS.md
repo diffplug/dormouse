@@ -7,7 +7,7 @@ A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite,
 ```
 pnpm install     # install deps
 pnpm setup:git   # once per clone: merge markdown sentence by sentence
-pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
+pnpm build       # typecheck lib; build vscode extension, Pocket, frame origin, website, Hosted
 ```
 
 **Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`. The Tool shows the harness in its own pane and prints the command to drive it (`docs/specs/standalone.md` → "Standalone browser-dev harness").
@@ -24,14 +24,14 @@ pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
   - `lib/src/lib/platform/` — platform abstraction (`PlatformAdapter` interface, fake + VSCode adapters)
   - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` both hosts run)
   - `lib/src/site/` — the dormouse.sh docs design the website and Hosted are both built from
-  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `one-time-app/` (the one-time phone page Hosted serves), `direct/` (the WebRTC direct path both ends run), `ws.ts` (shared socket surface)
+  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `one-time-app/` (the one-time phone page Hosted serves), `direct/` (the WebRTC direct path both ends run), `frame-origin/` (a frame origin's bootstrap page and service worker), `ws.ts` (shared socket surface)
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
   - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty, direct-path WebRTC via node-datachannel), bundled as the Tauri sidecar
   - `standalone/src-tauri/` — Rust backend bridging webview ↔ sidecar
 - **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process; direct-path WebRTC via node-datachannel, every platform's addon in one VSIX)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`relay/`** — Selfhost coordinating Relay for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket routing between Clients and Burrows, serves the built Pocket app
-- **`hosted/`** — Hosted's four Hono Workers: account and Better Auth (`hosted.dormouse.sh`), account-scoped Relay/Pocket and one-time Burrow route (`relay.`), one-time page and client route (`try.`), voice (`voice.`); Postgres.
+- **`hosted/`** — Hosted's five Workers: account and Better Auth (`hosted.dormouse.sh`), account-scoped Relay/Pocket and one-time Burrow route (`relay.`), one-time page and client route (`try.`), voice (`voice.`), frame origins (`*.dormouseusercontent.com`); Postgres.
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
 - **`remote-lib-common/`** — Security primitives + remote wire contract shared by `relay`, the Burrow module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
@@ -80,7 +80,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/one-time.md`** — One-time connection: the link a laptop shows, its Settings panel and Baseboard indicator, the Hosted rendezvous wire that carries only its handshake, the phone page Hosted serves, and the direct-only session; no account, nothing saved.
 - **`docs/specs/security-hosted.md`** — Hosted account origin, identity, and deployment security checks.
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.
-- **`docs/specs/pricing.md`** — Pricing (design-stage): the tiers and founding ladder, what the Individual plan grants, how a desktop proves membership, the managed-voice boundary, and the `/hosted` page contract.
+- **`docs/specs/pricing.md`** — Pricing: the tiers and founding ladder, what the Individual plan grants, how a desktop proves membership, the managed-voice boundary, and the `/hosted` page contract; opening checkout is staged.
 - **`docs/specs/pocket-app.md`** — Pocket: the remote session is a `PlatformAdapter` (`RemotePtyAdapter`), so Pocket is auth screens plus the mobile composition; owns the same-origin deployment rule.
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
 - **`docs/specs/security.md`** — The features Dormouse offers, what it does not defend, the known gaps, and how it is all checked; published at `/security` with the guarantees gathered from the domain specs, rows split by audience. Read first for anything security. It alone states each known gap and accepted risk; other security specs and the audit preamble point at it. Root `SECURITY.md` is the GitHub policy pointer at it.
