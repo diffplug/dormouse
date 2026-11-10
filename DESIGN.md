@@ -21,9 +21,13 @@ colors:
   input-border: "var(--vscode-input-border)"
   error: "var(--vscode-terminal-ansiRed)"
   success: "var(--vscode-terminal-ansiGreen)"
-  alarm: "var(--vscode-terminal-ansiYellow)"
+  alarm-vs-header-active: "var(--color-alarm-vs-header-active)"
+  alarm-vs-header-inactive: "var(--color-alarm-vs-header-inactive)"
+  alarm-vs-door: "var(--color-alarm-vs-door)"
   alarm-vs-terminal: "var(--color-alarm-vs-terminal)"
-  window-close-hover: "#b92a1b"
+  link: "var(--vscode-textLink-foreground)"
+  button-bg: "var(--vscode-button-background)"
+  button-fg: "var(--vscode-button-foreground)"
 typography:
   body:
     fontFamily: "var(--vscode-editor-font-family)"
@@ -98,7 +102,7 @@ The system is intentionally minimal and bg-only. Chrome recedes; terminals are t
 
 The system explicitly rejects: rounded SaaS cards, gradient accents, hacker-aesthetic green-on-black, "Slack-style" Electron chrome bloat, decorative animations, and any token that hardcodes a color. If a user installs a high-contrast theme, the chrome can look flatter than usual: that is accepted, not "fixed" with overrides.
 
-**Scope.** This design system governs every product surface: the lib components, the VS Code webview, the standalone app, and the server-served Pocket app — auth screens included (`docs/specs/pocket-app.md`). The marketing website keeps its own separate "homepage" design system (`lib/src/site/`: Ubuntu Mono / Ubuntu Sans Mono, a fixed dark palette, the caramel accent), scoped to marketing pages only. The two share nothing except lib components embedded in the site's playgrounds, which bring this system's tokens with them; product surfaces never consume homepage tokens, and marketing chrome never consumes `--vscode-*`. Hosted's account pages (`hosted/DESIGN.md`) are the one product surface outside this system: they are built from the site's reference-page design (`lib/src/site/`), which themes the site's type and wordmark from a bundled editor theme.
+**Scope.** This design system governs every product surface: the lib components, the VS Code webview, the standalone app, and the server-served Pocket app — auth screens included (`docs/specs/pocket-app.md`). The marketing website keeps its own separate "homepage" design system (`lib/src/site/`: Ubuntu Mono / Ubuntu Sans Mono, a dark palette with the caramel accent, which its reference pages repaint from a bundled editor theme's `--vscode-*`), scoped to marketing pages only. The two share nothing except lib components embedded in the site's playgrounds, which bring this system's tokens with them; product surfaces never consume homepage tokens. Hosted's account pages (`hosted/DESIGN.md`) are the one product surface outside this system: they are built from the site's reference-page design (`lib/src/site/`), which themes the site's type and wordmark from a bundled editor theme.
 
 **Key Characteristics:**
 - Host-theme-driven palette: every color is a `var(--vscode-*)` passthrough.
@@ -130,13 +134,13 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **App Foreground** (`var(--vscode-sideBar-foreground)`): default text on app chrome.
 - **Surface Raised** (`var(--vscode-editorWidget-background)`): popovers, tooltips, dialogs, kill-confirm sheet, theme picker dropdown. Roughly one step above app-bg in the host's vocabulary.
 - **Foreground** (`var(--vscode-editor-foreground)`): primary text in raised surfaces (popups, dialogs).
-- **Muted** (`var(--vscode-descriptionForeground)`): secondary text, shortcut hints inside `[brackets]`, theme picker chip captions.
+- **Muted** (`var(--vscode-descriptionForeground)`): secondary text, shortcut hints inside `[brackets]`.
 - **Border** (`var(--vscode-panel-border)`): hairline border on raised surfaces (popups, dialogs, theme picker). The only place borders carry weight.
 
 ### Status
 - **Terminal Background / Foreground** (`var(--vscode-terminal-background)` / `var(--vscode-terminal-foreground)`): the terminal content surface and xterm default text. Orthogonal to the chrome.
 - **Error** (`var(--vscode-terminal-ansiRed)`): destructive actions and kill-confirm letter flash.
-- **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
+- **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check.
 - **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so every alarm inset and the whole-Pane alarm treatment stay maximally legible on any surface.
 
 ### Fixed Exceptions
@@ -179,9 +183,9 @@ Flat by default. Pane headers, doors, the baseboard, and terminal panes carry ze
 Shadows appear only on **raised surfaces that float above content**: popovers, tooltips, dialogs. They are ambient, not structural; they say "I am temporary and on top," not "I have weight."
 
 ### Shadow Vocabulary
-- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), illegal-rename warning, terminal-pane header tooltips.
+- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), illegal-rename warning, terminal-pane header tooltips, theme picker menu.
 - **Dialog** (`box-shadow: var(--tw-shadow-lg)`): kill-confirm sheet, TODO alert dialog.
-- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme picker dropdown (when expanded), theme debugger, theme store dialog, copy editor.
+- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme debugger, theme store dialog, copy editor.
 - **Inset hairline** (`box-shadow: inset 0 0 0 1px var(--color-focus-ring)` / `var(--color-border)`): mobile UI segmented controls. Used instead of `border` when the surface needs a 1px stroke that does not shift layout on state change.
 
 ### Named Rules
@@ -227,13 +231,13 @@ The Windows/Linux native-style window control row in the standalone app bar.
 The system uses **raised surfaces**, not "cards." There are no nested cards. There is no resting card grid.
 - **Raised surface** (`PopupButtonRow`, tooltips, popups): `bg-surface-raised`, `border border-border`, `rounded` (4px), `shadow-md`, `font-mono text-sm`.
 - **Dialog** (`KillConfirm`, the terminal context's detail dialogs): `bg-surface-raised`, `border border-border`, `rounded-lg` (8px), `shadow-lg`, generous padding (`px-6 py-4` for kill-confirm).
-- **Modal** (`ThemePicker` dropdown, `ThemeDebugger`, `ThemeStoreDialog`): `bg-surface-raised`, `border`, `rounded`, `shadow-2xl`, fixed-position with viewport-clamped sizing.
+- **Modal** (`ThemeStoreDialog`, `ThemeDebugger`): `border`, `shadow-2xl`, fixed-position with viewport-clamped sizing; the store is `modalSurface` (`bg-surface-raised`, `rounded-lg`), the debugger `bg-app-bg`, `rounded`.
 - **On-palette surface** (theme previews): a surface painting a *previewed* palette rather than the host's, so its controls take `themePreviewButton` and inherit `currentColor` instead of `text-muted` / `hover:bg-foreground/10` / `outline-focus-ring`. `docs/specs/theme.md` → "Where the user picks a theme" owns candidate palettes, selection, and scroll affordances.
 
 **The Viewport-Bound Rule.** Anything floating over the viewport takes its height cap from `OVERLAY_MAX_HEIGHT` in `design.tsx` — `.modal` for a `ModalFrame` surface (the viewport minus `MODAL_OVERLAY_INSET` doubled), `.popover` for an anchored overlay (matching `clampOverlayPosition`'s margin). Don't hand-write a `vh`/`dvh` literal at the call site: the six that predated this token had drifted to five different budgets, and one silently shadowed its own overlay's padding. Each entry reads its own custom property first (`--overlay-max-h-modal` / `--overlay-max-h-popover`), so a story — or a host with less room than the window — can narrow one bound without touching the component; set the modal bound on `body`, where every modal renders (docs/specs/layout.md → "Selection overlay"). They are deliberately separate: a popover inside a modal is a DOM descendant of it, and custom properties inherit, so one shared knob would cap the dialog too. A deliberately *smaller* budget than the viewport (a context menu at `max-h-[70vh]`) is a different decision and stays at the call site.
 
 ### Inputs
-- Used by `ThemePicker`. Style: `bg-input-bg`, `border border-input-border`, `rounded`, `font-mono`, `text-sm`.
+- Used by the Settings search and the theme store search. Style: `bg-input-bg`, `border border-input-border`, `rounded`, `font-mono`, `text-sm`.
 - **Focus:** native browser focus outline; this is acceptable because the entire input lives inside a raised surface that already has `shadow-2xl` and a border.
 - **Form fields inside a dialog** use the underlined pair in `design.tsx` instead, so a form mixing them reads as one: `NumericInput` for a number (filtered at the keystroke, sized in `ch`) and `TextInput` for a string (full width, `type` passed through — `type="password"` for a credential). The app has no checkbox anywhere: a boolean is an `OnOffSwitch`.
 - **On/off switch:** a compact track with the thumb left when off and right when on, followed by only the current `On` / `Off` label. Off is neutral; on uses the host link accent. Its 60×24px button uses the subdued action tint and hover from `design.tsx`, with native keyboard and disabled-fieldset behavior. Nested settings text aligns through `UNDER_SWITCH_INDENT`.
