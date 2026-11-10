@@ -476,10 +476,12 @@ export class DirectCutover {
    * frame outlive this call, and the caller's buffer — a view over whatever the
    * runtime handed it — cannot be trusted to still say the same thing when the
    * queue drains. A frame answered `process` is decrypted before this returns.
+   * Copied with the constructor, never `.slice()`, which a `Buffer` answers
+   * with a live view.
    */
   onChannelFrame(frame: Uint8Array): DirectChannelOutcome {
     if (this.#inbound === 'direct') return 'process';
-    return this.#held.push(frame.slice()) ? 'held' : 'overflow';
+    return this.#held.push(new Uint8Array(frame)) ? 'held' : 'overflow';
   }
 
   /** Release held frames; a disposed session has nothing left to drain them. */
