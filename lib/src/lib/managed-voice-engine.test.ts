@@ -40,6 +40,10 @@ let configured: boolean | null;
 const port: ManagedVoicePort = {
   status: () => (configured === null ? null : { configured, voiceId: 'v', notEntitled: false }),
   subscribe: () => () => {},
+  // The engine only speaks; enrollment belongs to Settings.
+  beginEnrollment: async () => ({ ok: true }),
+  cancelEnrollment: async () => ({ ok: true }),
+  disconnect: async () => ({ ok: true }),
   configure: async () => ({ ok: true, configured: true, voiceId: 'v', notEntitled: false }),
   speak: (text) => new Promise((resolve) => speaks.push({ text, resolve })),
 };
