@@ -3264,6 +3264,33 @@ describe('Wall on the Lath engine', () => {
     expect(leafCount()).toBe(1);
   });
 
+  // Each argv quotes safely, but typed into an interactive bash, zsh, or fish
+  // its controls act as keys first: two DELs erase the opening quote, Ctrl-C
+  // abandons the line, Tab completes.
+  const lineEditorArgv = [
+    ['echo', 'x\x7f\x7f; touch MARK #'],
+    ['echo', "x\x7f\x7f; touch MARK; echo '"],
+    ['echo', 'x\x03touch MARK #'],
+    ['printf', '%s\n', 'a\tb'],
+  ];
+  it.each(['/bin/bash', '/bin/zsh', '/opt/homebrew/bin/fish'].flatMap(shell =>
+    ([SURFACE_CONTROL_METHODS.split, SURFACE_CONTROL_METHODS.ensure] as const).flatMap(method =>
+      lineEditorArgv.map(command => ({ shell, method, command })))),
+  )('refuses $method argv $command for $shell before typing it', async ({ shell, method, command }) => {
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell });
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
+    await flush();
+    const write = vi.spyOn(fake, 'writePty');
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method, surfaceId: 'surface:a', params: { surface: 'surface:a', command, cwd: '/repo' }, respond,
+    } })));
+    await flush();
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: 'command arguments cannot contain terminal control characters' });
+    expect(write).not.toHaveBeenCalled();
+    expect(leafCount()).toBe(1);
+  });
+
   it.each([
     // The form cmd, Windows PowerShell, and pwsh all read alike: the caller's
     // prompt may be any of them.

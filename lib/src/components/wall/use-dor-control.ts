@@ -602,6 +602,12 @@ function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
   return null;
 }
 
+/** The quoted command is typed into an interactive shell, whose line editor
+ *  reads a control character as a key (DEL erases the opening quote, Ctrl-C
+ *  abandons the line) before the shell parses any quoting; callers refuse
+ *  such argv before quoting it. */
+const COMMAND_CONTROLS_ERROR = 'command arguments cannot contain terminal control characters';
+
 /**
  * Quote raw argv for the configured default shell, which new splits launch.
  * The same string is used for ensure matching and restart; the CLI sends argv
@@ -1127,7 +1133,12 @@ export function useDorControl({
       const direction = directionParam === 'auto'
         ? autoDorDirection(resolved.target)
         : directionParam;
-      const command = dorCommandString(stringArrayParam(params.command));
+      const argv = stringArrayParam(params.command);
+      if (argv?.some(hasShellInputControls)) {
+        detail.respond({ ok: false, error: COMMAND_CONTROLS_ERROR });
+        return;
+      }
+      const command = dorCommandString(argv);
       if (params.command !== undefined && !command) {
         detail.respond({ ok: false, error: 'command cannot be empty' });
         return;
@@ -1903,7 +1914,12 @@ export function useDorControl({
         detail.respond({ ok: false, error: ENSURE_CANCELLED });
         return;
       }
-      const command = dorCommandString(stringArrayParam(params.command));
+      const argv = stringArrayParam(params.command);
+      if (argv?.some(hasShellInputControls)) {
+        detail.respond({ ok: false, error: COMMAND_CONTROLS_ERROR });
+        return;
+      }
+      const command = dorCommandString(argv);
       if (!command) {
         detail.respond({ ok: false, error: 'command cannot be empty' });
         return;
