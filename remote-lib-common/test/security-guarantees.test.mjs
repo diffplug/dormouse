@@ -26,12 +26,12 @@ import {
 } from '../dist/index.js';
 import {
   CompromisedRelay,
-  FakeClock,
   SimAuthenticator,
   SimClient,
   SimBurrow,
   SimRelay,
 } from './harness/actors.mjs';
+import { makeClock } from './harness/clock.mjs';
 
 const RP_ID = 'dormouse.dev';
 const ORIGIN = 'https://dormouse.dev';
@@ -39,7 +39,7 @@ const ACCOUNT = 'ned@dormouse.dev';
 const POCKET_LABEL = PAIRING_DEVICE_LABELS[1];
 
 async function world() {
-  const clock = new FakeClock();
+  const clock = makeClock();
   const relay = new SimRelay();
   const burrow = await SimBurrow.create({ label: 'Laptop', rpId: RP_ID, origin: ORIGIN, clock });
   const authenticator = await SimAuthenticator.create({ rpId: RP_ID });
