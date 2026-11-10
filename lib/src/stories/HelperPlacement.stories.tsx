@@ -167,7 +167,7 @@ const meta = {
   },
   args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) }, chromatic: { viewports: [1200] } },
-  play: async ({ args, canvasElement }) => { await prepare(args); canvasElement.dataset.placementCheck = 'passed'; },
+  play: async ({ args }) => { await prepare(args); },
 } satisfies Meta<typeof PlacementWall>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -246,7 +246,6 @@ export const PreserveInputAndFocus = story({
       expect(document.activeElement).toBe(focused);
       checkInput();
     });
-    canvasElement.dataset.placementCheck = 'passed';
   },
 });
 
