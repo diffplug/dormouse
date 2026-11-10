@@ -33,9 +33,9 @@
  * the `MANAGE_EOF` heredoc. Today `env_file_value` and `serve_origin_root`
  * are defined twice, and each pair is checked identical. `owner_only`,
  * `has_off_loopback`, `names_credential`, `serve_proxies_root`,
- * `check_tailscale_plaintext` and `cmd_purge` are in the heredoc (the
- * `manage` copy); `create_release_stage`, `env_missing_keys` and
- * `serve_state` are in the installer body.
+ * `check_tailscale_plaintext`, `atomic_symlink`, `cmd_rollback` and
+ * `cmd_purge` are in the heredoc (the `manage` copy); `create_release_stage`,
+ * `env_missing_keys`, `json_query` and `serve_state` are in the installer body.
  *
  * Windows is not run: nothing in CI can run PowerShell, so its Serve reader
  * and gate — the same reading over the same text — are pinned textually by
@@ -447,6 +447,8 @@ export function run() {
           'check_tailscale_plaintext',
           'cmd_purge',
           'json_query',
+          'atomic_symlink',
+          'cmd_rollback',
         ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
@@ -515,6 +517,24 @@ export function run() {
         (installed ? ': > "$ROOT/bin/run-relay"; ' : '') +
         "if cmd_purge <<< 'DELETE DORMOUSE STATE' > /dev/null 2>&1; then r=purged; else r=refused; fi; " +
         'if [ -d "$STATE_DIR" ]; then echo "$r kept"; else echo "$r deleted"; fi';
+      // `rollback` swaps with the target release's own runtime and reports a
+      // failed restart. The service manager and the health wait are stubbed;
+      // the swap runs the real `atomic_symlink` under the node running this.
+      const rollbackRoot = sq(join(fixtureDir, `rollback-${platform}`));
+      const rollback = (name, { targetRuntime, restart }) =>
+        `ROOT=${rollbackRoot}/${name}; C_RED=""; C_GRN=""; C_OFF=""; LABEL=label; UNIT=unit; ` +
+        `launchctl() { return ${restart}; }; systemctl() { return ${restart}; }; wait_for_health() { return 0; }; ` +
+        'mkdir -p "$ROOT/releases/old/runtime" "$ROOT/releases/new/runtime"; ' +
+        `ln -s ${sq(process.execPath)} "$ROOT/releases/new/runtime/node"; ` +
+        (targetRuntime ? `ln -s ${sq(process.execPath)} "$ROOT/releases/old/runtime/node"; ` : '') +
+        'ln -s "$ROOT/releases/new" "$ROOT/current"; ln -s "$ROOT/releases/old" "$ROOT/previous"; ' +
+        'if cmd_rollback > /dev/null 2>&1; then r=ok; else r=refused; fi; ' +
+        'echo "$r $(basename "$(readlink "$ROOT/current")")"';
+      allCases.push(
+        ['cmd_rollback: swaps to a target with its own runtime', rollback('healthy', { targetRuntime: true, restart: 0 }), 'ok old'],
+        ['cmd_rollback: refuses a target with no runtime, links untouched', rollback('noRuntime', { targetRuntime: false, restart: 0 }), 'refused new'],
+        ['cmd_rollback: a failed restart is a failure', rollback('restartFails', { targetRuntime: true, restart: 1 }), 'refused old'],
+      );
       // Both runners must spell a JSON boolean the way callers compare it.
       const tsStatus = join(fixtureDir, 'ts-status.json');
       writeFileSync(tsStatus, '{"CurrentTailnet":{"MagicDNSEnabled":true}}');

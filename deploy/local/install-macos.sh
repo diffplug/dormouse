@@ -1100,20 +1100,22 @@ cmd_rollback() {
   # installer has no rollback target, whatever the `previous` link suggests.
   [ "$prev" != "$cur" ] || { printf 'previous and current name the same release (%s) — nothing to roll back to\n' "$(basename "$prev")" >&2; return 1; }
   printf 'rolling back: %s -> %s\n' "$(basename "$cur")" "$(basename "$prev")"
-  local node_bin=""
-  for candidate in "$prev/runtime/node" "$ROOT/current/runtime/node"; do
-    if [ -x "$candidate" ]; then node_bin="$candidate"; break; fi
-  done
-  [ -n "$node_bin" ] || { printf 'no usable runtime found to swap the symlinks\n' >&2; return 1; }
-  # `previous` first: node_bin can be "$ROOT/current/runtime/node", and moving
-  # `current` to $prev would repoint it at the runtime that was just rejected.
+  # Swap with the target release's own runtime. Falling back to the one under
+  # `current` would mean reaching through the very symlink being moved, and a
+  # rollback target with no usable runtime cannot be started anyway.
+  local node_bin="$prev/runtime/node"
+  [ -x "$node_bin" ] || { printf 'previous release has no usable runtime: %s\n' "$node_bin" >&2; return 1; }
   if [ -n "$cur" ]; then atomic_symlink "$cur" "$ROOT/previous" "$node_bin"; fi
   atomic_symlink "$prev" "$ROOT/current" "$node_bin"
   if [ "$(readlink "$ROOT/current")" != "$prev" ]; then
     printf 'current did not advance to %s\n' "$prev" >&2
     return 1
   fi
-  launchctl kickstart -k "gui/$UID/$LABEL" || true
+  if ! launchctl kickstart -k "gui/$UID/$LABEL"; then
+    printf '%sthe symlinks were rolled back, but restarting %s failed%s\n' "$C_RED" "$LABEL" "$C_OFF" >&2
+    printf 'inspect: launchctl print gui/%s/%s\n' "$UID" "$LABEL" >&2
+    return 1
+  fi
   if wait_for_health 30; then
     printf '%srolled back and healthy%s\n' "$C_GRN" "$C_OFF"
   else
