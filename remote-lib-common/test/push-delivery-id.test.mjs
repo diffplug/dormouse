@@ -50,7 +50,9 @@ test('an id verifies under no other Burrow, no other token, and no random id', a
     flipped[at] ^= 1;
     assert.equal(await deliveryIdMintedBy(key, BURROW, toBase64Url(flipped)), false, `byte ${at}`);
   }
-  for (const malformed of [undefined, 42, '', id.slice(1), `${id}A`]) {
+  // The right length, with the last character's spare bits set.
+  const noncanonical = `${id.slice(0, 42)}${id.endsWith('B') ? 'C' : 'B'}`;
+  for (const malformed of [undefined, 42, '', id.slice(1), `${id}A`, noncanonical]) {
     assert.equal(await deliveryIdMintedBy(key, BURROW, malformed), false);
   }
 });
