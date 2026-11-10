@@ -1687,7 +1687,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         session.received += data.length;
         // Drop whole chunks off the front, then trim the head: O(chunk) per write.
         while (session.chunks.length > 1 && session.chars - session.chunks[0].length >= REPLAY_CHARS) session.chars -= session.chunks.shift().length;
-        if (session.chars > REPLAY_CHARS) { session.chunks[0] = session.chunks[0].slice(session.chars - REPLAY_CHARS); session.chars = REPLAY_CHARS; }
+        if (session.chars > REPLAY_CHARS) {
+          let head = session.chunks[0].slice(session.chars - REPLAY_CHARS);
+          // A cut between a surrogate pair leaves a lone low surrogate, which
+          // the host's JSON parser rejects along with the whole replay line.
+          if (/^[\uDC00-\uDFFF]/.test(head)) head = head.slice(1);
+          session.chars -= session.chunks[0].length - head.length;
+          session.chunks[0] = head;
+        }
       }
       send('data', { id, data });
     });

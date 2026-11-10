@@ -2186,6 +2186,23 @@ test('receivedChars counts everything ever received, past a replay-buffer trim',
   assert.equal(reads.length, seen);
 });
 
+test('a replay-buffer trim never leaves the buffer starting inside a surrogate pair', () => {
+  const events = [];
+  let output;
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() { return { pid: 1, onData(fn) { output = fn; }, onExit() {}, resize() {}, write() {}, kill() {} }; },
+  }, { replay: true });
+  mgr.spawn('pane-1');
+  // One code unit over the cap: the trim lands between the two halves of 🦀.
+  output('\u{1F980}');
+  output('x'.repeat(199_999));
+  mgr.list(['pane-1']);
+  const replay = events.find((e) => e.event === 'replay');
+  assert.ok(replay.data.data.isWellFormed());
+  assert.equal(replay.data.data, 'x'.repeat(199_999));
+  assert.equal(mgr.receivedChars('pane-1'), 200_001);
+});
+
 test('liveIds names every unexited PTY, and nothing after it exits', () => {
   const listeners = {};
   const fakePty = (id) => ({
