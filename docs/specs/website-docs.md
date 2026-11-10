@@ -232,7 +232,7 @@ Source of truth: `buildSecurity`, `gatherGuarantees`, `SECURITY_AUDIENCES` (spec
 
 **Must generate public references from their canonical sources at build time.** `generateDocs` owns the inputs; `PUBLISHED_PAGES` owns which results are emitted. **Must write a separate gitignored `website/src/data/docs.<page>.json` per published result, never one combined module** (rationale).
 
-**Must parse and validate the unpublished product guide and sync its media without emitting its data.** Reserved: **Scope: guide-page-return** restores that write. **Must strip `BUILD_ONLY_FIELDS` from emitted results while retaining them in memory for tests and public-doc lint.**
+**Must parse and validate the unpublished product guide and sync its media without emitting its data.** Reserved: **Scope: guide-page-return** restores that write. **Must strip `BUILD_ONLY_FIELDS` and `PAGE_BUILD_ONLY_FIELDS` from emitted results while retaining them in memory for tests and public-doc lint.**
 
 **Never import Node-based Dor command implementations into browser pages.**
 

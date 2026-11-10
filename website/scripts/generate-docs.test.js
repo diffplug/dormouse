@@ -16,6 +16,7 @@ import {
   groupGuarantees,
   guaranteeRows,
   linkPinnedBy,
+  publishable,
   resolveRepoLinks,
   securityAudiences,
   securityCoverage,
@@ -207,6 +208,16 @@ describe('self-host runbook', () => {
 });
 
 describe('security spec', () => {
+  it('ships its pages what they render, not the whole document', () => {
+    const shipped = publishable('security', data.security);
+    expect(shipped).not.toHaveProperty('blocks');
+    expect(shipped).not.toHaveProperty('headings');
+    expect(shipped.pageBlocks.length).toBeGreaterThan(0);
+    expect(shipped.toc.length).toBeGreaterThan(0);
+    // Other pages render their whole document.
+    expect(publishable('selfhost', data.selfhost)).toHaveProperty('blocks');
+  });
+
   it('drops exactly the document title and the front matter', () => {
     // Published whole is the point of the page: a delta that grew a third rule
     // is withholding something a reader was promised.
