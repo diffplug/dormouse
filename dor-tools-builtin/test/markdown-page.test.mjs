@@ -15,8 +15,10 @@ const page = (await build({
   define: { 'process.env.NODE_ENV': '"production"' }, external: ['mermaid'],
 })).outputFiles[0].text;
 
-/** Opens `text` (or a `source` that fails with `sourceError`) and lets the editor settle. */
-async function open(text, { sourceError } = {}) {
+/** Opens `text` (or a `source` that fails with `sourceError`), under
+ * `userAgent` when given, and lets the editor settle; then runs `act` against
+ * the page's window and its POSTs. */
+async function open(text, { sourceError, act, userAgent } = {}) {
   const html = markdownPage('doc.md').replace(/<script[^>]*><\/script>/, '').replace(/<link[^>]*>/, '');
   const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://127.0.0.1:1/cap/view' });
   const w = dom.window, posts = [];
@@ -31,9 +33,13 @@ async function open(text, { sourceError } = {}) {
     const rect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
     Range.prototype.getBoundingClientRect = rect; Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} });
     Element.prototype.scrollIntoView = function () {}; document.elementFromPoint = () => null;`);
+  // Browsers have it; jsdom does not, and a table cell's hand-off uses it.
+  w.structuredClone = value => JSON.parse(JSON.stringify(value));
+  if (userAgent) Object.defineProperty(w.navigator, 'userAgent', { value: userAgent });
   w.eval(page);
   // The editor's effects (its transforms among them) run after its first export.
   await new Promise(done => setTimeout(done, 500));
+  try { await act?.(w, posts); } catch (error) { w.close(); throw error; }
   const result = {
     label: w.document.querySelector('.controls .state')?.textContent ?? null,
     error: w.document.querySelector('.error')?.textContent ?? null,
@@ -61,4 +67,109 @@ test('a styled span renders through the HTML allowlist, and opening it is not an
 test('a document that fails to load shows why', async () => {
   const { error } = await open('', { sourceError: 'This editor supports UTF-8 text. Open this file in another editor.' });
   assert.equal(error, 'This editor supports UTF-8 text. Open this file in another editor.');
+});
+
+const settle = (ms = 100) => new Promise(done => setTimeout(done, ms));
+const label = w => w.document.querySelector('.controls .state')?.textContent;
+const saves = posts => posts.filter(post => post.url === 'save').map(post => post.body.text);
+const saveKey = w => w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true }));
+// Compare DOM nodes with `===` under `assert.ok`: a failing `assert.equal`
+// inspects both nodes, and jsdom's object graph exhausts memory.
+
+/** The page's last table cell, made the active cell as a click makes it. */
+async function lastCell(w) {
+  const td = [...w.document.querySelectorAll('td')].filter(cell => cell.querySelector('[data-lexical-editor]')).at(-1);
+  const element = td.querySelector('[data-lexical-editor]');
+  td.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+  // What a click does natively: jsdom focuses no contenteditable on its own.
+  element.tabIndex = -1;
+  element.focus();
+  await settle();
+  return { td, element, editor: element.__lexicalEditor };
+}
+/** Appends `text` to the cell's text, with the caret after it, as typing does. */
+function type(editor, text) {
+  editor.update(() => {
+    const node = [...editor.getEditorState()._nodeMap.values()].find(each => each.getType() === 'text');
+    node.setTextContent(node.getTextContent() + text);
+    node.select();
+  }, { discrete: true });
+}
+
+const TABLE = '| a | b |\n| - | - |\n| 1 | 2 |\n\ntext\n';
+
+test('text typed in a table cell is unsaved at once, and a save writes it without leaving the cell', { timeout: 30_000 }, async () => {
+  await open(TABLE, { act: async (w, posts) => {
+    const { td, element, editor } = await lastCell(w);
+    assert.ok(w.document.activeElement === element, 'the cell has focus');
+    type(editor, ' TYPED');
+    await settle();
+    assert.equal(label(w), 'Unsaved');
+    assert.deepEqual(posts.filter(post => post.url === 'state').map(post => post.body.dirty), [false, true]);
+    saveKey(w);
+    await settle();
+    assert.deepEqual(saves(posts), [TABLE.replace('| 2 |', '| 2 TYPED |')]);
+    assert.equal(label(w), 'Saved');
+    assert.ok(w.document.activeElement === element, 'focus stays in the cell');
+    assert.ok(td.dataset.active === 'true', 'it is still the active cell');
+    type(editor, '!');
+    await settle();
+    assert.equal(label(w), 'Unsaved', 'typing on after the save is an edit');
+  } });
+});
+
+test('moving the caret in a table cell is not an edit', { timeout: 30_000 }, async () => {
+  await open(TABLE, { act: async (w, posts) => {
+    const { editor } = await lastCell(w);
+    editor.update(() => { [...editor.getEditorState()._nodeMap.values()].find(each => each.getType() === 'text').select(0, 0); }, { discrete: true });
+    await settle();
+    assert.equal(label(w), 'Saved');
+    assert.deepEqual(posts, [{ url: 'state', body: { dirty: false } }]);
+  } });
+});
+
+/** Dispatches the Lexical command named `type` to `editor`, as its key would. */
+const command = (editor, type) => editor.dispatchCommand([...editor._commands.keys()].find(each => each.type === type), undefined);
+
+test('undoing and redoing a saved table edit in the document returns it to saved', { timeout: 30_000 }, async () => {
+  await open(TABLE, { act: async (w, posts) => {
+    const { editor } = await lastCell(w);
+    type(editor, ' TYPED');
+    saveKey(w);
+    await settle();
+    assert.equal(label(w), 'Saved');
+    const root = w.document.querySelector('.mdxeditor-root-contenteditable [data-lexical-editor]').__lexicalEditor;
+    command(root, 'UNDO_COMMAND');
+    await settle();
+    assert.equal(label(w), 'Unsaved');
+    command(root, 'REDO_COMMAND');
+    await settle();
+    assert.equal(label(w), 'Saved', 'the cell taking the redone table back is not an edit');
+    assert.equal(saves(posts).length, 1);
+  } });
+});
+
+// Chromium's order, where the composition ends at `compositionend`; WebKit
+// defers that to the next keydown.
+const CHROMIUM = 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+
+test('a save leaves a table cell mid-composition to the input method, and writes its text once it ends', { timeout: 30_000 }, async () => {
+  await open(TABLE, { userAgent: CHROMIUM, act: async (w, posts) => {
+    const { element, editor } = await lastCell(w);
+    type(editor, ''); // the caret the composition starts at
+    element.dispatchEvent(new w.CompositionEvent('compositionstart', { bubbles: true, data: '' }));
+    type(editor, ' 漢');
+    await settle();
+    assert.equal(editor.isComposing(), true);
+    saveKey(w);
+    await settle();
+    assert.equal(editor.isComposing(), true, 'the composition goes on');
+    assert.ok(saves(posts).every(text => !text.includes('漢')), 'nothing mid-composition is written');
+    assert.equal(label(w), 'Unsaved');
+    element.dispatchEvent(new w.CompositionEvent('compositionend', { bubbles: true, data: '漢' }));
+    await settle();
+    saveKey(w);
+    await settle();
+    assert.equal(saves(posts).at(-1), TABLE.replace('| 2 |', '| 2 漢 |'));
+  } });
 });
