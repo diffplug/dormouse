@@ -73,7 +73,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
         if (handleEditableClipboard(e)) return;
         const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
         const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;
-        if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId } });
+        // A focused context terminal takes the keyboard whatever the Wall's
+        // mode, so its copy editor gets its passthrough keys.
+        if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId }, modeRef: { current: 'passthrough' } });
         return;
       }
       if (handleDualTap(e, c, leader)) return;
