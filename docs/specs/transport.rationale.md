@@ -4,6 +4,8 @@
 
 ## Graceful shutdown
 
+SIGHUP, not SIGTERM, on POSIX (measured 2026-11-09, node-pty under the live checkout, macOS): an interactive bash and zsh ignore SIGTERM, so the stop waited out the full two-second timeout and acknowledged with every shell alive, and a closed window's shells ran on unseen until quit. Under SIGHUP zsh exited in 3 ms and bash in 4 ms. A PTY whose own process ignores SIGHUP is killed at the deadline instead; that is accepted, since the caller drops the ids next and nothing could reach it after. The SIGKILL reaches only that process: a descendant that ignores the hangup (`nohup`, a detached server) outlives the window as before. The exit then reaches the host before the acknowledgement: node-pty reports it when its master closes, which on Linux, with a child still holding the slave, waits for node-pty's own 200 ms fallback (211 ms measured on Ubuntu 24.04, 2026-11-10; 1 to 2 ms otherwise, and on macOS), so the wait is 500 ms. Every caller's own bound covers it: Rust allows the timeout plus 1.5 s, and VS Code's deactivate the timeout plus 1 s.
+
 With node-pty 1.2.0-beta.15 on Windows (measured 2026-10-06), `kill('SIGTERM')` throws, including from a deferred callback if the terminal is not ready. The swallowed synchronous error left shutdown waiting out its deadline without stopping anything (#984). Argument-less `kill()` closes the bundled ConPTY; the native addon also calls `TerminateProcess` on the shell. A console-handler probe did not save its close marker, so this path is not a history-flush guarantee. Agent recovery already captures before this stage.
 
 A second close before `onExit` crashed the Node process in the native test.

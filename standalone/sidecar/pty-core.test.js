@@ -923,7 +923,7 @@ test('interrupt with no live PTYs still reports done', async () => {
   assert.deepEqual(events.at(-1), { event: 'interruptDone', data: { requestId: 'req-empty' } });
 });
 
-test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final output', async () => {
+test('gracefulKill hangs up the named PTYs, kills what outlives the deadline, echoes requestId, forwards final output', async () => {
   const events = [];
   const killSignals = [];
   const listeners = {};
@@ -948,8 +948,9 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
   listeners.data?.('final output');
   await done;
 
-  // SIGTERM was delivered, and the done event carries the caller's requestId.
-  assert.deepEqual(killSignals, ['SIGTERM']);
+  // node-pty's default SIGHUP, then SIGKILL for a PTY still there at the
+  // deadline; the done event carries the caller's requestId.
+  assert.deepEqual(killSignals, [undefined, 'SIGKILL']);
   assert.deepEqual(events.at(-1), {
     event: 'gracefulKillDone',
     data: { requestId: 'req-42' },
@@ -959,6 +960,40 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
     event: 'data',
     data: { id: 'pane-1', data: 'final output' },
   });
+});
+
+for (const exitAfter of [200, null]) test(`gracefulKill acknowledges a SIGKILLed target ${exitAfter === null ? 'that never exits at the cap' : 'after its exit, which Linux reports 200 ms late'}`, async () => {
+  const events = [];
+  const listeners = {};
+  let killedAt = 0;
+  const mgr = create((event, data) => events.push({ event, data, at: Date.now() }), { spawn: () => ({
+    pid: 7,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill(signal) {
+      if (signal !== 'SIGKILL') return;
+      killedAt = Date.now();
+      // node-pty's socket-close fallback, when a child holds the slave.
+      if (exitAfter !== null) setTimeout(() => listeners.exit({ exitCode: 0, signal: 9 }), exitAfter);
+    },
+  }) }, { platform: 'linux' });
+  mgr.spawn('pane-1');
+  const acknowledged = new Promise((resolve) => {
+    const check = setInterval(() => { if (events.some(({ event }) => event === 'gracefulKillDone')) { clearInterval(check); resolve(); } }, 5);
+  });
+  mgr.gracefulKill(['pane-1'], 1, 'req');
+  await acknowledged;
+  const done = events.find(({ event }) => event === 'gracefulKillDone');
+  const exit = events.find(({ event }) => event === 'exit');
+  if (exitAfter === null) {
+    assert.equal(exit, undefined);
+    assert.ok(done.at - killedAt >= 500, `acknowledged ${done.at - killedAt} ms after the SIGKILL`);
+  } else {
+    assert.ok(exit && events.indexOf(exit) < events.indexOf(done), 'the exit reaches the host first');
+    assert.ok(done.at - killedAt < 500, `acknowledged ${done.at - killedAt} ms after the SIGKILL`);
+  }
 });
 
 test('gracefulKill resolves early after exits and a final output grace tick', async () => {
@@ -2550,7 +2585,7 @@ for (const platform of ['linux', 'win32']) test(`gracefulKill targets only the n
   mgr.gracefulKill(['a'], 1, 'req-1');
   await done;
 
-  assert.deepEqual(pty.killed, [['a', platform === 'win32' ? undefined : 'SIGTERM']]);
+  assert.deepEqual(pty.killed, platform === 'win32' ? [['a', undefined]] : [['a', undefined], ['a', 'SIGKILL']]);
   assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
 });
 
@@ -2626,8 +2661,8 @@ test('PTY owner streams only the current generation and stops the one a spawn di
   generations[0].onData('old shell');
   generations[1].onData('new shell');
   assert.deepEqual(sent.filter(([type]) => type === 'data').map(([, msg]) => msg.data), ['new shell']);
-  // `kill()` with no argument is node-pty's SIGHUP; an interactive bash ignores
-  // SIGTERM, so a graceful stop would leave the unreachable shell running.
+  // `kill()` with no argument is node-pty's SIGHUP, which an interactive shell
+  // honours (it ignores SIGTERM).
   assert.deepEqual(generations[0].kills, [undefined]);
   assert.deepEqual(generations[1].kills, []);
   mgr.killAll();
