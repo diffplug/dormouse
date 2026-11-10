@@ -11,7 +11,7 @@ import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts'
 import { handleStrayKey, handleStrayKeyPrompt } from './keyboard/handle-stray-key';
 import { dualTap, newDualTapState } from '../../lib/dual-tap';
 import { chromeKeyboardHeld } from './chrome-keyboard-lease';
-import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
+import { isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './keyboard/types';
 
 // Keystrokes an active Wall has already answered. A key that activates another
 // Workspace commits that Wall's `active` in the microtask checkpoint the browser
@@ -44,6 +44,14 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       // "Workspaces").
       if (!c.activeRef.current || answeredKeys.has(e)) return;
       answeredKeys.add(e);
+      // A held key the Wall consumed stays consumed: its first press may have
+      // moved focus into xterm (Enter entering passthrough), where each repeat
+      // would be typed. Arrows keep repeating to navigate.
+      if (e.repeat && consumedKeys.has(e.code) && !isArrowKey(e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       cancelUiSelectAll(e);
       dispatch(e, c);
       if (e.defaultPrevented) consumedKeys.add(e.code);
@@ -65,7 +73,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
         if (handleEditableClipboard(e)) return;
         const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
         const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;
-        if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId } });
+        // A focused context terminal takes the keyboard whatever the Wall's
+        // mode, so its copy editor gets its passthrough keys.
+        if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId }, modeRef: { current: 'passthrough' } });
         return;
       }
       if (handleDualTap(e, c, leader)) return;

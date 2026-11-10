@@ -156,7 +156,7 @@ describe('lath-wall-engine parking policy', () => {
       engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
       engine.store.doorLeaf(id, { park: true });
     }
-    const parked = engine.store.parkedIds();
+    const parked = [...engine.store.getSnapshot().parked.keys()];
     expect(parked).toHaveLength(32);
     // Every document remains mounted until it is reattached or killed.
     expect(parked).toEqual(ids);

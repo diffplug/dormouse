@@ -396,7 +396,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       onMouseDown={() => {
         actions.onClickPanel(id);
         // Deferred so it lands after the browser's own focus handling for this
-        // mousedown (same trick as enterTerminalMode's focusSession).
+        // mousedown (same trick as enterPassthrough's focusSession).
         requestAnimationFrame(() => elRef.current?.focus({ preventScroll: true }));
       }}
       onKeyDown={onKeyDown}

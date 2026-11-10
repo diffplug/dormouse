@@ -39,7 +39,6 @@ import { setDevServerResolution } from '../components/wall/agent-browser-ports';
 const loggingActions: WallActions = {
   onKill: () => console.log('[story] kill'),
   onMinimize: () => console.log('[story] minimize'),
-  onToggleTodo: () => {},
   onSplitH: () => console.log('[story] split left/right'),
   onSplitV: () => console.log('[story] split top/bottom'),
   onZoom: () => console.log('[story] zoom'),

@@ -13,9 +13,8 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom';
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Size = { width: number; height: number };
 
-/** Whether two rects match within `eps` on every field (default `0` → exact). Shared
- *  by hit-test's layout comparison (exact) and the animator's frame settle check
- *  (loose, `eps` 0.01). */
+/** Whether two rects match within `eps` on every field (default `0` → exact). The
+ *  animator's frame settle check passes a loose `eps` of 0.01. */
 export function rectsClose(a: Rect, b: Rect, eps = 0): boolean {
   return (
     Math.abs(a.x - b.x) <= eps &&
@@ -37,8 +36,9 @@ export type LathNode =
 
 export type LathChild = { node: LathNode; weight: number };
 
-/** `root: null` is the empty Wall. Trees are immutable; ops return fresh nodes
- *  along the mutated path and share structure everywhere else. */
+/** `root: null` is the empty Wall. Trees are immutable; ops return a fresh tree and
+ *  never mutate their input. Leaves are shared, but most ops rebuild every split
+ *  through `normalize`, so a split node's identity does not survive them. */
 export type LathTree = { root: LathNode | null };
 
 /** The split axis an edge divides. `'left'`/`'right'` → `'row'`; `'top'`/`'bottom'` → `'col'`. */
@@ -222,4 +222,21 @@ export function structureFingerprint(node: LathNode): string {
       ? { k: 'leaf', id: n.id }
       : { k: 'split', dir: n.dir, children: n.children.map((c) => strip(c.node)) };
   return JSON.stringify(strip(node));
+}
+
+/** A `structureFingerprint` with each leaf id passed through `rename`, so a
+ *  restore token still matches its tree after every leaf is renamed. Key order
+ *  survives the round trip, so the result equals the renamed tree's own
+ *  fingerprint. A string that is not JSON is returned as written. */
+export function renameFingerprint(fingerprint: string, rename: (id: string) => string): string {
+  const walk = (n: unknown): unknown => {
+    if (!isRecord(n)) return n;
+    if (n.k === 'leaf' && typeof n.id === 'string') return { ...n, id: rename(n.id) };
+    return Array.isArray(n.children) ? { ...n, children: n.children.map(walk) } : n;
+  };
+  try {
+    return JSON.stringify(walk(JSON.parse(fingerprint)));
+  } catch {
+    return fingerprint;
+  }
 }

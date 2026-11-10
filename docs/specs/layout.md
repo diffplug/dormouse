@@ -13,7 +13,7 @@ A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Base
 
 Two areas: Content, the tiling layout of Panes rendered by the Lath engine, and the Baseboard.
 
-Lath holds the geometry; the Wall holds selection (`selectedId` / `selectedType`), modes, and Activity + TODO state. Source of truth: `Wall` in `lib/src/components/Wall.tsx`.
+Lath holds the geometry; the Wall holds selection (`selectedId` / `selectedType`) and modes. Source of truth: `Wall` in `lib/src/components/Wall.tsx`.
 
 ## Content
 
@@ -184,7 +184,7 @@ VS Code mounts a bare Wall with no Workspace id, which behaves exactly as a sing
 
 A Workspace may leave the Window for another: `docs/specs/standalone.md` -> "Transfer". **Must confirm before a move that would destroy an iframe's page state**: a Workspace holding a plain iframe or serving iframe Tool, Doored ones included, asks with the Close's typed confirmation before it leaves, since that document reopens at its saved URL; agent-browser Surfaces reconnect and ask nothing (`iframeSurfaceIds` on the Wall handle). **Must show drag refusals over Window content in a dialog** until dismissal, retry, or Workspace departure; it waits behind a pending confirmation and an open rename.
 
-**Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gates, and host termination confirmations**: a bare matching letter confirms, another bare key cancels, and a modifier or chord never answers, so `Cmd+Q` still quits. **Must ignore the close confirmation's key while that Workspace transfers, and refuse renaming or pinning it.** **Must hold at most one pending Workspace confirmation** (close, cross-Window move gate, Surface move iframe consent), answered no when a newer one is raised or any close, cross-Window move, or Surface move starts, by gesture or `dor`, even one that refuses. **Must abandon superseded preparation while awaiting a Wall, window probe, persistence flush or editor decision**, so an older verb cannot later act or replace the newer question. A successful transfer dismisses only the departing Workspace's pending confirmation and rename UI; a failed transfer retains them. No pending kill follows a Workspace to its destination.
+**Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gates, and host termination confirmations**: a bare matching letter confirms, another bare key cancels, and a modifier or chord never answers, so `Cmd+Q` still quits. **Must ignore the close confirmation's key while that Workspace transfers, and refuse renaming or pinning it.** **Must hold at most one pending Workspace confirmation** (close, cross-Window move gate, Surface move iframe consent), answered no when a newer one is raised or any close, cross-Window move, Surface move, pin, or unpin starts, by gesture or `dor`, even one that refuses. **Must abandon superseded preparation while awaiting a Wall, window probe, persistence flush or editor decision**, so an older verb cannot later act or replace the newer question. A successful transfer dismisses only the departing Workspace's pending confirmation and rename UI; a failed transfer retains them. No pending kill follows a Workspace to its destination.
 
 Persisted containers: `docs/specs/transport.md`; standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". The union projection: `docs/specs/alert.md` → Workspace union.
 
@@ -241,7 +241,7 @@ flowchart TD
   MA -- yes --> CM["command mode"]
 ```
 
-**Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
+**Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key, and stop propagation of its `keyup`**, which win32-input-mode or kitty would report to the program. **Must swallow a handled key's held repeats, arrows excepted**, or a key that moved focus to the terminal types its repeats there. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
 
 Every open dialog holds its own reference-counted lease on the dialog gate; command-mode dispatch resumes only once the last lease is released.
 
@@ -272,7 +272,7 @@ A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spaw
 
 Dirty Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
-`x`/`k` (or the kill button, which first leaves passthrough) shows a confirmation with a random lowercase letter; typing it confirms the kill. **Never draw `x`, `k`, or Reopen's `u` as that letter**, so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule"; under Labs one that would show it becomes a pending kill instead (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). `Escape`, the cancel button, and clicking another panel cancel; any other answer key dismisses it. **Never answer a kill prompt with a bare modifier or a Cmd/Ctrl/Alt chord.**
+`x`/`k` (or the kill button, which first leaves passthrough) shows a confirmation with a random lowercase letter; typing it confirms the kill. **Never draw `x`, `k`, or Reopen's `u` as that letter**, so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule"; under Labs one that would show it becomes a pending kill instead (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). `Escape`, the cancel button, and any entry into passthrough (a click on another panel or Door included) cancel; any other answer key dismisses it. **Never answer a kill prompt with a bare modifier or a Cmd/Ctrl/Alt chord.**
 
 **Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and unasked kills only while the revealed pane, or the Door, is still selected in command mode; cancellation, refusal, or navigating away discards the return target.
 
@@ -315,7 +315,7 @@ Source of truth: `resolvePaneElement` in `lib/src/components/wall/resolve-pane-e
 
 **Must resolve arrow navigation through the engine-neutral `WallNav` seam to Lath's `neighborOf`, never a DOM rect scan.** Neighbor eligibility: `docs/specs/tiling-engine.md` → "Layout".
 
-Back-navigation: a breadcrumb tracks the last navigation direction and origin pane, and **the opposite direction must return to the origin instead of doing a spatial lookup**, so asymmetric layouts navigate reversibly.
+Back-navigation: a breadcrumb tracks the last navigation direction and origin pane, and **the opposite direction must return to the origin instead of doing a spatial lookup**, so asymmetric layouts navigate reversibly. The breadcrumb holds only while the selection is the pane its move left selected; any other selection change voids it.
 
 Pane↔door: Down from a pane with no pane below it selects the first door; Up from a door selects the last pane; Left/Right moves between doors. Doors have no spatial query — they are an ordered list.
 

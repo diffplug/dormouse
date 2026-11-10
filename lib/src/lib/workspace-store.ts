@@ -133,9 +133,9 @@ export function workspaceIdsSpanWindows(): boolean {
 }
 
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
-function nextDefaultName(): string {
+function nextDefaultName(workspaces: readonly WorkspaceMeta[] = state.workspaces): string {
   let max = 0;
-  for (const ws of state.workspaces) {
+  for (const ws of workspaces) {
     const assigned = /^Workspace (\d+)$/.exec(ws.name);
     if (assigned) max = Math.max(max, Number(assigned[1]));
   }
@@ -242,7 +242,7 @@ export function closeWorkspace(id: WorkspaceId): boolean {
   const index = state.workspaces.findIndex((ws) => ws.id === id);
   if (index === -1) return false;
   const workspaces = state.workspaces.filter((ws) => ws.id !== id);
-  if (workspaces.length === 0) workspaces.push({ id: generateWorkspaceId(), name: nextDefaultName(), nameIsAuto: true });
+  if (workspaces.length === 0) workspaces.push({ id: generateWorkspaceId(), name: nextDefaultName(workspaces), nameIsAuto: true });
   const activeId = state.activeId === id ? workspaces[Math.min(index, workspaces.length - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;

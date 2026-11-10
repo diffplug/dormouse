@@ -43,8 +43,8 @@ export interface WallKeyboardCtx {
   selectDoor: (id: string) => void;
   selectWorkspace: (id: string | null) => void;
   returnToPane: () => void;
-  enterTerminalMode: (id: string) => void;
-  exitTerminalMode: () => void;
+  enterPassthrough: (id: string) => void;
+  enterCommandMode: () => void;
   minimizePane: (id: string) => void;
   /** Open the terminal context for a pane, revealed from `origin`
    *  (`.terminal-context-enter` in `lib/src/theme.css`). */
@@ -64,9 +64,11 @@ export interface WallKeyboardCtx {
   fireEvent: (event: WallEvent) => void;
 }
 
-/** Last arrow direction, so the inverse arrow can return to the prior pane. */
+/** The last pane move: its direction, the pane it left, and the pane it left
+ *  selected (`at`). The breadcrumb holds only while the selection is still
+ *  `at`; any other selection change (a click, a kill, a reattach) voids it. */
 export interface NavHistoryRef {
-  current: { direction: string; fromId: string } | null;
+  current: { direction: string; fromId: string; at: string } | null;
 }
 
 export const ARROW_OPPOSITES = {

@@ -143,6 +143,8 @@ describe('workspace-store', () => {
     const unsubscribe = subscribeToWorkspaces(changed);
     expect(closeWorkspace(DEFAULT_WORKSPACE_ID)).toBe(true);
     expect(changed).toHaveBeenCalledTimes(1);
+    // Named past the Workspaces that remain, not the one just closed.
+    expect(getWorkspacesSnapshot().workspaces[0].name).toBe('Workspace 1');
     unsubscribe();
   });
 

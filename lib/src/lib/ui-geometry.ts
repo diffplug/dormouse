@@ -1,14 +1,14 @@
 import type { CSSProperties } from 'react';
 import { cfg } from '../cfg';
 
-/** True if the user has requested reduced motion (or we're in SSR). */
+/** True if the user has requested reduced motion; false without a `window`. */
 export function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined'
     && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
 
 /** True when chrome motion must resolve instantly: layout animation is disabled
- *  (Chromatic) or the user prefers reduced motion. The single snap gate shared
+ *  (Storybook) or the user prefers reduced motion. The single snap gate shared
  *  by the Lath animator's duration and the focus ring's travel. */
 export function motionIsInstant(): boolean {
   return !cfg.layout.animate || prefersReducedMotion();
