@@ -12,7 +12,7 @@ Lists every Surface in the current Workspace — terminals and browser Surfaces,
 
 Text output prints one row per Surface: a * marks the focused Surface, then its id (surface:<n>, the handle every command takes), kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, [preview] for the Workspace's preview slot (dor open --preview), and listening ports with --ports.
 
---ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
+--ports adds each terminal's listening TCP ports. Each listing costs the host one scan of its process table and listening sockets, so it is opt-in; remote sessions report none.
 
 --port <number> filters to terminal Surfaces listening on that port. It implies the same opt-in port scan as --ports, includes port details in JSON, and shows port tags in text output.
 
@@ -27,10 +27,10 @@ JSON output (--json) gives each row its id, has_terminal (a PTY), and has_browse
 --workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [pinned] when it is pinned (dor workspace pin), [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes --json and --window, and no other flag.
 
 Text output:
-  * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173
+  * surface:1  terminal  -              paned  /Users/me/projects/site  pnpm dev  :5173
 
   workspace:1  Workspace 1  [active]
-    * surface:1  terminal  -  paned  ~/projects/site  pnpm dev
+    * surface:1  terminal  -  paned  /Users/me/projects/site  pnpm dev
 
   * workspace:1  Workspace 1
     workspace:2  build        [ringing]  [attention 1]

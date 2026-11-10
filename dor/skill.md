@@ -190,7 +190,7 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 **The listing says how to work with each Tool:**
 
 - `[iframe]` is view-only; drive `[agent-browser-screencast]` with `dor agent-browser --surface <id>` and `[playwright-screencast]` with `dor playwright --surface <id>`.
-- `[keyed]`: running it again reveals and focuses the running one (`existing`), or restarts it in place if its command has exited (`adopted`), so it is as safe to repeat as `dor ensure`; `--fresh` starts another. Unkeyed, every call starts another — find the running one with `dor list --kind tool`.
+- `[keyed]`: running it again reveals and focuses the running one (`existing`), or restarts it in place if Dormouse stopped it while idle (`adopted`); `--fresh` starts another. Once its command exits, its pane is a plain terminal, and running it again starts another. Unkeyed, every call starts another — find the running one with `dor list --kind tool`.
 - `[port announced]`: no browser appears until the command announces its port. `[port auto]` shows the one port it opens.
 - A `run` shown as a list takes arguments (`dor tool <name> <args>`); a string takes none.
 - `[shadowed]`: a user Tool that the project's Tool of the same name replaces here.

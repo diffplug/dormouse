@@ -27,14 +27,14 @@ The target is one of:
                  the terminal owns zero or multiple ports.
 
 Text output:
-  created surface:3  "http://localhost:5173"
-  replaced surface:1  "http://localhost:5173"
+  created surface:3  "http://localhost:5173/"
+  replaced surface:1  "http://localhost:5173/"
 
 JSON output:
   {
     "status": "created",
     "surface_id": "surface:3",
-    "url": "http://localhost:5173",
+    "url": "http://localhost:5173/",
     "minimized": false
   }
 
