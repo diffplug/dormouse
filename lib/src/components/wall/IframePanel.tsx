@@ -361,7 +361,9 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
   // chrome action that replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
-    navigate(next) { commitUrl(next); },
+    // A URL-bar Enter always loads: the pane's own params.url after an
+    // in-frame navigation is a no-op write the proxy effect never sees.
+    navigate(next) { commitUrl(next); setReloadNonce((n) => n + 1); },
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
     forward() { goToHistoryIndex(historyIndexRef.current + 1); },
     reload() {
