@@ -100,6 +100,20 @@ test('every internal package source is in the shipped scope the network lints sc
   assert.deepEqual(unscanned, []);
 });
 
+test('every package whose tests run in jsdom declares jsdom', () => {
+  // vitest loads jsdom as an optional peer, so a package that omits it passes
+  // only while a sibling happens to declare it.
+  const missing = new Set();
+  for (const file of trackedFiles().filter((f) => /\.(?:[cm]?[jt]sx?)$/.test(f))) {
+    const text = readRepoFile(file);
+    if (!/@vitest-environment jsdom|environment:\s*['"]jsdom['"]/.test(text)) continue;
+    const pkg = owner(file);
+    const { devDependencies = {}, dependencies = {} } = pkg?.manifest ?? {};
+    if (pkg && !('jsdom' in devDependencies || 'jsdom' in dependencies)) missing.add(pkg.dir);
+  }
+  assert.deepEqual([...missing], []);
+});
+
 test('no workspace manifest declares an install lifecycle script', () => {
   // pnpm runs a project's own lifecycle scripts in the platform shell, which is
   // cmd.exe on Windows, so a POSIX one-liner there fails `pnpm install`.
