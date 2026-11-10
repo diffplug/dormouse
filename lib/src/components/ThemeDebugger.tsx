@@ -12,10 +12,6 @@ import { NativeModalDialog } from './design';
 
 export const OPEN_THEME_DEBUGGER_EVENT = 'dormouse:openThemeDebugger';
 
-export function openThemeDebugger(): void {
-  window.dispatchEvent(new CustomEvent(OPEN_THEME_DEBUGGER_EVENT));
-}
-
 function Swatch({ value }: { value: string | null }) {
   return (
     <span

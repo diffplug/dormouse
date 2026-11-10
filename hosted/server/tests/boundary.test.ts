@@ -29,7 +29,6 @@ import {
   tryRules,
   type RulesFor,
 } from "../headers";
-import { ADMIN_EMAIL } from "../entitlement";
 import { accountApp } from "../account-app";
 import { cookieEntitled, openAuthRead } from "../account-gate";
 import { createAuthApp } from "@pgstencil/auth/better-auth";

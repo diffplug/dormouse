@@ -116,6 +116,7 @@ export const SHIPPED_DIRS = [
   'dor-tools-builtin/src/',
   'dor-tools-builtin/viewer/',
   'dor-lib-common/src/',
+  'dor-tools-lib/src/',
   'remote-lib-common/src/',
 ];
 

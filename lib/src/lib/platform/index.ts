@@ -4,7 +4,6 @@ import { FakePtyAdapter } from './fake-adapter';
 import { getPlatformOrNull, setPlatform } from './current';
 
 export type { PlatformAdapter } from './types';
-export type { PtyInfo } from './types';
 export { FakePtyAdapter } from './fake-adapter';
 export type { FakeScenario } from './fake-adapter';
 export {

@@ -99,7 +99,6 @@
     }
   },
   "scripts": {
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "build:frontend": "vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm typecheck && vitest run",
@@ -116,7 +115,7 @@
   "dependencies": {
     "node-datachannel": "0.33.6",
     "node-pty": "1.2.0-beta.18",
-    "ws": "^8.18.0"
+    "ws": "^8.21.3"
   },
   "optionalDependencies": {
     "@node-datachannel/darwin-arm64": "0.33.6",
@@ -128,12 +127,12 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.13.6",
     "@types/vscode": "1.92.0",
-    "@types/ws": "^8.5.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.2",
     "@vscode/vsce": "^4.0.0",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.2",
     "ovsx": "^1.0.0",
     "playwright-core": "^1.63.0",
     "remote-lib-common": "workspace:*",
