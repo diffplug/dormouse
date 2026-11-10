@@ -17,7 +17,6 @@ export function subscribeToActiveTheme(listener: () => void): () => void {
 
 export interface AppliedThemeSnapshot {
   theme: DormouseTheme;
-  providedVars: Record<string, string>;
   /** What was painted on body: the resolved theme plus the page's derived
    *  properties (`ThemePaintProfile.derive`). */
   resolvedVars: Record<string, string>;
@@ -109,9 +108,8 @@ export function applyTheme(theme: DormouseTheme): void {
   }
 
   // Materialized so theme.css can read --vscode-* directly without fallbacks.
-  const providedVars = withHostTypography(theme.vars);
   const paint = paintFor(theme, profile);
-  appliedThemeSnapshot = { theme, providedVars, resolvedVars: paint.vars, profile };
+  appliedThemeSnapshot = { theme, resolvedVars: paint.vars, profile };
   paintThemeOnto(document.body, paint);
   rememberThemePaint(paint);
 
