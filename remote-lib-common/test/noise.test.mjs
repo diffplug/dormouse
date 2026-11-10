@@ -20,6 +20,7 @@ import {
   concatBytes,
   createNoiseInitiator,
   createNoiseResponder,
+  deriveNoiseStaticPublicKey,
   fromBase64Url,
   generateNoiseKeyPair,
   importNoiseStaticPrivateKey,
@@ -469,6 +470,26 @@ test('the role follows the remote static, so it can never be mismatched', async 
     keys.respStatic.publicKey,
   );
   assert.ok((await asInitiator.writeMessage(EMPTY)).length > 0);
+});
+
+test('a static’s public half derives from its private half, which is never made extractable or exported', async () => {
+  const material = await mintNoiseStaticKeyPair();
+  const subtle = globalThis.crypto.subtle;
+  const guarded = {
+    subtle: {
+      importKey: (format, data, algorithm, extractable, usages) => {
+        assert.equal(format === 'pkcs8' && extractable, false, 'a private half imported extractable');
+        return subtle.importKey(format, data, algorithm, extractable, usages);
+      },
+      deriveBits: (...args) => subtle.deriveBits(...args),
+      exportKey: async () => {
+        throw new Error('exported');
+      },
+    },
+  };
+  assert.equal(await deriveNoiseStaticPublicKey(material.privateKeyPkcs8, guarded), material.publicKey);
+  const other = await mintNoiseStaticKeyPair();
+  assert.notEqual(await deriveNoiseStaticPublicKey(other.privateKeyPkcs8, guarded), material.publicKey);
 });
 
 test('a minted static round-trips through its persisted form', async () => {
