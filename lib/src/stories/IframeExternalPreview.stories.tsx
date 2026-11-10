@@ -6,7 +6,7 @@ import { ExternalPreviewPrompt } from '../components/wall/IframePanel';
  *  machine (docs/specs/dor-browser.md → "Iframe External Origins"). */
 function ExternalPreviewStory({ width, height, ...props }: Parameters<typeof ExternalPreviewPrompt>[0] & { width: number; height: number }) {
   return (
-    <div style={{ width, height }} className="relative overflow-hidden bg-terminal-bg">
+    <div data-preview-story style={{ width, height }} className="relative overflow-hidden bg-terminal-bg">
       <ExternalPreviewPrompt {...props} />
     </div>
   );
@@ -96,7 +96,7 @@ export const NoOtherBrowser: Story = {
 export const Narrow: Story = {
   args: { width: 240, height: 360, origin: `http://${'very-long-subdomain-'.repeat(4)}example.com:65535` },
   play: async ({ canvasElement }) => {
-    const pane = canvasElement.firstElementChild as HTMLElement;
+    const pane = canvasElement.querySelector<HTMLElement>('[data-preview-story]')!;
     await expect(pane.scrollWidth).toBeLessThanOrEqual(pane.clientWidth + 1);
   },
 };

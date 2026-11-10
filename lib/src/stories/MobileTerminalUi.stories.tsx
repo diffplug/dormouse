@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { expect, userEvent, within } from 'storybook/test';
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   MOBILE_TERMINAL_KEY_SEQUENCES,
   MobileTerminalUi,
@@ -16,8 +16,6 @@ import {
 } from '../components/MobileGestureRadialMenu';
 import {
   flattenScenario,
-  initPlatform,
-  type FakePtyAdapter,
   type FakeScenario,
 } from '../lib/platform';
 import {
@@ -151,8 +149,6 @@ function StoryFrame(args: MobileTerminalUiProps) {
 }
 
 function PocketWallFrame(args: MobileTerminalUiProps) {
-  const adapterRef = useRef<FakePtyAdapter | null>(null);
-  if (!adapterRef.current) adapterRef.current = initPlatform('fake');
   const [activePaneId, setActivePaneId] = useState(POCKET_WALL_PANE);
   const [view, setView] = useState<MobileTerminalView>(args.activeView ?? args.defaultView ?? 'terminal');
   const sessionItems = useMobileWallSessionItems(POCKET_WALL_SESSIONS, activePaneId);

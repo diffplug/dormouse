@@ -60,14 +60,13 @@ test('clampTerminalDimension bounds the top, not just the bottom', () => {
   assert.equal(clampTerminalDimension(400, 24), 400);
 });
 
-const MINT = { token: 'aZ0-_abc', expiresAt: 1 };
+// A real token is base64url of 32 bytes: exactly what the pairing QR's grammar accepts.
+const MINT = { token: 'aZ0-_'.padEnd(RELAY_BEARER_LENGTH, 'b'), expiresAt: 1 };
 
 test('isSetupTokenResponse accepts a real mint', () => {
   assert.equal(isSetupTokenResponse(MINT), true);
   // Additive fields are fine: an older Burrow reading a newer Relay still works.
   assert.equal(isSetupTokenResponse({ ...MINT, extra: true }), true);
-  // A real token is base64url of 32 bytes, comfortably inside the bound.
-  assert.equal(isSetupTokenResponse({ ...MINT, token: 'a'.repeat(128) }), true);
 });
 
 test('isSetupTokenResponse rejects a 200 that is not one', () => {
@@ -85,8 +84,12 @@ test('isSetupTokenResponse rejects a 200 that is not one', () => {
     // An oversized token throws inside the QR encoder, under the app-wide
     // ErrorBoundary, which takes every terminal down with it.
     { ...MINT, token: 'a'.repeat(129) },
-    { ...MINT, token: 'has spaces' },
-    { ...MINT, token: 'not/base64url+' },
+    // Any other length paints a QR every phone refuses as not a pairing code.
+    { ...MINT, token: 'aZ0-_abc' },
+    { ...MINT, token: 'a'.repeat(RELAY_BEARER_LENGTH - 1) },
+    { ...MINT, token: 'a'.repeat(RELAY_BEARER_LENGTH + 1) },
+    { ...MINT, token: 'has spaces'.padEnd(RELAY_BEARER_LENGTH, 'a') },
+    { ...MINT, token: 'not/base64url+'.padEnd(RELAY_BEARER_LENGTH, 'a') },
     { ...MINT, expiresAt: '1' },
     { ...MINT, expiresAt: Number.NaN },
     { ...MINT, expiresAt: Number.POSITIVE_INFINITY },

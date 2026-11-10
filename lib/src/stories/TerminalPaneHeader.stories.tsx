@@ -10,6 +10,7 @@ import {
   type WallMode,
   type WallActions,
 } from '../components/Wall';
+import { noopActions } from './story-wall';
 import type { ActivityNotification, SessionStatus } from '../lib/alert-manager';
 import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
 import { commandWatchKey, cwdFromOsc633 } from '../lib/terminal-state';
@@ -21,22 +22,6 @@ import { requireElement, settleTerminalContext, TODO_SPOTLIGHT_HELD_CLASS, waitF
 
 const SESSION_ID = 'surface:1';
 
-const noopActions: WallActions = {
-  onKill: () => {},
-  onMinimize: () => {},
-  onSplitH: () => {},
-  onSplitV: () => {},
-  onZoom: () => {},
-  onClickPanel: () => {},
-  onEnterPanel: () => {},
-  onFrameLeader: () => {},
-  onFocusPane: () => {},
-  onStartRename: () => {},
-  onFinishRename: () => ({ accepted: true }),
-  onCancelRename: () => {},
-  onSwapRenderMode: () => {},
-  onResolveToolApproval: () => {},
-};
 
 function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {
   const rejection: SetTerminalUserTitleResult = { accepted: false, reason };
@@ -82,8 +67,7 @@ interface PanePriming {
 
 /**
  * Prime one pane's Activity and semantic state as a coherent pair: a detector
- * status comes with a running command and a WATCHING rule for it. Timestamps are
- * fixed rather than `Date.now()` for deterministic Chromatic snapshots.
+ * status comes with a running command and a WATCHING rule for it.
  */
 function primedPane({ status, todo = false, notification, command = 'pnpm dev', userTitle = 'build-server' }: PanePriming) {
   const watching = SHOWN_ONLY_WHILE_WATCHING[status];
@@ -321,9 +305,7 @@ function assertPaneActions(expected: readonly PaneAction[]) {
     // have settled, instead of guessing a fixed delay. Surface the last reason
     // if it never settles within the timeout.
     await waitForPrimedState();
-    await waitForCondition(() => violation() === null, { timeoutMs: 1000 });
-    const reason = violation();
-    if (reason) throw new Error(reason);
+    await waitForCondition(() => violation() === null, { timeoutMs: 1000, message: () => violation() ?? '' });
   };
 }
 

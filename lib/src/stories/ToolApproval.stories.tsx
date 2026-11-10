@@ -58,6 +58,7 @@ export const ShortScrolledToControls: Story = {
   play: ({ canvasElement }) => {
     const pane = canvasElement.querySelector('[data-approval-story]')!.firstElementChild as HTMLElement;
     const buttons = [...pane.querySelectorAll('button')];
+    if (buttons.length === 0) throw new Error('Approval rendered no controls');
     for (const button of buttons) {
       button.scrollIntoView({ block: 'nearest' });
       const bounds = button.getBoundingClientRect();

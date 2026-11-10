@@ -1,6 +1,6 @@
 /**
  * The remote wire contract (docs/specs/relay.md): HTTP routes and payloads,
- * relay frames, and the terminal-only remote-api v1 messages. Shared by
+ * relay frames, and the remote-api v1 messages. Shared by
  * `relay`, Hosted's Workers, the Burrow module in `lib`, and the Pocket UI so
  * the sides cannot drift.
  */
@@ -112,8 +112,8 @@ export const ORIGIN_MISMATCH_ERROR = 'origin mismatch';
 
 /**
  * The `error` the Hosted Relay answers when the account behind a credential is
- * not entitled to it: 403 to a Burrow token, a setup redemption, or an
- * enrollment poll, and 401 to a sign-in. A Burrow keys on it to stop retrying.
+ * not entitled to it: 403 to a Burrow token or an enrollment poll, and 401 to
+ * a sign-in. A Burrow keys on it to stop retrying.
  */
 export const NOT_ENTITLED_ERROR = 'this account is not entitled to the Hosted Relay';
 
@@ -583,28 +583,13 @@ export interface SetupRetireRequest {
 
 /**
  * How many unspent setup tokens ONE Burrow may hold, capping both sides of the
- * credential: the Relay's issuer map and the Burrow's own map of the nonces it
- * paired with them. One constant, so live-on-one-side and spent-on-the-other
+ * credential: the Relay's issuer map and the Burrow's own map of the invitations
+ * it minted with them. One constant, so live-on-one-side and spent-on-the-other
  * cannot drift. A human scans one at a time, so it is far above any real use.
  *
  * Source of truth for the eviction rule: `relay/src/setup-token.ts`.
  */
 export const MAX_TOKENS_PER_BURROW = 8;
-
-/**
- * The longest setup token this Burrow will put in a QR.
- *
- * A real one is base64url of 32 bytes (43 characters). The bound is what keeps
- * a 200 off a hostile or broken Relay from reaching the QR encoder, which
- * throws above its capacity — inside the app-wide ErrorBoundary, taking every
- * terminal down with it.
- */
-const SETUP_TOKEN_MAX_LENGTH = 128;
-
-/** Base64url, bounded, non-empty — the shape of a setup token on this wire. */
-function isSetupTokenHandle(value: unknown): value is string {
-  return isBoundedBase64Url(value, SETUP_TOKEN_MAX_LENGTH);
-}
 
 /**
  * Structural validation of a {@link SetupTokenResponse}, beside the type so a
@@ -620,7 +605,7 @@ export function isSetupTokenResponse(value: unknown): value is SetupTokenRespons
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
   return (
-    isSetupTokenHandle(candidate.token) &&
+    isRelayBearer(candidate.token) &&
     typeof candidate.expiresAt === 'number' &&
     Number.isFinite(candidate.expiresAt) &&
     candidate.expiresAt > 0

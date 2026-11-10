@@ -32,7 +32,7 @@ const meta: Meta<typeof IndicatorStory> = {
 export default meta;
 type Story = StoryObj<typeof IndicatorStory>;
 
-// `cfg.alert.ringingPaused` is on under Chromatic (lib/.storybook/preview.ts), so
+// `cfg.alert.ringingPaused` is on under Argos (lib/.storybook/preview.ts), so
 // the arrival burst is frozen out and this snapshots as the static treatment.
 export const Ringing: Story = {
   parameters: {
