@@ -72,13 +72,9 @@ export interface TestRelay {
   stop(): void;
 }
 
-export function createTestRelay(options: {
-  burrowId: string;
-  burrowSocket: FakeSocket;
-  clientId?: string;
-}): TestRelay {
+export function createTestRelay(options: { burrowId: string; burrowSocket: FakeSocket }): TestRelay {
   const { burrowId, burrowSocket } = options;
-  const clientId = options.clientId ?? testRoutingId();
+  const clientId = testRoutingId();
   /**
    * The live Client socket and the one Burrow it is bound to. Per socket, not per
    * relay: `registerClient` starts every registration unbound, so a reconnect
