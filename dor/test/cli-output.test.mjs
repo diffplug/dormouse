@@ -570,6 +570,7 @@ test('ensure surfaces a host error (no integration) to stderr with exit 1', asyn
 test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', () => {
   assert.equal(msysToWindowsCwd('/c/Users/me/site', 'win32'), 'C:\\Users\\me\\site');
   assert.equal(msysToWindowsCwd('/d/work', 'win32'), 'D:\\work');
+  assert.equal(msysToWindowsCwd('/c', 'win32'), 'C:\\');
   // Already-native paths (some MSYS builds export `C:/...`) and non-win32
   // platforms are left for resolvePath to handle.
   assert.equal(msysToWindowsCwd('C:/Users/me/site', 'win32'), 'C:/Users/me/site');

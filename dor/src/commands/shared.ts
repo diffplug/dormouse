@@ -139,8 +139,9 @@ export function writeStderr(context: DorCommandContext, stderr: string): void {
 // drive letter (e.g. `C:/Users/...`, which some MSYS builds export instead).
 export function msysToWindowsCwd(pwd: string, platform: string): string {
   if (platform !== 'win32') return pwd;
-  const match = pwd.match(/^\/([A-Za-z])\/(.*)$/);
-  return match ? `${match[1].toUpperCase()}:\\${match[2].replace(/\//g, '\\')}` : pwd;
+  // `/c` alone is the drive root.
+  const match = pwd.match(/^\/([A-Za-z])(?:\/(.*))?$/);
+  return match ? `${match[1].toUpperCase()}:\\${(match[2] ?? '').replace(/\//g, '\\')}` : pwd;
 }
 
 // The host has no idea where `dor` was launched, so the caller's directory must
