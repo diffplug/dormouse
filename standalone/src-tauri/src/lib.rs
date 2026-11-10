@@ -2712,15 +2712,6 @@ fn fit_geometry(saved: WindowGeometry, min: (f64, f64), monitors: &[WindowGeomet
     fit
 }
 
-/// The configured minimum window size, which `fit_geometry` keeps on a display.
-fn window_min_size(app: &AppHandle) -> (f64, f64) {
-    let first = app.config().app.windows.first();
-    (
-        first.and_then(|w| w.min_width).unwrap_or(0.0),
-        first.and_then(|w| w.min_height).unwrap_or(0.0),
-    )
-}
-
 /// Every connected display in logical coordinates, the primary first.
 fn monitor_rects(app: &AppHandle) -> Vec<WindowGeometry> {
     let primary = app.primary_monitor().ok().flatten();
@@ -2844,7 +2835,11 @@ fn session_file_names(dir: &Path) -> Vec<String> {
 /// order `restorable_labels` produced (`main` first). The cap is a ceiling on
 /// how many windows one launch may open; the excess stays on disk untouched.
 fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
-    let min = window_min_size(app);
+    let first = app.config().app.windows.first();
+    let min = (
+        first.and_then(|w| w.min_width).unwrap_or(0.0),
+        first.and_then(|w| w.min_height).unwrap_or(0.0),
+    );
     let monitors = monitor_rects(app);
     let saved_box = |label: &str| read_geometry(dir, label).map(|saved| fit_geometry(saved, min, &monitors));
     if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
@@ -3576,8 +3571,6 @@ fn transfer_workspace_content(
                 width: g.get("width").and_then(JsonValue::as_f64).unwrap_or(0.0),
                 height: g.get("height").and_then(JsonValue::as_f64).unwrap_or(0.0),
             });
-            // Never off every display; a window peeking past an edge stays.
-            let geometry = geometry.map(|g| fit_geometry(g, window_min_size(&app), &monitor_rects(&app)));
             if let Err(err) = build_window(&app, &to, geometry) {
                 // Nothing will ever drain the queue, and the source has
                 // already marked the Workspace transferring — `handOff` set
