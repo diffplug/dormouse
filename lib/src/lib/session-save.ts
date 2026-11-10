@@ -23,7 +23,7 @@ export interface SavePaneInput {
 export interface SaveOptions {
   alertDelivery?: AlertDeliveryOverrides;
   /** Re-read each terminal pane's cwd from the host. Defaults to true; `false`
-   *  takes the reported local directory, else what the previous record held. */
+   *  keeps what the previous record held, else the reported local directory. */
   probeCwd?: boolean;
 }
 
@@ -79,7 +79,7 @@ export async function buildPersistedSession(
 
 /**
  * `buildPersistedSession` past its probe, synchronously: `cwds` null keeps each
- * terminal's reported local directory, else its previous cwd. A Surface move publishes both Workspaces with no
+ * terminal's previous cwd, else its reported local directory. A Surface move publishes both Workspaces with no
  * await between ownership change and publication.
  */
 export function assemblePersistedSession(
@@ -127,7 +127,10 @@ export function assemblePersistedSession(
       id: pane.id,
       title: pane.title,
       // The probe answers nothing on Windows; the shell's own report then does.
-      cwd: cwds?.[pane.id] ?? getInheritableCwd(pane.id) ?? previousPane?.cwd ?? null,
+      // A save that skipped the probe keeps the previous record first: without
+      // shell integration the report is only the spawn directory.
+      cwd: (cwds ? cwds[pane.id] ?? getInheritableCwd(pane.id) ?? previousPane?.cwd
+        : previousPane?.cwd ?? getInheritableCwd(pane.id)) ?? null,
       untouched: isUntouched(pane.id),
       alert: liveAlert ?? previousPane?.alert ?? null,
     };

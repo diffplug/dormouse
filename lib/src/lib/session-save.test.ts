@@ -396,6 +396,7 @@ describe('saveSession', () => {
   });
 
   describe('cwd probe', () => {
+    afterEach(() => removeTerminalPaneState('pane-a'));
     it('prefers the batch, in one call for every terminal pane', async () => {
       const platform = createPlatform(null);
       platform.getCwds = vi.fn(async () => ({ 'pane-a': '/a', 'pane-b': '/b' }));
@@ -462,7 +463,9 @@ describe('saveSession', () => {
 
     it('probes nothing and keeps the previous cwd when the flush says not to', async () => {
       // The post-kill flush: every probe would answer null and be discarded for
-      // the previous record's value anyway.
+      // the previous record's value anyway. A shell without integration reports
+      // only its spawn directory, which must not replace the probe's answer.
+      seedTerminalManualCwd('pane-a', '/where-it-spawned');
       const platform = createPlatform({
         version: 4,
         panes: [{ id: 'pane-a', title: 'Pane A', cwd: '/before-the-kill', untouched: false }],
@@ -475,6 +478,13 @@ describe('saveSession', () => {
       expect(platform.getCwd).not.toHaveBeenCalled();
       const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
       expect(saved.panes[0].cwd).toBe('/before-the-kill');
+    });
+
+    it('takes the reported directory when a save skips the probe and has no previous record', async () => {
+      seedTerminalManualCwd('pane-a', '/reported');
+      const platform = createPlatform(null);
+      await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, { probeCwd: false });
+      expect((vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession).panes[0].cwd).toBe('/reported');
     });
   });
 });

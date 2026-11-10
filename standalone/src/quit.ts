@@ -134,8 +134,8 @@ async function runQuitTeardown(last: boolean): Promise<void> {
             console.warn("[quit] agent recovery capture failed; proceeding", err));
           await adapter.requestSessionFlush(PRE_KILL_FLUSH_MS); // save while PTYs are alive
           await adapter.gracefulKillPtys(GRACEFUL_KILL_MS); // graceful stop; wait for exits
-          // Final post-exit save. Nothing left to probe a cwd from: each pane
-          // keeps its reported directory, else the one the save above recorded.
+          // Final post-exit save. Nothing left to probe a cwd from, and each pane
+          // keeps the one the save above recorded.
           await adapter.requestSessionFlush(POST_KILL_FLUSH_MS, { probeCwd: false });
           // The Walls' records become one Window blob. Bounded like the rest, so
           // a writer that stalls cannot eat the drain's budget behind it.
