@@ -321,9 +321,7 @@ function assertPaneActions(expected: readonly PaneAction[]) {
     // have settled, instead of guessing a fixed delay. Surface the last reason
     // if it never settles within the timeout.
     await waitForPrimedState();
-    await waitForCondition(() => violation() === null, { timeoutMs: 1000 });
-    const reason = violation();
-    if (reason) throw new Error(reason);
+    await waitForCondition(() => violation() === null, { timeoutMs: 1000, message: () => violation() ?? '' });
   };
 }
 
