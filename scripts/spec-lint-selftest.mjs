@@ -22,7 +22,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { makeSelftest, readRepoFile, replaceText, repoRoot } from './lint-kit.mjs';
+import { appendText, makeSelftest, readRepoFile, replaceText, repoRoot } from './lint-kit.mjs';
 import { countWords } from './spec-md.mjs';
 
 const budgets = JSON.parse(readRepoFile('scripts/spec-word-budgets.json'));
@@ -65,6 +65,11 @@ const TITLED_TEST = 'scripts/md-unwrap.test.mjs';
 const TEST_TITLE = [...readRepoFile(TITLED_TEST).matchAll(/\b(?:it|test)\(\s*'([^'\n]+)'/g)]
   .map((m) => m[1]).find((title) => title.split(/\s+/).length >= 8);
 assert.ok(TEST_TITLE, `check 20 needs a test title of eight or more words in ${TITLED_TEST}`);
+
+/** The text of every spec, for picking a real fixture value. */
+const allSpecText = () => readdirSync(join(repoRoot, 'docs/specs')).filter((f) => f.endsWith('.md')).map((f) => readRepoFile(`docs/specs/${f}`)).join('\n');
+/** spec-lint's budget step; a smaller budget always fails a non-empty spec. */
+const BUDGET_STEP = 50;
 
 const EXTERNAL_SPEC = ['docs', 'compatible-agents.md'].join('/');
 const EXTERNAL_RATIONALE = EXTERNAL_SPEC.replace(/\.md$/, '.rationale.md');
@@ -148,11 +153,41 @@ selftest.withMutation(
   'check 5: an external spec without its glossary front matter',
 );
 
-selftest.withMutation(
+// Removing the file also orphans SELF_HOST.md's `(rationale)` markers, which
+// check 11 reports; only check 15's own diagnostic proves check 15.
+selftest.withMutationReporting(
   ROOT_RATIONALE,
   (path) => rmSync(path, { force: true }),
-  `check 15: a large root-level spec with no rationale file\n      removing ${ROOT_RATIONALE} stays green — spec-lint cannot see it`,
+  `words and no ${ROOT_RATIONALE}`,
+  `check 15: a large root-level spec with no rationale file\n      removing ${ROOT_RATIONALE} stays green or reports only another check — spec-lint cannot see it`,
 );
+
+// Checks 1, 2, 3, 6, 7, and 10, each required to report its own diagnostic:
+// a planted spec, heading, or budget can trip a neighbouring check too.
+const DEFINED_SCOPE = allSpecText().match(/^\*\*Scope: ([a-z0-9-]+)\*\*/m)?.[1];
+assert.ok(DEFINED_SCOPE, 'check 6 needs a defined scope to define again');
+const PLANTED_SPEC = spec('planted-unindexed.md');
+const BUDGETS = 'scripts/spec-word-budgets.json';
+const budgetsWith = (edit) => (path) => {
+  const next = JSON.parse(readFileSync(path, 'utf8'));
+  edit(next);
+  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
+};
+for (const [name, target, mutate, expected] of [
+  ['check 1: a spec AGENTS.md does not index', PLANTED_SPEC, (path) => writeFileSync(path, '# Planted\n\nText.\n'), `spec not indexed -> ${PLANTED_SPEC}`],
+  ['check 2: a section after ## Future', SPEC, appendText('\n## Future\n\n**Scope: planted-fold** — one item.\n\n## After\n\nText.\n'), '"## Future" must be the last section'],
+  ['check 3: a link to a file that does not exist', SPEC, appendText('\nSee [this](no-such-file.md).\n'), 'broken link -> no-such-file.md'],
+  ['check 3: a link to an anchor that does not exist', SPEC, appendText('\nSee [this](#no-such-anchor).\n'), 'missing anchor -> #no-such-anchor'],
+  ['check 6: a scope defined a second time', SPEC, appendText(`\n**Scope: ${DEFINED_SCOPE}** — again.\n`), `scope "${DEFINED_SCOPE}" already defined at`],
+  ['check 6: a reference to a scope nobody defines', SPEC, appendText('\nStaged (**Scope: planted-undefined**).\n'), 'reference to undefined scope "planted-undefined"'],
+  ['check 6: a bare reference to a scope nobody defines', SPEC, appendText('\nStaged in the **planted-bare** scope.\n'), 'reference to undefined scope "planted-bare"'],
+  ['check 7: a Reserved: paragraph that names nothing', SPEC, appendText('\nReserved: nothing here.\n'), '"Reserved:" paragraph names neither'],
+  ['check 10: a spec over its budget', BUDGETS, budgetsWith((b) => { b[SPEC] = BUDGET_STEP; }), `exceeds its ${BUDGET_STEP}-word budget`],
+  ['check 10: a spec with no budget', BUDGETS, budgetsWith((b) => { delete b[SPEC]; }), `no budget for ${SPEC}`],
+  ['check 10: a budget for a file that is not a spec', BUDGETS, budgetsWith((b) => { b[spec('no-such-spec.md')] = BUDGET_STEP; }), `stale entry for ${spec('no-such-spec.md')}`],
+]) {
+  selftest.withMutationReporting(target, mutate, expected, `${name}\n      planting it in ${target} stays green or reports something else — spec-lint cannot see it`);
+}
 
 // Check 16's failures need separate mutations so one ownership diagnostic
 // cannot hide another one regressing.
