@@ -38,7 +38,7 @@
     "stripe": "^22.6.2"
   },
   "devDependencies": {
-    "@storybook/react": "11.0.0-alpha.8",
+    "@storybook/react": "11.0.0-beta.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^24.13.6",
     "@types/react": "^19.2.14",
@@ -48,7 +48,7 @@
     "jsdom": "^30.0.0",
     "miniflare": "5.20261101.0-beta",
     "node-pg-migrate": "^9.0.0",
-    "storybook": "11.0.0-alpha.8",
+    "storybook": "11.0.0-beta.0",
     "tailwindcss": "^4.3.0",
     "testcontainers": "^12.2.1",
     "tsx": "4.23.15",

@@ -17,11 +17,11 @@
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
-    "@storybook/react": "11.0.0-alpha.8",
-    "@storybook/react-vite": "11.0.0-alpha.8",
+    "@storybook/react": "11.0.0-beta.0",
+    "@storybook/react-vite": "11.0.0-beta.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "storybook": "11.0.0-alpha.8",
+    "storybook": "11.0.0-beta.0",
     "typescript": "^7.0.0",
     "vite": "^8.0.14"
   }
