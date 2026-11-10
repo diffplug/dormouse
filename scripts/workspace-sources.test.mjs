@@ -114,6 +114,18 @@ test('every package whose tests run in jsdom declares jsdom', () => {
   assert.deepEqual([...missing], []);
 });
 
+test('every package with TypeScript importing a node: builtin declares @types/node', () => {
+  // Typings that arrive through another package's reference follow its `*`
+  // range, not the runtime-aligned one this repository pins.
+  const missing = new Set();
+  for (const file of trackedFiles().filter((f) => /\.(?:[cm]?tsx?)$/.test(f))) {
+    if (!/from\s+['"]node:/.test(readRepoFile(file))) continue;
+    const pkg = owner(file);
+    if (pkg && !('@types/node' in (pkg.manifest.devDependencies ?? {}) || '@types/node' in (pkg.manifest.dependencies ?? {}))) missing.add(pkg.dir);
+  }
+  assert.deepEqual([...missing], []);
+});
+
 test('no workspace manifest declares an install lifecycle script', () => {
   // pnpm runs a project's own lifecycle scripts in the platform shell, which is
   // cmd.exe on Windows, so a POSIX one-liner there fails `pnpm install`.
