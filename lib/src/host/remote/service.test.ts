@@ -3542,6 +3542,21 @@ describe('Hosted enrollment', () => {
     }
   }
 
+  /**
+   * Let a redemption land: saved, reported enrolled, and the code no longer
+   * `redeeming`, which it reports until the flow — the Burrow's start
+   * included — returns. The save alone comes before the start's WebCrypto and
+   * store round trips, so waiting on it reads a status mid-start.
+   */
+  async function redeemed(): Promise<void> {
+    await drain(() => store.enrollment !== null);
+    for (let turn = 0; turn < 500; turn += 1) {
+      const status = (await command('status')).result as BurrowConsoleStatus;
+      if (status.enrolled && (status.hostedEnrollment as { status?: string } | null)?.status !== 'redeeming') return;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
   /** Fire the next poll and wait for it to have asked. */
   async function nextPoll(): Promise<void> {
     const asked = pollRequests().length;
@@ -3603,7 +3618,7 @@ describe('Hosted enrollment', () => {
 
     polls.push(enrolledAnswer());
     await nextPoll();
-    await drain(() => store.enrollment !== null);
+    await redeemed();
 
     expect(store.enrollment).toMatchObject({
       relayUrl: HOSTED_ORIGIN,
@@ -3833,7 +3848,7 @@ describe('Hosted enrollment', () => {
     await command('cancelHostedEnrollment');
     expect(await hostedEnrollment()).toBeNull();
     answer(enrolledAnswer());
-    await drain(() => store.enrollment !== null);
+    await redeemed();
 
     expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID, label: 'Work laptop' });
     expect((await command('status')).result).toMatchObject({ enrolled: true, hostedEnrollment: null });
@@ -3852,7 +3867,7 @@ describe('Hosted enrollment', () => {
     await command('beginHostedEnrollment', { label: 'x' });
     expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', confirmDigits: '99' });
     answer(enrolledAnswer());
-    await drain(() => store.enrollment !== null);
+    await redeemed();
     await drain(() => vi.getTimerCount() === 0);
 
     expect(store.enrollment?.burrowId).toBe(BURROW_ID);
@@ -4043,6 +4058,7 @@ describe('Hosted enrollment', () => {
     };
     polls.push(enrolledAnswer());
     await nextPoll();
+    await redeemed();
 
     expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID });
     expect((await command('status')).result).toMatchObject({ enrolled: true });
