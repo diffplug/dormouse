@@ -44,10 +44,6 @@ export interface CommandRun {
    * Only set on finished commands; never read before `finishedAt`.
    */
   finalTerminalTitle?: TerminalTitle;
-  outputRange?: {
-    startMarkId?: string;
-    endMarkId?: string;
-  };
 }
 
 export type TerminalTitleSource =
