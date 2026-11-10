@@ -32,6 +32,7 @@ The two columns are **not comparable**: the first wave took the core library, bo
 - A dead-export cleanup removed a name `lib/.storybook/preview.ts` still imported, which blanked every Storybook story until Argos ran. Tests and Storybook config are type-checked since #1646.
 - A build-script edit added a path containing `prebuilds`, and pnpm skips a `pre<name>` hook whenever the body of `<name>` contains that hook's name, so `prebuild` stopped running and `pnpm build` failed in a fresh clone. CI ran tests first, which hid it. Fixed and tested in #1643.
 - Three audit canary patches stopped applying after fixes changed lines they quote.
+- During the follow-up on open `high` findings, an implementer's new jsdom test of the Markdown editor looped on its own updates and one Node process reached 122 GB before the maintainer noticed. The implementer brief now bounds memory and time on every run of a new test.
 
 **What went wrong in the process.**
 
