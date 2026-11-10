@@ -3871,7 +3871,7 @@ fn broadcast_registry(app: &AppHandle, windows: &WindowState) {
 /// **Not consumed**: the record settles at `adopt_done`, so a webview that
 /// drains at boot and again when its listener is installed sees only what it has
 /// yet to adopt. The webview dedupes what it is already mounting.
-#[tauri::command]
+#[tauri::command(async)]
 fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) -> Vec<JsonValue> {
     routing::arrival_payloads(&guard(&windows.arrivals), window.label())
 }
@@ -7212,7 +7212,7 @@ mod tests {
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",
-                "kill_sidecar_and_wait",
+                "kill_sidecar_and_wait", "arrival_payloads",
             ].iter().any(|helper| body.contains(helper));
             if reaches_blocking && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());
