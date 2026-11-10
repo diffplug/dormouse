@@ -119,9 +119,9 @@ const CHECK_4_EXCEPTIONS = {
     call: 'nextServer.listen(path',
     reason: 'The peer link between VS Code windows listens on a Unix-domain socket or named pipe path, never a port.',
   },
-  'dor/src/commands/open-picker.ts': {
-    call: 'terminal.listen(onInput',
-    reason: 'Subscribes to the picker\'s own keyboard input; no socket.',
+  'dor/src/commands/picker-core.ts': {
+    call: 'terminal.listen(chunk',
+    reason: 'Subscribes to the pickers\' own keyboard input; no socket.',
   },
   'lib/src/host/remote/native-direct-peer.ts': {
     call: 'new native.polyfill.RTCPeerConnection(',

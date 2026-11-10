@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../dist/cli.js';
 import { fuzzyMatch, Ranker } from '../dist/commands/fuzzy.js';
-import { parseKeys, runFilePicker } from '../dist/commands/open-picker.js';
+import { runFilePicker } from '../dist/commands/open-picker.js';
+import { parseKeys } from '../dist/commands/picker-core.js';
+import { fakeTerminal, until } from './fake-terminal.mjs';
 import { listFiles } from '../dist/commands/file-list.js';
 import { execFileSync } from 'node:child_process';
 import { setImmediate } from 'node:timers/promises';
@@ -73,25 +75,6 @@ test('parseKeys decodes keys, mouse, paste, and a lone escape', () => {
   ]);
 });
 
-function fakeTerminal({ columns = 120, rows = 20 } = {}) {
-  let onInput;
-  let onResize;
-  let output = '';
-  let taken = 0;
-  return {
-    columns: () => columns,
-    rows: () => rows,
-    write: (text) => { output += text; },
-    listen(input, resize) { onInput = input; onResize = resize; return () => { onInput = undefined; onResize = undefined; }; },
-    send(chunk) { onInput(chunk); },
-    resize(width, height) { columns = width; rows = height; onResize(); },
-    get output() { return output; },
-    /** Output written since the previous call. */
-    take() { const text = output.slice(taken); taken = output.length; return text; },
-    get listening() { return onInput !== undefined; },
-  };
-}
-
 const HANDLERS = [
   { tool: 'builtin:file', description: 'Markdown editor', reason: 'built-in; no open rule matches' },
   { tool: 'builtin:code', description: 'code editor (source)', reason: 'built-in' },
@@ -109,14 +92,6 @@ function pickerClient({ handlers = async () => ({ handlers: HANDLERS, config: '/
       return { status: 'created', surfaceId: 'surface:9', command: `viewer ${request.file}`, cwd: request.cwd, minimized: false, key: null };
     },
   };
-}
-
-async function until(predicate, label) {
-  for (let i = 0; i < 200; i++) {
-    if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-  assert.fail(`timed out waiting for ${label}`);
 }
 
 /** The rows a frame repainted, in order. */

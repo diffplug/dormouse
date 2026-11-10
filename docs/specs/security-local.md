@@ -222,7 +222,7 @@ Source of truth: `windowsSystemPath` in `standalone/sidecar/windows-system.js`; 
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **A repository's Tool runs nothing until you trust it in Dormouse's own window.** No command grants that trust, and a control character in what the repository configures is escaped before it reaches your terminal and refused before it reaches a launch. |  | `lib/src/host/tool-host.test.ts`, `dor/test/cli-output.test.mjs`, `dor/test/open-picker.test.mjs` |
+| **A repository's Tool runs nothing until you trust it in Dormouse's own window.** No command grants that trust, and a control character in what the repository configures is escaped before it reaches your terminal and refused before it reaches a launch. |  | `lib/src/host/tool-host.test.ts`, `dor/test/cli-output.test.mjs`, `dor/test/open-picker.test.mjs`, `dor/test/tool-picker.test.mjs` |
 
 Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md` → Trust, Declaring tools.
 
@@ -230,7 +230,7 @@ What an upstream grant trusts, and what the trust prompt does not bound, is `doc
 
 - **FAIL IF** `S170` a repo-local named Tool spawns its terminal or a helper before the user grants trust through Dormouse chrome, or the control socket gains a trust-grant verb beside lookup and launch.
 - **FAIL IF** `S171` named-tool inputs stop being argv until the renderer quotes them for the shell that reads them — at a cmd or PowerShell prompt a Tool did not launch, the form all three Windows shells read alike (`docs/specs/dor-cli.md` -> "Current Implemented Commands") — or a project name can replace a user Tool during user-only lookup; user configuration is the local user's authority.
-- **FAIL IF** `S172` a repo-sourced field reaches a terminal with a C0, DEL, or C1 character unescaped: every field `dor tool` prints, its warnings, `--list --json`, every `dor list` listing, the host errors `dor tool` and `dor open` relay, the host's answer they print, and the file names and handlers the `dor open` picker draws. Pinned by `dor/test/cli-output.test.mjs` and `dor/test/open-picker.test.mjs`.
+- **FAIL IF** `S172` a repo-sourced field reaches a terminal with a C0, DEL, or C1 character unescaped: every field `dor tool` prints, its warnings, `--list --json`, every `dor list` listing, the host errors `dor tool` and `dor open` relay, the host's answer they print, the file names and handlers the `dor open` picker draws, and the Tools the `dor tool` picker draws. Pinned by `dor/test/cli-output.test.mjs`, `dor/test/open-picker.test.mjs`, and `dor/test/tool-picker.test.mjs`.
 - **FAIL IF** `S173` a Tool's string `run`, argv, substituted argv, a local target, or a `dor split` or `dor ensure` command tail reaches launch carrying a C0, DEL, or C1 character, including one exposed by canonicalizing a symlink or decoding a `file:` URL, which a filesystem error would otherwise echo; shell quotes do not protect terminal editing keys.
 - **FAIL IF** `S174` a renderer request can supply the grant key rather than the host deriving it from the canonical upstream URL or project-root folder, or a host reads a config unbounded or follows a repo-config symlink. The user config may follow a dotfiles symlink; its opened descriptor must still be a bounded regular file.
 - **FAIL IF** `S175` a port announced outside the designated command's Session process tree is served (`docs/specs/dor-tool.md` → Serving), or process output turns an ordinary terminal into a Tool; it may only select among that tree's discovered ports.

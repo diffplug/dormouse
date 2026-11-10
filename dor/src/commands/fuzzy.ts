@@ -152,9 +152,15 @@ export class Ranker {
   get scanning(): boolean { return this.terms.length > 0 && this.next < this.scanLength(); }
 
   at(position: number): string | undefined {
-    if (!this.terms.length) return this.items[position];
+    const index = this.indexAt(position);
+    return index === undefined ? undefined : this.items[index];
+  }
+
+  /** Where the item ranked at `position` was added, counting from 0. */
+  indexAt(position: number): number | undefined {
+    if (!this.terms.length) return position < this.items.length ? position : undefined;
     this.settle();
-    return this.items[this.ranked[position]?.index ?? -1];
+    return this.ranked[position]?.index;
   }
 
   /** Where the selection ranks now: 0 when nothing is chosen. */
