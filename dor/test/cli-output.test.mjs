@@ -1388,6 +1388,14 @@ test('agent-browser --surface needs a control endpoint', async () => {
   assert.deepEqual(ab.calls, []);
 });
 
+test('a -h in a command tail is the command\'s, so the tail check still runs', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['ensure', 'extra', '--', 'du', '-h'], { client, env: { PWD: '/work/site' } });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, "Error: unexpected argument 'extra' before --\n");
+  assert.deepEqual(client.requests, []);
+});
+
 test('agent-browser rejects an intercepted flag given twice', async () => {
   for (const [args, flag] of [[['--key', 'a', '--key', 'b'], '--key'], [['--workspace', '1', '--workspace=2'], '--workspace']]) {
     const ab = fakeAgentBrowser();
