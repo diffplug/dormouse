@@ -1967,6 +1967,19 @@ describe('session expiry', () => {
     expect(harness.client.sessionToken).toBeNull();
   });
 
+  it('reports expiry to a request made after a background 401 cleared the session', async () => {
+    const harness = await signedIn({
+      '/api/push/subscriptions/query': () => ({ status: 401, json: { error: 'unauthorized' } }),
+    });
+    await seedRecord(harness.knownBurrows, 'h1');
+    // The app swallows a background request's failure.
+    await harness.client.listPushSubscribedBurrows().catch(() => {});
+    expect(harness.client.sessionToken).toBeNull();
+
+    await expect(harness.client.listBurrows()).rejects.toBeInstanceOf(SessionExpiredError);
+    await expect(harness.client.openSocket()).rejects.toBeInstanceOf(SessionExpiredError);
+  });
+
   it('diagnoses a relay upgrade as expiry when a concurrent 401 already cleared the session', async () => {
     const harness = await signedIn({
       '/api/burrows': () => ({ status: 401, json: { error: 'unauthorized' } }),

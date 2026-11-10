@@ -1444,7 +1444,10 @@ export class PocketClient {
   }
 
   #requireSession(): PocketSession {
-    if (!this.#session) throw new Error('sign in first');
+    // Expiry, not a bare error: every caller runs after sign-in, so a session
+    // gone here was cleared by a sign-out or a 401 — possibly on a background
+    // request whose failure nobody showed — and the caller must land on sign-in.
+    if (!this.#session) throw new SessionExpiredError();
     return this.#session;
   }
 
