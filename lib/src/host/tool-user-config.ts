@@ -32,12 +32,12 @@ export async function readUserBrowserConfig(path: string): Promise<BrowserConfig
   }
 }
 
-/** The `ok` result for a user Tool: no project root, no trust gate. */
+/** The `ok` result for a user Tool: no trust gate. */
 export async function resolveUserTool(
   file: ToolFile, path: string, entry: ToolEntry, cwd: string, args: readonly string[],
   browserConfig: BrowserViewportConfig = mergeBrowserConfig(file.browser),
 ): Promise<ToolLookupResult> {
-  const input = await resolveToolInput(entry, { cwd, projectRoot: null, args });
+  const input = await resolveToolInput(entry, { cwd, here: file.dir, args });
   return { status: 'ok', projectRoot: file.dir, path, name: entry.name, scope: 'user',
     ...input, render: entry.render, port: entry.port,
     viewport: toolViewport(entry.render, entry.viewport, browserConfig), warnings: [...file.warnings] };

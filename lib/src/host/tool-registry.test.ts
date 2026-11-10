@@ -63,7 +63,7 @@ describe('parseToolFile', () => {
 tools:
   storybook:
     run: pnpm storybook
-    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+    prespawn_dedupe: [storybook, $HERE]
 `);
     expect(file.warnings).toEqual([]);
     expect(file.tools.get('storybook')).toEqual({
@@ -71,7 +71,7 @@ tools:
       run: 'pnpm storybook',
       render: 'iframe',
       port: 'announced',
-      dedupeTemplate: ['storybook', '$PROJECT_ROOT'],
+      dedupeTemplate: ['storybook', '$HERE'],
       description: null,
     });
   });
@@ -120,15 +120,24 @@ tools:
   });
 
   it('rejects an unknown substitution rather than keeping it as a literal', () => {
-    expect(() => parse('tools:\n  t:\n    run: x\n    prespawn_dedupe: [t, $PROJECTROOT]\n')).toThrow(
-      /unknown substitution '\$PROJECTROOT'/,
+    expect(() => parse('tools:\n  t:\n    run: x\n    prespawn_dedupe: [t, $HEER]\n')).toThrow(
+      /unknown substitution '\$HEER'/,
     );
   });
 
-  it('rejects $PROJECT_ROOT in a user-global file', () => {
-    expect(() => parse('tools:\n  t:\n    run: x\n    prespawn_dedupe: [t, $PROJECT_ROOT]\n', USER)).toThrow(
-      /only defined for a repo-local/,
+  it.each([REPO, USER])('rejects the retired PROJECT_ROOT token as unknown in $scope configuration', opts => {
+    expect(() => parse('tools:\n  t:\n    run: x\n    prespawn_dedupe: [t, $PROJECT_ROOT]\n', opts)).toThrow(
+      /unknown substitution '\$PROJECT_ROOT'/,
     );
+    expect(() => parse('tools:\n  t:\n    run: [x, $PROJECT_ROOT]\n', opts)).toThrow(
+      /unknown substitution '\$PROJECT_ROOT'/,
+    );
+  });
+
+  it('accepts $HERE in a user-global run list and key', () => {
+    const file = parse('tools:\n  t:\n    run: [node, $HERE/t.js]\n    prespawn_dedupe: [t, $HERE]\n', USER);
+    expect(file.tools.get('t')).toMatchObject({ run: ['node', '$HERE/t.js'], dedupeTemplate: ['t', '$HERE'] });
+    expect(file.warnings).toEqual([]);
   });
 
   it('rejects an unknown reserved prespawn_* field', () => {
@@ -145,7 +154,7 @@ tools:
 
   it('warns on a repo-local key with no project scope', () => {
     const file = parse('tools:\n  t:\n    run: x\n    prespawn_dedupe: [t]\n');
-    expect(file.warnings).toEqual([expect.stringContaining('no $PROJECT_ROOT')]);
+    expect(file.warnings).toEqual([expect.stringContaining('no $HERE')]);
     expect(file.tools.get('t')?.dedupeTemplate).toEqual(['t']);
   });
 
@@ -209,31 +218,31 @@ describe('resolveDedupeKey', () => {
     ({ name: 't', run: 'x', render: 'iframe' as const, port: 'announced' as const, dedupeTemplate });
 
   it('is null when the entry declared no template', () => {
-    expect(resolveDedupeKey(entry(null), { projectRoot: '/repo', cwd: '/repo/lib' })).toBeNull();
+    expect(resolveDedupeKey(entry(null), { here: '/repo', cwd: '/repo/lib' })).toBeNull();
   });
 
-  it('substitutes the project root and the caller cwd', () => {
+  it('substitutes the declaring directory and the caller cwd', () => {
     expect(
-      resolveDedupeKey(entry(['t', '$PROJECT_ROOT', '$CWD']), { projectRoot: '/repo', cwd: '/repo/lib' }),
+      resolveDedupeKey(entry(['t', '$HERE', '$CWD']), { here: '/repo', cwd: '/repo/lib' }),
     ).toEqual(['t', '/repo', '/repo/lib']);
   });
 
   it('substitutes inside a larger string', () => {
-    expect(resolveDedupeKey(entry(['tool@$PROJECT_ROOT']), { projectRoot: '/repo', cwd: '/x' })).toEqual([
+    expect(resolveDedupeKey(entry(['tool@$HERE']), { here: '/repo', cwd: '/x' })).toEqual([
       'tool@/repo',
     ]);
   });
 
   it('keeps two worktrees distinct — the case the list shape exists for', () => {
-    const template = ['storybook', '$PROJECT_ROOT'];
-    const a = resolveDedupeKey(entry(template), { projectRoot: '/repo', cwd: '/repo' });
-    const b = resolveDedupeKey(entry(template), { projectRoot: '/repo.phase-b', cwd: '/repo.phase-b' });
+    const template = ['storybook', '$HERE'];
+    const a = resolveDedupeKey(entry(template), { here: '/repo', cwd: '/repo' });
+    const b = resolveDedupeKey(entry(template), { here: '/repo.phase-b', cwd: '/repo.phase-b' });
     expect(a).not.toEqual(b);
   });
 
-  it('throws rather than emitting a literal $PROJECT_ROOT when none is defined', () => {
-    expect(() => resolveDedupeKey(entry(['t', '$PROJECT_ROOT']), { projectRoot: null, cwd: '/x' })).toThrow(
-      /\$PROJECT_ROOT is not defined/,
+  it('throws rather than emitting the retired $PROJECT_ROOT as a literal', () => {
+    expect(() => resolveDedupeKey(entry(['t', '$PROJECT_ROOT']), { here: '/repo', cwd: '/x' })).toThrow(
+      /unknown substitution '\$PROJECT_ROOT'/,
     );
   });
 });
@@ -285,8 +294,8 @@ describe("this repo's own dormouse.yml", () => {
 
   it('scopes every key to the checkout, so parallel worktrees stay distinct', () => {
     for (const entry of file.tools.values()) {
-      const a = resolveDedupeKey(entry, { projectRoot: '/w/one', cwd: '/w/one' });
-      const b = resolveDedupeKey(entry, { projectRoot: '/w/two', cwd: '/w/two' });
+      const a = resolveDedupeKey(entry, { here: '/w/one', cwd: '/w/one' });
+      const b = resolveDedupeKey(entry, { here: '/w/two', cwd: '/w/two' });
       expect(a).not.toBeNull();
       expect(a).not.toEqual(b);
     }
