@@ -534,7 +534,10 @@ async function runToolInCallerPane(
   retireToolRun(lath, id);
   // A lapse an earlier host restart left speaks for no Tool this pane becomes.
   clearHoldLapse(id);
-  lath.store.setMeta(id, becomeToolMeta(meta, tool.become.title, tool.become.params));
+  // The shell is the user's, not one spawned for this Tool: never stopped to
+  // save memory (docs/specs/dor-tool.md -> Reaping). Volatile: run end drops
+  // it with the designation, and persistence strips it.
+  lath.store.setMeta(id, becomeToolMeta(meta, tool.become.title, { ...tool.become.params, toolSharesCallerShell: true }));
   await typeToolCommand(id, tool.command, tool.cwd, signal);
 }
 

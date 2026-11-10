@@ -131,7 +131,7 @@ Source of truth: `useToolRunEnd` in `lib/src/components/wall/use-tool-run-end.ts
 
 A reap stops an idle Tool's Session, shell included; rehydrate starts it again in the same Surface, which keeps its leaf, Tool metadata, scrollback, rename, and alert, and reads as an exited Session meanwhile.
 
-**Must reap only a Tool whose running designated command declared itself safe to stop** with `dehydrate: true` in the run's latest `serve` ([OSC 367](#osc-367)): its args alone restart it, and a payload only adds fidelity. Clean or unreported state never qualifies (rationale). **Never reap a Tool** that reports unsaved changes, announced `persist: "never"`, is a marked preview slot or popped out, awaits approval or document navigation, has an auxiliary helper, is a pending kill (`docs/specs/reopen.md`), or belongs to a closing or transferring Workspace (rationale).
+**Must reap only a Tool whose running designated command declared itself safe to stop** with `dehydrate: true` in the run's latest `serve` ([OSC 367](#osc-367)): its args alone restart it, and a payload only adds fidelity. Clean or unreported state never qualifies (rationale). **Never reap a Tool** that reports unsaved changes, announced `persist: "never"`, is a marked preview slot or popped out, awaits approval or document navigation, has an auxiliary helper, is a pending kill (`docs/specs/reopen.md`), or belongs to a closing or transferring Workspace (rationale). **Never reap a Tool that took over its caller's shell** ([Take-over](#take-over)); a cold-restored one has its own shell (rationale).
 
 **Must reap only after 30 minutes continuously out of sight and without PTY output** — Doored, in an inactive Workspace, or in a hidden webview (rationale): never on the minimize or switch itself, and never for memory pressure. The stop:
 
@@ -320,7 +320,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 | Helper | No existing auxiliary helper; preserve it by splitting |
 | Quoting | A cmd or PowerShell caller's argv has a Windows-portable form |
 
-A taken-over Surface is a Tool for one run ([Run end](#run-end)): once that run ends, a later invocation from its prompt takes the plain terminal over afresh.
+A taken-over Surface is a Tool for one run ([Run end](#run-end)), in the caller's own shell ([Reaping](#reaping)): once that run ends, a later invocation from its prompt takes the plain terminal over afresh.
 
 ```mermaid
 sequenceDiagram

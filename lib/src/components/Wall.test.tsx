@@ -19,6 +19,7 @@ import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import { answerClientClose } from '../remote/burrow/client-close';
 import * as browserSurface from './wall/browser-surface';
+import * as lathWallEngine from './wall/lath-wall-engine';
 import { TERMINAL_CLOSE_REFUSAL } from './wall/close-for-client';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
@@ -2443,6 +2444,7 @@ describe('Wall on the Lath engine', () => {
     let toolId: string | undefined;
     const typed: string[] = [];
     vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    const engine = vi.spyOn(lathWallEngine, 'createLathWallEngine');
     const toolControl = vi.fn(async () => ({ status: 'ok' as const, scope: 'user' as const,
       projectRoot: '/config', path: '/config/dormouse.yml', name: 'viewer', run: ['view', '/repo/a.md'],
       key: ['/repo/a.md'], render: 'iframe' as const, port: 'auto' as const, warnings: [] }));
@@ -2483,6 +2485,21 @@ describe('Wall on the Lath engine', () => {
         reportRunning(toolId!, 'view /repo/a.md');
       });
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+      // Only a take-over runs in a shell the host did not spawn for it, and
+      // that mark lives only as long as the run, never on disk.
+      const lath = engine.mock.results[0].value as lathWallEngine.LathWallEngine;
+      expect(lath.getMeta(toolId!)?.params?.toolSharesCallerShell).toBe(status === 'takeover' ? true : undefined);
+      if (status === 'takeover') {
+        await act(async () => window.dispatchEvent(new Event('pagehide')));
+        await flush();
+        const saved = fake.getState() as { lathLayout: { leafMeta: Record<string, { component: string; params?: Record<string, unknown> }> } };
+        expect(saved.lathLayout.leafMeta[toolId!]).toMatchObject({ component: 'tool' });
+        expect(saved.lathLayout.leafMeta[toolId!].params).not.toHaveProperty('toolSharesCallerShell');
+        act(() => terminalRegistry.applyTerminalSemanticEvents(toolId!, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
+        await flush();
+        expect(lath.getMeta(toolId!)?.component).toBe('terminal');
+        expect(lath.getMeta(toolId!)?.params?.toolSharesCallerShell).toBeUndefined();
+      }
     } finally {
       await act(async () => controller.abort());
       fake.clearInputHandler('surface:a');

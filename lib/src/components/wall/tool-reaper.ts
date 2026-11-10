@@ -53,6 +53,8 @@ export function toolReapIdleMs(): number {
  *  out-of-sight conditions, and the Workspace's, are the caller's. */
 export function toolReapBlocker(id: string, params: Record<string, unknown> | undefined): string | null {
   if (!isToolParams(params)) return 'not a Tool';
+  // A take-over runs in the user's own shell, which a reap would kill.
+  if (params.toolSharesCallerShell === true) return 'it shares the shell it took over';
   if (isToolReaped(id) || isToolStopping(id)) return 'already reaped';
   // A pending kill's restore must bring back the same process (docs/specs/reopen.md).
   if (isPendingKillSession(id)) return 'it is a pending kill';
