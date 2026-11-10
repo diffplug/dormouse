@@ -342,9 +342,6 @@ importers:
       '@fontsource/ubuntu-sans-mono':
         specifier: ^5.3.0
         version: 5.3.0
-      '@hono/node-server':
-        specifier: ^2.0.10
-        version: 2.1.5(hono@4.13.16)
       '@pgstencil/auth':
         specifier: ^0.4.3
         version: 0.4.3(hono@4.13.16)(kysely@0.29.8)(pg@8.23.1)(pgstencil@0.4.3(cheerio@1.2.0)(kysely@0.29.8)(node-pg-migrate@9.0.0(pg@8.23.1))(testcontainers@12.2.1(supports-color@10.2.2))(turndown@7.2.4))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5)
@@ -379,6 +376,9 @@ importers:
         specifier: ^22.6.2
         version: 22.6.2(@types/node@24.19.2)
     devDependencies:
+      '@hono/node-server':
+        specifier: ^2.0.10
+        version: 2.1.5(hono@4.13.16)
       '@storybook/react':
         specifier: 11.0.0-alpha.8
         version: 11.0.0-alpha.8(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(storybook@11.0.0-alpha.8(@types/react@19.3.0)(prettier@3.9.6)(react@19.3.1))(supports-color@10.2.2)(typescript@7.0.2)
