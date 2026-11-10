@@ -1,6 +1,6 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
-import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
+import { isToolKeyScope, isToolOrigin, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { SessionStatus } from './alert-manager';
 import type { WorkspaceMeta } from './workspace-store';
@@ -230,7 +230,7 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
 
 /** An origin is held to what a target is held to, and must be absolute. */
 function isPersistedToolOrigin(value: unknown): value is ToolOrigin {
-  return isRecord(value) && typeof value.file === 'string' && !hasShellInputControls(value.file)
+  return isToolOrigin(value) && !hasShellInputControls(value.file)
     && /^(?:[\\/]|[A-Za-z]:[\\/])/.test(value.file);
 }
 

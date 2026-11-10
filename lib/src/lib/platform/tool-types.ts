@@ -7,6 +7,7 @@
  */
 
 import type { BrowserViewportConfig, BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import { isRecord } from '../is-record';
 import type { OpenHandlersRequest, OpenHandlersResponse, ToolListRequest, ToolListResponse, ToolOrigin } from 'dor/commands/types';
 
 export type ToolHostRequest =
@@ -82,6 +83,9 @@ export type ToolLookupResult =
 export function toolOriginOf(lookup: { scope?: ToolKeyScope; path: string }): ToolOrigin | undefined {
   return lookup.scope === 'builtin' ? undefined : { file: lookup.path };
 }
+
+/** The shape every reader of an untrusted origin starts from. */
+export const isToolOrigin = (value: unknown): value is ToolOrigin => isRecord(value) && typeof value.file === 'string';
 
 export type ToolControlResult =
   | ToolLookupResult

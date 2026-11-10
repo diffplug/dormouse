@@ -10,7 +10,7 @@ import {
   type RenderMode,
 } from './agent-browser-screen';
 import type { BrowserBinding, Surface, SurfaceKind, ToolOrigin } from 'dor/commands/types';
-import { isToolKeyScope, type ToolKeyScope, type ToolRender } from '../../lib/platform/tool-types';
+import { isToolKeyScope, isToolOrigin, type ToolKeyScope, type ToolRender } from '../../lib/platform/tool-types';
 import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
@@ -209,11 +209,10 @@ export function toolScopeFromParams(params: unknown): ToolKeyScope | undefined {
  *  another kind or an anonymous Tool, and no origin for a built-in. */
 export function toolListIdentity(params: unknown): Pick<Surface, 'toolName' | 'toolScope' | 'toolOrigin'> {
   if (!isToolParams(params) || typeof params.toolName !== 'string') return {};
-  const origin = params.toolOrigin as Partial<ToolOrigin> | undefined;
   return {
     toolName: params.toolName,
     toolScope: toolScopeFromParams(params) ?? 'project',
-    ...(typeof origin?.file === 'string' ? { toolOrigin: { file: origin.file } } : {}),
+    ...(isToolOrigin(params.toolOrigin) ? { toolOrigin: { file: params.toolOrigin.file } } : {}),
   };
 }
 
