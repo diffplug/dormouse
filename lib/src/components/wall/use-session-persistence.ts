@@ -257,9 +257,11 @@ export function useSessionPersistence({
         });
     };
     // No CWD probe: the page is torn down before a host round trip answers,
-    // so a probing save would never publish. Each pane keeps its last cwd.
+    // so a probing save would never publish. Each pane keeps its last cwd. It
+    // bypasses the queue too: a save already in flight is waiting on that same
+    // unanswered round trip, and a request queued behind it would never run.
     const handlePageHide = () => {
-      void flushSessionSave({ probeCwd: false }).catch(() => undefined);
+      void doSave({ probeCwd: false }).catch(() => undefined);
     };
 
     // One subscription: every store commit (add/remove/resize/swap/meta, including
@@ -334,6 +336,7 @@ export function useSessionPersistence({
     ownsHostFlush,
     workspaceId,
     lath,
+    doSave,
     flushSessionSave,
     ownsSurface,
     ownsHostFlush,
