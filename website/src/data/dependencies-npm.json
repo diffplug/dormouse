@@ -343,15 +343,6 @@
       ]
     },
     {
-      "name": "tailwind-merge",
-      "license": "MIT",
-      "author": "Dany Castillo",
-      "homepage": "https://github.com/dcastil/tailwind-merge",
-      "versions": [
-        "3.7.0"
-      ]
-    },
-    {
       "name": "tailwind-variants",
       "license": "MIT",
       "author": "Junior Garcia <jrgarciadev@gmail.com>",
