@@ -68,7 +68,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function mount(enrollment: Enrollment | null, start: { checkout?: CheckoutIntent; confirming?: string } = {}) {
+async function mount(enrollment: Enrollment | null, start: { checkout?: CheckoutIntent; confirming?: string; toWithdraw?: boolean } = {}) {
   await act(async () => root.render(<App enrollment={enrollment} {...start} />));
 }
 function button(text: string) {
@@ -610,6 +610,22 @@ describe("withdrawal and closure", () => {
     expect(text()).toContain("wd-reference-1");
     expect(text()).toContain("We emailed this acknowledgement");
     expect(container.querySelector("#withdraw")).toBeNull();
+  });
+
+  it("brings the withdrawal section into view once it renders, when the link named it", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      await mount(null, { toWithdraw: true });
+      expect(scrolled).toEqual([container.querySelector("#withdraw")]);
+      expect(scrolled[0]).not.toBeNull();
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it("explains what closing does to the plan before closing, then confirms it signed out", async () => {
