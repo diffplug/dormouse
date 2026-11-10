@@ -84,6 +84,8 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Persisted session types
 
+**Why a reported directory is saved.** It is terminal-reported, the value splits, helpers, and Reopen already use, and it is saved only where the host's probe has no answer: every pane on Windows, where the probe resolves nothing (2026-11). A save that skips the probe (the post-kill quit flush, a Surface move) keeps the previous record first, because a shell without integration reports only its spawn directory, which would overwrite the probe's last good answer. Before, every Windows row was saved with `cwd: null`, so a relaunch opened every shell in the home directory and typed an auto-resumed agent's command there.
+
 **What a cwd probe costs.** On macOS `getCwd` is an `lsof` subprocess in the sidecar, on every debounced save and every 30 s heartbeat; per pane, and per Workspace in a quit flush that fans out to every Wall at once, it would be N spawns on the sidecar's only event loop.
 
 ## Retiring the transcripts already on disk
