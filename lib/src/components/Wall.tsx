@@ -42,7 +42,6 @@ import {
   clearLocalSurfaceActivity,
   disposeSession,
   focusSession,
-  toggleSessionTodo,
   setPendingShellOpts,
   getDefaultShellOpts,
   getInheritableCwd,
@@ -848,8 +847,6 @@ export function Wall({
     // Defer focus so it happens after the mousedown/click event finishes.
     requestAnimationFrame(() => focusSession(id, true));
   }, [selectPane]);
-  const enterPassthroughRef = useRef(enterPassthrough);
-  enterPassthroughRef.current = enterPassthrough;
 
   /** Minimize a pane: detach the leaf (capturing its restore token) and add a Door.
    *
@@ -2089,9 +2086,6 @@ export function Wall({
       // The confirm keystroke must reach the Wall, not the pane's xterm.
       enterCommandMode();
       requestKill(id);
-    },
-    onToggleTodo: (id: string) => {
-      toggleSessionTodo(id);
     },
     onMinimize: (id: string) => {
       minimizePane(id);
