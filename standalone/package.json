@@ -15,7 +15,7 @@
     "stage:sidecar-proxy": "node ../scripts/build-workspace-deps.mjs && node scripts/build-sidecar-proxy.mjs",
     "tauri": "node ../scripts/build-workspace-deps.mjs && node scripts/tauri.mjs",
     "pretest": "node ../scripts/build-workspace-deps.mjs",
-    "test": "vitest run && node --test scripts/*.test.mjs"
+    "test": "tsc --noEmit && vitest run && node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
