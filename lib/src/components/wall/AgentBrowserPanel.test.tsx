@@ -943,6 +943,17 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     expect(sentMouse().map((m) => [m.eventType, m.x, m.y])).toEqual([['mouseMoved', 100, 50], ['mouseMoved', -1, -1]]);
   });
 
+  it('sends nothing for a Back or Forward thumb button', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      for (const button of [3, 4]) {
+        canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button }));
+        canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button }));
+      }
+    });
+    expect(sentMouseEvents()).toHaveLength(0);
+  });
+
   it('catches up a release made off the canvas before ending the hover', async () => {
     const canvas = await renderWithMode('passthrough', 'ab-panel');
     await act(async () => {

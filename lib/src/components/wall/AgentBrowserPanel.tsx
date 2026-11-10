@@ -199,6 +199,9 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
     if (!passthroughRef.current) return;
+    // A Back/Forward thumb button has no page button to become.
+    const button = MOUSE_BUTTONS[e.button];
+    if (!button) return;
     // preventDefault stops the browser's focus-shift default action (a click on a
     // non-focusable canvas would otherwise blur to <body>), and the explicit
     // focus claims keystrokes for this pane.
@@ -212,7 +215,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       eventType: 'mousePressed',
       x: point.x,
       y: point.y,
-      button: MOUSE_BUTTONS[e.button] ?? 'left',
+      button,
       buttons: buttonsHeldRef.current,
       clickCount: clickCountFor(e.button, point.x, point.y),
       modifiers: modifiers(e),
@@ -223,6 +226,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     // Pair with onCanvasMouseDown: gate on passthrough (not full `interactive`)
     // so the release of a first, pane-selecting click still completes the click.
     if (!passthroughRef.current) return;
+    const button = MOUSE_BUTTONS[e.button];
+    if (!button) return;
     e.preventDefault();
     const point = toDevice(e);
     if (!point) return;
@@ -232,7 +237,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       eventType: 'mouseReleased',
       x: point.x,
       y: point.y,
-      button: MOUSE_BUTTONS[e.button] ?? 'left',
+      button,
       buttons: buttonsHeldRef.current,
       clickCount: lastClickRef.current.count,
       modifiers: modifiers(e),
