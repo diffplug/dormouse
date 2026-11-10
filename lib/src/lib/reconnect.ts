@@ -8,6 +8,7 @@ import { readPersistedSession, sessionSurfaceIds, type PersistedDoor, type Persi
 import { isReapedToolPane, persistedLathLayout, restoreReapedTool, restoreSession } from './session-restore';
 import { maxSurfaceIdNumber } from 'dor/protocol';
 import { seedSurfaceIds } from './surface-ids';
+import { learnReplayLocalHost } from './platform/replay-parse';
 
 export interface ReconnectResult {
   paneIds: string[];
@@ -126,6 +127,10 @@ export async function collectLivePtys(
   platform: PlatformAdapter,
   options: CollectPtysOptions = {},
 ): Promise<LivePtys> {
+  // The replays this asks for are parsed as they land: their OSC 7 reports
+  // need the host's name by then.
+  const learning = learnReplayLocalHost(platform);
+  if (learning) await learning;
   const first = await collectLivePtysOnce(platform, options);
   if (!first.timedOut || options.retryTimeoutMs === undefined) return first;
   return collectLivePtysOnce(platform, { ...options, timeoutMs: options.retryTimeoutMs });

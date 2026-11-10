@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import type { PersistedSession } from './session-types';
+import type { TerminalContextInfo } from './terminal-context-types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
   restoreBrowserSurfaceTodo: vi.fn(),
@@ -21,6 +22,8 @@ import { mintSurfaceId, resetSurfaceIdPool } from './surface-ids';
 import { getHelper, forgetHelper } from './helper-terminal';
 import { setPlatform } from './platform';
 import type { LathNode } from './lath/model';
+import { parseReplay, setReplayLocalHost } from './platform/replay-parse';
+import { getInheritableCwd, removeTerminalPaneState } from './terminal-state-store';
 
 /** A native Lath persisted layout over `ids` (row split; empty tree for none) —
  *  the shape every post-Lath save carries. */
@@ -736,5 +739,35 @@ describe('collectLivePtys addressing', () => {
     const collected = await collectLivePtys(platform, { timeoutMs: 1000 });
     expect(collected.ptys.map((pty) => pty.id)).toEqual(['a']);
     expect(collected.timedOut).toBe(false);
+  });
+});
+
+describe('a boot replay naming this machine', () => {
+  afterEach(() => {
+    removeTerminalPaneState('fish');
+    setReplayLocalHost(undefined);
+  });
+
+  it('is parsed with the host\'s name, which the collection learns first', async () => {
+    const saved: PersistedSession = { version: 4, panes: [{ id: 'fish', title: 'fish', cwd: null, untouched: false }] };
+    const platform = createPlatform([{ id: 'fish', alive: true }], saved);
+    // The host answers its name a little late, as a real round trip does.
+    platform.terminalContext = vi.fn(() => new Promise<TerminalContextInfo>((resolve) => setTimeout(() => resolve({ home: '/home/me', hostname: 'mac-mini' }), 20)));
+    const replay = new Set<(detail: { id: string; data: string }) => void>();
+    const lists = new Set<(detail: { ptys: PtyInfo[] }) => void>();
+    platform.onPtyList = (handler) => { lists.add(handler); };
+    platform.offPtyList = (handler) => { lists.delete(handler); };
+    platform.onPtyReplay = (handler) => { replay.add(handler); };
+    platform.offPtyReplay = (handler) => { replay.delete(handler); };
+    // As an adapter does: each replay is parsed the moment it lands.
+    platform.requestInit = vi.fn(() => {
+      for (const handler of lists) handler({ ptys: [{ id: 'fish', alive: true }] });
+      const data = parseReplay('fish', '\x1b]7;file://mac-mini/Users/me/repo\x07$ ');
+      for (const handler of replay) handler({ id: 'fish', data });
+    });
+
+    await resumeOrRestore(platform);
+
+    expect(getInheritableCwd('fish')).toBe('/Users/me/repo');
   });
 });
