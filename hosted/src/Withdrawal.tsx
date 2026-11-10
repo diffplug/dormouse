@@ -9,11 +9,10 @@ import {
 } from "../../website/src/lib/hosted-withdrawal";
 import { PLAN_NAMES } from "../../website/src/lib/hosted-pricing.ts";
 import type { WithdrawalOffer, Withdrawn } from "../server/billing-summary";
-import { isPlan } from "../server/policy-constants";
+import { TERMS_VERSION, isPlan, termsArchiveUrl } from "../server/policy-constants";
 import { day } from "./billing";
 import { BUTTON_CLASS, HEADING_CLASS, HELP_CLASS, LABEL_TEXT_CLASS, PRIMARY_CLASS } from "./classes";
 
-const TERMS_WITHDRAWAL_URL = "https://dormouse.sh/terms/#withdrawal";
 const contract = (plan: string, startedAt: string) =>
   `Dormouse Hosted, ${isPlan(plan) ? PLAN_NAMES[plan] : plan}, ordered on ${day(startedAt)}`;
 
@@ -53,8 +52,11 @@ export function Facts({
   );
 }
 
-/** The optional model withdrawal form, folded, with the Terms' section beside it. */
-export function ModelForm() {
+/**
+ * The optional model withdrawal form, folded, with the withdrawal section of
+ * the Terms version agreed to beside it.
+ */
+export function ModelForm({ termsVersion }: { termsVersion: string }) {
   return (
     <details className="mt-2">
       <summary className={`cursor-pointer ${LINK_CLASS}`}>Model withdrawal form</summary>
@@ -64,7 +66,7 @@ export function ModelForm() {
       </blockquote>
       <p className="mt-2">
         The{" "}
-        <a className={LINK_CLASS} href={TERMS_WITHDRAWAL_URL} target="_blank" rel="noreferrer">
+        <a className={LINK_CLASS} href={`${termsArchiveUrl(termsVersion)}#withdrawal`} target="_blank" rel="noreferrer">
           Terms
         </a>{" "}
         describe the right in full.
@@ -87,7 +89,7 @@ export function WithdrawalRight() {
         <SupportLink />
         {after}
       </p>
-      <ModelForm />
+      <ModelForm termsVersion={TERMS_VERSION} />
     </div>
   );
 }

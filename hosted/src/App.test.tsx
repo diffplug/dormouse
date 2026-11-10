@@ -403,6 +403,7 @@ describe("checkout", () => {
     expect(text()).toContain("you can withdraw within 14 days of buying");
     expect(text()).toContain("Use Withdraw from contract on your billing page, or email support@dormouse.sh");
     expect(text()).toContain(MODEL_WITHDRAWAL_FORM);
+    expect(container.querySelector<HTMLAnchorElement>("details a")!.href).toBe(`${termsArchiveUrl(TERMS_VERSION)}#withdrawal`);
     const price = Number(/\$(\d+)/.exec(usd)![1]);
     for (const line of presentedLines(plan, price, TERMS_VERSION)) expect(text()).toContain(line);
   });
@@ -610,6 +611,14 @@ describe("withdrawal and closure", () => {
     expect(text()).toContain("wd-reference-1");
     expect(text()).toContain("We emailed this acknowledgement");
     expect(container.querySelector("#withdraw")).toBeNull();
+  });
+
+  it("links the withdrawal section of the Terms version the member agreed to", async () => {
+    history.replaceState(null, "", "/billing");
+    const agreed = "2026-10-30";
+    vi.mocked(api.getBilling).mockResolvedValue({ ...WITHDRAWABLE, consent: { termsVersion: agreed, consentedAt: OFFER.startedAt } });
+    await mount(null);
+    expect(container.querySelector<HTMLAnchorElement>("details a")!.href).toBe(`${termsArchiveUrl(agreed)}#withdrawal`);
   });
 
   it("brings the withdrawal section into view once it renders, when the link named it", async () => {

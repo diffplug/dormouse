@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { CARD_CLASS, LINK_CLASS } from "dormouse-lib/site/docs-tokens";
-import { isFounderName, termsArchiveUrl } from "../server/policy-constants";
+import { TERMS_VERSION, isFounderName, termsArchiveUrl } from "../server/policy-constants";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing.ts";
 import type { BillingSummary } from "../server/billing-summary";
 import { refundWindow } from "../server/disclosure";
@@ -220,7 +220,7 @@ export function PlanConfirmation({
               In the EEA or UK, you can withdraw from this contract until {day(billing.withdrawal.until)} without giving a
               reason, and we refund every payment for it, including tax, with no deduction for the time you used. Use
               Withdraw from contract below, or email <SupportLink />, even if you can no longer sign in.
-              <ModelForm />
+              <ModelForm termsVersion={billing.consent?.termsVersion ?? TERMS_VERSION} />
             </>,
           ],
         ] as [string, ReactNode][])
