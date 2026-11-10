@@ -203,7 +203,13 @@ const TRIPLE_FILES = ['canopy/src/GlTerminal.stories.tsx', 'canopy/README.md'];
 function canopyTriples() {
   const found = [];
   for (const rel of TRIPLE_FILES) {
-    if (!existsSync(join(ROOT, rel))) continue;
+    if (!existsSync(join(ROOT, rel))) {
+      problems.push(
+        `${rel}: missing — it holds a copy of the UpstreamVsFork baseline triple, and without it ` +
+        'nothing checks that copy, or the commit the two copies must agree on, against the pins',
+      );
+      continue;
+    }
     const m = TRIPLE.exec(read(rel));
     if (!m) {
       problems.push(
