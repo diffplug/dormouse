@@ -1616,6 +1616,14 @@ describe('setup QR', () => {
     expect(requests).toEqual([]);
   });
 
+  it('refuses to mint on a Burrow another instance displaced', async () => {
+    const socket = await running();
+    socket.closeWith(WS_CLOSE_BURROW_REPLACED);
+    requests = [];
+    expect((await command('setupQr')).error).toContain('not connected');
+    expect(requests).toEqual([]);
+  });
+
   it('fails the mint when the Relay answers a 200 that is not a setup token', async () => {
     await running();
     setupTokenMalformed = true;

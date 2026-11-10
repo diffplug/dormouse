@@ -1057,7 +1057,12 @@ export class BurrowService {
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
     const burrow = this.#burrow;
-    if (!enrollment || !burrow || relayRefuses(burrow.status)) throw await this.#notConnected();
+    // Nor a displaced one: its token still mints, but the Relay routes the
+    // phone's handshake to the instance that took the slot, which holds no
+    // such invitation, so the code could never pair.
+    if (!enrollment || !burrow || relayRefuses(burrow.status) || burrow.status === 'displaced') {
+      throw await this.#notConnected();
+    }
     const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
       API_ROUTES.burrowSetupToken,
