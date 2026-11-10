@@ -3550,12 +3550,10 @@ fn open_workspace_window(
             .and_then(|grab| grab.get("x")?.as_f64().zip(grab.get("y")?.as_f64()))
             .unwrap_or((0.0, 0.0));
         match (app.cursor_position().ok(), size) {
-            (Some(cursor), Some(size)) => Some(WindowGeometry {
-                x: cursor.x / scale - offset.0,
-                y: cursor.y / scale - offset.1,
-                width: size.width,
-                height: size.height,
-            }),
+            (Some(cursor), Some(size)) => {
+                let (x, y) = cursor_space(&app).logical_cursor((cursor.x, cursor.y), scale);
+                Some(WindowGeometry { x: x - offset.0, y: y - offset.1, width: size.width, height: size.height })
+            }
             _ => None,
         }
     };
@@ -3968,7 +3966,22 @@ fn window_at_cursor(
         })
         .collect();
     let focus_order = guard(&windows.focus_order).clone();
-    routing::window_at(&rects, &focus_order, (point.x, point.y))
+    routing::window_at(&rects, &focus_order, (point.x, point.y), cursor_space(&app))
+}
+
+/// How this platform reports the cursor against windows' boxes
+/// (`routing::CursorSpace`).
+fn cursor_space(app: &AppHandle) -> routing::CursorSpace {
+    #[cfg(target_os = "macos")]
+    {
+        let primary = app.primary_monitor().ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+        routing::CursorSpace::PrimaryScaled(primary)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        routing::CursorSpace::Physical
+    }
 }
 
 /// Show (or clear) another window's drop caret while a tab is dragged over it.
@@ -4806,6 +4819,14 @@ pub fn run() {
                 }
                 WindowEvent::Resized(size) => {
                     note_geometry(app, window.label(), None, Some((size.width, size.height)));
+                }
+                // Moved to a display of another scale: the cached box is in
+                // that scale from the next event on, so the hit test's
+                // conversion must be too (`routing::CursorSpace`).
+                WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                    if let Some(state) = app.try_state::<GeometryState>() {
+                        state.refresh_rect(window.label(), Some(*scale_factor));
+                    }
                 }
                 // The close button: this window alone unless it is the last one,
                 // which is the whole-app quit (§Per-window close). Gated on the
@@ -6774,18 +6795,32 @@ mod tests {
 
         // The same cached rect is the hit test's input: a point inside the box
         // it moved to hits, and the client-space answer is relative to it.
+        let physical = super::routing::CursorSpace::Physical;
         let hit = super::routing::window_at(
             &[rect.hit_rect("ws-2", true)],
             &["ws-2".to_string()],
             (300.0, 240.0),
+            physical,
         )
         .expect("the moved window is under the cursor");
         assert_eq!((hit.label.as_str(), hit.x, hit.y), ("ws-2", 100.0, 100.0));
         // Outside the box it moved to, and inside the one it left.
         assert_eq!(
-            super::routing::window_at(&[rect.hit_rect("ws-2", true)], &[], (10.0, 10.0)),
+            super::routing::window_at(&[rect.hit_rect("ws-2", true)], &[], (10.0, 10.0), physical),
             None
         );
+
+        // Dragged onto a 1x display beside a 2x primary (macOS): its events
+        // now report points at scale 1, and the scale change folds in, so the
+        // cursor (reported at the primary's 2x) finds it in points.
+        let state = super::GeometryState::default();
+        super::guard(&state.rects).insert("ws-2".to_string(), rect);
+        let mut moved = state.refresh_rect("ws-2", Some(1.0)).unwrap();
+        moved.apply(Some((1700, 100)), Some((1400, 900)));
+        let macos = super::routing::CursorSpace::PrimaryScaled(2.0);
+        let hit = super::routing::window_at(&[moved.hit_rect("ws-2", true)], &[], (4800.0, 1000.0), macos)
+            .expect("the window on the 1x display is under the cursor");
+        assert_eq!((hit.label.as_str(), hit.x, hit.y), ("ws-2", 700.0, 400.0));
     }
 
     /// The debounce thread's own bookkeeping. The dirty set and the flush slot
