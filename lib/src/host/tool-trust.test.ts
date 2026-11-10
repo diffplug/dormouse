@@ -18,7 +18,7 @@ const YML = `
 tools:
   storybook:
     run: pnpm storybook
-    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+    prespawn_dedupe: [storybook, $HERE]
   once:
     run: echo hi
 `;

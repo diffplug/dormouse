@@ -36,7 +36,7 @@ export const TOOL_RENDERS: readonly ToolRender[] = ['iframe', 'agent-browser-scr
 export const isToolRender = (value: unknown): value is ToolRender => (TOOL_RENDERS as readonly unknown[]).includes(value);
 
 /** Result of resolving a tool name. `ok` carries the rendered dedupe key: the
- *  host owns `$PROJECT_ROOT`, so the webview never sees a template.
+ *  host owns `$HERE`, so the webview never sees a template.
  *
  *  The `ok` and `untrusted` arms carry the parsed file's `warnings`, so a
  *  config lint reaches the caller on the path it hits first — an untrusted

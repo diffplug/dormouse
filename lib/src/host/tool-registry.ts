@@ -15,7 +15,7 @@ import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/too
 import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
 import { parseBrowserConfig, parseViewportSelection, type BrowserConfigLayer } from './browser-config';
 
-/** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
+/** Where a tool file came from. */
 export type ToolScope = 'repo' | 'user';
 
 
@@ -57,7 +57,7 @@ export interface ToolFile {
   readonly browser?: BrowserConfigLayer;
   readonly open: readonly OpenRule[];
   readonly scope: ToolScope;
-  /** Absolute directory holding the file. `$PROJECT_ROOT` for a repo scope. */
+  /** Absolute directory holding the file: `$HERE`. */
   readonly dir: string;
   readonly tools: ReadonlyMap<string, ToolEntry>;
   /** Non-fatal lint output, already prefixed with the file path. */
@@ -127,7 +127,7 @@ export function parseBrowserSection(text: string, path: string): BrowserConfigLa
 /** Substitutions a `prespawn_dedupe` element may use. Closed set: an
  *  unrecognized `$NAME` is a parse error, never a literal, because a typo kept
  *  as a constant string dedupes across every worktree on the machine. */
-const SUBSTITUTIONS = ['$PROJECT_ROOT', '$CWD', '$TARGET'] as const;
+const SUBSTITUTIONS = ['$HERE', '$CWD', '$TARGET'] as const;
 
 // `$` followed by an identifier. Matches the whole token so an unknown one can
 // be named in the error rather than silently surviving as text.
@@ -159,8 +159,8 @@ function readDedupeTemplate(value: unknown, where: string): string[] {
   });
 }
 
-/** Reject unknown `$NAME` tokens, and `$PROJECT_ROOT` outside a repo scope. */
-function validateSubstitutions(template: readonly string[], scope: ToolScope, where: string): void {
+/** Reject unknown `$NAME` tokens. */
+function validateSubstitutions(template: readonly string[], where: string): void {
   for (const element of template) {
     for (const token of element.match(SUBSTITUTION_TOKEN) ?? []) {
       if (!(SUBSTITUTIONS as readonly string[]).includes(token)) {
@@ -168,16 +168,13 @@ function validateSubstitutions(template: readonly string[], scope: ToolScope, wh
           `${where}: unknown substitution '${token}' (known: ${SUBSTITUTIONS.join(', ')})`,
         );
       }
-      if (token === '$PROJECT_ROOT' && scope !== 'repo') {
-        throw new ToolFileError(`${where}: $PROJECT_ROOT is only defined for a repo-local dormouse.yml`);
-      }
     }
   }
 }
 
 /**
  * Parse a tool file. `dir` is the absolute directory holding it and becomes
- * `$PROJECT_ROOT` for a repo scope. Throws `ToolFileError` with a
+ * `$HERE`, in either scope. Throws `ToolFileError` with a
  * `<path>: <problem>` message for anything malformed; lint-level problems come
  * back as `warnings`.
  */
@@ -226,7 +223,7 @@ export function parseToolFile(
         throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
       }
       if (run.some(hasControlOrFormatCharacters)) throw new ToolFileError(`${where}: run cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
-      validateSubstitutions(run.filter(arg => arg !== '$ARGS'), scope, where);
+      validateSubstitutions(run.filter(arg => arg !== '$ARGS'), where);
     } else if (typeof run !== 'string' || run.trim() === '') {
       throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string or argument list`);
     } else if (hasControlOrFormatCharacters(run.trim())) {
@@ -241,7 +238,7 @@ export function parseToolFile(
       if (dedupeTemplate.some(hasControlOrFormatCharacters)) {
         throw new ToolFileError(`${where}: prespawn_dedupe cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
       }
-      validateSubstitutions(dedupeTemplate, scope, where);
+      validateSubstitutions(dedupeTemplate, where);
       if (typeof run === 'string' && usesTarget(dedupeTemplate)) {
         throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);
       }
@@ -252,9 +249,9 @@ export function parseToolFile(
       // that declares the name, so a second worktree's tool would reveal the
       // first instead of starting. Warn, not error: a repo-declared
       // machine-wide singleton is unusual but legitimate.
-      if (scope === 'repo' && !dedupeTemplate.some((el) => el.includes('$PROJECT_ROOT'))) {
+      if (scope === 'repo' && !dedupeTemplate.some((el) => el.includes('$HERE'))) {
         warnings.push(
-          `${where}: prespawn_dedupe has no $PROJECT_ROOT, so it dedupes across every checkout of this repo`,
+          `${where}: prespawn_dedupe has no $HERE, so it dedupes across every checkout of this repo`,
         );
       }
     }
@@ -293,7 +290,8 @@ export function parseToolFile(
 }
 
 export interface SubstitutionContext {
-  readonly projectRoot: string | null;
+  /** The directory of the declaring `dormouse.yml`. */
+  readonly here: string;
   readonly cwd: string;
   /** The canonical local file, present only when the invocation resolved one. */
   readonly target?: string;
@@ -301,9 +299,9 @@ export interface SubstitutionContext {
 
 /**
  * Expand every `$NAME` in one template element. Closed set: an unknown token
- * throws rather than surviving as text (see `SUBSTITUTIONS`), and a token
- * whose value is absent from `context` throws so a caller assembling entries
- * by hand cannot produce a literal `$PROJECT_ROOT` in a key or a command.
+ * throws rather than surviving as text (see `SUBSTITUTIONS`), and `$TARGET`
+ * absent from `context` throws so a caller assembling entries by hand cannot
+ * produce a literal `$TARGET` in a key or a command.
  */
 export function substituteToolTokens(element: string, context: SubstitutionContext, toolName: string): string {
   return element.replace(SUBSTITUTION_TOKEN, (token) => {
@@ -312,12 +310,7 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
       if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file or folder argument`);
       return context.target;
     }
-    if (token === '$PROJECT_ROOT') {
-      if (context.projectRoot === null) {
-        throw new ToolFileError(`tool '${toolName}': $PROJECT_ROOT is not defined here`);
-      }
-      return context.projectRoot;
-    }
+    if (token === '$HERE') return context.here;
     throw new ToolFileError(`tool '${toolName}': unknown substitution '${token}'`);
   });
 }
