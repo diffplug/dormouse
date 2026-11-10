@@ -304,8 +304,10 @@ export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
 export interface ToolSurfaceResponse {
   /**
    * `existing` is a key match on a live tool: the redundant spawn never
-   * started. `adopted` is a key match whose command had exited — the Surface is
-   * reused and the command re-run in place, keeping its position and scrollback.
+   * started. `adopted` is a key match on a Tool the host had stopped — reaped
+   * while idle, or idle while the host replaces its run — restarted in the same
+   * Surface, keeping its position and scrollback. A Tool whose run ended is a
+   * plain terminal, which no key matches.
    * On the calling pane's own match it is answered before the re-run is typed,
    * for the same reason `takeover` is. `takeover` is the calling pane itself
    * becoming the tool, answered before the command is typed — `dor` has to exit
