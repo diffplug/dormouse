@@ -18,6 +18,7 @@ const {
   parseHexIpv6,
   parseProcNetTcp,
   parseLsofListening,
+  withConnectAddresses,
   parseNetTcpConnections,
   parseNetstatListening,
   getListeningPortsForPids,
@@ -1917,6 +1918,72 @@ test('the linux process table reads ppid from /proc/<pid>/stat', async () => {
   assert.equal(await shellHasWork(999, '/bin/zsh', runtime), false);
 });
 
+test('wildcard loopback selection excludes more-specific listeners before process filtering', () => {
+  const wildcard = { protocol: 'tcp', family: 'IPv6', address: '::', port: 5173, pid: 200 };
+  const ipv6 = { ...wildcard, address: '::1', pid: 999 };
+  const ipv4 = { ...wildcard, family: 'IPv4', address: '127.0.0.1', pid: 998 };
+  assert.equal(withConnectAddresses([wildcard])[0].connectAddress, '::1');
+  assert.equal(withConnectAddresses([wildcard, ipv6])[0].connectAddress, '127.0.0.1');
+  assert.equal(withConnectAddresses([wildcard, ipv6, ipv4])[0].connectAddress, null);
+  assert.equal(withConnectAddresses([wildcard, ipv6, { ...ipv6, address: '::ffff:7f00:1' }])[0].connectAddress, null);
+  assert.equal(withConnectAddresses([wildcard, ipv6, { ...ipv4, address: '0.0.0.0' }])[0].connectAddress, null);
+  assert.equal(withConnectAddresses([wildcard, { ...ipv6, port: 6006 }])[0].connectAddress, '::1');
+  assert.equal(withConnectAddresses([{ ...ipv4, address: '0.0.0.0', pid: 200 }, ipv4])[0].connectAddress, null);
+});
+
+test('macOS scan keeps the wildcard server distinct from an unrelated IPv6 localhost server', async () => {
+  const execFile = (cmd, args) => {
+    if (cmd === 'ps') return '100 1\n200 100\n999 1\n';
+    assert.equal(cmd, 'lsof');
+    assert.ok(!args.includes('-p'));
+    return ['p200', 'cnode', 'tIPv6', 'n*:5173', 'p999', 'cpridm', 'tIPv6', 'n[::1]:5173'].join('\n');
+  };
+  const result = await getOpenPortsForPids([{ pid: 100 }], { platform: 'darwin', execFile });
+  assert.deepEqual(result.get(100), [{
+    protocol: 'tcp', family: 'IPv6', address: '::', port: 5173, pid: 200,
+    processName: 'node', connectAddress: '127.0.0.1',
+  }]);
+});
+
+test('Linux includes unowned socket-table rows when choosing a wildcard destination', async () => {
+  const fsModule = {
+    readdirSync: () => ['3'],
+    readlinkSync: () => 'socket:[55501]',
+    readFileSync(file) {
+      if (file === '/proc/net/tcp') return 'header\n';
+      if (file === '/proc/net/tcp6') return [
+        'header',
+        '0: 00000000000000000000000000000000:1435 0:0 0A 0 0 0 1000 0 55501',
+        '1: 00000000000000000000000001000000:1435 0:0 0A 0 0 0 1000 0 99999',
+      ].join('\n');
+      if (file === '/proc/200/comm') return 'node';
+      throw new Error('unexpected file');
+    },
+  };
+  const ports = await getListeningPortsForPids([200], { platform: 'linux', fsModule });
+  assert.equal(ports.length, 1);
+  assert.equal(ports[0].pid, 200);
+  assert.equal(ports[0].connectAddress, '127.0.0.1');
+});
+
+for (const fallback of [false, true]) test(`Windows checks unrelated listeners before filtering (netstat=${fallback})`, async () => {
+  const execFile = (cmd) => {
+    if (cmd === POWERSHELL) {
+      if (fallback) throw new Error('cmdlet unavailable');
+      return JSON.stringify([
+        { LocalAddress: '::', LocalPort: 5173, OwningProcess: 200 },
+        { LocalAddress: '::1', LocalPort: 5173, OwningProcess: 999 },
+      ]);
+    }
+    assert.equal(cmd, NETSTAT);
+    return 'TCP [::]:5173 [::]:0 LISTENING 200\nTCP [::1]:5173 [::]:0 LISTENING 999\n';
+  };
+  const ports = await getListeningPortsForPids([200], { platform: 'win32', env: WINDOWS_ENV, execFile });
+  assert.equal(ports.length, 1);
+  assert.equal(ports[0].pid, 200);
+  assert.equal(ports[0].connectAddress, '127.0.0.1');
+});
+
 test('getListeningPortsForPids (linux) maps fd inodes to /proc/net/tcp ports', async () => {
   const fdLinks = {
     '/proc/200/fd/3': 'socket:[55501]',
@@ -1946,22 +2013,22 @@ test('getListeningPortsForPids (linux) maps fd inodes to /proc/net/tcp ports', a
   const ports = await getListeningPortsForPids([200], { platform: 'linux', fsModule });
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5432, pid: 200, processName: 'node' },
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 8080, pid: 200, processName: 'node' },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', connectAddress: '127.0.0.1', port: 8080, pid: 200, processName: 'node' },
   ]);
 });
 
-test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list', async () => {
+test('getListeningPortsForPids (darwin) scans all listeners then filters to descendant pids', async () => {
   let capturedArgs;
   const execFile = (cmd, args) => {
     assert.equal(cmd, 'lsof');
     capturedArgs = args;
     return ['p4242', 'cnode', 'tIPv4', 'n*:3000'].join('\n');
   };
-  const ports = await getListeningPortsForPids([100, 200], { platform: 'darwin', execFile });
+  const ports = await getListeningPortsForPids([100, 4242], { platform: 'darwin', execFile });
   assert.ok(capturedArgs.includes('-sTCP:LISTEN'));
-  assert.ok(capturedArgs.includes('100,200'));
+  assert.ok(!capturedArgs.includes('-p'));
   assert.deepEqual(ports, [
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node' },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', connectAddress: '127.0.0.1', port: 3000, pid: 4242, processName: 'node' },
   ]);
 });
 
@@ -1996,7 +2063,7 @@ test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () =
   };
   const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile }, new Map([[4242, 'node.exe']]));
   assert.deepEqual(ports, [
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', connectAddress: '127.0.0.1', port: 3000, pid: 4242, processName: 'node.exe' },
   ]);
 });
 
@@ -2012,7 +2079,7 @@ test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fai
   };
   const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile });
   assert.deepEqual(ports, [
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', connectAddress: '127.0.0.1', port: 3000, pid: 4242, processName: undefined },
   ]);
 });
 
@@ -2088,7 +2155,7 @@ test('getOpenPortsForPids answers per root pid from ONE process table and ONE so
     spawns.push(cmd);
     if (cmd === 'ps') return '100 1\n200 100\n300 1\n400 300\n';
     if (cmd === 'lsof') {
-      assert.ok(args.includes('100,200,300,400'), `one scan over every descendant: ${args.join(' ')}`);
+      assert.ok(!args.includes('-p'), 'competing listeners outside the requested trees must be visible');
       // The socket scan is budgeted for the batch, not for one terminal.
       assert.equal(options.timeout, openPortScanTimeoutMs(2));
       assert.equal(options.timeout, OPEN_PORT_TIMEOUT_MS + 2 * OPEN_PORT_TIMEOUT_PER_ID_MS);
@@ -2160,7 +2227,7 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
 
   const ports = await getOpenPortsForPids(roots, { platform: 'win32', env: WINDOWS_ENV, execFile, fsModule });
 
-  assert.deepEqual(ports.get(100), [{ protocol: 'tcp', family: 'IPv6', address: '::', port: 3000, pid: 302, processName: 'node.exe' }]);
+  assert.deepEqual(ports.get(100), [{ protocol: 'tcp', family: 'IPv6', address: '::', connectAddress: '::1', port: 3000, pid: 302, processName: 'node.exe' }]);
   assert.deepEqual(ports.get(500), [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 8080, pid: 2609, processName: 'python3' }]);
   // Only the Surface that runs wsl.exe is looked for in the distro.
   assert.equal(scripts.length, 1);

@@ -1140,7 +1140,7 @@ describe('Wall on the Lath engine', () => {
       // `open` queued behind it.
       expect(leafCount()).toBe(2);
       expect(requests('launch')).toEqual([{
-        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://127.0.0.1:5173/', headed: true,
       }]);
       expect(requests('navigate')).toEqual([]);
     } finally {
@@ -1168,7 +1168,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
 
       expect(requests('launch')).toEqual([{
-        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://127.0.0.1:5173/', headed: true,
       }]);
     } finally {
       untouchedSpy.mockRestore();
@@ -1190,7 +1190,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => contextButton('Open in playwright screencast').click());
       await flush();
 
-      expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://localhost:5173/' }));
+      expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://127.0.0.1:5173/' }));
       expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open playwright');
       // No pane is created for a failed startup.
       expect(leafCount()).toBe(1);
@@ -4133,7 +4133,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector('[data-lath-leaf="surface:a"]')).not.toBeNull();
       expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
       expect(requests('launch')).toContainEqual(expect.objectContaining({
-        provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://localhost:5173/', headed: false,
+        provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://127.0.0.1:5173/', headed: false,
       }));
       expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).toBeNull();
       expect(focusOf('surface:a')).toBe('false');
