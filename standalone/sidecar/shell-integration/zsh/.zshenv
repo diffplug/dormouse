@@ -13,11 +13,12 @@
 DORMOUSE_ZDOTDIR=${ZDOTDIR:-$HOME}
 : ${USER_ZDOTDIR:=$HOME}
 
-# The user's .zshenv runs with ZDOTDIR at their directory, as it would without
-# us. Setting ZDOTDIR there is how a user moves the rest of their dotfiles (for
-# example to ~/.config/zsh), so whatever it leaves becomes the directory we
-# chain to from here on.
-ZDOTDIR=${USER_ZDOTDIR}
+# The user's .zshenv runs with ZDOTDIR as it would be without us: unset when
+# they had none (USER_ZDOTDIR fell back to $HOME), so a default such as
+# `export ZDOTDIR=${ZDOTDIR:-$HOME/.config/zsh}` still applies. Setting ZDOTDIR
+# there is how a user moves the rest of their dotfiles, so whatever it leaves
+# becomes the directory we chain to from here on.
+if [[ ${USER_ZDOTDIR} == ${HOME} ]]; then unset ZDOTDIR; else ZDOTDIR=${USER_ZDOTDIR}; fi
 if [[ -f ${USER_ZDOTDIR}/.zshenv ]]; then
   builtin source ${USER_ZDOTDIR}/.zshenv
 fi

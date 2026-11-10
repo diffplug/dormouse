@@ -294,13 +294,15 @@ test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line'
 
 // Setting ZDOTDIR in ~/.zshenv is how a user moves the rest of their zsh
 // dotfiles. The integration sources that .zshenv itself, so it must follow the
-// ZDOTDIR it leaves, or such a user's .zprofile and .zshrc never run.
-test('zsh: a ZDOTDIR set in the user\'s .zshenv still finds their .zprofile and .zshrc', { skip: !ZSH }, () => {
+// ZDOTDIR it leaves, or such a user's .zprofile and .zshrc never run. The
+// default form only applies if that .zshenv sees ZDOTDIR unset, as it would
+// without Dormouse.
+for (const zshenv of ['ZDOTDIR="$HOME/.config/zsh"', 'export ZDOTDIR=${ZDOTDIR:-$HOME/.config/zsh}']) test(`zsh: \`${zshenv}\` in the user's .zshenv still finds their .zprofile and .zshrc`, { skip: !ZSH }, () => {
   const home = mkdtempSync(path.join(os.tmpdir(), 'dormouse-zsh-'));
   try {
     const moved = path.join(home, '.config', 'zsh');
     mkdirSync(moved, { recursive: true });
-    writeFileSync(path.join(home, '.zshenv'), 'ZDOTDIR="$HOME/.config/zsh"\n');
+    writeFileSync(path.join(home, '.zshenv'), `${zshenv}\n`);
     writeFileSync(path.join(moved, '.zprofile'), 'PROFILE_MARK=profile\n');
     writeFileSync(path.join(moved, '.zshrc'), 'RC_MARK=rc\n');
     const out = execFileSync(ZSH, ['-l', '-i', '-c', 'print -r -- "$PROFILE_MARK $RC_MARK $ZDOTDIR"'], {
