@@ -550,6 +550,18 @@ describe('iframe proxy — serving', () => {
     }
   });
 
+  it('forwards a redirect to a scheme a browser refuses as sent, never as a page that follows it', async () => {
+    let location = '';
+    const port = await upstream((_q, s) => { s.writeHead(302, { location }); s.end(); });
+    const url = await frame(`http://127.0.0.1:${port}/login`);
+    for (const sent of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>']) {
+      location = sent;
+      const res = await request(url, { headers: { 'sec-fetch-dest': 'iframe' } });
+      expect(res.status, sent).toBe(302);
+      expect(res.body).not.toContain('location.replace');
+    }
+  });
+
   it('forwards an off-origin redirect as sent when there is no embedder to ask', async () => {
     const port = await upstream((_q, s) => { s.writeHead(302, { location: 'https://accounts.example/' }); s.end(); });
     const url = await frame(`http://127.0.0.1:${port}/`, NO_EMBEDDER);

@@ -954,6 +954,9 @@ function offOriginRedirect(grant: Grant, path: string, upstreamRes: http.Incomin
   if (status < 300 || status > 399 || typeof location !== 'string') return null;
   try {
     const target = new URL(location, `${grant.upstream.origin}${path}`);
+    // A `javascript:` or `data:` redirect, which a browser refuses, passes as
+    // sent: the redirect page would navigate a nested frame there itself.
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
     return target.origin === grant.upstream.origin ? null : target;
   } catch {
     return null;
