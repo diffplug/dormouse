@@ -71,9 +71,9 @@ Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` and 
 
 ## Entitlement
 
-**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query.
+**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, resolved with each bearer ("Relay").
 
-- **Must entitle an account only while `@pgstencil/stripe`'s `owner_access` view grants it access** by the database's clock, as `status()` reads it: exactly one current subscription, `active` before its period end or `trialing` before its trial end. **Never entitle it while a payment dispute is open** ("Billing").
+- **Must entitle an account only while `@pgstencil/stripe`'s `owner_access` view grants it access**, by the database's clock: exactly one current subscription, `active` before its period end plus `RENEWAL_GRACE` (rationale) or `trialing` before its trial end, never a failed renewal. **Never entitle it while a payment dispute is open** ("Billing").
 - **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
 
 Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`; `cookieEntitled` in `hosted/server/account-gate.ts`.

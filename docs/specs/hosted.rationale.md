@@ -48,6 +48,10 @@ Three origins (decided 2026-09-30):
 - Sweep at deploy, not at close (decided 2026-10-21): a `pull_request` job runs the PR's own workflow file, so any job holding preview credentials needs the approval-gated `hosted-preview` environment, and a close-time cleanup there waited for approval nobody gave; ten merged PRs' previews leaked that way. A main-only cleanup environment would have needed a second copy of the credentials, and `pull_request_target` is banned (`docs/specs/security-ci.md` -> `S44`).
 - One owner-role Hyperdrive per PR (decided 2026-10-03): a Hyperdrive per role would triple each PR's Hyperdrives against a preview-account limit nobody has measured, and the grants are exercised where they can fail a PR, in `hosted/server/tests`, which binds the relay and voice Workers to their roles.
 
+## Entitlement
+
+An `active` subscription keeps entitling for `RENEWAL_GRACE` (15 minutes) past its period end because its renewal lands only when Stripe's next webhook does: `owner_access` grants an `active` row exactly until `period_end`, which moves only when `synchronize` reads the rolled-over subscription, and Stripe rolls the period at or after the old end. Without it every renewal read as not entitled for that gap, and the Relay's sweep closed a paying member's Burrows 4002, which latched them. A missed webhook waits for `resyncBilling`'s `reconcileStale`, on the account Worker's every-10-minutes Cron, so 15 minutes covers one missed run with five to spare. The grace never extends a failed renewal: `owner_access` gives a `past_due`, `unpaid`, `paused`, or `incomplete` row no `access_until`, a canceled or ended one leaves the view, and a dispute is refused beside it; Stripe charges a renewal invoice about an hour after the rollover, so a renewal cannot have failed inside the grace (2026-11-10). Ending access at a failed renewal is deliberate: losing connectivity is how a member learns to fix billing, and the founders' 30 days are a pricing grace (`docs/specs/pricing.md`), not an access one.
+
 ## Relay
 
 Caps (2026-09-30):
