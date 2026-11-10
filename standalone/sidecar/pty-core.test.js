@@ -1,11 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const {
   create,
   detectAvailableShells,
-  parseCwdFromLsof,
   parseCwdsFromLsof,
   getCwdsForPids,
   resolveSpawnConfig,
@@ -318,12 +318,17 @@ test('resolveSpawnConfig strips another terminal\'s inherited identity', () => {
         TERMINAL: 'kitty',
         MY_TMUX_SETTING: 'kept',
         CLAUDE_CODE_USE_BEDROCK: '1',
+        // What the VS Code pty-host runs with, as Electron run as Node.
+        ELECTRON_RUN_AS_NODE: '1',
+        ELECTRON_NO_ATTACH_CONSOLE: '1',
       },
       osModule: { homedir: () => '/Users/tester', tmpdir: () => '/tmp' },
     },
   );
 
   for (const key of Object.keys(FOREIGN_TERMINAL_IDENTITY)) assert.equal(config.env[key], undefined, key);
+  assert.equal(config.env.ELECTRON_RUN_AS_NODE, undefined);
+  assert.equal(config.env.ELECTRON_NO_ATTACH_CONSOLE, undefined);
   // Dormouse's own identity still goes on after the strip.
   assert.equal(config.env.TERM_PROGRAM, 'iTerm.app');
   assert.equal(config.env.LC_TERMINAL, 'iTerm2');
@@ -473,6 +478,9 @@ test('canonicalizeWindowsCwd folds MSYS drive, slashes, and drive-letter case', 
   assert.equal(canonicalizeWindowsCwd('c:/Users/me/app'), 'C:\\Users\\me\\app');
   assert.equal(canonicalizeWindowsCwd('c:\\Users\\me\\app'), 'C:\\Users\\me\\app');
   assert.equal(canonicalizeWindowsCwd('C:\\Users\\me\\app'), 'C:\\Users\\me\\app');
+  // At a drive root Git Bash reports a bare `/c`.
+  assert.equal(canonicalizeWindowsCwd('/c'), 'C:\\');
+  assert.equal(canonicalizeWindowsCwd('/c/'), 'C:\\');
   // Non-drive paths (POSIX dirs, UNC, empty) pass through unchanged.
   assert.equal(canonicalizeWindowsCwd('/home/me/app'), '/home/me/app');
   assert.equal(canonicalizeWindowsCwd('\\\\server\\share'), '\\\\server\\share');
@@ -1040,20 +1048,6 @@ test('gracefulKill with nothing live waits one grace tick', async () => {
   assert.deepEqual(events, [{ event: 'gracefulKillDone', data: { requestId: 'req-1' } }]);
 });
 
-test('parseCwdFromLsof returns the cwd for the requested pid', () => {
-  const output = [
-    'p100',
-    'fcwd',
-    'n/',
-    'p4242',
-    'fcwd',
-    'n/home/tester/project',
-    '',
-  ].join('\n');
-
-  assert.equal(parseCwdFromLsof(output, 4242), '/home/tester/project');
-});
-
 // ── resolveSpawnConfig shell/args override ──────────────────────────────
 
 test('resolveSpawnConfig uses explicit shell and args when provided', () => {
@@ -1418,6 +1412,38 @@ test('resolveSpawnConfig injects WSL bash integration via a sh -c detector', () 
     + "'/mnt/c/Program Files/Dormouse/shell-integration/bash/shellIntegration.bash' -i;; esac; fi; "
     + 'exec "${login:-/bin/sh}" -l';
   assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'sh', '-c', detector]);
+});
+
+// The integration scripts live under the user's profile directory, and a
+// Windows user name may hold an apostrophe.
+test('resolveSpawnConfig quotes an apostrophe in the integration path for PowerShell and WSL', () => {
+  const runtime = (integrationDir) => ({
+    platform: 'win32',
+    env: { USERPROFILE: 'C:\\Users\\tester', DORMOUSE_SHELL_INTEGRATION_DIR: integrationDir },
+    osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+    fsModule: integrationFsModule,
+  });
+  const pwsh = (name) => resolveSpawnConfig(
+    { shell: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' },
+    runtime(`C:\\Users\\${name}\\AppData\\Local\\Dormouse Terminal\\shell-integration`),
+  ).shellArgs;
+  assert.deepEqual(pwsh("O'Brien"), ['-NoExit', '-Command',
+    ". 'C:\\Users\\O''Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration\\pwsh\\shellIntegration.ps1'"]);
+  // PowerShell also closes a single-quoted string at U+2018–U+201B.
+  assert.deepEqual(pwsh('O\u2019Brien'), ['-NoExit', '-Command',
+    ". 'C:\\Users\\O\u2019\u2019Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration\\pwsh\\shellIntegration.ps1'"]);
+
+  const wsl = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
+    runtime("C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration"),
+  ).shellArgs;
+  const detector = wsl[wsl.length - 1];
+  assert.ok(detector.includes(
+    "exec bash --init-file '/mnt/c/Users/O'\\''Brien/AppData/Local/Dormouse Terminal/shell-integration/bash/shellIntegration.bash' -i;;",
+  ), detector);
+  // The detector is one sh program, so it must still parse.
+  const parsed = spawnSync('sh', ['-n', '-c', detector], { encoding: 'utf8' });
+  assert.equal(parsed.status, 0, parsed.stderr);
 });
 
 test('resolveSpawnConfig starts a WSL shell in its Linux directory, which Windows cannot resolve', () => {
@@ -2161,6 +2187,23 @@ test('receivedChars counts everything ever received, past a replay-buffer trim',
   assert.equal(mgr.outputSince('unknown-pane', 0), '');
   assert.equal(mgr.receivedChars('unknown-pane'), 0);
   assert.equal(reads.length, seen);
+});
+
+test('a replay-buffer trim never leaves the buffer starting inside a surrogate pair', () => {
+  const events = [];
+  let output;
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() { return { pid: 1, onData(fn) { output = fn; }, onExit() {}, resize() {}, write() {}, kill() {} }; },
+  }, { replay: true });
+  mgr.spawn('pane-1');
+  // One code unit over the cap: the trim lands between the two halves of 🦀.
+  output('\u{1F980}');
+  output('x'.repeat(199_999));
+  mgr.list(['pane-1']);
+  const replay = events.find((e) => e.event === 'replay');
+  assert.ok(replay.data.data.isWellFormed());
+  assert.equal(replay.data.data, 'x'.repeat(199_999));
+  assert.equal(mgr.receivedChars('pane-1'), 200_001);
 });
 
 test('liveIds names every unexited PTY, and nothing after it exits', () => {

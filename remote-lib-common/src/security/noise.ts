@@ -89,6 +89,8 @@ const HMAC_ALGORITHM = { name: 'HMAC', hash: 'SHA-256' } as const;
 
 const EMPTY = new Uint8Array(0);
 const ZERO_KEY = new Uint8Array(NOISE_KEY_LENGTH);
+/** The X25519 base point, u = 9 (RFC 7748 §4.1), little-endian. */
+const X25519_BASE_POINT = Uint8Array.from({ length: NOISE_KEY_LENGTH }, (_, i) => (i === 0 ? 9 : 0));
 
 /** Every failure in this module — handshake, transport, or counter. */
 export class NoiseError extends Error {
@@ -273,33 +275,17 @@ export function isNoiseStaticMaterial(publicKey: string, privateKeyPkcs8: string
  * paired Client rather than as the corrupt state file it is
  * (`docs/specs/remote-security-model.md` → Burrow identity).
  *
- * The private key is imported extractable for exactly this call and discarded;
- * the copy the Burrow actually holds still comes from
- * {@link importNoiseStaticPrivateKey}. JWK is the only WebCrypto route from an
- * X25519 private key to its public point — `deriveBits` yields a shared secret,
- * never the point — and `x` is the raw public key in unpadded base64url, which
- * is the encoding this module already persists.
+ * The private key is imported **nonextractably**, as the Burrow holds it: the
+ * public point is X25519 of the private scalar with the base point 9 (RFC 7748
+ * §6.1), so an agreement with that point derives it and nothing is exported.
  */
 export async function deriveNoiseStaticPublicKey(
   privateKeyPkcs8: string,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<string> {
   try {
-    const temporary = await crypto.subtle.importKey(
-      'pkcs8',
-      fromBase64Url(privateKeyPkcs8),
-      X25519_ALGORITHM,
-      true,
-      ['deriveBits'],
-    );
-    const jwk = await crypto.subtle.exportKey('jwk', temporary);
-    if (typeof jwk.x !== 'string' || fromBase64Url(jwk.x).length !== NOISE_KEY_LENGTH) {
-      throw new Error('no public point');
-    }
-    // Re-encoded rather than returned as the runtime spelled it: a JWK `x` is
-    // base64url by contract, but only this round trip makes it the same
-    // canonical string the enrollment stored.
-    return toBase64Url(fromBase64Url(jwk.x));
+    const privateKey = await importNoiseStaticPrivateKey(privateKeyPkcs8, crypto);
+    return toBase64Url(await x25519Agree(crypto, privateKey, X25519_BASE_POINT));
   } catch {
     throw new NoiseError('X25519 static public key could not be derived');
   }

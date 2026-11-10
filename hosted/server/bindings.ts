@@ -30,7 +30,7 @@ export interface BillingEnv {
   STRIPE_PRICES_FOUNDING?: string;
 }
 
-/** `hosted.dormouse.sh`: the account frontend, auth, voice-token minting, and billing. */
+/** `hosted.dormouse.sh`: the account frontend, auth, and billing. */
 export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv, BillingEnv {
   HYPERDRIVE: { connectionString: string };
   ASSETS: Assets;

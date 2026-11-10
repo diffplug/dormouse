@@ -25,14 +25,22 @@ test('a runtime that cannot generate an X25519 key says no rather than throwing'
 
 test('a runtime whose agreement fails says no', async () => {
   const real = globalThis.crypto;
+  let agreements = 0;
   const crypto = {
     subtle: {
       generateKey: (...args) => real.subtle.generateKey(...args),
-      deriveBits: () => Promise.reject(new Error('OperationError')),
+      // Key generation reads the public half back, so it must work here for
+      // the probe to reach the agreement this case is about.
+      exportKey: (...args) => real.subtle.exportKey(...args),
+      deriveBits: () => {
+        agreements += 1;
+        return Promise.reject(new Error('OperationError'));
+      },
     },
     getRandomValues: (array) => real.getRandomValues(array),
   };
   assert.equal(await probeNoiseSupport(crypto), false);
+  assert.equal(agreements, 1);
 });
 
 test('a runtime with no WebCrypto at all says no', async () => {

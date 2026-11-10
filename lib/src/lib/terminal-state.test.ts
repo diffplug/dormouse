@@ -890,6 +890,8 @@ describe('surfaceRunsCommand (dor ensure matching)', () => {
     // Drive-letter case and slash direction are folded too.
     const winPane = runningPane('c:/Users/me/app', 'pnpm dev:website');
     expect(surfaceRunsCommand(winPane, 'pnpm dev:website', 'C:\\Users\\me\\app')).toBe(true);
+    // At a drive root Git Bash reports a bare `/c`.
+    expect(surfaceRunsCommand(runningPane('/c', 'pnpm dev:website'), 'pnpm dev:website', 'C:\\')).toBe(true);
     // Genuinely different directories still do not match.
     expect(surfaceRunsCommand(bashPane, 'pnpm dev:website', 'C:\\Users\\me\\other')).toBe(false);
   });

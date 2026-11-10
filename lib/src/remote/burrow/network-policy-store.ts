@@ -7,8 +7,9 @@
  * **The `network-policy` event is the authority.** The service sends the
  * complete result on every change (`service-protocol.ts` ->
  * `NetworkPolicyEvent`), so the store replaces rather than merges,
- * and reads `networkPolicy` only to seed a first subscriber and to re-seed a
- * panel that opens — which also re-reads this machine's interfaces.
+ * and reads `networkPolicy` only to seed a first subscriber, to re-seed a
+ * panel that opens — which also re-reads this machine's interfaces — and to
+ * build each change on ({@link changeNetworkPolicy}).
  */
 
 import { isNetworkPolicyResult, type NetworkPolicy, type NetworkPolicyResult } from '../network-policy';
@@ -133,9 +134,14 @@ export function changeNetworkPolicy(
     if (current.kind !== 'ready') {
       throw new Error(current.kind === 'error' ? current.message : 'The network setting is not loaded yet.');
     }
-    const policy = change(current.network);
-    if (!policy) return;
     const active = requireBurrowLink();
+    // Built on a fresh read, never on the mirror alone: a VS Code window outside
+    // the broker's peer net hears no event, so its mirror can be another
+    // window's change behind, and a whole policy made from it would revert that.
+    const latest = await active.command('networkPolicy');
+    if (!isNetworkPolicyResult(latest)) throw new Error(describeBurrowError(undefined));
+    const policy = change(latest);
+    if (!policy) return;
     const mine = ++generation;
     const network = await active.command('setNetworkPolicy', { policy });
     if (mine === generation && isNetworkPolicyResult(network)) publish({ kind: 'ready', network });

@@ -152,10 +152,11 @@ export function secureHeaders(app: Hono<any>, rulesFor: RulesFor) {
     // mapper ran, and the raw ones if it threw.
     const { policy, permissions, cache } = rulesFor(c.req.path, c.env?.APP_ORIGIN);
     // The SPA fallback can answer a hashed path with HTML: only a 200 that is not
-    // HTML is a content-hashed file, cached forever.
+    // HTML is a content-hashed file, cached forever. A 304 revalidating it keeps
+    // that class, since its `Cache-Control` replaces the cached entry's.
     const asset =
       cache === "immutable" &&
-      c.res.status === 200 &&
+      (c.res.status === 200 || c.res.status === 304) &&
       !(c.res.headers.get("content-type") ?? "").includes("text/html");
     c.header(
       "Cache-Control",

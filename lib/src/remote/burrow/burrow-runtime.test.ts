@@ -457,6 +457,8 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(burrow.trackedClientCount).toBe(0);
     expect(socket.sent).toHaveLength(framesBefore);
     expect(invitationEvents.some((event) => event.outcome === 'paired')).toBe(false);
+    // The record is live, so the owner's log says so.
+    expect(accessEntries.map(({ event }) => event)).toEqual(['paired']);
   });
 
   it('gives the confirmation exactly one attempt', async () => {
@@ -885,6 +887,16 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(await attemptConnection('c1', clientStatic, strangerPasskey)).toEqual({
       ok: false,
       code: 'pairing-required',
+    });
+
+    // The paired static and the paired credential id, signed with another key:
+    // the proof verifies against the key it presents, so the key-hash compare
+    // is the one check between a stolen Client static and a terminal.
+    const impostor = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, credentialId: authenticator.credentialId });
+    expect(await attemptConnection('c1', clientStatic, impostor)).toEqual({ ok: false, code: 'pairing-required' });
+    expect(accessEntries.at(-1)).toMatchObject({
+      event: 'connection-denied',
+      reason: 'pairing-required: passkey-key-mismatch',
     });
 
     // Halves that are each paired, but never together: the conjunction is the

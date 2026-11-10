@@ -14,7 +14,7 @@
     }
   };
   const need = (ok, why) => { if (!ok) throw new Error(why); };
-  const sum = (bytes, start = 0) => { let s = start; for (let i = 0; i < bytes.length; i += 1) s = (s + bytes[i]) >>> 0; return s; };
+  const sum = (bytes) => { let s = 0; for (let i = 0; i < bytes.length; i += 1) s = (s + bytes[i]) >>> 0; return s; };
 
   await check('page is controlled by the worker', async () => {
     need(navigator.serviceWorker?.controller, 'no controller');

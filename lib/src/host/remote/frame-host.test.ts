@@ -127,6 +127,20 @@ describe('createBurrowFrameHost', () => {
     expect(header(response.headers, 'content-encoding')).toBeUndefined();
   });
 
+  it('frames a body itself, so a Client\'s Content-Length cannot cut it into a second request', async () => {
+    const seen: string[] = [];
+    const { port } = await listen((req, res) => {
+      seen.push(`${req.method} ${req.url} ${req.headers['content-length'] ?? '-'}`);
+      req.resume();
+      req.on('end', () => res.end('ok'));
+    });
+    const upstream = await open(`http://localhost:${port}/`);
+    const smuggled = `DELETE /second HTTP/1.1\r\nHost: localhost:${port}\r\nCookie: session=1\r\n\r\n`;
+    await fetchThrough(upstream, { method: 'POST', path: '/first', headers: [['content-length', '0']], destination: '' }, smuggled);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(seen).toEqual(['POST /first -']);
+  });
+
   it('instruments a page the upstream compressed anyway, or its sockets would miss the tunnel', async () => {
     const { port } = await listen((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' });

@@ -157,8 +157,14 @@ rl.on('line', (line) => {
 });
 
 function handleLine(line) {
+  let event, data;
   try {
-    const { event, data } = JSON.parse(line);
+    ({ event, data } = JSON.parse(line));
+  } catch (err) {
+    console.error(`[sidecar] Failed to parse message:`, err.message);
+    return;
+  }
+  try {
     // A closed window's iframe views are gone with it: end their leases. The
     // shared host takes the same event for the Burrow and the alerts.
     if (event === 'burrow:windows' && Array.isArray(data?.labels)) retainIframeProxyOwners(data.labels.filter((label) => typeof label === 'string'));
@@ -174,7 +180,6 @@ function handleLine(line) {
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
       case 'pty:getOpenPortsMany': mgr.getOpenPortsMany(data.ids, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
-      case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
       // Quit teardown, first step: press ^C, detect each agent's resume
       // invocation, and write the single-use record. Runs here rather than in
       // Rust because the replay buffers the detection reads are here, this
@@ -270,7 +275,7 @@ function handleLine(line) {
       default: console.error(`[sidecar] Unknown event: ${event}`);
     }
   } catch (err) {
-    console.error(`[sidecar] Failed to parse message:`, err.message);
+    console.error(`[sidecar] ${event} failed:`, err.message);
   }
 }
 
@@ -296,6 +301,10 @@ async function shutdown() {
 
 rl.on('close', shutdown);
 process.on('SIGTERM', shutdown);
+// Under Tauri the sidecar leads its own process group, but the browser-dev
+// harness runs it in the terminal's foreground group, where Ctrl-C reaches it
+// directly and the default action would skip the shutdown above.
+process.on('SIGINT', shutdown);
 
 // Watchdog: if the Tauri host crashes or is force-killed, stdin EOF isn't
 // always delivered (esp. on Windows), leaving us as an orphan that locks

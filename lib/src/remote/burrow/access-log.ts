@@ -59,7 +59,7 @@ export interface AccessLogEntry {
   durationMs?: number;
   /** Why a request was refused, specifically: the ACL miss or presence failure the wire never carries. */
   reason?: string;
-  /** The surface an `attached` entry attached. */
+  /** The surface an `attached` entry attached, or a `closed` entry closed. */
   surface?: string;
   /** Who asked for a `revoked`: a `RevocationRequester` (`acl.ts`), or any name an older entry kept. */
   by?: string;

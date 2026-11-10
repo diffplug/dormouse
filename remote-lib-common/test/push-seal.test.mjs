@@ -11,6 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createDecipheriv, diffieHellman, generateKeyPairSync, hkdfSync } from 'node:crypto';
 
 import {
   MAX_SEALED_PUSH_LENGTH,
@@ -52,6 +53,31 @@ function open(client, burrow, sealed) {
     sealed,
   });
 }
+
+test('a sealed push opens with node:crypto, as the documented construction', async () => {
+  // Opened here without this package's opener: a round trip through the code
+  // under test stays green when both sides change, and the sealer (a desktop
+  // Burrow) and the opener (a Pocket worker a Relay served) ship apart.
+  const burrow = generateKeyPairSync('x25519');
+  const client = generateKeyPairSync('x25519');
+  const burrowStaticPrivateKey = await globalThis.crypto.subtle.importKey(
+    'pkcs8',
+    burrow.privateKey.export({ format: 'der', type: 'pkcs8' }),
+    { name: 'X25519' },
+    false,
+    ['deriveBits'],
+  );
+  const clientStaticPublicKey = Buffer.from(client.publicKey.export({ format: 'jwk' }).x, 'base64url');
+  const sealed = await sealPush({ burrowStaticPrivateKey, clientStaticPublicKey, plaintext: PLAINTEXT });
+
+  const ss = diffieHellman({ privateKey: client.privateKey, publicKey: burrow.publicKey });
+  const key = Buffer.from(hkdfSync('sha256', ss, fromBase64Url(sealed.salt), 'dormouse/push/v1', 32));
+  const ct = Buffer.from(fromBase64Url(sealed.ct));
+  const decipher = createDecipheriv('chacha20-poly1305', key, Buffer.alloc(12), { authTagLength: 16 });
+  decipher.setAuthTag(ct.subarray(ct.length - 16));
+  const opened = Buffer.concat([decipher.update(ct.subarray(0, ct.length - 16)), decipher.final()]);
+  assert.deepEqual(new Uint8Array(opened), PLAINTEXT);
+});
 
 test('a sealed push round-trips between the paired statics', async () => {
   const { burrow, client } = await parties();

@@ -523,6 +523,20 @@ describe('websockets', () => {
     expect(t.answer(late)).toMatchObject({ ok: false, error: 'no such socket' });
   });
 
+  it('bounds a message in fragments, not only in bytes: empty ones add none', async () => {
+    const t = setup();
+    const frameId = await t.open();
+    const id = t.call(FRAME_METHODS.wsOpen, { frameId, path: '/' });
+    const socket = t.host.upstreams[0]!.sockets[0]!;
+    socket.sink.onOpen('', '');
+    let last = '';
+    for (let i = 0; i < 200 && !socket.closed; i++) {
+      last = t.call(FRAME_METHODS.wsSend, { socketId: id, data: '', binary: true, fin: false });
+    }
+    expect(socket.closed).toEqual([1009, 'message too big']);
+    expect(t.answer(last)).toMatchObject({ ok: false, error: 'message too big' });
+  });
+
   it('fails the open when the upstream closes first, and refuses a reserved close code', async () => {
     const t = setup();
     const frameId = await t.open();

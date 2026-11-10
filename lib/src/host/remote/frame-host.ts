@@ -31,9 +31,17 @@ import { HOP_BY_HOP_RESPONSE_HEADERS, REMOTE_LEASE_OWNER_PREFIX, normalizeEmbedd
  * Request fields the tunnel never forwards: the connection's own, what it sets
  * itself, and what the proxy would drop anyway. `Sec-` fields are the
  * browser's, which it never hands a service worker; the destination the
- * Client names stands in for `Sec-Fetch-Dest`.
+ * Client names stands in for `Sec-Fetch-Dest`. `Content-Length` frames the
+ * body, which Node then sends chunked: a Client's own would let the bytes past
+ * it reach the listener as a second request of the Client's writing.
  */
-const DROPPED_REQUEST_HEADERS = new Set([...HOP_BY_HOP_RESPONSE_HEADERS, 'host', 'cookie', 'accept-encoding']);
+const DROPPED_REQUEST_HEADERS = new Set([
+  ...HOP_BY_HOP_RESPONSE_HEADERS,
+  'host',
+  'cookie',
+  'accept-encoding',
+  'content-length',
+]);
 /** The proxy's own grant is one hop away; a stall here is the proxy's to report. */
 const GRANT_IDLE_TIMEOUT_MS = 60_000;
 

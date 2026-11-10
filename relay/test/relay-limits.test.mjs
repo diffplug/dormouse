@@ -39,8 +39,7 @@ test('a client socket whose session has expired is closed by the sweep', async (
   assert.equal(created.sweepRelaySockets().expired, 1);
 
   const closed = await socket.closed;
-  // The same code and reason the upgrade answers with, so Pocket needs no
-  // second recovery path.
+  // The same code the route's open-time session re-check closes with.
   assert.equal(closed.code, 1008);
   assert.equal(created.hub.clientCount, 0);
 });
