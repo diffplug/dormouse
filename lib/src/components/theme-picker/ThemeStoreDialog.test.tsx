@@ -188,9 +188,7 @@ describe('ThemeStoreDialog', () => {
   });
 
   it('reports an extension that has no color themes', async () => {
-    searchThemesMock.mockImplementationOnce(async () => ({
-      extensions: [extension('icons', 'Some Icon Theme')],
-    }));
+    searchThemesMock.mockImplementationOnce(async () => results(extension('icons', 'Some Icon Theme')));
     vi.mocked(fetchExtensionThemes).mockResolvedValueOnce([]);
     const onThemesChanged = vi.fn();
 
@@ -210,9 +208,7 @@ describe('ThemeStoreDialog', () => {
   });
 
   it('offers no Install for an extension whose themes are bundled', async () => {
-    searchThemesMock.mockImplementationOnce(async () => ({
-      extensions: [{ ...extension('theme-monokai', 'Monokai Theme'), namespace: 'vscode' }],
-    }));
+    searchThemesMock.mockImplementationOnce(async () => results({ ...extension('theme-monokai', 'Monokai Theme'), namespace: 'vscode' }));
 
     vi.useFakeTimers();
     try {
