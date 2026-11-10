@@ -580,9 +580,11 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   if (typeof headers.referer === 'string') {
     headers.referer = rewriteOrigin(headers.referer, grant.proxyOrigin, grant.upstream.origin);
   }
-  // Documents come back identity, so their HTML can be instrumented.
+  // Documents come back identity, so their HTML can be instrumented; a
+  // fetch/XHR body is never instrumented, since the shim would corrupt it.
   const dest = req.headers['sec-fetch-dest'];
-  if (typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest)) delete headers['accept-encoding'];
+  const documentLoad = typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest);
+  if (documentLoad) delete headers['accept-encoding'];
   // Only a frame's own load, which names its destination: a probe without
   // one must not spend it.
   if (grant.fresh && (dest === 'document' || dest === 'iframe')) {
@@ -630,7 +632,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       res.end(`This page is compressed as ${encoding}, which Dormouse cannot decode here.`);
       return;
     }
-    if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && body === upstreamRes)
+    if (!documentLoad || !/text\/html/i.test(contentType) || (encoding !== 'identity' && body === upstreamRes)
       || declaresUtf16(contentType) || embedder === undefined) {
       passThrough(grant, upstreamRes, res, body);
       return;

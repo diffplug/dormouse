@@ -372,6 +372,19 @@ describe('iframe proxy — serving', () => {
     expect(res.headers['transfer-encoding']).toBe('chunked');
   });
 
+  it('instruments only a document load: a fetch answered as text/html comes back as sent', async () => {
+    const json = '{"ok":true,"n":1}';
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); s.end(json); });
+    const url = await frame(`http://127.0.0.1:${port}/api`);
+
+    const fetched = await request(url, { headers: { 'sec-fetch-dest': 'empty' } });
+    expect(fetched.body).toBe(json);
+    expect(fetched.headers['x-frame-options']).toBeUndefined();
+    for (const headers of [{ 'sec-fetch-dest': 'iframe' }, {}]) {
+      expect((await request(url, { headers })).body, JSON.stringify(headers)).toContain('__dormouse');
+    }
+  });
+
   it('keeps the upstream content-type, charset included', async () => {
     const body = Buffer.concat([Buffer.from('<html><head><title>'), Buffer.from([0x93, 0xfa, 0x96, 0x7b]), Buffer.from('</title></head><body>x</body></html>')]);
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html; charset=Shift_JIS' }); s.end(body); });
