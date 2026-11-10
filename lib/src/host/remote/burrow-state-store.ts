@@ -111,7 +111,6 @@ export class FileBurrowStateStore implements BurrowStateStore {
   readonly #path: string;
   readonly #policyPath: string;
   readonly #accessLogPath: string;
-  #state: Promise<BurrowStateFile> | null = null;
   /**
    * Serializes mutations, the way `relay/src/state.ts` does: every save is a
    * read-modify-write of the whole file, so two of them running together can
@@ -127,7 +126,7 @@ export class FileBurrowStateStore implements BurrowStateStore {
   }
 
   async loadEnrollment(): Promise<BurrowEnrollment | null> {
-    return (await this.#read()).enrollment;
+    return (await this.#readOnce()).enrollment;
   }
 
   saveEnrollment(enrollment: BurrowEnrollment): Promise<void> {
@@ -143,7 +142,7 @@ export class FileBurrowStateStore implements BurrowStateStore {
   }
 
   async loadAcl(burrowId: string): Promise<BurrowAclRecord[]> {
-    return filterAclRecords(burrowId, (await this.#read()).acl[burrowId] ?? []);
+    return filterAclRecords(burrowId, (await this.#readOnce()).acl[burrowId] ?? []);
   }
 
   saveAcl(burrowId: string, records: readonly BurrowAclRecord[]): Promise<void> {
@@ -190,42 +189,19 @@ export class FileBurrowStateStore implements BurrowStateStore {
     return this.#serialize(() => writeJsonAtomic(this.#dir, this.#accessLogPath, entries));
   }
 
-  /** Apply one change to the in-memory state and flush it, one at a time. */
+  /** Apply one change to the file as it is now and flush it, one at a time. */
   #mutate(change: (state: BurrowStateFile) => void): Promise<void> {
     return this.#serialize(async () => {
-      // A read that failed rejects here and takes the whole save with it: every
-      // change is a read-modify-write of the whole file, so writing without
-      // having read it would replace state we could not see with state we
-      // invented (`#read`).
-      const current = await this.#read();
-      // Do not expose a mutation through later reads until its atomic rename
-      // has succeeded. In particular, a failed enrollment save must not make a
-      // later adoption believe the Burrow is durable and discard the webview's
-      // only surviving copy. Changes replace top-level enrollment / ACL slots,
-      // so a shallow copy of the map is the required transaction boundary.
-      const next: BurrowStateFile = { ...current, acl: { ...current.acl } };
+      // Read again for every change rather than from a copy held since start:
+      // another Dormouse can share this state directory, and rewriting the
+      // whole file from an older copy would undo its revocations and its
+      // un-enrollment. A read that failed rejects here and takes the whole
+      // save with it: writing without having read the file would replace
+      // state we could not see with state we invented (`#readOnce`).
+      const next = await this.#readOnce();
       change(next);
       await this.#write(next);
-      this.#state = Promise.resolve(next);
     });
-  }
-
-  #read(): Promise<BurrowStateFile> {
-    // Read once and keep it: this process is the only writer, so the in-memory
-    // copy is the file, and a save is a full rewrite of what we already hold.
-    this.#state ??= this.#readOnce().catch((error: unknown) => {
-      // A read that failed for a reason other than "there is no file yet" says
-      // nothing about what the file holds — EACCES, EIO, an open handle on
-      // Windows. Memoizing empty for it would make the very next `#mutate`
-      // read-modify-write from nothing and durably overwrite the enrollment and
-      // every ACL record with it, de-pairing every device for good. So forget
-      // the attempt instead: the caller fails closed, `#mutate` refuses to
-      // write because it never got a state to modify, and a later read of the
-      // same file can still recover.
-      this.#state = null;
-      throw error;
-    });
-    return this.#state;
   }
 
   async #readOnce(): Promise<BurrowStateFile> {

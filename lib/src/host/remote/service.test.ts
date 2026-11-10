@@ -67,6 +67,7 @@ import {
   PAIRING_UNKNOWN_DEVICE_LABEL,
   RELAY_BEARER_LENGTH,
   UNAUTHORIZED_ERROR,
+  WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
   mintNoiseStaticKeyPair,
   parseOneTimeLinkUrl,
@@ -930,6 +931,19 @@ describe('start', () => {
     const status = (await command('reconnect')).result as BurrowConsoleStatus;
     expect(sockets).toHaveLength(1);
     expect(status).toMatchObject({ enrolled: true, connection: 'connecting' });
+  });
+
+  it('rebuilds a displaced Burrow from the store, so what the other instance revoked stays revoked', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    await service.start();
+    sockets[0]!.open();
+    sockets[0]!.closeWith(WS_CLOSE_BURROW_REPLACED);
+    // The Dormouse that took the slot revokes the phone in the shared state.
+    store.acl[BURROW_ID] = [{ ...aclRecord('device-1'), revokedAt: 2000 }];
+
+    await command('reconnect');
+    expect(sockets).toHaveLength(2);
+    expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toEqual([]);
   });
 
   it('builds one Burrow when a start and a reconnect race', async () => {

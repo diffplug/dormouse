@@ -1018,7 +1018,10 @@ export class BurrowService {
    */
   async #reconnect(): Promise<BurrowConsoleStatus> {
     await this.#serialize(async () => {
-      if (this.#burrow) this.#burrow.start();
+      // A displaced Burrow is rebuilt from the store, never resumed: another
+      // instance ran this burrowId meanwhile, and what it revoked or paired is
+      // on disk, not in this runtime's ACL.
+      if (this.#burrow && this.#burrow.status !== 'displaced') this.#burrow.start();
       else await this.#start();
     });
     return this.#status();
