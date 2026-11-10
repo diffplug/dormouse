@@ -37,13 +37,13 @@ Each webview's union (`ringing` / `todo`) is computed over its router's `ownedPt
 
 Source of truth: `notifyUnion` in `vscode-ext/src/message-router.ts`; `vscode-ext/src/workspace-chrome.ts`.
 
-**`alert:speak` goes only to a connected router whose `ownedPtyIds` hold its Session**; a due push goes to `pushAlert`: this window's service, else the broker's as an unanswered `push` peer frame, else dropped, never held. **This window is one more alert viewer, with no focus, present while `WindowState` reports it `focused` and `active`**; one that never reports `active` adds none (rationale).
+**`alert:speak` goes only to a connected router whose `ownedPtyIds` hold its Session**; a due push goes to `pushAlert`: this window's service, else the broker's as an unanswered `push` peer frame, else dropped, never held. **This window is one more alert viewer, with no focus, present while `WindowState` reports it `focused` and `active`** (rationale).
 
 Source of truth: `connectWebview` / `reportWindowPresence` in `vscode-ext/src/message-router.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`.
 
 ## Shell selection
 
-The selected shell is `dormouse.selectedShellPath`, read from `workspaceState` before `globalState`; **a global save clears the workspace value** so it cannot shadow the new default. `dormouse:selectedShell` keeps the webview's default-shell slot current. `dormouse.newTerminal`, and a changed pick in `dormouse.selectShell`'s QuickPick, open a terminal with the selected shell (`docs/specs/layout.md` -> "Session lifecycle and terminal registry").
+The selected shell is `dormouse.selectedShellPath`, read from `workspaceState` before `globalState`; **a global save clears the workspace value** so it cannot shadow the new default. `dormouse:selectedShell` keeps every webview's default-shell slot current. `dormouse.newTerminal`, and a changed pick in `dormouse.selectShell`'s QuickPick, open a terminal with the selected shell (`docs/specs/layout.md` -> "Session lifecycle and terminal registry").
 
 **The QuickPick is the only shell control here**: `VSCodeAdapter` sets `hostOwnsShells`, so the shared Settings dialog hides its Shell row. Source of truth: `vscode-ext/src/shell-selection.ts`.
 
@@ -55,13 +55,13 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 
 **Must bound every deactivation step and continue after any failure or timeout**, in this order:
 
-1. Start closing browser sessions.
+1. Start closing browser sessions and saving revocations.
 2. Capture agent recovery commands.
 3. Flush every webview's session.
-4. Refresh saved state from the still-live PTYs (CWD).
+4. Refresh saved state from the live PTYs (CWD).
 5. Graceful kill (`docs/specs/transport.md` → Graceful shutdown), then force kill.
 
-**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `shutdown` in `vscode-ext/src/shutdown.ts`.
+**Must capture before the flush and kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `shutdown` in `vscode-ext/src/shutdown.ts`.
 
 **On activate**, saved state loads through `readPersistedSession()` and is injected into the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then claim their own pane ids' recovery commands from the single record (`docs/compatible-agents.md` → "Recovery record"); **a panel's pane ids come from the `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery needs no host-side per-panel store.
 
@@ -204,7 +204,7 @@ The service asks every webview what only it knows (`docs/specs/transport.md` →
 | Operation schema | `(op, params) → zero or more results`; `op` opaque to the transport, the typed map only in `peer-surfaces.ts`. | Same seam; only a reserved `ptyId` is interpreted, for routing. |
 | Ownership / miss | Presence is ownership; every webview answers, including with no results. | Every peer answers; disconnect settles its pending asks empty. |
 | Fan-out order | All webviews in parallel. | `askBothTiers` runs local and all peers in parallel, local concatenated first. |
-| Budget | `ASK_BUDGET_MS` (1 s; another build's peer runs its inner ask inside this window's 3 s `PEER_REPLY_BUDGET_MS`, so never raise it to 3 s or more); disposal removes that webview from the outstanding set. | `PEER_REPLY_BUDGET_MS` covers the inner ask plus socket hops, and **is defined as `ASK_BUDGET_MS + 2_000`** so it cannot fall under it. |
+| Budget | `askBudgetMs` (1 s, `closeOp` 60 s; another build's peer runs its inner ask inside this window's 3 s reply budget, so keep the default under 3 s); disposal ends that webview's wait. | `peerReplyBudgetMs` covers the inner ask plus socket hops, and **is defined as `askBudgetMs(op) + 2_000`** so it cannot fall under it. |
 | Invalidation | `peer:notify` carries no subject; pane/activity/focus bursts coalesce before crossing. | `notify`, webview membership, and peer membership each trigger a fresh directory collect. |
 | PTY stream | One window-wide keyed registry distributes already-processed data/exit. | Opaque routed handles select one peer; `subscribe` is reference-counted, streaming the same processed data/exit. |
 | Burrow command | This window calls its service, broadcasting the uniquely correlated result to its webviews. | `command` goes to the broker, `commandResult` returns only to its origin window, `uiEvent` broadcasts. |

@@ -42,6 +42,7 @@ process.on('message', (msg) => {
     case 'gracefulKill': mgr.gracefulKill(msg.ids, msg.timeout, msg.requestId); break;
     case 'context': mgr.context(msg.request, msg.requestId); break;
     case 'getCwd':  mgr.getCwd(msg.id); break;
+    case 'getCwds': mgr.getCwds(msg.ids, msg.requestId); break;
     case 'getOpenPortsMany': mgr.getOpenPortsMany(msg.ids, msg.requestId); break;
     case 'getShells': mgr.getShells(msg.requestId); break;
     case 'dor:controlResponse': dorControl?.respond(msg); break;

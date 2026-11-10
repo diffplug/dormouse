@@ -11,6 +11,6 @@ export function handleDualTap(
   leader: boolean,
 ): boolean {
   if (e.key !== 'Meta' && e.key !== 'Shift') return false;
-  if (leader && ctx.modeRef.current === 'passthrough') ctx.exitTerminalMode();
+  if (leader && ctx.modeRef.current === 'passthrough') ctx.enterCommandMode();
   return true;
 }

@@ -2035,6 +2035,11 @@ test("send requires and bounds its recipients, and the push routes refuse an id 
   // A session is not a Burrow token, nor the reverse.
   expect((await f.devices(f.sessionToken)).status).toBe(401);
   expect((await f.query([randomSecret()], f.laptop.token)).status).toBe(401);
+  // A send that delivers nothing counts nothing. The count is written after
+  // the answer, so give a write time to land before looking for none.
+  expect((await f.send(to(randomSecret()))).json).toEqual({ delivered: 0, expired: 0, unknown: 1, failed: 0 });
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  expect(await f.sql(`SELECT event FROM dormouse_metrics_daily WHERE event = 'push.sent'`)).toEqual([]);
 });
 
 test("subscribe adds a row only for an id the Burrow minted, so a session that is not a paired phone evicts none", async ({

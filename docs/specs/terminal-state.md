@@ -27,7 +27,7 @@
 CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 
 - **OSC 7 is parsed as a `file:` URI, its host taken from the URL parser's normalized hostname, preserving raw case and the literal `localhost` spelling only.**
-- **OSC 9;9 drive-letter and UNC paths are Windows paths; every other path is `unknown`, never `posix`** (rationale).
+- **OSC 9;9 drops one surrounding pair of double quotes; its drive-letter and UNC paths are Windows paths, every other path `unknown`, never `posix`** (rationale).
 - **A path opening with two separators in either spelling is remote**, OSC 7's `file:////host/share` included (`isUncOrDevicePath` in `dor-lib-common/src/browser-providers.ts`).
 - **Must preserve native CWD text, including percent signs, semicolons and edge spaces; percent-decode only OSC 7 file URIs** (rationale).
 - `process` — the adapter polled the PTY's process for its working directory.
@@ -85,7 +85,7 @@ Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/
 
 **Emitted fields must be filtered before they are written — a security boundary.** An attacker-chosen directory name or command can carry an OSC terminator (BEL, `ESC \`, or the C1 ST `U+009C`) that ends the `633` sequence early, so the remainder arrives as a fresh, fully-trusted OSC. **The parser cannot defend against this** — it scans raw bytes (rationale). The field grammar the parser decodes:
 
-- **`E` escapes** BEL, ESC and the C1 ST alongside `\`, `;`, LF and CR; the parser decodes `\xNN` back, so it still reports verbatim.
+- **`E` escapes** BEL, CAN, SUB, ESC and the C1 ST alongside `\`, `;`, LF and CR; the parser decodes `\xNN` back, so it still reports verbatim.
 - **`Cwd=` is read verbatim**, no `\xNN` decoding, so a Windows path's backslashes arrive intact — its control characters are therefore *removed*, not escaped.
 
 Source of truth: `applyShellIntegration` in `standalone/sidecar/pty-core.js`; the scripts under `standalone/sidecar/shell-integration/`; pinned by `standalone/sidecar/shell-integration.test.js`.

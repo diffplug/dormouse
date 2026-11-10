@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { leaves, renameFingerprint, structureFingerprint, type LathNode, type LathTree } from './lath/model';
+import { remove, restore, type RestoreToken } from './lath/ops';
 import { withFreshSurfaceIds } from './session-remap';
 import type { PersistedSession } from './session-types';
 import { installSurfaceIdPool, mintSurfaceId, resetSurfaceIdPool } from './surface-ids';
@@ -33,6 +35,27 @@ describe('withFreshSurfaceIds', () => {
       leafMeta: { 'surface:1': { title: 'shell' }, 'surface:2': { title: 'docs' } },
     });
     expect(Object.keys((fresh.lathLayout as { leafMeta: object }).leafMeta)).toEqual(['surface:1', 'surface:2']);
+  });
+
+  const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
+  it.each([
+    ['its parent split', { kind: 'split', dir: 'row', children: [{ node: leaf('a'), weight: 0.5 }, { node: leaf('b'), weight: 0.25 }, { node: leaf('c'), weight: 0.25 }] }, 'c'],
+    ['its sibling group', { kind: 'split', dir: 'row', children: [{ node: leaf('c'), weight: 0.5 }, { node: { kind: 'split', dir: 'col', children: [{ node: leaf('a'), weight: 0.5 }, { node: leaf('b'), weight: 0.5 }] }, weight: 0.5 }] }, 'c'],
+  ] satisfies [string, LathNode, string][])('keeps a Door restoring at the exact tier beside %s', async (_, root, doorId) => {
+    const before: LathTree = { root };
+    const removed = remove(before, doorId);
+    const tree = removed.tree;
+    const meta = { component: 'terminal', tabComponent: 'terminal', title: 'shell' };
+    const [fresh] = await withFreshSurfaceIds([{
+      version: 4,
+      panes: ['a', 'b', 'c'].map(id => ({ id, cwd: null, title: id, untouched: true })),
+      doors: [{ id: doorId, title: doorId, token: removed.token }],
+      lathLayout: { version: 1, tree, leafMeta: Object.fromEntries(leaves(tree).map(id => [id, meta])) },
+    }]);
+    const restored = restore((fresh.lathLayout as { tree: LathTree }).tree, fresh.doors![0].token as RestoreToken);
+    expect(restored.tier).toBe('exact');
+    const names = new Map(['a', 'b', 'c'].map((id, i) => [fresh.panes[i].id, id]));
+    expect(renameFingerprint(structureFingerprint(restored.tree.root!), id => names.get(id) ?? id)).toBe(structureFingerprint(root));
   });
 
   it('reserves exactly the distinct Surfaces of every session at once, past what the pool holds', async () => {

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { shutdown } from './shutdown';
 import * as ptyManager from './pty-manager';
 import { DormouseViewProvider } from './webview-view-provider';
-import { attachRouter, getAlertStates, reportWindowPresence } from './message-router';
+import { attachRouter, broadcastSelectedShell, getAlertStates, reportWindowPresence } from './message-router';
 import { setBrowserShellRuntime } from './agent-browser-host';
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
@@ -48,10 +48,7 @@ function setupPanel(
     ? mergeAlertStates(savedState, getAlertStates())
     : undefined;
 
-  panel.iconPath = {
-    light: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-light.png')),
-    dark: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-dark.png')),
-  };
+  panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny.png'));
   const savedSession = readPersistedSession(initialState);
   // A panel's panes are interrupted by the teardown capture along with every
   // other live PTY, so they have a recovery command waiting too — claimed by
@@ -64,7 +61,6 @@ function setupPanel(
   const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.(), recoveryCommands);
 
   const router = attachRouter(channel, {
-    reconnect: !!savedState,
     killOnDispose: true,
     getSelectedShell,
     // Reflect this panel's Workspace union onto the editor-tab title
@@ -111,7 +107,16 @@ export function activate(context: vscode.ExtensionContext) {
   const applyShell = (shell: { name: string; path: string; args: string[] } | undefined) => {
     setBrowserShellRuntime({ ...browserShellRuntime, shell: shell?.path, args: shell?.args });
     provider.setDescription(shell?.name);
-    provider.setSelectedShell(shell ? { shell: shell.path, args: shell.args } : null);
+    const selected = shell ? { shell: shell.path, args: shell.args } : null;
+    provider.setSelectedShell(selected);
+    broadcastSelectedShell(selected);
+  };
+  // Resolved before a panel's document is served, as the view's is, so the
+  // panel's first spawns use the selected shell rather than the platform's
+  // default (`cmd.exe` on Windows, which has no shell integration).
+  const resolveShellBeforeServing = async () => {
+    if (provider.getSelectedShell()) return;
+    applyShell(resolveSelectedShell(context, await ptyManager.getAvailableShells()));
   };
 
   const postNewTerminal = async (message: Omit<NewTerminalMessage, 'type'>) => {
@@ -146,13 +151,19 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.window.registerWebviewPanelSerializer('dormouse', {
       async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown) {
+        let disposed = false;
+        const disposal = panel.onDidDispose(() => { disposed = true; });
+        await resolveShellBeforeServing();
+        disposal.dispose();
+        if (disposed) return;
         setupPanel(context, panel, state, () => provider.getSelectedShell());
       },
     }),
     vscode.commands.registerCommand('dormouse.focus', () => {
       vscode.commands.executeCommand('dormouse.view.focus');
     }),
-    vscode.commands.registerCommand('dormouse.open', () => {
+    vscode.commands.registerCommand('dormouse.open', async () => {
+      await resolveShellBeforeServing();
       const mediaPath = path.join(context.extensionPath, 'media');
       const panel = vscode.window.createWebviewPanel(
         'dormouse',

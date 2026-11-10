@@ -90,9 +90,6 @@ export function isPublicNetworkAddress(address: string): boolean {
   return false;
 }
 
-/** Shared with the Hosted Relay (`docs/specs/relay.md` -> State files). */
-export { MAX_PUSH_ENDPOINT_LENGTH };
-
 /**
  * One DNS name: lowercase letters, digits, and inner hyphens per label, at
  * most 63 characters a label, no trailing dot. Anything else WHATWG admits in

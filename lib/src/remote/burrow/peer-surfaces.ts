@@ -123,6 +123,16 @@ function driveOwnSurface({
   rows,
   hold,
 }: PeerSurfaceParams): PeerSurfaceResult[] {
+  // A release goes through whatever the pane's state, a pending kill included:
+  // the kill can be undone, and a hold left behind would keep the restored pane
+  // at the departed phone's size. It answers nothing either way: a release is
+  // fire and forget, and a PTY id in the answer would re-route a handle the
+  // Burrow is dropping.
+  if (op === 'release') {
+    const given = holdOf(hold);
+    if (given) releaseSizeHold(surfaceId, given);
+    return [];
+  }
   // A pending kill is out of the user's sight, so out of every Client's too.
   const entry = isHelperSession(surfaceId) || isPendingKillSession(surfaceId) ? undefined : registry.get(surfaceId);
   if (!entry) return [];
@@ -139,13 +149,6 @@ function driveOwnSurface({
       if (taken) holdSize(surfaceId, { ...taken, cols: nextCols, rows: nextRows });
       if (term.cols !== nextCols || term.rows !== nextRows) term.resize(nextCols, nextRows);
       break;
-    }
-    case 'release': {
-      // Answers nothing either way: a release is fire and forget, and a PTY id
-      // in the answer would re-route a handle the Burrow is dropping.
-      const given = holdOf(hold);
-      if (given) releaseSizeHold(surfaceId, given);
-      return [];
     }
     default:
       return [];

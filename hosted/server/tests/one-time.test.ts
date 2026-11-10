@@ -65,6 +65,12 @@ async function start(tryEntry: string) {
           // SPA fallback would give, so a path the Worker hands the assets shows.
           ASSETS: (request) => {
             const { pathname } = new URL(request.url);
+            // A matching ETag is a 304 carrying the file's headers.
+            if (pathname === PAGE_SCRIPT && request.headers.get("if-none-match") === '"e"')
+              return new WorkerResponse(null, {
+                status: 304,
+                headers: { "content-type": "text/javascript", etag: '"e"' },
+              });
             if (pathname === PAGE_SCRIPT || pathname === UNHASHED_SCRIPT)
               return new WorkerResponse("export const page = 1;\n", {
                 headers: { "content-type": "text/javascript" },
@@ -558,7 +564,7 @@ test("the page's policy admits no source outside /connect/ but its one socket an
   }
 });
 
-const get = (path: string, init?: { method: string }) =>
+const get = (path: string, init?: { method?: string; headers?: Record<string, string> }) =>
   production.mf.dispatchFetch(origin + path, init);
 
 test("the phone page is served under its own policy, and uncached", async () => {
@@ -583,6 +589,9 @@ test("the page's hashed assets are immutable, and a missing or unhashed one is a
     "public, max-age=31536000, immutable",
   );
   expect(script.headers.get("content-security-policy")).toBe(PAGE_POLICY);
+  const revalidated = await get(PAGE_SCRIPT, { headers: { "if-none-match": '"e"' } });
+  expect(revalidated.status).toBe(304);
+  expect(revalidated.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
   for (const path of [
     `${ONE_TIME_PAGE_PATH}assets/missing-B39o2E6i.js`,
     `${ONE_TIME_PAGE_PATH}assets/`,

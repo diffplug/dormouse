@@ -11,6 +11,7 @@
  */
 
 import { buildCommand, type FlagParametersForType } from '@stricli/core';
+import { cwdPathsEqual } from './cwd.js';
 import type {
   CliOptions,
   Command,
@@ -249,7 +250,7 @@ function applyListFilters(
       (flags.kind === undefined || surface.kind === flags.kind) &&
       (flags.view === undefined || surface.view === flags.view) &&
       (flags.command === undefined || surface.command === flags.command) &&
-      (cwd === undefined || surface.cwd === cwd) &&
+      (cwd === undefined || cwdPathsEqual(surface.cwd, cwd)) &&
       (flags.port === undefined || (surface.ports ?? []).some((port) => port.port === flags.port))
     )),
   };

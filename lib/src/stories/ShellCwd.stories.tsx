@@ -46,7 +46,6 @@ interface ShellCwdCase {
 const noopActions: WallActions = {
   onKill: () => {},
   onMinimize: () => {},
-  onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},
   onZoom: () => {},

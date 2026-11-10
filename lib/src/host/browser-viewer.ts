@@ -110,14 +110,22 @@ export function createViewerServer(): ViewerServer {
         const token = VIEW_PATH.exec(req.url ?? '')?.[1];
         const open = token && isLoopbackHost(req.headers.host, port) ? grants.consume(token) : undefined;
         if (!open) {
-          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+          // Node hands an upgraded socket over with no `error` listener, and
+          // `ws` adds one only to a socket it accepts. A refused peer that
+          // resets instead of reading its 403 would otherwise raise an
+          // uncaught exception in the host process.
+          socket.on('error', () => socket.destroy());
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n', () => socket.destroy());
           return;
         }
         wss.handleUpgrade(req, socket, head, open);
       });
       server.once('error', reject);
       server.listen(0, '127.0.0.1', () => {
+        // Replaced, never just removed: an `http.Server` with no `error`
+        // listener turns a failed accept into an uncaught exception.
         server.off('error', reject);
+        server.on('error', () => {});
         server.unref();
         port = (server.address() as { port: number }).port;
         resolve({ server, port });

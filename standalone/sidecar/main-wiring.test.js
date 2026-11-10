@@ -37,3 +37,10 @@ test('iframe leases are owned by the window Rust stamps, and end with it', () =>
   assert.match(source, /case 'iframe:releaseProxy':[\s\S]*?releaseIframeProxyLease\(data\.owner/);
   assert.match(source, /event === 'burrow:windows'[\s\S]*?retainIframeProxyOwners\(/);
 });
+
+test('a Ctrl-C to the sidecar runs its shutdown instead of ending it at once', () => {
+  // The browser-dev harness shares the terminal's foreground process group with
+  // the sidecar, so Ctrl-C there signals both. Without the handler the control
+  // socket file, the inner browsers, and the Burrow's last save are left behind.
+  assert.match(source, /process\.on\('SIGINT',\s*shutdown\)/);
+});

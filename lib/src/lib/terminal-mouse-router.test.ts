@@ -100,6 +100,7 @@ function createHarness(windowHost: ListenerHost, rows?: readonly string[], shift
   const terminal = {
     cols: 80,
     clearSelection: vi.fn(),
+    hasSelection: vi.fn(() => false),
     focus: vi.fn(),
     buffer: rows ? fakeXterm(rows).buffer : {
       active: {
@@ -200,6 +201,18 @@ describe('terminal-mouse-router: override suppression', () => {
     element.emit('mousedown', mouseEvent());
     windowHost.emit('mousemove', mouseEvent({ clientX: 6, buttons: 1 }));
     windowHost.emit('mouseup', mouseEvent({ clientX: 6 }));
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    cleanup();
+  });
+
+  it('clears the selection xterm.js made from a click that moved under the drag threshold', () => {
+    const { cleanup, element, terminal } = createHarness(windowHost);
+    element.emit('mousedown', mouseEvent());
+    windowHost.emit('mousemove', mouseEvent({ clientX: 7, buttons: 1 }));
+    // The unconsumed press reached xterm.js, which selected across the midpoint.
+    terminal.hasSelection.mockReturnValue(true);
+    windowHost.emit('mouseup', mouseEvent({ clientX: 7 }));
+    expect(terminal.clearSelection).toHaveBeenCalledOnce();
     expect(getMouseSelectionState('t1').selection).toBeNull();
     cleanup();
   });
@@ -396,7 +409,7 @@ describe('terminal-mouse-router: override suppression', () => {
 
   it('clears a finalized selection as soon as a new touch starts, before movement', () => {
     const { cleanup, element } = createHarness(windowHost);
-    beginDrag('t1', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('t1', { row: 0, col: 0, altKey: false });
     endDrag('t1');
     element.emit('pointerdown', pointerEvent());
     expect(getMouseSelectionState('t1').selection).toBeNull();

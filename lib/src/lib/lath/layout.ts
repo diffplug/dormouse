@@ -1,6 +1,5 @@
 // Lath layout: pure geometry over the split tree. Turns a tree + a rect into per-leaf
-// rects (exact integer tiling), plus the derived queries that replace today's DOM
-// rect scanning. No DOM, React, or timing. See docs/specs/tiling-engine.md ("Layout").
+// rects (exact integer tiling), plus the queries derived from those rects. No DOM, React, or timing. See docs/specs/tiling-engine.md ("Layout").
 
 import type { LathChild, LathNode, LathTree, LeafId, Rect, Size, Edge } from './model';
 

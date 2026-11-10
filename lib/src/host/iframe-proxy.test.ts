@@ -576,6 +576,29 @@ describe('iframe proxy — serving', () => {
     await expect(get(await frame(`http://127.0.0.1:${port}/`))).rejects.toMatchObject({ code: 'ECONNRESET' });
   });
 
+  it('answers a status line Node cannot relay with the error page, and keeps serving', async () => {
+    // Node's client accepts `099`; `writeHead` throws on it, and here that is
+    // inside the proxy's response handler, where a throw is an uncaught
+    // exception in the host process.
+    const raw = net.createServer((socket) => {
+      socket.once('data', () => socket.end('HTTP/1.1 099 x\r\nContent-Length: 0\r\n\r\n'));
+    });
+    await new Promise<void>((resolve) => raw.listen(0, '127.0.0.1', resolve));
+    const errors: unknown[] = [];
+    const onUncaught = (error: unknown) => { errors.push(error); };
+    process.on('uncaughtException', onUncaught);
+    try {
+      const url = await frame(`http://127.0.0.1:${(raw.address() as net.AddressInfo).port}/`);
+      const first = await Promise.race([get(url), new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000))]);
+      expect(errors).toEqual([]);
+      expect(first?.body).toContain('invalid status 99');
+      expect((await get(url)).body).toContain('invalid status 99');
+    } finally {
+      process.off('uncaughtException', onUncaught);
+      raw.close();
+    }
+  });
+
   it('serves an actionable error page (frameable) when the upstream is unreachable', async () => {
     const res = await get(await frame('http://127.0.0.1:1/')); // port 1: connection refused
 

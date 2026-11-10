@@ -76,7 +76,7 @@ async function place({ from, to, fill, exact, expected }: Props): Promise<{ box:
   const last = term.rows - 1;
   const startRow = top + Math.round(from * last);
   const endRow = top + Math.round(to * last);
-  setSelection(SOURCE, { startRow, startCol: 0, endRow, endCol: term.cols - 1, shape: 'linewise', dragging: false, startedInScrollback: false });
+  setSelection(SOURCE, { startRow, startCol: 0, endRow, endCol: term.cols - 1, shape: 'linewise', dragging: false });
   openCopyEditor(SOURCE, term);
   if (exact) setCopyFormat(SOURCE, 'exact');
   await requireElement(`[data-copy-editor-for="${SOURCE}"]`, 'copy editor');

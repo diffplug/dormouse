@@ -85,13 +85,15 @@ export async function createTestAuthenticator(options: {
   origin: string;
   /** False for an authenticator that proves presence only. */
   userVerified?: boolean;
+  /** Another passkey's id, signed for with this one's own key; random by default. */
+  credentialId?: string;
 }): Promise<TestAuthenticator> {
   const keyPair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
     'sign',
     'verify',
   ]);
   const spki = new Uint8Array(await subtle.exportKey('spki', keyPair.publicKey));
-  const credentialId = randomBase64Url(16);
+  const credentialId = options.credentialId ?? randomBase64Url(16);
   let signCount = 0;
 
   return {

@@ -4,7 +4,7 @@
  *
  * **Structural, never the DOM globals.** The interfaces below are the subset of
  * the W3C API this stack calls, so the browser's `RTCPeerConnection`, the
- * sidecar's native polyfill, and the in-memory fake all satisfy the same shape
+ * Burrows' native polyfill, and the in-memory fake all satisfy the same shape
  * and neither endpoint reaches for a global. Constructing one is the injected
  * factory's job (`PocketClientDeps.createDirectPeer`, a Burrow runtime's
  * {@link DirectPeering}), which is also where the ICE servers are chosen
@@ -536,8 +536,8 @@ export class DirectPeer {
    * negotiated, so there the check bites. `node-datachannel`'s polyfill builds
    * every incoming channel with its own defaults instead — measured against
    * 0.33.2, an offerer's `{ordered: false, maxRetransmits: 0}` reaches the
-   * answerer as `ordered: true, maxRetransmits: null` — so on the standalone
-   * Burrow only the label comparison is load-bearing, and a paired Client that
+   * answerer as `ordered: true, maxRetransmits: null` — so on either Burrow
+   * only the label comparison is load-bearing, and a paired Client that
    * opened an unordered channel would be adopted. Pinned, so a version that
    * starts reporting them is noticed, by
    * `lib/src/host/remote/native-direct-peer.test.ts`.

@@ -240,10 +240,12 @@ describe.each([
   });
 
   it("settles what it parked when it shuts down", async () => {
-    const { adapter } = await open();
+    const { adapter, sent } = await open();
     const handle = adapter.alertAwait("p", { until: "quiet", timeoutMs: 600_000 });
     adapter.shutdown();
     await expect(handle.promise).resolves.toMatchObject({ kind: "cancelled" });
+    // Every window shares the sidecar; one page's shutdown never ends it.
+    expect(sent().map(([cmd]) => cmd)).not.toContain("kill_sidecar_now");
   });
 
   it("pushes the resolved theme so the sidecar can answer a colour query", async () => {

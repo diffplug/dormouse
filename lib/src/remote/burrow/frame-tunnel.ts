@@ -499,7 +499,13 @@ export class FrameTunnel {
     if (entry.fragments.length === 0) entry.fragmentBinary = params!.binary;
     entry.fragments.push(chunk);
     entry.fragmentBytes += chunk.length;
-    if (entry.fragmentBytes > MAX_WS_MESSAGE_BYTES) {
+    // Bounded in fragments as well as bytes: an empty fragment adds no bytes,
+    // and a Client fragmenting at `FRAME_CHUNK_BYTES` (`frameChunks`) never
+    // needs more than this for a message within the byte bound.
+    if (
+      entry.fragmentBytes > MAX_WS_MESSAGE_BYTES ||
+      entry.fragments.length > Math.ceil(MAX_WS_MESSAGE_BYTES / FRAME_CHUNK_BYTES)
+    ) {
       // The message cannot be delivered whole, so the socket ends as a peer's
       // would on an oversized message.
       entry.socket.close(1009, 'message too big');

@@ -144,7 +144,6 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
  * request timeout is a separate bound on socket inactivity while talking to
  * the push service.
  */
-export { PUSH_TTL_SECONDS };
 export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 
 // The third bound of the trio, `PUSH_SEND_DEADLINE_MS`, lives in

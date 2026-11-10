@@ -15,6 +15,7 @@ import { setTerminalActivity, clearTerminalActivity } from '../../lib/session-ac
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { clearSizeHold, getSizeHolds, holdSize } from '../../lib/size-hold-store';
+import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import {
   installWorkspaceIdPool,
   renameWorkspace,
@@ -387,6 +388,29 @@ describe('embedded pages', () => {
     ]);
   });
 
+  it('hides a Surface pending its kill from every Client, and a pending Workspace’s members too', () => {
+    // `docs/specs/reopen.md`: out of the user's sight, so out of every Client's.
+    const terminal = registerSurface('surface:1');
+    registerPage('surface:2', 'http://localhost:5173/');
+    registerSurface('surface:3');
+    setWorkspaceSurfaces('workspace:5', ['surface:3']);
+    const actions = { restore: () => true, finalize: () => {} };
+    addPendingKill({ kind: 'surface', id: 'surface:1', workspaceId: 'workspace:1', title: 'shell', label: 'Terminal' }, actions);
+    addPendingKill({ kind: 'surface', id: 'surface:2', workspaceId: 'workspace:1', title: 'Page', label: 'Browser' }, actions);
+    addPendingKill({ kind: 'workspace', id: 'workspace:5', workspaceId: 'workspace:5', title: 'api', label: 'Workspace' }, actions);
+    try {
+      expect(platform.answer('directory', {})).toEqual([]);
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'resolve' })).toEqual([]);
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'attach', cols: 100, rows: 30 })).toEqual([]);
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:3', op: 'resolve' })).toEqual([]);
+      expect(terminal.resize).not.toHaveBeenCalled();
+      expect(platform.answer('browserOp', { surfaceId: 'surface:2' })).toEqual([]);
+    } finally {
+      _resetPendingKillsForTesting();
+      resetWorkspaceSurfaces();
+    }
+  });
+
   it('tells the Burrow when a page opens or moves', async () => {
     await armed();
     const registration = registerPage('surface:2', 'http://localhost:5173/');
@@ -460,6 +484,21 @@ describe('size holds', () => {
     }
     expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'release', hold: PHONE })).toEqual([]);
     expect(getSizeHolds('surface:1')).toEqual([]);
+  });
+
+  it('releases a hold on a pane that is a pending kill, which an undo can restore', () => {
+    registerSurface('surface:1');
+    platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
+    addPendingKill(
+      { kind: 'surface', id: 'surface:1', workspaceId: 'workspace:1', title: 'shell', label: 'Terminal' },
+      { restore: () => true, finalize: () => {} },
+    );
+    try {
+      expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'release', hold: PHONE })).toEqual([]);
+      expect(getSizeHolds('surface:1')).toEqual([]);
+    } finally {
+      _resetPendingKillsForTesting();
+    }
   });
 
   it('keeps each holder’s hold until that holder releases it', () => {

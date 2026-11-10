@@ -51,9 +51,9 @@ export function applyAlertSettingsFromHost(value: unknown): void {
 }
 
 /**
- * Offer the renderer's persisted settings as the host's startup seed. In
- * multi-webview VS Code only the first seed after an extension-host start is
- * accepted; the host replies to every renderer with its canonical snapshot.
+ * Offer the renderer's persisted settings as the host's startup seed. Only
+ * the first seed after a host start is accepted; the host replies to every
+ * renderer with its canonical snapshot.
  */
 export function publishAlertSettings(): void {
   getPlatform().alertPublishSettings(settings, { seed: true });

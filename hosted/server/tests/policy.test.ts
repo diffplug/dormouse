@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { TERMS_VERSION } from "../policy-constants";
-import { authPolicy, providerBindings, LOGIN_FRESH_AGE_MS } from "../policy";
+import { LOGIN_FRESH_AGE_MS, TERMS_VERSION } from "../policy-constants";
+import { authPolicy, providerBindings } from "../policy";
 import { allowedDevRequest } from "../dev-host-guard";
 import type { IncomingMessage } from "node:http";
 test("provider allowlist fails closed on typos and partial credentials", () => {

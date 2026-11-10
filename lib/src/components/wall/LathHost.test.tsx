@@ -13,7 +13,6 @@ import { type DropTarget, move } from '../../lib/lath/ops';
 import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
 import { leaf, split, tree as treeOf, movePreview as movePreviewAt, landingPreview as landingPreviewAt } from '../../lib/lath/test-util';
 import { leafMeta } from '../../lib/lath/test-fixtures';
-import { PANE_HEADER_HEIGHT_PX } from '../design';
 import { SLIDE_ARM_MS } from './lath-drag-controller';
 import type { PaneProps } from './pane-props';
 import { LayoutFramesContext } from './wall-context';
@@ -445,15 +444,6 @@ describe('LathHost — sash drag', () => {
 });
 
 describe('LathHost — zoom', () => {
-  it('insets elevated zoom by half the pane-header height', () => {
-    const store = seeded(leafTree('a'), [['a', leafMeta({ title: 'A' })]]);
-    mount(store);
-
-    const header = container.querySelector<HTMLElement>('.lath-leaf-header')!;
-    expect(header.style.height).toBe(`${PANE_HEADER_HEIGHT_PX}px`);
-    expect(LATH_ZOOM_MARGIN).toBe(PANE_HEADER_HEIGHT_PX / 2);
-  });
-
   it('renders the zoomed leaf inset above the tiled layout, and restores after', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store);
@@ -490,7 +480,7 @@ describe('LathHost — pane props contract', () => {
     expect(tabProps['a']).toMatchObject({ id: 'a', title: 'A' });
   });
 
-  it('does not re-render leaf content on a geometry-only frame', () => {
+  it.each([false, true])('does not re-render leaf content on a geometry-only frame (StrictMode: %s)', (strict) => {
     // A resize commit changes the tree geometry but no leaf's meta, so the memoized
     // LathLeafContent (header + body) must not re-render — only the positioned wrapper.
     const bodyRenders: Record<string, number> = {};
@@ -505,16 +495,15 @@ describe('LathHost — pane props contract', () => {
     };
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const engine = createLathWallEngine(store, { durationMs: 0 });
-    act(() => {
-      root.render(
-        <LathHost
-          lath={engine}
-          onCommitResize={vi.fn()}
-          onLeafFocused={vi.fn()}
-          componentsOverride={{ bodies: { terminal: CountingBody }, tabs: { terminal: CountingTab } }}
-        />,
-      );
-    });
+    const host = (
+      <LathHost
+        lath={engine}
+        onCommitResize={vi.fn()}
+        onLeafFocused={vi.fn()}
+        componentsOverride={{ bodies: { terminal: CountingBody }, tabs: { terminal: CountingTab } }}
+      />
+    );
+    act(() => { root.render(strict ? <StrictMode>{host}</StrictMode> : host); });
     const before = { ba: bodyRenders['a'], bb: bodyRenders['b'], ta: tabRenders['a'], tb: tabRenders['b'] };
 
     act(() => store.resizeBoundary([], 0, 40)); // geometry-only: weights change, meta does not
@@ -1009,7 +998,7 @@ describe('LathHost — pane / Door drag', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
     const { onProposeMove } = mountDrag(store);
     act(() => down(header('a'), 100, 15));
-    expect(shielded()).toBe(false); // not before the threshold
+    expect(shielded()).toBe(true); // from the press, before the threshold
     focusFrameIn('a'); // the header press selects a Tool, focusing its body
     act(() => window.dispatchEvent(new Event('blur')));
     act(() => moveTo(601, 300));
@@ -1142,6 +1131,7 @@ describe('LathHost — pane / Door drag', () => {
     act(() => up());
     expect(onDragStart).not.toHaveBeenCalled();
     expect(onProposeMove).not.toHaveBeenCalled();
+    expect(shielded()).toBe(false);
   });
 
   it('swallows the click and dblclick a drag\'s release fires, never a sub-threshold press\'s', () => {
@@ -1206,6 +1196,7 @@ describe('LathHost — pane / Door drag', () => {
     // "no drop" so the Door's own click-reattach is what actually restores it.
     expect(onExternalDrop).toHaveBeenCalledWith(null);
     expect(overlayEl()).toBeNull();
+    expect(shielded()).toBe(false);
   });
 
   it('hit-tests the LIVE tree when a background commit lands mid-drag', async () => {

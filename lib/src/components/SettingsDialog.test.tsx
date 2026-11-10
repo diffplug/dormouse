@@ -14,7 +14,7 @@ import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { stubResizeObserver } from './wall/wall-test-utils';
 import { setNativeFieldValue } from '../lib/dom';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings';
-import { resetPushDevices, setCommandWatched, getWatchedCommands, setPushDevices } from '../lib/terminal-registry';
+import { resetPushDevices, setCommandWatched, getWatchedCommandsSnapshot, setPushDevices } from '../lib/terminal-registry';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -109,7 +109,7 @@ beforeEach(() => {
   platform = new FakePtyAdapter();
   setPlatform(platform);
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
-  for (const command of getWatchedCommands()) setCommandWatched(command, false);
+  for (const command of getWatchedCommandsSnapshot()) setCommandWatched(command, false);
 });
 
 afterEach(async () => {
@@ -179,7 +179,7 @@ describe('SettingsDialog navigation and search', () => {
     await act(async () => setCommandWatched('my-agent', true));
     expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['watcher']);
     await act(async () => visible('button[aria-label="Remove my-agent rule"]')[0].click());
-    expect(getWatchedCommands()).not.toContain('my-agent');
+    expect(getWatchedCommandsSnapshot()).not.toContain('my-agent');
   });
 
   it('keeps a topic chosen while the opened-at topic settles', async () => {

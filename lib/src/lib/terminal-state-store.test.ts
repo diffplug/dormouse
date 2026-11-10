@@ -452,7 +452,7 @@ describe('countRunningSessions (quit-confirmation gate)', () => {
   });
 });
 
-describe('seedLaunchedCommand (dor split/ensure -lc launches)', () => {
+describe('seedLaunchedCommand (dor split/ensure command launches)', () => {
   afterEach(() => removeTerminalPaneState('launch'));
 
   it('reports a launched command so ensure can match it, then clears it on finish', () => {

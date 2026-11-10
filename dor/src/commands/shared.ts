@@ -135,11 +135,11 @@ export function writeStderr(context: DorCommandContext, stderr: string): void {
 // Git Bash exports PWD as a POSIX path (`/c/Users/...`). On Windows, resolvePath
 // reads the leading `/c` as a folder under the current drive's root and mangles it
 // to `C:\c\Users\...`, which then matches no surface. Fold the MSYS drive form to a
-// native Windows drive first. No-op off win32 and for paths that already carry a
-// drive letter (e.g. `C:/Users/...`, which some MSYS builds export instead).
+// native Windows drive first, including a drive root, which Git Bash exports as a
+// bare `/c`. No-op off win32 and for paths that already carry a drive letter (e.g.
+// `C:/Users/...`, which some MSYS builds export instead).
 export function msysToWindowsCwd(pwd: string, platform: string): string {
   if (platform !== 'win32') return pwd;
-  // `/c` alone is the drive root.
   const match = pwd.match(/^\/([A-Za-z])(?:\/(.*))?$/);
   return match ? `${match[1].toUpperCase()}:\\${(match[2] ?? '').replace(/\//g, '\\')}` : pwd;
 }

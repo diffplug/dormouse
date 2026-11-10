@@ -27,13 +27,13 @@ function CopyEditorStory({
   touch = false,
 }: {
   id: string;
-  selection: Omit<Selection, 'startedInScrollback' | 'dragging'>;
+  selection: Omit<Selection, 'dragging'>;
   editor?: EditorPreset;
   touch?: boolean;
 }) {
   useStorySelection(id, (terminal) => {
     // What a mouse-up does: finalize, then open the editor over it.
-    setSelection(id, { ...selection, dragging: false, startedInScrollback: false });
+    setSelection(id, { ...selection, dragging: false });
     openCopyEditor(id, terminal);
     if (editor.scope) setCopyScope(id, editor.scope);
     if (editor.format) setCopyFormat(id, editor.format);

@@ -4,8 +4,8 @@ import type { WorkerEnv } from "./bindings";
 import { secureHeaders, type RulesFor } from "./headers";
 
 /**
- * What all three Workers share (`docs/specs/hosted.md` -> "Application
- * boundary"): the secure headers, the bindings mapper, the 421 gate, `/api/health`
+ * What every Worker but `dormouse-frames` shares (`docs/specs/hosted.md` ->
+ * "Application boundary"): the secure headers, the bindings mapper, the 421 gate, `/api/health`
  * and `/api/ready`, the 404 tails, and `onError`. Each entry mounts only its own routes, between
  * the gate and the tails, and its `fallback` after them. A Cron Trigger's
  * `scheduled` sees the same mapped bindings a route does.

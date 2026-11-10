@@ -74,7 +74,7 @@ describe('writeUserInput', () => {
 
   it('leaves a drag in progress alone', () => {
     getOrCreateTerminal('pane-2');
-    beginDrag('pane-2', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('pane-2', { row: 0, col: 0, altKey: false });
     writeUserInput('pane-2', 'x');
     expect(getMouseSelectionState('pane-2').selection?.dragging).toBe(true);
   });

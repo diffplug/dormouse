@@ -169,23 +169,20 @@ export function HostedApprovalProgress({
 
 /**
  * Enrolling (`docs/specs/hosted.md` -> "Burrow enrollment"): a button that
- * begins it, under the name to keep for this machine where `askName`; then
+ * begins it, under the name to keep for this machine; then
  * {@link HostedApprovalProgress}; ended, a new code a click away.
  *
  * **The name field is hidden while a code waits, never unmounted**, so what
- * was typed survives a Cancel. Without `askName` the service's suggested name
- * is used: phones show it, and the person never typed one.
+ * was typed survives a Cancel.
  */
 export function HostedEnrollView({
   enrollment,
   accountOrigin,
   suggestedLabel,
-  askName = true,
 }: {
   enrollment: HostedEnrollmentState | null;
   accountOrigin: string | null;
   suggestedLabel: string;
-  askName?: boolean;
 }) {
   const [label, setLabel] = useState(suggestedLabel);
   const { busy, error, run } = useBusyAction();
@@ -194,7 +191,7 @@ export function HostedEnrollView({
   const waiting = enrollment?.status === 'waiting' ? enrollment : null;
   const redeeming = enrollment?.status === 'redeeming';
   const ended = enrollment?.status === 'ended' ? enrollment : null;
-  const name = askName ? label.trim() : suggestedLabel;
+  const name = label.trim();
   const begin = () =>
     void run(async () => {
       setBeginning(true);
@@ -223,7 +220,7 @@ export function HostedEnrollView({
           if (name !== '' && !busy) begin();
         }}
       >
-        {askName ? <BurrowNameField value={label} onChange={setLabel} /> : null}
+        <BurrowNameField value={label} onChange={setLabel} />
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             type="submit"

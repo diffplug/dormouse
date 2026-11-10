@@ -555,15 +555,12 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             // Never a sibling window: acting on the wrong terminal is worse
             // than failing (docs/specs/dor-cli.md → "Standalone").
             if let Some(sidecar) = app.try_state::<SidecarState>() {
-                let response = serde_json::json!({
-                    "event": "dor:controlResponse",
-                    "data": {
-                        "requestId": request_id,
-                        "ok": false,
-                        "error": format!("No Dormouse window owns surface '{surface_id}'"),
-                    },
-                });
-                send_to_sidecar(&sidecar, response.to_string());
+                let response = sidecar_line("dor:controlResponse", serde_json::json!({
+                    "requestId": request_id,
+                    "ok": false,
+                    "error": format!("No Dormouse window owns surface '{surface_id}'"),
+                }));
+                send_to_sidecar(&sidecar, response);
             }
         }
     }
@@ -625,11 +622,10 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
                 {
                     send_to_sidecar(
                         &sidecar,
-                        serde_json::json!({
-                            "event": "burrow:askDelivered",
-                            "data": { "burrowRequestId": burrow_request_id, "windows": [label] },
-                        })
-                        .to_string(),
+                        sidecar_line(
+                            "burrow:askDelivered",
+                            serde_json::json!({ "burrowRequestId": burrow_request_id, "windows": [label] }),
+                        ),
                     );
                 }
             }
@@ -657,7 +653,7 @@ fn send_window_labels(app: &AppHandle) {
     let labels = window_labels(app);
     send_to_sidecar(
         &state,
-        serde_json::json!({ "event": "burrow:windows", "data": { "labels": labels } }).to_string(),
+        sidecar_line("burrow:windows", serde_json::json!({ "labels": labels })),
     );
 }
 
@@ -1148,6 +1144,18 @@ fn init_log() {
     }
 }
 
+/// What the log keeps of a stdout line that is not JSON. A protocol line
+/// (one cut short at exit, or one `serde_json` rejects) carries terminal
+/// output, which never goes to the log; anything else is a stray print,
+/// kept short.
+fn unparseable_stdout_message(line: &str) -> String {
+    if line.trim_start().starts_with('{') {
+        return format!("[sidecar stdout] unparseable protocol line ({} bytes)", line.len());
+    }
+    let stray: String = line.trim_end().chars().take(200).collect();
+    format!("[sidecar stdout] {stray}")
+}
+
 fn append_log(message: impl AsRef<str>) {
     let Some(file) = log_file() else { return };
     if let Ok(mut file) = file.lock() {
@@ -1270,11 +1278,7 @@ fn request_from_sidecar_timeout(
     };
     payload.insert("requestId".into(), JsonValue::String(request_id.clone()));
 
-    let msg = serde_json::json!({
-        "event": event,
-        "data": JsonValue::Object(payload)
-    });
-    send_to_sidecar(state, msg.to_string());
+    send_to_sidecar(state, sidecar_line(event, JsonValue::Object(payload)));
 
     match rx.recv_timeout(timeout) {
         Ok(response) => Ok(response),
@@ -1442,11 +1446,8 @@ fn stamped_message(label: &str, event: &str, mut payload: JsonValue) -> String {
 
 #[tauri::command]
 fn pty_resize(state: tauri::State<'_, SidecarState>, id: String, cols: u16, rows: u16) {
-    let msg = serde_json::json!({
-        "event": "pty:resize",
-        "data": { "id": id, "cols": cols, "rows": rows }
-    });
-    send_to_sidecar(&state, msg.to_string());
+    let msg = sidecar_line("pty:resize", serde_json::json!({ "id": id, "cols": cols, "rows": rows }));
+    send_to_sidecar(&state, msg);
 }
 
 // The webview's resolved terminal colors, so the sidecar's parser can answer
@@ -1454,21 +1455,13 @@ fn pty_resize(state: tauri::State<'_, SidecarState>, id: String, cols: u16, rows
 // to the parser at the other end, and Rust has no reason to know it.
 #[tauri::command]
 fn pty_theme_colors(state: tauri::State<'_, SidecarState>, colors: JsonValue) {
-    let msg = serde_json::json!({
-        "event": "pty:themeColors",
-        "data": colors
-    });
-    send_to_sidecar(&state, msg.to_string());
+    send_to_sidecar(&state, sidecar_line("pty:themeColors", colors));
 }
 
 #[tauri::command]
 fn pty_kill(state: tauri::State<'_, SidecarState>, windows: tauri::State<'_, WindowState>, id: String) {
     windows.forget_pty(&id);
-    let msg = serde_json::json!({
-        "event": "pty:kill",
-        "data": { "id": id }
-    });
-    send_to_sidecar(&state, msg.to_string());
+    send_to_sidecar(&state, sidecar_line("pty:kill", serde_json::json!({ "id": id })));
 }
 
 /// List and replay only what this window owns. The answer names the window, so
@@ -1495,15 +1488,12 @@ fn pty_request_init(
         windows.owned_by(window.label()),
         &guard(&windows.arrivals),
     );
-    let msg = serde_json::json!({
-        "event": "pty:requestInit",
-        "data": {
-            "forWindow": window.label(),
-            "ids": ids,
-            "requestId": request_id,
-        },
-    });
-    send_to_sidecar(&state, msg.to_string());
+    let msg = sidecar_line("pty:requestInit", serde_json::json!({
+        "forWindow": window.label(),
+        "ids": ids,
+        "requestId": request_id,
+    }));
+    send_to_sidecar(&state, msg);
 }
 
 // One passthrough for the whole burrow bridge: the webview and the sidecar
@@ -1546,11 +1536,7 @@ fn dor_control_response(
     guard(&windows.routing)
         .dor_targets
         .remove(&response.request_id);
-    let msg = serde_json::json!({
-        "event": "dor:controlResponse",
-        "data": response,
-    });
-    send_to_sidecar(&state, msg.to_string());
+    send_to_sidecar(&state, sidecar_line("dor:controlResponse", response));
 }
 
 #[tauri::command(async)]
@@ -1687,6 +1673,16 @@ async fn pty_graceful_kill(
 // sidecar helper (see the INVARIANT above `request_from_sidecar_timeout`;
 // `blocking_commands_run_off_the_main_thread` enforces it).
 
+/// The sidecar answers a handler that threw with `{ error }` and no success
+/// field (`respondAsync` in standalone/sidecar/main.js); that error is the
+/// command's failure, so the webview's adapter builds its typed failure.
+fn sidecar_error(response: &JsonValue) -> Result<(), String> {
+    match response.get("error").and_then(JsonValue::as_str) {
+        Some(error) => Err(error.to_string()),
+        None => Ok(()),
+    }
+}
+
 /// Interrupt the live PTYs and let the sidecar detect and record each agent's
 /// resume invocation. First step of the quit teardown: the hint exists only
 /// between the interrupt and the kill.
@@ -1706,7 +1702,7 @@ fn capture_agent_recovery(
         windows.owned_by(window.label()),
         &guard(&windows.arrivals),
     );
-    request_from_sidecar_timeout(
+    let response = request_from_sidecar_timeout(
         &state,
         "pty:captureRecovery",
         serde_json::json!({ "ids": ids, "timeout": timeout }),
@@ -1714,7 +1710,7 @@ fn capture_agent_recovery(
         // one `pty_graceful_kill` adds (see its comment for the pin).
         Duration::from_millis(timeout + 1500),
     )?;
-    Ok(())
+    sidecar_error(&response)
 }
 
 /// Claim the resume invocations belonging to `pane_ids`. Destructive on the
@@ -1730,6 +1726,7 @@ fn take_recovery_commands(
         serde_json::json!({ "paneIds": pane_ids }),
         Duration::from_secs(5),
     )?;
+    sidecar_error(&response)?;
     Ok(response
         .get("commands")
         .cloned()
@@ -1761,6 +1758,7 @@ fn iframe_create_proxy_url(
     }
     let response =
         request_from_sidecar_timeout(&state, "iframe:createProxyUrl", data, Duration::from_secs(5))?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1796,6 +1794,7 @@ fn git_info(
         serde_json::json!({ "paths": paths }),
         Duration::from_secs(5),
     )?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1814,6 +1813,7 @@ fn tool_control(
         serde_json::json!({ "request": request }),
         Duration::from_secs(5),
     )?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1832,6 +1832,7 @@ fn managed_voice(
 ) -> Result<JsonValue, String> {
     let mut response =
         request_from_sidecar_timeout(&state, "voice:command", payload, MANAGED_VOICE_TIMEOUT)?;
+    sidecar_error(&response)?;
     Ok(response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null))
 }
 
@@ -1858,6 +1859,7 @@ fn browser_request(
         serde_json::json!({ "request": request }),
         BROWSER_REQUEST_TIMEOUT,
     )?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1943,10 +1945,7 @@ fn write_clipboard_text(
             serde_json::json!({ "text": text }),
             Duration::from_secs(5),
         )?;
-        match response.get("error").and_then(|v| v.as_str()) {
-            Some(error) => Err(error.to_string()),
-            None => Ok(()),
-        }
+        sidecar_error(&response)
     }
 }
 
@@ -2572,11 +2571,15 @@ struct CachedRect {
 
 impl CachedRect {
     /// Fold in a window event, which carries only the half that changed.
+    ///
+    /// Minimizing on Windows reports a `(-32000, -32000)` origin and a 0x0
+    /// size; the cache keeps the last visible box instead, because a close
+    /// while minimized records it for Reopen and the drag hit test reads it.
     fn apply(&mut self, origin: Option<(i32, i32)>, size: Option<(u32, u32)>) {
-        if let Some(origin) = origin {
+        if let Some(origin) = origin.filter(|&(x, y)| x > -32000 || y > -32000) {
             self.origin = origin;
         }
-        if let Some(size) = size {
+        if let Some(size) = size.filter(|&(w, h)| w > 0 && h > 0) {
             self.size = size;
         }
     }
@@ -3391,11 +3394,11 @@ fn begin_arrival(
     // Workspace of browser panes alone has no ids to mark; its source sends
     // content at once.
     if let Some(sidecar) = app.try_state::<SidecarState>() {
-        let msg = serde_json::json!({
-            "event": "pty:mark",
-            "data": { "ids": arrival.terminal_ids, "requestId": format!("mark-{}", arrival.workspace_id) },
-        });
-        send_to_sidecar(&sidecar, msg.to_string());
+        let msg = sidecar_line(
+            "pty:mark",
+            serde_json::json!({ "ids": arrival.terminal_ids, "requestId": format!("mark-{}", arrival.workspace_id) }),
+        );
+        send_to_sidecar(&sidecar, msg);
     }
     spawn_arrival_watchdog(app.clone(), &arrival);
     Ok(())
@@ -3468,16 +3471,13 @@ fn hand_back_arrival(
         );
         if !marked.is_empty() {
             if let Some(sidecar) = app.try_state::<SidecarState>() {
-                let msg = serde_json::json!({
-                    "event": "pty:requestInit",
-                    "data": {
-                        "forWindow": arrival.from,
-                        "ids": marked,
-                        "requestId": format!("handback-{}", arrival.workspace_id),
-                        "marks": marks,
-                    },
-                });
-                send_to_sidecar(&sidecar, msg.to_string());
+                let msg = sidecar_line("pty:requestInit", serde_json::json!({
+                    "forWindow": arrival.from,
+                    "ids": marked,
+                    "requestId": format!("handback-{}", arrival.workspace_id),
+                    "marks": marks,
+                }));
+                send_to_sidecar(&sidecar, msg);
             }
         }
     } else {
@@ -3661,11 +3661,11 @@ fn adopt_ready(
             .ok_or_else(|| format!("no arrival of '{workspace_id}' into {label}"))?;
         (arrival.terminal_ids.clone(), routing::arrival_marks(arrival))
     };
-    let msg = serde_json::json!({
-        "event": "pty:requestInit",
-        "data": { "forWindow": label, "ids": ids, "requestId": request_id, "marks": marks },
-    });
-    send_to_sidecar(&state, msg.to_string());
+    let msg = sidecar_line(
+        "pty:requestInit",
+        serde_json::json!({ "forWindow": label, "ids": ids, "requestId": request_id, "marks": marks }),
+    );
+    send_to_sidecar(&state, msg);
     Ok(())
 }
 
@@ -3842,7 +3842,7 @@ fn broadcast_registry(app: &AppHandle, windows: &WindowState) {
 /// **Not consumed**: the record settles at `adopt_done`, so a webview that
 /// drains at boot and again when its listener is installed sees only what it has
 /// yet to adopt. The webview dedupes what it is already mounting.
-#[tauri::command]
+#[tauri::command(async)]
 fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) -> Vec<JsonValue> {
     routing::arrival_payloads(&guard(&windows.arrivals), window.label())
 }
@@ -4127,7 +4127,7 @@ fn shutdown_sidecar_and_wait(state: &SidecarState) {
     append_log("[sidecar] requesting graceful shutdown");
     send_to_sidecar(
         state,
-        serde_json::json!({ "event": "sidecar:shutdown", "data": {} }).to_string(),
+        sidecar_line("sidecar:shutdown", serde_json::json!({})),
     );
 
     let Ok(mut guard) = state.child.lock() else {
@@ -4155,10 +4155,11 @@ fn shutdown_sidecar_and_wait(state: &SidecarState) {
     let _ = guard.start_kill();
 }
 
-// Job Object on Windows / process group on Unix — kill propagates to the
-// sidecar's grandchildren (the spawned shells). On Unix this is SIGKILL to
-// the whole process group, which is more thorough than the previous
-// SIGTERM-to-just-node path that left node-pty grandchildren orphaned.
+// Job Object on Windows / process group on Unix. On Windows the kill takes
+// the spawned shells with the sidecar. On Unix the SIGKILL reaches only the
+// sidecar's process group: node-pty starts each shell as the leader of its own
+// session, so a shell ends on the PTY hangup when node exits, and one that
+// ignores SIGHUP survives.
 //
 // The updater calls this before launching the Windows NSIS installer: NSIS
 // overwrites files inside the bundled sidecar (e.g. node-pty's `conpty.node`),
@@ -4527,7 +4528,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
                 break;
             };
             let Ok(mut msg) = serde_json::from_str::<JsonValue>(&line) else {
-                append_log(format!("[sidecar stdout] {}", line.trim_end()));
+                append_log(unparseable_stdout_message(&line));
                 continue;
             };
             let Some(event) = msg.get("event").and_then(|e| e.as_str()).map(String::from)
@@ -4568,7 +4569,9 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
                 break;
             };
             let message = format!("[sidecar] {}", line.trim_end());
-            eprintln!("{message}");
+            // Never `eprintln!`: it panics once the launching terminal or pipe
+            // is gone, and `abort_on_panic` turns that into an abort.
+            let _ = writeln!(std::io::stderr(), "{message}");
             append_log(message);
         }
     });
@@ -4630,12 +4633,11 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 
 /// The File menu's Reopen Closed item (docs/specs/reopen.md → Reopen verb).
-/// macOS only: a menu accelerator fires before the webview sees the key, so
-/// it works in passthrough; on Windows and Linux `Ctrl+Shift+T` would take a
-/// key programs read as `Ctrl+T`.
+/// macOS only: the page sees the chord first and a keydown it does not cancel
+/// still reaches the menu item, so it works in passthrough; on Windows and
+/// Linux `Ctrl+Shift+T` would take a key programs read as `Ctrl+T`.
 const REOPEN_MENU_ITEM_ID: &str = "dormouse-reopen-closed";
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     panic_policy::abort_on_panic();
     tauri::Builder::default()
@@ -4759,7 +4761,8 @@ pub fn run() {
                         .iter()
                         .map(|p| p.to_string_lossy().into_owned())
                         .collect();
-                    let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
+                    // `emit` broadcasts to every window; the drop belongs to this one.
+                    let _ = app.emit_to(window.label(), "dormouse://files-dropped", serde_json::json!({ "paths": payload }));
                 }
                 // Focus order is the drag hit test's z-order stand-in and the
                 // fallback owner for a `dor` request naming no Surface.
@@ -6728,6 +6731,12 @@ mod tests {
         assert_eq!(rect.origin, (100, 40));
         assert_eq!(rect.size, (1000, 700));
 
+        // A minimized window's placeholder box never replaces the visible one.
+        rect.apply(Some((-32000, -32000)), None);
+        rect.apply(None, Some((0, 0)));
+        assert_eq!(rect.origin, (100, 40));
+        assert_eq!(rect.size, (1000, 700));
+
         // Stored logical, so the box reopens sensibly on another display.
         let geometry = rect.to_logical();
         assert_eq!(
@@ -7010,13 +7019,6 @@ mod tests {
         assert_eq!(session_file_name("a/b"), "a_b.json");
     }
 
-    // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
-    // every `#[tauri::command]` whose body reaches blocking sidecar or journal helpers
-    // must be `#[tauri::command(async)]` (or an `async fn`). A plain-sync command
-    // runs on the main thread, where `recv_timeout` freezes the webview for the
-    // whole round trip — up to 10s on a clipboard image paste. Three clipboard
-    // commands once slipped through the async port; this scans the source so the
-    // omission can't silently recur.
     #[test]
     fn journal_locks_never_span_an_await() {
         let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
@@ -7052,6 +7054,59 @@ mod tests {
         assert!(src.contains("restore_windows(app.handle()"), "setup must still restore windows itself");
     }
 
+    #[test]
+    fn a_file_drop_reaches_only_its_own_window() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let arm = src.split("WindowEvent::DragDrop(DragDropEvent::Drop").nth(1).unwrap()
+            .split("WindowEvent::").next().unwrap();
+        assert!(arm.contains("emit_to(window.label(), \"dormouse://files-dropped\""), "{arm}");
+    }
+
+    #[test]
+    fn an_unparseable_protocol_line_logs_no_terminal_output() {
+        let cut = r#"{"event":"pty:data","data":{"id":"p","data":"secret prompt"#;
+        let message = super::unparseable_stdout_message(cut);
+        assert!(!message.contains("secret"), "{message}");
+        assert!(message.contains(&format!("{} bytes", cut.len())), "{message}");
+        // A stray print is not protocol: it is kept, and kept short.
+        assert_eq!(super::unparseable_stdout_message("hello\n"), "[sidecar stdout] hello");
+        assert_eq!(super::unparseable_stdout_message(&"é".repeat(500)).chars().count(), 217);
+    }
+
+    #[test]
+    fn a_sidecar_handler_error_fails_the_command() {
+        let threw = serde_json::json!({ "error": "trust write failed", "requestId": "req-1" });
+        assert_eq!(super::sidecar_error(&threw), Err("trust write failed".to_string()));
+        let answered = serde_json::json!({ "result": null, "requestId": "req-2" });
+        assert_eq!(super::sidecar_error(&answered), Ok(()));
+        // Every bridge that reads a sidecar answer checks it first.
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        for command in [
+            "fn capture_agent_recovery(", "fn take_recovery_commands(", "fn iframe_create_proxy_url(",
+            "fn git_info(", "fn tool_control(", "fn managed_voice(", "fn browser_request(",
+        ] {
+            let body = src.split(command).nth(1).unwrap().split("\n}\n").next().unwrap();
+            assert!(body.contains("sidecar_error(&response)"), "{command} ignores a sidecar error");
+        }
+    }
+
+    /// The print macros panic when stdout or stderr is closed (a launching
+    /// shell that exited), and `abort_on_panic` makes that an abort.
+    #[test]
+    fn no_print_macro_can_abort_the_app() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        for mac in ["print!(", "println!(", "dbg!("] {
+            assert!(!src.contains(mac), "use `let _ = writeln!(std::io::stderr(), ..)`, not {mac}");
+        }
+    }
+
+    // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
+    // every `#[tauri::command]` whose body reaches blocking sidecar or journal helpers
+    // must be `#[tauri::command(async)]` (or an `async fn`). A plain-sync command
+    // runs on the main thread, where `recv_timeout` freezes the webview for the
+    // whole round trip — up to 10s on a clipboard image paste. Three clipboard
+    // commands once slipped through the async port; this scans the source so the
+    // omission can't silently recur.
     #[test]
     fn blocking_commands_run_off_the_main_thread() {
         let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
@@ -7128,7 +7183,11 @@ mod tests {
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",
-                "kill_sidecar_and_wait",
+                "kill_sidecar_and_wait", "arrival_payloads",
+                // File writes that fsync, and a window build, which deadlocks
+                // inside a sync command on Windows.
+                "reserve_blocks(", "reserve_ids(", "reserve_id_strings(", "next_window_label(",
+                "write_session_to(", "write_file_atomically(", "build_window(",
             ].iter().any(|helper| body.contains(helper));
             if reaches_blocking && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());

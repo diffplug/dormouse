@@ -23,6 +23,7 @@ import {
   setWorkspaceMoveError,
 } from '../lib/workspace-ui-store';
 import {
+  closeWorkspace,
   createWorkspace,
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
@@ -451,6 +452,30 @@ describe('WorkspaceStrip', () => {
     expect(order()).toEqual([first, 'workspace:2', 'workspace:3']);
   });
 
+  it('restores before its original neighbor when the strip changes under a cancelled drag', async () => {
+    createWorkspace({ id: 'workspace:2' });
+    createWorkspace({ id: 'workspace:3' });
+    createWorkspace({ id: 'workspace:4' });
+    await render();
+    const order = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
+    const first = order()[0];
+    const boxes = new Map(order().map((id, index) => [id, { left: index * 100, width: 100 }]));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = this.dataset.workspaceTab ? boxes.get(this.dataset.workspaceTab) : undefined;
+      const left = box?.left ?? 0;
+      const width = box?.width ?? 400;
+      return { left, right: left + width, width, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+
+    await act(async () => { tabFor('workspace:3').dispatchEvent(pointer('pointerdown', { button: 0, clientX: 250, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 40, clientY: 12 })); });
+    expect(order()).toEqual(['workspace:3', first, 'workspace:2', 'workspace:4']);
+    await act(async () => { closeWorkspace(first); });
+
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(order()).toEqual(['workspace:2', 'workspace:3', 'workspace:4']);
+  });
+
   it('never captures the pointer before the drag activates, so a plain press still activates', async () => {
     createWorkspace({ id: 'workspace:2' });
     await render();
@@ -630,7 +655,7 @@ describe('WorkspaceStrip', () => {
     expect(getWorkspaceUiSnapshot().renamingId).toBe(first);
   });
 
-  it('does not accept a pending kill during transfer and releases its keyboard lease on departure', async () => {
+  it('does not accept a pending confirmation during transfer and releases its keyboard lease on departure', async () => {
     createWorkspace({ id: 'workspace:2' });
     const closeAll = vi.fn(async () => null);
     stubHandle('workspace:2', { needsCloseConfirmation: () => true, closeAll });

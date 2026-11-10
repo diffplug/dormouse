@@ -20,7 +20,9 @@ import { join } from 'node:path';
 
 import {
   API_ROUTES,
+  MAX_PUSH_ENDPOINT_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
+  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   MAX_SEALED_PUSH_LENGTH,
   generateNoiseKeyPair,
   mintPushDeliveryId,
@@ -42,12 +44,7 @@ import {
   defaultVapidSubject,
   generateVapidKeys,
 } from '../dist/push.js';
-import { MAX_PUSH_ENDPOINT_LENGTH } from '../dist/push-endpoint.js';
-import {
-  BurrowStore,
-  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
-  PushSubscriptionStore,
-} from '../dist/state.js';
+import { BurrowStore, PushSubscriptionStore } from '../dist/state.js';
 import { enrollBurrow, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
@@ -320,6 +317,16 @@ test('subscribe round-trip persists the subscription owner-only', async () => {
   assert.equal(stored[0].devicePublicKey, undefined, 'the device key is gone with its ceremony');
   // The endpoint plus its keys is a bearer capability to notify that phone.
   assert.equal((await stat(join(stateDir, 'push-subscriptions.json'))).mode & 0o777, 0o600);
+});
+
+test('subscribe stores only the two bounded key fields', async () => {
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  const sub = subscription();
+  sub.keys.pad = 'A'.repeat(1000);
+  const res = await subscribe(app, { sessionToken, burrow, deliveryId: await mintedId(burrow), sub });
+  assert.equal(res.status, 200);
+  const [stored] = await storedRows(stateDir);
+  assert.deepEqual(Object.keys(stored.keys), ['p256dh', 'auth']);
 });
 
 test('subscribe requires a session', async () => {

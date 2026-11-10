@@ -27,7 +27,6 @@ function sel(overrides: Partial<Selection>): Selection {
     endCol: 0,
     shape: 'linewise',
     dragging: false,
-    startedInScrollback: false,
     ...overrides,
   };
 }

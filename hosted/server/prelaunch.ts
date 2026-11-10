@@ -13,7 +13,7 @@ export const SIGN_IN_ALLOWLIST: readonly string[] = [
   "edgar.twigg@gmail.com",
 ];
 
-/** Matches the frontend's pre-launch copy in `hosted/src/App.tsx`. */
+/** Matches the frontend's pre-launch copy in `hosted/src/HostedPage.tsx`. */
 export const PRELAUNCH_REFUSAL =
   "Coming soon. Get an email when it opens.";
 

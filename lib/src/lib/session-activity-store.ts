@@ -103,12 +103,12 @@ function setLocalSurfaceTodo(id: string, todo: boolean): void {
  * Restore a browser surface's persisted TODO into the local activity store.
  * Browser surfaces have no PTY, so the TODO is reconstructed from the saved pane
  * (the `alert` blob) rather than replayed from a PTY alert. Shared by the cold
- * restore (session-restore.ts) and live resume (reconnect.ts) paths.
+ * restore (session-restore.ts) and live resume (reconnect.ts) paths. The record
+ * is authoritative: a Workspace that returns to a window it left can find that
+ * window's own entry for the Surface still set.
  */
 export function restoreBrowserSurfaceTodo(pane: Pick<PersistedPane, 'id' | 'surfaceType' | 'alert'>): void {
-  if (pane.surfaceType === 'browser' && pane.alert?.todo === true) {
-    setLocalSurfaceTodo(pane.id, true);
-  }
+  if (pane.surfaceType === 'browser') setLocalSurfaceTodo(pane.id, pane.alert?.todo === true);
 }
 
 function handleAlertState({ id, ...state }: AlertStateDetail): void {

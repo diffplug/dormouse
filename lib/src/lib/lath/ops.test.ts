@@ -410,6 +410,19 @@ describe('restore', () => {
     expect(rects(out.tree, big)).toEqual(rects(original, big));
   });
 
+  it('restores exact at its own weight beside a split sibling when another child of the parent changed', () => {
+    const original = tree(mk('row', [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5], [leaf('a'), 0.25], [leaf('d'), 0.25]));
+    const removed = remove(original, 'a');
+    const changed = split(removed.tree, 'd', 'bottom', 'e').tree; // the parent's fingerprint now misses
+
+    const out = restore(changed, removed.token!);
+
+    expect(out.tier).toBe('exact');
+    const want = rects(original, big);
+    const got = rects(out.tree, big);
+    for (const id of ['a', 'b', 'c']) expect(got[id]).toEqual(want[id]);
+  });
+
   it('restores exact through a fingerprinted ancestor when the sibling leaf is nested', () => {
     const original = tree(mk('row', [leaf('a'), 0.25], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5], [leaf('d'), 0.25]));
     const removed = remove(original, 'a');

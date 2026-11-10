@@ -428,7 +428,7 @@ describe('saveSession', () => {
       });
       platform.getCwds = vi.fn(async () => ({}));
 
-      await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, undefined, { probeCwd: false });
+      await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, { probeCwd: false });
 
       expect(platform.getCwds).not.toHaveBeenCalled();
       expect(platform.getCwd).not.toHaveBeenCalled();

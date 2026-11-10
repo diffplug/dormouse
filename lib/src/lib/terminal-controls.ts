@@ -32,7 +32,9 @@ export const STRING_CONTROL_INTRODUCER_SCAN = new RegExp(
   STRING_CONTROL_INTRODUCER.source,
   'g',
 );
-// "Terminated" here tracks what the renderer honours rather than ECMA-48 alone.
+// "Terminated" here follows the renderer on these terminators rather than
+// ECMA-48 alone; xterm.js also ends a string at any other C1 control, which
+// these scans do not.
 // BEL ends an OSC but is payload inside DCS/SOS/PM/APC, so the two kinds scan
 // for different sets; CAN, SUB and the C1 ST end either, and so does a bare ESC
 // — whose next byte decides between an ST terminator and a cancel.

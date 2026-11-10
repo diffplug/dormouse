@@ -3,7 +3,7 @@
  * The composed behavior — real Walls, real Surfaces — is in
  * `WorkspaceWindow.test.tsx`; this pins what the verb refuses.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import {
   closeWorkspaceWithSurfaces,
   enterWorkspace,
@@ -18,6 +18,8 @@ import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../../lib/labs-settings';
 import { getPendingKills } from '../../lib/pending-kills';
+import * as helperTerminal from '../../lib/helper-terminal';
+import type { HelperTerminal } from '../../lib/helper-terminal';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
@@ -191,6 +193,30 @@ describe('requestWorkspaceClose', () => {
     expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('workspace:2');
     expect(ids()).toEqual([first, 'workspace:2']);
   });
+
+  it('raises nothing when a newer question arrives while it probes helper work', async () => {
+    const fake = new FakePtyAdapter();
+    Object.assign(fake, { offersLabs: true });
+    setPlatform(fake);
+    setDelayedKillSetting(true);
+    onTestFinished(() => _resetLabsSettingsForTesting());
+    const [first] = ids();
+    createWorkspace({ id: 'workspace:2' });
+    handleFor('workspace:2', { needsCloseConfirmation: () => true, surfaceIds: () => ['surface:a'] });
+    vi.spyOn(helperTerminal, 'getHelper').mockReturnValue({ id: 'surface:helper', parentId: 'surface:a' } as HelperTerminal);
+    let finishProbe!: (busy: boolean) => void;
+    vi.spyOn(helperTerminal, 'helperHasWork').mockReturnValue(new Promise((resolve) => { finishProbe = resolve; }));
+    requestWorkspaceClose('workspace:2');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(helperTerminal.helperHasWork).toHaveBeenCalled();
+
+    const answer = vi.fn();
+    requestConfirmation({ id: first, char: 'x', answer });
+    finishProbe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe(first);
+    expect(answer).not.toHaveBeenCalled();
+  });
 });
 
 it('preserves another Workspace’s rename and close confirmation when closing a sibling', async () => {
@@ -288,6 +314,7 @@ describe('a pinned Workspace', () => {
     expect(ids()).toEqual([first, 'workspace:2']);
     expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
   });
+
 });
 
 describe('enterWorkspace', () => {
