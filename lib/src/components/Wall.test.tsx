@@ -44,6 +44,7 @@ import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
 import { installSurfaceIdPool, resetSurfaceIdPool } from '../lib/surface-ids';
+import { cfg } from '../cfg';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -262,6 +263,22 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('leaves the source terminal unfocused when a context opened in command mode closes', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true })); });
+      const menu = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+      expect(menu).not.toBeNull();
+      await act(async () => { menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); });
+      expect(menu.hasAttribute('inert') || !menu.isConnected).toBe(true);
+      expect(focus).not.toHaveBeenCalledWith('surface:a', true);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
   it('cancels an ensure restart before a late prompt can relaunch its command', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
@@ -405,8 +422,7 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(leafCount()).toBe(1);
 
-    // 4. A save (flushed via pagehide) writes the Lath layout only (no legacy
-    //    dockview `layout` key).
+    // 4. A save (flushed via pagehide) writes the Lath layout.
     await act(async () => {
       window.dispatchEvent(new Event('pagehide'));
     });
@@ -420,6 +436,27 @@ describe('Wall on the Lath engine', () => {
     expect(saved!.lathLayout!.version).toBe(1);
     // The surviving pane is present in the Lath layout's leaf meta.
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('surface:a');
+  });
+
+  it('saves on pagehide without waiting on a CWD probe the unloading page never hears back from', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const saveState = vi.spyOn(fake, 'saveState');
+    vi.spyOn(fake, 'getCwd').mockReturnValue(new Promise(() => {}));
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    expect(saveState).toHaveBeenCalledWith(expect.objectContaining({ panes: [expect.objectContaining({ id: 'surface:a' })] }));
+  });
+
+  it('saves on pagehide while a probing save is still waiting on its CWD answer', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+    await flush();
+    const saveState = vi.spyOn(fake, 'saveState');
+    vi.spyOn(fake, 'getCwd').mockReturnValue(new Promise(() => {}));
+    // A Session exiting flushes a save, which then waits on the probe forever.
+    await act(async () => fake.killPty('surface:b'));
+    expect(saveState).not.toHaveBeenCalled();
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    expect(saveState).toHaveBeenCalledWith(expect.objectContaining({ panes: expect.arrayContaining([expect.objectContaining({ id: 'surface:a' })]) }));
   });
 
   it.each(['split', 'close', 'minimize', 'no change'] as const)('validates the transfer snapshot after %s during its CWD probe', async (change) => {
@@ -3650,6 +3687,26 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('finishes a kill when the dying pane is minimized during its fade', async () => {
+    const originalMatchMedia = globalThis.matchMedia;
+    globalThis.matchMedia = ((query: string) => ({ ...originalMatchMedia(query), matches: false })) as typeof matchMedia;
+    const disposeSpy = vi.spyOn(terminalRegistry, 'disposeSession');
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+      await flush();
+      await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:a"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+      await dispatchKill('surface:a');
+      expect(disposeSpy).not.toHaveBeenCalledWith('surface:a');
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true, cancelable: true })); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+      expect(container.querySelector('[data-door-id="surface:a"]')).toBeNull();
+      expect(disposeSpy).toHaveBeenCalledWith('surface:a');
+    } finally {
+      disposeSpy.mockRestore();
+      globalThis.matchMedia = originalMatchMedia;
+    }
+  });
+
   // The focus decision the Wall makes for a pane: `data-focused` on the mocked
   // TerminalPane mirrors `mode === 'passthrough' && selected`.
   const focusOf = (id: string): string | null =>
@@ -3686,6 +3743,27 @@ describe('Wall on the Lath engine', () => {
     await flush();
     return response;
   }
+
+  it('reopens command mode when the pane under rename is killed without a blur', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+    await flush();
+    const key = (name: string) => act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })); });
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:a"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    await key(',');
+    const input = container.querySelector<HTMLInputElement>('[data-pane-header-for="surface:a"] input');
+    expect(input).not.toBeNull();
+    // WebKit removes a focused node without dispatching a blur.
+    const swallow = (e: FocusEvent) => e.stopPropagation();
+    window.addEventListener('focusout', swallow, true);
+    try {
+      expect((await dispatchKill('surface:a'))?.ok).toBe(true);
+      await waitUntil(() => container.querySelector('[data-lath-leaf="surface:a"]') === null);
+      await key('m');
+      expect(container.querySelector('[data-door-id="surface:b"]')).not.toBeNull();
+    } finally {
+      window.removeEventListener('focusout', swallow, true);
+    }
+  });
 
   async function dispatchAgentBrowser(params: Record<string, unknown>): Promise<string> {
     const response = await dispatchAgentBrowserResponse(params);
@@ -4006,6 +4084,49 @@ describe('Wall on the Lath engine', () => {
     expect(container.querySelector('[data-lath-leaf="surface:a"]')).not.toBeNull();
   });
 
+  it.each(['reject', 'accept'] as const)('keeps a Kill prompt raised while the previous one exits (%s)', async (answer) => {
+    const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const pinned = cfg.killConfirm.char;
+    cfg.killConfirm.char = 'q';
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b', 'surface:c']} initialMode="command" />));
+      await flush();
+      const kill = (id: string) => act(async () => {
+        container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${id}"] button[aria-label="Kill"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await kill('surface:a');
+      expect(confirmKillOverlay()).not.toBeNull();
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: answer === 'accept' ? 'q' : '1', bubbles: true, cancelable: true })); });
+      await kill('surface:b');
+      await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+      expect(confirmKillOverlay()).not.toBeNull();
+      expect(container.querySelector('[data-lath-leaf="surface:b"]')).not.toBeNull();
+    } finally {
+      cfg.killConfirm.char = pinned;
+      untouched.mockRestore();
+    }
+  });
+
+  it('cancels a Kill prompt when a Door click enters another Surface', async () => {
+    const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+      await flush();
+      await act(async () => { container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:b"] button[aria-label="Minimize"]')!.click(); });
+      await flush();
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(confirmKillOverlay()).not.toBeNull();
+      await act(async () => { container.querySelector<HTMLElement>('[data-door-id="surface:b"] button')!.click(); });
+      await flush();
+      expect(container.querySelector('[data-lath-leaf="surface:b"]')).not.toBeNull();
+      expect(confirmKillOverlay()).toBeNull();
+    } finally {
+      untouched.mockRestore();
+    }
+  });
+
   /** pane-a is an untouched shell owning a helper whose own entry is `helperEntry`. */
   function untouchedShellWithHelper(helperEntry: Partial<TerminalEntry>): () => void {
     registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
@@ -4056,7 +4177,7 @@ describe('Wall on the Lath engine', () => {
     await flush();
   }
 
-  it('reattaches an untouched Door only far enough to close it, with no overlay', async () => {
+  it('closes an untouched Door in place, with no overlay', async () => {
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     await killSelectedDoor();
     expect(container.querySelector('[data-door-id="surface:a"]')).toBeNull();

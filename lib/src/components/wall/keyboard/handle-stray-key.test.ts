@@ -34,8 +34,8 @@ function makeCtx(workspaceId: string | undefined) {
     selectDoor: vi.fn(),
     selectWorkspace: vi.fn(),
     returnToPane: vi.fn(),
-    enterTerminalMode: vi.fn(),
-    exitTerminalMode: vi.fn(),
+    enterPassthrough: vi.fn(),
+    enterCommandMode: vi.fn(),
     minimizePane: vi.fn(),
     openTerminalContext: vi.fn(),
     requestKill: vi.fn(),
@@ -92,7 +92,7 @@ describe('stray keys in command mode', () => {
     const events = [...'ls -la'].map(key => press(key));
     expect(ctx.raiseStrayKey).toHaveBeenCalledExactlyOnceWith('l');
     expect(wallActions.onSplitV).not.toHaveBeenCalled();
-    expect(ctx.enterTerminalMode).not.toHaveBeenCalled();
+    expect(ctx.enterPassthrough).not.toHaveBeenCalled();
     expect(events.every(event => event.defaultPrevented)).toBe(true);
   });
 
@@ -101,7 +101,7 @@ describe('stray keys in command mode', () => {
     press('l');
     expect(press('Escape').defaultPrevented).toBe(true);
     expect(strayKeyRef.current).toBeNull();
-    expect(ctx.enterTerminalMode).not.toHaveBeenCalled();
+    expect(ctx.enterPassthrough).not.toHaveBeenCalled();
     press('z');
     expect(wallActions.onZoom).toHaveBeenCalledWith('p1');
   });
@@ -111,7 +111,7 @@ describe('stray keys in command mode', () => {
     press('l');
     press('Enter');
     expect(strayKeyRef.current).toBeNull();
-    expect(ctx.enterTerminalMode).toHaveBeenCalledWith('p1');
+    expect(ctx.enterPassthrough).toHaveBeenCalledWith('p1');
   });
 
   it('leaves host chords and bare modifiers to the host while the prompt shows', async () => {

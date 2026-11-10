@@ -97,7 +97,7 @@ function render(ui: ReactElement = <CopyEditor terminalId="term-1" />): void {
 /** A finalized drag over rows `r0`..`r1`, opened as mouse-up opens it. */
 function drag(r0: number, c0: number, r1: number, c1: number): void {
   act(() => {
-    beginDrag('term-1', { row: r0, col: c0, altKey: false, startedInScrollback: false });
+    beginDrag('term-1', { row: r0, col: c0, altKey: false });
     setSelection('term-1', { ...getMouseSelectionState('term-1').selection!, endRow: r1, endCol: c1 });
     endDrag('term-1');
     openCopyEditor('term-1', terminal);
@@ -143,7 +143,7 @@ afterEach(() => {
 
 describe('CopyEditor: opening and placement', () => {
   it('stays closed over a selection nobody opened it for', () => {
-    act(() => setSelection('term-1', { startRow: 0, startCol: 0, endRow: 1, endCol: 5, shape: 'linewise', dragging: false, startedInScrollback: false }));
+    act(() => setSelection('term-1', { startRow: 0, startCol: 0, endRow: 1, endCol: 5, shape: 'linewise', dragging: false }));
     render();
     expect(editor()).toBeNull();
   });
@@ -553,7 +553,7 @@ describe('CopyEditor: preview and controls', () => {
 describe('CopyEditor: the program’s own copy', () => {
   it('takes the width an offer adds on the next tick', () => {
     act(() => {
-      setSelection('term-1', { startRow: 2, startCol: 25, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+      setSelection('term-1', { startRow: 2, startCol: 25, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, owner: 'program' });
       openCopyEditor('term-1', terminal);
     });
     render();
@@ -571,7 +571,7 @@ describe('CopyEditor: the program’s own copy', () => {
 
   it('offers it last as "From <program>" and previews its text, scope set aside', () => {
     act(() => {
-      setSelection('term-1', { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+      setSelection('term-1', { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, owner: 'program' });
       offerProgramCopy('term-1', '**The flake** comes from a race');
       openCopyEditor('term-1', terminal);
     });

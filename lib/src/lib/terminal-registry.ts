@@ -60,7 +60,6 @@ export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 
 export {
   getRunningCommandWatchRule,
-  getWatchedCommands,
   getWatchedCommandsSnapshot,
   setCommandWatched,
   subscribeToWatchedCommands,

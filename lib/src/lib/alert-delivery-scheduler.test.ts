@@ -201,6 +201,7 @@ describe('published Sessions', () => {
     // The realm is gone, and never published again; a Session reusing the id
     // is not the one it described.
     ring();
+    manager.restart(OTHER);
     ring(OTHER);
     vi.advanceTimersByTime(PUSH_MS);
     expect(delivered.filter((delivery) => delivery.sink === 'push')).toEqual([{ sink: 'push', id: OTHER, title: 'terminal' }]);

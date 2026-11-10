@@ -440,6 +440,13 @@ describe('copy-text terminalCopyBuffer', () => {
     expect(text(buf, span(0, 0, 0, 2), 'exact')).toBe('中x');
   });
 
+  it('keeps the continuation cell of a wide character that ends its row', () => {
+    const line = bufferLine([['a', 1], [' ', 1], ['中', 2], [' ', 1], ['\u3000', 2]]);
+    const terminal = { cols: 8, buffer: { active: { length: 1, getLine: () => line } } } as unknown as Terminal;
+    // The trailing blanks go, an ideographic space's continuation with it.
+    expect(terminalCopyBuffer(terminal).row(0).cells).toEqual(['a', ' ', '中', '']);
+  });
+
   it('drops the blank a wide character leaves when it wraps', () => {
     const rows = [bufferLine([['a', 1], ['', 1]]), { ...bufferLine([['中', 2]]), isWrapped: true }];
     const terminal = { cols: 2, buffer: { active: { length: 2, getLine: (r: number) => rows[r] } } } as unknown as Terminal;

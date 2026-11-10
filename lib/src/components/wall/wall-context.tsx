@@ -50,7 +50,6 @@ export const DoorElementsContext = createContext<PaneElementsState>({
 export interface WallActions {
   onKill: (id: string) => void;
   onMinimize: (id: string) => void;
-  onToggleTodo: (id: string) => void;
   onSplitH: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onZoom: (id: string) => void;
@@ -98,7 +97,6 @@ export interface WallActions {
 export const WallActionsContext = createContext<WallActions>({
   onKill: () => {},
   onMinimize: () => {},
-  onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},
   onZoom: () => {},

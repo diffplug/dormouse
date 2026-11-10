@@ -7,20 +7,6 @@ import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouc
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { isToolReaped } from './tool-reap-store';
 
-/**
- * Where a save reads its previous record from and where it writes the new one.
- * A Workspace supplies both, so its record is compared against and published
- * beside its own Workspace's rather than the Window's active one
- * (`docs/specs/transport.md` → "Persisted session"). No sink at all is the
- * platform slot; a half-supplied one would silently mix the two.
- */
-export interface SaveSink {
-  /** This Workspace's last persisted record; the previous-pane map reads a dead
-   *  PTY's retained cwd out of it. */
-  previous: () => PersistedSession | null;
-  publish: (session: PersistedSession) => void;
-}
-
 function previousPaneMap(previous: PersistedSession | null): Map<string, PersistedPane> {
   if (!previous) return new Map();
   return new Map(previous.panes.map((pane) => [pane.id, pane]));
@@ -167,19 +153,18 @@ export function assemblePersistedSession(
 
 // Every input read here needs a dirty trigger in use-session-persistence.ts;
 // the unconditional flushes + store-level compare only bound the staleness.
+/** Save into the platform's own slot. A Workspace publishes through its
+ *  aggregator record instead, behind the ownership-revision fence. */
 export async function saveSession(
   platform: PlatformAdapter,
   panes: SavePaneInput[],
   doors: PersistedDoor[] = [],
   lathLayout?: unknown,
-  /** Defaults to the platform's own slot; a Workspace substitutes its own. */
-  sink?: SaveSink,
   options: SaveOptions = {},
 ): Promise<void> {
-  const previous = sink ? sink.previous() : readPersistedSession(platform.getState());
+  const previous = readPersistedSession(platform.getState());
   const session = await buildPersistedSession(platform, panes, doors, lathLayout, previous, options);
-  if (sink) sink.publish(session);
-  else platform.saveState(session);
+  platform.saveState(session);
 }
 
 /** The command a tool Surface was given, or null when it has none yet — what

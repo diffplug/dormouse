@@ -175,6 +175,14 @@ function broadcastToWebviews(message: ExtensionMessage): void {
   for (const router of activeRouters) router.send(message);
 }
 
+/**
+ * Keep every webview's default-shell slot current, the view's and each editor
+ * panel's alike: a panel otherwise learns the shell only at its next init.
+ */
+export function broadcastSelectedShell(selected: { shell?: string; args?: string[] } | null): void {
+  broadcastToWebviews({ type: 'dormouse:selectedShell', shell: selected?.shell, args: selected?.args });
+}
+
 const activeRouters = new Set<ActiveRouter>();
 let nextFlushRequestId = 0;
 /** Tags each router's engagement viewer in the shared alert manager. */
@@ -193,15 +201,12 @@ const alertManager = alertHost.manager;
  * active, the window is one more viewer — with no focus, so it engages no
  * Session — which holds back a push: the user may be working outside the
  * Dormouse webview (`docs/specs/alert.md` -> Alarm
- * settings). `WindowState.active` is finalized in 1.89, below the supported
- * 1.92, but `@types/vscode` stays at 1.85, so it is read defensively; focus
- * alone must not count, or a focused window left behind would silence the
- * walked-away channel.
+ * settings). Focus alone must not count, or a focused window left behind
+ * would silence the walked-away channel.
  */
 const WINDOW_VIEWER = 'vscode-window';
 export function reportWindowPresence(state: vscode.WindowState): void {
-  const active = (state as { active?: unknown }).active === true;
-  alertManager.setViewer(WINDOW_VIEWER, { present: state.focused && active, focusId: null });
+  alertManager.setViewer(WINDOW_VIEWER, { present: state.focused && state.active, focusId: null });
 }
 /** Every PTY write, as the alerts must see it. */
 const alertedPtys = alertedPty(alertManager, ptyManager);
@@ -352,7 +357,6 @@ export async function flushAllSessions(timeoutMs = 1000): Promise<void> {
 export function attachRouter(
   channel: WebviewChannel,
   options?: {
-    reconnect?: boolean;
     killOnDispose?: boolean;
     onSaveState?: (state: unknown) => void | PromiseLike<void>;
     getSelectedShell?: () => { shell?: string; args?: string[] } | null;
@@ -366,7 +370,6 @@ export function attachRouter(
     shown?: { current(): boolean; onDidChange: vscode.Event<unknown> };
   },
 ): vscode.Disposable {
-  const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
   // Only a router whose PTYs outlive it (the WebviewView's) leaves live PTYs
   // unowned, so only such a router claims them back at `dormouse:init`; a
@@ -588,6 +591,7 @@ export function attachRouter(
         // onto the new PTY's first bytes.
         alertHost.respawn(msg.id, alert);
         if (msg.options?.helper) alertManager.setHelper(msg.id, true);
+        processedPtyStreams.endGeneration(msg.id);
         ownerPtyStreams.delete(msg.id);
         if (!spawnOptions.cwd) {
           spawnOptions.cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -613,6 +617,11 @@ export function attachRouter(
       case 'pty:getCwd':
         ptyManager.getCwd(msg.id).then((cwd) => {
           post({ type: 'pty:cwd', id: msg.id, cwd, requestId: msg.requestId } satisfies ExtensionMessage);
+        });
+        break;
+      case 'pty:getCwds':
+        ptyManager.getCwds(msg.ids).then((cwds) => {
+          post({ type: 'pty:cwds', cwds, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
       case 'pty:getOpenPorts':
@@ -783,11 +792,11 @@ export function attachRouter(
           } satisfies ExtensionMessage);
         }
 
-        if (!reconnect) {
-          // Fresh instance — no existing PTYs to restore
-          post({ type: 'pty:list', ptys: [] } satisfies ExtensionMessage);
-          break;
-        }
+        // Every init lists what this router owns, a panel's too: a panel's
+        // document is reloaded under the same router when VS Code moves it to
+        // another window, and an empty list would have it cold-restore over
+        // its own live PTYs. A brand-new webview owns nothing yet, so it is
+        // listed none.
         // Snapshot IDs owned before claiming so we can choose the right data source below
         const previouslyOwned = new Set(ownedPtyIds);
 

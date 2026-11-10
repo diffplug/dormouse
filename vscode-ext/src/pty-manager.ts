@@ -186,12 +186,12 @@ const dorControlCancelListeners = new Set<(cancel: DorControlCancel) => void>();
 const dorControlToken = randomBytes(24).toString('hex');
 
 // Always run the pty host under the editor's own Node — Electron's bundled
-// runtime (process.execPath, re-execed as Node via ELECTRON_RUN_AS_NODE, which
-// is inherited through `env` at the fork site). VSCode's integrated terminal
-// drives node-pty against Electron the same way, and node-pty ships N-API
-// prebuilds that load across runtimes, so there's no need to hunt for a
-// user-installed system Node — which was unreliable and, on Windows, caused
-// multi-second fork stalls.
+// runtime (process.execPath, run as Node via ELECTRON_RUN_AS_NODE, which
+// Electron's `child_process.fork` sets in the child's environment). VSCode's
+// integrated terminal drives node-pty against Electron the same way, and
+// node-pty ships N-API prebuilds that load across runtimes, so there's no need
+// to hunt for a user-installed system Node — which was unreliable and, on
+// Windows, caused multi-second fork stalls.
 function resolveNodeBinary(): string {
   return process.execPath;
 }
@@ -392,23 +392,35 @@ export interface ShellEntry {
 
 let shellsCache: Promise<ShellEntry[]> | null = null;
 
-/** One correlated round trip to the PTY host child; rejects on timeout. */
+/**
+ * One correlated round trip to the PTY host child; rejects on timeout, or as
+ * soon as the child exits, since an exited child can never answer.
+ */
 function requestChild<T>(message: Record<string, unknown>, matches: (msg: any) => boolean, timeoutMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
     // Fork the child before attaching the listener: on the cold path `child`
     // is null until then and the handler would never be registered.
-    ensureChild(extensionPath_);
+    const target = ensureChild(extensionPath_);
+    const stopListening = () => {
+      clearTimeout(timeout);
+      target.off('message', handler);
+      target.off('exit', onExit);
+    };
     const timeout = setTimeout(() => {
-      child?.off('message', handler);
+      stopListening();
       reject(new Error('PTY host request timed out'));
     }, timeoutMs);
     const handler = (msg: any) => {
       if (!matches(msg)) return;
-      clearTimeout(timeout);
-      child?.off('message', handler);
+      stopListening();
       resolve(msg);
     };
-    child?.on('message', handler);
+    const onExit = () => {
+      stopListening();
+      reject(new Error('PTY host exited'));
+    };
+    target.on('message', handler);
+    target.on('exit', onExit);
     sendToChild(message);
   });
 }
@@ -443,6 +455,17 @@ export function terminalContext(request: TerminalContextRequest): Promise<Termin
 export function getCwd(id: string): Promise<string | null> {
   return requestChild<{ cwd: string | null }>({ type: 'getCwd', id }, (msg) => msg.type === 'cwd' && msg.id === id, 1000)
     .then((msg) => msg.cwd, () => null);
+}
+
+let cwdsSequence = 0;
+/**
+ * Every id's cwd from one pty-host scan, so a save of N panes spawns one
+ * process scan rather than N. Bounded like standalone's `pty_get_cwds`.
+ */
+export function getCwds(ids: string[]): Promise<Record<string, string | null>> {
+  const requestId = `cwds-${++cwdsSequence}`;
+  return requestChild<{ cwds?: Record<string, string | null> }>({ type: 'getCwds', ids, requestId }, (msg) => msg.type === 'cwds' && msg.requestId === requestId, 2000)
+    .then((msg) => msg.cwds || {}, () => ({}));
 }
 
 export function getOpenPorts(id: string): Promise<OpenPort[]> {

@@ -20,7 +20,7 @@ export const cfg = {
     busyConfirmGap: 500,
     /** ms — silence after BUSY before suspecting completion. */
     mightNeedAttention: 2_000,
-    /** ms — additional silence before confirming NEEDS_ATTENTION. */
+    /** ms — further silence in MIGHT_NEED_ATTENTION before a settle. */
     needsAttentionConfirm: 3_000,
     /** ms — after input reaches the program, how long its output may still
      * begin a busy run. Output that begins later — a repaint on focus or

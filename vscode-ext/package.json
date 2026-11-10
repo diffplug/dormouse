@@ -44,10 +44,7 @@
       {
         "command": "dormouse.focus",
         "title": "Dormouse: Focus",
-        "icon": {
-          "light": "icon-tiny-light.png",
-          "dark": "icon-tiny-dark.png"
-        }
+        "icon": "icon-tiny.png"
       },
       {
         "command": "dormouse.open",

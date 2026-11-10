@@ -1200,6 +1200,27 @@ describe('burrow service glue', () => {
     expect(await mod.burrowAllowedNetworks()).toEqual([]);
   });
 
+  // docs/specs/vscode.md -> "Managed voice": a window with no service asks the
+  // stored policy before every speak, a failed read counting as Nothing.
+  it('lets managed voice out only as far as the stored policy in a window with no service', async () => {
+    const mod = await freshBurrow();
+    mod.configureBurrow(fakeDeps().deps());
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
+    await tick();
+    expect(await mod.burrowNetworkAllowed()).toBe(false);
+    store.global.set(NETWORK_POLICY_KEY, LOCAL_ON);
+    expect(await mod.burrowNetworkAllowed()).toBe(true);
+    store.global.set(NETWORK_POLICY_KEY, nothingPolicy());
+    expect(await mod.burrowNetworkAllowed()).toBe(false);
+    // A store that cannot be read, as when VS Code's storage is shutting down.
+    store.global.set(NETWORK_POLICY_KEY, LOCAL_ON);
+    (context as { globalState: { get(key: string): unknown } }).globalState.get = () => {
+      throw new Error('storage is closed');
+    };
+    expect(await mod.burrowNetworkAllowed()).toBe(false);
+  });
+
   it('contends when another window enrolls, without a reload', async () => {
     // This window was un-enrolled at activation, so it never contended and has
     // no socket and no broker to hear from. The shared `SecretStorage` is the

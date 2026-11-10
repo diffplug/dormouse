@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { registry } from '../../lib/terminal-store';
 import { messageOf } from '../../lib/errors';
 import { wallHandleOwning } from './wall-handles';
@@ -56,7 +56,10 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     setHelperVisible(id, true);
     return () => setHelperVisible(id, false);
   }, [id, closing, tool, workspaceActive]);
-  const onClose = useCallback(() => { context.close(); if (!tool) focusSession(id, true); }, [context, id, tool]);
+  // No focus call: a passthrough source regains xterm focus through its own
+  // `isFocused` once the context lets go, and in command mode the Session
+  // must not hold focus, or unbound keys would reach its PTY.
+  const onClose = context.close;
   const copy = async (value: string) => { if (!await writeTextToClipboard(value)) throw new Error('Could not copy to clipboard'); };
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
   const source = wallHandleOwning(id);

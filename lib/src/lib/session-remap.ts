@@ -1,4 +1,4 @@
-import type { LathNode } from './lath/model';
+import { renameFingerprint, type LathNode } from './lath/model';
 import { isLathPersistedLayout } from './lath/persistence';
 import { sessionSurfaceIds, type PersistedSession } from './session-types';
 import { isRecord } from './is-record';
@@ -29,6 +29,9 @@ function remapSurfaceIds(session: PersistedSession, mint: () => string): Persist
   // An id outside the record (a token's sibling that has since closed) maps to
   // nothing live either way, so it is left as written.
   const rename = (id: unknown): unknown => typeof id === 'string' ? ids.get(id) ?? id : id;
+  // A token's fingerprints embed leaf ids too; restore's exact tier compares
+  // them against the renamed tree.
+  const renameFp = (fp: string): string => renameFingerprint(fp, id => ids.get(id) ?? id);
   const renameNode = (node: LathNode): LathNode => node.kind === 'leaf'
     ? { ...node, id: rename(node.id) as string }
     : { ...node, children: node.children.map(child => ({ ...child, node: renameNode(child.node) })) };
@@ -45,6 +48,8 @@ function remapSurfaceIds(session: PersistedSession, mint: () => string): Persist
           leafId: rename(door.token.leafId),
           siblingId: rename(door.token.siblingId),
           ...(Array.isArray(door.token.siblingLeafIds) ? { siblingLeafIds: door.token.siblingLeafIds.map(rename) } : {}),
+          ...(typeof door.token.fingerprint === 'string' ? { fingerprint: renameFp(door.token.fingerprint) } : {}),
+          ...(typeof door.token.siblingFingerprint === 'string' ? { siblingFingerprint: renameFp(door.token.siblingFingerprint) } : {}),
         } } : {}),
       })),
     } : {}),

@@ -51,15 +51,15 @@ export function handlePaneNavigation(
   }
 
   const hist = navHistory.current;
-  if (hist && ARROW_OPPOSITES[dir] === hist.direction && ctx.nav.hasPane(hist.fromId)) {
-    navHistory.current = { direction: dir, fromId: sid };
+  if (hist && hist.at === sid && ARROW_OPPOSITES[dir] === hist.direction && ctx.nav.hasPane(hist.fromId)) {
+    navHistory.current = { direction: dir, fromId: sid, at: hist.fromId };
     ctx.selectPane(hist.fromId);
     return true;
   }
 
   const targetId = ctx.nav.findInDirection(sid, dir);
   if (targetId) {
-    navHistory.current = { direction: dir, fromId: sid };
+    navHistory.current = { direction: dir, fromId: sid, at: targetId };
     ctx.selectPane(targetId);
   } else if (dir === 'ArrowDown' && currentDoors.length > 0) {
     navHistory.current = null;

@@ -63,6 +63,12 @@ describe('terminal CWD normalization', () => {
     expect(parse('  relative path  ')?.path).toBe('  relative path  ');
   });
 
+  it('drops one pair of quotes around an OSC 9;9 path', () => {
+    expect(cwdFromOsc9_9('"C:\\repo"', 100)).toMatchObject({ path: 'C:\\repo', pathKind: 'windows' });
+    expect(cwdFromOsc9_9('""C:\\repo""', 100)?.path).toBe('"C:\\repo"');
+    expect(cwdFromOsc9_9('"', 100)?.path).toBe('"');
+  });
+
   it('marks OSC 9;9 Windows paths and leaves other paths unknown', () => {
     expect(cwdFromOsc9_9('C:\\repo', 100)?.pathKind).toBe('windows');
     expect(cwdFromOsc9_9('\\\\server\\share\\repo', 100)).toMatchObject({
@@ -127,7 +133,7 @@ describe('terminal CWD normalization', () => {
     const otherShare = cwdFromOsc9_9('\\\\server\\other\\repo\\app', 100)!;
     const labels = shortestUniqueCwdLabels([share, otherShare]);
 
-    expect(cwdDisplay(share, { maxSegments: 2 })).toBe('\\\\server\\share\\repo\\app');
+    expect(cwdDisplay(share)).toBe('\\\\server\\share\\repo\\app');
     expect(labels.get(cwdIdentity(share))).toBe('\\\\server\\share\\repo\\app');
     expect(labels.get(cwdIdentity(otherShare))).toBe('\\\\server\\other\\repo\\app');
   });

@@ -22,7 +22,6 @@ const SESSION_ID = 'surface:1';
 const noopActions: WallActions = {
   onKill: () => {},
   onMinimize: () => {},
-  onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},
   onZoom: () => {},

@@ -32,7 +32,7 @@ const common = {
   // They are not installed and must not be — a `.node` addon cannot be bundled
   // and would have to be shipped per platform — so they stay as runtime
   // `require`s that `ws` already catches and falls back from.
-  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate', ...NATIVE_DIRECT.flatMap((name) => [name, `${name}/*`])],
+  external: ['vscode', 'bufferutil', 'utf-8-validate', ...NATIVE_DIRECT.flatMap((name) => [name, `${name}/*`])],
   alias: workspaceSourceAliases(),
 };
 

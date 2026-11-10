@@ -106,8 +106,13 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
     setEditingUrl(false);
     if (restoreFocus && visibleRef.current) overflowRef.current?.focus();
   }, []);
-  const tier = useHeaderTier(headerRef, browserHeaderTier, { onResize: () => closeMenu(false) });
+  const tier = useHeaderTier(headerRef, browserHeaderTier, { onResize: () => setMenuOpen(false) });
   const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tiny' ? null : tier;
+  // The URL editor lives inline or in the popover; with neither mounted it
+  // ends, or `editingUrl` would hold its keyboard lease with no editor.
+  useEffect(() => {
+    if (inline === null && !menuOpen) setEditingUrl(false);
+  }, [inline, menuOpen]);
   // Zoom stays in the header at every width, so only its two companions move;
   // a focused one hands focus to the trigger as it goes.
   const inlineMinimizeKill = tier !== 'tiny';

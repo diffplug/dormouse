@@ -177,8 +177,10 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     // Running helper work refuses a close outright; it is no pending kill.
-    if (isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds())) {
-      if (isCurrent() && !closeInFlight) pendWorkspace(id);
+    const pend = isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds());
+    if (!isCurrent() || workspaceCloseRefusal(id)) return;
+    if (pend) {
+      pendWorkspace(id);
       return;
     }
     // An immediate close reveals the Workspace itself.

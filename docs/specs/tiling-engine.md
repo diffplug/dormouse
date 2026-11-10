@@ -42,7 +42,7 @@ Source of truth: `lib/src/lib/lath/layout.ts`.
 
 ## Operations
 
-All ops are pure and synchronous and return `{ tree, ok }` plus op-specific fields. **On `ok: false` the returned `tree` is the input object**, on `ok: true` always a fresh one — so identity comparison detects a rejected op, and tree identity never signals "no visual change."
+All ops are pure and synchronous and return `{ tree, ok }` plus op-specific fields. **On `ok: false` the returned `tree` is the input object**, on `ok: true` a fresh one, except a `move` that changes nothing (below) — so identity comparison detects a rejected op.
 
 | Operation | Behavior |
 |---|---|

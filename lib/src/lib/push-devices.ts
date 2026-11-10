@@ -8,9 +8,10 @@
  * per-store relay cost `docs/specs/transport.md` warns about.
  *
  * It lives in `lib/src/lib/` rather than beside the Burrow because the
- * dialog is in every bundle while the Burrow is lazily loaded in standalone only.
- * The Burrow writes; the dialog reads; a build without a Burrow leaves it at
- * `no-burrow` forever, which is exactly what the UI should say.
+ * dialog is in every bundle while the Burrow's webview glue is lazily loaded,
+ * and only where the host enables it. That glue writes; the dialog reads; a
+ * build without it leaves it at `no-burrow` forever, which is exactly what the
+ * UI should say.
  */
 
 export interface PushDevice {
