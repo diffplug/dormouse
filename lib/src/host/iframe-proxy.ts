@@ -502,7 +502,9 @@ async function mintGrant(
   // Sweep after insertion as well, so neither sequential nor concurrent calls
   // leave more than MAX_GRANTS published listeners behind.
   sweepGrants(Date.now());
-  log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin}${leased ? ' (leased)' : ''}`);
+  // The origin only: a path or query can carry a credential (`?token=`), and
+  // the host log is offered for pasting into an issue.
+  log(`[iframe-proxy] ${upstream.origin} → ${grant.proxyOrigin}${leased ? ' (leased)' : ''}`);
   return grant;
 }
 
@@ -938,7 +940,7 @@ function sweepGrants(now: number): void {
     if (!expired && count <= MAX_GRANTS) break;
     count -= 1;
     closeGrant(grant);
-    log(`[iframe-proxy] swept grant for ${grant.upstream.href}`);
+    log(`[iframe-proxy] swept grant for ${grant.upstream.origin}`);
   }
 }
 

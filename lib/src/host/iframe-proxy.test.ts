@@ -385,6 +385,14 @@ describe('iframe proxy — serving', () => {
     }
   });
 
+  it('logs a framed URL\'s origin, never its path or query', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('ok'); });
+    const lines: string[] = [];
+    await frame(`http://127.0.0.1:${port}/lab/secret-path?token=secret`, { ...NO_LOG, log: (line: string) => { lines.push(line); } });
+    expect(lines.some(line => line.includes(`127.0.0.1:${port}`))).toBe(true);
+    expect(lines.filter(line => line.includes('secret'))).toEqual([]);
+  });
+
   it('keeps the upstream content-type, charset included', async () => {
     const body = Buffer.concat([Buffer.from('<html><head><title>'), Buffer.from([0x93, 0xfa, 0x96, 0x7b]), Buffer.from('</title></head><body>x</body></html>')]);
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html; charset=Shift_JIS' }); s.end(body); });
