@@ -15,6 +15,7 @@ import type { EnrollmentOffer } from 'remote-lib-common';
 
 import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
 import type { FrameHostProxy } from '../../lib/src/host/remote/frame-host';
+import type { SurfaceHold } from '../../lib/src/remote/burrow/burrow-surface-provider';
 import { LOCAL_ON } from '../../lib/src/host/remote/test-burrow-link';
 import { levelsFor, nothingPolicy } from '../../lib/src/remote/network-policy';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
@@ -41,7 +42,7 @@ import {
 type BurrowModule = typeof import('../src/burrow');
 
 /** The hold a remote session's attach takes; opaque to every window it crosses. */
-const HOLD = { holder: 'session-a', label: 'iPhone', lease: '1' };
+const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-a' };
 type LinkModule = typeof import('../src/peer-link');
 
 /**
@@ -175,29 +176,32 @@ function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {})
   const announce = (key: string) => {
     for (const watcher of [...watchers]) watcher({ key });
   };
+  /** `context.secrets`, typed, so a test can swap one method for a slower one. */
+  const keychain = {
+    get: async (key: string) => {
+      reads.push(key);
+      return secrets.get(key);
+    },
+    store: async (key: string, value: string) => {
+      secrets.set(key, value);
+      announce(key);
+    },
+    delete: async (key: string) => {
+      secrets.delete(key);
+      announce(key);
+    },
+    onDidChange: (watcher: SecretWatcher) => {
+      watchers.add(watcher);
+      return { dispose: () => void watchers.delete(watcher) };
+    },
+  };
   return {
     store: { secrets, global, announce, watchers, reads },
+    keychain,
     context: {
       globalStorageUri: { fsPath: dir },
       subscriptions: [] as unknown[],
-      secrets: {
-        get: async (key: string) => {
-          reads.push(key);
-          return secrets.get(key);
-        },
-        store: async (key: string, value: string) => {
-          secrets.set(key, value);
-          announce(key);
-        },
-        delete: async (key: string) => {
-          secrets.delete(key);
-          announce(key);
-        },
-        onDidChange: (watcher: SecretWatcher) => {
-          watchers.add(watcher);
-          return { dispose: () => void watchers.delete(watcher) };
-        },
-      },
+      secrets: keychain,
       globalState: {
         get: (key: string) => global.get(key),
         update: (key: string, value: unknown) => {
@@ -222,6 +226,7 @@ function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {})
         },
         keys: () => [...global.keys()],
       },
+      // The slice of `vscode.ExtensionContext` the code under test reads.
     } as never,
   };
 }
@@ -478,16 +483,16 @@ describe('burrow state store', () => {
 
   it('saves the ACL while a keychain write waits, in order with other ACL writes', async () => {
     const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
-    const { context, store } = fakeContext();
+    const { context, store, keychain } = fakeContext();
     const unlocked = Promise.withResolvers<void>();
-    const keychainStore = context.secrets.store;
-    const keychainDelete = context.secrets.delete;
+    const keychainStore = keychain.store;
+    const keychainDelete = keychain.delete;
     // A keychain waiting on its unlock prompt.
-    context.secrets.store = async (key: string, value: string) => {
+    keychain.store = async (key: string, value: string) => {
       await unlocked.promise;
       await keychainStore(key, value);
     };
-    context.secrets.delete = async (key: string) => {
+    keychain.delete = async (key: string) => {
       await unlocked.promise;
       await keychainDelete(key);
     };
@@ -527,7 +532,7 @@ describe('burrow state store', () => {
     // enrolled window silently Burrow-less until reload — `onDidChange` only
     // fires on a write, so nothing else ever retries the read.
     const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
-    const { context, store } = fakeContext();
+    const { context, store, keychain } = fakeContext();
     const enrollment = {
       relayUrl: 'https://relay.dormouse.sh',
       burrowId: BURROW_ID,
@@ -537,15 +542,15 @@ describe('burrow state store', () => {
       ...ENROLLMENT_LOCAL,
     };
     store.secrets.set('dormouse.burrow.enrollment', JSON.stringify(enrollment));
-    const workingGet = context.secrets.get;
-    context.secrets.get = async () => {
+    const workingGet = keychain.get;
+    keychain.get = async () => {
       throw new Error('keychain is locked');
     };
 
     const target = new VsCodeBurrowStateStore(context);
     await expect(target.loadEnrollment()).rejects.toThrow('keychain is locked');
 
-    context.secrets.get = workingGet;
+    keychain.get = workingGet;
     expect(await target.loadEnrollment()).toEqual(enrollment);
   });
 
@@ -1145,7 +1150,9 @@ describe('burrow service glue', () => {
         releaseSurface: () => {},
         writePty: () => {},
         resizePty: () => {},
-        streamPty: () => () => {},
+        streamPty: () => ({ stop: () => {}, ready: Promise.resolve() }),
+        resolveBrowser: async () => null,
+        closeSurface: async () => ({ outcome: 'refused', message: 'no surfaces' }),
       },
       kind: 'vscode',
       sendToUi: (event, data) => void sent.push({ event, data: data as never }),
@@ -1403,13 +1410,13 @@ describe('burrow provider', () => {
 
     expect(await provider.collectDirectory()).toEqual([{ surfaceId: 'surface:1' }]);
 
-    const handle = await provider.resolveSurface('surface:1', { cols: 100, rows: 30 });
+    const handle = await provider.resolveSurface('surface:1', { cols: 100, rows: 30 }, HOLD);
     expect(handle).toMatchObject({ ptyId: 'pty-1', cols: 100, rows: 30 });
     // Attach-is-the-resize: the size rides the attach, because the owner is the
     // only one that can reach its xterm.
     expect(bound.asked.at(-1)).toEqual({
       op: 'surfaceOp',
-      params: { surfaceId: 'surface:1', op: 'attach', cols: 100, rows: 30 },
+      params: { surfaceId: 'surface:1', op: 'attach', cols: 100, rows: 30, hold: HOLD },
     });
   });
 
@@ -1462,7 +1469,7 @@ describe('burrow provider', () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();
     const provider = mod.createBurrowProvider(bound.deps());
-    expect(await provider.resolveSurface('nobody', {})).toBeNull();
+    expect(await provider.resolveSurface('nobody', {}, HOLD)).toBeNull();
   });
 
   it('rejects when a resize goes unanswered and keeps only the cached dimensions', async () => {
@@ -1470,7 +1477,7 @@ describe('burrow provider', () => {
     const bound = fakeDeps();
     bound.answers.set('surfaceOp', [{ ptyId: 'pty-1', cols: 100, rows: 30 }]);
     const provider = mod.createBurrowProvider(bound.deps());
-    const handle = (await provider.resolveSurface('surface:1', { cols: 100, rows: 30 }))!;
+    const handle = (await provider.resolveSurface('surface:1', { cols: 100, rows: 30 }, HOLD))!;
 
     bound.answers.set('surfaceOp', []);
     await expect(handle.resize(120, 40)).rejects.toThrow('surface owner unavailable');
@@ -1559,7 +1566,7 @@ describe('serving the other windows', () => {
     // after it is routed by that.
     let handle: Awaited<ReturnType<typeof provider.resolveSurface>> = null;
     await waitFor(async () => {
-      handle = await provider.resolveSurface('far-1', { cols: 80, rows: 24 });
+      handle = await provider.resolveSurface('far-1', { cols: 80, rows: 24 }, HOLD);
       return handle !== null;
     });
 
@@ -1661,7 +1668,7 @@ describe('serving the other windows', () => {
       void localFallbacks.push({ ptyId, cols, rows });
     const provider = mod.createBurrowProvider(providerDeps);
 
-    const handle = await provider.resolveSurface('restored-surface', { cols: 80, rows: 24 });
+    const handle = await provider.resolveSurface('restored-surface', { cols: 80, rows: 24 }, HOLD);
     expect(handle).not.toBeNull();
     // The key held by SurfaceHandle is provider-local, not the colliding id
     // understood inside either peer window.

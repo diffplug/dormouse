@@ -116,7 +116,7 @@ import {
   type TestOneTimePhone,
   type TestRendezvous,
 } from '../../remote/test-rendezvous';
-import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
+import type { BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN, HOSTED_ONE_TIME_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import {
@@ -257,7 +257,9 @@ function fakeProvider(): BurrowSurfaceProvider {
     releaseSurface: () => {},
     writePty: () => {},
     resizePty: () => {},
-    streamPty: () => () => {},
+    streamPty: () => ({ stop: () => {}, ready: Promise.resolve() }),
+    resolveBrowser: async () => null,
+    closeSurface: async () => ({ outcome: 'refused', message: 'no surfaces' }),
   };
 }
 
@@ -2537,8 +2539,10 @@ describe('one-time connection', () => {
     expect(rendezvous.rooms).toEqual([]);
     expect(oneTimeStates()).toEqual([]);
     // The same answers a window with no service gives (`vscode-ext/src/burrow.ts`).
-    expect(idleOneTimeState(null)).toEqual({ status: 'unavailable', reason: 'self-host' });
-    expect(idleOneTimeState(HOSTED_ORIGIN)).toEqual({ status: 'idle' });
+    expect(idleOneTimeState(null, 'local')).toEqual({ status: 'unavailable', reason: 'self-host' });
+    expect(idleOneTimeState(null, 'nothing')).toEqual({ status: 'unavailable', reason: 'self-host' });
+    expect(idleOneTimeState(HOSTED_ORIGIN, 'local')).toEqual({ status: 'idle' });
+    expect(idleOneTimeState(HOSTED_ORIGIN, 'nothing')).toEqual({ status: 'unavailable', reason: 'network-off' });
   });
 
   it.each([false, true])('cancels an opening policy read (fresh request: %s)', async (retry) => {

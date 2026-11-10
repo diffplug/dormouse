@@ -80,7 +80,7 @@ afterEach(() => {
   container.remove();
   disposeAllSessions();
   clearTerminalActivity();
-  delete (document as Document & { elementFromPoint?: unknown }).elementFromPoint;
+  Reflect.deleteProperty(document, 'elementFromPoint');
   vi.restoreAllMocks();
 });
 

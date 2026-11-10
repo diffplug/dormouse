@@ -668,6 +668,7 @@ describe('WorkspaceWindow', () => {
       workspaces: [{
         id: first,
         name: 'One',
+        nameIsAuto: false,
         session: {
           version: 4,
           doors: [],
@@ -1008,7 +1009,7 @@ describe('Surface moves between Workspaces', () => {
 
   it('preserves Session identity, ref, TODO and retained cwd, and recomputes both unions', async () => {
     const source = await twoWalls(['surface:3', 'surface:b']);
-    publishWorkspaceSession(source, { version: 4, panes: [{ id: 'surface:3', title: 'exited', cwd: '/retained' }, { id: 'surface:b', title: 'other' }] });
+    publishWorkspaceSession(source, { version: 4, panes: [{ id: 'surface:3', title: 'exited', cwd: '/retained', untouched: false }, { id: 'surface:b', title: 'other', cwd: null, untouched: false }] });
     await act(async () => setTerminalActivity('surface:3', { todo: true }));
     const kill = vi.spyOn(fake, 'killPty');
     const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
@@ -1035,7 +1036,7 @@ describe('Surface moves between Workspaces', () => {
 
   it('fences a save collected during adoption before the retained cwd migrates', async () => {
     const source = await twoWalls();
-    publishWorkspaceSession(source, { version: 4, panes: [{ id: 'surface:a', title: 'exited', cwd: '/retained' }, { id: 'surface:b', title: 'other' }] });
+    publishWorkspaceSession(source, { version: 4, panes: [{ id: 'surface:a', title: 'exited', cwd: '/retained', untouched: false }, { id: 'surface:b', title: 'other', cwd: null, untouched: false }] });
     const target = getWallHandle('workspace:2')!;
     const finish = target.finishSurfaceMove;
     let duringCommit!: Promise<void>;

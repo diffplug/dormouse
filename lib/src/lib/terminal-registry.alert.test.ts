@@ -16,7 +16,7 @@ vi.mock('./platform', async () => {
 });
 
 import * as platformModule from './platform';
-import { makeAlertScenario, type FakePtyAdapter, type FakeScenario } from './platform';
+import { makeAlertScenario, type FakePtyAdapter, type FakeScenario, type PlatformAdapter } from './platform';
 import {
   DEFAULT_ACTIVITY_STATE,
   applyTerminalSemanticEvents,
@@ -524,7 +524,7 @@ describe('terminal-registry alert behavior', () => {
   });
   it('announces the resume in the pane instead of replaying a transcript', () => {
     const id = 'noticed-resume-command';
-    const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01a100fe-5be3-7d43-a77f-88d30d0f7f12' });
+    const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01a100fe-5be3-7d43-a77f-88d30d0f7f12' }) as TestTerminalEntry;
 
     // The pane has no scrollback to explain itself with, so the notice is the
     // only thing saying why an agent appeared — and that the interrupted turn
@@ -1062,8 +1062,10 @@ describe('terminal-registry alert behavior', () => {
   it.each([
     ['a file drop', async (id: string) => pasteFilePaths(id, ['/tmp/a.txt'])],
     ['a text paste', async (id: string) => {
-      fakePlatform.readClipboardText = async () => 'please review';
-      try { await doPaste(id); } finally { delete fakePlatform.readClipboardText; }
+      // An optional port `FakePtyAdapter` leaves out, so it is set through the interface.
+      const platform: PlatformAdapter = fakePlatform;
+      platform.readClipboardText = async () => 'please review';
+      try { await doPaste(id); } finally { delete platform.readClipboardText; }
     }],
   ])('acknowledges %s like typed input', async (_name, paste) => {
     const id = 'paste-acknowledges';

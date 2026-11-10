@@ -3,7 +3,7 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { AboutPanel, aboutDiagnostics, type AboutFacts } from './AboutSettings';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
@@ -16,7 +16,7 @@ const ENV = { platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh) AppleWeb
 
 let container: HTMLDivElement;
 let root: Root;
-let openExternal: ReturnType<typeof vi.fn>;
+let openExternal: Mock<(uri: string) => void>;
 
 beforeEach(() => {
   container = document.createElement('div');

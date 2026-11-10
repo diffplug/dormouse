@@ -32,6 +32,12 @@ export function insertPreview(t: LathTree, id: string, target: DropTarget, rect:
   return layout(insert(t, id, target, size).tree, rect, opts).get(id)!;
 }
 
+/** `target` as the edge drop a caller expects it to be; throws on any other kind. */
+export function edgeTarget(target: DropTarget): DropTarget & { kind: 'edge' } {
+  if (target.kind !== 'edge') throw new Error(`expected an edge drop, got ${JSON.stringify(target)}`);
+  return target;
+}
+
 /** Expected preview rect of an internal edge drag: a placeholder inserted into the
  *  current layout, sized as the move would be. */
 export function landingPreview(t: LathTree, dragged: string, target: DropTarget & { kind: 'edge' }, rect: Rect, opts: LayoutOpts): Rect {
