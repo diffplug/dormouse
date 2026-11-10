@@ -1,3 +1,4 @@
+import { isReportedCommandLine } from './osc-sanitize';
 import type { TerminalProtocolEvent } from './terminal-protocol';
 
 /**
@@ -38,7 +39,7 @@ export class ToolLaunchLatch {
           this.#line = event.event.commandLine;
           break;
         case 'commandStart':
-          this.#running = this.#launched !== null && this.#line === this.#launched;
+          this.#running = this.#launched !== null && isReportedCommandLine(this.#line, this.#launched);
           this.#launched = null;
           this.#line = null;
           break;

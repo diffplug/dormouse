@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PaneProps } from './pane-props';
-import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
+import { AgentBrowserPanel } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import {
   closeBrowserSurface,
@@ -14,6 +14,7 @@ import {
   disposeAllAgentBrowserSurfaceControllers,
   getAgentBrowserSurfaceController,
   handOverBrowserStream,
+  HIDDEN_PARK_DELAY_MS,
 } from './agent-browser-surface-controller';
 import type { RenderMode } from './agent-browser-screen';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, ZoomedIdContext, type PaneWriteActions } from './wall-context';
@@ -23,6 +24,8 @@ import { encodeViewerFrame } from '../../lib/platform/browser-automation';
 
 // Any test host counts as a Mac for the forwarder's ⌘A exemption.
 vi.mock('../../lib/select-all', () => ({ isMacSelectAll: (e: KeyboardEvent) => e.type === 'keydown' && e.metaKey && e.key === 'a' }));
+// The Cmd+A case is a Mac's: its editing chords take Cmd, not Ctrl.
+vi.mock('../../lib/platform', async (importOriginal) => ({ ...await importOriginal<typeof import('../../lib/platform')>(), IS_MAC: true }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,11 +35,10 @@ type TestPanelParams = {
   session: string;
   stream?: number;
   url?: string;
-  poppedOut?: boolean;
   cwd?: string;
 };
 
-const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
+const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'browser', session: 'browser-session' };
 
 /** The operations that drive a live browser, rather than bind or view one. */
 const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'close']);
@@ -809,6 +811,30 @@ describe('AgentBrowserPanel visibility parking', () => {
     expect(onReady).toHaveBeenCalledOnce();
   });
 
+  it('hides the last frame of a browser that went, leaving the ended message alone', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
+    setDocumentHidden(false);
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <AgentBrowserPanel {...paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 4321 })} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    await act(async () => {
+      liveStreamSocket(4321)?.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
+      liveStreamSocket(4321)?.emitMessage(encodeViewerFrame({ kind: 'provisional', jpeg: new Uint8Array([0xff, 0xd8, 1]) }).buffer);
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const canvas = container.querySelector('canvas')!;
+    expect(canvas.classList.contains('hidden')).toBe(false);
+    await act(async () => { liveStreamSocket(4321)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
+    expect(container.textContent).toContain('The browser session ended');
+    expect(canvas.classList.contains('hidden')).toBe(true);
+  });
+
   it('does not park a popped-out panel while it is hidden', async () => {
     const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', renderMode: 'agent-browser-popout', session: 'browser-session', stream: 1111,
@@ -852,7 +878,7 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     selectedId: string | null,
     workspaceActive = true,
   ): Promise<HTMLCanvasElement> {
-    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', stream: 4321 });
+    const props = paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 4321 });
     await act(async () => {
       root.render(
         <StrictMode>
@@ -943,6 +969,17 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     expect(sentMouse().map((m) => [m.eventType, m.x, m.y])).toEqual([['mouseMoved', 100, 50], ['mouseMoved', -1, -1]]);
   });
 
+  it('sends nothing for a Back or Forward thumb button', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      for (const button of [3, 4]) {
+        canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button }));
+        canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button }));
+      }
+    });
+    expect(sentMouseEvents()).toHaveLength(0);
+  });
+
   it('catches up a release made off the canvas before ending the hover', async () => {
     const canvas = await renderWithMode('passthrough', 'ab-panel');
     await act(async () => {
@@ -952,6 +989,30 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     });
     expect(sentMouse().map((m) => [m.eventType, m.buttons])).toEqual([['mousePressed', 1], ['mouseMoved', 0], ['mouseMoved', 0]]);
     expect(sentMouse().at(-1)).toEqual(expect.objectContaining({ x: -1, y: -1 }));
+  });
+
+  it('ends the page\'s drag, then its hover, when the press is released off the canvas', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0, buttons: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, buttons: 1, relatedTarget: document.body }));
+      document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 1400, clientY: 50, button: 0 }));
+    });
+    expect(sentMouse().map((m) => [m.eventType, m.x, m.y, m.buttons])).toEqual([
+      ['mousePressed', 100, 50, 1], ['mouseReleased', 1400, 50, 0], ['mouseMoved', -1, -1, 0],
+    ]);
+  });
+
+  it('sends no release for a press it never forwarded', async () => {
+    const canvas = await renderWithMode('command', null);
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+    });
+    await renderWithMode('passthrough', 'ab-panel');
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
+    });
+    expect(sentMouseEvents()).toHaveLength(0);
   });
 
   it('keeps its own drag through a leave, and skips the moves of a drag that began elsewhere', async () => {
@@ -968,6 +1029,24 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
   // The window key forwarder is a capture-phase listener that preventDefaults
   // what it takes, so a Workspace left in passthrough on a browser pane would go
   // on eating every keystroke while hidden (docs/specs/layout.md → "Workspaces").
+  it('leaves keys to a focused menu outside the pane', async () => {
+    await renderWithMode('passthrough', 'ab-panel');
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    const item = document.createElement('button');
+    item.setAttribute('role', 'menuitem');
+    menu.appendChild(item);
+    document.body.appendChild(menu);
+    try {
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      await act(async () => { item.dispatchEvent(enter); });
+      expect(enter.defaultPrevented).toBe(false);
+      expect(sentKeyEvents()).toHaveLength(0);
+    } finally {
+      menu.remove();
+    }
+  });
+
   it('stops forwarding window keys once its Workspace is hidden, and resumes on return', async () => {
     await renderWithMode('passthrough', 'ab-panel');
     const press = async () => {
@@ -1010,7 +1089,7 @@ describe('AgentBrowserPanel tab strip actions', () => {
   // just exercises the onClick → selectTab/closeTab wiring.
   async function renderWithTwoTabs(): Promise<ReturnType<typeof installBrowserHost>> {
     const host = installBrowserHost();
-    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', stream: 4321 });
+    const props = paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 4321 });
     await renderPanel(props);
     const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
     await act(async () => {

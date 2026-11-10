@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { FakePtyAdapter, IS_MAC, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult, type ViewerInput, type ViewerSyncIntent } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
@@ -312,7 +312,7 @@ describe('painting', () => {
     const { host, controller } = await paintFixture();
     let resolveClipboard!: (text: string) => void;
     (host.platform as PlatformAdapter).readClipboardText = () => new Promise((resolve) => { resolveClipboard = resolve; });
-    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: !IS_MAC, metaKey: IS_MAC, altKey: false, shiftKey: false });
     host.answers.launch = async () => ({ ok: true, stream: 7777 });
     getAgentBrowserScreenController('id')?.actions.setRenderMode?.('agent-browser-popout');
     await flushMicrotasks();
@@ -329,11 +329,20 @@ describe('painting', () => {
     controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
     expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'a', text: 'a' });
     // A paste goes as text, whichever provider: the host inserts it.
-    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: !IS_MAC, metaKey: IS_MAC, altKey: false, shiftKey: false });
     await flushMicrotasks();
     expect(sent().at(-1)).toEqual({ type: 'input_text', text: 'pasted\ntext' });
-    controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: !IS_MAC, metaKey: IS_MAC, altKey: false, shiftKey: false });
     expect(host.requests('edit')).toEqual([onSess({ op: 'edit', edit: 'selectAll' })]);
+    // The other platform's modifier is the page's key: a Mac's Ctrl+C is a
+    // web terminal's interrupt.
+    controller.handleKeyDownLike({ key: 'c', code: 'KeyC', ctrlKey: IS_MAC, metaKey: !IS_MAC, altKey: false, shiftKey: false });
+    expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'c' });
+    expect(host.requests('edit')).toHaveLength(1);
+    // So is its Ctrl+V, a web terminal's quoted-insert: no paste.
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: IS_MAC, metaKey: !IS_MAC, altKey: false, shiftKey: false });
+    await flushMicrotasks();
+    expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'v' });
     // A view remounted over the open socket asks the host for the last frame.
     controller.attachView(makeSink());
     expect(sent().at(-1)).toEqual({ type: 'repaint' });
@@ -1421,7 +1430,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(host.relaunches(false)).toHaveLength(1);
   });
 
-  it('pop-in while the first launch is in flight is a no-op', async () => {
+  it('pop-in while the first launch is in flight waits for the browser', async () => {
     const host = relaunchHost();
     // The first launch opens a new session, and never answers.
     host.answers.launch = () => new Promise<never>(() => {});
@@ -1854,7 +1863,7 @@ describe('Playwright provider', () => {
     controller.attachView(makeSink());
     await flushMicrotasks();
 
-    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'v', code: 'KeyV', metaKey: IS_MAC, ctrlKey: !IS_MAC, altKey: false, shiftKey: false });
     await flushMicrotasks();
 
     // Two messages, where a key pair per character was ~16k: the host's input

@@ -1,4 +1,5 @@
 import { isUncOrDevicePath } from 'dor-lib-common/browser-providers';
+import { isReportedCommandLine } from './osc-sanitize';
 import { cwdPathsEqual } from 'dor/commands/cwd';
 import { POSIX_ESCAPABLE } from './posix-escape';
 
@@ -464,9 +465,10 @@ export function resolveCommandStart(
  * The idempotency predicate for `dor ensure`: true when the pane is *currently
  * running* `command` in `cwdPath`. It matches only while the command is live
  * (`currentCommand` is set between commandStart and commandFinish) and only on
- * the exact command line the shell reported via integration — never the
- * summarized display label, and never a forked child. Panes with no reported
- * command line (no shell integration) never match.
+ * the command line the pane reports — by shell integration, as seeded for a
+ * command Dormouse launched, or by the keystroke heuristic of a shell without
+ * integration — never the summarized display label, and never a forked child.
+ * Panes with no reported command line never match.
  */
 export function surfaceRunsCommand(
   state: TerminalPaneState,
@@ -474,8 +476,7 @@ export function surfaceRunsCommand(
   cwdPath: string,
 ): boolean {
   const run = state.currentCommand;
-  if (!run || run.rawCommandLine === null) return false;
-  if (run.rawCommandLine !== command) return false;
+  if (!run || !isReportedCommandLine(run.rawCommandLine, command)) return false;
   return cwdPathsEqual(run.cwdAtStart?.path ?? state.cwd?.path, cwdPath);
 }
 

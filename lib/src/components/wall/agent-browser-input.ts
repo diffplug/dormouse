@@ -57,6 +57,9 @@ export const OEM_VK_BY_CODE: Record<string, number> = {
 export function virtualKeyCode(key: string, code: string): number {
   const special = SPECIAL_KEYS[key];
   if (special) return special.keyCode;
+  // A Latin letter is its own key code whatever key types it (QWERTZ's Z sits
+  // on `KeyY`); any other layout falls back to the physical key, as browsers do.
+  if (/^[a-zA-Z]$/.test(key)) return key.toUpperCase().charCodeAt(0);
   if (/^Key[A-Z]$/.test(code)) return code.charCodeAt(3);
   if (/^(Digit|Numpad)[0-9]$/.test(code)) return code.charCodeAt(code.length - 1) + (code.startsWith('Numpad') ? 48 : 0);
   if (/^F([1-9]|1[0-2])$/.test(code)) return 111 + Number(code.slice(1));

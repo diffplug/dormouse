@@ -23,7 +23,8 @@ import {
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { cancelPendingConfirmation } from '../../lib/workspace-ui-store';
 import { computeWorkspaceUnion } from '../../lib/workspace-union';
-import { awaitWallHandle, errorText, mountingRefusal, requestForWall, stringParam } from './dor-control-shared';
+import { messageOf } from '../../lib/errors';
+import { awaitWallHandle, mountingRefusal, requestForWall, stringParam } from './dor-control-shared';
 import { attachSurfacePorts } from './surface-ports';
 import type { WallHandle } from './wall-handles';
 import { closeWorkspaceWithSurfaces, nameWorkspace, pinWorkspace, workspaceCloseRefusal, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
@@ -89,10 +90,10 @@ function askWall(
       resolve(response);
     };
     try {
-      const running = handle.handleDorControl({ ...requestForWall(handle, detail), params, respond }) as unknown;
-      if (running instanceof Promise) void running.catch((error) => respond({ ok: false, error: errorText(error) }));
+      const running = handle.handleDorControl({ ...requestForWall(handle, detail), params, respond });
+      if (running instanceof Promise) void running.catch((error) => respond({ ok: false, error: messageOf(error) }));
     } catch (error) {
-      respond({ ok: false, error: errorText(error) });
+      respond({ ok: false, error: messageOf(error) });
     }
   });
 }
@@ -302,7 +303,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         try {
           await platform.transferWorkspace(target.id, label, index === undefined ? {} : { index });
         } catch (err) {
-          detail.respond({ ok: false, error: `workspace '${target.id}' was not moved: ${errorText(err)}` });
+          detail.respond({ ok: false, error: `workspace '${target.id}' was not moved: ${messageOf(err)}` });
           return;
         }
         respondMutation('moved', target);

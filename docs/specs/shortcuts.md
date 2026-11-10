@@ -73,8 +73,8 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `⌘V` / `Ctrl+V` | Paste into page | Inserts the *local* clipboard as text through the host. |
-| `⌘`/`Ctrl` + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. |
+| `⌘V` (macOS) / `Ctrl+V` (others) | Paste into page | Inserts the *local* clipboard as text through the host. On macOS, `Ctrl+V` goes to the page. |
+| `⌘` (macOS) / `Ctrl` (others) + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. On macOS, `Ctrl` + these keys goes to the page. |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
 ## Dialogs, menus & prompts

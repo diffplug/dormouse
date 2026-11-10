@@ -531,7 +531,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           }
           if (isBrowsableUrl(url)) {
             const navigating = p.act(b, { op: 'navigate', url });
-            void navigating.then((result) => { if (!result.ok) log(`navigating ${id} to ${url} failed: ${result.error ?? 'no reason given'}`); }, log);
+            void navigating.then((result) => { if (!result.ok) log(`navigating ${id} to ${new URL(url).origin} failed: ${result.error ?? 'no reason given'}`); }, log);
             sweepAfter(navigating.then(() => {}), bound, generation);
           } else sweepAfter(opening, bound, generation);
         } else sweepAfter(opening, bound, generation);
@@ -589,7 +589,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     if (!found || !('stream' in found) || (found.headed ?? headed.has(id)) !== isHeaded) return undefined;
     if (isBrowsableUrl(url)) {
       void p.act(b, { op: 'navigate', url }).then((result) => {
-        if (!result.ok) log(`navigating ${id} to ${url} failed: ${result.error ?? 'no reason given'}`);
+        if (!result.ok) log(`navigating ${id} to ${new URL(url).origin} failed: ${result.error ?? 'no reason given'}`);
       }, log);
     }
     return { ...found, headed: isHeaded };

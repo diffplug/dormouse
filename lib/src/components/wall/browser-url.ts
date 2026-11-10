@@ -62,6 +62,8 @@ export function normalizeNavUrl(raw: string): string {
   // `localhost:5173` is NOT a scheme (no `//`), so it falls through to get one.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
   if (/^(about|data|blob|mailto|tel|javascript|view-source|chrome):/i.test(trimmed)) return trimmed;
+  // A bare `:port` is localhost, as the CLI reads it.
+  if (/^:\d{1,5}(?:[/?#].*)?$/.test(trimmed)) return `http://localhost${trimmed}`;
   const authority = trimmed.split(/[/?#]/, 1)[0];
   const hostname = authorityHostname(authority);
   const scheme = /:\d+$/.test(authority) || isLoopbackHostname(hostname) ? 'http' : 'https';

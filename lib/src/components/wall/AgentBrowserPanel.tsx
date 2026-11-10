@@ -15,9 +15,6 @@ import {
   acquireAgentBrowserSurfaceController,
   type AgentBrowserSurfaceParams,
 } from './agent-browser-surface-controller';
-// Re-exported so existing importers (notably the panel test) keep resolving the
-// park delay from here even though it now lives on the controller.
-export { HIDDEN_PARK_DELAY_MS } from './agent-browser-surface-controller';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceSight } from './use-surface-visibility';
@@ -130,7 +127,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       viewport,
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
-      requestRenderSwap: (mode = 'iframe', swapViewport) => {
+      requestRenderSwap: (mode, swapViewport) => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
         if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap({ mode, viewport: swapViewport });
@@ -179,6 +176,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   }, [controller]);
 
   const buttonsHeldRef = useRef(0);
+  const releaseListenersRef = useRef(new Set<(e: MouseEvent) => void>());
+  useEffect(() => () => {
+    for (const listener of releaseListenersRef.current) window.removeEventListener('mouseup', listener, true);
+  }, []);
   const lastMoveRef = useRef(0);
   // Whether a hover move has gone to the page since its last leave.
   const hoveringRef = useRef(false);
@@ -199,6 +200,9 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
     if (!passthroughRef.current) return;
+    // A Back/Forward thumb button has no page button to become.
+    const button = MOUSE_BUTTONS[e.button];
+    if (!button) return;
     // preventDefault stops the browser's focus-shift default action (a click on a
     // non-focusable canvas would otherwise blur to <body>), and the explicit
     // focus claims keystrokes for this pane.
@@ -207,36 +211,62 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     const point = toDevice(e);
     if (!point) return;
     buttonsHeldRef.current |= MOUSE_BUTTON_MASKS[e.button] ?? 0;
+    // A release off the canvas (a drag past its edge) still ends the page's
+    // drag, then its hover; the canvas's own handler takes one over it.
+    const pressed = e.button;
+    const releaseOff = (up: MouseEvent) => {
+      if (up.button !== pressed) return;
+      window.removeEventListener('mouseup', releaseOff, true);
+      releaseListenersRef.current.delete(releaseOff);
+      if (up.target === canvasRef.current || !releasePressed(up)) return;
+      if (buttonsHeldRef.current) return;
+      hoveringRef.current = false;
+      controller.send({ type: 'input_mouse', eventType: 'mouseMoved', x: -1, y: -1, button: 'none', buttons: 0, modifiers: 0 });
+    };
+    window.addEventListener('mouseup', releaseOff, true);
+    releaseListenersRef.current.add(releaseOff);
     controller.send({
       type: 'input_mouse',
       eventType: 'mousePressed',
       x: point.x,
       y: point.y,
-      button: MOUSE_BUTTONS[e.button] ?? 'left',
+      button,
       buttons: buttonsHeldRef.current,
       clickCount: clickCountFor(e.button, point.x, point.y),
       modifiers: modifiers(e),
     });
   };
 
-  const onCanvasMouseUp = (e: React.MouseEvent) => {
-    // Pair with onCanvasMouseDown: gate on passthrough (not full `interactive`)
-    // so the release of a first, pane-selecting click still completes the click.
-    if (!passthroughRef.current) return;
-    e.preventDefault();
+  /** Send the release of a button whose press this canvas forwarded; any
+   *  other release (a press dropped in command mode, a drag begun in another
+   *  pane) is not the page's. */
+  const releasePressed = (e: MouseEvent | React.MouseEvent): boolean => {
+    const button = MOUSE_BUTTONS[e.button];
+    const mask = MOUSE_BUTTON_MASKS[e.button] ?? 0;
+    if (!button || !(buttonsHeldRef.current & mask)) return false;
+    buttonsHeldRef.current &= ~mask;
     const point = toDevice(e);
-    if (!point) return;
-    buttonsHeldRef.current &= ~(MOUSE_BUTTON_MASKS[e.button] ?? 0);
+    if (!point) return true;
     controller.send({
       type: 'input_mouse',
       eventType: 'mouseReleased',
       x: point.x,
       y: point.y,
-      button: MOUSE_BUTTONS[e.button] ?? 'left',
+      button,
       buttons: buttonsHeldRef.current,
       clickCount: lastClickRef.current.count,
       modifiers: modifiers(e),
     });
+    return true;
+  };
+
+  const onCanvasMouseUp = (e: React.MouseEvent) => {
+    // Pair with onCanvasMouseDown: gate on passthrough (not full `interactive`)
+    // so the release of a first, pane-selecting click still completes the click.
+    if (!passthroughRef.current) return;
+    if (!MOUSE_BUTTONS[e.button]) return;
+    e.preventDefault();
+    releasePressed(e);
   };
 
   const onCanvasMouseMove = (e: React.MouseEvent) => {
@@ -333,7 +363,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       // A screen modal (or any dialog) renders outside the pane element, so the
       // contains() check above misses it; without this, typing into the modal's
       // Custom W/H/DPI fields would be swallowed and forwarded to the browser.
-      if (e.target instanceof Element && e.target.closest('[role="dialog"], [data-terminal-context]')) return;
+      // A portaled menu (the Workspace tab menu) takes its own arrows and Enter.
+      if (e.target instanceof Element && e.target.closest('[role="dialog"], [role="menu"], [data-terminal-context]')) return;
       // Likewise never hijack keystrokes destined for an editable field that
       // lives outside the pane — notably the header's URL editor.
       if (isEditableTarget(e.target)) return;
@@ -435,7 +466,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
             — just hidden under the stub while a headed window renders instead. */}
         <canvas
           ref={canvasRef}
-          className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut) && 'hidden')}
+          className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut || placeholder !== null) && 'hidden')}
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}
           onMouseMove={onCanvasMouseMove}

@@ -37,7 +37,7 @@ import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../..
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
-import { errorText, stringParam } from './dor-control-shared';
+import { stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
@@ -146,8 +146,8 @@ export type DorControlParams = {
 export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
-  /** Absent on the in-process dispatch path (and in tests), which has no
-   *  client to hang up — every consumer must treat it as optional. */
+  /** `dispatchDorControlRequest` supplies one for every request; a test that
+   *  dispatches the event itself may not, so consumers treat it as optional. */
   signal?: AbortSignal;
   /** The caller's own OSC 367 `open`, which only a running designated Tool
    *  may make and whose failure shows in the preview slot. Never set by a
@@ -301,7 +301,7 @@ export const PREVIEW_INTERRUPT_GRACE_MS = 1_000;
 
 /** Await `wait` with the launch queue released, then retake it behind
  *  whatever queued meanwhile: anything read of the Wall before is stale after. */
-export type ReleasedWait = <T>(wait: PromiseLike<T>) => Promise<T>;
+type ReleasedWait = <T>(wait: PromiseLike<T>) => Promise<T>;
 
 /** A serial queue whose work can step out of it for a wait only the user ends
  *  (docs/specs/dor-tool.md -> Identity and dedupe). */
@@ -458,10 +458,10 @@ const ENSURE_CANCELLED = 'ensure was cancelled';
 async function interruptToPrompt(id: string, signal?: AbortSignal, timeoutMs = PROMPT_RETURN_TIMEOUT_MS): Promise<ParseResult<undefined>> {
   // Checked before the interrupt is written, not just before each wait.
   if (signal?.aborted) return RESTART_CANCELLED;
-  // A match is by construction OSC-driven (surfaceRunsCommand only matches a
-  // shell that reports its command), so this never fires on the real path — but
-  // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
-  // popping `Terminate batch job (Y/N)?`).
+  // A match can be a shell without integration — a launched command is seeded
+  // before any report, and the keystroke heuristic reports one for such a
+  // shell — so never fire Ctrl+C into one (e.g. cmd.exe popping `Terminate
+  // batch job (Y/N)?`).
   if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
   // The interrupt is the host's own doing: never a command-exit ring or a
   // push, and never the end of a Tool's designation (docs/specs/dor-tool.md ->
@@ -602,6 +602,12 @@ function parseDorSplitDirection(value: unknown): DorSplitDirection | null {
   return null;
 }
 
+/** The quoted command is typed into an interactive shell, whose line editor
+ *  reads a control character as a key (DEL erases the opening quote, Ctrl-C
+ *  abandons the line) before the shell parses any quoting; callers refuse
+ *  such argv before quoting it. */
+const COMMAND_CONTROLS_ERROR = 'command arguments cannot contain terminal control characters';
+
 /**
  * Quote raw argv for the configured default shell, which new splits launch.
  * The same string is used for ensure matching and restart; the CLI sends argv
@@ -730,7 +736,7 @@ export function useDorControl({
   updateSurfaceParams: (id: string, patch: Record<string, unknown>) => void;
   /** Run one `dor` request against this Wall. `dor-control-router.ts` owns the
    *  window listener that chooses which Wall's handler runs. */
-  handleDorControl: (detail: DorControlRequest) => void;
+  handleDorControl: (detail: DorControlRequest) => void | Promise<void>;
 } {
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
@@ -1127,7 +1133,12 @@ export function useDorControl({
       const direction = directionParam === 'auto'
         ? autoDorDirection(resolved.target)
         : directionParam;
-      const command = dorCommandString(stringArrayParam(params.command));
+      const argv = stringArrayParam(params.command);
+      if (argv?.some(hasShellInputControls)) {
+        detail.respond({ ok: false, error: COMMAND_CONTROLS_ERROR });
+        return;
+      }
+      const command = dorCommandString(argv);
       if (params.command !== undefined && !command) {
         detail.respond({ ok: false, error: 'command cannot be empty' });
         return;
@@ -1608,13 +1619,15 @@ export function useDorControl({
           const run = running ? { id: running.id, at: Date.now(), input: getSessionInputVersion(id) } : undefined;
           lateRestores.current.get(id)?.();
           const interrupted = await interruptToPrompt(id, detail.signal, PREVIEW_INTERRUPT_GRACE_MS);
-          if (!interrupted.ok || unavailable() || !isTargetable(id)
+          // `unavailable` answers the request itself, so it answers at most once.
+          const gone = interrupted.ok && unavailable();
+          if (!interrupted.ok || gone || !isTargetable(id)
             || (run && getSessionInputVersion(id) !== run.input)) {
             if (token !== null) endPreviewTransition(id, token);
             if (interrupted === INTERRUPT_OUTLIVED && run) restoreOnLatePrompt(id, run);
             else if (interrupted !== INTERRUPT_OUTLIVED) await restoreInterruptedRun(id, run);
             if (!interrupted.ok) detail.respond({ ok: false, error: `Cannot navigate: ${interrupted.message}` });
-            else if (!unavailable()) detail.respond({ ok: false, error: 'The source Tool changed before navigation.' });
+            else if (!gone && !unavailable()) detail.respond({ ok: false, error: 'The source Tool changed before navigation.' });
             return true;
           }
           retargetInPlace(id, nextCommand, token, isPreviewSlotParams(source));
@@ -1903,7 +1916,12 @@ export function useDorControl({
         detail.respond({ ok: false, error: ENSURE_CANCELLED });
         return;
       }
-      const command = dorCommandString(stringArrayParam(params.command));
+      const argv = stringArrayParam(params.command);
+      if (argv?.some(hasShellInputControls)) {
+        detail.respond({ ok: false, error: COMMAND_CONTROLS_ERROR });
+        return;
+      }
+      const command = dorCommandString(argv);
       if (!command) {
         detail.respond({ ok: false, error: 'command cannot be empty' });
         return;
@@ -2067,10 +2085,15 @@ export function useDorControl({
         return;
       }
 
+      // A cancel can land while the router retries a mounting Workspace's
+      // route, and an abort listener added after the fact never runs.
+      if (detail.signal?.aborted) {
+        detail.respond({ ok: false, error: `await on '${target.id}' was cancelled` });
+        return;
+      }
       const handle = getPlatform().alertAwait(target.id, { until, timeoutMs });
       // The client hung up (Ctrl-C) or the control server's deadline passed:
       // release the wait so it stops absorbing completions nobody can receive.
-      // Guarded because in-process callers may dispatch a request without one.
       detail.signal?.addEventListener('abort', () => handle.cancel());
 
       const outcome = await handle.promise;
@@ -2112,7 +2135,7 @@ export function useDorControl({
           dangerouslyDestroyIframePageState: booleanParam(params.dangerouslyDestroyIframePageState),
         });
         detail.respond({ ok: true, result });
-      } catch (error) { detail.respond({ ok: false, error: errorText(error) }); }
+      } catch (error) { detail.respond({ ok: false, error: messageOf(error) }); }
       return;
     }
 
@@ -2125,6 +2148,10 @@ export function useDorControl({
       const target = requireListedSurface(params.surface, detail);
       if (!target) return;
       if (confirmation.mode === 'if-read') {
+        if (!hasTerminal(target.kind)) {
+          detail.respond({ ok: false, error: `surface '${target.id}' has no terminal to read (kind: ${target.kind}); use --confirm-dangerously` });
+          return;
+        }
         const text = readSurfaceText(target.id, undefined, false);
         if (!text.includes(confirmation.text)) {
           detail.respond({ ok: false, error: `surface '${target.id}' read text did not contain confirmation text` });
@@ -2254,7 +2281,7 @@ export function useDorControl({
         let initialViewport: BrowserViewportSetting;
         try { initialViewport = resolveBrowserViewport(config); }
         catch (error) {
-          detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          detail.respond({ ok: false, error: messageOf(error) });
           return;
         }
         const launchViewport = initialViewport.mode === 'fixed' ? initialViewport : { width: 1440, height: 900 };
@@ -2275,7 +2302,8 @@ export function useDorControl({
         const found = findBrowserSurface(provider, { key });
         if (found) targetId = found.id;
       } else if (session !== undefined) {
-        const matches = buildDorSurfaces().filter((surface) => {
+        // Listed Surfaces, minimized ones included, like `--key` and `--surface`.
+        const matches = buildDorSurfaceList().filter((surface) => {
           const p = lath.getMeta(surface.id)?.params;
           return parseRenderMode((p as { renderMode?: unknown } | undefined)?.renderMode).provider === provider
             && agentBrowserSessionFromParams(p) === session;
@@ -2352,7 +2380,7 @@ export function useDorControl({
               setting = resolveBrowserViewport(config, { width: setting.width, height: setting.height, dpr: choice.dpr });
             }
           } catch (error) {
-            detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+            detail.respond({ ok: false, error: messageOf(error) });
             return;
           }
         } else {
@@ -2395,7 +2423,7 @@ export function useDorControl({
           requested: effective, ...(measured.viewport ? { actual: measured.viewport } : {}), ready: measured.ok && !!measured.viewport,
         } });
       } catch (error) {
-        detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        detail.respond({ ok: false, error: messageOf(error) });
       }
       return;
     }

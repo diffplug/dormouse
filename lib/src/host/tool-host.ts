@@ -91,8 +91,10 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
         const args = request.args ?? [];
         const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
         if (project?.status === 'ok') {
-          const userFile = await readUserToolFile(userPath);
-          return okResult(project.entry, project.input, { projectRoot: project.projectRoot, path: project.path, warnings: project.file.warnings }, mergeBrowserConfig(userFile?.browser, project.file.browser));
+          // Only the user's browser presets: a malformed user Tool must not
+          // fail a project Tool.
+          return okResult(project.entry, project.input, { projectRoot: project.projectRoot, path: project.path, warnings: project.file.warnings },
+            mergeBrowserConfig(await readUserBrowserConfig(userPath), project.file.browser));
         }
         if (project && project.status !== 'no-file' && project.status !== 'unknown-tool') return project;
 

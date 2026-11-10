@@ -19,7 +19,7 @@ import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './t
 import { resolveUpstreamUrl } from './git-upstream';
 import { resolveToolInput, type ToolInput } from './tool-input';
 
-export const TOOL_FILE_NAME = 'dormouse.yml';
+const TOOL_FILE_NAME = 'dormouse.yml';
 /**
  * Cap on a `dormouse.yml`. This read happens before the trust check —
  * deliberately, so the approval dialog can name the command — so both the file
@@ -108,8 +108,7 @@ export function folderGrantKey(root: string): string {
  *
  * A file rather than a bare marker on purpose:
  * `docs/specs/remote-security-model.md` designed revocation into its ACL record
- * from the start and still shipped without callers, but the *field* was there.
- * An empty marker file has nowhere to put one, so adding revocation later would
+ * from the start. An empty marker file has nowhere to put one, so adding revocation later would
  * be a schema change on a security file. `key` is here for the same reason: the
  * name on disk is a hash, so only the file itself can say what was granted.
  */

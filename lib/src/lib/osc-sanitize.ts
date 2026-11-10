@@ -36,6 +36,18 @@ export function sanitizeCommandLine(input: string, limit: number): string | null
   return truncateText(collapsed, limit);
 }
 
+/** The cap on a shell-reported command line, in code points. */
+export const COMMAND_LINE_LIMIT = 2048;
+
+/** Whether a shell-reported command line is the command `typed`. The report
+ *  passed through {@link sanitizeCommandLine}, which rewrites whitespace runs
+ *  (a path's double space or U+202F) and clamps, so `typed` is compared after
+ *  the same pass; a run seeded from `typed` itself matches verbatim. */
+export function isReportedCommandLine(reported: string | null | undefined, typed: unknown): boolean {
+  if (reported == null || typeof typed !== 'string') return false;
+  return reported === typed || reported === sanitizeCommandLine(typed, COMMAND_LINE_LIMIT);
+}
+
 /** Untrusted clipboard text (an `OSC 52` write): line endings normalized to
  *  `\n`, every other control but tab removed, nothing else touched — never
  *  truncated, since a cut-off copy reads as complete; its caller bounds it.

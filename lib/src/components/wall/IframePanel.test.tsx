@@ -461,6 +461,24 @@ describe('IframePanel', () => {
     expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/app' });
     expect(createProxy.mock.calls.length).toBeGreaterThan(callsBeforeBack);
   });
+
+  it('re-resolves the proxy on a URL-bar navigation to the persisted URL after an in-frame navigation', async () => {
+    const { platform } = installBrowserHost();
+    const createProxy = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
+    platform.createIframeProxyUrl = createProxy;
+    await renderPanel(stubActions(), paneProps('iframe-nav'), vi.fn());
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'location', url: 'http://127.0.0.1:61234/other' },
+      }));
+    });
+    const callsBefore = createProxy.mock.calls.length;
+    await act(async () => {
+      getAgentBrowserScreenController('iframe-nav')?.chromeActions.navigate('http://example.test/app');
+    });
+    expect(createProxy.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
 });
 
 describe('before its first paint', () => {

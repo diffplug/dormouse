@@ -126,7 +126,6 @@ import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertDelivery } from './wall/use-alert-delivery';
 import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
-import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
 import { useEngagementFocus } from './wall/use-engagement-focus';
 import {
@@ -1733,8 +1732,9 @@ export function Wall({
     previewSlot,
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
     answeringWorkspaceId: effectiveWorkspaceId,
-    // The raw prop, not `effectiveWorkspaceId`: a bare Wall keeps the unscoped
-    // agent-browser session names (docs/specs/dor-browser.md → Managed identity).
+    // The raw prop, not `effectiveWorkspaceId`: a bare Wall has no Workspace id,
+    // so its browser keys take a scope of its own (docs/specs/dor-browser.md →
+    // Managed identity).
     workspaceScope: useCallback(() => workspaceId, [workspaceId]),
   });
 
@@ -1857,7 +1857,7 @@ export function Wall({
         await waitForNewToolCommand(id, command, cwd);
       });
     } catch (error) {
-      showFailure(errorText(error));
+      showFailure(messageOf(error));
     } finally {
       toolApprovalsInFlightRef.current.delete(id);
     }

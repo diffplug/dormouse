@@ -6,7 +6,8 @@ import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../li
 import { handleAppControl } from './app-control';
 import { handleReopenControl } from './reopen';
 import { handleToolControl } from './tool-control';
-import { errorText, mountingRefusal, requestForWall, ROUTE_RETRIES } from './dor-control-shared';
+import { messageOf } from '../../lib/errors';
+import { mountingRefusal, requestForWall, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
 import type { DorControlRequest } from './use-dor-control';
@@ -21,7 +22,7 @@ import type { DorControlRequest } from './use-dor-control';
  */
 
 /** Where one control request lands. */
-export type DorControlRoute =
+type DorControlRoute =
   | { kind: 'handle'; handle: WallHandle }
   /** Answered by the Window before anything is resolved: an `app.*` verb acts
    *  on the running app, so no param of its names a Workspace or Surface. */
@@ -149,7 +150,7 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
   // Every failure the handler can raise is answered: an unanswered request
   // blocks its caller until the CLI's own deadline
   // (`docs/specs/dor-cli.md` → "Handle Model").
-  const fail = (error: unknown) => detail.respond({ ok: false, error: errorText(error) });
+  const fail = (error: unknown) => detail.respond({ ok: false, error: messageOf(error) });
   try {
     const running = runRoute(route, detail);
     if (running instanceof Promise) void running.catch(fail);

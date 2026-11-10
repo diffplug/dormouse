@@ -70,6 +70,8 @@ Snapshot clock: `lib/.storybook/snapshot-clock.ts` freezes `Date.now` and `new D
 
 Helper placement snapshots: defer the fake helper's first prompt until its terminal is mounted and fitted. Drain queued xterm writes before capture and assert the one complete prompt and a viewport at the bottom. Output emitted at the initial wide grid can lose the current prompt line when xterm shrinks; waiting afterward cannot repair it. `lib/src/stories/HelperPlacement.stories.tsx` owns the gate and `lib/src/lib/platform/fake-adapter-helper.test.ts` covers deferred startup and narrow wrapping.
 
+Real browser CLIs: `lib/src/host/agent-browser-host.real.test.ts` and `lib/src/host/playwright-host.real.test.ts` drive an installed CLI and its Chromium, and skip unless `DORMOUSE_AGENT_BROWSER_TEST_BIN` or `DORMOUSE_PLAYWRIGHT_TEST_BIN` names that CLI's binary. No CI job sets either; run them by hand after changing a provider, e.g. `(cd lib && DORMOUSE_AGENT_BROWSER_TEST_BIN=$(which agent-browser) npx vitest run src/host/agent-browser-host.real.test.ts)`.
+
 Help snapshots: after changing any `dor` help text, rebuild and refresh with `cd dor && pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then run `node --test` again and commit `dor/test/snapshots/`.
 
 Tests that pin the Workspace model's non-obvious rules, by concern:

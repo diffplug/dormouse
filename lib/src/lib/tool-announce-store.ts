@@ -19,11 +19,7 @@ const listeners = new Set<(id: string) => void>();
 
 /** Last-write-wins: the announcement is re-emittable, so a tool that changes
  *  its port or its name simply says so again. */
-export function recordToolAnnounce(id: string, announce: ToolAnnounce | null): void {
-  if (!announce) {
-    announces.delete(id);
-    return;
-  }
+export function recordToolAnnounce(id: string, announce: ToolAnnounce): void {
   const previous = announces.get(id);
   announces.set(id, announce);
   // The serving poll retries an unchanged destination; only a new one is news.

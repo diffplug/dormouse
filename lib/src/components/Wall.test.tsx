@@ -776,6 +776,12 @@ describe('Wall on the Lath engine', () => {
     } });
     expect(await control({ provider: 'playwright', surface: id })).toMatchObject({ ok: false, error: expect.stringContaining(`dor agent-browser --surface ${id}`) });
     expect(await control({ provider: 'agent-browser', surface: 'surface:a' })).toMatchObject({ ok: false, error: expect.stringContaining('has no browser') });
+
+    // A raw --session finds the bound Surface minimized, as --key and --surface do.
+    await act(async () => { container.querySelector<HTMLElement>(`[data-lath-leaf="${id}"] [aria-label="Minimize"]`)!.click(); });
+    await flush();
+    expect(container.querySelector(`[data-door-id="${id}"]`)).not.toBeNull();
+    expect(await control({ provider: 'agent-browser', session: 'diag-session' })).toMatchObject({ ok: true, result: { surfaceId: id } });
   });
 
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
@@ -898,6 +904,43 @@ describe('Wall on the Lath engine', () => {
     });
     expect(timedOut?.result?.cause).toBeUndefined();
     expect(typeof timedOut?.result?.waitedMs).toBe('number');
+  });
+
+  it('never parks a dor await whose client already hung up', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:1']} initialMode="command" />);
+    });
+    await flush();
+    const park = vi.spyOn(fake, 'alertAwait');
+    const respond = vi.fn();
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.await,
+        params: { surface: 'surface:1', until: 'quiet', timeoutMs: 60_000 },
+        signal: AbortSignal.abort(),
+        respond,
+      } }));
+    });
+    expect(park).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: "await on 'surface:1' was cancelled" });
+  });
+
+  it('names the missing terminal when dor kill --confirm-if-read targets a browser', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.kill,
+        params: { surface: surfaceId, confirmation: { mode: 'if-read', text: 'localhost' } },
+        respond: (r: typeof response) => { response = r; },
+      } }));
+    });
+    expect(response).toEqual({ ok: false, error: `surface '${surfaceId}' has no terminal to read (kind: browser); use --confirm-dangerously` });
+    expect(container.querySelector(`[data-lath-leaf="${surfaceId}"]`)).not.toBeNull();
   });
 
   it('parks a minimized browser surface so its DOM survives, and unparks it on kill', async () => {
@@ -3299,6 +3342,33 @@ describe('Wall on the Lath engine', () => {
       params: { command: ['view', '/tmp/\x15printf unwanted\n#'], cwd: '/repo' }, respond,
     } })));
     expect(respond).toHaveBeenCalledWith({ ok: false, error: 'tool arguments cannot contain terminal control characters' });
+    expect(write).not.toHaveBeenCalled();
+    expect(leafCount()).toBe(1);
+  });
+
+  // Each argv quotes safely, but typed into an interactive bash, zsh, or fish
+  // its controls act as keys first: two DELs erase the opening quote, Ctrl-C
+  // abandons the line, Tab completes.
+  const lineEditorArgv = [
+    ['echo', 'x\x7f\x7f; touch MARK #'],
+    ['echo', "x\x7f\x7f; touch MARK; echo '"],
+    ['echo', 'x\x03touch MARK #'],
+    ['printf', '%s\n', 'a\tb'],
+  ];
+  it.each(['/bin/bash', '/bin/zsh', '/opt/homebrew/bin/fish'].flatMap(shell =>
+    ([SURFACE_CONTROL_METHODS.split, SURFACE_CONTROL_METHODS.ensure] as const).flatMap(method =>
+      lineEditorArgv.map(command => ({ shell, method, command })))),
+  )('refuses $method argv $command for $shell before typing it', async ({ shell, method, command }) => {
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell });
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
+    await flush();
+    const write = vi.spyOn(fake, 'writePty');
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method, surfaceId: 'surface:a', params: { surface: 'surface:a', command, cwd: '/repo' }, respond,
+    } })));
+    await flush();
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: 'command arguments cannot contain terminal control characters' });
     expect(write).not.toHaveBeenCalled();
     expect(leafCount()).toBe(1);
   });

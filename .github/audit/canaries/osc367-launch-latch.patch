@@ -16,10 +16,10 @@ index b02173d21..4218840d6 100644
    });
  
 diff --git a/lib/src/lib/tool-launch-latch.test.ts b/lib/src/lib/tool-launch-latch.test.ts
-index 53061a771..c27fbca4c 100644
+index 71fa3846d..d38e1de06 100644
 --- a/lib/src/lib/tool-launch-latch.test.ts
 +++ b/lib/src/lib/tool-launch-latch.test.ts
-@@ -48,26 +48,6 @@ describe('ToolLaunchLatch', () => {
+@@ -48,18 +48,6 @@ describe('ToolLaunchLatch', () => {
      expect(admitted(start('view /a') + open('/b'))).toEqual([]);
    });
  
@@ -35,6 +35,13 @@ index 53061a771..c27fbca4c 100644
 -    expect(admitted(start('view /a'), finish + start('view /a') + open('/a'), open('/b'))).toEqual([]);
 -  });
 -
+   it('admits the launched run whose reported line the parser rewrote: a whitespace run, U+202F, or past the length cap', () => {
+     for (const typed of ["dor builtin-file '/x/a  b.md'", "dor builtin-file '/x/3.05.12\u202fPM.png'", `dor builtin-file '/x/${'a'.repeat(2100)}'`]) {
+       const { latch, admitted } = pty();
+@@ -68,14 +56,6 @@ describe('ToolLaunchLatch', () => {
+     }
+   });
+ 
 -  it('ends the launched run at a second start or a prompt, never resuming it', () => {
 -    for (const ending of [start('view /a'), osc('133;C'), osc('633;A'), osc('133;D;0')]) {
 -      const { latch, admitted } = pty();
@@ -47,10 +54,10 @@ index 53061a771..c27fbca4c 100644
      const { latch } = pty();
      const parser = new TerminalProtocolParser();
 diff --git a/lib/src/lib/tool-launch-latch.ts b/lib/src/lib/tool-launch-latch.ts
-index f8f747e66..a4b30b185 100644
+index e4df26691..f5e8db9d9 100644
 --- a/lib/src/lib/tool-launch-latch.ts
 +++ b/lib/src/lib/tool-launch-latch.ts
-@@ -4,16 +4,12 @@ import type { TerminalProtocolEvent } from './terminal-protocol';
+@@ -5,16 +5,12 @@ import type { TerminalProtocolEvent } from './terminal-protocol';
   * Which of a PTY's OSC 367 `open` requests its owner forwards
   * (`docs/specs/dor-tool.md` -> OSC 367): only those made during the run the
   * host itself launched there. Dormouse arms it as it types a command line into
@@ -71,10 +78,10 @@ index f8f747e66..a4b30b185 100644
    #launched: string | null = null;
    /** The line the shell staged for its next start (`OSC 633;E`). */
    #line: string | null = null;
-@@ -39,7 +35,6 @@ export class ToolLaunchLatch {
+@@ -40,7 +36,6 @@ export class ToolLaunchLatch {
            break;
          case 'commandStart':
-           this.#running = this.#launched !== null && this.#line === this.#launched;
+           this.#running = this.#launched !== null && isReportedCommandLine(this.#line, this.#launched);
 -          this.#launched = null;
            this.#line = null;
            break;

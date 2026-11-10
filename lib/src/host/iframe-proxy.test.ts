@@ -372,6 +372,28 @@ describe('iframe proxy — serving', () => {
     expect(res.headers['transfer-encoding']).toBe('chunked');
   });
 
+  it('instruments only a document load: a fetch answered as text/html comes back as sent', async () => {
+    const json = '{"ok":true,"n":1}';
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); s.end(json); });
+    const url = await frame(`http://127.0.0.1:${port}/api`);
+
+    const fetched = await request(url, { headers: { 'sec-fetch-dest': 'empty' } });
+    expect(fetched.body).toBe(json);
+    expect(fetched.headers['x-frame-options']).toBeUndefined();
+    const documentLoads: Record<string, string>[] = [{ 'sec-fetch-dest': 'iframe' }, {}];
+    for (const headers of documentLoads) {
+      expect((await request(url, { headers })).body, JSON.stringify(headers)).toContain('__dormouse');
+    }
+  });
+
+  it('logs a framed URL\'s origin, never its path or query', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('ok'); });
+    const lines: string[] = [];
+    await frame(`http://127.0.0.1:${port}/lab/secret-path?token=secret`, { ...NO_LOG, log: (line: string) => { lines.push(line); } });
+    expect(lines.some(line => line.includes(`127.0.0.1:${port}`))).toBe(true);
+    expect(lines.filter(line => line.includes('secret'))).toEqual([]);
+  });
+
   it('keeps the upstream content-type, charset included', async () => {
     const body = Buffer.concat([Buffer.from('<html><head><title>'), Buffer.from([0x93, 0xfa, 0x96, 0x7b]), Buffer.from('</title></head><body>x</body></html>')]);
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html; charset=Shift_JIS' }); s.end(body); });
@@ -534,6 +556,18 @@ describe('iframe proxy — serving', () => {
       const fetched = await request(url, { headers: { 'sec-fetch-dest': 'empty' } });
       expect(fetched.status).toBe(302);
       expect(fetched.headers.location).toBe(sent);
+    }
+  });
+
+  it('forwards a redirect to a scheme a browser refuses as sent, never as a page that follows it', async () => {
+    let location = '';
+    const port = await upstream((_q, s) => { s.writeHead(302, { location }); s.end(); });
+    const url = await frame(`http://127.0.0.1:${port}/login`);
+    for (const sent of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>']) {
+      location = sent;
+      const res = await request(url, { headers: { 'sec-fetch-dest': 'iframe' } });
+      expect(res.status, sent).toBe(302);
+      expect(res.body).not.toContain('location.replace');
     }
   });
 

@@ -7,7 +7,7 @@ import type { WorkspaceId } from '../../lib/session-types';
 import { sanitizeText } from '../../lib/osc-sanitize';
 import { getTerminalInstance } from '../../lib/terminal-registry';
 import { randomKillChar } from '../KillConfirm';
-import { errorText } from './dor-control-shared';
+import { messageOf } from '../../lib/errors';
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from './workspace-boot-plans';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 
@@ -196,6 +196,6 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
 export function requestSurfaceMove(id: string, destination: MoveSurfaceRequest['destination']): void {
   const source = wallHandleOwning(id);
   void moveSurface(id, { destination, focus: true, dangerouslyDestroyIframePageState: false }, true).catch(error => {
-    if (source) setWorkspaceMoveError({ id: source.workspaceId, reason: errorText(error) });
+    if (source) setWorkspaceMoveError({ id: source.workspaceId, reason: messageOf(error) });
   });
 }

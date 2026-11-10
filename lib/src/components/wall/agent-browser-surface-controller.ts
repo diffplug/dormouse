@@ -16,7 +16,7 @@ import {
   type ViewerSyncState,
 } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
-import { getPlatform } from '../../lib/platform';
+import { getPlatform, IS_MAC } from '../../lib/platform';
 import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { msSince } from '../../lib/elapsed';
@@ -219,7 +219,7 @@ export interface AgentBrowserViewSink {
   /** Ask the view to swap to iframe or the other automation provider. The ≥2-tab
    *  typed-confirm gate and the Wall's `onSwapRenderMode` are view concerns; the
    *  view reads tabs from the snapshot and decides. */
-  requestRenderSwap(mode?: RenderMode, viewport?: BrowserViewportSetting): void;
+  requestRenderSwap(mode: RenderMode, viewport?: BrowserViewportSetting): void;
   /** The first launch failed: the Wall applies the Surface's `launchFallback`. */
   launchFailed(error: string): void;
 }
@@ -1706,8 +1706,11 @@ export class AgentBrowserSurfaceController {
   }
 
   handleKeyDownLike(e: KeyLike): void {
-    const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key.toLowerCase() === 'v') {
+    // Paste and the editing chords below take the platform's own modifier,
+    // Cmd on macOS and Ctrl elsewhere, so a Mac's Ctrl+V and Ctrl+C stay the
+    // page's keys (a web terminal's quoted-insert and interrupt).
+    const platformMod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+    if (platformMod && e.key.toLowerCase() === 'v') {
       // A slow read must not land in a browser relaunched meanwhile.
       const { phase, connection } = this;
       if (phase.k !== 'live' || !connection) return;
@@ -1717,12 +1720,12 @@ export class AgentBrowserSurfaceController {
       return;
     }
     // Native editing chords (select-all/copy/cut) don't fire over the stream
-    // input path (CDP commands field is dropped), on any platform — Cmd on
-    // macOS, Ctrl elsewhere. Route the intent through the host's purpose-built
-    // edit channel instead — a daemon command, so gated like the rest. A host
-    // that cannot drive the provider (the fake adapter) falls through, so the
-    // page still gets the chord for its own JS shortcuts.
-    if (mod && !e.altKey && !e.shiftKey) {
+    // input path (CDP commands field is dropped), on any platform. Route the
+    // intent through the host's purpose-built edit channel instead — a daemon
+    // command, so gated like the rest. A host that cannot drive the provider
+    // (the fake adapter) falls through, so the page still gets the chord for
+    // its own JS shortcuts.
+    if (platformMod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
       if (op && this.hosted && this.session) {
         this.drive(op, (browser) => browser.edit(op));

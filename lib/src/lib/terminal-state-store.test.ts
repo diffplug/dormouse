@@ -469,4 +469,17 @@ describe('seedLaunchedCommand (dor split/ensure command launches)', () => {
     expect(done.currentCommand).toBeNull();
     expect(surfaceRunsCommand(done, 'pnpm dev:website', '/repo/app')).toBe(false);
   });
+
+  it('still matches once the shell re-reports a launched command the parser rewrites', () => {
+    for (const command of ["printf '%s\\n' 'a  b\tc'", "dor builtin-file '/x/3.05\u202fPM.png'", `less '/x/${'a'.repeat(2100)}'`]) {
+      seedLaunchedCommand('launch', command, '/repo/app');
+      const reported = new TerminalProtocolParser().process(`\x1b]633;E;${command}\x07\x1b]633;C\x07`).events
+        .flatMap(event => event.kind === 'semantic' ? [event.event] : []);
+      applyTerminalSemanticEvents('launch', reported);
+      const live = getTerminalPaneState('launch');
+      expect(live.currentCommand?.rawCommandLine, command.slice(0, 30)).not.toBe(command);
+      expect(surfaceRunsCommand(live, command, '/repo/app'), command.slice(0, 30)).toBe(true);
+      removeTerminalPaneState('launch');
+    }
+  });
 });

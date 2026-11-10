@@ -75,6 +75,19 @@ describe('a viewer socket', () => {
     expect(socket.frames().at(-1)).toMatchObject({ kind: 'crisp', size: { width: 800, height: 600 } });
   });
 
+  it('paints the withheld stream frame when the capture it pulsed fails', async () => {
+    const { socket, view, captures } = makeView();
+    view.frame(jpeg(1));
+    await vi.advanceTimersByTimeAsync(100);
+    captures[0](jpeg(9));
+    await vi.advanceTimersByTimeAsync(0);
+    view.frame(jpeg(2));
+    await vi.advanceTimersByTimeAsync(300);
+    captures[1](undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.kinds()).toEqual(['provisional 1', 'crisp 9', 'provisional 2']);
+  });
+
   it('sends a byte-identical capture only over a provisional paint, or to a canvas that asks again', async () => {
     const { socket, view, captures } = makeView();
     view.frame(jpeg(1));

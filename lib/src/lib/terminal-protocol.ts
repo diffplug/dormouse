@@ -1,7 +1,7 @@
 import { parseToolAnnounce, parseToolDehydrate, parseToolOpen, parseToolState, type ToolAnnounce, type ToolDehydrate, type ToolOpen, type ToolState } from 'dor-tools-lib/osc';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
-import { sanitizeClipboardText, sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
+import { COMMAND_LINE_LIMIT, sanitizeClipboardText, sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
 import { isProtocolCommandStart } from './tool-events';
 import {
   STRING_CONTROL_INTRODUCER,
@@ -114,8 +114,8 @@ const BODY_LIMIT = 4096;
 // *retained*: it is re-tokenized on every header derivation and is the key
 // `dor ensure --restart` matches on, and its decoding actively re-introduces
 // control characters that the emit-side escaping had removed
-// (`docs/specs/terminal-state.md` → Shell-integration injection). See `commandLineEvents`.
-const COMMAND_LINE_LIMIT = 2048;
+// (`docs/specs/terminal-state.md` → Shell-integration injection). See `commandLineEvents`;
+// the cap is `COMMAND_LINE_LIMIT`.
 /** The longest `OSC 52` payload offered, in base64 characters; longer is
  *  dropped. Under {@link OSC_INCOMPLETE_LIMIT} with room for the introducer, so
  *  how the PTY splits its reads never changes the answer. */

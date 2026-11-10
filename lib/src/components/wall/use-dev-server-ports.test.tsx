@@ -122,6 +122,25 @@ describe('dev-server port correlation across Walls', () => {
     expect(openPorts).not.toHaveBeenCalled();
   });
 
+  it('finds a settled port\'s owner again once the owning command ends', async () => {
+    const paneIds = ['a1', 'b1'];
+    let server = 'a1';
+    openPorts.mockImplementation(async (id: string) => (id === server ? tcp(PORT) : []));
+    act(() => seedLaunchedCommand('a1', 'pnpm dev'));
+    requestDevServerPort(PORT);
+    await act(async () => { root.render(<Harness paneIds={paneIds} />); });
+    await settleScan();
+    expect(getDevServerResolution(PORT)?.paneId).toBe('a1');
+
+    // a1 is killed; the server is restarted in b1.
+    server = 'b1';
+    act(() => removeTerminalPaneState('a1'));
+    act(() => seedLaunchedCommand('b1', 'pnpm dev'));
+    await settleScan();
+    expect(getDevServerResolution(PORT)?.paneId).toBe('b1');
+    removeTerminalPaneState('b1');
+  });
+
   it('backs off on an unmatched port and stops until the next wake', async () => {
     requestDevServerPort(PORT);
     await act(async () => { root.render(<Harness paneIds={['a1']} />); });

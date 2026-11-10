@@ -4,7 +4,7 @@
  *
  * Only tool-designated Sessions are scanned. An ordinary terminal that opens a
  * port never transforms — that is the Dev-Server Chip's job, and panes must not
- * flip under the user (`docs/specs/dor-tool.md` -> Security).
+ * flip under the user (`docs/specs/security-local.md` -> Dor Tool configuration).
  */
 import { useEffect, useRef } from 'react';
 import { getTerminalPaneState } from '../../lib/terminal-registry';
@@ -25,6 +25,7 @@ import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 import type { CommandRun } from '../../lib/terminal-state';
+import { isReportedCommandLine } from '../../lib/osc-sanitize';
 
 // A serving command usually binds within a second or two of starting, but a
 // cold `pnpm` boot can take much longer, so this keeps polling for as long as
@@ -60,7 +61,7 @@ export function toolLeaves(lath: LathWallEngine, doors: readonly DooredItem[]): 
  *  browser panel remains mounted behind the terminal half, so its controller
  *  must be released explicitly rather than waiting for an unmount that will not
  *  happen — closing its session with it. */
-export function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): boolean {
+function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): boolean {
   if (browserUrlFromParams(params) === null && toolPortConflictFromParams(params) === null) return false;
   closeBrowserSurface(id, params);
   lath.store.updateParams(id, {
@@ -129,7 +130,7 @@ export function useToolServing({
         const runId = run?.id ?? null;
         const runChanged = observedRuns.current.has(leaf.id) && observedRuns.current.get(leaf.id) !== runId;
         observedRuns.current.set(leaf.id, runId);
-        const running = run !== null && run.rawCommandLine === leaf.params.command;
+        const running = run !== null && isReportedCommandLine(run.rawCommandLine, leaf.params.command);
         const announce = running ? getToolAnnounce(leaf.id) : null;
 
         // A runtime re-key re-labels this Surface and nothing else — it never

@@ -502,7 +502,9 @@ async function mintGrant(
   // Sweep after insertion as well, so neither sequential nor concurrent calls
   // leave more than MAX_GRANTS published listeners behind.
   sweepGrants(Date.now());
-  log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin}${leased ? ' (leased)' : ''}`);
+  // The origin only: a path or query can carry a credential (`?token=`), and
+  // the host log is offered for pasting into an issue.
+  log(`[iframe-proxy] ${upstream.origin} → ${grant.proxyOrigin}${leased ? ' (leased)' : ''}`);
   return grant;
 }
 
@@ -580,9 +582,11 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   if (typeof headers.referer === 'string') {
     headers.referer = rewriteOrigin(headers.referer, grant.proxyOrigin, grant.upstream.origin);
   }
-  // Documents come back identity, so their HTML can be instrumented.
+  // Documents come back identity, so their HTML can be instrumented; a
+  // fetch/XHR body is never instrumented, since the shim would corrupt it.
   const dest = req.headers['sec-fetch-dest'];
-  if (typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest)) delete headers['accept-encoding'];
+  const documentLoad = typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest);
+  if (documentLoad) delete headers['accept-encoding'];
   // Only a frame's own load, which names its destination: a probe without
   // one must not spend it.
   if (grant.fresh && (dest === 'document' || dest === 'iframe')) {
@@ -630,7 +634,7 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       res.end(`This page is compressed as ${encoding}, which Dormouse cannot decode here.`);
       return;
     }
-    if (!/text\/html/i.test(contentType) || (encoding !== 'identity' && body === upstreamRes)
+    if (!documentLoad || !/text\/html/i.test(contentType) || (encoding !== 'identity' && body === upstreamRes)
       || declaresUtf16(contentType) || embedder === undefined) {
       passThrough(grant, upstreamRes, res, body);
       return;
@@ -936,7 +940,7 @@ function sweepGrants(now: number): void {
     if (!expired && count <= MAX_GRANTS) break;
     count -= 1;
     closeGrant(grant);
-    log(`[iframe-proxy] swept grant for ${grant.upstream.href}`);
+    log(`[iframe-proxy] swept grant for ${grant.upstream.origin}`);
   }
 }
 
@@ -952,6 +956,9 @@ function offOriginRedirect(grant: Grant, path: string, upstreamRes: http.Incomin
   if (status < 300 || status > 399 || typeof location !== 'string') return null;
   try {
     const target = new URL(location, `${grant.upstream.origin}${path}`);
+    // A `javascript:` or `data:` redirect, which a browser refuses, passes as
+    // sent: the redirect page would navigate a nested frame there itself.
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
     return target.origin === grant.upstream.origin ? null : target;
   } catch {
     return null;

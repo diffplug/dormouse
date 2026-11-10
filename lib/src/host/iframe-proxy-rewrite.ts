@@ -5,8 +5,7 @@
  * Split out from the Node server (`iframe-proxy.ts`) so the policy/rewriting
  * logic is shared by every host that runs the proxy (VS Code extension host,
  * Tauri sidecar) and is unit-testable without standing up a server. Nothing
- * here imports `http`/`net`; headers are typed structurally so this file is
- * runtime-agnostic.
+ * here imports `http`/`net`.
  */
 
 import { dualTap, newDualTapState } from '../lib/dual-tap';

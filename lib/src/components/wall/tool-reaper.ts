@@ -22,6 +22,7 @@ import {
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
 import { registry } from '../../lib/terminal-store';
+import { isReportedCommandLine } from '../../lib/osc-sanitize';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import { getToolDirty } from '../../lib/tool-dirty-store';
 import {
@@ -65,7 +66,7 @@ export function toolReapBlocker(id: string, params: Record<string, unknown> | un
   const command = toolCommandFromParams(params);
   // Only the designated command's own declaration counts: another command
   // typed into the Tool's shell is not what a rehydrate would start.
-  if (!command || getTerminalPaneState(id).currentCommand?.rawCommandLine !== command) return 'its command is not running';
+  if (!command || !isReportedCommandLine(getTerminalPaneState(id).currentCommand?.rawCommandLine, command)) return 'its command is not running';
   const announce = getToolAnnounce(id);
   if (announce?.dehydrate !== true) return 'it never declared itself safe to stop';
   if (announce.persist === 'never') return 'it announced persist: never';

@@ -12,10 +12,13 @@ describe('virtualKeyCode', () => {
     expect(virtualKeyCode(' ', 'Space')).toBe(32);
   });
 
-  it('maps letters and digits structurally from the physical code', () => {
+  it('maps a Latin letter by the letter typed, and other keys from the physical code', () => {
     expect(virtualKeyCode('a', 'KeyA')).toBe(65); // VK_A
     expect(virtualKeyCode('A', 'KeyA')).toBe(65); // shifted shares the code
     expect(virtualKeyCode('z', 'KeyZ')).toBe(90);
+    expect(virtualKeyCode('z', 'KeyY')).toBe(90); // QWERTZ: the letter, not the position
+    expect(virtualKeyCode('a', 'KeyQ')).toBe(65); // AZERTY
+    expect(virtualKeyCode('я', 'KeyZ')).toBe(90); // a non-Latin layout keeps the position
     expect(virtualKeyCode('1', 'Digit1')).toBe(49); // VK_1
     expect(virtualKeyCode('1', 'Numpad1')).toBe(97); // VK_NUMPAD1
   });
