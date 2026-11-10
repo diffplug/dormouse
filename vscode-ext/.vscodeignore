@@ -8,7 +8,7 @@ scripts/
 node_modules/
 *.mts
 icon-no-border.svg
-tsconfig.json
+tsconfig*.json
 icon.svg
 *.vsix
 *.ts
