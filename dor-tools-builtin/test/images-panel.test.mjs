@@ -4,18 +4,12 @@ import { createRequire } from 'node:module';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { build } from 'esbuild';
 import { startFileViewer } from '../dist/file-viewer.js';
-import { load } from './bundle.mjs';
+import { keydown, load } from './bundle.mjs';
 
-// The panel imports MDXEditor, which bundles only for Node.
-const bundled = await build({
-  entryPoints: [fileURLToPath(new URL('../viewer/images-panel.tsx', import.meta.url))],
-  bundle: true, format: 'esm', platform: 'node', write: false, logLevel: 'silent', loader: { '.css': 'empty' },
-});
-const { localImagePath, renamedSource } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+const { localImagePath, renamedSource, renameKey } = await load('../viewer/images-panel.tsx', { platform: 'node' });
 
 // The parser and serializer versions the installed editor saves with.
 const editor = createRequire(createRequire(new URL('../viewer/markdown.tsx', import.meta.url)).resolve('@mdxeditor/editor'));
@@ -69,4 +63,16 @@ test('a renamed image is written as a link that reads back as its new file', { s
       assert.equal(localImagePath(fromMarkdown(saved).children[1].children[0].url), folder + name, `${line} reads back`);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('the rename field leaves an IME\'s Enter and Escape to the composition', () => {
+  for (const composing of ['webkit', 'chromium']) for (const key of ['Enter', 'Escape']) {
+    const done = [];
+    renameKey(keydown(key, composing), () => done.push('commit'), () => done.push('revert'));
+    assert.deepEqual(done, [], `${composing} ${key}`);
+  }
+  const done = [];
+  renameKey(keydown('Enter'), () => done.push('commit'), () => done.push('revert'));
+  renameKey(keydown('Escape'), () => done.push('commit'), () => done.push('revert'));
+  assert.deepEqual(done, ['commit', 'revert']);
 });

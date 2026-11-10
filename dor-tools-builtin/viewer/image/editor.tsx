@@ -3,6 +3,7 @@
  * parent. Remount it (a new `key`) to load other pixels. */
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
+import { isComposingKey } from '../composing';
 import type { DocumentEditor } from '../document-session';
 import { EditorController, MARKUP, type Revision, type Tool } from './controller';
 import { Icon, type IconName } from './icons';
@@ -297,11 +298,18 @@ function LabelInput({ ctl }: { ctl: EditorController }) {
       style={{ left: at.x, top: at.y, fontSize: size, color: ctl.color, width: `${Math.max(2, ...lines.map(l => l.length)) + 1.5}ch` }}
       onChange={e => { setValue(e.target.value); ctl.setText(e.target.value); }}
       onBlur={() => ctl.finishText(true)}
-      onKeyDown={e => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ctl.finishText(true); ctl.hooks.focus?.(); }
-        else if (e.key === 'Escape') { e.preventDefault(); ctl.finishText(false); ctl.hooks.focus?.(); }
-        e.stopPropagation();
-      }}
+      onKeyDown={e => labelKey(ctl, e)}
     />
   );
+}
+
+/** The label field's keys: Enter places the label (Shift+Enter is a new
+ * line) and Escape discards it, except while an IME composition owns the key.
+ * No key reaches the editor's shortcuts. */
+export function labelKey(ctl: Pick<EditorController, 'finishText' | 'hooks'>, e: KeyboardEvent): void {
+  if (!isComposingKey(e.nativeEvent)) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ctl.finishText(true); ctl.hooks.focus?.(); }
+    else if (e.key === 'Escape') { e.preventDefault(); ctl.finishText(false); ctl.hooks.focus?.(); }
+  }
+  e.stopPropagation();
 }

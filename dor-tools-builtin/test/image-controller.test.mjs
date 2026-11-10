@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { load, px, raster } from './bundle.mjs';
+import { keydown, load, px, raster } from './bundle.mjs';
 
 // The canvas the controller paints is out of scope: a stand-in takes its
 // calls, and converts colors as a browser would between sRGB and Display P3
@@ -228,4 +228,21 @@ test('a seam an arrow or a stroke crosses moves only the ends and points past it
   const [arrow, stroke] = ctl.doc.objects;
   assert.deepEqual([arrow.x1, arrow.x2], [2, 34]);
   assert.deepEqual(stroke.points.map(p => p.x), [2, 12, 34]);
+});
+
+test('the label field leaves an IME\'s Enter and Escape to the composition, and every key to itself', async () => {
+  globalThis.matchMedia = () => ({ matches: false });
+  const { labelKey } = await load('../viewer/image/editor.tsx', { platform: 'node' });
+  const finished = [];
+  const ctl = { finishText: commit => finished.push(commit), hooks: {} };
+  for (const composing of ['webkit', 'chromium']) for (const key of ['Enter', 'Escape']) {
+    const event = keydown(key, composing);
+    labelKey(ctl, event);
+    assert.deepEqual(finished, [], `${composing} ${key}`);
+    assert.deepEqual(event.calls, ['stopPropagation'], `${composing} ${key}`);
+  }
+  labelKey(ctl, keydown('Enter', null, { shiftKey: true }));
+  labelKey(ctl, keydown('Enter'));
+  labelKey(ctl, keydown('Escape'));
+  assert.deepEqual(finished, [true, false]);
 });

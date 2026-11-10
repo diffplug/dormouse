@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 import { $getRoot, $isElementNode, getNearestEditorFromDOMNode, type LexicalEditor, type LexicalNode } from 'lexical';
 import { $isImageNode, $isTableNode, ImageNode, NESTED_EDITOR_UPDATED_COMMAND, type TableNode } from '@mdxeditor/editor';
 import { editableImageType } from '../src/file-viewer-format';
 import { IMAGES_ROUTE } from '../src/image-format';
+import { isComposingKey } from './composing';
 import { message, request } from './document-session';
 
 /** A relative image `src` as the `/`-separated path, relative to the document's
@@ -95,6 +96,14 @@ export function renamedSource(src: string, name: string, path: string): string {
   return /%[\da-f]{2}/i.test(base.slice(folder.length)) || localImagePath(raw) !== path ? folder + encodeURIComponent(name) : raw;
 }
 
+/** The rename field's keys: Enter commits and Escape reverts, except while an
+ * IME composition owns the key. */
+export function renameKey(event: KeyboardEvent, commit: () => void, revert: () => void): void {
+  if (isComposingKey(event.nativeEvent)) return;
+  if (event.key === 'Enter') { event.preventDefault(); commit(); }
+  if (event.key === 'Escape') { event.preventDefault(); revert(); }
+}
+
 function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: LexicalEditor; generation: number; onEdit(path: string): void }) {
   const path = localImagePath(src);
   const editable = editableImage(path) ? path : null;
@@ -121,10 +130,7 @@ function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: Le
         : <input className="image-name" value={draft} disabled={state.busy} aria-label={`Rename ${name}`} spellCheck={false}
             onChange={event => { setDraft(event.target.value); setState({}); }}
             onBlur={() => void commit()}
-            onKeyDown={event => {
-              if (event.key === 'Enter') { event.preventDefault(); void commit(); }
-              if (event.key === 'Escape') { event.preventDefault(); setDraft(name); setState({}); }
-            }} />}
+            onKeyDown={event => renameKey(event, () => void commit(), () => { setDraft(name); setState({}); })} />}
       {editable !== null && <button type="button" className="image-edit" data-tip-text={`Edit ${name}`} onClick={() => onEdit(editable)}>Edit</button>}
       {folder && <span className="image-folder" data-tip-text={path!}>{folder}</span>}
       {state.error && <span className="image-error" role="alert">{state.error}</span>}
