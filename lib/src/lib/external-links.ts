@@ -108,7 +108,7 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
   const file = decodeFileLink(uri);
   if (file && [shown, text].some((name) => namesPath(file.path, name.replace(LINE_SUFFIX_RE, '')))) return 'plain';
 
-  const shapedHost = extractUrlShapedHost(shown);
+  const shapedHost = extractUrlShapedHost(shown, normalizeDisplayText(text, false));
   if (shapedHost === null) return 'plain';
 
   const actualHost = safeHost(uri);
@@ -193,22 +193,28 @@ const DISPLAY_LABEL = '[\\p{L}\\p{N}](?:[\\p{L}\\p{N}\\p{M}-]*[\\p{L}\\p{N}\\p{M
 // "URL-shaped" without a scheme: `localhost` or a dotted name, with any root
 // dot, port, and path. Bare-domain detection is the classic phishing shape: a
 // terminal label that looks like a domain and links somewhere else.
-const BARE_DOMAIN_RE = new RegExp(`^(?://)?(localhost|${DISPLAY_LABEL}(?:\\.${DISPLAY_LABEL})+)\\.?(?::\\d{1,5})?(?:[/?#].*)?$`, 'iu');
+// A web URL's `\` reads as `/`.
+const BARE_DOMAIN_RE = new RegExp(`^(?://)?(localhost|${DISPLAY_LABEL}(?:\\.${DISPLAY_LABEL})+)\\.?(?::\\d{1,5})?(?:[/?#\\\\].*)?$`, 'iu');
+// A web scheme the URL parser reads a host after with or without its slashes:
+// `https:github.com` is `https://github.com/`.
+const WEB_SCHEME_RE = /^(?:https?|ftp|wss?):/i;
 // A name ending in a number is an IPv4 address or not a host: `12.5` is a figure.
 const FIGURE_RE = /^(?!\d+\.\d+\.\d+\.\d+$).*\.\d+$/;
 
 /** Display text however spelled: compatibility forms and the ideographic full
- *  stop folded, separators read as spaces, invisible characters dropped, wrapping
- *  brackets and punctuation removed. */
-function normalizeDisplayText(text: string): string {
-  return text.normalize('NFKC').replace(/\p{Z}/gu, ' ').replace(HIDDEN_IN_DISPLAY, '').replace(/\u3002/g, '.').replace(DISPLAY_WRAPPING, '');
+ *  stop folded, separators read as spaces, invisible characters dropped, and
+ *  unless `unwrap` is false, wrapping brackets and punctuation removed. */
+function normalizeDisplayText(text: string, unwrap = true): string {
+  const folded = text.normalize('NFKC').replace(/\p{Z}/gu, ' ').replace(HIDDEN_IN_DISPLAY, '').replace(/\u3002/g, '.');
+  return unwrap ? folded.replace(DISPLAY_WRAPPING, '') : folded;
 }
 
 /** The host normalized display text reads as, through the URL parser so a
  *  lookalike's punycode compares unequal to the host it imitates; null for text
- *  that names no host. */
-function extractUrlShapedHost(text: string): string | null {
-  if (text.includes('://')) return safeHost(text);
+ *  that names no host. `folded` is the text before unwrapping, whose closing
+ *  `]` an IPv6 literal such as `http://[::1]` needs. */
+function extractUrlShapedHost(text: string, folded: string): string | null {
+  if (text.includes('://') || WEB_SCHEME_RE.test(text)) return safeHost(text) ?? safeHost(folded);
   const name = BARE_DOMAIN_RE.exec(text)?.[1];
   return !name || FIGURE_RE.test(name) ? null : safeHost(`https://${name}`);
 }

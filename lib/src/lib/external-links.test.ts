@@ -135,6 +135,12 @@ describe('classifyDisplayMatch', () => {
     ['a trailing no-break space', 'github.com\u00a0'],
     ['a tag character', 'github.com\u{e0041}'],
     ['a Cyrillic homoglyph', 'g\u0456thub.com'],
+    ['a scheme without slashes', 'https:github.com'],
+    ['a scheme with one slash', 'https:/github.com'],
+    ['an upper-case scheme without slashes', 'HTTP:github.com/login'],
+    ['an IPv6 literal', 'http://[::1]'],
+    ['an IPv6 literal and slash', 'http://[2001:db8::1]/'],
+    ['a backslash path', 'github.com\\login'],
   ])('flags a different host spelled with %s as deceptive', (_, display) => {
     expect(classifyDisplayMatch('https://evil.example/login', display)).toBe('deceptive');
   });
@@ -145,6 +151,7 @@ describe('classifyDisplayMatch', () => {
     ['brackets', '(https://github.com)'],
     ['a fullwidth dot', 'github\uff0ecom'],
     ['a zero-width space', 'git\u200bhub.com'],
+    ['a scheme without slashes', 'https:github.com/x'],
   ])('keeps the same host spelled with %s plain', (_, display) => {
     expect(classifyDisplayMatch('https://github.com/x', display)).toBe('plain');
   });
@@ -152,6 +159,7 @@ describe('classifyDisplayMatch', () => {
   it('compares hosts without a port or root dot on the target', () => {
     expect(classifyDisplayMatch('https://github.com:8443/x', 'github.com')).toBe('plain');
     expect(classifyDisplayMatch('https://github.com./x', 'github.com')).toBe('plain');
+    expect(classifyDisplayMatch('http://[::1]:8080/x', 'http://[::1]')).toBe('plain');
     expect(classifyDisplayMatch('https://m\u00fcnchen.example/x', 'M\u00dcNCHEN.example')).toBe('plain');
   });
 
