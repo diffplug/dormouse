@@ -6,8 +6,10 @@
 
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import type { IncomingMessage, Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import type { Duplex } from 'node:stream';
 
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -427,6 +429,35 @@ class PresenceNonceStore {
   }
 }
 
+type UpgradeListener = (request: IncomingMessage, socket: Duplex, head: Buffer) => unknown;
+
+/**
+ * Wrap `@hono/node-ws`'s `injectWebSocket` so no upgrade request can end the
+ * process. Its listener is async and parses the raw request target unguarded
+ * (`//` throws, an unhandled rejection), and Node hands an upgrade listener a
+ * socket with no `'error'` listener, which the adapter never adds before `ws`
+ * takes the socket — and never on one it refuses — so a peer reset would be an
+ * unhandled `'error'`. Both close only that socket here. The adapter's
+ * `injectWebSocket` only calls `server.on('upgrade', …)`, so a facade carrying
+ * that one method is all it is handed.
+ */
+function guardUpgrades(inject: NodeWebSocket['injectWebSocket']): NodeWebSocket['injectWebSocket'] {
+  return (server) => {
+    const facade = {
+      on(event: 'upgrade', listener: UpgradeListener) {
+        (server as Server).on(event, (request, socket, head) => {
+          socket.on('error', () => socket.destroy());
+          Promise.resolve()
+            .then(() => listener(request, socket, head))
+            .catch(() => socket.destroy());
+        });
+        return facade;
+      },
+    };
+    inject(facade as unknown as Server);
+  };
+}
+
 /** What {@link createApp} hands back: the Hono app plus its auth internals. */
 export interface CreatedApp {
   readonly app: Hono<AppEnv>;
@@ -629,7 +660,8 @@ export function createApp(config: AppConfig): CreatedApp {
   const app = new Hono<AppEnv>();
   // The WS relay routes need the http server that `serve()` builds later, so the
   // adapter is created here and `injectWebSocket` is handed back to the caller.
-  const { upgradeWebSocket, injectWebSocket, wss } = createNodeWebSocket({ app });
+  const { upgradeWebSocket, injectWebSocket: injectUnguarded, wss } = createNodeWebSocket({ app });
+  const injectWebSocket = guardUpgrades(injectUnguarded);
   // `ws` defaults to a 100 MiB frame, which the relay would buffer whole before
   // any guard ran. Read at upgrade time, so setting it on the options here is
   // what every socket this adapter accepts is built with.
