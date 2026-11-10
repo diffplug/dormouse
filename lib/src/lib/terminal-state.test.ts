@@ -113,7 +113,7 @@ describe('terminal CWD normalization', () => {
     expect(cwdFromOsc633(long, 100)?.path.length).toBe(MAX_CWD_LENGTH);
     const osc7 = cwdFromOsc7(`file://localhost${long}`, 100)!;
     expect(osc7.path.length).toBeLessThanOrEqual(MAX_CWD_LENGTH);
-    expect(osc7.uri.length).toBe(MAX_CWD_LENGTH);
+    expect(osc7.uri).toHaveLength(MAX_CWD_LENGTH);
   });
 
   it('builds shortest unique labels without losing remote hosts', () => {

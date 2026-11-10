@@ -27,7 +27,7 @@ import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
 import { IS_MAC, setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
-import type { PlatformAdapter } from '../lib/platform/types';
+import type { PlatformAdapter, ToolControlResult, ToolHostRequest } from '../lib/platform/types';
 import type { BrowserRequest, BrowserResult } from '../lib/platform/browser-automation';
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
@@ -292,8 +292,8 @@ describe('Wall on the Lath engine', () => {
         cwdAtStart: cwd, startedAt: 0, source: 'osc633_E',
       },
     });
-    const stateSpy = vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(() => state);
-    const integratedSpy = vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(() => state);
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
     const writeSpy = vi.spyOn(fake, 'writePty');
     const controller = new AbortController();
     const respond = vi.fn();
@@ -500,6 +500,7 @@ describe('Wall on the Lath engine', () => {
         else if (action === 'host split' || action === 'host replace') window.dispatchEvent(new CustomEvent('dormouse:new-terminal', { detail: { replaceUntouched: action === 'host replace' } }));
         else if (action === 'header kill') container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Kill"]')!.click();
         else handle.handleDorControl({
+          requestId: 'transfer',
           method: SURFACE_CONTROL_METHODS[action],
           params: { surface: 'surface:a', direction: 'right', url: 'http://localhost:8080', confirmation: { mode: 'dangerously' } },
           respond,
@@ -522,7 +523,7 @@ describe('Wall on the Lath engine', () => {
     vi.spyOn(helpers, 'helperHasWork').mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
     const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
     const respond = vi.fn();
-    handle.handleDorControl({ method: SURFACE_CONTROL_METHODS.kill,
+    handle.handleDorControl({ requestId: 'kill', method: SURFACE_CONTROL_METHODS.kill,
       params: { surface: 'surface:a', confirmation: { mode: 'dangerously' } }, respond });
     setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, true);
     try {
@@ -1306,7 +1307,7 @@ describe('Wall on the Lath engine', () => {
     } finally {
       window.getSelection()!.removeAllRanges();
       if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
-      else delete (navigator as Partial<Navigator>).clipboard;
+      else Reflect.deleteProperty(navigator, 'clipboard');
     }
   });
 
@@ -2047,7 +2048,7 @@ describe('Wall on the Lath engine', () => {
     vi.spyOn(terminalRegistry, 'disposeSession').mockImplementation((id) => terminalRegistry.removeTerminalPaneState(id));
     terminalRegistry.seedTerminalManualCwd('surface:a', '/repo');
     await act(async () => {
-      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" showBaseboard />);
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
     });
     await flush();
 
@@ -2840,7 +2841,7 @@ describe('Wall on the Lath engine', () => {
       key: null;
       warnings: string[];
     }>();
-    const toolControl = vi.fn((request: { op: 'lookup' | 'trust' }) => {
+    const toolControl = vi.fn((request: ToolHostRequest): Promise<ToolControlResult> => {
       if (request.op === 'trust') return trustGate.promise;
       if (toolControl.mock.calls.length === 1) {
         return Promise.resolve({
@@ -2971,7 +2972,7 @@ describe('Wall on the Lath engine', () => {
       return {} as ReturnType<typeof terminalRegistry.getOrCreateTerminal>;
     });
     let lookupCount = 0;
-    const toolControl = vi.fn(async (request: { op: 'lookup' | 'trust' }) => {
+    const toolControl = vi.fn(async (request: ToolHostRequest): Promise<ToolControlResult> => {
       if (request.op === 'trust') return { status: 'trust-recorded' as const };
       lookupCount += 1;
       if (lookupCount === 1) {
@@ -3028,7 +3029,8 @@ describe('Wall on the Lath engine', () => {
         expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
       }
     } finally {
-      if (toolId && fake.hasPty(toolId)) act(() => fake.killPty(toolId));
+      const spawned = toolId;
+      if (spawned && fake.hasPty(spawned)) act(() => fake.killPty(spawned));
       getTerminalSpy.mockRestore();
     }
   });

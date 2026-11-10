@@ -54,6 +54,13 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     alertClearTodo: () => {},
     onAlertState: () => {},
     onWatchedCommands: () => {},
+    getOpenPorts: vi.fn(async () => []),
+    getOpenPortsMany: vi.fn(async () => ({})),
+    alertPublishSettings: vi.fn(),
+    alertPublishSessions: vi.fn(),
+    alertAwait: vi.fn(),
+    onAlertSettings: vi.fn(),
+    onAlertSpeak: vi.fn(() => () => {}),
     saveState: vi.fn((state: unknown) => {
       persistedState = state;
     }),
@@ -78,8 +85,7 @@ describe('saveSession', () => {
   it('persists the live alert state even when the previous snapshot was empty', async () => {
     const platform = createPlatform({
       version: 4,
-      layout: null,
-      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, alert: null }],
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, untouched: false, alert: null }],
     });
 
     terminalRegistryMocks.getLivePersistedAlertState.mockReturnValue({ status: 'NOTHING_TO_SHOW', todo: true });

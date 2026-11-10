@@ -93,14 +93,14 @@ it.each(['legacy', 'context', 'public-key'])('rejects a %s checkpoint without re
   expect(report).toMatchObject({
     status: 'FAIL', stage: change === 'legacy' ? 'read-checkpoint' : 'restore-production-key',
   });
-  if (change === 'legacy') expect(report.error).toContain('prepare a new production-format test');
+  if (change === 'legacy') expect('error' in report && report.error).toContain('prepare a new production-format test');
   await expect(second.prepareRestart()).rejects.toThrow('already exists');
   await second.clearRestart();
 });
 
 it('continues after simulated WebKit X25519 failures and distinguishes missing readback', async () => {
   const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value, key) {
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
     if (value?.key?.algorithm?.name === 'X25519') throw new DOMException('clone failed', 'DataError');
     if (value?.algorithm?.name === 'X25519') return put.call(this, null, key);
     return put.call(this, value, key);

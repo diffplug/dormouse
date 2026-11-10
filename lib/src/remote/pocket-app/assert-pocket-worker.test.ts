@@ -15,8 +15,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ONE_TIME_PAGE_PATH } from 'remote-lib-common';
 
-// @ts-expect-error -- a plain build script, deliberately not part of the app's
-// TypeScript program; the shapes it takes and returns are exercised below.
 import {
   assertPocketShell,
   assertPocketWorker,
@@ -26,10 +24,9 @@ import {
   WORKER_FILE,
 } from '../../../scripts/assert-pocket-worker.mjs';
 
-type ShellBases = { base: string; scriptBase: string };
-const check = assertPocketWorker as (outDir: string) => number;
-const checkShell = assertPocketShell as (outDir: string, bases?: ShellBases) => number;
-const oneTimeShell = ONE_TIME_SHELL as ShellBases;
+const check = assertPocketWorker;
+const checkShell = assertPocketShell;
+const oneTimeShell = ONE_TIME_SHELL;
 
 /** A `dist-pocket` holding whatever root files a case needs. */
 function fixture(files: Record<string, string>): string {

@@ -409,7 +409,7 @@ describe('RemoteApiSession frames', () => {
       const sent: SentPayload[] = [];
       const session = new RemoteApiSession({
         burrowId: 'burrow-1', send: (payload) => void sent.push(payload), provider, holder: HOLDER, frames, onClose: (id) => void closed.push(id),
-      } as never);
+      });
       hello(session);
       close(session, { surfaceId: 'surface:1' });
       await flush();

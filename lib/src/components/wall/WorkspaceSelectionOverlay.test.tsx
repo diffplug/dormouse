@@ -377,7 +377,7 @@ describe('SelectionRing settled render', () => {
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
 
-    const path = container.querySelector('[data-ring="outline"]');
+    const path = container.querySelector<SVGPathElement>('[data-ring="outline"]');
     expect(path!.getAttribute('stroke-dasharray')).not.toBeNull();
 
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
@@ -494,7 +494,7 @@ describe('SelectionRing motion smear', () => {
     const panes = flushPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
 
-    const path = container.querySelector('[data-ring="outline"]')!;
+    const path = container.querySelector<SVGPathElement>('[data-ring="outline"]')!;
     // Real geometry, not a stubbed perimeter: pane A inflated by 4 is 108x208 with
     // 12px radii on a 0.5 inset, so `ringPerimeter` is the length the dash divides.
     const dashOf = (el: Element) => el.getAttribute('stroke-dasharray')!.split(' ').map(Number);

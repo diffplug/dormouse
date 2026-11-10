@@ -4,6 +4,7 @@ import type { ActivityState } from './session-activity-store';
 
 function activity(entries: Record<string, Partial<ActivityState>>): Map<string, ActivityState> {
   const base: ActivityState = {
+    episode: null,
     status: 'WATCHING_DISABLED',
     watchingEnabled: false,
     todo: false,

@@ -67,7 +67,7 @@ describe('burrow enrollment', () => {
 
   it('posts the credential and the baked origin to /api/burrow/enroll, and persists nothing', async () => {
     const store = stubLocalStorage();
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response(
         JSON.stringify({
           burrowId: BURROW_ID,
@@ -91,7 +91,7 @@ describe('burrow enrollment', () => {
       'https://dormouse.example/api/burrow/enroll',
       expect.objectContaining({ method: 'POST', redirect: 'error' }),
     );
-    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
     expect(body).toEqual({ password: TEST_SETUP_PASSWORD, origin: 'https://dormouse.example' });
 
     expect(enrollment).toEqual({
@@ -117,7 +117,7 @@ describe('burrow enrollment', () => {
     // and persisted with the enrollment; the enroll request body is unchanged
     // (docs/specs/remote-security-model.md → Burrow identity).
     stubLocalStorage();
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response(
         JSON.stringify({
           burrowId: BURROW_ID,
@@ -144,7 +144,7 @@ describe('burrow enrollment', () => {
     // Round-trips through the guard every read runs.
     expect(isEnrollment(enrollment)).toBe(true);
 
-    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string) as Record<
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as Record<
       string,
       unknown
     >;
@@ -182,7 +182,7 @@ describe('burrow enrollment', () => {
     // `BurrowEnrollRequest` is a union of exactly one credential, and the Relay
     // answers 400 for both or neither — so the body must carry the token alone.
     stubLocalStorage();
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response(
         JSON.stringify({
           burrowId: BURROW_ID,
@@ -197,7 +197,7 @@ describe('burrow enrollment', () => {
 
     await performEnrollment('https://dormouse.example', { enrollToken: 'f'.repeat(64) }, 'My Laptop', fetch);
 
-    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
     expect(body).toEqual({ enrollToken: 'f'.repeat(64), origin: 'https://dormouse.example' });
     expect(body).not.toHaveProperty('password');
   });
@@ -463,15 +463,15 @@ describe('Hosted device-code enrollment', () => {
     interval: 5,
   };
   const json = (status: number, body: unknown) =>
-    vi.fn(async () => new Response(JSON.stringify(body), { status }));
+    vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status }));
 
   it('begins with the baked origin alone, minting the Noise static first', async () => {
     const fetchMock = json(200, BEGIN);
-    const { begin, noiseStatic } = await beginHostedEnrollment(RELAY, fetchMock as unknown as typeof fetch);
+    const { begin, noiseStatic } = await beginHostedEnrollment(RELAY, fetchMock);
 
     expect(begin).toEqual(BEGIN);
     expect(fetchMock.mock.calls[0]![0]).toBe(`${RELAY}/api/burrow/enroll/begin`);
-    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    const init = fetchMock.mock.calls[0]![1]!;
     expect(init.redirect).toBe('error');
     expect(JSON.parse(init.body as string)).toEqual({ origin: RELAY });
     expect(JSON.stringify(init.body)).not.toContain(noiseStatic.noiseStaticPublicKey);
@@ -487,12 +487,12 @@ describe('Hosted device-code enrollment', () => {
 
   it('refuses a begin answer that is not an enrollment code, and names a refused origin', async () => {
     await expect(
-      beginHostedEnrollment(RELAY, json(200, { ...BEGIN, interval: 0 }) as unknown as typeof fetch),
+      beginHostedEnrollment(RELAY, json(200, { ...BEGIN, interval: 0 })),
     ).rejects.toThrow(/not an enrollment code/);
     await expect(
       beginHostedEnrollment(
         RELAY,
-        json(409, { error: ORIGIN_MISMATCH_ERROR, origin: 'https://relay.example.com' }) as unknown as typeof fetch,
+        json(409, { error: ORIGIN_MISMATCH_ERROR, origin: 'https://relay.example.com' }),
       ),
     ).rejects.toThrow(/The Relay says its origin is https:\/\/relay.example.com/);
   });
@@ -503,8 +503,8 @@ describe('Hosted device-code enrollment', () => {
       const material = await mintNoiseStaticKeyPair();
       noiseStatic = { noiseStaticPrivateKey: material.privateKeyPkcs8, noiseStaticPublicKey: material.publicKey };
     });
-    const poll = (fetchMock: unknown) =>
-      pollHostedEnrollment(RELAY, BEGIN.deviceCode, 'My Laptop', noiseStatic, fetchMock as typeof fetch);
+    const poll = (fetchMock: typeof fetch) =>
+      pollHostedEnrollment(RELAY, BEGIN.deviceCode, 'My Laptop', noiseStatic, fetchMock);
 
     it('posts the device code and this machine\'s name, and maps an enrolled answer through the enrollment guard', async () => {
       const enrollment = { burrowId: BURROW_ID, burrowToken: 'tok', origin: RELAY, rpId: 'relay.dormouse.sh' };
@@ -514,7 +514,7 @@ describe('Hosted device-code enrollment', () => {
       const answer = await poll(fetchMock);
 
       expect(fetchMock.mock.calls[0]![0]).toBe(`${RELAY}/api/burrow/enroll/poll`);
-      const init = fetchMock.mock.calls[0]![1] as RequestInit;
+      const init = fetchMock.mock.calls[0]![1]!;
       expect(init.redirect).toBe('error');
       expect(JSON.parse(init.body as string)).toEqual({ deviceCode: BEGIN.deviceCode, label: 'My Laptop' });
       expect(answer).toEqual({
@@ -533,8 +533,8 @@ describe('Hosted device-code enrollment', () => {
     it('sends the name reduced as Hosted stores it, and none when nothing is left', async () => {
       const sent = async (label: string) => {
         const fetchMock = json(200, { status: 'pending' });
-        await pollHostedEnrollment(RELAY, BEGIN.deviceCode, label, noiseStatic, fetchMock as typeof fetch);
-        return JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+        await pollHostedEnrollment(RELAY, BEGIN.deviceCode, label, noiseStatic, fetchMock);
+        return JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       };
       expect(await sent(`\u202eMy\nLaptop${'x'.repeat(80)}`)).toEqual({
         deviceCode: BEGIN.deviceCode,

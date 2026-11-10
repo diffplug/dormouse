@@ -41,10 +41,13 @@ afterEach(() => {
 });
 
 const PROXY = 'http://127.0.0.1:61234';
-function proxyPlatform(result: Awaited<ReturnType<NonNullable<PlatformAdapter['createIframeProxyUrl']>>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {
+type CreateIframeProxyUrl = NonNullable<PlatformAdapter['createIframeProxyUrl']>;
+
+function proxyPlatform(result: Awaited<ReturnType<CreateIframeProxyUrl>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {
   // A host that drives agent-browser can swap the pane to it.
-  const platform: PlatformAdapter = swapCapable ? installBrowserHost().platform : new FakePtyAdapter();
-  platform.createIframeProxyUrl = vi.fn(async () => result);
+  const base: PlatformAdapter = swapCapable ? installBrowserHost().platform : new FakePtyAdapter();
+  // Typed as the mock, so a test can read its calls.
+  const platform = Object.assign(base, { createIframeProxyUrl: vi.fn<CreateIframeProxyUrl>(async () => result) });
   setPlatform(platform);
   return platform;
 }
@@ -114,7 +117,7 @@ describe('IframePanel', () => {
   it('refuses an open-window url that is not http(s)', async () => {
     const onOpenBrowserPane = vi.fn();
     const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
-    platform.createIframeProxyUrl = vi.fn(async () => ({ ok: true, url: 'http://127.0.0.1:61234/app' }));
+    platform.createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
     setPlatform(platform);
     await renderPanel(stubActions({ onOpenBrowserPane }), paneProps('iframe-openwindow'));
 
@@ -303,7 +306,7 @@ describe('IframePanel', () => {
 
   it('reloads the observed page and preserves its history', async () => {
     const platform = proxyPlatform();
-    const createProxy = vi.fn(async (url: string) => ({
+    const createProxy = vi.fn<CreateIframeProxyUrl>(async (url) => ({
       ok: true as const,
       url: url.replace('http://example.test', PROXY),
     }));
@@ -357,7 +360,6 @@ describe('IframePanel', () => {
     platform.createIframeProxyUrl = vi.fn(async () => ({
       ok: true as const,
       url: 'http://127.0.0.1:61234/app',
-      upstream: 'http://example.test/app',
     }));
     await renderPanel(stubActions(), paneProps('iframe-proxied'), updateParameters);
 
@@ -378,7 +380,7 @@ describe('IframePanel', () => {
   it('acts on no message from any origin but its own proxy', async () => {
     const onClickPanel = vi.fn();
     const onFrameLeader = vi.fn();
-    proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
+    proxyPlatform({ ok: true, url: `${PROXY}/app` });
     const frame = await renderPanel(stubActions({ onClickPanel, onFrameLeader }), paneProps('iframe-foreign'));
     frame.focus();
     const chrome = () => getAgentBrowserScreenController('iframe-foreign')?.chrome().url;
@@ -408,7 +410,7 @@ describe('IframePanel', () => {
     ['leader', 'onFrameLeader'],
   ] as const)('takes %s only from its own frame, while that frame holds focus', async (kind, action) => {
     const acted = vi.fn();
-    proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
+    proxyPlatform({ ok: true, url: `${PROXY}/app` });
     const frame = await renderPanel(stubActions({ [action]: acted }), paneProps('iframe-focus'));
     const other = document.createElement('iframe');
     document.body.appendChild(other);
