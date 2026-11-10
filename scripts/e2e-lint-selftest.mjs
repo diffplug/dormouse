@@ -89,6 +89,28 @@ for (const rule of RULES) {
       ? `${name}\n      an added use stays green — the count must compare exactly, not as a floor`
       : name,
   );
+
+  // And for `exactly`, one use fewer: the count must not be a ceiling either.
+  if (rule.kind === 'exactly') {
+    const site = filesFor(rule)
+      .flatMap((file) => [...readFileSync(join(repoRoot, file), 'utf8').matchAll(rule.pattern)]
+        .filter((m) => !rule.allow?.(m[0], file))
+        .map((m) => ({ file, index: m.index, length: m[0].length })))[0];
+    if (!site) {
+      selftest.weak.push(`${name}\n      no use found to delete — the deletion case proves nothing`);
+      continue;
+    }
+    // Required to report the count, since a deletion can break another rule.
+    selftest.withMutationReporting(
+      site.file,
+      (path) => {
+        const text = readFileSync(path, 'utf8');
+        writeFileSync(path, text.slice(0, site.index) + text.slice(site.index + site.length));
+      },
+      `expected exactly ${rule.count} — a use went missing`,
+      `${name}\n      deleting one use from ${site.file} stays green — the count must compare exactly, not as a ceiling`,
+    );
+  }
 }
 
 // The two `E2eKind` rules are `require` rules, so the loop above proves only

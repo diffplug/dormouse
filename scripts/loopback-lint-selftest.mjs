@@ -25,7 +25,7 @@
  * there.
  */
 
-import { appendText, makeSelftest } from './lint-kit.mjs';
+import { appendText, makeSelftest, replaceText } from './lint-kit.mjs';
 
 const LINT = 'scripts/loopback-lint.mjs';
 
@@ -135,6 +135,16 @@ selftest.withMutationReporting(
   'no spelled-out loopback host',
   'a second listen in a file CHECK_4_EXCEPTIONS names\n      the exception covers the whole file, not its one call',
 );
+
+// The guards against a stale allowlist and a lint gone blind, each required to
+// report its own diagnostic.
+for (const [relative, mutate, expected, name] of [
+  ['scripts/dor-tool-qc/server.mjs', replaceText("server.listen(0, '127.0.0.1', resolve)", 'server.listen(resolve)'), 'ALLOWED entry no longer binds a loopback listener', 'an ALLOWED file that no longer binds'],
+  [LINT, replaceText("const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');", 'const LISTEN_RE = /(?!)/gs;'), 'has stopped looking', 'a bind pattern that matches nothing'],
+  [LINT, replaceText("call: 'terminal.listen(onInput',", "call: 'terminal.listen(noSuchCall',"), 'CHECK_4_EXCEPTIONS entry no longer matches', 'a CHECK_4_EXCEPTIONS call that no longer matches'],
+]) {
+  selftest.withMutationReporting(relative, mutate, expected, `${name}\n      planting it in ${relative} does not report "${expected}"`);
+}
 
 // Every alternative the lint declares needs a fixture above, or it is a claim
 // nothing checks — which is how a `WebSocket.Relay` branch that matched no real
