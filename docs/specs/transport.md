@@ -134,7 +134,7 @@ Source of truth: `captureTransferContent` in `lib/src/components/wall/workspace-
 
 ## Message protocol
 
-Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`WebviewMessage`, `ExtensionMessage`; other adapters import or mirror it). The schema is exhaustive there; below are only the contracts the types do not carry.
+Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`WebviewMessage`, `ExtensionMessage`; only the extension host compiles against it). The schema is exhaustive there; below are only the contracts the types do not carry.
 
 **Sender authenticity is the adapter's job, not the protocol's**, and **an adapter whose transport is reachable by page content must authenticate before it branches on `type`.** Tauri uses private IPC; browser-dev: `docs/specs/standalone.md` → "Standalone browser-dev harness"; VS Code: `docs/specs/vscode.md` → "Webview message authentication".
 
