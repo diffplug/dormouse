@@ -14,6 +14,9 @@ const REFUSED_APP_SCHEMES = new Set([
   'ms-msdt:', 'search-ms:', 'search:', 'ms-officecmd:', 'ms-appinstaller:', 'ms-its:', 'its:', 'mk:', 'hcp:',
 ]);
 
+/** A Windows drive letter, which the URL parser reads as a one-letter scheme. */
+const DRIVE_LETTER_RE = /^[a-z]:$/i;
+
 export type DisplayMatchVerdict = 'match' | 'plain' | 'deceptive';
 
 export type ExternalUriDecision =
@@ -54,6 +57,11 @@ export function inspectExternalUri(input: string): ExternalUriDecision {
     }
     if (REFUSED_APP_SCHEMES.has(uri.protocol)) {
       return blocked(input, trimmed, scheme, `${scheme}: links can run code on this computer, so Dormouse never opens them.`);
+    }
+    // `c:/x/y.bat` parses with scheme `c`, but Windows opens it as a local
+    // file, which must go through `dor open`, never the system opener.
+    if (DRIVE_LETTER_RE.test(uri.protocol)) {
+      return blocked(input, trimmed, null, 'This is a file path, not a link.');
     }
     return {
       status: 'openable',

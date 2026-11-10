@@ -28,6 +28,13 @@ describe('normalizeExternalUri', () => {
     }
   });
 
+  it('refuses a Windows drive path, which parses as a one-letter scheme', () => {
+    for (const uri of ['c:/Windows/calc.exe', 'C:\\Windows\\System32\\calc.exe', 'D:x.bat']) {
+      expect(normalizeExternalUri(uri), uri).toBeNull();
+      expect(inspectExternalUri(uri), uri).toMatchObject({ status: 'blocked', reason: 'This is a file path, not a link.' });
+    }
+  });
+
   it('rejects malformed or control-character-bearing input', () => {
     expect(normalizeExternalUri('not a url')).toBeNull();
     expect(normalizeExternalUri('https://example.com/\nnext')).toBeNull();
