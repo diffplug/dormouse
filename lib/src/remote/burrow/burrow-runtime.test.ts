@@ -889,6 +889,16 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       code: 'pairing-required',
     });
 
+    // The paired static and the paired credential id, signed with another key:
+    // the proof verifies against the key it presents, so the key-hash compare
+    // is the one check between a stolen Client static and a terminal.
+    const impostor = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, credentialId: authenticator.credentialId });
+    expect(await attemptConnection('c1', clientStatic, impostor)).toEqual({ ok: false, code: 'pairing-required' });
+    expect(accessEntries.at(-1)).toMatchObject({
+      event: 'connection-denied',
+      reason: 'pairing-required: passkey-key-mismatch',
+    });
+
     // Halves that are each paired, but never together: the conjunction is the
     // record, not the two identities.
     const other = await newAuthenticator();
