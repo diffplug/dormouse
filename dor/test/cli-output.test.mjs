@@ -97,8 +97,8 @@ const fixtureSurfaces = [
 // The Window's Workspaces, as the host projects them for `--workspaces` and for
 // the `--all` group headers.
 const fixtureWorkspaces = [
-  { id: 'workspace:1', name: 'Workspace 1', pinned: false, active: true, ringing: false, todo: false, count: 0 },
-  { id: 'workspace:2', name: 'build', pinned: true, active: false, ringing: true, todo: true, count: 2 },
+  { id: 'workspace:1', name: 'Workspace 1', auto: true, pinned: false, active: true, ringing: false, todo: false, count: 0 },
+  { id: 'workspace:2', name: 'build', auto: false, pinned: true, active: false, ringing: true, todo: true, count: 2 },
 ];
 
 // Listening ports the host would attach to a terminal Surface for `--ports`.
@@ -447,7 +447,9 @@ test('split json output', async () => {
 
 test('shell command quoting supports shell families', () => {
   assert.equal(shellCommandKind(undefined, 'Windows'), 'cmd');
+  assert.equal(shellCommandKind(undefined, 'Win32'), 'cmd');
   assert.equal(shellCommandKind('/bin/zsh', 'darwin'), 'posix');
+  assert.equal(shellCommandKind(undefined, 'darwin'), 'posix');
   assert.equal(shellCommandKind('C:\\Program Files\\Git\\bin\\bash.exe', 'win32'), 'posix');
   assert.equal(shellCommandKind('C:\\Windows\\System32\\cmd.exe', 'win32'), 'cmd');
   assert.equal(shellCommandKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');
@@ -1389,6 +1391,24 @@ test('agent-browser --surface needs a control endpoint', async () => {
   assert.deepEqual(ab.calls, []);
 });
 
+test('a -h in a command tail is the command\'s, so the tail check still runs', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['ensure', 'extra', '--', 'du', '-h'], { client, env: { PWD: '/work/site' } });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stderr, "Error: unexpected argument 'extra' before --\n");
+  assert.deepEqual(client.requests, []);
+});
+
+test('agent-browser rejects an intercepted flag given twice', async () => {
+  for (const [args, flag] of [[['--key', 'a', '--key', 'b'], '--key'], [['--workspace', '1', '--workspace=2'], '--workspace']]) {
+    const ab = fakeAgentBrowser();
+    const result = await runCli(['agent-browser', ...args, 'snapshot'], { client: fixtureClient(), execAgentBrowser: ab.exec });
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stderr, `Error: ${flag} may be given only once\n`);
+    assert.deepEqual(ab.calls, []);
+  }
+});
+
 test('agent-browser rejects a valueless identity flag, whichever one it is', async () => {
   // The three flags share one parse loop; a trailing flag has no value and a
   // following flag is never one, so neither may be swallowed as the value.
@@ -2173,6 +2193,17 @@ test('list escapes control characters in Tool commands, titles, locations, and W
     assert.doesNotMatch(result.stdout, controls, argv.join(' '));
   }
   assert.equal(JSON.parse((await runCli(['list', '--json'], { client })).stdout).surfaces[0].command, evil.command);
+});
+
+test('workspace verbs escape control characters in the Workspace name', async () => {
+  const client = fixtureClient();
+  client.switchWorkspace = async () => ({ status: 'active', workspaceId: 'workspace:2', name: 'ws\u009d\u007f' });
+  for (const argv of [['workspace', 'switch', 'workspace:2'], ['workspace', 'switch', '--json', 'workspace:2']]) {
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 0, argv.join(' '));
+    assert.doesNotMatch(result.stdout, /[\x7f-\x9f]/, argv.join(' '));
+  }
+  assert.equal(JSON.parse((await runCli(['workspace', 'switch', '--json', 'workspace:2'], { client })).stdout).name, 'ws\u009d\u007f');
 });
 
 test('tool rejects an unknown option', async () => {

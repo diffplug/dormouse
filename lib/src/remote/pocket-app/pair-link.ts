@@ -29,3 +29,14 @@ export function takePairingHash(): boolean {
   window.history.replaceState(null, '', `${pathname}${search}`);
   return true;
 }
+
+/**
+ * Erase a pairing fragment that arrives under a running page too. A link
+ * opened in the tab or window already showing Pocket differs from it only
+ * after `#`, a same-page jump with no load, so the boot-time take never sees
+ * it. No reload: that would end a live wall. `replaceState` fires no
+ * `hashchange`, so the erase never retriggers this.
+ */
+export function erasePairingHashOnChange(): void {
+  window.addEventListener('hashchange', () => takePairingHash());
+}

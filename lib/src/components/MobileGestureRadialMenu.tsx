@@ -20,7 +20,6 @@ import {
 const QUIT_RADIUS = 78;
 const GAP_CLUSTER = 2;
 const ROOT_CHIP_HALF_HEIGHT = 9;
-const ROOT_CHIP_STACK_OFFSET = ROOT_CHIP_HALF_HEIGHT * 2 + GAP_CLUSTER;
 const ROOT_CHIP_HALF_WIDTH_ARROW = 11;
 const ROOT_CLUSTER_AXIS_GAP = GAP_CLUSTER / 2;
 const ROOT_SIDE_STACK_OFFSET = ROOT_CHIP_HALF_HEIGHT + ROOT_CLUSTER_AXIS_GAP;
@@ -41,29 +40,6 @@ const ROOT_CARDINAL_ANCHORS: Partial<Record<MobileGestureDirection, MobileGestur
   e: { x: ROOT_CARDINAL_X, y: ROOT_LABEL_SIDE_CENTER_Y },
   s: { x: ROOT_LABEL_CENTER_X, y: ROOT_CARDINAL_Y },
   w: { x: -ROOT_CARDINAL_X, y: ROOT_LABEL_SIDE_CENTER_Y },
-};
-
-const ROOT_SIDE_DX = ROOT_CHIP_HALF_WIDTH_ARROW + GAP_CLUSTER;
-const ROOT_CARDINAL_SECONDARY: Partial<Record<
-  MobileGestureDirection,
-  Record<1 | 2, { dx: number; dy: number; placement: ChipPlacement }>
->> = {
-  n: {
-    1: { dx: -ROOT_CLUSTER_AXIS_GAP, dy: -ROOT_CHIP_STACK_OFFSET, placement: 'left' },
-    2: { dx: ROOT_CLUSTER_AXIS_GAP, dy: -ROOT_CHIP_STACK_OFFSET, placement: 'right' },
-  },
-  s: {
-    1: { dx: -ROOT_CLUSTER_AXIS_GAP, dy: ROOT_CHIP_STACK_OFFSET, placement: 'left' },
-    2: { dx: ROOT_CLUSTER_AXIS_GAP, dy: ROOT_CHIP_STACK_OFFSET, placement: 'right' },
-  },
-  e: {
-    1: { dx: ROOT_SIDE_DX, dy: -ROOT_SIDE_STACK_OFFSET, placement: 'right' },
-    2: { dx: ROOT_SIDE_DX, dy: ROOT_SIDE_STACK_OFFSET, placement: 'right' },
-  },
-  w: {
-    1: { dx: -ROOT_SIDE_DX, dy: -ROOT_SIDE_STACK_OFFSET, placement: 'left' },
-    2: { dx: -ROOT_SIDE_DX, dy: ROOT_SIDE_STACK_OFFSET, placement: 'left' },
-  },
 };
 
 type ChipPlacement =
@@ -261,19 +237,9 @@ function rootOptionLayout(
 ): { point: MobileGesturePoint; placement: ChipPlacement } {
   const optionIndex = index as MobileGestureOptionIndex;
   const cardinalAnchor = ROOT_CARDINAL_ANCHORS[direction];
+  // A cardinal group has one option, its arrow, at the anchor.
   if (cardinalAnchor) {
-    const anchorPoint = {
-      x: center.x + cardinalAnchor.x,
-      y: center.y + cardinalAnchor.y,
-    };
-    const secondary = optionIndex === 0
-      ? undefined
-      : ROOT_CARDINAL_SECONDARY[direction]?.[optionIndex];
-    if (!secondary) return { point: anchorPoint, placement: 'center' };
-    return {
-      point: { x: anchorPoint.x + secondary.dx, y: anchorPoint.y + secondary.dy },
-      placement: secondary.placement,
-    };
+    return { point: { x: center.x + cardinalAnchor.x, y: center.y + cardinalAnchor.y }, placement: 'center' };
   }
   const diagonalLayout = ROOT_DIAGONAL_LAYOUT[direction];
   const vector = MOBILE_GESTURE_DIRECTION_VECTORS[direction];

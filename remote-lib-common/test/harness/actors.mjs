@@ -42,6 +42,7 @@ import {
   utf8Encode,
   verifyPresenceProof,
 } from '../../dist/index.js';
+import { makeClock } from './clock.mjs';
 
 const subtle = globalThis.crypto.subtle;
 
@@ -74,21 +75,6 @@ export function registrationClientData({ challenge, origin, type = 'webauthn.cre
 /** A SimBurrow, or a bare burrowId string; both name one Burrow to these actors. */
 function burrowIdOf(burrow) {
   return typeof burrow === 'string' ? burrow : burrow.burrowId;
-}
-
-/** Deterministic, manually-advanced clock shared by actors in a scenario. */
-export class FakeClock {
-  #ms;
-
-  constructor(startMs = 1_700_000_000_000) {
-    this.#ms = startMs;
-  }
-
-  now = () => this.#ms;
-
-  advance(ms) {
-    this.#ms += ms;
-  }
 }
 
 /**
@@ -238,7 +224,7 @@ export class SimBurrow {
     label = 'Laptop',
     rpId,
     origin,
-    clock = new FakeClock(),
+    clock = makeClock(),
     policy = {},
     ttlMs,
     invitationTtlSeconds = 300,

@@ -195,10 +195,6 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
   // `validateToolArgs` already accepted this argv, so the walk cannot fail.
   const head = headPositionals(this.commandArgs);
   const named = head.ok && head.value.length > 0;
-  if (named && rest.length === 0) {
-    return new Error('dor tool requires a tool name or -- <command...>');
-  }
-
   return dispatchToolSurface(this, {
     ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
     ...workspaceParam(flags.workspace),

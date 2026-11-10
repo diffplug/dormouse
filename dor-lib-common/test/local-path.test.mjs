@@ -7,7 +7,7 @@ import { canonicalLocalDirectory, localRealpath, localRealpathIfExists, NonLocal
 import { dir, fakeFs, file, isShare, link } from './fake-fs.mjs';
 
 const win32 = path.win32;
-const SHARES = ['\\\\host\\share\\x', '//host/share/x', '\\/host/share', '\\\\?\\C:\\x', '\\\\.\\pipe\\x', '//?/C:/x'];
+const SHARES = ['\\\\host\\share\\x', '//host/share/x', '\\/host/share', '\\\\?\\C:\\x', '\\\\.\\pipe\\x', '//?/C:/x', '\\??\\UNC\\host\\share'];
 
 test('refuses a share or device path before any filesystem call', async () => {
   for (const paths of [win32, path.posix]) {
@@ -33,9 +33,11 @@ test('with Windows semantics, never follows a link to a share, wherever in the p
     'C:\\work\\unc': link('\\\\host\\share'),
     'C:\\work\\slashes': link('//host/share/repo'),
     'C:\\work\\device': link('\\\\?\\UNC\\host\\share'),
+    // How libuv reads back a link to a device path it does not rewrite to Win32.
+    'C:\\work\\nt': link('\\??\\GLOBALROOT\\Device\\Mup\\host\\share'),
     'C:\\work\\to-unc': link('unc'),
   });
-  for (const input of ['C:\\work\\unc', 'C:\\work\\unc\\deeper\\file.png', 'C:\\work\\slashes', 'C:\\work\\device', 'C:\\work\\to-unc\\x']) {
+  for (const input of ['C:\\work\\unc', 'C:\\work\\unc\\deeper\\file.png', 'C:\\work\\slashes', 'C:\\work\\device', 'C:\\work\\nt', 'C:\\work\\to-unc\\x']) {
     await assert.rejects(localRealpath(input, { fs, path: win32 }), NonLocalPathError, input);
     await assert.rejects(localRealpathIfExists(input, { fs, path: win32 }), NonLocalPathError, input);
   }

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { DEFAULT_CHALLENGE_TTL_MS, ChallengeIssuer, fromBase64Url } from '../dist/index.js';
-import { FakeClock } from './harness/actors.mjs';
+import { makeClock } from './harness/clock.mjs';
 
 test('issued challenges are 32 bytes and unique', () => {
   const issuer = new ChallengeIssuer();
@@ -16,7 +16,7 @@ test('issued challenges are 32 bytes and unique', () => {
 });
 
 test('issue stamps issuedAt and expiresAt from the clock and ttl', () => {
-  const clock = new FakeClock();
+  const clock = makeClock();
   const issuer = new ChallengeIssuer({ now: clock.now, ttlMs: 5000 });
   const issued = issuer.issue();
   assert.equal(issued.issuedAt, clock.now());
@@ -24,7 +24,7 @@ test('issue stamps issuedAt and expiresAt from the clock and ttl', () => {
 });
 
 test('a fresh challenge consumes exactly once', () => {
-  const clock = new FakeClock();
+  const clock = makeClock();
   const issuer = new ChallengeIssuer({ now: clock.now });
   const { challenge } = issuer.issue();
   assert.equal(issuer.consume(challenge), true);
@@ -32,7 +32,7 @@ test('a fresh challenge consumes exactly once', () => {
 });
 
 test('an expired challenge cannot be consumed', () => {
-  const clock = new FakeClock();
+  const clock = makeClock();
   const issuer = new ChallengeIssuer({ now: clock.now, ttlMs: 1000 });
   const { challenge } = issuer.issue();
   clock.advance(1000);
@@ -42,7 +42,7 @@ test('an expired challenge cannot be consumed', () => {
 });
 
 test('a challenge consumed just before expiry succeeds', () => {
-  const clock = new FakeClock();
+  const clock = makeClock();
   const issuer = new ChallengeIssuer({ now: clock.now, ttlMs: 1000 });
   const { challenge } = issuer.issue();
   clock.advance(999);
@@ -72,7 +72,7 @@ test('the default ttl is two minutes', () => {
 // /api/signin/begin` mints one per request with no authentication in front of
 // it, which made that an unauthenticated memory-growth vector.
 test('issuing reclaims abandoned challenges instead of accumulating them', () => {
-  const clock = new FakeClock();
+  const clock = makeClock();
   const issuer = new ChallengeIssuer({ now: clock.now, ttlMs: 1000 });
   for (let i = 0; i < 50; i++) issuer.issue(); // minted, never consumed
   assert.equal(issuer.pendingCount, 50);
@@ -83,7 +83,7 @@ test('issuing reclaims abandoned challenges instead of accumulating them', () =>
 });
 
 test('issuing never reclaims a challenge that is still live', () => {
-  const clock = new FakeClock();
+  const clock = makeClock();
   const issuer = new ChallengeIssuer({ now: clock.now, ttlMs: 1000 });
   const stale = issuer.issue();
   clock.advance(600);

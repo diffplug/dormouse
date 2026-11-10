@@ -305,7 +305,7 @@ export const ManyRules: Story = {
  *
  *  Storybook's `play` runs before the snapshot, but the menu positions itself
  *  from a measured trigger rect — one commit later. Settle before returning so
- *  Chromatic never captures the pre-measurement frame. */
+ *  Argos never captures the pre-measurement frame. */
 function openPickerMenu(name: RegExp) {
   return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
     await userEvent.click(dialog(canvasElement).getByRole('button', { name }));

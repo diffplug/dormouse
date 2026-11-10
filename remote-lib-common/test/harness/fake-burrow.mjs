@@ -109,8 +109,8 @@ export class FakeBurrow extends EventEmitter {
      * without a real Burrow: two in-memory "echo shells" addressable by surfaceId.
      */
     this.surfaces = [
-      { surfaceId: 'srf-zsh', paneRef: 'pane-zsh', title: 'zsh', cols: 80, rows: 24 },
-      { surfaceId: 'srf-vim', paneRef: 'pane-vim', title: 'vim', cols: 80, rows: 24 },
+      { surfaceId: 'srf-zsh', title: 'zsh', cols: 80, rows: 24 },
+      { surfaceId: 'srf-vim', title: 'vim', cols: 80, rows: 24 },
     ];
     /** clientId → directory-watch subId (the request id it was opened with). */
     this.directorySubs = new Map();
@@ -842,7 +842,8 @@ export class FakeBurrow extends EventEmitter {
   /** A directory snapshot of the synthetic surfaces. */
   #directoryEntries() {
     return this.surfaces.map((surface, index) => ({
-      paneRef: surface.paneRef,
+      // Reserved: a Burrow sets `paneRef` to the surface id.
+      paneRef: surface.surfaceId,
       surfaceId: surface.surfaceId,
       type: 'terminal',
       title: surface.title,

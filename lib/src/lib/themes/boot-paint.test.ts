@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { applyTheme, themeBootPaint } from './apply';
 import { setThemePaintProfile, themeBootScript, type ThemePaint } from './boot-paint';
 import { getBundledThemes } from './store';
+import { themeBootPlugin } from './boot-paint-plugin';
 
 const FALLBACK: ThemePaint = { themeId: 'fallback', kind: 'dark', vars: { '--vscode-editor-background': '#1e1e1e' } };
 const remember = (paint: ThemePaint) => localStorage.setItem('dormouse:theme-paint', JSON.stringify(paint));
@@ -68,5 +69,18 @@ describe('painting through a profile', () => {
   it('remembers nothing without a profile', () => {
     applyTheme(getBundledThemes().find(({ id }) => id !== light.id)!);
     expect(localStorage.getItem('dormouse:theme-paint')).toBeNull();
+  });
+});
+
+describe('themeBootPlugin', () => {
+  type Hook = (html: string, ctx: { path: string }) => unknown;
+  it('tags the app\'s root index.html only, never another entry', () => {
+    const plugin = themeBootPlugin({ defaultThemeId: 'fallback' });
+    (plugin.configResolved as unknown as (config: unknown) => void)({ base: '/', build: { assetsDir: 'assets' } });
+    const transform = plugin.transformIndexHtml as unknown as Hook;
+    expect(transform('', { path: '/index.html' })).toEqual([
+      { tag: 'script', attrs: { src: expect.stringMatching(/^\/assets\/theme-boot-.{8}\.js$/) }, injectTo: 'body-prepend' },
+    ]);
+    expect(transform('', { path: '/diagnostics/index.html' })).toBeUndefined();
   });
 });

@@ -12,7 +12,6 @@
     "db:validate": "tsx server/db.ts validate",
     "db:status": "tsx server/db.ts status",
     "db:roles": "tsx server/db.ts roles",
-    "preview:worker": "wrangler dev --local --local-protocol https",
     "test:deploy": "node --test scripts/*.test.mjs",
     "test:miniflare": "vitest run server/tests/one-time.test.ts server/tests/boundary.test.ts server/tests/pocket.test.ts server/tests/relay-push.test.ts",
     "test:server-unit": "vitest run server/tests/settle.test.ts server/tests/voice-supplier.test.ts server/tests/policy.test.ts server/tests/frame-origin.test.ts server/tests/artifacts.test.ts server/tests/enrollment.test.ts",

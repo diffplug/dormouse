@@ -273,7 +273,7 @@ describe.skipIf(process.platform !== 'win32')('a cmd or PowerShell Session\'s pa
 
   // A PowerShell Session's own argv form, through both native bindings: Windows
   // PowerShell 5.1's legacy one and pwsh's, to an exe and to the batch launcher.
-  const powerShellArgv = ['say "hi"', '"', 'a\\"b', '', 'a b\\', 'C:\\a b\\', 'a&b', 'a^b', '<x>|y', 'a b', 'it’s (1).txt', '$HOME', '%%'];
+  const powerShellArgv = ['say "hi"', '"', 'a\\"b', '', 'a b\\', 'C:\\a b\\', 'a&b', 'a^b', '<x>|y', 'a b', 'it’s (1).txt', '$HOME', '%%', '-Dserver.port=8081'];
   for (const [name, shell] of shells.slice(1)) {
     it.skipIf(!shell)(`reads PowerShell argv back literally through ${name} to a program`, () => {
       const line = buildShellCommandForKind('powershell', [process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', ...powerShellArgv]);

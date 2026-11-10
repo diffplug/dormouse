@@ -122,8 +122,9 @@ export interface ListSurfacesRequest extends WorkspaceScopedRequest {
   window?: string;
   /** Omitted means `workspace`. */
   scope?: ListScope;
-  /** Enumerate each terminal Surface's listening ports. The host shells out per
-   *  pane (lsof / PowerShell), so callers opt in; remote sessions report none. */
+  /** Enumerate each terminal Surface's listening ports. Each listing costs the
+   *  host one process-table and socket scan, so callers opt in; remote sessions
+   *  report none. */
   includePorts?: boolean;
 }
 
@@ -304,8 +305,10 @@ export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
 export interface ToolSurfaceResponse {
   /**
    * `existing` is a key match on a live tool: the redundant spawn never
-   * started. `adopted` is a key match whose command had exited — the Surface is
-   * reused and the command re-run in place, keeping its position and scrollback.
+   * started. `adopted` is a key match on a Tool the host had stopped — reaped
+   * while idle, or idle while the host replaces its run — restarted in the same
+   * Surface, keeping its position and scrollback. A Tool whose run ended is a
+   * plain terminal, which no key matches.
    * On the calling pane's own match it is answered before the re-run is typed,
    * for the same reason `takeover` is. `takeover` is the calling pane itself
    * becoming the tool, answered before the command is typed — `dor` has to exit
@@ -657,8 +660,8 @@ export interface ControlEndpoint {
 }
 
 /**
- * Everything `dor` needs from the machine it runs on (`docs/specs/dor-cli.md`
- * -> Bundling and Environment): `dor/src/node-host.ts` is the real one, and the
+ * Everything `dor` needs from the machine it runs on
+ * (`docs/specs/dor-cli.md` -> "Bundling And PATH"): `dor/src/node-host.ts` is the real one, and the
  * website playground supplies its own, so the CLI itself loads in a browser.
  */
 export interface CliHost {
@@ -710,13 +713,13 @@ export interface CliResult {
 
 export interface DorCommandContext extends CommandContext {
   /** Narrower than stricli's `CommandContext`, which exposes only the writable
-   *  streams. `cli.ts` always supplies a full `StricliProcess`, and a command
+   *  streams. `cli-core.ts` always supplies a full `StricliProcess`, and a command
    *  that needs an exit code other than `dor`'s usual 0/1 sets `exitCode` on it
    *  directly (`dor await`); stricli assigns its own with `??=`, so the
    *  command's wins. */
   readonly process: StricliProcess;
   readonly options: CliOptions;
-  /** The raw argv after the command name, as `cli.ts` saw it before stricli
+  /** The raw argv after the command name, as `cli-core.ts` saw it before stricli
    *  parsed it. stricli consumes `--` and leaves no trace in the parsed
    *  positionals, so this is the only way a command can tell `dor split --`
    *  (empty tail) from a bare `dor split`, or a named `dor tool` from an
@@ -730,7 +733,7 @@ export interface Command {
   helpPatches?: readonly HelpPatch[];
   /** Argv validation that must run *before* stricli parses (e.g. the `--` command
    *  tail in `dor ensure`, or `dor send`'s input-flag ordering). Defined next to
-   *  the command's flags so the check and the flag list can't drift apart; `cli.ts`
+   *  the command's flags so the check and the flag list can't drift apart; `cli-core.ts`
    *  dispatches it generically. Receives argv with the command name already
    *  stripped, and is skipped for help invocations. */
   preParse?: (args: string[]) => ParseResult<void>;

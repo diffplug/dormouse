@@ -7,7 +7,7 @@ import {
   BurrowAcl,
   isBurrowAclRecord,
 } from '../dist/index.js';
-import { FakeClock } from './harness/actors.mjs';
+import { makeClock } from './harness/clock.mjs';
 
 /** A readable stand-in for a 43-character base64url Client static. */
 const clientStatic = (tag) => tag.padEnd(CLIENT_STATIC_PUBLIC_KEY_LENGTH, 'A');
@@ -28,7 +28,7 @@ const CLIENT = {
 };
 
 function makeAcl() {
-  const clock = new FakeClock();
+  const clock = makeClock();
   return { clock, acl: new BurrowAcl('burrow-1', { now: clock.now }) };
 }
 
