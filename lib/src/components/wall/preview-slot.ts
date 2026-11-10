@@ -114,7 +114,9 @@ export function retargetToolLeaf(
   clearHoldLapse(id);
   const meta = lath.getMeta(id);
   if (!meta) return;
-  const kept = Object.fromEntries(Object.entries(meta.params ?? {}).filter(([name]) => !TOOL_IDENTITY_PARAMS.has(name)));
+  // A failed navigation's banner was about the document being replaced.
+  const kept = Object.fromEntries(Object.entries(meta.params ?? {})
+    .filter(([name]) => !TOOL_IDENTITY_PARAMS.has(name) && name !== 'toolNavigationError'));
   const next = becomeToolMeta(meta, tool.title, { ...kept, ...tool.identity });
   if (pin) pin(id, next);
   else lath.store.setMeta(id, next);

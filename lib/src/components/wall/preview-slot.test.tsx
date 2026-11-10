@@ -1335,6 +1335,20 @@ describe('Tool document navigation', () => {
     expect(forward.mock.calls[0][0].ok).toBe(false);
     expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/c.png');
   });
+  it('drops a failed link\'s error banner when the slot is retargeted to another file', async () => {
+    const toolControl = await mountSlot();
+    const answerLookup = toolControl.getMockImplementation()!;
+    toolControl.mockImplementation(async call => call.target === '/repo/missing.md' ? { status: 'error', message: 'no rule matches' } as never : answerLookup(call));
+    const banner = () => container.querySelector('[data-lath-leaf="surface:slot"] [role="alert"]')?.textContent ?? null;
+    const failed = await request({ file: '/repo/missing.md', disposition: 'current' }, 'surface:slot');
+    await waitUntil(() => failed.mock.calls.length > 0);
+    await waitUntil(() => banner() !== null);
+    expect(banner()).toContain('no rule matches');
+    expect(await answer(await request({ file: 'c.md', preview: true }))).toMatchObject({ surfaceId: 'surface:slot' });
+    expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/c.md');
+    expect(banner()).toBeNull();
+  });
+
   it('answers once when its Workspace starts moving while the slot is interrupted', async () => {
     await mountSlot({ slot: { holdInterrupt: true }, workspaceId: WORKSPACE });
     const respond = await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot');
