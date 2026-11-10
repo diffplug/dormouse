@@ -37,6 +37,7 @@ async function open(text, { sourceError } = {}) {
   const result = {
     label: w.document.querySelector('.controls .state')?.textContent ?? null,
     error: w.document.querySelector('.error')?.textContent ?? null,
+    styled: [...w.document.querySelectorAll('.prose [style]')].map(element => element.outerHTML),
     posts,
   };
   w.close();
@@ -47,4 +48,12 @@ test('opening a document with bare URLs and addresses is not an edit', async () 
   const { label, posts } = await open('See https://example.com/a_b_c, `curl https://example.com/x`, www.example.com. and me@example.com.\n');
   assert.equal(label, 'Saved');
   assert.deepEqual(posts, [{ url: 'state', body: { dirty: false } }]);
+});
+
+test('a styled span renders through the HTML allowlist, and opening it is not an edit', async () => {
+  for (const text of ['before <span style="position:fixed;inset:0">overlay</span> after\n', '<span style="position:fixed;opacity:0">[click](other.md)</span>\n']) {
+    const { styled, label } = await open(text);
+    assert.deepEqual(styled, [], text);
+    assert.equal(label, 'Saved', text);
+  }
 });
