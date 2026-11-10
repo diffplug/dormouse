@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, realpath, rm, readFile, writeFile, symlink, rename, stat, readdir } from 'node:fs/promises';
+import { chmod, chown, mkdtemp, realpath, rm, readFile, writeFile, symlink, rename, stat, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -45,6 +45,17 @@ test('rejects a stale save after another editor changes or replaces the file', a
   await assert.rejects(saveText(editorStore(root), file, 'ours', source.version), { status: 409 });
   assert.equal((await readText(editorStore(root), file)).text, 'replacement');
 });
+test('a save keeps the file\'s group, where the saver belongs to it', { skip: process.platform === 'win32' }, async () => {
+  await writeFile(file, 'original');
+  const folderGroup = (await stat(root)).gid;
+  const other = execFileSync('id', ['-G'], { encoding: 'utf8' }).trim().split(/\s+/).map(Number).find(gid => gid !== folderGroup);
+  if (other === undefined) return;
+  await chown(file, -1, other);
+  await saveText(editorStore(root), file, 'changed', (await readText(editorStore(root), file)).version);
+  assert.equal(await readFile(file, 'utf8'), 'changed');
+  assert.equal((await stat(file)).gid, other);
+});
+
 test('a save that cannot write says why: a read-only file or folder, or a deleted file', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
   await writeFile(file, 'original');
   const source = await readText(editorStore(root), file);

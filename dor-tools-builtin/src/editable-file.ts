@@ -73,6 +73,9 @@ export async function replaceEditable(target: string, version: string, bound: Si
   try {
     try {
       await file.writeFile(bytes);
+      // The document's group too: a new file takes the saver's (or the folder's).
+      // Only a group the saver belongs to can be set; the mode, after it, stays.
+      await file.chown(-1, current.stat.gid).catch(() => {});
       await file.chmod(current.stat.mode & 0o777);
       await file.sync();
     } finally { await file.close(); }
