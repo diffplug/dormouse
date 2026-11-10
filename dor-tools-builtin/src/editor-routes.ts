@@ -10,10 +10,15 @@ import {
   checkImageSave, IMAGE_BOUND, IMAGE_CSP, IMAGES_ROUTE, isImage, PASTE_ATTEMPTS, PASTE_BOUND,
   PASTE_EXHAUSTED_MESSAGE, pastedImageExtension, pastedImageName, type SizeBound, VERSION_HEADER,
 } from './image-format.js';
+import { parse, postprocess, preprocess } from 'micromark';
 import { HttpError, parseJsonBody, pathSegments } from './viewer-http.js';
 import { markdownLink } from './markdown-links.js';
 
 export const TEXT_BOUND: SizeBound = { limit: 8 * 1024 * 1024, message: 'Text files are limited to 8 MiB.' };
+/** The longest Markdown text, in UTF-16 units, that `markdownEditing` parses:
+ * micromark's event parse took 336 ms and 332 MB of heap at 256 KiB, and ran
+ * out of a 4 GB heap at 8 MiB (Node 26, 2026-11-09). */
+export const MARKDOWN_PARSE_BOUND = 256 * 1024;
 /** A save whose revision is no longer the file's. */
 export const STALE_MESSAGE = 'The file changed on disk. Your edits are safe here; compare or reload before saving.';
 /** A save or read whose file is no longer at its path. */
@@ -118,6 +123,52 @@ const image = ({ bytes, version }: { bytes: Uint8Array; version: string }, type:
 const jsonBody = (request: EditorRequest, limit: number) =>
   parseJsonBody(request.contentType, limit, bound => request.body({ limit: bound, message: '' })) as Promise<Record<string, unknown> | null>;
 
+// At a line start: four columns of indent, after any blockquote markers, then
+// content; and a line that lets the next one start a code block — blank, or a
+// heading, fence, HTML block, or rule, none of which a paragraph continues.
+const INDENTED_LINE = /(?: {0,3}> ?)*(?: {4}| {0,3}\t)[ \t]*\S/y;
+const OPENS_BLOCK = /(?: {0,3}> ?)*[ \t]*(?:$|\n|#|```|~~~|<|(?:[-*_=][ \t]*)+(?:$|\n))/y;
+
+/** Whether `text` has a line that could start an indented code block: a
+ * necessary condition, not a detector, since a list item's continuation
+ * paragraph passes it too. One pass, no parse. */
+export function mayHoldIndentedCode(text: string): boolean {
+  let opens = true;
+  for (let start = 0; ; ) {
+    INDENTED_LINE.lastIndex = start;
+    if (opens && INDENTED_LINE.test(text)) return true;
+    OPENS_BLOCK.lastIndex = start;
+    opens = OPENS_BLOCK.test(text);
+    const end = text.indexOf('\n', start);
+    if (end < 0) return false;
+    start = end + 1;
+  }
+}
+
+/** Whether CommonMark, with no extensions, reads an indented code block in
+ * `text`. MDXEditor's parser disables that construct and reads the block as
+ * Markdown, so a save would restructure it. */
+export function parsesIndentedCode(text: string): boolean {
+  const events = postprocess(parse().document().write(preprocess()(text, undefined, true)));
+  return events.some(([kind, token]) => kind === 'enter' && token.type === 'codeIndented');
+}
+
+/** Which editor a Markdown document opens in: the rich one, unless it holds an
+ * indented code block (`indented`), or may and is too long to parse (`large`),
+ * when it opens as source (docs/specs/dor-tools-builtin.md -> Markdown editor). */
+export function markdownEditing(text: string, findIndentedCode = parsesIndentedCode): 'rich' | 'indented' | 'large' {
+  if (!mayHoldIndentedCode(text)) return 'rich';
+  if (text.length > MARKDOWN_PARSE_BOUND) return 'large';
+  return findIndentedCode(text) ? 'indented' : 'rich';
+}
+
+/** Whether `file` opens in the rich Markdown editor, decided on each page
+ * load; a file it cannot read opens there, to show why. */
+async function opensRich(store: EditorStore, file: StorePath): Promise<boolean> {
+  try { return markdownEditing((await readText(store, file)).text) === 'rich'; }
+  catch { return true; }
+}
+
 /** The routes of one editor over `file`, the document it opened (titled
  * `name`); null for a route it does not answer, which the caller may. */
 export function editorRoutes({ kind, file, name, store, onDirty, openLink }: {
@@ -191,7 +242,8 @@ export function editorRoutes({ kind, file, name, store, onDirty, openLink }: {
       return json(await save(() => saveText(store, file, text, version)));
     }
     if (route === 'view') {
-      return { body: (kind === 'image' ? imagePage : kind === 'markdown' ? markdownPage : editorPage)(name), type: 'text/html; charset=utf-8' };
+      const page = kind === 'image' ? imagePage : kind === 'markdown' && await opensRich(store, file) ? markdownPage : editorPage;
+      return { body: page(name), type: 'text/html; charset=utf-8' };
     }
     if (route === 'source') return imageType ? image(await store.read(file, IMAGE_BOUND), imageType) : json({ ...await readText(store, file), name });
     return null;
