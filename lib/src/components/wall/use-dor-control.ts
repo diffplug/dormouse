@@ -2299,7 +2299,8 @@ export function useDorControl({
         const found = findBrowserSurface(provider, { key });
         if (found) targetId = found.id;
       } else if (session !== undefined) {
-        const matches = buildDorSurfaces().filter((surface) => {
+        // Listed Surfaces, minimized ones included, like `--key` and `--surface`.
+        const matches = buildDorSurfaceList().filter((surface) => {
           const p = lath.getMeta(surface.id)?.params;
           return parseRenderMode((p as { renderMode?: unknown } | undefined)?.renderMode).provider === provider
             && agentBrowserSessionFromParams(p) === session;

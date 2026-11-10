@@ -738,6 +738,12 @@ describe('Wall on the Lath engine', () => {
     } });
     expect(await control({ provider: 'playwright', surface: id })).toMatchObject({ ok: false, error: expect.stringContaining(`dor agent-browser --surface ${id}`) });
     expect(await control({ provider: 'agent-browser', surface: 'surface:a' })).toMatchObject({ ok: false, error: expect.stringContaining('has no browser') });
+
+    // A raw --session finds the bound Surface minimized, as --key and --surface do.
+    await act(async () => { container.querySelector<HTMLElement>(`[data-lath-leaf="${id}"] [aria-label="Minimize"]`)!.click(); });
+    await flush();
+    expect(container.querySelector(`[data-door-id="${id}"]`)).not.toBeNull();
+    expect(await control({ provider: 'agent-browser', session: 'diag-session' })).toMatchObject({ ok: true, result: { surfaceId: id } });
   });
 
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
