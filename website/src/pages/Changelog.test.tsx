@@ -1,5 +1,6 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { changelogToc, CHANGELOG_TOC_RELEASES } from "./Changelog";
+import { changelogToc, CHANGELOG_TOC_RELEASES, renderInlineMarkdown } from "./Changelog";
 import changelog from "../data/changelog.json";
 
 describe("changelog table of contents", () => {
@@ -15,5 +16,12 @@ describe("changelog table of contents", () => {
     const two = changelog.releases.slice(0, 2);
     expect(changelogToc(two).map((entry) => entry.id)).toEqual(two.map((r) => r.tag));
     expect(changelogToc([])).toEqual([]);
+  });
+});
+
+describe("changelog item markdown", () => {
+  it("renders bold leads and backslash escapes, not their markup", () => {
+    const markup = renderToStaticMarkup(<>{renderInlineMarkdown("**Reopen `u`** — through \\<your Relay>")}</>);
+    expect(markup).toBe("<strong>Reopen <code class=\"rounded-sm bg-[var(--color-surface)] px-1 py-0.5 text-[var(--color-text)]\">u</code></strong> — through &lt;your Relay&gt;");
   });
 });
