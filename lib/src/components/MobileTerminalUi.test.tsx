@@ -293,6 +293,19 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onSendInput.mock.calls).toEqual([['a'], ['\r'], ['\x1b[A'], ['\t'], ['😀'], ['\x03']]);
   });
 
+  it('sends the arrows, Home and End in their application form while the program set DECCKM', () => {
+    const onSendInput = vi.fn();
+    const modes = { applicationCursorKeysMode: true };
+    vi.spyOn(registry, 'getTerminalInstance').mockReturnValue({ modes } as unknown as Terminal);
+    renderUi({ onSendInput, sessions: [{ id: 'pane-a', title: 'htop', active: true, episode: null }] });
+    for (const key of ['ArrowUp', 'ArrowDown', 'ArrowRight', 'ArrowLeft', 'Home', 'End', 'PageUp']) keydown(document.body, { key });
+    modes.applicationCursorKeysMode = false;
+    keydown(document.body, { key: 'ArrowUp' });
+    expect(onSendInput.mock.calls).toEqual([
+      ['\x1bOA'], ['\x1bOB'], ['\x1bOC'], ['\x1bOD'], ['\x1bOH'], ['\x1bOF'], ['\x1b[5~'], ['\x1b[A'],
+    ]);
+  });
+
   it('leaves named keys, Command chords, and IME composition to the page', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput });
@@ -858,6 +871,17 @@ describe('MobileTerminalUi edge scroll', () => {
     expect(onSendInput).toHaveBeenCalledWith('\x1b[C');
     expect(onGestureInput).toHaveBeenCalledWith('right', '\x1b[C');
     expect(onGestureInput.mock.invocationCallOrder[0]).toBeLessThan(onSendInput.mock.invocationCallOrder[0]);
+  });
+
+  it('sends a compass arrow in its application form while the program set DECCKM', () => {
+    const { pointer, onSendInput, onGestureInput } = setup();
+    const terminal = registry.getTerminalInstance('scroll-test')!;
+    (terminal.modes as { applicationCursorKeysMode: boolean }).applicationCursorKeysMode = true;
+    pointer('pointerdown', 100, 200);
+    pointer('pointermove', 380, 200);
+    pointer('pointerup', 380, 200);
+    expect(onSendInput.mock.calls).toEqual([['\x1bOC']]);
+    expect(onGestureInput).toHaveBeenCalledWith('right', '\x1bOC');
   });
 
   it.each<Partial<MobileTerminalUiProps>>([

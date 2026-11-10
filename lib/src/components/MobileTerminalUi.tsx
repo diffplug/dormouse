@@ -190,8 +190,20 @@ const HARDWARE_KEYS: Partial<Record<string, MobileGestureInputId>> = {
   ArrowLeft: 'left',
 };
 
+/** The keys whose sequence changes under application cursor keys (DECCKM). */
+const CURSOR_KEYS: ReadonlySet<MobileGestureInputId> = new Set(['up', 'down', 'right', 'left', 'home', 'end']);
+
+/** What a key sends to a Session: the arrows, Home and End take their `ESC O`
+ *  form while its program has application cursor keys on, as xterm's own
+ *  encoder does; ncurses' keypad mode matches only that form. */
+function terminalKeySequence(id: MobileGestureInputId, sessionId: string | undefined): string {
+  const data = MOBILE_TERMINAL_KEY_SEQUENCES[id];
+  if (!CURSOR_KEYS.has(id) || !sessionId) return data;
+  return getTerminalInstance(sessionId)?.modes.applicationCursorKeysMode ? `\x1bO${data.slice(2)}` : data;
+}
+
 /** What a physical keyboard's key sends; null leaves the key to the page. */
-function hardwareKeySequence(event: globalThis.KeyboardEvent): string | null {
+function hardwareKeySequence(event: globalThis.KeyboardEvent, sessionId: string | undefined): string | null {
   if (event.metaKey || event.altKey) return null;
   if (event.ctrlKey) {
     const key = event.key.toLowerCase();
@@ -200,7 +212,7 @@ function hardwareKeySequence(event: globalThis.KeyboardEvent): string | null {
   let id = HARDWARE_KEYS[event.key];
   if (event.shiftKey && id === 'enter') id = 'shiftEnter';
   if (event.shiftKey && id === 'tab') id = 'shiftTab';
-  if (id) return MOBILE_TERMINAL_KEY_SEQUENCES[id];
+  if (id) return terminalKeySequence(id, sessionId);
   // One character, an astral one included; other named keys (`Shift`, `F1`) send nothing.
   return [...event.key].length === 1 ? event.key : null;
 }
@@ -841,7 +853,7 @@ export function MobileTerminalUi({
       const root = rootRef.current;
       if (!root || event.defaultPrevented || isComposingKey(event)) return;
       if (!isHardwareKeyTarget(root, event.target)) return;
-      const sequence = hardwareKeySequence(event);
+      const sequence = hardwareKeySequence(event, activeSessionId);
       if (!sequence) return;
       event.preventDefault();
       sendInput(sequence);
@@ -860,7 +872,7 @@ export function MobileTerminalUi({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('paste', onNativePaste);
     };
-  }, [composing, confirming, onPaste, sendInput, terminalInteractive, view]);
+  }, [activeSessionId, composing, confirming, onPaste, sendInput, terminalInteractive, view]);
 
   useEffect(() => {
     if (!terminalInteractive || view !== 'terminal') closeComposer();
@@ -889,7 +901,7 @@ export function MobileTerminalUi({
   const executeGestureAction = useCallback((action: MobileGestureAction | undefined) => {
     if (!action) return;
     if (action.kind === 'input') {
-      const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
+      const data = terminalKeySequence(action.input, activeSessionId);
       // Before sending: the input may leave the screen that credits it.
       onGestureInput?.(action.input, data);
       sendInput(data);
@@ -906,7 +918,7 @@ export function MobileTerminalUi({
     if (action.kind === 'confirm') {
       setPendingGestureConfirmation(action);
     }
-  }, [onGestureInput, onPaste, sendInput]);
+  }, [activeSessionId, onGestureInput, onPaste, sendInput]);
 
   const confirmPendingGestureAction = useCallback(() => {
     if (!pendingGestureConfirmation) return;
