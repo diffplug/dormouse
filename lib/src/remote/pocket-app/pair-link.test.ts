@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { takePairingHash } from './pair-link';
+import { erasePairingHashOnChange, takePairingHash } from './pair-link';
 
 const TOKEN = '3PkQ8sV2mYb1hZr7Lw0cJdN6xTgAeUiOpqRsFuHv9Kz';
 const EPH_PUB = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -74,5 +74,18 @@ describe('takePairingHash', () => {
 
     expect(location.hash).toBe('#something-else');
     expect(replaceState).not.toHaveBeenCalled();
+  });
+});
+
+describe('erasePairingHashOnChange', () => {
+  // A link opened in the tab already showing Pocket is a same-page jump: no load.
+  it('erases a fragment that arrives under the running page', () => {
+    erasePairingHashOnChange();
+    openWith(FRAGMENT);
+
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+    expect(location.hash).toBe('');
+    expect(location.href).not.toContain(TOKEN);
   });
 });

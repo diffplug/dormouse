@@ -293,10 +293,26 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onSendInput.mock.calls).toEqual([['a'], ['\r'], ['\x1b[A'], ['\t'], ['😀'], ['\x03']]);
   });
 
+  it('sends the arrows, Home and End in their application form while the program set DECCKM', () => {
+    const onSendInput = vi.fn();
+    const modes = { applicationCursorKeysMode: true };
+    vi.spyOn(registry, 'getTerminalInstance').mockReturnValue({ modes } as unknown as Terminal);
+    renderUi({ onSendInput, sessions: [{ id: 'pane-a', title: 'htop', active: true, episode: null }] });
+    for (const key of ['ArrowUp', 'ArrowDown', 'ArrowRight', 'ArrowLeft', 'Home', 'End', 'PageUp']) keydown(document.body, { key });
+    modes.applicationCursorKeysMode = false;
+    keydown(document.body, { key: 'ArrowUp' });
+    expect(onSendInput.mock.calls).toEqual([
+      ['\x1bOA'], ['\x1bOB'], ['\x1bOC'], ['\x1bOD'], ['\x1bOH'], ['\x1bOF'], ['\x1b[5~'], ['\x1b[A'],
+    ]);
+  });
+
   it('leaves named keys, Command chords, and IME composition to the page', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput });
-    for (const init of [{ key: 'Shift' }, { key: 'F1' }, { key: 'v', metaKey: true }, { key: 'a', isComposing: true }, { key: 'a', keyCode: 229 }]) {
+    for (const init of [
+      { key: 'Shift' }, { key: 'F1' }, { key: 'v', metaKey: true }, { key: 'v', ctrlKey: true }, { key: 'V', ctrlKey: true, shiftKey: true },
+      { key: 'a', isComposing: true }, { key: 'a', keyCode: 229 },
+    ]) {
       expect(keydown(document.body, init).defaultPrevented).toBe(false);
     }
     expect(onSendInput).not.toHaveBeenCalled();
@@ -333,6 +349,54 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(keydown(document.body, { key: 'Enter' }).defaultPrevented).toBe(false);
     expect(onSendInput).not.toHaveBeenCalled();
   });
+
+  // Pocket moves to another Session when the active one closes on the computer.
+  it('drops a confirmation and closes the composer when the active Session changes under them', () => {
+    const onSendInput = vi.fn();
+    vi.spyOn(activity, 'acknowledgeSession').mockImplementation(() => {});
+    const sessionsOn = (id: string) => ({ onSendInput, sessions: [{ id, title: id, active: true, episode: null }] });
+    const { container, terminal, typeButton, field, renderWith } = renderUi(sessionsOn('pane-a'));
+    vi.spyOn(gestureMenu, 'finishMobileGesture').mockReturnValue({
+      state: gestureMenu.MOBILE_GESTURE_IDLE_STATE,
+      action: { kind: 'confirm', confirmation: 'ctrlC', action: { kind: 'input', input: 'ctrlC' } },
+    });
+    act(() => {
+      terminal.dispatchEvent(pointerEvent('pointerdown'));
+      terminal.dispatchEvent(pointerEvent('pointerup'));
+    });
+    expect(container.querySelector('[data-mobile-gesture-dialog]')).not.toBeNull();
+    renderWith(sessionsOn('pane-b'));
+    expect(container.querySelector('[data-mobile-gesture-dialog]')).toBeNull();
+
+    act(() => typeButton.click());
+    expect(field()).not.toBeNull();
+    renderWith(sessionsOn('pane-c'));
+    expect(field()).toBeNull();
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+});
+
+describe('MobileTerminalUi keyboard focus invariant', () => {
+  it('makes a text input the terminal mounts later a non-keyboard target', async () => {
+    const { terminal } = renderUi();
+    const textarea = document.createElement('textarea');
+    await act(async () => { terminal.appendChild(textarea); });
+    expect([textarea.inputMode, textarea.autocomplete, textarea.readOnly, textarea.tabIndex]).toEqual(['none', 'off', true, -1]);
+  });
+
+  it('blurs a focused pane input on a touch, and again across the window Wall can restore focus in', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    const { terminal } = renderUi();
+    const textarea = terminal.appendChild(document.createElement('textarea'));
+    textarea.focus();
+    act(() => terminal.dispatchEvent(pointerEvent('pointerdown')));
+    expect(document.activeElement).not.toBe(textarea);
+    for (const ms of [16, 50, 150]) {
+      textarea.focus();
+      act(() => vi.advanceTimersByTime(ms));
+      expect(document.activeElement, `after ${ms} ms more`).not.toBe(textarea);
+    }
+  });
 });
 
 describe('MobileTerminalUi controls inside the host', () => {
@@ -354,6 +418,27 @@ describe('MobileTerminalUi controls inside the host', () => {
     expect(down.defaultPrevented).toBe(false);
     expect(setPointerCapture).not.toHaveBeenCalled();
     expect(acknowledge).not.toHaveBeenCalled();
+  });
+
+  // A cancelled touchstart or touchend gets no click from the browser.
+  it('leaves a header button its touch start and end in Mouse mode, but cancels the pane\'s', () => {
+    const { button: control, container } = renderUi({
+      activeTouchMode: 'cursor',
+      cursorTouchAvailable: true,
+      terminal: <div><header><button type="button">Kill</button></header><div data-testid="pane" /></div>,
+    });
+    const button = control('Kill')!;
+    const pane = container.querySelector('[data-testid="pane"]')!;
+    for (const type of ['touchstart', 'touchend']) {
+      const onButton = new Event(type, { bubbles: true, cancelable: true });
+      const onPane = new Event(type, { bubbles: true, cancelable: true });
+      act(() => {
+        button.dispatchEvent(onButton);
+        pane.dispatchEvent(onPane);
+      });
+      expect(onButton.defaultPrevented, type).toBe(false);
+      expect(onPane.defaultPrevented, type).toBe(true);
+    }
   });
 });
 
@@ -838,6 +923,17 @@ describe('MobileTerminalUi edge scroll', () => {
     expect(onSendInput).toHaveBeenCalledWith('\x1b[C');
     expect(onGestureInput).toHaveBeenCalledWith('right', '\x1b[C');
     expect(onGestureInput.mock.invocationCallOrder[0]).toBeLessThan(onSendInput.mock.invocationCallOrder[0]);
+  });
+
+  it('sends a compass arrow in its application form while the program set DECCKM', () => {
+    const { pointer, onSendInput, onGestureInput } = setup();
+    const terminal = registry.getTerminalInstance('scroll-test')!;
+    (terminal.modes as { applicationCursorKeysMode: boolean }).applicationCursorKeysMode = true;
+    pointer('pointerdown', 100, 200);
+    pointer('pointermove', 380, 200);
+    pointer('pointerup', 380, 200);
+    expect(onSendInput.mock.calls).toEqual([['\x1bOC']]);
+    expect(onGestureInput).toHaveBeenCalledWith('right', '\x1bOC');
   });
 
   it.each<Partial<MobileTerminalUiProps>>([

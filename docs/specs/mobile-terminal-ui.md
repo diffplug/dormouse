@@ -67,7 +67,7 @@ Source of truth: the `RADIUS_*` constants in `lib/src/lib/mobile-gesture-menu.ts
 
 Each diagonal group carries three options — its primary and two secondaries.
 
-**Must confirm `⌃C` and `Paste` in an in-pane modal before running them.** **Must open a second exploded-option menu for `Quit`** instead of sending input, under the same reset-center, highlight, and select rules as normal option selection.
+**Must confirm `⌃C` and `Paste` in an in-pane modal before running them.** **Must drop that confirmation, and close the composer, when the active Session changes**, so neither reaches a Session the phone did not pick. **Must open a second exploded-option menu for `Quit`** instead of sending input, under the same reset-center, highlight, and select rules as normal option selection.
 
 Source of truth: `MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in `lib/src/lib/mobile-gesture-menu.ts`; `MOBILE_TERMINAL_KEY_SEQUENCES` in `lib/src/components/MobileTerminalUi.tsx`.
 
@@ -94,7 +94,7 @@ Source of truth: `MobileTerminalUi` and `Composer` in `lib/src/components/Mobile
 
 ## Physical keyboard
 
-**While the composer is closed, no gesture confirmation is open, and the terminal is showing, a physical keyboard types straight into the terminal.** **Must leave to the page** a key aimed at a focused field or control, a Command or Option chord, and IME composition. A soft keyboard opens only for a focused field, so it never reaches this path.
+**While the composer is closed, no gesture confirmation is open, and the terminal is showing, a physical keyboard types straight into the terminal.** **Must leave to the page** a key aimed at a focused field or control, a Command or Option chord, the `Ctrl (+Shift) + V` paste chord, and IME composition. A soft keyboard opens only for a focused field, so it never reaches this path.
 
 Source of truth: `hardwareKeySequence` and `isHardwareKeyTarget` in `lib/src/components/MobileTerminalUi.tsx`.
 
@@ -126,7 +126,7 @@ Source of truth: `MobileWall` in `lib/src/components/MobileWall.tsx`; `MobileBro
 
 **Pane-content touches must never open the native keyboard.** The pane content area may focus the terminal internally for key routing or mouse handling, but every text input the terminal surface creates — later-mounted ones included — is a non-keyboard target, blurred when the touch starts there; **that blur repeats across the window in which `Wall` can restore focus** (rationale). **The only mobile UI surface that may open the native keyboard is the composer.**
 
-Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx` and `lib/src/components/MobileWall.test.tsx`.
+Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx` and `MobileWall` in `lib/src/components/MobileWall.tsx`; pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
 
 ## Future
 

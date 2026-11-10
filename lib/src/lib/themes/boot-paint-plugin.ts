@@ -7,7 +7,9 @@ import { themeBootScript, type ThemePaintProfile } from './boot-paint';
  * Puts the theme boot tag (`./boot-paint.ts`) first in an `index.html` app's
  * body, as a same-origin file under the build's assets directory: every such
  * app is served a `script-src` that refuses an inline script. The profile's
- * default rides in the file, which is cached immutable, not in the HTML.
+ * default rides in the file, which is cached immutable, not in the HTML. Only
+ * the root `index.html` is the app; another entry (Pocket's diagnostics page)
+ * paints itself and keeps out of the app's theme storage.
  */
 export function themeBootPlugin(profile: ThemePaintProfile): Plugin {
   const code = themeBootScript(themeBootPaint(profile), profile.classes);
@@ -32,7 +34,8 @@ export function themeBootPlugin(profile: ThemePaintProfile): Plugin {
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: assetPath, source: code });
     },
-    transformIndexHtml() {
+    transformIndexHtml(_html, ctx) {
+      if (ctx.path !== '/index.html') return;
       return [{ tag: 'script', attrs: { src }, injectTo: 'body-prepend' }];
     },
   };
