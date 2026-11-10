@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   createManagedVoiceHost,
   fileManagedVoiceStore,
@@ -18,7 +18,7 @@ import { DEFAULT_RELAY_ORIGIN } from './relay-origin';
 const MANAGED_VOICE_SPEAK_URL = 'https://voice.dormouse.sh/api/voice/speak';
 const MANAGED_VOICE_TOKEN_URL = 'https://voice.dormouse.sh/api/voice/token';
 /** Each request's URL, method, and bearer. */
-const requests = () => fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) =>
+const requests = () => fetchMock.mock.calls.map(([url, init]) =>
   [url, init.method, (init.headers as Record<string, string>).authorization]);
 
 /** The next `readFile` fails with this, once and then `repeats` more times: a Windows antivirus lock, say. */
@@ -52,7 +52,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 const TOKEN = `dmv_${'A'.repeat(43)}`;
 let dir: string;
-let fetchMock: ReturnType<typeof vi.fn>;
+/** `fetch` as the host calls it: a string URL and an init, always. */
+let fetchMock: Mock<(url: string, init: RequestInit) => Promise<Response>>;
 let broadcasts: unknown[];
 let host: ReturnType<typeof make>;
 
@@ -193,7 +194,7 @@ describe('configuration', () => {
     expect(await restarted.handle({ op: 'status' })).toEqual(idle(true, OTHER_VOICE));
     fetchMock.mockResolvedValue(audioResponse());
     await restarted.handle({ op: 'speak', text: 'build finished' });
-    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({ text: 'build finished', voiceId: OTHER_VOICE });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toEqual({ text: 'build finished', voiceId: OTHER_VOICE });
   });
 
   it('stores a chosen retired voice as its replacement', async () => {
@@ -243,7 +244,7 @@ describe('speak', () => {
     fetchMock.mockResolvedValue(audioResponse());
     const result = await host.handle({ op: 'speak', text: 'build finished' });
     expect(result).toEqual({ ok: true, audioBase64: Buffer.from([9, 8, 7]).toString('base64') });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe(MANAGED_VOICE_SPEAK_URL);
     expect(init.method).toBe('POST');
     expect(init.redirect).toBe('error');
@@ -584,7 +585,7 @@ describe('independent managed-voice lifecycle', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(async () => expect(await host.handle({ op: 'status' })).toEqual(idle(true)));
     expect(await make().handle({ op: 'status' })).toEqual(idle(true));
-    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body))).toEqual([
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body as string))).toEqual([
       { origin: DEFAULT_RELAY_ORIGIN, purpose: 'voice' },
       { deviceCode: begin.deviceCode, purpose: 'voice' },
     ]);

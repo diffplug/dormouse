@@ -449,7 +449,7 @@ describe('the viewer listener', () => {
       const { port } = new URL(await server.grant(() => {}));
       for (let attempt = 0; attempt < 5; attempt++) {
         await new Promise<void>((resolve) => {
-          const peer = connect({ host: '127.0.0.1', port });
+          const peer = connect({ host: '127.0.0.1', port: Number(port) });
           peer.on('error', () => {});
           peer.on('close', () => resolve());
           peer.on('connect', () => {

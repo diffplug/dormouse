@@ -84,7 +84,15 @@ function stubBaseboardWidths(widthOf: (element: HTMLElement) => number): void {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: HTMLElement) {
       const width = target.classList.contains('h-7') ? 244 : 72;
-      this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      const entry: ResizeObserverEntry = {
+        target,
+        // The baseboard reads only the width.
+        contentRect: { width } as DOMRectReadOnly,
+        borderBoxSize: [],
+        contentBoxSize: [],
+        devicePixelContentBoxSize: [],
+      };
+      this.callback([entry], this as unknown as ResizeObserver);
     }
     disconnect() {}
   });
