@@ -64,7 +64,6 @@ export interface WallKeyboardCtx {
   fireEvent: (event: WallEvent) => void;
 }
 
-/** Last arrow direction, so the inverse arrow can return to the prior pane. */
 /** The last pane move: its direction, the pane it left, and the pane it left
  *  selected (`at`). The breadcrumb holds only while the selection is still
  *  `at`; any other selection change (a click, a kill, a reattach) voids it. */

@@ -241,7 +241,7 @@ flowchart TD
   MA -- yes --> CM["command mode"]
 ```
 
-**Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key, and stop propagation of its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
+**Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key, and stop propagation of its `keyup`**, which win32-input-mode or kitty would report to the program. **Must swallow a handled key's held repeats, arrows excepted**, or a key that moved focus to the terminal types its repeats there. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
 
 Every open dialog holds its own reference-counted lease on the dialog gate; command-mode dispatch resumes only once the last lease is released.
 
