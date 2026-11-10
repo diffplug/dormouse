@@ -13,7 +13,7 @@ export async function listTools(
   request: ToolListRequest,
   options: { trust: ToolTrustStore; userPath: string },
 ): Promise<ToolListResponse> {
-  const project = request.global ? null : await loadProjectToolFile(request.cwd);
+  const project = request.global ? null : await loadProjectToolFile(request.cwd, { userPath: options.userPath });
   const user = await readUserToolFile(options.userPath);
   const projectNames = new Set(project?.file.tools.keys());
   return {
