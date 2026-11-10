@@ -4184,10 +4184,11 @@ fn shutdown_sidecar_and_wait(state: &SidecarState) {
     let _ = guard.start_kill();
 }
 
-// Job Object on Windows / process group on Unix — kill propagates to the
-// sidecar's grandchildren (the spawned shells). On Unix this is SIGKILL to
-// the whole process group, which is more thorough than the previous
-// SIGTERM-to-just-node path that left node-pty grandchildren orphaned.
+// Job Object on Windows / process group on Unix. On Windows the kill takes
+// the spawned shells with the sidecar. On Unix the SIGKILL reaches only the
+// sidecar's process group: node-pty starts each shell as the leader of its own
+// session, so a shell ends on the PTY hangup when node exits, and one that
+// ignores SIGHUP survives.
 //
 // The updater calls this before launching the Windows NSIS installer: NSIS
 // overwrites files inside the bundled sidecar (e.g. node-pty's `conpty.node`),
@@ -4661,9 +4662,9 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 
 /// The File menu's Reopen Closed item (docs/specs/reopen.md → Reopen verb).
-/// macOS only: a menu accelerator fires before the webview sees the key, so
-/// it works in passthrough; on Windows and Linux `Ctrl+Shift+T` would take a
-/// key programs read as `Ctrl+T`.
+/// macOS only: the page sees the chord first and a keydown it does not cancel
+/// still reaches the menu item, so it works in passthrough; on Windows and
+/// Linux `Ctrl+Shift+T` would take a key programs read as `Ctrl+T`.
 const REOPEN_MENU_ITEM_ID: &str = "dormouse-reopen-closed";
 
 pub fn run() {
@@ -7047,13 +7048,6 @@ mod tests {
         assert_eq!(session_file_name("a/b"), "a_b.json");
     }
 
-    // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
-    // every `#[tauri::command]` whose body reaches blocking sidecar or journal helpers
-    // must be `#[tauri::command(async)]` (or an `async fn`). A plain-sync command
-    // runs on the main thread, where `recv_timeout` freezes the webview for the
-    // whole round trip — up to 10s on a clipboard image paste. Three clipboard
-    // commands once slipped through the async port; this scans the source so the
-    // omission can't silently recur.
     #[test]
     fn journal_locks_never_span_an_await() {
         let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
@@ -7135,6 +7129,13 @@ mod tests {
         }
     }
 
+    // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
+    // every `#[tauri::command]` whose body reaches blocking sidecar or journal helpers
+    // must be `#[tauri::command(async)]` (or an `async fn`). A plain-sync command
+    // runs on the main thread, where `recv_timeout` freezes the webview for the
+    // whole round trip — up to 10s on a clipboard image paste. Three clipboard
+    // commands once slipped through the async port; this scans the source so the
+    // omission can't silently recur.
     #[test]
     fn blocking_commands_run_off_the_main_thread() {
         let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
