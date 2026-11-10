@@ -1029,6 +1029,24 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
   // The window key forwarder is a capture-phase listener that preventDefaults
   // what it takes, so a Workspace left in passthrough on a browser pane would go
   // on eating every keystroke while hidden (docs/specs/layout.md → "Workspaces").
+  it('leaves keys to a focused menu outside the pane', async () => {
+    await renderWithMode('passthrough', 'ab-panel');
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    const item = document.createElement('button');
+    item.setAttribute('role', 'menuitem');
+    menu.appendChild(item);
+    document.body.appendChild(menu);
+    try {
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      await act(async () => { item.dispatchEvent(enter); });
+      expect(enter.defaultPrevented).toBe(false);
+      expect(sentKeyEvents()).toHaveLength(0);
+    } finally {
+      menu.remove();
+    }
+  });
+
   it('stops forwarding window keys once its Workspace is hidden, and resumes on return', async () => {
     await renderWithMode('passthrough', 'ab-panel');
     const press = async () => {
