@@ -13,9 +13,9 @@
  * **The combination nothing else covers.** `direct-peer.test.ts` links two
  * in-memory fakes and `native-direct-peer.test.ts` runs the addon against
  * itself; what actually ships is a phone's browser stack negotiating with
- * `node-datachannel` in the sidecar, and no CI job has a browser. So this pair
+ * `node-datachannel` in a Burrow host, and no CI job has a browser. So this pair
  * is the shipped one: the browser offers, as Pocket does, and the addon answers,
- * as the standalone Burrow does — over the shipped `DirectPeer` on both sides,
+ * as a Burrow does — over the shipped `DirectPeer` on both sides,
  * each peer built by its shipped factory, through no ICE server at either end
  * unless `--stun`.
  *
