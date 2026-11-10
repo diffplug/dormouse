@@ -137,8 +137,12 @@ describe('responseFrom', () => {
     const nonsense = answering();
     nonsense.send({ kind: 'head', status: 99, statusText: '', headers: [] });
     expect((await nonsense.response).status).toBe(502);
+    const phrase = answering();
+    phrase.send({ kind: 'head', status: 200, statusText: 'O\u0001K', headers: [] });
+    expect((await Promise.race([phrase.response, new Promise((resolve) => setTimeout(resolve, 100, null))]) as Response | null)?.status).toBe(200);
     empty.port2.close();
     nonsense.port2.close();
+    phrase.port2.close();
   });
 
   it('answers a failure before the head as a page, and after it as a broken body', async () => {
