@@ -165,8 +165,13 @@ export function responseFrom(port: MessagePort, finished: () => void, abandoned?
       cancel();
       resolve(failure(504, 'Your computer did not answer in time.'));
     }, HEAD_TIMEOUT_MS);
-    // A page's own abort, which must stop a request still waiting its turn too.
-    abandoned?.addEventListener('abort', cancel, { once: true });
+    // A page's own abort, which must stop a request still waiting its turn too,
+    // and answer the fetch event, whose head timer `cancel` clears; after the
+    // head the answer is a no-op.
+    abandoned?.addEventListener('abort', () => {
+      cancel();
+      resolve(failure(503, 'The page gave up on this request.'));
+    }, { once: true });
     const settlePull = () => {
       wake?.();
       wake = null;

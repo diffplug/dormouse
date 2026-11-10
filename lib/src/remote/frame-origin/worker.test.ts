@@ -79,10 +79,12 @@ describe('responseFrom', () => {
     port2.onmessage = (event) => asked.push(event.data);
     const aborted = new AbortController();
     const finished = vi.fn();
-    void responseFrom(port1, finished, aborted.signal);
+    const response = responseFrom(port1, finished, aborted.signal);
     aborted.abort();
     await vi.waitFor(() => { expect(asked).toEqual([{ kind: 'cancel' }]); }, { interval: 1 });
     expect(finished).toHaveBeenCalled();
+    // And the fetch event is answered, not left pending with no timer to end it.
+    expect((await Promise.race([response, new Promise((resolve) => setTimeout(resolve, 100, null))]) as Response | null)?.status).toBe(503);
     port2.close();
   });
 
