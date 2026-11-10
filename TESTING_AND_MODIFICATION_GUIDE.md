@@ -202,6 +202,7 @@ Each row names the code and the spec section that must change with it. Spec lint
 ## 8. Known gaps
 
 - The browser harness simulates one window; multi-window behavior is Tauri-only.
+- The browser harness starts the sidecar directly behind an HTTP bridge, so the Rust ↔ sidecar stdio bridge runs only under Tauri, and a Mac run exercises no Windows ConPTY behavior.
 - `dor list --all` still lists the answering window only (`dor-cli.md` → Future).
 - A mark can fall inside an escape sequence the sidecar's parser is holding; the target's parser resynchronizes on the next ground byte, the same class of cut the old bounded replay made. Documented in `standalone.rationale.md` → Arrival queue.
 - The alert stores in the sidecar are memory-only; a sidecar respawn loses them until a window re-seeds (the harness re-seeds on stream reconnect).
