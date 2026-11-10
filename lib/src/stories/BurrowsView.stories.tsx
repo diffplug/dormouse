@@ -79,7 +79,7 @@ export const Empty: Story = {
 // Paired+online (Connect), pairing-required (Pair again), offline (dimmed).
 export const MixedList: Story = {};
 
-// Canonical Pocket default theme, pinned so Chromatic captures the dark rows.
+// Canonical Pocket default theme, pinned so Argos captures the dark rows.
 export const MixedListKimbieDark: Story = {
   globals: { theme: 'Kimbie Dark' },
 };

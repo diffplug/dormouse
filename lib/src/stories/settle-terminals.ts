@@ -10,13 +10,13 @@ export const TODO_SPOTLIGHT_HELD_CLASS = '[&_.todo-spotlight]:!animate-none [&_.
 const DEFAULT_TIMEOUT_MS = 4000;
 
 /**
- * A Chromatic readiness gate for terminal-bearing stories.
+ * An Argos readiness gate for terminal-bearing stories.
  *
  * The FakePty adapter emits scenario data on a `setTimeout` (even `flattenScenario`'s
  * "instant" output is a `setTimeout(0)`), and xterm then parses and paints on its own
  * async schedule. A story with no `play` is snapshotted the moment React finishes
  * rendering — before that write lands — so the terminal is captured mid-paint (a
- * partial prompt like `user@dormo`). Chromatic awaits a story's `play` function, so
+ * partial prompt like `user@dormo`). Argos awaits a story's `play` function, so
  * awaiting this in `play` holds the snapshot until every visible terminal has written
  * its content and painted a settled frame.
  *
@@ -157,7 +157,7 @@ function containsFixed(style: CSSStyleDeclaration): boolean {
  * frames so whatever it gates has rendered. The tool for stories that reveal
  * content asynchronously *after* the
  * terminal paints — e.g. a programmatic selection overlay applied on the story's own
- * timer, chained after `settleTerminals` so Chromatic never captures a painted
+ * timer, chained after `settleTerminals` so Argos never captures a painted
  * terminal that is still missing its overlay.
  *
  * Throws if `predicate()` is still false after those frames, with `message()` when
@@ -175,7 +175,7 @@ export async function waitForCondition(
  * `waitForCondition` without the throw, for a gate that re-checks with its own
  * message or loops on a predicate that can flip back.
  *
- * Robustness rules (a hanging gate is worse than none — it stalls Chromatic to its
+ * Robustness rules (a hanging gate is worse than none — it stalls the snapshot run to its
  * own timeout):
  *  - The poll clock is `setTimeout`, never `requestAnimationFrame` alone: rAF is
  *    fully paused in a hidden/backgrounded tab, so an rAF-only wait can hang forever.

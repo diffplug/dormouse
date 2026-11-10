@@ -28,7 +28,7 @@ const meta: Meta<typeof DoorStory> = {
     title: 'build-server',
     status: 'WATCHING_DISABLED',
     // Stories draw the static treatment; the arrival burst is frozen out by
-    // `cfg.alert.ringingPaused` under Chromatic anyway.
+    // `cfg.alert.ringingPaused` under Argos anyway.
     episode: null,
     todo: false,
     width: 260,

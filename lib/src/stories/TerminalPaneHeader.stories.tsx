@@ -82,8 +82,7 @@ interface PanePriming {
 
 /**
  * Prime one pane's Activity and semantic state as a coherent pair: a detector
- * status comes with a running command and a WATCHING rule for it. Timestamps are
- * fixed rather than `Date.now()` for deterministic Chromatic snapshots.
+ * status comes with a running command and a WATCHING rule for it.
  */
 function primedPane({ status, todo = false, notification, command = 'pnpm dev', userTitle = 'build-server' }: PanePriming) {
   const watching = SHOWN_ONLY_WHILE_WATCHING[status];
