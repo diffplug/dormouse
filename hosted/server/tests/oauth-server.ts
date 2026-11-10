@@ -31,10 +31,6 @@ export const betterAuthCredentials = {
     clientSecret: "test-microsoft-secret",
   },
 } satisfies OAuthSettings;
-export const oauthCredentials = {
-  google: allOAuthCredentials.google,
-  github: allOAuthCredentials.github,
-};
 const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
 // Only the badSignature grant needs a second key; generating it is ~40ms.
 let wrongKey: typeof key | undefined;

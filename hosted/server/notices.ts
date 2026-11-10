@@ -1,6 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Billing notices"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing, Stripe } from "@pgstencil/stripe";
+import type { Billing } from "@pgstencil/stripe";
 import { postmarkEmail } from "@pgstencil/auth/postmark";
 import type { EmailSender } from "pgstencil";
 import { planInterval } from "../../website/src/lib/hosted-pricing";

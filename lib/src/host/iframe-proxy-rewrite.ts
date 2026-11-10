@@ -12,9 +12,6 @@
 import { dualTap, newDualTapState } from '../lib/dual-tap';
 import { bareAddress, ipv4Value, ipv4sCarriedByIPv6, ipv6Bytes, isLoopbackHostname } from '../lib/ip-literal';
 
-/** Header bag shape both `http.IncomingHttpHeaders` and a plain map satisfy. */
-export type ProxyHeaders = Record<string, string | string[] | undefined>;
-
 // Hop-by-hop headers (RFC 7230 §6.1). Never forwarded downstream.
 export const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
