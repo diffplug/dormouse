@@ -55,7 +55,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
+import { readRepoFile, repoRoot, SOURCE_EXT, trackedFiles } from './lint-kit.mjs';
 
 /**
  * The one suite. Spelled here rather than imported, because importing the
@@ -827,7 +827,7 @@ function sourceFilesUnder(trees) {
   return trackedFiles().filter(
     (file) =>
       trees.some((tree) => file.startsWith(tree)) &&
-      /\.(?:ts|tsx|mjs|js)$/.test(file) &&
+      SOURCE_EXT.test(file) &&
       !/\.test\./.test(file) &&
       !/(?:^|\/)tests?\//.test(file) &&
       !/(?:^|\/)test-[^/]*$/.test(file) &&

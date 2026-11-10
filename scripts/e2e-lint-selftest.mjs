@@ -27,7 +27,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { makeSelftest, repoRoot } from './lint-kit.mjs';
 import {
@@ -417,6 +417,26 @@ for (const { spec, line } of cited.values()) {
     (path) => writeFileSync(path, text.replace(line, '')),
     `deleting "${line}" from ${spec} stays green — a rule would outlive the prose`,
   );
+}
+
+// A tree rule must read every source extension tsc and Node accept, not only
+// the `.ts` files the cases above append to. No `.mts` file is tracked under
+// the trees, so this one plants one and adds it to the sandbox's tracked list
+// (what `trackedFiles` reads there); restoring the list untracks it again.
+{
+  const planted = 'remote-lib-common/src/security/__selftest.mts';
+  const list = process.env.LINT_KIT_TRACKED_FILES;
+  if (!list) selftest.weak.push('no sandbox tracked list — the extension case cannot plant a file');
+  else {
+    selftest.withMutation(
+      relative(repoRoot, list),
+      (path) => {
+        writeFileSync(join(repoRoot, planted), "import { x25519 } from '@noble/curves/ed25519.js';\n");
+        writeFileSync(path, `${readFileSync(path, 'utf8')}\0${planted}`);
+      },
+      `${planted}\n      a forbidden import in a .mts file stays green — the tree rules skip that extension`,
+    );
+  }
 }
 
 selftest.finish(
