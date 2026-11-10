@@ -811,6 +811,30 @@ describe('AgentBrowserPanel visibility parking', () => {
     expect(onReady).toHaveBeenCalledOnce();
   });
 
+  it('hides the last frame of a browser that went, leaving the ended message alone', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
+    setDocumentHidden(false);
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <AgentBrowserPanel {...paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 4321 })} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    await act(async () => {
+      liveStreamSocket(4321)?.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
+      liveStreamSocket(4321)?.emitMessage(encodeViewerFrame({ kind: 'provisional', jpeg: new Uint8Array([0xff, 0xd8, 1]) }).buffer);
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const canvas = container.querySelector('canvas')!;
+    expect(canvas.classList.contains('hidden')).toBe(false);
+    await act(async () => { liveStreamSocket(4321)?.emitMessage(JSON.stringify({ type: 'status', connected: false, screencasting: false })); });
+    expect(container.textContent).toContain('The browser session ended');
+    expect(canvas.classList.contains('hidden')).toBe(true);
+  });
+
   it('does not park a popped-out panel while it is hidden', async () => {
     const { setVisible } = await renderVisibilityPanel({
       surfaceType: 'browser', renderMode: 'agent-browser-popout', session: 'browser-session', stream: 1111,

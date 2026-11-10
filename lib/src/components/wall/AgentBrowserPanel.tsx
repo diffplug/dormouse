@@ -468,7 +468,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
             — just hidden under the stub while a headed window renders instead. */}
         <canvas
           ref={canvasRef}
-          className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut) && 'hidden')}
+          className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut || placeholder !== null) && 'hidden')}
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}
           onMouseMove={onCanvasMouseMove}
