@@ -2136,6 +2136,17 @@ test('list escapes control characters in Tool commands, titles, locations, and W
   assert.equal(JSON.parse((await runCli(['list', '--json'], { client })).stdout).surfaces[0].command, evil.command);
 });
 
+test('workspace verbs escape control characters in the Workspace name', async () => {
+  const client = fixtureClient();
+  client.switchWorkspace = async () => ({ status: 'active', workspaceId: 'workspace:2', name: 'ws\u009d\u007f' });
+  for (const argv of [['workspace', 'switch', 'workspace:2'], ['workspace', 'switch', '--json', 'workspace:2']]) {
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 0, argv.join(' '));
+    assert.doesNotMatch(result.stdout, /[\x7f-\x9f]/, argv.join(' '));
+  }
+  assert.equal(JSON.parse((await runCli(['workspace', 'switch', '--json', 'workspace:2'], { client })).stdout).name, 'ws\u009d\u007f');
+});
+
 test('tool rejects an unknown option', async () => {
   await snapshot('tool-unknown-option', await runCli(['tool', '--nope', 'storybook'], { client: fixtureClient() }));
 });
