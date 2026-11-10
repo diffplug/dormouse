@@ -74,6 +74,17 @@ describe('createToolHost', () => {
     });
   });
 
+  it('resolves a trusted project Tool beside an invalid unrelated user Tool, keeping the user presets', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\ntools:\n  broken:\n    render: ab-screencast\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  app:\n    run: pnpm dev\n    render: playwright-screencast\n    viewport: custom\n');
+    const host = createToolHost({ stateDir, userConfigPath });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await host.handle({ op: 'lookup', name: 'app', cwd: repo })).toMatchObject({
+      status: 'ok', viewport: { mode: 'fixed', width: 1100, height: 800 },
+    });
+  });
+
   it('asks for trust before resolving anything runnable', async () => {
     const host = createToolHost({ stateDir });
     expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
