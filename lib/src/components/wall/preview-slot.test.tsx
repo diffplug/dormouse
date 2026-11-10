@@ -31,6 +31,7 @@ import { PREVIEW_INTERRUPT_GRACE_MS, PREVIEW_OUTPUT_QUIET_MS, PROMPT_RETURN_TIME
 import { setDevServerResolution } from './agent-browser-ports';
 import * as helpers from '../../lib/helper-terminal';
 import { decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
+import { setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,6 +47,7 @@ let root: Root;
 let fake: FakePtyAdapter;
 /** Every Session a test touched, released afterwards. */
 const sessions = new Set<string>();
+const WORKSPACE = 'workspace:1';
 /** Cancels every request a test left waiting on the shared launch queue. */
 let requests: AbortController;
 /** Input each Session received, in order. */
@@ -137,9 +139,10 @@ function viewerParams(file: string, extra: Record<string, unknown> = {}) {
 type Leaf = { id: string; params?: Record<string, unknown>; title?: string };
 
 /** A Wall of a plain terminal `surface:a` beside the given Tool leaves. */
-async function mountWall(leaves: Leaf[], options: { doors?: Leaf[]; mode?: 'command' | 'passthrough' } = {}) {
+async function mountWall(leaves: Leaf[], options: { doors?: Leaf[]; mode?: 'command' | 'passthrough'; workspaceId?: string } = {}) {
   const ids = ['surface:a', ...leaves.map(leaf => leaf.id)];
   await act(async () => root.render(<Wall
+    workspaceId={options.workspaceId}
     initialMode={options.mode ?? 'passthrough'}
     restoredLathLayout={{
       version: 1,
@@ -157,10 +160,10 @@ async function mountWall(leaves: Leaf[], options: { doors?: Leaf[]; mode?: 'comm
 
 /** The common prelude: the host installed, and `surface:a` running `caller`
  *  beside a marked `surface:slot` running a.md's viewer — a pane unless `minimized`. */
-async function mountSlot(options: { caller?: string; slot?: ShellOptions; title?: string; minimized?: boolean; mode?: 'command' | 'passthrough' } = {}) {
+async function mountSlot(options: { caller?: string; slot?: ShellOptions; title?: string; minimized?: boolean; mode?: 'command' | 'passthrough'; workspaceId?: string } = {}) {
   const toolControl = installHost();
   const slot = { id: 'surface:slot', params: viewerParams('a.md'), title: options.title };
-  await mountWall(options.minimized ? [] : [slot], { doors: options.minimized ? [slot] : [], mode: options.mode });
+  await mountWall(options.minimized ? [] : [slot], { doors: options.minimized ? [slot] : [], mode: options.mode, workspaceId: options.workspaceId });
   shell('surface:a', options.caller ?? null);
   shell('surface:slot', 'view /repo/a.md', options.slot);
   return toolControl;
@@ -1332,6 +1335,21 @@ describe('Tool document navigation', () => {
     expect(forward.mock.calls[0][0].ok).toBe(false);
     expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/c.png');
   });
+  it('answers once when its Workspace starts moving while the slot is interrupted', async () => {
+    await mountSlot({ slot: { holdInterrupt: true }, workspaceId: WORKSPACE });
+    const respond = await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot');
+    await waitUntil(() => typed['surface:slot'].includes('\x03'));
+    setWorkspaceTransferPending(WORKSPACE, true);
+    try {
+      act(() => returnToPrompt('surface:slot'));
+      await waitUntil(() => respond.mock.calls.length > 0);
+      await flush();
+      expect(respond.mock.calls).toEqual([[{ ok: false, error: 'this workspace is transferring' }]]);
+    } finally {
+      setWorkspaceTransferPending(WORKSPACE, false);
+    }
+  });
+
   it('rejects duplicate pending navigation and preserves the source when interruption times out', async () => {
     await mountSlot({ slot: { holdInterrupt: true } });
     const first = await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot');

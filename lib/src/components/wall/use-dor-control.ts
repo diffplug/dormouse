@@ -1619,13 +1619,15 @@ export function useDorControl({
           const run = running ? { id: running.id, at: Date.now(), input: getSessionInputVersion(id) } : undefined;
           lateRestores.current.get(id)?.();
           const interrupted = await interruptToPrompt(id, detail.signal, PREVIEW_INTERRUPT_GRACE_MS);
-          if (!interrupted.ok || unavailable() || !isTargetable(id)
+          // `unavailable` answers the request itself, so it answers at most once.
+          const gone = interrupted.ok && unavailable();
+          if (!interrupted.ok || gone || !isTargetable(id)
             || (run && getSessionInputVersion(id) !== run.input)) {
             if (token !== null) endPreviewTransition(id, token);
             if (interrupted === INTERRUPT_OUTLIVED && run) restoreOnLatePrompt(id, run);
             else if (interrupted !== INTERRUPT_OUTLIVED) await restoreInterruptedRun(id, run);
             if (!interrupted.ok) detail.respond({ ok: false, error: `Cannot navigate: ${interrupted.message}` });
-            else if (!unavailable()) detail.respond({ ok: false, error: 'The source Tool changed before navigation.' });
+            else if (!gone && !unavailable()) detail.respond({ ok: false, error: 'The source Tool changed before navigation.' });
             return true;
           }
           retargetInPlace(id, nextCommand, token, isPreviewSlotParams(source));
