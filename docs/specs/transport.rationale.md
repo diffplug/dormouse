@@ -119,3 +119,5 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 **The phantom-running symptoms of a spawn failure with no exit.** A running header that never clears, a `countRunningSessions` that never returns to zero, and therefore a quit confirmation on every window close. Reached whenever a persisted or selected shell binary is gone.
 
 **What type-only ack matching did.** `interrupt` and the graceful kill time out on the teardown path, and the late ack from a timed-out call then resolved the *next* call of the same type the instant it was issued — so the second interrupt appeared to complete before the PTYs had seen it.
+
+**Why an empty interrupt list sends nothing.** A caller whose computed set comes out empty would otherwise send the blanket second press, which destroys codex's hint.
