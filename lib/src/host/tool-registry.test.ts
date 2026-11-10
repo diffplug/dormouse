@@ -12,7 +12,7 @@ import {
 const REPO = { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' as const };
 const USER = { path: '/home/me/.config/dormouse/tools.yml', dir: '/home/me/.config/dormouse', scope: 'user' as const };
 
-function parse(text: string, opts = REPO) {
+function parse(text: string, opts: Parameters<typeof parseToolFile>[1] = REPO) {
   return parseToolFile(text, opts);
 }
 

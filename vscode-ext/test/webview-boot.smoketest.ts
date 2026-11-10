@@ -94,14 +94,15 @@ beforeAll(async () => {
   // a port — so the server reads its body from a box we fill in after binding.
   // Restarting to bake the URLs in would hand out a different port and point the
   // document at a closed one.
-  const document = { html: '' };
-  ({ server, origin } = await serveMedia(document));
+  // Not `document`: that would shadow the page's own inside `page.evaluate`.
+  const served = { html: '' };
+  ({ server, origin } = await serveMedia(served));
 
   const webview = {
     cspSource: origin,
     asWebviewUri: () => origin,
   } as never;
-  document.html = getWebviewHtml(webview, MEDIA_PATH).html;
+  served.html = getWebviewHtml(webview, MEDIA_PATH).html;
 
   browser = await launchChromium();
   const page = await browser.newPage();
