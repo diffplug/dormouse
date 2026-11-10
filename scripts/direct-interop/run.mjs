@@ -88,12 +88,11 @@ const blackhole = process.argv.includes('--stun-blackhole');
 /** Whether the page is the one-time page Hosted serves; see question 5. */
 const stunPage = blackhole || process.argv.includes('--stun');
 /**
- * The policy the addon's Burrow runs under, which `directPeeringFor` reads:
- * "Anywhere, through your Relay"'s unrestricted Burrow by default, as Pocket
- * meets it.
+ * The level the addon's Burrow runs under, which `directPeeringFor` reads with
+ * the allowed networks: "Anywhere, through your Relay"'s unrestricted Burrow by
+ * default, as Pocket meets it.
  */
 const level = allowed ? 'local' : stunPage ? 'anywhere' : 'relay';
-const networkPolicy = { level, allowed: allowed ?? [], autoUpdate: false };
 
 /**
  * Where `--stun-blackhole` points both factories: TEST-NET-1 (RFC 5737), which
@@ -185,7 +184,7 @@ const javascript = browserBundle.outputFiles[0].text;
 /** For the library version alone: the factory loads the same module itself. */
 const addon = sidecarRequire('node-datachannel');
 /** The direct path as the Burrow service chooses it: STUN and the hold, from the policy. */
-const peering = directPeeringFor(networkPolicy, createNativeDirectPeerFactory());
+const peering = directPeeringFor(level, () => allowed ?? [], createNativeDirectPeerFactory());
 
 /**
  * A candidate up to its type, which is where its SDP line and its
