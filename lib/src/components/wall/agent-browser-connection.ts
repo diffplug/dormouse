@@ -33,9 +33,8 @@ export interface AgentBrowserSnapshot {
 export type AgentBrowserConnectionEvent =
   | { type: 'connection-open'; stream: number }
   | { type: 'connection-close'; stream: number; failures: number; code: number; reason: string; wasClean: boolean }
-  | { type: 'connection-error'; stream: number }
   | { type: 'status'; status: AgentBrowserStreamStatus }
-  | { type: 'tabs'; tabs: AgentBrowserTab[]; previousTabs: AgentBrowserTab[] }
+  | { type: 'tabs'; tabs: AgentBrowserTab[] }
   /** The active tab committed a navigation. Fires at commit; the `tabs`
    *  snapshot may lag a commit: agent-browser refreshes it when the driving
    *  command completes, while Playwright polls. See docs/specs/dor-browser.md
@@ -248,7 +247,6 @@ export class AgentBrowserConnection {
       this.patch({ lastError: 'viewer socket error' });
       this.log(`[ab-panel] viewer error ${JSON.stringify({ stream: this.deps.stream })}`);
       this.debug('error');
-      this.emit({ type: 'connection-error', stream: this.deps.stream });
     };
     socket.onclose = (ev) => {
       if (this.socket !== socket) return;
@@ -326,7 +324,7 @@ export class AgentBrowserConnection {
     const active = next.find((t) => t.active);
     this.debug('tabs', { count: next.length, active: active?.tabId ?? null, url: active?.url ?? null });
     this.patch({ tabs: next });
-    this.emit({ type: 'tabs', tabs: next, previousTabs });
+    this.emit({ type: 'tabs', tabs: next });
   }
 
   private maybeSelectNewTab(next: AgentBrowserTab[], previousTabs: AgentBrowserTab[]): void {

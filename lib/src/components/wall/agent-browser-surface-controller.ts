@@ -219,7 +219,7 @@ export interface AgentBrowserViewSink {
   /** Ask the view to swap to iframe or the other automation provider. The ≥2-tab
    *  typed-confirm gate and the Wall's `onSwapRenderMode` are view concerns; the
    *  view reads tabs from the snapshot and decides. */
-  requestRenderSwap(mode?: RenderMode, viewport?: BrowserViewportSetting): void;
+  requestRenderSwap(mode: RenderMode, viewport?: BrowserViewportSetting): void;
   /** The first launch failed: the Wall applies the Surface's `launchFallback`. */
   launchFailed(error: string): void;
 }

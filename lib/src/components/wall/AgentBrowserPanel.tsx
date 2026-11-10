@@ -15,9 +15,6 @@ import {
   acquireAgentBrowserSurfaceController,
   type AgentBrowserSurfaceParams,
 } from './agent-browser-surface-controller';
-// Re-exported so existing importers (notably the panel test) keep resolving the
-// park delay from here even though it now lives on the controller.
-export { HIDDEN_PARK_DELAY_MS } from './agent-browser-surface-controller';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceSight } from './use-surface-visibility';
@@ -130,7 +127,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       viewport,
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
-      requestRenderSwap: (mode = 'iframe', swapViewport) => {
+      requestRenderSwap: (mode, swapViewport) => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
         if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap({ mode, viewport: swapViewport });

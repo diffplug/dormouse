@@ -303,7 +303,7 @@ export function launchFallbackFromParams(params: unknown): LaunchFallback | null
 /** The params that launch a Tool's agent-drivable browser at `url`, in the
  *  session it had or else its own (`tool.<leafId>`), falling back to the embed
  *  when it cannot come up (docs/specs/dor-tool.md → Serving). */
-export function toolBrowserLaunchParams(leafId: string, params: Record<string, unknown>, url: string, provider: 'agent-browser' | 'playwright' = 'agent-browser'): Record<string, unknown> {
+export function toolBrowserLaunchParams(leafId: string, params: Record<string, unknown>, url: string, provider: 'agent-browser' | 'playwright'): Record<string, unknown> {
   return {
     url,
     renderMode: renderModeFor(provider, 'screencast'),

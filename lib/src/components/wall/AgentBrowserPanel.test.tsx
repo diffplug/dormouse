@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PaneProps } from './pane-props';
-import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
+import { AgentBrowserPanel } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import {
   closeBrowserSurface,
@@ -14,6 +14,7 @@ import {
   disposeAllAgentBrowserSurfaceControllers,
   getAgentBrowserSurfaceController,
   handOverBrowserStream,
+  HIDDEN_PARK_DELAY_MS,
 } from './agent-browser-surface-controller';
 import type { RenderMode } from './agent-browser-screen';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, ZoomedIdContext, type PaneWriteActions } from './wall-context';
