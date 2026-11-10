@@ -193,6 +193,19 @@ async function fixedAndSaved(text, also) {
   return saved;
 }
 
+for (const text of [
+  '3. third\n4. fourth\n',
+  '1. one\n\n```sh\nmake\n```\n\n2. two\n',
+  '9. nine\n10. ten\n11. eleven\n',
+  '1. a\n2. b\n',
+  '- [ ] todo\n- [x] done\n',
+  '- a\n  1. one\n  2. two\n- b\n',
+]) {
+  test(`a save keeps an ordered list's numbering: ${JSON.stringify(text)}`, { timeout: 30_000 }, async () => {
+    assert.equal(await fixedAndSaved(text), `Intro word.\n\n${text}`);
+  });
+}
+
 for (const [text, saved = text] of [
   ['Line one\\\nLine two\n'],
   // A spelling change, not a rendering one: the break stays hard.
