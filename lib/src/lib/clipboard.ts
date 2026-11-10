@@ -22,6 +22,7 @@ function writePasteToPty(terminalId: string, text: string): void {
 
 export const CONTROL_PATH_NOTICE = 'Nothing pasted: a file name has a control character';
 export const UNQUOTABLE_PATH_NOTICE = 'Nothing pasted: a file name has a character cmd or PowerShell would expand';
+export const CLIPBOARD_READ_NOTICE = 'Nothing pasted: the clipboard could not be read';
 
 /**
  * Shell-escape the given paths and type them at the terminal, joined by single
@@ -48,13 +49,15 @@ export function pasteFilePaths(terminalId: string, paths: string[]): void {
   writePasteToPty(terminalId, escaped.join(' ') + ' ');
 }
 
-export async function readTextFromClipboard(): Promise<string> {
+/** `onFailure` hears a native read that failed, which reads as empty. */
+export async function readTextFromClipboard(onFailure?: () => void): Promise<string> {
   // Prefer native reads; macOS WKWebView prompts on every navigator read.
   const platform = getPlatform();
   if (platform.readClipboardText) {
     try {
       return (await platform.readClipboardText()) ?? '';
     } catch {
+      onFailure?.();
       return '';
     }
   }
@@ -75,10 +78,13 @@ export async function doPaste(terminalId: string, suppliedText?: string): Promis
     return;
   }
   const platform = getPlatform();
+  // A read that failed is not an empty clipboard: when nothing pastes, say so.
+  let failed = false;
+  const fail = () => { failed = true; return null; };
 
   const [paths, text] = await Promise.all([
-    platform.readClipboardFilePaths().catch(() => null),
-    readTextFromClipboard(),
+    platform.readClipboardFilePaths().catch(fail),
+    readTextFromClipboard(fail),
   ]);
   if (paths && paths.length > 0) {
     pasteFilePaths(terminalId, paths);
@@ -89,8 +95,10 @@ export async function doPaste(terminalId: string, suppliedText?: string): Promis
     return;
   }
 
-  const imagePath = await platform.readClipboardImageAsFilePath().catch(() => null);
+  const imagePath = await platform.readClipboardImageAsFilePath().catch(fail);
   if (imagePath) {
     pasteFilePaths(terminalId, [imagePath]);
+  } else if (failed) {
+    wallHandleOwning(terminalId)?.showNotice(CLIPBOARD_READ_NOTICE, terminalId);
   }
 }

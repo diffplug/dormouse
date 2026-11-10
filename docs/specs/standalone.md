@@ -30,7 +30,7 @@ Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry 
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri::command]` set) and `standalone/sidecar/main.js` (the dispatch table); `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
-**stdout is the protocol**: sidecar diagnostics go to stderr. Invokes on Rust-owned state, and the Windows clipboard reads and text write (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6), never reach the sidecar; the rest are thin forwarders.
+**stdout is the protocol**: sidecar diagnostics go to stderr. Invokes on Rust-owned state and the in-Rust clipboard calls (`docs/specs/mouse-and-clipboard.md` §8.6) never reach the sidecar; the rest are thin forwarders.
 
 **Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
 

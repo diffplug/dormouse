@@ -46,9 +46,14 @@ use process_wrap::std::ProcessGroup;
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
 // Native Win32 clipboard reads and text write, so neither spawns a
-// console-window-popping child. macOS/Linux keep the sidecar path (no console flicker there).
+// console-window-popping child.
 #[cfg(windows)]
 mod clipboard_win;
+// Native Linux clipboard reads through GTK, so paste needs no wl-paste or xclip.
+// macOS keeps the sidecar path.
+mod clipboard_read;
+#[cfg(target_os = "linux")]
+mod clipboard_linux;
 
 // Shared with build.rs (via `#[path]`); the PE subsystem offsets live in one place.
 #[cfg(windows)]
@@ -1864,18 +1869,26 @@ fn browser_request(
 }
 
 // Clipboard reads run natively on Windows (see clipboard_win) to avoid the
-// console-window flicker of shelling out to PowerShell; other platforms keep the
-// sidecar path (pbpaste/xclip never pop a console window).
+// console-window flicker of shelling out to PowerShell, and on Linux (see
+// clipboard_linux) so they need no clipboard tool installed; macOS keeps the
+// sidecar path (pbpaste never pops a console window).
 #[tauri::command(async)]
 fn read_clipboard_file_paths(
+    app: AppHandle,
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Vec<String>, String> {
+    let _ = &app;
     #[cfg(windows)]
     {
         let _ = &state;
         return Ok(clipboard_win::read_file_paths());
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = &state;
+        return clipboard_linux::read_file_paths(&app);
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let response =
             request_from_sidecar_timeout(&state, "clipboard:readFiles", serde_json::json!({}), Duration::from_secs(5))?;
@@ -1888,14 +1901,21 @@ fn read_clipboard_file_paths(
 
 #[tauri::command(async)]
 fn read_clipboard_image_as_file_path(
+    app: AppHandle,
     state: tauri::State<'_, SidecarState>,
 ) -> Result<Option<String>, String> {
+    let _ = &app;
     #[cfg(windows)]
     {
         let _ = &state;
         return Ok(clipboard_win::read_image_as_file_path());
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = &state;
+        return clipboard_linux::read_image_as_file_path(&app);
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let response =
             request_from_sidecar_timeout(&state, "clipboard:readImage", serde_json::json!({}), Duration::from_secs(10))?;
@@ -1907,14 +1927,21 @@ fn read_clipboard_image_as_file_path(
 
 #[tauri::command(async)]
 fn read_clipboard_text(
+    app: AppHandle,
     state: tauri::State<'_, SidecarState>,
 ) -> Result<String, String> {
+    let _ = &app;
     #[cfg(windows)]
     {
         let _ = &state;
         return Ok(clipboard_win::read_text().unwrap_or_default());
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = &state;
+        return clipboard_linux::read_text(&app);
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let response =
             request_from_sidecar_timeout(&state, "clipboard:readText", serde_json::json!({}), Duration::from_secs(5))?;
