@@ -77,7 +77,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
   let socket: FakeSocket;
   let burrow: BurrowRuntime;
   let savedRecords: BurrowAclRecord[] = [];
-  let approvals: PendingPairing[] = [];
+  let approvals: Omit<PendingPairing, 'kind'>[] = [];
   let dismissed: string[] = [];
   let invitationEvents: Array<{ inviteId: string; state: string; outcome?: string }> = [];
   // `outcome` is omitted rather than `undefined` where there is none, so the
@@ -749,7 +749,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     burrowChallenge: string,
     session: NoiseTransportSession,
     passkeyCredentialId: string,
-  ): PresenceBinding {
+  ): Extract<PresenceBinding, { kind: 'connection' }> {
     return {
       kind: 'connection',
       burrowId: enrollment.burrowId,

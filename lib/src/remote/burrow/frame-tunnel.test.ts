@@ -87,6 +87,8 @@ class FakeHost implements BurrowFrameHost {
   refuse: string | null = null;
   /** Held until released, as a slow grant is. */
   hold: Promise<void> | null = null;
+  /** The directory's question; the tunnel itself never asks it. */
+  async canOpen() { return this.refuse === null; }
   async open(url: string, options: FrameOpenOptions) {
     this.opened.push([url, options]);
     await this.hold;

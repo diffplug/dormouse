@@ -154,7 +154,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function breakNativeStorage() {
   const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value, key) {
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
     if (value?.clientStaticKeyPair?.privateKey?.algorithm?.name === 'X25519') {
       throw new DOMException('WebKit clone failure', 'DataError');
     }
@@ -180,7 +180,7 @@ it('blocks pairing when neither key encoding survives storage', async () => {
   vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
     throw new DOMException('secret detail', 'QuotaExceededError');
   });
-  const failure = await requirePocketKeyStorage().catch((error: Error) => error);
+  const failure = await requirePocketKeyStorage().then(() => { throw new Error('the preflight passed'); }, (error: Error) => error);
   expect(failure.message).toContain('Encrypted storage:');
   // Both probes failed, and the sentence the user reads says so once, not twice.
   expect(failure.message.split(POCKET_KEY_STORAGE_ERROR)).toHaveLength(2);
@@ -189,7 +189,7 @@ it('blocks pairing when neither key encoding survives storage', async () => {
 
 it('rejects silent loss of the encrypted wrapping key during the preflight', async () => {
   const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value, key) {
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
     if (value?.clientStaticKeyPair?.privateKey?.format) {
       const changed = structuredClone(value);
       changed.clientStaticKeyPair.privateKey.wrappingKey = null;

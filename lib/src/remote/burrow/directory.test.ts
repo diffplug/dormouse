@@ -14,7 +14,6 @@ function pane(partial: Partial<TerminalPaneState> = {}): TerminalPaneState {
     pendingCommandLine: null,
     currentCommand: null,
     lastCommand: null,
-    title: null,
     titleCandidates: {},
     ...partial,
   };

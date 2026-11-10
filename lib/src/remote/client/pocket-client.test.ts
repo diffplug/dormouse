@@ -73,8 +73,6 @@ import {
   type FakeDirectNetworkOptions,
   type FakePeer,
 } from '../direct/test-fake-peer';
-import type { DirectPeerLike } from '../direct/direct-peer';
-import type { RemoteTimer } from '../ws';
 import {
   createTestAuthenticator,
   openConnectionSession,
