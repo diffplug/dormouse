@@ -374,6 +374,23 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(field()).toBeNull();
     expect(onSendInput).not.toHaveBeenCalled();
   });
+
+  it('forgets a kept draft when the active Session changes, open or cancelled', () => {
+    vi.spyOn(activity, 'acknowledgeSession').mockImplementation(() => {});
+    const sessionsOn = (id: string) => ({ onSendInput: vi.fn(), sessions: [{ id, title: id, active: true, episode: null }] });
+    const { typeButton, field, button, renderWith } = renderUi(sessionsOn('pane-a'));
+    act(() => typeButton.click());
+    act(() => setNativeFieldValue(field()!, 'rm -rf build'));
+    act(() => button('Cancel')!.click());
+    renderWith(sessionsOn('pane-b'));
+    act(() => typeButton.click());
+    expect(field()!.value).toBe('');
+
+    act(() => setNativeFieldValue(field()!, 'git push'));
+    renderWith(sessionsOn('pane-c'));
+    act(() => typeButton.click());
+    expect(field()!.value).toBe('');
+  });
 });
 
 describe('MobileTerminalUi keyboard focus invariant', () => {
