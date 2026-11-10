@@ -31,6 +31,7 @@ import App, {
   SCAN_LABEL,
 } from './App';
 import {
+  INSECURE_ORIGIN_TITLE,
   TRANSPORT_PATH_LABELS,
   TRANSPORT_RELAY_CAUSES,
   UNSUPPORTED_BROWSER_TITLE,
@@ -318,6 +319,18 @@ describe('the capability gate', () => {
     expect(buttonNamed(container, 'Sign in with passkey')).toBeNull();
     expect(buttonNamed(container, SCAN_LABEL)).toBeNull();
     expect(fake.signin).not.toHaveBeenCalled();
+    expect(fake.listBurrows).not.toHaveBeenCalled();
+  });
+
+  // Browsers withhold Web Crypto from a plain-http page, however current they are.
+  it('names the insecure origin, not the browser, on a plain-http page', async () => {
+    fake.noiseSupported = false;
+    vi.stubGlobal('isSecureContext', false);
+
+    await boot();
+
+    expect(container.textContent).toContain(INSECURE_ORIGIN_TITLE);
+    expect(container.textContent).not.toContain(UNSUPPORTED_BROWSER_TITLE);
     expect(fake.listBurrows).not.toHaveBeenCalled();
   });
 
