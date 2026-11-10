@@ -65,7 +65,6 @@ export function SelectionOverlay({ terminalId }: Props) {
     zIndex: 10,
   };
 
-  const borderColor = focusRingColor || 'rgb(100, 149, 237)';
   const pathD = shadowed ? '' : pathOf(selection);
 
   // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
@@ -134,7 +133,7 @@ export function SelectionOverlay({ terminalId }: Props) {
             <path
               d={pathD}
               fill="none"
-              stroke={borderColor}
+              stroke={focusRingColor}
               strokeWidth={1.5}
               strokeLinejoin="miter"
             />

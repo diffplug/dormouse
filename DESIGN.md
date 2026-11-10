@@ -143,6 +143,8 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 Every literal color the Host-Theme-Only Rule below permits, in full. Each is here because the surface it paints is not read as part of the theme; a literal anywhere else is a bug.
 - **Window Close Hover** (`#b92a1b`): native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
 - **Setup QR** (`#ffffff` ground, `#000000` modules, in `lib/src/components/QrCode.tsx`): a phone camera reads this control, not a person. Scanners expect dark-on-light and many refuse an inverted code, and no theme token promises either the polarity or the contrast ratio in both light and dark.
+- **Iframe ground** (`bg-white`, in `lib/src/components/wall/IframePanel.tsx` and `lib/src/remote/pocket-app/PocketBrowserFrame.tsx`): a framed page paints its own colors and many assume the browser's white canvas, so the frame behind it is white in every theme.
+- **Alarm picks** (`#ffffff` / `#000000`, in `pickAlarmColor` in `lib/src/lib/themes/dynamic-palette.ts`): the runtime value of each `--color-alarm-vs-*`, whichever contrasts the surface behind it (see Alarm above).
 - **Terminal last resort** (`#1e1e1e` background, `#cccccc` foreground, in `lib/src/lib/terminal-theme.ts`): xterm.js needs two readable colors to render at all, and `pnpm dev:lib` runs with no resolver and no applied theme. The rest of the terminal palette carries no literal — an unset key is omitted and xterm uses its own default, except the cursor, which derives from the resolved foreground.
 
 ### Named Rules

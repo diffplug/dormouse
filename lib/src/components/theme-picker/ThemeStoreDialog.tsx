@@ -125,7 +125,7 @@ export function ThemeStoreDialog({
   return (
     <NativeModalDialog
       onClose={onClose}
-      className={`${modalSurface({ padding: 'none', elevation: 'modal' })} fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] backdrop:bg-black/50`}
+      className={`${modalSurface({ padding: 'none', elevation: 'modal' })} fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] backdrop:bg-app-bg/50`}
     >
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
