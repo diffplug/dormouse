@@ -13,8 +13,9 @@ import { workerApp } from "./worker-app";
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
  * terms acceptance, Natural Voice on or off, the Relay's account routes, the
  * admin's metrics, the frontend, billing, account closure, and the founders
- * row. The production and preview entries differ only in their mail
- * (`fetchAuth`'s and `mail`) and in `bindings`.
+ * row. The production and preview entries differ in their mail (`fetchAuth`'s
+ * and `mail`), in `bindings`, in production's pre-launch gate around
+ * `fetchAuth`, and in the preview's inbox routes (`configure`).
  */
 export function accountApp(
   fetchAuth: (
