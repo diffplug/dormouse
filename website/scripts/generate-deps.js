@@ -287,10 +287,7 @@ deps.push(
 const missingLicense = {
   "Solarized & Selenized": "MIT",
   // Declared in the legacy `licenses` array.
-  "buildcheck": "MIT",
-  "cpu-features": "MIT",
   "format": "MIT",
-  "ssh2": "MIT",
   // Stated only in its LICENSE file.
   "khroma": "MIT",
 };
@@ -311,22 +308,17 @@ const missingAuthor = {
   "@xterm/xterm": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
   // nodeca's port of Python's argparse, under the PSF license.
   "argparse": "nodeca, Python Software Foundation",
-  "atomically": "Fabio Spampinato",
   "inherits": "Isaac Z. Schlueter",
   "lexical": "Meta Platforms, Inc. and affiliates",
   "minimalistic-assert": "Calvin Metcalf",
   "ms": "Vercel, Inc.",
   "node-addon-api": "Node.js API collaborators",
-  "pngjs": "pngjs contributors",
   "prop-types": "Meta Platforms, Inc. and affiliates",
   "react": "Meta Platforms, Inc. and affiliates",
   "react-dom": "Meta Platforms, Inc. and affiliates",
   "react-is": "Meta Platforms, Inc. and affiliates",
   "scheduler": "Meta Platforms, Inc. and affiliates",
-  "stubborn-fs": "Fabio Spampinato",
-  "stubborn-utils": "Fabio Spampinato",
   "tailwindcss": "Tailwind Labs, Inc.",
-  "when-exit": "Fabio Spampinato",
   // Holders named only in each package's LICENSE file.
   "@braintree/sanitize-url": "Braintree",
   "acorn": "Acorn contributors",
@@ -341,27 +333,15 @@ const missingAuthor = {
   "layout-base": "iVis@Bilkent",
   "uuid": "Robert Kieffer and other contributors",
   "uvu": "Luke Edwards",
-  "@balena/dockerignore": "Balena Ltd., Zeit Inc.",
   "@better-fetch/fetch": "Bereket Engida",
-  "balanced-match": "Julian Gruber",
-  "bcrypt-pbkdf": "Niels Provos, Joyent",
   "better-auth": "Bereket Engida",
   "better-call": "Bereket Engida",
-  "brace-expansion": "Julian Gruber",
   "defu": "Pooya Parsa",
-  "graceful-fs": "Isaac Z. Schlueter, Ben Noordhuis, and contributors",
-  "jiti": "Pooya Parsa",
-  "mkdirp": "James Halliday, Isaac Z. Schlueter",
   "pg-cloudflare": "Brian Carlson",
   "pg-int8": "Charmander",
   "pg-protocol": "Brian Carlson",
   "pgstencil": "DiffPlug",
-  "process-nextick-args": "Calvin Metcalf",
-  "readable-stream": "Node.js contributors",
   "rou3": "Pooya Parsa",
-  "string_decoder": "Node.js contributors",
-  // No holder in the package's files: its project or maintainer.
-  "@pkgjs/parseargs": "pkgjs contributors",
 };
 // Every package under these scopes names its holder only in its LICENSE.
 const missingAuthorScopes = {
