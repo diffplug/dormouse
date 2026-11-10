@@ -306,7 +306,7 @@ export type BurrowStatus =
   | 'stopped';
 
 /**
- * A relay socket no reconnect timer will restore (see
+ * A relay socket the reconnect backoff never restores (see
  * {@link BurrowRuntime.start}): `displaced` is one another Burrow took from
  * us; `removed` and `not-entitled` are a Relay that no longer takes this
  * Burrow's token ({@link BurrowStanding}). Only `not-entitled` reverses on its
@@ -944,9 +944,11 @@ export class BurrowRuntime {
   // --- Socket lifecycle ----------------------------------------------------
 
   /**
-   * Open the relay socket. Also the one way back from a {@link BurrowLatch}: a
-   * latched Burrow never reconnects on a timer, so returning is a deliberate
-   * act — one that evicts whichever Burrow currently holds the burrowId.
+   * Open the relay socket. Also the one way back from a `displaced` or
+   * `removed` {@link BurrowLatch}: neither reconnects on a timer, so returning
+   * is a deliberate act — one that evicts whichever Burrow currently holds the
+   * burrowId. A `not-entitled` Burrow also returns on its own, once its
+   * standing re-probe finds it entitled ({@link #reprobeStanding}).
    * Idempotent while a socket is live.
    */
   start(): void {
@@ -1061,7 +1063,8 @@ export class BurrowRuntime {
 
   /**
    * The relay socket policy (`docs/specs/relay.md` -> "Burrow side"): a
-   * latching close ({@link LATCH_FOR_CLOSE}) is terminal; a socket that never
+   * latching close ({@link LATCH_FOR_CLOSE}) stands the Burrow down
+   * ({@link #latch}); a socket that never
    * opened — a refused upgrade reads only as an error event — is probed first,
    * once per failure streak; anything else backs off and reconnects.
    */

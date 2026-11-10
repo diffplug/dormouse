@@ -317,7 +317,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 - **Must retain an enrollment whose save succeeded when startup fails**, reporting restart guidance, never removal advice.
 - **Never enable, disable, or clear managed voice through remote-control enrollment, startup, or Disconnect.** Managed-voice approval: `docs/specs/hosted.md` -> "Managed voice".
 
-**Relay socket policy**: one socket at a time, reconnected with backoff after any close except these, which latch a state, dispose the Burrow's sessions, and arm no reconnect timer before `start()` (an explicit `reconnect()` or fresh start) (rationale):
+**Relay socket policy**: one socket at a time, reconnected with backoff after any close except these, which latch a state, dispose the Burrow's sessions, and arm no reconnect backoff before `start()` (an explicit `reconnect()` or fresh start) (rationale):
 
 | Close or probe answer | Latched state |
 | --- | --- |
