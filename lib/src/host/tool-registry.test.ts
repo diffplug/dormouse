@@ -356,3 +356,53 @@ describe('folder rules and preview handlers', () => {
     expect(() => rules('{match: "*.md", tool: viewer, preview: 3}')).toThrow('needs a preview defined');
   });
 });
+
+describe('imports', () => {
+  const IMPORTS = `tools:
+  # Local.
+  pridm:
+    from: pridm
+  mine:
+    run: [mine]
+  prs:
+    from: /opt/supertools
+    tool: pr-dashboard
+open:
+  - {match: "*.md", tool: prs, preview: pridm}
+`;
+
+  it('yields import entries unresolved, in file order beside declared ones', () => {
+    const file = parse(IMPORTS, USER);
+    expect([...file.imports.values()]).toEqual([
+      { name: 'pridm', from: 'pridm', tool: 'pridm', description: 'Local.' },
+      { name: 'prs', from: '/opt/supertools', tool: 'pr-dashboard', description: null },
+    ]);
+    expect([...file.tools.keys()]).toEqual(['mine']);
+    expect(file.names).toEqual(['pridm', 'mine', 'prs']);
+    // An import's run is checked once it resolves, not here.
+    expect(file.open).toEqual([{ match: '*.md', tool: 'prs', preview: 'pridm' }]);
+  });
+
+  it('is user-file only', () => {
+    expect(() => parse('tools:\n  pridm:\n    from: pridm\n')).toThrow("tools.pridm: 'from' imports a Tool only in the user file");
+  });
+
+  it.each([
+    ['    from: pridm\n    run: [x]\n', "exactly one of 'run' or 'from'"],
+    ['    from: pridm\n    render: playwright-screencast\n', "an import takes only 'from' and 'tool', not 'render'"],
+    ['    from: pridm\n    colour: blue\n', "not 'colour'"],
+    ['    from: ""\n', "'from' must name a directory"],
+    ['    from: " "\n', "'from' must name a directory"],
+    ['    from:\n', "'from' must name a directory"],
+    ['    from: [a]\n', "'from' must name a directory"],
+    ['    from: ~/tools/pridm\n', "'from' takes no ~ or $; use a path relative to this file"],
+    ['    from: $HERE/pridm\n', "'from' takes no ~ or $"],
+    ['    from: "pr\\u001bidm"\n', 'from cannot contain'],
+    ['    from: "pr\\u200bidm"\n', 'from cannot contain'],
+    ['    from: pridm\n    tool: ""\n', "'tool' must be a Tool name"],
+    ['    from: pridm\n    tool: 3\n', "'tool' must be a Tool name"],
+    ['    from: pridm\n    tool: "a\\u0007b"\n', 'tool cannot contain'],
+  ])('rejects a malformed import: %j', (entry, message) => {
+    expect(() => parse(`tools:\n  pridm:\n${entry}`, USER)).toThrow(message);
+  });
+});
