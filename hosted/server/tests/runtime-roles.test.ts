@@ -97,6 +97,7 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_tokens.userId: INSERT",
     "owner_access.access_until: SELECT",
     "owner_access.owner_id: SELECT",
+    "owner_access.status: SELECT",
     "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
     "user.email: SELECT",
@@ -119,6 +120,7 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_usage: DELETE, INSERT, SELECT",
     "owner_access.access_until: SELECT",
     "owner_access.owner_id: SELECT",
+    "owner_access.status: SELECT",
     "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
     "user.email: SELECT",
@@ -147,7 +149,6 @@ const outcome = (worker: Worker, text: string) =>
 const BILLING_REFUSED = [
   `SELECT owner_id FROM pgstencil_billing.subscriptions`,
   `SELECT price_id FROM pgstencil_billing.owner_access`,
-  `SELECT status FROM pgstencil_billing.owner_access`,
   `SELECT customer_id FROM pgstencil_billing.accounts`,
   `SELECT id FROM pgstencil_billing.checkouts`,
   `SELECT id FROM pgstencil_billing.events`,
@@ -159,7 +160,7 @@ const BILLING_REFUSED = [
 ];
 
 /** What the entitlement reads of billing, which both roles may. */
-const ENTITLEMENT_READ = `SELECT owner_id, access_until FROM pgstencil_billing.owner_access
+const ENTITLEMENT_READ = `SELECT owner_id, status, access_until FROM pgstencil_billing.owner_access
   WHERE NOT EXISTS (SELECT FROM dormouse_billing_disputes d WHERE d."userId" = owner_id)`;
 
 test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint, and Burrow removal", async () => {

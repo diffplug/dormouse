@@ -114,6 +114,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       billing.status(userId),
       accountQuery<{
         entitled: boolean;
+        subscribed: boolean;
         suspended: boolean;
         founder: boolean;
         name: string | null;
@@ -123,6 +124,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         host(c),
         // A held subscription refuses another checkout, so the latest consent is its own.
         `SELECT ${entitledSql("u")} AS entitled,
+          ${subscribedSql("u.id")} AS subscribed,
           EXISTS (SELECT FROM dormouse_billing_disputes d WHERE d."userId" = u.id) AS suspended,
           ${subscribedSql("u.id", "$2::text[]")} AS founder,
           (SELECT f.name FROM dormouse_founders f WHERE f."userId" = u.id) AS name,
@@ -152,7 +154,9 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     return c.json({
       plan: held ? status.plan : null,
       price: held ? (catalog.prices.get(held.price_id)?.usd ?? null) : null,
-      active: status.access,
+      // The entitlement's reading, renewal grace and all, so a renewal's
+      // rollover never shows a paid plan as a failed payment.
+      active: account?.subscribed === true,
       until: held ? (status.accessUntil?.toISOString() ?? null) : null,
       renews: !!held && !held.cancel_at_period_end,
       entitled: account?.entitled === true,

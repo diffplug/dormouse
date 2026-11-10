@@ -4,7 +4,7 @@
  *
  * ```sh
  * dor ensure -- pnpm exec node scripts/direct-interop/run.mjs [--allow <cidr>[,<cidr>…]] [--stun | --stun-blackhole]
- * dor agent-browser --key direct-interop open "$(cat "$TMPDIR/dormouse-direct-interop.url")"
+ * dor agent-browser --key direct-interop open "$(cat "${TMPDIR:-/tmp}/dormouse-direct-interop.url")"
  * ```
  *
  * The URL carries a per-run token, so it is written to that file as well as
@@ -60,9 +60,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isOwnOrigin } from '../../lib/src/host/loopback-guard.ts';
-// The same gate `standalone/scripts/dev-agent-browser.mjs` uses, for the same
-// reason: an unbundled dev script cannot import the TypeScript guard, and the
-// loopback-plus-token rule must not have a second implementation.
+// The dev bridge's token-plus-Host gate, shared with
+// `standalone/scripts/dev-agent-browser.mjs`; `isOwnOrigin` above comes from the
+// shared TypeScript guard, which Node loads with its types stripped.
 import { isAuthorized } from '../../standalone/scripts/dev-host-guard.mjs';
 
 /** What the addon puts on the channel, largest first; see question 2 above. */

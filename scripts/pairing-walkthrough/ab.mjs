@@ -23,11 +23,17 @@ const BIN = 'agent-browser';
 export const AGENT_BROWSER_HOME = join(homedir(), '.agent-browser');
 
 /**
- * Where a daemon writes its `<session>.pid`: `AGENT_BROWSER_SOCKET_DIR` moves
- * it, and the `innerdogfood` harness sets that in every inner terminal, so a
- * walkthrough run from one finds its daemons there.
+ * Where a daemon writes its `<session>.pid`, by the CLI's own rule (the host's
+ * `agentBrowserStateDir`): `AGENT_BROWSER_SOCKET_DIR`, which the `innerdogfood`
+ * harness sets in every inner terminal, else `$XDG_RUNTIME_DIR/agent-browser`,
+ * else the home directory; under `namespaces/<name>/run` with a namespace.
  */
-const SOCKET_DIR = process.env.AGENT_BROWSER_SOCKET_DIR || AGENT_BROWSER_HOME;
+const SOCKET_BASE = process.env.AGENT_BROWSER_SOCKET_DIR
+  || (process.env.XDG_RUNTIME_DIR ? join(process.env.XDG_RUNTIME_DIR, 'agent-browser') : '')
+  || AGENT_BROWSER_HOME;
+const SOCKET_DIR = process.env.AGENT_BROWSER_NAMESPACE
+  ? join(SOCKET_BASE, 'namespaces', process.env.AGENT_BROWSER_NAMESPACE, 'run')
+  : SOCKET_BASE;
 
 export class AgentBrowser {
   /** @param {string} session `--session` name. @param {string} cwd repo root. */

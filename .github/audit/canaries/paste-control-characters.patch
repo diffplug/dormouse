@@ -4,15 +4,15 @@ Expect: lib/src/lib/clipboard.ts
 Source: reverses #1033 (a pasted or dropped file name may carry a control character)
 
 diff --git a/lib/src/lib/clipboard.test.ts b/lib/src/lib/clipboard.test.ts
-index b4a947159..bad9cc493 100644
+index ace99ef..5db1573 100644
 --- a/lib/src/lib/clipboard.test.ts
 +++ b/lib/src/lib/clipboard.test.ts
-@@ -37,3 +37,3 @@ vi.mock('./terminal-registry', () => ({
+@@ -40,3 +40,3 @@ vi.mock('./terminal-registry', () => ({
  
--import { CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
-+import { UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
+-import { CLIPBOARD_READ_NOTICE, CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
++import { CLIPBOARD_READ_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
  import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
-@@ -133,25 +133,2 @@ describe('doPaste three-tier fallthrough', () => {
+@@ -161,25 +161,2 @@ describe('doPaste three-tier fallthrough', () => {
  
 -  // Shell quotes cannot hold a byte the tty or line editor acts on first: ^C
 -  // drops the opening quote, and a CR submits the rest on the paste itself.

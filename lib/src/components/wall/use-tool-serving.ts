@@ -29,8 +29,8 @@ import { isReportedCommandLine } from '../../lib/osc-sanitize';
 
 // A serving command usually binds within a second or two of starting, but a
 // cold `pnpm` boot can take much longer, so this keeps polling for as long as
-// the command runs. The scan shells out per Surface (lsof / PowerShell), so the
-// cadence is deliberately slow and only tools without a URL are scanned.
+// the command runs. Each poll shells out (lsof / PowerShell) for one batched
+// scan, so the cadence is slow and only tools without a URL are scanned.
 const POLL_MS = 1500;
 
 const neverPaused = () => false;
@@ -251,7 +251,7 @@ export function useToolServing({
       }
     };
 
-    // `getOpenPorts` shells out (lsof / PowerShell) and can outrun the
+    // `openPortsByTerminal` shells out (lsof / PowerShell) and can outrun the
     // interval. Without this guard a second tick re-enters a leaf whose `url`
     // is not written yet and frames it twice. A poll that lands mid-tick is
     // dropped; an announcement is not, since the tick in flight decided its

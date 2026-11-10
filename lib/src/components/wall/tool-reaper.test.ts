@@ -113,6 +113,12 @@ describe('toolReapBlocker', () => {
     expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/persist: never/);
   });
 
+  it('refuses a Tool that took over its caller, however safe it declared itself: the shell is the user\'s', () => {
+    const lath = servingTool({ toolSharesCallerShell: true });
+    recordToolDirty(ID, false);
+    expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/shares the shell/);
+  });
+
   it('refuses a Tool whose browser is popped out, which is in sight in its own window', () => {
     const lath = servingTool({ renderMode: 'agent-browser-popout' });
     expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/popped out/);

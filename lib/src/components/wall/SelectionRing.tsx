@@ -56,7 +56,7 @@ export function SelectionRing({
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}
       >
         {/* Smear first so it sits behind the ring. Hidden outright when settled,
-            which is what keeps a resting ring byte-identical for Chromatic. */}
+            which is what keeps a resting ring byte-identical for Argos snapshots. */}
         <g ref={smearRef} data-ring="smear" style={{ display: 'none' }}>
           {RING_PIECES.map((piece) => (
             <path

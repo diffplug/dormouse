@@ -181,6 +181,7 @@ export interface BurrowStatusEvent {
  * Whether `connection` is a Relay that no longer takes this Burrow (a
  * `BurrowStanding` latched, `docs/specs/relay.md` -> "Burrow side"), which the
  * Burrow asks for nothing more: no push, device list, setup code, or relay row.
+ * A `not-entitled` one asks only its standing, on a slow timer.
  */
 export function relayRefuses(connection: BurrowStatus): boolean {
   return connection === 'removed' || connection === 'not-entitled';

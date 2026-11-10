@@ -224,10 +224,29 @@ One Stripe account holds only Dormouse, because retries, customer emails, and th
 - **Product:** one, with a tax code. **Prices:** recurring, USD, `tax_behavior=exclusive`, whole dollars matching `website/src/lib/hosted-pricing.ts`: `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING`, comma-separated in `FOUNDING_LADDER` order.
 - **Stripe Tax:** head office, default tax code, and a registration everywhere the business must collect. It collects only where registered.
 - **Customer portal, the default configuration:** cancel at period end with no proration or reason, payment methods, invoice history, email and address; **plan switching off**, since a Price billing does not know fails that owner's webhooks and leaving founding loses the lock.
-- **Revenue recovery:** Smart Retries over 2 months for cards, then cancel the subscription, so a founder keeps the 30 days the Terms promise to fix a failed renewal. Failed-payment emails on, since Hosted sends none, with a Stripe-hosted link.
+- **Revenue recovery:** Settings → Billing → Subscriptions and emails → Manage failed payments → Card payments: **Smart Retries, up to 8 times within 2 months**; on the first failed renewal attempt, leave the subscription past due; if all retries fail, cancel it; if a dispute is opened, leave it past due. The window must stay at least 30 days, since a founder keeps the lock only while Stripe retries (`docs/specs/pricing.md`); 1 month is 28 days, too short. Set on 2026-11-10 in the main account's test mode and the sandbox; **recheck it in live mode once live exists**, since whether live inherits it is unknown. Failed-payment emails on, since Hosted sends none, with a Stripe-hosted link.
 - **Customer emails:** successful payments and refunds on.
 - **Link:** on. Its instant bank payments come with it, with no separate switch, so Checkout offers "Pay with Bank" beside cards; a refund to a bank account takes a few days to succeed, and a withdrawal or closure it pays stays unsettled until then.
 - **Webhook endpoint:** `https://hosted.dormouse.sh/api/billing/webhook`, created through the API with `api_version` set to the SDK's pinned `STRIPE_API_VERSION`, since any other version is refused with 400. Its events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`, `invoice.paid`, `invoice.payment_failed`.
+
+## Move the Stripe API version
+
+The webhook accepts only events at the installed `stripe` SDK's pinned API version (`STRIPE_API_VERSION`, re-exported by `@pgstencil/stripe`), and the endpoint renders events at the version it was created with. The SDK moves that version in minor releases, so `hosted/server/tests/stripe-api-version.test.ts` pins the literal, and Renovate holds `stripe` and `@pgstencil/stripe` for approval on the dependency dashboard. A move is this procedure, never a routine update.
+
+**Not yet exercised end to end.** The steps as far as they are known, in the sandbox first, then live:
+
+1. Move `@pgstencil/stripe` and `stripe` together, to releases that pin the same new API version.
+2. Create a second webhook endpoint at the new version, with the same URL and events as "Webhook endpoint" above, while the old one stays enabled. Stripe delivers each event to every enabled endpoint.
+3. Deploy the Worker built against the new SDK with the new endpoint's signing secret as `STRIPE_WEBHOOK_SECRET`, changing the literal in `stripe-api-version.test.ts` in the same change.
+4. Confirm the new endpoint's deliveries succeed in Stripe's dashboard.
+5. Reconcile every owner. The account cron reconciles at most 20 stale owners each run (`RESYNC_OWNERS` in `hosted/server/billing.ts`, every 10 minutes), and only those `reconcileStale` finds holding a current subscription without access, so it does not cover an event missed during the cut-over. No script does this yet.
+6. Disable the old endpoint.
+
+Open questions the first real move must answer:
+
+- Whether applying one event id twice across the cut-over, once from each endpoint, is harmless.
+- Whether the Worker should accept two signing secrets during the overlap, rather than refusing the old endpoint's deliveries from the deploy on.
+- What the old endpoint's failing deliveries look like in Stripe's dashboard, and whether its retries alert anyone, until it is disabled.
 
 ## Change a price
 
