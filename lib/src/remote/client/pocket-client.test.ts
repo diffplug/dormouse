@@ -626,6 +626,9 @@ describe('connecting, end to end', () => {
     expect(gone).toHaveBeenCalledWith(true);
     expect(harness.client.connectedBurrowId).toBeNull();
     expect(harness.burrow.establishedSessionCount).toBe(0);
+    // The relay socket stays bound to the Burrow; its later drop ends no session.
+    harness.relay.burrowGone();
+    expect(gone).toHaveBeenCalledTimes(1);
     await expect(harness.client.hello()).rejects.toThrow();
     // Still paired: the next connection needs no new pairing.
     expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });

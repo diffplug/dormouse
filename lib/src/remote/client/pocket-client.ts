@@ -1302,7 +1302,10 @@ export class PocketClient {
         if (isE2eRelayToClientFrame(frame)) this.#core.onFrame(frame, frame.step, frame.ct);
         return;
       case 'burrow-gone':
-        this.#core.loseBurrow('burrow disconnected');
+        // Reported only over a live session, as a socket close is: the Relay
+        // keeps this socket bound to the Burrow after a session ends, so the
+        // frame can arrive long after that session's own report.
+        this.#core.endSession('burrow disconnected', { notifyGone: this.connectedBurrowId !== null });
         return;
       case 'error':
         // Fixed copy, for the reason the denial tables are: the text is the
