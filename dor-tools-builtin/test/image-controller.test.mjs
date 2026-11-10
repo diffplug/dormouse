@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { keydown, load, px, raster } from './bundle.mjs';
+import { fillRect, keydown, load, px, raster } from './bundle.mjs';
 
 // The canvas the controller paints is out of scope: a stand-in takes its
 // calls, and converts colors as a browser would between sRGB and Display P3
@@ -183,7 +183,7 @@ test('a seam stretches or closes up a redaction with the pixels it hid, the copi
   // Each column's red channel names it, so a pixel's source is known after the seam.
   const columns = () => {
     const r = raster(40, 2);
-    for (let x = 0; x < 40; x++) px.fillRect(r, { x, y: 0, width: 1, height: 2 }, [x, 0, 0, 255]);
+    for (let x = 0; x < 40; x++) fillRect(r, { x, y: 0, width: 1, height: 2 }, [x, 0, 0, 255]);
     return r;
   };
   for (const [name, [hx, hw], mode, from, to] of [

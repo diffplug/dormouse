@@ -33,7 +33,7 @@ export async function buildViewerAssets(outdir) {
       define: { 'process.env.NODE_ENV': '"production"' },
     }),
     // The image editor: `image.js` and `image.css`, no chunks, and its PNG
-    // encoder's worker, `image.worker.js`.
+    // codec's worker, `image.worker.js`.
     build({
       absWorkingDir,
       entryPoints: { image: 'viewer/image/main.tsx', 'image.worker': 'viewer/image/png-worker.ts' },

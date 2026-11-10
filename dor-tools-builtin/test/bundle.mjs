@@ -34,10 +34,18 @@ export function keydown(key, composing = null, { shiftKey = false } = {}) {
 export const px = await load('../viewer/image/pixels.ts');
 export const WHITE = [255, 255, 255, 255];
 
+/** Paints `rect` of raster `r`, clipped to it, `color`. */
+export function fillRect(r, rect, color) {
+  const c = px.clipRect(r, rect);
+  if (c) for (let y = c.y; y < c.y + c.height; y++) {
+    for (let x = c.x; x < c.x + c.width; x++) r.data.set(color, (y * r.width + x) * 4);
+  }
+}
+
 /** A `width` × `height` raster filled with `color`. */
 export function raster(width, height, color = WHITE) {
   const r = px.createRaster(width, height);
-  px.fillRect(r, { x: 0, y: 0, width, height }, color);
+  fillRect(r, { x: 0, y: 0, width, height }, color);
   return r;
 }
 
