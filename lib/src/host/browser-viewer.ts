@@ -246,6 +246,9 @@ export class BrowserView implements ViewerSink {
   private closed = false;
   // What the socket last carried, which is what the webview's canvas shows.
   private last: { kind: ViewerFrameKind; jpeg: Uint8Array; message: Uint8Array } | null = null;
+  /** The newest stream frame withheld for a capture: painted if that capture
+   *  fails, since a static page sends no further frame. */
+  private unsent: { jpeg: Uint8Array; windowWidth?: number; at: number } | null = null;
   private size: { width: number; height: number } | undefined;
   private lastInput = -Infinity;
   // The current burst of changed frames: when it began, and its latest.
@@ -328,6 +331,8 @@ export class BrowserView implements ViewerSink {
     if (forInput || this.captureOverdue(now)) {
       this.send('provisional', jpeg, windowWidth);
       if (forInput) this.provisionalGeneration += 1;
+    } else {
+      this.unsent = { jpeg, windowWidth, at: now };
     }
     if (this.capturable) this.pulse();
   }
@@ -391,6 +396,7 @@ export class BrowserView implements ViewerSink {
     if (kind === 'provisional' && this.socket.bufferedAmount > FRAME_BACKLOG_BYTES) return;
     const message = encodeViewerFrame({ kind, jpeg, ...(this.size ? { size: this.size } : {}), ...(windowWidth ? { windowWidth } : {}) });
     this.last = { kind, jpeg, message };
+    this.unsent = null;
     this.stats[kind] += 1;
     this.lastSentAt = performance.now();
     this.transmit(message);
@@ -454,7 +460,8 @@ export class BrowserView implements ViewerSink {
     this.inFlight = true;
     this.dirty = false;
     const generation = this.provisionalGeneration;
-    let started = this.lastStart = performance.now();
+    const requested = performance.now();
+    let started = this.lastStart = requested;
     this.stats.captures += 1;
     const claim: CaptureClaim = {
       urgent: started - this.lastInput <= URGENT_AFTER_INPUT_MS,
@@ -473,10 +480,14 @@ export class BrowserView implements ViewerSink {
       this.inFlight = false;
       if (this.closed) return;
       if (jpeg) {
+        // The capture shows any frame withheld before it was asked for.
+        if (this.unsent && this.unsent.at <= requested) this.unsent = null;
         // A provisional paint landed meanwhile and is newer: keep the
         // sharpening capture owed rather than paint over it.
         if (this.provisionalGeneration !== generation) this.dirty = true;
         else if (!(this.last?.kind === 'crisp' && sameBytes(this.last.jpeg, jpeg))) this.send('crisp', jpeg);
+      } else if (this.unsent) {
+        this.send('provisional', this.unsent.jpeg, this.unsent.windowWidth);
       }
       if (this.dirty) this.schedule();
     });
