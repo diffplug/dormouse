@@ -157,6 +157,13 @@ test('serves only the HTML document and its bounded relative dependency graph', 
   assert.equal((await get(viewer, asset(viewer, 'assets/style.css'))).status, 200); // repeated streams retain the grant
 });
 
+test('serves a view-only file whose name holds a backslash', { skip: process.platform === 'win32' }, async () => {
+  const viewer = await start('a\\b.html', '<p>hi</p>');
+  const page = await get(viewer);
+  assert.equal(page.status, 200);
+  assert.equal(page.body, '<p>hi</p>');
+});
+
 test('rejects parent-directory references and symlinks escaping the document directory', { skip: process.platform === 'win32' }, async () => {
   await mkdir(join(root, 'page'));
   await writeFile(join(root, 'secret.txt'), 'secret');
