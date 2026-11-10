@@ -761,9 +761,10 @@ while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in *=*) ;; *) continue ;; esac
   key="${line%%=*}"
   value="${line#*=}"
+  # Only a whole identifier: `export` under `set -e` exits on any other key,
+  # which would stop the Relay at every start over one hand-added line.
   case "$key" in
-    [A-Za-z_]*) ;;
-    *) continue ;;
+    ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;;
   esac
   case "$value" in
     '"'*'"') value="${value#\"}"; value="${value%\"}" ;;

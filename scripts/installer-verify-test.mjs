@@ -217,6 +217,8 @@ function writeEnvFixtures(dir) {
     unmatchedQuote: `${ENV_COMPLETE}\nDORMOUSE_BIND_HOST="127.0.0.1`,
     duplicateOrigin: `${ENV_COMPLETE}\nDORMOUSE_ORIGIN=https://another.tail.ts.net`,
     duplicatePort: `${ENV_COMPLETE}\nPORT=31000`,
+    // Not identifiers: the wrapper must skip them, not die exporting them.
+    invalidKeys: `${ENV_COMPLETE}\nMY-FLAG=1\nPORT =31000\n=orphan`,
   };
   const paths = {};
   for (const [name, body] of Object.entries(files)) {
@@ -275,6 +277,11 @@ function cases(platform, env, definitions) {
   return [
     ...ownerCases,
     ...configCases,
+    [
+      'load_runtime_env: a key that is not an identifier is skipped',
+      `ENV_FILE='${env.invalidKeys}'; load_runtime_env; printf '[%s|%s]\\n' "$DORMOUSE_BIND_HOST" "$PORT"`,
+      '[127.0.0.1|3100]',
+    ],
     [
       'env_missing_keys: a later empty assignment overrides the earlier value',
       `printf '[%s]\\n' "$(env_missing_keys '${env.emptyLastBinding}')"`,
