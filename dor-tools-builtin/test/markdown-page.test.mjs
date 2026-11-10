@@ -57,3 +57,8 @@ test('a styled span renders through the HTML allowlist, and opening it is not an
     assert.equal(label, 'Saved', text);
   }
 });
+
+test('a document that fails to load shows why', async () => {
+  const { error } = await open('', { sourceError: 'This editor supports UTF-8 text. Open this file in another editor.' });
+  assert.equal(error, 'This editor supports UTF-8 text. Open this file in another editor.');
+});

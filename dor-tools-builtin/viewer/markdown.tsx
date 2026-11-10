@@ -290,4 +290,6 @@ function Page({ markdown }: { markdown: string }) {
 
 installTooltips();
 const root = createRoot(document.getElementById('root')!);
+// Until a load mounts the Page, so a failed first load still shows its error.
+root.render(<ErrorBanner />);
 void session.load();
