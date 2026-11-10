@@ -6,7 +6,7 @@ import { ScanInvitation, type StartScan } from '../remote/pocket-app/ScanInvitat
 import { PhoneFrame } from './PhoneFrame';
 
 /**
- * The camera, faked. Storybook has no camera and Chromatic must not open one,
+ * The camera, faked. Storybook has no camera and the snapshot run must not open one,
  * so every state below is driven through the component's `startScan` seam —
  * which is exactly the seam the app's own tests use.
  */
@@ -45,7 +45,7 @@ type Story = StoryObj<typeof ScanInvitation>;
 // The ordinary case: a live rear camera above a paste field.
 export const Scanning: Story = {};
 
-// Canonical Pocket default theme, pinned so Chromatic captures the dark shell.
+// Canonical Pocket default theme, pinned so Argos captures the dark shell.
 export const ScanningKimbieDark: Story = {
   globals: { theme: 'Kimbie Dark' },
 };

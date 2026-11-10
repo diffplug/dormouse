@@ -80,7 +80,7 @@ const meta: Meta<typeof SelectionOverlayStory> = {
     fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
   },
   // Hold the snapshot until the terminal has painted AND the story's own timer has
-  // applied the selection — otherwise Chromatic can capture a painted terminal with
+  // applied the selection — otherwise Argos can capture a painted terminal with
   // no overlay yet.
   play: async ({ args }) => {
     await settleTerminals();

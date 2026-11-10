@@ -71,8 +71,9 @@ export const PK = {
   // scrollable, and accepted, because a plain `justify-center` fallback would
   // reintroduce the unreachable overflow on exactly the devices that lack it.
   bodyCenter: 'justify-center-safe',
-  // The whole screen but the status bar, which takes the wall header's colour.
-  wallHost: 'flex h-full min-h-0 flex-col bg-header-active-bg pt-[env(safe-area-inset-top)] text-app-fg',
+  // The whole screen but the status bar, which takes the wall header's colour,
+  // and in landscape the side insets the notch and corners take.
+  wallHost: 'flex h-full min-h-0 flex-col bg-header-active-bg pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-app-fg',
   // Burrow row = the INACTIVE header pair (a list item lifted off the page).
   row: 'flex w-full items-center gap-3 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-left text-header-inactive-fg',
   rowOffline: 'opacity-55', // presence = intensity, no extra color

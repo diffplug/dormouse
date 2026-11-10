@@ -6,7 +6,7 @@ import { MobileCloseDialog, type MobileCloseDialogState } from '../components/Mo
 import { MobileSettings } from '../components/MobileSettings';
 import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalView } from '../components/MobileTerminalUi';
 import { MobileWall, type MobileWallSession } from '../components/MobileWall';
-import { flattenScenario, initPlatform, type FakeScenario } from '../lib/platform';
+import { flattenScenario, type FakeScenario } from '../lib/platform';
 
 const TOOL = 'surface:1';
 const BROWSER = 'surface:2';
@@ -51,7 +51,6 @@ function Frame({ status, active: initial = TOOL, view: initialView = 'terminal',
   view?: MobileTerminalView;
   dialog?: MobileCloseDialogState;
 }) {
-  useState(() => initPlatform('fake'));
   const [active, setActive] = useState(initial);
   const [view, setView] = useState<MobileTerminalView>(initialView);
   // A Tool opens on its page; the switch is remembered per Session.

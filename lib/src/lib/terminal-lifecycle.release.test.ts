@@ -22,11 +22,14 @@ vi.mock('./platform', async () => {
 import * as platformModule from './platform';
 import { getSizeHolds, holdSize } from './size-hold-store';
 import type { FakePtyAdapter } from './platform';
+import { FitAddon } from '@xterm/addon-fit';
 import {
   disposeSession,
   getOrCreateTerminal,
   getTerminalInstance,
+  mountElement,
   releaseSession,
+  setTerminalFontSize,
 } from './terminal-registry';
 
 const platform = (platformModule as unknown as { __fakePlatform: FakePtyAdapter }).__fakePlatform;
@@ -82,5 +85,28 @@ describe('a size hold', () => {
     holdSize('pane-2', hold);
     releaseSession('pane-2');
     expect(getSizeHolds('pane-2')).toEqual([]);
+  });
+});
+
+describe('setTerminalFontSize', () => {
+  // The fit addon reads a detached terminal's box as zero and resizes it to
+  // 2×1, rewrapping its buffer; the pane fits it when it mounts.
+  it('sets the size on every terminal but refits only a mounted one', () => {
+    const fit = vi.spyOn(FitAddon.prototype, 'fit');
+    getOrCreateTerminal('font-mounted');
+    getOrCreateTerminal('font-detached');
+    const container = document.body.appendChild(document.createElement('div'));
+    mountElement('font-mounted', container);
+    try {
+      setTerminalFontSize(23);
+      expect(getTerminalInstance('font-mounted')?.options.fontSize).toBe(23);
+      expect(getTerminalInstance('font-detached')?.options.fontSize).toBe(23);
+      expect(fit).toHaveBeenCalledTimes(1);
+    } finally {
+      setTerminalFontSize(null);
+      disposeSession('font-mounted');
+      disposeSession('font-detached');
+      container.remove();
+    }
   });
 });

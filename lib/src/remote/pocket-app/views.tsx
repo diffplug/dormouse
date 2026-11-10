@@ -42,6 +42,12 @@ export const UNSUPPORTED_BROWSER_TITLE = 'This browser cannot run Dormouse Pocke
 export const UNSUPPORTED_BROWSER_BODY =
   'Dormouse Pocket needs X25519 in the Web Crypto API, which this browser does not have. ' +
   'Update it, or open Dormouse Pocket in a newer browser.';
+/** The same gate on a plain-http origin, where the browser withholds Web Crypto
+ *  however current it is. */
+export const INSECURE_ORIGIN_TITLE = 'Dormouse Pocket needs an https:// address';
+export const INSECURE_ORIGIN_BODY =
+  'This page was opened over plain http://, where browsers withhold the Web Crypto API ' +
+  'Dormouse Pocket needs. Open it over https:// instead.';
 
 /** A phone screen that is not the wall: its header, and what it says under it, centered. */
 export function PocketScreen({
@@ -68,10 +74,11 @@ export function PocketScreen({
  * (`docs/specs/remote-security-model.md` → Burrow identity).
  */
 export function UnsupportedBrowser(): React.ReactElement {
+  const insecure = globalThis.isSecureContext === false;
   return (
     <PocketScreen heading="Dormouse Pocket">
-      <p className={PK.title}>{UNSUPPORTED_BROWSER_TITLE}</p>
-      <p className={PK.lead}>{UNSUPPORTED_BROWSER_BODY}</p>
+      <p className={PK.title}>{insecure ? INSECURE_ORIGIN_TITLE : UNSUPPORTED_BROWSER_TITLE}</p>
+      <p className={PK.lead}>{insecure ? INSECURE_ORIGIN_BODY : UNSUPPORTED_BROWSER_BODY}</p>
     </PocketScreen>
   );
 }
