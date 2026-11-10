@@ -279,6 +279,24 @@ const TAURI = [
     'an HTTP client crate in [dependencies]',
   ],
   [
+    'standalone/src-tauri/Cargo.toml',
+    replace('getrandom = "0.4"\n', 'getrandom = "0.4"\nnetc = { package = "reqwest", version = "0.12" }\n'),
+    'depends on reqwest',
+    'an HTTP client crate renamed with package =',
+  ],
+  [
+    'standalone/src-tauri/Cargo.toml',
+    replace('getrandom = "0.4"\n', 'getrandom = "0.4"\n"reqwest" = "0.12"\n'),
+    'depends on reqwest',
+    'an HTTP client crate under a quoted key',
+  ],
+  [
+    'standalone/src-tauri/Cargo.toml',
+    replace('[target.\'cfg(unix)\'.dependencies]', '[dependencies.reqwest]\nversion = "0.12"\n\n[target.\'cfg(unix)\'.dependencies]'),
+    'depends on reqwest',
+    'an HTTP client crate as a [dependencies.<name>] table',
+  ],
+  [
     'standalone/src-tauri/capabilities/default.json',
     replace('"windows": ["main", "ws-*"],', '"windows": ["main", "ws-*"],\n  "remote": { "urls": ["https://*.example.net"] },'),
     'a remote URL scope',
@@ -289,6 +307,12 @@ const TAURI = [
     replace('"shell:default"', '"shell:default",\n    "updater:default"'),
     'grants an updater permission outside main-only.json',
     'an updater permission outside main-only.json',
+  ],
+  [
+    'standalone/src-tauri/tauri.conf.json',
+    replace('"security": {', '"security": {\n      "capabilities": [{ "identifier": "selftest", "windows": ["*"], "remote": { "urls": ["https://*.example.net"] }, "permissions": [] }],'),
+    'a remote URL scope',
+    'an inline capability in tauri.conf.json with a remote scope',
   ],
   [
     'standalone/src-tauri/tauri.conf.json',
