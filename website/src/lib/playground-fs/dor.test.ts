@@ -71,11 +71,10 @@ describe("playground dor open", () => {
 
 describe("playground dor's other commands", () => {
   it("prints the real CLI's help", async () => {
-    // `help` takes the command's own name, not its alias.
-    for (const args of [[], ["--help"], ["help"], ["help", "o"]]) {
+    for (const args of [[], ["--help"], ["help"]]) {
       expect(await ran(args)).toMatchObject({ exitCode: 0, text: expect.stringContaining("USAGE\r\n  dor split [") });
     }
-    for (const args of [["open", "--help"], ["help", "open"], ["o", "README.md", "-h"]]) {
+    for (const args of [["open", "--help"], ["help", "open"], ["help", "o"], ["o", "README.md", "-h"]]) {
       expect((await ran(args)).text).toContain("USAGE\r\n  dor open [--json]");
     }
     expect((await ran(["agent-browser", "--help"])).text).toContain("USAGE\r\n  dor agent-browser");
