@@ -1699,6 +1699,16 @@ async fn pty_graceful_kill(
 // sidecar helper (see the INVARIANT above `request_from_sidecar_timeout`;
 // `blocking_commands_run_off_the_main_thread` enforces it).
 
+/// The sidecar answers a handler that threw with `{ error }` and no success
+/// field (`respondAsync` in standalone/sidecar/main.js); that error is the
+/// command's failure, so the webview's adapter builds its typed failure.
+fn sidecar_error(response: &JsonValue) -> Result<(), String> {
+    match response.get("error").and_then(JsonValue::as_str) {
+        Some(error) => Err(error.to_string()),
+        None => Ok(()),
+    }
+}
+
 /// Interrupt the live PTYs and let the sidecar detect and record each agent's
 /// resume invocation. First step of the quit teardown: the hint exists only
 /// between the interrupt and the kill.
@@ -1718,7 +1728,7 @@ fn capture_agent_recovery(
         windows.owned_by(window.label()),
         &guard(&windows.arrivals),
     );
-    request_from_sidecar_timeout(
+    let response = request_from_sidecar_timeout(
         &state,
         "pty:captureRecovery",
         serde_json::json!({ "ids": ids, "timeout": timeout }),
@@ -1726,7 +1736,7 @@ fn capture_agent_recovery(
         // one `pty_graceful_kill` adds (see its comment for the pin).
         Duration::from_millis(timeout + 1500),
     )?;
-    Ok(())
+    sidecar_error(&response)
 }
 
 /// Claim the resume invocations belonging to `pane_ids`. Destructive on the
@@ -1742,6 +1752,7 @@ fn take_recovery_commands(
         serde_json::json!({ "paneIds": pane_ids }),
         Duration::from_secs(5),
     )?;
+    sidecar_error(&response)?;
     Ok(response
         .get("commands")
         .cloned()
@@ -1773,6 +1784,7 @@ fn iframe_create_proxy_url(
     }
     let response =
         request_from_sidecar_timeout(&state, "iframe:createProxyUrl", data, Duration::from_secs(5))?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1808,6 +1820,7 @@ fn git_info(
         serde_json::json!({ "paths": paths }),
         Duration::from_secs(5),
     )?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1826,6 +1839,7 @@ fn tool_control(
         serde_json::json!({ "request": request }),
         Duration::from_secs(5),
     )?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1844,6 +1858,7 @@ fn managed_voice(
 ) -> Result<JsonValue, String> {
     let mut response =
         request_from_sidecar_timeout(&state, "voice:command", payload, MANAGED_VOICE_TIMEOUT)?;
+    sidecar_error(&response)?;
     Ok(response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null))
 }
 
@@ -1870,6 +1885,7 @@ fn browser_request(
         serde_json::json!({ "request": request }),
         BROWSER_REQUEST_TIMEOUT,
     )?;
+    sidecar_error(&response)?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
@@ -1955,10 +1971,7 @@ fn write_clipboard_text(
             serde_json::json!({ "text": text }),
             Duration::from_secs(5),
         )?;
-        match response.get("error").and_then(|v| v.as_str()) {
-            Some(error) => Err(error.to_string()),
-            None => Ok(()),
-        }
+        sidecar_error(&response)
     }
 }
 
@@ -7093,6 +7106,23 @@ mod tests {
         // A stray print is not protocol: it is kept, and kept short.
         assert_eq!(super::unparseable_stdout_message("hello\n"), "[sidecar stdout] hello");
         assert_eq!(super::unparseable_stdout_message(&"é".repeat(500)).chars().count(), 217);
+    }
+
+    #[test]
+    fn a_sidecar_handler_error_fails_the_command() {
+        let threw = serde_json::json!({ "error": "trust write failed", "requestId": "req-1" });
+        assert_eq!(super::sidecar_error(&threw), Err("trust write failed".to_string()));
+        let answered = serde_json::json!({ "result": null, "requestId": "req-2" });
+        assert_eq!(super::sidecar_error(&answered), Ok(()));
+        // Every bridge that reads a sidecar answer checks it first.
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        for command in [
+            "fn capture_agent_recovery(", "fn take_recovery_commands(", "fn iframe_create_proxy_url(",
+            "fn git_info(", "fn tool_control(", "fn managed_voice(", "fn browser_request(",
+        ] {
+            let body = src.split(command).nth(1).unwrap().split("\n}\n").next().unwrap();
+            assert!(body.contains("sidecar_error(&response)"), "{command} ignores a sidecar error");
+        }
     }
 
     /// The print macros panic when stdout or stderr is closed (a launching
