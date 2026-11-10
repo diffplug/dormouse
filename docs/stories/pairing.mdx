@@ -277,7 +277,7 @@ A notification is the one message the two ends exchange with no live session bet
 
 ## 8. Living with it
 
-Back on the laptop, the section now counts what is paired:
+Back on the laptop, the section now lists each paired phone:
 
 <Canvas of={RemoteControl.ConnectedOneDevice} />
 
@@ -308,7 +308,7 @@ Four limits worth knowing before they surprise you:
 
 So nothing above reads as a promise:
 
-- **Revoking a machine is still editing a JSON file by hand**, and no relay frame carries a phone's revocation. Deleting a *machine* takes effect within a minute — the Relay re-reads the file and drops that machine's socket. Withdrawing one *phone* is the laptop's own list, Settings → Remote control's Revoke, and takes effect at once (`docs/specs/remote-security-model.md` → Revocation). **Remove** on the phone is not that list: it forgets the machine locally, and a phone that pairs again arrives with a new per-Burrow key, which the laptop cannot match to the old record — so the list shows both until the old one is revoked.
+- **Revoking a machine is still editing a JSON file by hand.** Deleting a *machine* takes effect within a minute — the Relay re-reads the file and drops that machine's socket. Deleting a *passkey* from `account.json` takes effect on the same re-read: the Relay tells each machine, which revokes every phone paired with it (`docs/specs/remote-security-model.md` → Relay-named revocation). Withdrawing one *phone* is the laptop's own list, Settings → Network's Revoke, and takes effect at once (`docs/specs/remote-security-model.md` → Revocation). **Remove** on the phone is not that list: it forgets the machine locally, and a phone that pairs again arrives with a new per-Burrow key, which the laptop cannot match to the old record — so the list shows both until the old one is revoked.
 - **Approval is Approve/Deny only.** Choosing a standing grant at pairing time — observe-only versus interactive — is designed but not built. Every paired session today gets full input.
 - **Disconnecting a phone means revoking it.** The paired-phone list shows which phones are connected and when each was last seen, and Revoke ends a session, but a per-viewer disconnect that keeps the pairing is staged.
-- **Terminals only.** The shipped protocol carries terminal surfaces and nothing else — no browser surfaces, no thumbnails, no scrollback.
+- **Terminals only, through a self-host Relay.** Its Pocket declares no frames, so it lists no browser surfaces; there are no thumbnails or scrollback either.
