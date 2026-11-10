@@ -9,6 +9,7 @@ import {
   usageLines,
   definitionRows,
   labelledBody,
+  proseParagraphs,
   MalformedSnapshotError,
 } from './help-parser.js';
 
@@ -55,6 +56,15 @@ describe('losslessness', () => {
 });
 
 describe('semantic extraction', () => {
+  it('keeps indented prose lines as literal text', () => {
+    const [prose] = parseHelp('Intro that\nwraps:\n  dor a --json\n    continued\n  dor b\nand after.');
+    expect(proseParagraphs(prose)).toEqual([
+      'Intro that wraps:',
+      { pre: 'dor a --json\n  continued\ndor b' },
+      'and after.',
+    ]);
+  });
+
   it('reads usage lines', () => {
     const [usage] = parseHelp('USAGE\n  dor list [--json]\n  dor list --help');
     expect(usageLines(usage)).toEqual(['dor list [--json]', 'dor list --help']);
