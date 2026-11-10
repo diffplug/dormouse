@@ -27,7 +27,7 @@ type Story = StoryObj<typeof PairingCodeView>;
 // (`docs/specs/remote-security-model.md` -> Pairing).
 export const Waiting: Story = {};
 
-// Canonical Pocket default theme, pinned so Chromatic captures the dark shell.
+// Canonical Pocket default theme, pinned so Argos captures the dark shell.
 export const WaitingKimbieDark: Story = {
   globals: { theme: 'Kimbie Dark' },
 };

@@ -9,8 +9,8 @@ import {
   TerminalPaneHeader,
   WallActionsContext,
   type DoorChip,
-  type WallActions,
 } from '../components/Wall';
+import { noopActions } from './story-wall';
 import {
   cwdFromManualPath,
   cwdFromOsc1337,
@@ -43,22 +43,6 @@ interface ShellCwdCase {
   note?: string;
 }
 
-const noopActions: WallActions = {
-  onKill: () => {},
-  onMinimize: () => {},
-  onSplitH: () => {},
-  onSplitV: () => {},
-  onZoom: () => {},
-  onClickPanel: () => {},
-  onEnterPanel: () => {},
-  onFrameLeader: () => {},
-  onFocusPane: () => {},
-  onStartRename: () => {},
-  onFinishRename: () => ({ accepted: true }),
-  onCancelRename: () => {},
-  onSwapRenderMode: () => {},
-  onResolveToolApproval: () => {},
-};
 
 const meta: Meta<typeof ShellCwdMatrix> = {
   title: 'Terminal State/Shell and CWD',

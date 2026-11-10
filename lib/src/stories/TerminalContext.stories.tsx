@@ -178,7 +178,6 @@ const meta = {
     }
     const terminal = panel.querySelector<HTMLElement>('.min-h-16.bg-terminal-bg')!;
     expect(terminal.getBoundingClientRect().height).toBeGreaterThanOrEqual(64);
-    canvasElement.dataset.contextCheck = 'passed';
   },
 } satisfies Meta<typeof TerminalContextStory>;
 export default meta;

@@ -76,10 +76,12 @@ const ABSOLUTE_RE = /^(?:\/|[A-Za-z]:[\\/])/;
  * True for a path opening with two separators in either spelling: a UNC share
  * (`\\host\share`, `//host/share`) or a device path (`\\?\`, `\\.\`), which
  * Windows reaches on another machine or past its own path normalization;
- * even a `stat` of one reaches that machine.
+ * even a `stat` of one reaches that machine. Also for the NT namespace's
+ * `\??\`, in which libuv reads back a link to a device path it does not
+ * rewrite as a drive or share path.
  */
 export function isUncOrDevicePath(path: string): boolean {
-  return /^[\\/]{2}/.test(path);
+  return /^(?:[\\/]{2}|[\\/]\?\?[\\/])/.test(path);
 }
 
 /**

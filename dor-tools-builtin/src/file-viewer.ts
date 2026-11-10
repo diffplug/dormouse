@@ -166,7 +166,8 @@ export async function startFileViewer(input: string, { onDirty = () => {}, onOpe
         const url = new URL(req.url!, 'http://localhost');
         try { route = decodeURIComponent(url.pathname.slice(prefix.length)); }
         catch { throw new HttpError(400); }
-        if (!pathSegments(route)) throw new HttpError(403);
+        // A granted file's exact key cannot traverse, whatever its name holds.
+        if (!resources.has(route) && !pathSegments(route)) throw new HttpError(403);
         const answer = await editor?.({ method: req.method!, route, query: url.searchParams, contentType: contentType(req), body: bound => readBody(req, bound.limit, bound.message) });
         if (answer) {
           for (const [name, value] of Object.entries(answer.headers ?? {})) res.setHeader(name, value);

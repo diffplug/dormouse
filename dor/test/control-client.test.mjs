@@ -65,6 +65,10 @@ test('a browser bind waits past the host\'s browser request timeout, not the cli
     try {
       const client = new SocketControlClient({ socketPath, token: 'shared-secret', timeoutMs: 50 });
       assert.deepEqual(await client.browserSurface({ provider: 'playwright', session: 's' }), { status: 'created' });
+      // A first command for a key waits on the host's browser; a port scan on its own bound.
+      assert.deepEqual(await client.resolveBrowser({ provider: 'playwright', key: 'k' }), { status: 'created' });
+      assert.deepEqual(await client.resolveOpenTarget({ surface: 'surface:1' }), { status: 'created' });
+      assert.deepEqual(await client.listSurfaces({ includePorts: true }), { status: 'created' });
       await assert.rejects(client.listSurfaces({}), /timed out waiting for surface.list/);
     } finally {
       server.close();

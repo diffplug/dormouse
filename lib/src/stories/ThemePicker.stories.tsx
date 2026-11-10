@@ -56,7 +56,7 @@ function installedTheme(index: number): DormouseTheme {
 
 /** Storybook's `play` runs before the snapshot, but the menu positions itself
  *  from a measured trigger rect — one commit later. Settle before returning so
- *  Chromatic never captures the pre-measurement frame. */
+ *  Argos never captures the pre-measurement frame. */
 async function openMenu({ canvasElement }: { canvasElement: HTMLElement }) {
   const canvas = within(canvasElement);
   await userEvent.click(canvas.getByRole('button', { name: /^Theme:/ }));
@@ -104,7 +104,7 @@ export const OpenWithInstalledThemes: Story = {
  * failure mode.
  *
  * Narrowed through `OVERLAY_MAX_HEIGHT_VAR` rather than by shrinking the
- * browser, because Chromatic controls snapshot width and never height — a
+ * browser, because the snapshot run captures every story at one fixed viewport — a
  * `dvh`-based cap would render at full height here and prove nothing.
  */
 export const OpenOnShortViewport: Story = {

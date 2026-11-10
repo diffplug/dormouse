@@ -148,7 +148,6 @@ export interface MobileTerminalUiProps {
   defaultView?: MobileTerminalView;
   onViewChange?: (view: MobileTerminalView) => void;
   activeTouchMode?: MobileTerminalTouchMode;
-  defaultTouchMode?: MobileTerminalTouchMode;
   onTouchModeChange?: (mode: MobileTerminalTouchMode) => void;
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
@@ -170,7 +169,6 @@ export interface MobileTerminalUiProps {
   sessionsHeader?: ReactNode;
   fillViewport?: boolean;
   className?: string;
-  terminalClassName?: string;
   style?: CSSProperties;
 }
 
@@ -190,17 +188,32 @@ const HARDWARE_KEYS: Partial<Record<string, MobileGestureInputId>> = {
   ArrowLeft: 'left',
 };
 
-/** What a physical keyboard's key sends; null leaves the key to the page. */
-function hardwareKeySequence(event: globalThis.KeyboardEvent): string | null {
+/** The keys whose sequence changes under application cursor keys (DECCKM). */
+const CURSOR_KEYS: ReadonlySet<MobileGestureInputId> = new Set(['up', 'down', 'right', 'left', 'home', 'end']);
+
+/** What a key sends to a Session: the arrows, Home and End take their `ESC O`
+ *  form while its program has application cursor keys on, as xterm's own
+ *  encoder does; ncurses' keypad mode matches only that form. */
+function terminalKeySequence(id: MobileGestureInputId, sessionId: string | undefined): string {
+  const data = MOBILE_TERMINAL_KEY_SEQUENCES[id];
+  if (!CURSOR_KEYS.has(id) || !sessionId) return data;
+  return getTerminalInstance(sessionId)?.modes.applicationCursorKeysMode ? `\x1bO${data.slice(2)}` : data;
+}
+
+/** What a physical keyboard's key sends; null leaves the key to the page.
+ *  `Ctrl (+Shift) + V` is a paste chord, as on the desktop, so the page's
+ *  `paste` comes back instead of `0x16`. */
+function hardwareKeySequence(event: globalThis.KeyboardEvent, sessionId: string | undefined): string | null {
   if (event.metaKey || event.altKey) return null;
   if (event.ctrlKey) {
     const key = event.key.toLowerCase();
+    if (key === 'v') return null;
     return /^[a-z]$/.test(key) ? String.fromCharCode(key.charCodeAt(0) - 96) : null;
   }
   let id = HARDWARE_KEYS[event.key];
   if (event.shiftKey && id === 'enter') id = 'shiftEnter';
   if (event.shiftKey && id === 'tab') id = 'shiftTab';
-  if (id) return MOBILE_TERMINAL_KEY_SEQUENCES[id];
+  if (id) return terminalKeySequence(id, sessionId);
   // One character, an astral one included; other named keys (`Shift`, `F1`) send nothing.
   return [...event.key].length === 1 ? event.key : null;
 }
@@ -610,6 +623,13 @@ function consumeNativeTouchOrScrollEvent(event: Event): void {
   event.stopImmediatePropagation();
 }
 
+/** Mouse mode's touch start and end: a cancelled touch gets no `click`, so a
+ *  control inside the host keeps its own. Its `touchmove` is still consumed. */
+function consumeCursorTouchEvent(event: Event): void {
+  if (isHostControlTarget(event.target)) return;
+  consumeNativeTouchOrScrollEvent(event);
+}
+
 function isTouchLikePrimaryPointer(event: PointerEvent<HTMLElement>): boolean {
   return event.pointerType !== 'mouse' && event.isPrimary;
 }
@@ -674,7 +694,6 @@ export function MobileTerminalUi({
   defaultView = 'terminal',
   onViewChange,
   activeTouchMode,
-  defaultTouchMode = 'gestures',
   onTouchModeChange,
   cursorTouchAvailable = false,
   onSendInput,
@@ -689,12 +708,11 @@ export function MobileTerminalUi({
   sessionsHeader,
   fillViewport = false,
   className,
-  terminalClassName,
   style,
 }: MobileTerminalUiProps) {
   useDynamicPalette();
   const [internalView, setInternalView] = useState<MobileTerminalView>(defaultView);
-  const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
+  const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>('gestures');
   const view = activeView ?? internalView;
   const touchMode = activeTouchMode ?? internalTouchMode;
   const terminalInteractive = interactive && !browserShown;
@@ -825,8 +843,8 @@ export function MobileTerminalUi({
 
   // A physical keyboard types straight into the terminal while the composer is
   // closed and no gesture confirmation is asking. No soft keyboard reaches
-  // here: one opens only for a focused field. Its Command+V comes back from
-  // the page as a `paste` on the same targets.
+  // here: one opens only for a focused field. Its Command+V and Ctrl+V come
+  // back from the page as a `paste` on the same targets.
   const confirming = pendingGestureConfirmation !== null;
   useEffect(() => {
     if (!terminalInteractive || composing || confirming || view !== 'terminal') return;
@@ -834,7 +852,7 @@ export function MobileTerminalUi({
       const root = rootRef.current;
       if (!root || event.defaultPrevented || isComposingKey(event)) return;
       if (!isHardwareKeyTarget(root, event.target)) return;
-      const sequence = hardwareKeySequence(event);
+      const sequence = hardwareKeySequence(event, activeSessionId);
       if (!sequence) return;
       event.preventDefault();
       sendInput(sequence);
@@ -853,7 +871,7 @@ export function MobileTerminalUi({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('paste', onNativePaste);
     };
-  }, [composing, confirming, onPaste, sendInput, terminalInteractive, view]);
+  }, [activeSessionId, composing, confirming, onPaste, sendInput, terminalInteractive, view]);
 
   useEffect(() => {
     if (!terminalInteractive || view !== 'terminal') closeComposer();
@@ -872,7 +890,7 @@ export function MobileTerminalUi({
       const hostBottom = rootTop + host.offsetTop + host.offsetHeight;
       const top = Math.max(0, Math.round(visible.top - rootTop));
       const pan = Math.max(0, Math.round(hostBottom - visible.bottom));
-      // iOS fires these through the keyboard's whole animation; most change nothing.
+      // These may fire through the keyboard's whole animation; most change nothing.
       setKeyboardInset((prev) => (prev.top === top && prev.pan === pan ? prev : { top, pan }));
     };
     update();
@@ -882,7 +900,7 @@ export function MobileTerminalUi({
   const executeGestureAction = useCallback((action: MobileGestureAction | undefined) => {
     if (!action) return;
     if (action.kind === 'input') {
-      const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
+      const data = terminalKeySequence(action.input, activeSessionId);
       // Before sending: the input may leave the screen that credits it.
       onGestureInput?.(action.input, data);
       sendInput(data);
@@ -899,7 +917,7 @@ export function MobileTerminalUi({
     if (action.kind === 'confirm') {
       setPendingGestureConfirmation(action);
     }
-  }, [onGestureInput, onPaste, sendInput]);
+  }, [activeSessionId, onGestureInput, onPaste, sendInput]);
 
   const confirmPendingGestureAction = useCallback(() => {
     if (!pendingGestureConfirmation) return;
@@ -920,15 +938,15 @@ export function MobileTerminalUi({
     if (!host) return;
     const options: AddEventListenerOptions = { capture: true, passive: false };
     if (touchMode === 'cursor') {
-      host.addEventListener('touchstart', consumeNativeTouchOrScrollEvent, options);
+      host.addEventListener('touchstart', consumeCursorTouchEvent, options);
       host.addEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
-      host.addEventListener('touchend', consumeNativeTouchOrScrollEvent, options);
-      host.addEventListener('touchcancel', consumeNativeTouchOrScrollEvent, options);
+      host.addEventListener('touchend', consumeCursorTouchEvent, options);
+      host.addEventListener('touchcancel', consumeCursorTouchEvent, options);
       return () => {
-        host.removeEventListener('touchstart', consumeNativeTouchOrScrollEvent, options);
+        host.removeEventListener('touchstart', consumeCursorTouchEvent, options);
         host.removeEventListener('touchmove', consumeNativeTouchOrScrollEvent, options);
-        host.removeEventListener('touchend', consumeNativeTouchOrScrollEvent, options);
-        host.removeEventListener('touchcancel', consumeNativeTouchOrScrollEvent, options);
+        host.removeEventListener('touchend', consumeCursorTouchEvent, options);
+        host.removeEventListener('touchcancel', consumeCursorTouchEvent, options);
       };
     }
     host.addEventListener('wheel', consumeNativeTouchOrScrollEvent, options);
@@ -970,6 +988,14 @@ export function MobileTerminalUi({
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
   }, [clearGestureCompletionTimer, commitGestureState, terminalInteractive, touchMode, stopEdgeScroll]);
+
+  // The consumer may change the active Session on its own (Pocket falls back to
+  // another when the active one closes). A confirmation or a draft was meant
+  // for the Session it opened on, so neither is sent to the next.
+  useEffect(() => {
+    setPendingGestureConfirmation(null);
+    closeComposer();
+  }, [activeSessionId, closeComposer]);
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
@@ -1196,7 +1222,6 @@ export function MobileTerminalUi({
         className={clsx(
           'relative min-h-0 flex-1 overflow-hidden bg-terminal-bg',
           !browserShown && 'touch-none',
-          terminalClassName,
         )}
         style={inset.pan ? { transform: `translateY(-${inset.pan}px)` } : undefined}
         onPointerDownCapture={handlePanePointerDownCapture}

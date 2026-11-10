@@ -68,7 +68,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function mount(enrollment: Enrollment | null, start: { checkout?: CheckoutIntent; confirming?: string } = {}) {
+async function mount(enrollment: Enrollment | null, start: { checkout?: CheckoutIntent; confirming?: string; toWithdraw?: boolean } = {}) {
   await act(async () => root.render(<App enrollment={enrollment} {...start} />));
 }
 function button(text: string) {
@@ -403,6 +403,7 @@ describe("checkout", () => {
     expect(text()).toContain("you can withdraw within 14 days of buying");
     expect(text()).toContain("Use Withdraw from contract on your billing page, or email support@dormouse.sh");
     expect(text()).toContain(MODEL_WITHDRAWAL_FORM);
+    expect(container.querySelector<HTMLAnchorElement>("details a")!.href).toBe(`${termsArchiveUrl(TERMS_VERSION)}#withdrawal`);
     const price = Number(/\$(\d+)/.exec(usd)![1]);
     for (const line of presentedLines(plan, price, TERMS_VERSION)) expect(text()).toContain(line);
   });
@@ -483,6 +484,31 @@ describe("billing", () => {
     expect(text()).toContain("at $50 plus any applicable tax");
     vi.mocked(api.getBilling).mockResolvedValue(FOUNDING);
     await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(api.confirmCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms again on Retry when the confirm could not reach the server", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    vi.mocked(api.confirmCheckout).mockRejectedValueOnce(new Error("Billing is temporarily unavailable. Try again."));
+    await mount(null, { confirming: "op_1" });
+    expect(text()).toContain("Billing is temporarily unavailable. Try again.");
+    vi.mocked(api.confirmCheckout).mockResolvedValue(FOUNDING);
+    await click("Retry connection");
+    expect(api.confirmCheckout).toHaveBeenCalledTimes(2);
+    expect(api.confirmCheckout).toHaveBeenLastCalledWith("op_1");
+    expect(container.querySelector("h1")?.textContent).toBe("You’re subscribed");
+  });
+
+  it("does not confirm again a checkout the server refused", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getSession).mockResolvedValue(login());
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
+    vi.mocked(api.confirmCheckout).mockRejectedValue(new api.CheckoutRefusedError("Checkout not found."));
+    await mount(null, { confirming: "op_1" });
+    expect(text()).toContain("Checkout not found.");
+    await click("Retry connection");
     expect(api.confirmCheckout).toHaveBeenCalledTimes(1);
   });
 
@@ -585,6 +611,30 @@ describe("withdrawal and closure", () => {
     expect(text()).toContain("wd-reference-1");
     expect(text()).toContain("We emailed this acknowledgement");
     expect(container.querySelector("#withdraw")).toBeNull();
+  });
+
+  it("links the withdrawal section of the Terms version the member agreed to", async () => {
+    history.replaceState(null, "", "/billing");
+    const agreed = "2026-10-30";
+    vi.mocked(api.getBilling).mockResolvedValue({ ...WITHDRAWABLE, consent: { termsVersion: agreed, consentedAt: OFFER.startedAt } });
+    await mount(null);
+    expect(container.querySelector<HTMLAnchorElement>("details a")!.href).toBe(`${termsArchiveUrl(agreed)}#withdrawal`);
+  });
+
+  it("brings the withdrawal section into view once it renders, when the link named it", async () => {
+    history.replaceState(null, "", "/billing");
+    vi.mocked(api.getBilling).mockResolvedValue(WITHDRAWABLE);
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      await mount(null, { toWithdraw: true });
+      expect(scrolled).toEqual([container.querySelector("#withdraw")]);
+      expect(scrolled[0]).not.toBeNull();
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it("explains what closing does to the plan before closing, then confirms it signed out", async () => {

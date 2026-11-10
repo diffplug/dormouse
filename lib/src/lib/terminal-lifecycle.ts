@@ -152,14 +152,16 @@ export function getTerminalFontSize(): number {
 }
 
 /** Resizes every live terminal, and every terminal created after. A refit
- *  resizes its PTY, so a remote Session's other displays reflow too. */
+ *  resizes its PTY, so a remote Session's other displays reflow too. Only a
+ *  mounted terminal is refit: the fit addon sizes a detached one to its 2×1
+ *  minimum, and its pane fits it when it mounts. */
 export function setTerminalFontSize(px: number | null): void {
   fontSizeOverride = px;
   const fontSize = getTerminalFontSize();
   for (const entry of registry.values()) {
     if (entry.terminal.options.fontSize === fontSize) continue;
     entry.terminal.options.fontSize = fontSize;
-    entry.fit.fit();
+    if (entry.element.isConnected) entry.fit.fit();
   }
 }
 

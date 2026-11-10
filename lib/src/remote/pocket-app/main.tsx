@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { restorePocketTheme } from './pocket-theme';
 import { registerPushServiceWorker } from './service-worker';
-import { takePairingHash } from './pair-link';
+import { erasePairingHashOnChange, takePairingHash } from './pair-link';
 import { purgeLegacyPairedMarkers } from '../client/pocket-client';
 
 // Apply the theme to <body> before the first render so the auth screens — not
@@ -18,6 +18,7 @@ restorePocketTheme();
 // structurally guaranteed. Nothing is kept from it but the fact that it was
 // there — see `pair-link.ts`.
 const arrivedByCamera = takePairingHash();
+erasePairingHashOnChange();
 
 // One sweep of the markers the pre-end-to-end Burrows view kept. Boot, because it
 // is a one-time cleanup rather than anything a screen depends on.
