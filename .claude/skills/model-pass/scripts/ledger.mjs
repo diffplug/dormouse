@@ -644,7 +644,7 @@ function cmdPr(opts, pos) {
     body = `${stacked}${count} commits from the audit, one finding per commit. ${implementer(loadRuns(L), lane)} implemented each from a reviewer's write-up; `
       + "the finding ids refer to the audit ledger. Each commit's message states what a user or caller saw before, what changed, and, where behavior changed, "
       + 'the test that failed on the old code.\n\n## Commits\n\n' + section
-      + "\n\n## Validation\n\nEach commit passed its package's tests, the typechecks its files fall under, and `spec-lint` when it was made, on macOS. "
+      + "\n\n## Validation\n\nEach commit passed its package's tests, the typechecks its files fall under, and `spec-lint` when it was made. "
       + "This PR's CI is the first full gate for the branch as a whole.\n\n" + FOOTER + '\n';
     if (!dry) fs.writeFileSync(bodyFile, body);
     step('gh', ['pr', 'create', '--draft', '--base', base, '--head', branch, '--title', title, '--body-file', bodyFile]);

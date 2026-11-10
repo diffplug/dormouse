@@ -39,7 +39,7 @@ Settle these with the maintainer before spending anything, and write them at the
 - **Budget**, in tokens of the model under test, and what share the pilot may use (a tenth is a good default).
 - **Priority areas**: what he cares about most this time. Those units get the model under test whatever the pilot says.
 - **The control and the worker**, by model name.
-- **Backlog first.** Read the previous ledger's `REVIEW-LIST.md`. Findings still marked as needing a decision will be found again and paid for again, so ask him to sort them into `fix`, `defer`, `ignore`, or `declined` in `decisions.tsv` first, or accept that the pass will re-find them. The reviewer brief tells reviewers never to re-report a recorded decision.
+- **Backlog first.** Read the previous ledger's `REVIEW-LIST.md`. Findings still marked as needing a decision will be found again and paid for again, so ask him to sort them into `fix`, `defer`, `ignore`, or `declined` in `decisions.tsv` first, then run `list --ledger <previous>` so `REVIEW-LIST.md` carries the answers, or accept that the pass will re-find them. Reviewers read only that file, and the brief tells them never to re-report a recorded decision.
 
 Then run `init`, create `<worktrees>/review-main` from `origin/main`, and run `pnpm install && pnpm build` there so reviewers have a built, read-only checkout.
 
@@ -56,7 +56,7 @@ Review each unit twice, once with the model under test and once with the control
 When they finish:
 
 1. Record each with `run`.
-2. **Match the findings.** For each unit, read both summary tables and write `pilot.tsv`: one row per distinct problem, with the id from each side or `-`. Two write-ups of one defect are one row even when they propose different fixes.
+2. **Match the findings.** For each unit, read both summary tables and write `pilot.tsv`: one tab-separated row per distinct problem, holding the unit, the model-under-test finding id or `-`, the control finding id or `-`, and the severity (the higher of the two sides'). Two write-ups of one defect are one row even when they propose different fixes.
 3. **Verify a sample.** For every finding only one model reported at `med` or above, and five others per unit, confirm the cited caller chain in the code yourself. A model that reports more is not ahead if the extra findings are wrong. Note each disproved finding in `decisions.tsv` as `declined` with the reason.
 4. **Fix a handful now.** Queue the pilot's five to ten clearest sure-fix findings to one worker implementer (Stage 4), and open that PR. The maintainer judges fix quality from a real diff, and the first pass's largest mistake was making him wait for one.
 
