@@ -3666,6 +3666,26 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('finishes a kill when the dying pane is minimized during its fade', async () => {
+    const originalMatchMedia = globalThis.matchMedia;
+    globalThis.matchMedia = ((query: string) => ({ ...originalMatchMedia(query), matches: false })) as typeof matchMedia;
+    const disposeSpy = vi.spyOn(terminalRegistry, 'disposeSession');
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+      await flush();
+      await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:a"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+      await dispatchKill('surface:a');
+      expect(disposeSpy).not.toHaveBeenCalledWith('surface:a');
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', bubbles: true, cancelable: true })); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+      expect(container.querySelector('[data-door-id="surface:a"]')).toBeNull();
+      expect(disposeSpy).toHaveBeenCalledWith('surface:a');
+    } finally {
+      disposeSpy.mockRestore();
+      globalThis.matchMedia = originalMatchMedia;
+    }
+  });
+
   // The focus decision the Wall makes for a pane: `data-focused` on the mocked
   // TerminalPane mirrors `mode === 'passthrough' && selected`.
   const focusOf = (id: string): string | null =>

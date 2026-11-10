@@ -856,6 +856,9 @@ export function Wall({
    *  "Parked leaves"). Terminals do not park: their state lives in the PTY and the
    *  registry retains it across remove/restore. */
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
+    // A dying pane's kill already ran its teardown; dooring it would skip the
+    // disposal its fade timer finishes with.
+    if (lath.isDying(id)) return;
     setTerminalContext(current => current?.id === id ? null : current);
     const meta = lath.getMeta(id);
     if (!meta) return;
