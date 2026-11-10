@@ -199,7 +199,7 @@ describe('classifyDisplayMatch', () => {
   it('treats label with embedded URL as plain unless the bare-domain pattern matches', () => {
     // "Click for https://goog1e.com/free" contains a URL but is itself not URL-shaped.
     // Conservative call: classify as plain. (We'd need to scan for embedded URLs to flag.)
-    expect(classifyDisplayMatch('https://evil.com/phish', 'Click for free money')).toBe('plain');
+    expect(classifyDisplayMatch('https://evil.com/phish', 'Click for https://goog1e.com/free')).toBe('plain');
   });
 });
 
