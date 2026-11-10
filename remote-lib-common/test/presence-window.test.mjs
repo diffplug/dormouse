@@ -42,6 +42,12 @@ test('a window closes once idle, and stays closed', () => {
   assert.equal(windows.open(STATIC), null);
 });
 
+test('a clock that steps back closes the window rather than stretching it', () => {
+  const { clock, windows } = seeded();
+  clock.advance(-1);
+  assert.equal(windows.open(STATIC), null);
+});
+
 test('folded activity extends the idle bound, and never moves it back', () => {
   const { clock, windows } = seeded();
   clock.advance(PRESENCE_WINDOW_IDLE_MS - 1);

@@ -67,13 +67,17 @@ export class PresenceWindows {
   /**
    * The open window for one Client static, or `null`. Open means less than
    * {@link PRESENCE_WINDOW_IDLE_MS} since the latest activity and less than
-   * {@link PRESENCE_WINDOW_MAX_MS} since the proof.
+   * {@link PRESENCE_WINDOW_MAX_MS} since the proof. A clock that stepped back
+   * past either closes it: a negative interval would otherwise stretch both
+   * bounds by the size of the step.
    */
   open(clientStaticPublicKey: string): PresenceWindowEntry | null {
     const entry = this.#entries.get(clientStaticPublicKey);
     if (!entry) return null;
     const now = this.#now();
-    if (now - entry.activeAt < PRESENCE_WINDOW_IDLE_MS && now - entry.provedAt < PRESENCE_WINDOW_MAX_MS) {
+    const idle = now - entry.activeAt;
+    const age = now - entry.provedAt;
+    if (idle >= 0 && age >= 0 && idle < PRESENCE_WINDOW_IDLE_MS && age < PRESENCE_WINDOW_MAX_MS) {
       return entry;
     }
     this.#entries.delete(clientStaticPublicKey);
