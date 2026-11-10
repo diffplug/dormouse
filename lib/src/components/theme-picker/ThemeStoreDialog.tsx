@@ -5,6 +5,7 @@ import {
   addInstalledTheme,
   applyTheme,
   fetchExtensionThemes,
+  getBundledThemes,
   getInstalledThemes,
   removeInstalledTheme,
   restoreActiveTheme,
@@ -114,6 +115,13 @@ export function ThemeStoreDialog({
     );
   };
 
+  // Bundled themes came from OpenVSX with the same `<namespace>.<name>.<slug>`
+  // ids an install would write, so installing one would duplicate them.
+  const isBundled = (extension: OpenVSXExtension) => {
+    const prefix = `${extension.namespace}.${extension.name}.`;
+    return getBundledThemes().some((theme) => theme.id.startsWith(prefix));
+  };
+
   return (
     <NativeModalDialog
       onClose={onClose}
@@ -179,7 +187,9 @@ export function ThemeStoreDialog({
                     {extension.namespace} - {extension.downloadCount.toLocaleString()} downloads
                   </div>
                 </div>
-                {installed ? (
+                {isBundled(extension) ? (
+                  <span className="shrink-0 px-2 py-1 text-sm text-muted">Built in</span>
+                ) : installed ? (
                   <button
                     type="button"
                     onClick={() => handleRemoveExtension(key)}

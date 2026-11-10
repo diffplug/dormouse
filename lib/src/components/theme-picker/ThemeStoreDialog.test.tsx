@@ -9,6 +9,7 @@ vi.mock('../../lib/themes', () => ({
   addInstalledTheme: vi.fn(),
   applyTheme: vi.fn(),
   fetchExtensionThemes: vi.fn(),
+  getBundledThemes: vi.fn(() => [{ id: 'vscode.theme-monokai.monokai' }]),
   getInstalledThemes: vi.fn(() => []),
   removeInstalledTheme: vi.fn(),
   restoreActiveTheme: vi.fn(),
@@ -200,6 +201,24 @@ describe('ThemeStoreDialog', () => {
 
       expect(container.textContent).toContain('This extension has no color themes');
       expect(onThemesChanged).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('offers no Install for an extension whose themes are bundled', async () => {
+    searchThemesMock.mockImplementationOnce(async () => ({
+      extensions: [{ ...extension('theme-monokai', 'Monokai Theme'), namespace: 'vscode' }],
+    }));
+
+    vi.useFakeTimers();
+    try {
+      render();
+      await search('monokai');
+
+      expect(container.textContent).toContain('Monokai Theme');
+      expect(container.textContent).toContain('Built in');
+      expect([...container.querySelectorAll('button')].map((button) => button.textContent)).not.toContain('Install');
     } finally {
       vi.useRealTimers();
     }
