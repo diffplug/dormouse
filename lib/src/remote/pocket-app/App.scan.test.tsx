@@ -457,6 +457,18 @@ describe('a first run, from the scan to the terminal', () => {
 });
 
 describe('a phone that is already signed in', () => {
+  it('leaves the sign-in screen, saying why, when the read after sign-in fails', async () => {
+    fake.hasPriorUse = true;
+    fake.listBurrows.mockRejectedValue(new Error('offline'));
+    await boot();
+
+    await click(container, 'Sign in with passkey');
+
+    expect(alertText(container)).toBe('offline');
+    expect(buttonNamed(container, 'Refresh')).not.toBeNull();
+    expect(buttonNamed(container, 'Sign in with passkey')).toBeNull();
+  });
+
   it('retires the scanned token rather than registering a second passkey', async () => {
     const { url, invitation } = await invitationUrl();
     fake.hasPriorUse = true;
@@ -845,6 +857,20 @@ describe('leaving the scanner', () => {
     await click(container, 'Cancel');
 
     expect(buttonNamed(container, 'Refresh')).not.toBeNull();
+  });
+
+  it('lands on the list, saying why, when the read on the way back fails', async () => {
+    fake.hasPriorUse = true;
+    await boot();
+    await click(container, 'Sign in with passkey');
+    fake.listBurrows.mockRejectedValue(new Error('offline'));
+
+    await click(container, SCAN_LABEL);
+    await click(container, 'Cancel');
+
+    expect(alertText(container)).toBe('offline');
+    expect(buttonNamed(container, 'Refresh')).not.toBeNull();
+    expect(container.querySelector('#pocket-paste-code')).toBeNull();
   });
 
   /**

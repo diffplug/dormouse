@@ -393,19 +393,24 @@ export default function App({
     return views;
   }, [client]);
 
-  // A kept session's first read, once the capability gate passes: it finds
-  // out whether the Relay still honors the session. A 401 drops to sign-in
-  // through `run`; any other failure still lands on the list, where Refresh
-  // retries.
-  useEffect(() => {
-    if (at !== 'restoring' || !noiseSupported) return;
-    void run('refresh', () =>
+  /** `loadBurrows` from another screen, for `run`: a 401 drops to sign-in
+   *  through `run`; any other failure still lands on the list, saying why,
+   *  where Refresh retries, rather than stranding the screen it started on. */
+  const enterBurrows = useCallback(
+    () =>
       loadBurrows().catch((err: unknown) => {
         setPhase({ at: 'burrows' });
         throw err;
       }),
-    );
-  }, [at, loadBurrows, noiseSupported, run]);
+    [loadBurrows],
+  );
+
+  // A kept session's first read, once the capability gate passes: it finds
+  // out whether the Relay still honors the session.
+  useEffect(() => {
+    if (at !== 'restoring' || !noiseSupported) return;
+    void run('refresh', enterBurrows);
+  }, [at, enterBurrows, noiseSupported, run]);
 
   // Socket drop / burrow-gone: dispose the adapter and fall back to Burrows.
   useEffect(() => {
@@ -723,7 +728,7 @@ export default function App({
               setPhase({ at: 'auth' });
               return;
             }
-            void run('refresh', loadBurrows);
+            void run('refresh', enterBurrows);
           }}
         />
       );
@@ -747,7 +752,7 @@ export default function App({
           onSignin={() =>
             run('signin', async () => {
               await client.signin();
-              await loadBurrows();
+              await enterBurrows();
             })
           }
         />
