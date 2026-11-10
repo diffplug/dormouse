@@ -21,6 +21,8 @@ import { mintSurfaceId, resetSurfaceIdPool } from './surface-ids';
 import { getHelper, forgetHelper } from './helper-terminal';
 import { setPlatform } from './platform';
 import type { LathNode } from './lath/model';
+import { persistableLeafMeta, toolLeafMeta } from '../components/wall/lath-wall-engine';
+import { toolReapBlocker } from '../components/wall/tool-reaper';
 
 /** A native Lath persisted layout over `ids` (row split; empty tree for none) —
  *  the shape every post-Lath save carries. */
@@ -736,5 +738,41 @@ describe('collectLivePtys addressing', () => {
     const collected = await collectLivePtys(platform, { timeoutMs: 1000 });
     expect(collected.ptys.map((pty) => pty.id)).toEqual(['a']);
     expect(collected.timedOut).toBe(false);
+  });
+});
+
+describe('a take-over\'s shared-shell mark', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /** A Tool that took over its caller, as the Wall saves it, visible or Doored. */
+  function savedTakeover(doored = false): PersistedSession {
+    const meta = persistableLeafMeta(toolLeafMeta('viewer', { surfaceType: 'tool', command: 'view a.md', toolSharesCallerShell: true }));
+    return {
+      version: 4,
+      lathLayout: doored
+        ? { version: 1, tree: { root: { kind: 'leaf', id: 'shell' } }, leafMeta: { shell: { component: 'terminal', tabComponent: 'terminal', title: 'shell' } } }
+        : { version: 1, tree: { root: { kind: 'leaf', id: 'tool' } }, leafMeta: { tool: meta } },
+      doors: doored ? [{ id: 'tool', title: 'viewer', component: 'tool', tabComponent: 'tool', params: meta.params }] : [],
+      panes: [
+        { id: 'tool', title: 'viewer', cwd: null, untouched: false, surfaceType: 'tool', command: 'view a.md', tool: { render: 'iframe', port: 'announced' } },
+        ...(doored ? [{ id: 'shell', title: 'shell', cwd: null, untouched: false }] : []),
+      ],
+    };
+  }
+
+  it('survives a resume onto the same live PTY, so the Tool is still never reaped', async () => {
+    const visible = (await resumeOrRestore(createPlatform([{ id: 'tool', alive: true }], savedTakeover()))).lathLayout!.leafMeta.tool.params;
+    expect(visible?.toolSharesCallerShell).toBe(true);
+    expect(toolReapBlocker('tool', visible)).toMatch(/shares the shell/);
+    const doored = await resumeOrRestore(createPlatform([{ id: 'tool', alive: true }, { id: 'shell', alive: true }], savedTakeover(true)));
+    expect(doored.doors?.[0].params?.toolSharesCallerShell).toBe(true);
+  });
+
+  it('is dropped by a cold restore, which spawns a fresh shell', async () => {
+    const visible = await resumeOrRestore(createPlatform([], savedTakeover()));
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('tool', expect.anything());
+    expect(visible.lathLayout!.leafMeta.tool.params).not.toHaveProperty('toolSharesCallerShell');
+    const doored = await resumeOrRestore(createPlatform([], savedTakeover(true)));
+    expect(doored.doors?.[0].params).not.toHaveProperty('toolSharesCallerShell');
   });
 });

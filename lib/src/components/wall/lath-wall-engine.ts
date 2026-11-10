@@ -125,7 +125,9 @@ export function becomeTerminalMeta(meta: LeafMeta, userTitle: string | null): Le
  * persisted agent-browser `session` would name a daemon that is gone
  * (`docs/specs/dor-tool.md` -> Persistence and hosts). A restored tool is a
  * terminal running its command until it serves again, which is the same state a
- * cold spawn passes through. Everything else about the leaf persists.
+ * cold spawn passes through. Everything else about the leaf persists, a
+ * take-over's shared-shell mark included: a resume keeps the same shell, and a
+ * cold restore drops it (`withToolCommand` in lib/session-restore.ts).
  */
 export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   if (meta.component !== 'tool' || !meta.params) return meta;
