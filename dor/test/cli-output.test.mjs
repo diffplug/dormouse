@@ -1388,6 +1388,16 @@ test('agent-browser --surface needs a control endpoint', async () => {
   assert.deepEqual(ab.calls, []);
 });
 
+test('agent-browser rejects an intercepted flag given twice', async () => {
+  for (const [args, flag] of [[['--key', 'a', '--key', 'b'], '--key'], [['--workspace', '1', '--workspace=2'], '--workspace']]) {
+    const ab = fakeAgentBrowser();
+    const result = await runCli(['agent-browser', ...args, 'snapshot'], { client: fixtureClient(), execAgentBrowser: ab.exec });
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stderr, `Error: ${flag} may be given only once\n`);
+    assert.deepEqual(ab.calls, []);
+  }
+});
+
 test('agent-browser rejects a valueless identity flag, whichever one it is', async () => {
   // The three flags share one parse loop; a trailing flag has no value and a
   // following flag is never one, so neither may be swallowed as the value.
