@@ -317,7 +317,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 - **Must retain an enrollment whose save succeeded when startup fails**, reporting restart guidance, never removal advice.
 - **Never enable, disable, or clear managed voice through remote-control enrollment, startup, or Disconnect.** Managed-voice approval: `docs/specs/hosted.md` -> "Managed voice".
 
-**Relay socket policy**: one socket at a time, reconnected with backoff after any close except these, which latch a state, dispose the Burrow's sessions, and arm no timer until `start()` (an explicit `reconnect()` or a fresh start) (rationale):
+**Relay socket policy**: one socket at a time, reconnected with backoff after any close except these, which latch a state, dispose the Burrow's sessions, and arm no reconnect backoff before `start()` (an explicit `reconnect()` or fresh start) (rationale):
 
 | Close or probe answer | Latched state |
 | --- | --- |
@@ -325,8 +325,8 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 | `WS_CLOSE_BURROW_REVOKED` (4001); probe 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR` | `removed` |
 | `WS_CLOSE_BURROW_NOT_ENTITLED` (4002, Hosted only); probe 403 `NOT_ENTITLED_ERROR` | `not-entitled` |
 
-- **A socket that never opened is probed before its next backoff** with one `GET /api/push/devices` as the Burrow, a refused upgrade being only an error event. **Only a 2xx, 401, or 403 spends the failure streak's one probe** (rationale).
-- **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay nothing more**: no push, device list, setup code, or removed passkey.
+- **A socket that never opened is probed before its next backoff** with one Burrow `GET /api/push/devices`. **Only a 2xx, 401, or 403 spends the failure streak's one probe** (rationale).
+- **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay nothing more**: no push, device list, setup code, or removed passkey; a `not-entitled` one only re-probes, after 1 minute doubling to 30, reconnecting when entitled (rationale).
 
 **Security**: `BurrowAcl`, `ChallengeIssuer`, `verifyPresenceProof`, and the Noise responder for both ceremonies run in the service's process. **Must keep authorization in the Burrow process**; the expected two-digit code never leaves it (`docs/specs/remote-security-model.md` -> "Pairing").
 
