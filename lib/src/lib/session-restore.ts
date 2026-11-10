@@ -50,10 +50,20 @@ function requoteToolCommand(pane: PersistedPane): PersistedPane {
   return { ...pane, command: buildShellCommandForKind(kind, pane.tool.argv) };
 }
 
-/** A Tool leaf's params carry the command its pane re-runs. */
+/** A take-over's mark names the shell it shared, which a fresh PTY is not
+ *  (`docs/specs/dor-tool.md` -> Reaping). */
+function withoutSharedShell(params: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!params || !('toolSharesCallerShell' in params)) return params;
+  const { toolSharesCallerShell: _shared, ...rest } = params;
+  return rest;
+}
+
+/** A leaf's params for the fresh PTY a restore spawns: a Tool's carry the
+ *  command its pane re-runs, and no Session's keeps a shared-shell mark. */
 function withToolCommand(params: Record<string, unknown> | undefined, pane: PersistedPane): Record<string, unknown> | undefined {
+  const fresh = withoutSharedShell(params);
   return pane.surfaceType === 'tool' && pane.tool?.argv
-    ? { ...params, command: pane.command, toolArgv: pane.tool.argv } : params;
+    ? { ...fresh, command: pane.command, toolArgv: pane.tool.argv } : fresh;
 }
 
 /**
@@ -107,7 +117,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   const panesById = new Map(panes.map(pane => [pane.id, pane]));
   const doors = (saved.doors ?? []).map(door => {
     const pane = panesById.get(door.id);
-    return pane ? { ...door, params: withToolCommand(door.params, pane) } : door;
+    return { ...door, params: pane ? withToolCommand(door.params, pane) : withoutSharedShell(door.params) };
   });
   const doorIds = new Set(doors.map((item) => item.id));
   const visiblePanes = panes.filter((pane) => !doorIds.has(pane.id));

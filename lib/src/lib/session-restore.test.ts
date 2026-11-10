@@ -14,7 +14,7 @@ vi.mock('./terminal-registry', () => ({
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
 }));
 
-import { restoreSession } from './session-restore';
+import { reopenPane, restoreSession } from './session-restore';
 import { isLathPersistedLayout } from './lath/persistence';
 import { createLathWallEngine } from '../components/wall/lath-wall-engine';
 
@@ -459,5 +459,16 @@ describe('restoreSession alert seeding', () => {
     );
     // An explicit `null` is "no record", never a fallback to the slot.
     expect(restoreSession(platform, { savedSession: null })).toBeNull();
+  });
+});
+
+describe('reopening a closed take-over', () => {
+  it('drops its shared-shell mark, since the reopened Tool gets a fresh shell', () => {
+    const meta = reopenPane('tool', {
+      id: 'closed', title: 'viewer', cwd: null, untouched: false, surfaceType: 'tool', command: 'view a.md',
+      tool: { render: 'iframe', port: 'announced', argv: ['view', 'a.md'] },
+    }, { component: 'tool', tabComponent: 'tool', title: 'viewer', params: { surfaceType: 'tool', command: 'view a.md', toolSharesCallerShell: true } });
+    expect(meta.params).not.toHaveProperty('toolSharesCallerShell');
+    expect(meta.params?.command).toBeTruthy();
   });
 });

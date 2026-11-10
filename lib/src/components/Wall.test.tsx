@@ -2485,8 +2485,9 @@ describe('Wall on the Lath engine', () => {
         reportRunning(toolId!, 'view /repo/a.md');
       });
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
-      // Only a take-over runs in a shell the host did not spawn for it, and
-      // that mark lives only as long as the run, never on disk.
+      // Only a take-over runs in a shell the host did not spawn for it. The
+      // mark is saved, so a resume onto the same shell keeps it (a cold restore
+      // drops it: reconnect.test.ts), and it ends with the run.
       const lath = engine.mock.results[0].value as lathWallEngine.LathWallEngine;
       expect(lath.getMeta(toolId!)?.params?.toolSharesCallerShell).toBe(status === 'takeover' ? true : undefined);
       if (status === 'takeover') {
@@ -2494,7 +2495,7 @@ describe('Wall on the Lath engine', () => {
         await flush();
         const saved = fake.getState() as { lathLayout: { leafMeta: Record<string, { component: string; params?: Record<string, unknown> }> } };
         expect(saved.lathLayout.leafMeta[toolId!]).toMatchObject({ component: 'tool' });
-        expect(saved.lathLayout.leafMeta[toolId!].params).not.toHaveProperty('toolSharesCallerShell');
+        expect(saved.lathLayout.leafMeta[toolId!].params?.toolSharesCallerShell).toBe(true);
         act(() => terminalRegistry.applyTerminalSemanticEvents(toolId!, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
         await flush();
         expect(lath.getMeta(toolId!)?.component).toBe('terminal');
