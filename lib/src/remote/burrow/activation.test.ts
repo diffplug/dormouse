@@ -295,6 +295,24 @@ describe('burrow bridge mode', () => {
     expect(link.commands.filter((c) => c.cmd === 'pairingQueue')).toHaveLength(1);
   });
 
+  it('re-reads the queue from a new service instance, clearing what the old one held', async () => {
+    // VS Code: the broker window closes and another takes over. The new
+    // service holds none of the old one's requests and pushes no queue.
+    const link = fakeLink();
+    link.results.pairingQueue = [
+      { kind: 'pairing', clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 },
+    ];
+    const { pairing } = await installBridge(link);
+    link.emit('status', { name: 'status', enrolled: true, serving: true, serviceId: 'a' });
+    await settle();
+    expect(pairing.getPairingApprovalSnapshot()).toHaveLength(1);
+
+    link.results.pairingQueue = [];
+    link.emit('status', { name: 'status', enrolled: true, serving: true, serviceId: 'b' });
+    await settle();
+    expect(pairing.getPairingApprovalSnapshot()).toEqual([]);
+  });
+
   it('asks the service for the device list the dialog names', async () => {
     const link = fakeLink();
     await installBridge(link);
