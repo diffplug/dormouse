@@ -446,7 +446,9 @@ test('split json output', async () => {
 
 test('shell command quoting supports shell families', () => {
   assert.equal(shellCommandKind(undefined, 'Windows'), 'cmd');
+  assert.equal(shellCommandKind(undefined, 'Win32'), 'cmd');
   assert.equal(shellCommandKind('/bin/zsh', 'darwin'), 'posix');
+  assert.equal(shellCommandKind(undefined, 'darwin'), 'posix');
   assert.equal(shellCommandKind('C:\\Program Files\\Git\\bin\\bash.exe', 'win32'), 'posix');
   assert.equal(shellCommandKind('C:\\Windows\\System32\\cmd.exe', 'win32'), 'cmd');
   assert.equal(shellCommandKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe', 'win32'), 'powershell');

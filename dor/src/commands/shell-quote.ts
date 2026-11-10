@@ -54,7 +54,7 @@ const powerShellBare = (arg: string) => WINDOWS_SAFE_ARG.test(arg) && !POWERSHEL
 
 export function shellCommandKind(shell: string | undefined, platformString: string): ShellCommandKind {
   const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
-  if (!normalizedShell && /win/i.test(platformString)) return 'cmd';
+  if (!normalizedShell && /^win/i.test(platformString)) return 'cmd';
   if (normalizedShell === 'cmd.exe' || normalizedShell === 'cmd') return 'cmd';
   if (normalizedShell === 'powershell.exe' || normalizedShell === 'powershell' || normalizedShell === 'pwsh.exe' || normalizedShell === 'pwsh') {
     return 'powershell';
