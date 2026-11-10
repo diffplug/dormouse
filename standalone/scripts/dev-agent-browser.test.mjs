@@ -234,6 +234,12 @@ test('the inner app gets its own agent-browser socket dir; the harness browser k
   assert.notEqual(inner, '/outer/agent-browser');
   await access(inner);
   assert.equal((await run.wait(/BROWSER_AB_DIR (\S+)/))[1], '/outer/agent-browser');
+  // Both per-run directories go with the run.
+  const state = (await run.wait(/burrow state dir: (\S+)/))[1];
+  await mkdir(state, { recursive: true });
+  assert.equal((await run.stop()).code, 0);
+  await assert.rejects(access(inner), { code: 'ENOENT' });
+  await assert.rejects(access(state), { code: 'ENOENT' });
 });
 
 test('run as a Tool, leaves the browser to the Tool instead of opening a second', { timeout: 60000 }, async t => {

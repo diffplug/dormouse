@@ -88,7 +88,7 @@ afterEach(() => {
   }
   roots = [];
   document.body.replaceChildren();
-  delete (document as Document & { elementFromPoint?: unknown }).elementFromPoint;
+  Reflect.deleteProperty(document, 'elementFromPoint');
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -696,14 +696,15 @@ describe('MobileTerminalUi edge scroll', () => {
     screen.className = 'xterm-screen';
     ui.terminal.appendChild(screen);
     vi.spyOn(screen, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 32, right: 370, bottom: 500, width: 370, height: 468 } as DOMRect);
+    const viewport = { viewportY: 100, baseY: 200 };
     vi.spyOn(registry, 'getTerminalInstance').mockReturnValue({
       element: ui.terminal, modes: { mouseTrackingMode: capturing ? 'any' : 'none' }, scrollLines,
-      buffer: { active: { viewportY: 100, baseY: 200 } },
+      buffer: { active: viewport },
     } as unknown as Terminal);
     const pointer = (type: string, x: number, y: number, overrides: Partial<PointerEvent> = {}) => act(() => {
       ui.terminal.dispatchEvent(pointerEvent(type, { clientX: x, clientY: y, ...overrides }));
     });
-    return { ...ui, props, onSendInput, onGestureInput, onGestureScroll, scrollLines, pointer };
+    return { ...ui, props, onSendInput, onGestureInput, onGestureScroll, scrollLines, pointer, viewport };
   }
 
   function flick(pointer: ReturnType<typeof setup>['pointer'], end = 'pointerup', pointerType = 'touch') {
@@ -747,7 +748,7 @@ describe('MobileTerminalUi edge scroll', () => {
 
   it.each(['touch', 'second finger', 'session', 'mode', 'disabled', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
     startClock();
-    const { pointer, scrollLines, props, renderWith } = setup();
+    const { pointer, scrollLines, props, renderWith, viewport } = setup();
     flick(pointer);
     act(() => vi.advanceTimersByTime(150));
     expect(scrollLines.mock.calls.length).toBeGreaterThan(1);
@@ -761,8 +762,8 @@ describe('MobileTerminalUi edge scroll', () => {
       vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
       act(() => document.dispatchEvent(new Event('visibilitychange')));
     }
-    if (stop === 'boundary') registry.getTerminalInstance('scroll-test')!.buffer.active.viewportY = 200;
-    if (stop === 'missing terminal') vi.mocked(registry.getTerminalInstance).mockReturnValue(undefined);
+    if (stop === 'boundary') viewport.viewportY = 200;
+    if (stop === 'missing terminal') vi.mocked(registry.getTerminalInstance).mockReturnValue(null);
     const stopped = scrollLines.mock.calls.length;
     act(() => vi.advanceTimersByTime(1000));
     expect(scrollLines).toHaveBeenCalledTimes(stopped);

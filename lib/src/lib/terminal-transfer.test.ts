@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { Terminal, type ITerminalOptions } from '@xterm/xterm';
+import { Terminal, type ITerminalInitOnlyOptions, type ITerminalOptions } from '@xterm/xterm';
+
+/** Everything the `Terminal` constructor takes, its size included. */
+type TerminalOptions = ITerminalOptions & ITerminalInitOnlyOptions;
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
 import { serializeTransferTerminal, type DecPrivateModes } from './terminal-transfer';
@@ -21,13 +24,13 @@ const vtExtensions = xtermVtExtensions();
 const live: Terminal[] = [];
 afterEach(() => { for (const terminal of live.splice(0)) terminal.dispose(); });
 
-const newTerminal = (options: ITerminalOptions = {}) => {
+const newTerminal = (options: TerminalOptions = {}) => {
   const terminal = new Terminal({ allowProposedApi: true, vtExtensions, ...options });
   live.push(terminal);
   return terminal;
 };
 
-async function writtenSource(input: string, options: ITerminalOptions = {}): Promise<{ source: Terminal; serializer: SerializeAddon }> {
+async function writtenSource(input: string, options: TerminalOptions = {}): Promise<{ source: Terminal; serializer: SerializeAddon }> {
   const source = newTerminal(options);
   const serializer = new SerializeAddon();
   source.loadAddon(serializer);
@@ -38,7 +41,7 @@ async function writtenSource(input: string, options: ITerminalOptions = {}): Pro
 /** Writes `input` to a fresh source, then its transfer serialization into a fresh target. */
 async function transfer(
   input: string,
-  options: ITerminalOptions = {},
+  options: TerminalOptions = {},
   prepareTarget?: (target: Terminal) => unknown,
 ): Promise<{ source: Terminal; target: Terminal }> {
   const { source, serializer } = await writtenSource(input, options);

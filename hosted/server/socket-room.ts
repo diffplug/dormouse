@@ -1,6 +1,6 @@
-// What the relay Worker's two socket families share: the one-time rendezvous
-// (`one-time.ts`, `one-time-room.ts`) and the relay sockets (`relay-sockets.ts`,
-// `relay-room.ts`). Each route checks its request, then hands its Durable
+// What Hosted's two socket families share: the try Worker's one-time rendezvous
+// (`one-time.ts`, `one-time-room.ts`) and the relay Worker's relay sockets
+// (`relay-sockets.ts`, `relay-room.ts`). Each route checks its request, then hands its Durable
 // Object a fresh upgrade; each object refuses by closing an accepted socket.
 import type { Context } from "hono";
 

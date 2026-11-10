@@ -9,7 +9,7 @@
  * on its own, so a second owner can rely on it without Pocket's socket.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
@@ -229,6 +229,27 @@ describe('an established session', () => {
       core.onFrame(ROUTE, 'transport', toBase64Url(ct));
     }
     await expect(hello).resolves.toEqual({ burrowId: 'b' });
+  });
+
+  it('lets go of a session’s event subscriptions when it ends', async () => {
+    const { core, sent } = makeCore();
+    const first = await noiseSessionPair();
+    core.establish(ROUTE, first.client);
+    const onEvent = vi.fn();
+    const subscribed = core.subscribe('terminal.attach', {}, onEvent);
+    const [request] = openReceipt(first.burrow, sent.at(-1)!.ciphertext) as Array<{ requestId: string }>;
+    for (const ct of first.burrow.sendApp(utf8Encode(JSON.stringify({ requestId: request!.requestId, ok: true, result: {} })))) {
+      core.onFrame(ROUTE, 'transport', toBase64Url(ct));
+    }
+    const { subId } = await subscribed;
+    core.endSession('ended', { notifyGone: false });
+
+    const second = await noiseSessionPair();
+    core.establish(ROUTE, second.client);
+    for (const ct of second.burrow.sendApp(utf8Encode(JSON.stringify({ subId, event: 'terminal.data', data: {} })))) {
+      core.onFrame(ROUTE, 'transport', toBase64Url(ct));
+    }
+    expect(onEvent).not.toHaveBeenCalled();
   });
 
   it('takes only its own route’s transport frames, and ends on one that will not decrypt', async () => {

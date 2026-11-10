@@ -87,6 +87,8 @@ class FakeHost implements BurrowFrameHost {
   refuse: string | null = null;
   /** Held until released, as a slow grant is. */
   hold: Promise<void> | null = null;
+  /** The directory's question; the tunnel itself never asks it. */
+  async canOpen() { return this.refuse === null; }
   async open(url: string, options: FrameOpenOptions) {
     this.opened.push([url, options]);
     await this.hold;
@@ -519,6 +521,20 @@ describe('websockets', () => {
     expect(t.events(id, FRAME_EVENTS.wsClosed)).toMatchObject([{ data: { code: 1000, reason: 'bye' } }]);
     const late = part('x', true);
     expect(t.answer(late)).toMatchObject({ ok: false, error: 'no such socket' });
+  });
+
+  it('bounds a message in fragments, not only in bytes: empty ones add none', async () => {
+    const t = setup();
+    const frameId = await t.open();
+    const id = t.call(FRAME_METHODS.wsOpen, { frameId, path: '/' });
+    const socket = t.host.upstreams[0]!.sockets[0]!;
+    socket.sink.onOpen('', '');
+    let last = '';
+    for (let i = 0; i < 200 && !socket.closed; i++) {
+      last = t.call(FRAME_METHODS.wsSend, { socketId: id, data: '', binary: true, fin: false });
+    }
+    expect(socket.closed).toEqual([1009, 'message too big']);
+    expect(t.answer(last)).toMatchObject({ ok: false, error: 'message too big' });
   });
 
   it('fails the open when the upstream closes first, and refuses a reserved close code', async () => {

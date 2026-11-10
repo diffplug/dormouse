@@ -1084,7 +1084,7 @@ export class PocketClient {
       try {
         await this.#dropAuthorization(record);
       } catch {
-        this.#core.disposeSession();
+        // Left `paired`, as said above.
       }
     }
     return {
@@ -1108,7 +1108,6 @@ export class PocketClient {
     // Best-effort: the tombstone is what makes this retryable, so a failure
     // here costs a later drain rather than the row.
     await this.#retire(tombstone);
-    this.#core.disposeSession();
   }
 
   async #tombstone(
@@ -1302,7 +1301,10 @@ export class PocketClient {
         if (isE2eRelayToClientFrame(frame)) this.#core.onFrame(frame, frame.step, frame.ct);
         return;
       case 'burrow-gone':
-        this.#core.loseBurrow('burrow disconnected');
+        // Reported only over a live session, as a socket close is: the Relay
+        // keeps this socket bound to the Burrow after a session ends, so the
+        // frame can arrive long after that session's own report.
+        this.#core.endSession('burrow disconnected', { notifyGone: this.connectedBurrowId !== null });
         return;
       case 'error':
         // Fixed copy, for the reason the denial tables are: the text is the
@@ -1369,10 +1371,11 @@ export class PocketClient {
 
   /**
    * A ceremony that failed before an outcome: relay error, dropped socket, or
-   * expired timer, all of them {@link BURROW_UNAVAILABLE_MESSAGE}.
+   * expired timer, all of them {@link BURROW_UNAVAILABLE_MESSAGE}. Its state was
+   * local to it, so nothing is disposed here: a session already working stays
+   * as it was.
    */
   #unavailable(error: unknown): { readonly ok: false; readonly message: string } {
-    this.#core.disposeSession();
     if (error instanceof SessionExpiredError) throw error;
     return { ok: false, message: BURROW_UNAVAILABLE_MESSAGE };
   }
@@ -1444,7 +1447,10 @@ export class PocketClient {
   }
 
   #requireSession(): PocketSession {
-    if (!this.#session) throw new Error('sign in first');
+    // Expiry, not a bare error: every caller runs after sign-in, so a session
+    // gone here was cleared by a sign-out or a 401 — possibly on a background
+    // request whose failure nobody showed — and the caller must land on sign-in.
+    if (!this.#session) throw new SessionExpiredError();
     return this.#session;
   }
 

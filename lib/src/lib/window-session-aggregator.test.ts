@@ -99,7 +99,7 @@ describe('window session aggregator', () => {
 
   it('forgets a Workspace session, seeded or published', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    seedWindowSession({ version: 2, workspaces: [{ id: first, name: 'One', session: session('seed') }], activeWorkspaceId: first });
+    seedWindowSession({ version: 2, workspaces: [{ id: first, name: 'One', nameIsAuto: false, session: session('seed') }], activeWorkspaceId: first });
     publishWorkspaceSession(first, session('a'));
     forgetWorkspaceSession(first);
     expect(getWindowSnapshot().workspaces).toEqual([]);
@@ -114,8 +114,8 @@ describe('window session aggregator', () => {
       const seeded: PersistedWindow = {
         version: 2,
         workspaces: [
-          { id: first(), name: 'One', session: session('a-seed') },
-          { id: second, name: 'Second', session: session('b-seed') },
+          { id: first(), name: 'One', nameIsAuto: false, session: session('a-seed') },
+          { id: second, name: 'Second', nameIsAuto: false, session: session('b-seed') },
         ],
         activeWorkspaceId: second,
       };
@@ -134,7 +134,7 @@ describe('window session aggregator', () => {
     });
 
     it('replaces the previous seed, and null clears it', () => {
-      seedWindowSession({ version: 2, workspaces: [{ id: first(), name: 'One', session: session('old') }], activeWorkspaceId: first() });
+      seedWindowSession({ version: 2, workspaces: [{ id: first(), name: 'One', nameIsAuto: false, session: session('old') }], activeWorkspaceId: first() });
       seedWindowSession(null);
       expect(previousWorkspaceSession(first())).toBeNull();
       expect(getWindowSnapshot().workspaces).toEqual([]);

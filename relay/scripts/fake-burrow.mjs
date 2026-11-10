@@ -6,7 +6,9 @@
  *
  *   node scripts/fake-burrow.mjs http://localhost:3000
  *
- * The Relay URL (default http://localhost:3000) is argv[2]. The setup password
+ * The Relay's origin (default http://localhost:3000) is argv[2]: the script
+ * both connects to it and enrolls claiming it, so pass the origin the Relay
+ * reports at start (`… (origin <origin>)`), not its bound address. The setup password
  * comes from the Relay package's `data` directory unless
  * `DORMOUSE_STATE_DIR` says otherwise. Build first (`pnpm --filter relay
  * build`) so `remote-lib-common` is compiled.
@@ -38,7 +40,8 @@ async function main() {
   const res = await fetch(`${relayUrl}${API_ROUTES.burrowEnroll}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password }),
+    // The Relay refuses a Burrow that names no origin, or another one.
+    body: JSON.stringify({ password, origin: relayUrl }),
   });
   if (!res.ok) {
     console.error(`enroll failed: ${res.status} ${await res.text()}`);

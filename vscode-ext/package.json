@@ -101,7 +101,7 @@
   "scripts": {
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "build:frontend": "vite build --config vite.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm typecheck && vitest run",
     "test:smoke": "vitest run --config vitest.smoketest.config.mts",
     "build": "node ../scripts/build-workspace-deps.mjs && pnpm stage:dor-cli && node scripts/esbuild.mjs && rm -rf dist/node-pty && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/node-pty/src dist/node-pty/scripts dist/node-pty/typings dist/node-pty/binding.gyp dist/node-pty/third_party dist/node-pty/prebuilds/*/*.pdb && node scripts/stage-native-direct.mjs && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",

@@ -523,9 +523,9 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     kind: 'standalone',
     sendToUi: send,
     relay,
-    // The one host that answers a `direct-offer` today. Building the factory
-    // loads nothing: the addon is opened inside the first offer, if one ever
-    // comes (`native-direct-peer.ts`).
+    // Both hosts answer a `direct-offer`. Building the factory loads nothing:
+    // the addon is opened inside the first offer, if one ever comes
+    // (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),
   });
   void service.start().catch((error: unknown) => {

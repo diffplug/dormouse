@@ -1,7 +1,7 @@
 /**
  * The messages between a frame origin's service worker, its bootstrap page, and
- * the Client window that holds the session (`docs/specs/pocket-app.md` → scope
- * pocket-frames). None of these cross the session: `FrameClient` speaks that.
+ * the Client window that holds the session (`docs/specs/pocket-app.md` ->
+ * "Frame origin"). None of these cross the session: `FrameClient` speaks that.
  */
 
 import type { HttpHeader, HttpResponseHead, WsOpenResult } from 'remote-lib-common';

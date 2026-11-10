@@ -54,6 +54,23 @@ test('the directives without a default-src fallback admit nothing', () => {
   for (const name of ['base-uri', 'form-action', 'frame-ancestors']) assert.deepEqual(directives.get(name), ["'none'"], name);
 });
 
+// xterm appends runtime `<style>` elements and sets `style` attributes with no
+// nonce, so it needs `'unsafe-inline'`. A packaged build gives every bundled
+// `<style>` element a nonce and adds it to `style-src`, and a source list with
+// a nonce ignores `'unsafe-inline'` — unless `style-src` is exempted from that
+// rewrite. Neither `tauri dev` nor the browser harness applies this policy.
+test("style-src keeps 'unsafe-inline' in a packaged build", () => {
+  const styleSrc = csp
+    .split(';')
+    .map((part) => part.trim().split(/\s+/))
+    .find((parts) => parts[0] === 'style-src');
+  assert.ok(styleSrc.includes("'unsafe-inline'"));
+  // Named, never `true`: that would also drop the nonces Tauri adds to
+  // `script-src`, which carries no `'unsafe-inline'` and relies on them.
+  assert.deepEqual(conf.app.security.dangerousDisableAssetCspModification, ['style-src'],
+    'Tauri may not add a nonce to style-src, and must keep rewriting every other directive');
+});
+
 test('localhost stays allowed for dev and the loopback proxies', () => {
   assert.ok(csp.includes('http://localhost:*') && csp.includes('ws://localhost:*'));
   assert.ok(csp.startsWith("default-src 'self'"));
@@ -90,3 +107,15 @@ test('only the first window may check for or install an update', () => {
     assert.ok(!dflt.permissions.includes(permission), `default does not hold ${permission}`);
   }
 });
+
+// Every window close and destroy runs in Rust, behind the close and quit
+// interception. A webview able to destroy its own window would skip
+// `CloseRequested`, and with it that whole interception. Nothing in the app
+// asks for it: the JS API destroys only from `onCloseRequested`, which the app
+// does not use.
+test('no window may destroy itself', () => {
+  for (const name of ['default', 'main-only']) {
+    assert.ok(!capability(name).permissions.includes('core:window:allow-destroy'), name);
+  }
+});
+

@@ -256,7 +256,7 @@ describe('createToolHost', () => {
       const userConfigPath = join(repo, 'user.yml');
       await writeFile(userConfigPath, USER);
       const host = createToolHost({ stateDir, userConfigPath });
-      const before = await host.handle({ op: 'list', cwd: join(repo) });
+      const before = await host.handle({ op: 'list', cwd: join(repo), global: false });
       expect(before).toEqual({ status: 'list', listing: {
         project: { path: join(repo, 'dormouse.yml'), approved: false },
         user: { path: userConfigPath, found: true },
@@ -269,7 +269,7 @@ describe('createToolHost', () => {
         warnings: [`${join(repo, 'dormouse.yml')}: tools.harness: ignoring unknown field 'colour'`],
       } });
       await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
-      expect(await host.handle({ op: 'list', cwd: repo })).toMatchObject({ listing: { project: { approved: true } } });
+      expect(await host.handle({ op: 'list', cwd: repo, global: false })).toMatchObject({ listing: { project: { approved: true } } });
     });
 
     it('--global lists only user Tools, none shadowed', async () => {
@@ -286,14 +286,14 @@ describe('createToolHost', () => {
     it('answers an empty listing when neither file exists', async () => {
       await rm(join(repo, 'dormouse.yml'));
       const userConfigPath = join(repo, 'missing-user.yml');
-      expect(await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo })).toEqual({ status: 'list', listing: {
+      expect(await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo, global: false })).toEqual({ status: 'list', listing: {
         project: null, user: { path: userConfigPath, found: false }, tools: [], warnings: [],
       } });
     });
 
     it('fails on a malformed file, as lookup does', async () => {
       await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  broken:\n    render: iframe\n');
-      expect(await createToolHost({ userConfigPath: join(repo, 'missing-user.yml') }).handle({ op: 'list', cwd: repo }))
+      expect(await createToolHost({ userConfigPath: join(repo, 'missing-user.yml') }).handle({ op: 'list', cwd: repo, global: false }))
         .toMatchObject({ status: 'error', message: expect.stringContaining("'run' is required") });
     });
   });

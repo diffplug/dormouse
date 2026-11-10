@@ -131,9 +131,6 @@ impl Counters {
             return Err(LoadError::OtherVersion(version));
         }
         let file: File = serde_json::from_value(value).map_err(|e| LoadError::Unreadable(e.to_string()))?;
-        if file.version != VERSION {
-            return Err(LoadError::Unreadable(format!("version {}", file.version)));
-        }
         self.seed(Kind::Surface, file.surface);
         self.seed(Kind::Workspace, file.workspace);
         self.seed(Kind::Window, file.window);

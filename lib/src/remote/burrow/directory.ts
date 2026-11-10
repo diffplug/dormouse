@@ -33,6 +33,8 @@ export interface DirectoryBrowserInput {
   surfaceId: string;
   title: string;
   focused: boolean;
+  /** The user set a TODO on it, the one activity a browser Surface carries. */
+  hasTODO: boolean;
   browser: DirectoryBrowser;
 }
 
@@ -48,7 +50,7 @@ export function buildDirectoryEntry(input: DirectoryInput): DirectoryEntry {
       focused: input.focused,
       alive: true,
       ringing: false,
-      hasTODO: false,
+      hasTODO: input.hasTODO,
       browser: input.browser,
     };
   }

@@ -52,6 +52,11 @@ function assets(request: Request) {
         headers: { location: pathname.slice(0, -"index.html".length) },
       });
     case "/assets/index-B39o2E6i.js":
+      // Cloudflare's assets answer a matching ETag with a 304 carrying the
+      // file's headers.
+      if (request.headers.get("if-none-match") === '"e"')
+        return new WorkerResponse(null, { status: 304, headers: { "content-type": "text/javascript", etag: '"e"' } });
+      return file("export {};", "text/javascript");
     case "/sw.js":
       return file("export {};", "text/javascript");
     case "/manifest.webmanifest":
@@ -77,7 +82,7 @@ afterAll(async () => {
   await relay?.dispose();
 });
 
-const get = (path: string, init?: { method?: string }) =>
+const get = (path: string, init?: { method?: string; headers?: Record<string, string> }) =>
   relay.dispatchFetch(origin + path, { redirect: "manual", ...init });
 
 test("the shell answers the root, every deep link, and its own name, uncached-until-revalidated under Pocket's policy", async () => {
@@ -119,6 +124,9 @@ test("hashed assets are immutable; root files revalidate; a missing asset is a 4
   const script = await get("/assets/index-B39o2E6i.js");
   expect(script.status).toBe(200);
   expect(script.headers.get("cache-control")).toBe(IMMUTABLE);
+  const revalidated = await get("/assets/index-B39o2E6i.js", { headers: { "if-none-match": '"e"' } });
+  expect(revalidated.status).toBe(304);
+  expect(revalidated.headers.get("cache-control")).toBe(IMMUTABLE);
   for (const path of ["/sw.js", "/manifest.webmanifest"]) {
     const response = await get(path);
     expect(response.status, path).toBe(200);

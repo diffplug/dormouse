@@ -9,7 +9,6 @@
 
 import { hostname } from 'node:os';
 import { enrollVerificationUrl, SELF_HOST_DEVICE_CODE_REFUSAL } from './hosted-enrollment-url';
-export { enrollVerificationUrl } from './hosted-enrollment-url';
 import {
   API_ROUTES,
   BurrowAcl,
@@ -381,8 +380,15 @@ const HOLDER_ID_BYTES = 16;
 /** Bytes of the random id that names one service instance to the webviews. */
 const SERVICE_ID_BYTES = 16;
 
-/** How long a revocation goes unsaved before the next try, and how long a person waits on a write that has not failed. */
+/** How long a revocation goes unsaved before the next try. */
 export const REVOCATION_SAVE_RETRY_MS = 30_000;
+
+/**
+ * How long a person waits on a revocation's write that has not failed: under
+ * the webview's own command budget (`BURROW_COMMAND_TIMEOUT_MS`), which would
+ * otherwise answer "timed out" for a phone already refused.
+ */
+export const REVOCATION_ANSWER_MS = 10_000;
 
 /** One entry of `BurrowService.#unsavedRevocations`. */
 interface HeldRevocation {
@@ -1018,7 +1024,10 @@ export class BurrowService {
    */
   async #reconnect(): Promise<BurrowConsoleStatus> {
     await this.#serialize(async () => {
-      if (this.#burrow) this.#burrow.start();
+      // A displaced Burrow is rebuilt from the store, never resumed: another
+      // instance ran this burrowId meanwhile, and what it revoked or paired is
+      // on disk, not in this runtime's ACL.
+      if (this.#burrow && this.#burrow.status !== 'displaced') this.#burrow.start();
       else await this.#start();
     });
     return this.#status();
@@ -1054,7 +1063,12 @@ export class BurrowService {
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
     const burrow = this.#burrow;
-    if (!enrollment || !burrow || relayRefuses(burrow.status)) throw await this.#notConnected();
+    // Nor a displaced one: its token still mints, but the Relay routes the
+    // phone's handshake to the instance that took the slot, which holds no
+    // such invitation, so the code could never pair.
+    if (!enrollment || !burrow || relayRefuses(burrow.status) || burrow.status === 'displaced') {
+      throw await this.#notConnected();
+    }
     const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
       API_ROUTES.burrowSetupToken,
@@ -1323,7 +1337,7 @@ export class BurrowService {
       await Promise.race([
         this.#saveHeldRevocations(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('the write has not finished')), REVOCATION_SAVE_RETRY_MS);
+          timer = setTimeout(() => reject(new Error('the write has not finished')), REVOCATION_ANSWER_MS);
           timer.unref?.();
         }),
       ]);

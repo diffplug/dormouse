@@ -484,7 +484,7 @@ describe('surface.list --all', () => {
   it('scans every Workspace terminal in one batched call, never per Wall', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
-    const port = (value: number): OpenPort => ({ family: 'IPv4', address: '127.0.0.1', port: value, pid: 1 });
+    const port = (value: number): OpenPort => ({ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: value, pid: 1 });
     const getOpenPortsMany = vi.fn(async (ids: string[]) => Object.fromEntries(
       ids.map((id, index) => [id, [port(5000 + index)]]),
     ));

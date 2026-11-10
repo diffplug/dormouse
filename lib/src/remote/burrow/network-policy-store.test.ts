@@ -148,6 +148,24 @@ describe('network policy store', () => {
     expect(getNetworkPolicySnapshot()).toEqual({ kind: 'ready', network: NOTHING });
   });
 
+  it('builds a change on the service’s answer now, not on a mirror no event refreshed', async () => {
+    // A VS Code window outside the broker's peer net hears no event when
+    // another window changes the level.
+    const link = fakeLink(async () => NOTHING);
+    subscribe();
+    await flush();
+    const changed: NetworkPolicyResult = {
+      ...NOTHING,
+      policy: { level: 'anywhere', allowed: [], autoUpdate: true },
+    };
+    link.command.mockImplementation(async (cmd) => (cmd === 'setNetworkPolicy' ? LOCAL : changed));
+
+    await changeNetworkPolicy(({ policy }) => ({ ...policy, allowed: ['10.0.0.0/8'] }));
+    expect(link.command).toHaveBeenCalledWith('setNetworkPolicy', {
+      policy: { level: 'anywhere', allowed: ['10.0.0.0/8'], autoUpdate: true },
+    });
+  });
+
   it('passes a refused set through to the caller', async () => {
     fakeLink(async (cmd) => {
       if (cmd === 'setNetworkPolicy') throw new Error('This build does not offer the relay level.');
