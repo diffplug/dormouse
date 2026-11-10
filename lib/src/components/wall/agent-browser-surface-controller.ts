@@ -16,7 +16,7 @@ import {
   type ViewerSyncState,
 } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
-import { getPlatform } from '../../lib/platform';
+import { getPlatform, IS_MAC } from '../../lib/platform';
 import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { msSince } from '../../lib/elapsed';
@@ -1718,11 +1718,13 @@ export class AgentBrowserSurfaceController {
     }
     // Native editing chords (select-all/copy/cut) don't fire over the stream
     // input path (CDP commands field is dropped), on any platform — Cmd on
-    // macOS, Ctrl elsewhere. Route the intent through the host's purpose-built
+    // macOS, Ctrl elsewhere, so a Mac's Ctrl+C stays the page's own key (a web
+    // terminal's interrupt). Route the intent through the host's purpose-built
     // edit channel instead — a daemon command, so gated like the rest. A host
     // that cannot drive the provider (the fake adapter) falls through, so the
     // page still gets the chord for its own JS shortcuts.
-    if (mod && !e.altKey && !e.shiftKey) {
+    const editMod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+    if (editMod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
       if (op && this.hosted && this.session) {
         this.drive(op, (browser) => browser.edit(op));

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { FakePtyAdapter, IS_MAC, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import { VIEWER_TEXT_INPUT_MAX, encodeViewerFrame, type BrowserRequest, type BrowserResult, type ViewerInput, type ViewerSyncIntent } from '../../lib/platform/browser-automation';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
@@ -330,8 +330,13 @@ describe('painting', () => {
     controller.handleKeyDownLike({ key: 'v', code: 'KeyV', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
     await flushMicrotasks();
     expect(sent().at(-1)).toEqual({ type: 'input_text', text: 'pasted\ntext' });
-    controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false });
+    controller.handleKeyDownLike({ key: 'a', code: 'KeyA', ctrlKey: !IS_MAC, metaKey: IS_MAC, altKey: false, shiftKey: false });
     expect(host.requests('edit')).toEqual([onSess({ op: 'edit', edit: 'selectAll' })]);
+    // The other platform's modifier is the page's key: a Mac's Ctrl+C is a
+    // web terminal's interrupt.
+    controller.handleKeyDownLike({ key: 'c', code: 'KeyC', ctrlKey: IS_MAC, metaKey: !IS_MAC, altKey: false, shiftKey: false });
+    expect(sent().at(-1)).toMatchObject({ type: 'input_keyboard', eventType: 'keyDown', key: 'c' });
+    expect(host.requests('edit')).toHaveLength(1);
     // A view remounted over the open socket asks the host for the last frame.
     controller.attachView(makeSink());
     expect(sent().at(-1)).toEqual({ type: 'repaint' });
