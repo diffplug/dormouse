@@ -11,6 +11,7 @@ import type { Plan } from "../policy-constants";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
 import { ADMIN_EMAIL, entitled, entitledSql, RENEWAL_GRACE } from "../entitlement";
 import { migrations } from "../migrations";
+import { reconcileCommand } from "../reconcile";
 import { ORIGINS, bundleWorker, miniflareOptions, alone } from "./bundle";
 import { workerDatabases } from "./worker-roles";
 
@@ -293,6 +294,70 @@ test("the resync repairs a missed renewal, and does nothing while billing is clo
   expect(await f.entitledOn(member)).toEqual(everywhere(false));
   await resyncBilling(f.setup, f.database.url, origin, noMail);
   expect(await f.entitledOn(member)).toEqual(everywhere(true));
+});
+
+test("the full reconcile reports and repairs exactly the owner a missed cancellation left stale, and refuses a live key", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const [kept, canceled] = [await f.user(), await f.user()];
+  await f.buy(kept, "monthly");
+  const subscription = await f.buy(canceled, "yearly");
+  // Stripe cancels, but the webhook never arrives: the access the stored row
+  // still grants is one the cron's stale resync never looks at.
+  f.dev.transition(subscription.id, "cancel");
+  f.dev.events.length = 0;
+  await resyncBilling(f.setup, f.database.url, origin, noMail);
+  expect(await f.entitledOn(canceled)).toEqual(everywhere(true));
+
+  const env = {
+    DATABASE_URL: f.database.url,
+    STRIPE_SECRET_KEY: f.setup.secretKey,
+    STRIPE_WEBHOOK_SECRET: f.setup.webhookSecret,
+    STRIPE_PRICE_MONTHLY: f.setup.monthly,
+    STRIPE_PRICE_YEARLY: f.setup.yearly,
+    STRIPE_PRICES_FOUNDING: f.setup.founding.join(","),
+  };
+  const inject = { stripe: f.setup.stripe, time: f.time };
+  const reconcile = async (args: string[], environment: Record<string, string | undefined> = env) => {
+    const lines: string[] = [];
+    const code = await reconcileCommand(args, environment, (line) => lines.push(line), inject);
+    return { code, lines };
+  };
+  const stored = async () =>
+    (await f.sql<{ status: string }>(`SELECT status FROM pgstencil_billing.subscriptions WHERE owner_id = $1`, [canceled]))
+      .map(({ status }) => status)
+      .join();
+
+  const dry = await reconcile(["--dry-run"]);
+  expect(dry.code).toBe(0);
+  expect(dry.lines).toHaveLength(2);
+  expect(dry.lines[0]!.startsWith(`would change ${canceled}: ${subscription.id} active `)).toBe(true);
+  expect(dry.lines[0]!.includes(`-> ${subscription.id} canceled `)).toBe(true);
+  expect(dry.lines[1]).toBe("1 of 2 owners would change, 0 failed (dry run: nothing written)");
+  expect(await stored()).toBe("active");
+
+  const run = await reconcile([]);
+  expect(run.code).toBe(0);
+  expect(run.lines.map((line) => line.split(":")[0])).toEqual([`changed ${canceled}`, "1 of 2 owners changed, 0 failed"]);
+  expect(await stored()).toBe("canceled");
+  expect(await f.entitledOn(canceled)).toEqual(everywhere(false));
+  expect(await f.entitledOn(kept)).toEqual(everywhere(true));
+  expect((await reconcile([])).lines).toEqual(["0 of 2 owners changed, 0 failed"]);
+
+  // A live key is refused unless asked for; asked for, StripeDev's test-mode
+  // subscriptions then fail every owner, and the exit code says so.
+  const live = { ...env, STRIPE_SECRET_KEY: "sk_live_dormouse_test_only" };
+  expect(await reconcile([], live)).toEqual({
+    code: 2,
+    lines: ["STRIPE_SECRET_KEY is a live key; pass --allow-live to reconcile production."],
+  });
+  const forced = await reconcile(["--allow-live", "--dry-run"], live);
+  expect(forced.code).toBe(1);
+  expect(forced.lines.at(-1)).toBe("0 of 2 owners would change, 2 failed (dry run: nothing written)");
+  expect((await reconcile(["--force"])).code).toBe(2);
+  expect((await reconcile([], { ...env, STRIPE_PRICE_YEARLY: undefined })).code).toBe(2);
 });
 
 test("the account Worker's cron resyncs through Stripe's API in workerd, and only with every binding", async ({

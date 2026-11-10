@@ -235,11 +235,11 @@ The webhook accepts only events at the installed `stripe` SDK's pinned API versi
 
 **Not yet exercised end to end.** The steps as far as they are known, in the sandbox first, then live:
 
-1. Move `@pgstencil/stripe` and `stripe` together, to releases that pin the same new API version.
+1. Move `@pgstencil/stripe` and `stripe` together, to releases that pin the same new API version, keeping `stripe`'s `~` range: every minor moves the version.
 2. Create a second webhook endpoint at the new version, with the same URL and events as "Webhook endpoint" above, while the old one stays enabled. Stripe delivers each event to every enabled endpoint.
 3. Deploy the Worker built against the new SDK with the new endpoint's signing secret as `STRIPE_WEBHOOK_SECRET`, changing the literal in `stripe-api-version.test.ts` in the same change.
 4. Confirm the new endpoint's deliveries succeed in Stripe's dashboard.
-5. Reconcile every owner. The account cron reconciles at most 20 stale owners each run (`RESYNC_OWNERS` in `hosted/server/billing.ts`, every 10 minutes), and only those `reconcileStale` finds holding a current subscription without access, so it does not cover an event missed during the cut-over. `@pgstencil/stripe`'s `reconcileAll()` is that pass, reporting each owner it changed; no Hosted script runs it yet.
+5. Reconcile every owner, since the account cron's resync (`resyncBilling` in `hosted/server/billing.ts`) finds only owners holding a current subscription without access and so misses a cancellation or refund lost in the cut-over. From `hosted/`, with the migration role's `DATABASE_URL` and the five `STRIPE_*` bindings in the environment from your secret manager, run `pnpm billing:reconcile --dry-run`, then `pnpm billing:reconcile`; a live key also needs `--allow-live`. It prints one line per owner whose stored subscriptions changed, each one event the webhook never applied, and the counts, and exits non-zero if any owner failed.
 6. Disable the old endpoint.
 
 pgstencil's `BILLING.md` -> "Moving to a new Stripe API version" answers two questions from its code, though no deployment has run it either: its events ledger applies each event once, whichever endpoint's copy lands first, and one signing secret suffices, since the new Worker answers 400 to the old endpoint's deliveries, which Stripe retries, so create the new endpoint well before the deploy and let the old one drain before disabling it. The first real move must still answer what the old endpoint's failing deliveries look like in Stripe's dashboard, and whether its retries alert anyone, until it is disabled.
