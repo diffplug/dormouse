@@ -132,6 +132,24 @@ test('moving the caret in a table cell is not an edit', { timeout: 30_000 }, asy
 /** Dispatches the Lexical command named `type` to `editor`, as its key would. */
 const command = (editor, type) => editor.dispatchCommand([...editor._commands.keys()].find(each => each.type === type), undefined);
 
+test('undoing in the document a cell edit its cell already handed off returns it to saved', { timeout: 30_000 }, async () => {
+  await open(TABLE, { act: async (w, posts) => {
+    const { element, editor } = await lastCell(w);
+    type(editor, ' TYPED');
+    await settle();
+    // Leaving the cell hands its text to the table, as MDXEditor does itself.
+    element.blur();
+    await settle();
+    assert.equal(label(w), 'Unsaved');
+    const root = w.document.querySelector('.mdxeditor-root-contenteditable [data-lexical-editor]').__lexicalEditor;
+    command(root, 'UNDO_COMMAND');
+    await settle();
+    assert.equal(label(w), 'Saved');
+    assert.equal(posts.filter(post => post.url === 'state').at(-1).body.dirty, false);
+    assert.equal(saves(posts).length, 0);
+  } });
+});
+
 test('undoing and redoing a saved table edit in the document returns it to saved', { timeout: 30_000 }, async () => {
   await open(TABLE, { act: async (w, posts) => {
     const { editor } = await lastCell(w);
