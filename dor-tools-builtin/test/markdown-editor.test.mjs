@@ -219,7 +219,9 @@ test('a Markdown file with an indented code block opens as source and saves exac
     const page = (await send(viewer, viewer.path)).body.toString();
     assert.match(page, /assets\/editor\.js/, text);
     assert.doesNotMatch(page, /assets\/markdown\.js/, text);
-    const { version } = JSON.parse((await send(viewer, route(viewer, 'source'))).body.toString());
+    const { version, editing } = JSON.parse((await send(viewer, route(viewer, 'source'))).body.toString());
+    // Decided again on every load, so the rich page can leave on a Reload.
+    assert.equal(editing, 'indented');
     const edited = text.replace('Done.', 'Finished.');
     assert.equal((await send(viewer, route(viewer, 'save'), { body: { text: edited, version } })).status, 200);
     assert.equal(await readFile(join(docs, 'doc.md'), 'utf8'), edited);
@@ -230,6 +232,7 @@ test('a Markdown file with no indented code block opens rich', async () => {
   for (const text of RICH) {
     const viewer = await start('doc.md', text);
     assert.match((await send(viewer, viewer.path)).body.toString(), /assets\/markdown\.js/, JSON.stringify(text));
+    assert.equal(JSON.parse((await send(viewer, route(viewer, 'source'))).body.toString()).editing, 'rich');
   }
 });
 

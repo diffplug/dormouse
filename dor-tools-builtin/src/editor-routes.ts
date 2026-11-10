@@ -313,7 +313,13 @@ export function editorRoutes({ kind, file, name, store, onDirty, openLink }: {
       const page = kind === 'image' ? imagePage : kind === 'markdown' && await opensRich(store, file) ? markdownPage : editorPage;
       return { body: page(name), type: 'text/html; charset=utf-8' };
     }
-    if (route === 'source') return imageType ? image(await store.read(file, IMAGE_BOUND), imageType) : json({ ...await readText(store, file), name });
+    if (route === 'source') {
+      if (imageType) return image(await store.read(file, IMAGE_BOUND), imageType);
+      const read = await readText(store, file);
+      // A Markdown file's editor, decided again on every load: the rich page
+      // goes back through `view` when the file no longer opens there.
+      return json({ ...read, name, ...kind === 'markdown' && { editing: markdownEditing(read.text) } });
+    }
     return null;
   };
 }

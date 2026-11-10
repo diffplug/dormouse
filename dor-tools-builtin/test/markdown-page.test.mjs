@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { build } from 'esbuild';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 import { markdownPage } from '../dist/editor-page.js';
 import { mayHoldIndentedCode, parsesIndentedCode } from '../dist/editor-routes.js';
@@ -18,15 +18,22 @@ const page = (await build({
 
 /** Opens `text` (or a `source` that fails with `sourceError`), under
  * `userAgent` when given, and lets the editor settle; then runs `act` against
- * the page's window and its POSTs. */
+ * the page's window, its POSTs, and what `source` serves, which it may change.
+ * `navigations` counts the page's attempts to leave, which jsdom reports. */
 async function open(text, { sourceError, act, userAgent } = {}) {
   const html = markdownPage('doc.md').replace(/<script[^>]*><\/script>/, '').replace(/<link[^>]*>/, '');
-  const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://127.0.0.1:1/cap/view' });
-  const w = dom.window, posts = [];
+  const virtualConsole = new VirtualConsole();
+  let navigations = 0;
+  virtualConsole.on('jsdomError', error => {
+    if (/navigation/.test(error.message)) navigations++;
+    else console.error(error);
+  });
+  const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://127.0.0.1:1/cap/view', virtualConsole });
+  const w = dom.window, posts = [], served = { text, editing: 'rich' };
   w.fetch = async (url, init) => {
     if (init?.method === 'POST') posts.push({ url, body: JSON.parse(init.body) });
     if (url === 'source' && sourceError) return { ok: false, status: 415, text: async () => sourceError };
-    const answer = url === 'source' ? { text, version: 'v1', name: 'doc.md' } : url === 'save' ? { version: 'v2' } : {};
+    const answer = url === 'source' ? { ...served, version: 'v1', name: 'doc.md' } : url === 'save' ? { version: 'v2' } : {};
     return { ok: true, status: 200, json: async () => answer };
   };
   w.eval(`window.matchMedia = q => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {} });
@@ -40,8 +47,9 @@ async function open(text, { sourceError, act, userAgent } = {}) {
   w.eval(page);
   // The editor's effects (its transforms among them) run after its first export.
   await new Promise(done => setTimeout(done, 500));
-  try { await act?.(w, posts); } catch (error) { w.close(); throw error; }
+  try { await act?.(w, posts, served); } catch (error) { w.close(); throw error; }
   const result = {
+    navigations,
     label: w.document.querySelector('.controls .state')?.textContent ?? null,
     error: w.document.querySelector('.error')?.textContent ?? null,
     styled: [...w.document.querySelectorAll('.prose [style]')].map(element => element.outerHTML),
@@ -68,6 +76,32 @@ test('a styled span renders through the HTML allowlist, and opening it is not an
 test('a document that fails to load shows why', async () => {
   const { error } = await open('', { sourceError: 'This editor supports UTF-8 text. Open this file in another editor.' });
   assert.equal(error, 'This editor supports UTF-8 text. Open this file in another editor.');
+});
+
+test('Reload of a file that no longer opens rich goes back through view, and never loads it rich', async () => {
+  const reload = w => [...w.document.querySelectorAll('button')].find(button => button.textContent === 'Reload').click();
+  const prose = w => w.document.querySelector('.prose').textContent;
+  // Changed on disk to hold indented code: the page leaves for `view`.
+  const changed = await open('Before.\n', {
+    async act(w, _posts, served) {
+      Object.assign(served, { text: 'After.\n\n    code\n', editing: 'indented' });
+      reload(w);
+      await new Promise(done => setTimeout(done, 300));
+      assert.match(prose(w), /Before\./);
+      assert.doesNotMatch(prose(w), /After|code/);
+    },
+  });
+  assert.equal(changed.navigations, 1);
+  // Changed and still rich: it reloads in place.
+  const kept = await open('Before.\n', {
+    async act(w, _posts, served) {
+      served.text = 'After.\n';
+      reload(w);
+      await new Promise(done => setTimeout(done, 300));
+      assert.match(prose(w), /After\./);
+    },
+  });
+  assert.equal(kept.navigations, 0);
 });
 
 const settle = (ms = 100) => new Promise(done => setTimeout(done, ms));

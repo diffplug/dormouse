@@ -15,7 +15,7 @@ import {
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type LexicalVisitor, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { checked, documentSession, loadingState, request, stateLabel, textSource, type DocumentState } from './document-session';
+import { checked, documentSession, loadingState, request, stateLabel, textSource, type DocumentSource, type DocumentState } from './document-session';
 import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, pathRoute } from './images-panel';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
@@ -129,6 +129,22 @@ function CellEdits() {
   return <span ref={ref} hidden />;
 }
 
+/** The document's text, unless the file no longer opens rich: then the page
+ * reloads, and its `view` route serves the source editor, so MDXEditor never
+ * loads what a save would restructure. A Reload of a file changed on disk, or
+ * a change between `view` and the first load, reaches it. */
+const markdownSource: DocumentSource<string> = {
+  async load() {
+    const { text, version, name, editing } = await request('source');
+    if (editing !== 'rich') {
+      location.reload();
+      return new Promise(() => {});
+    }
+    return { content: text, version, name };
+  },
+  save: textSource.save,
+};
+
 // The editor trims the document; saves end it with one newline, and the server
 // restores the file's line endings.
 const session = documentSession<string>({
@@ -146,7 +162,7 @@ const session = documentSession<string>({
 }, {
   report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
-}, textSource, view);
+}, markdownSource, view);
 
 /** The document's source for the image node `key`, when it opens as an editable image. */
 function editablePath(editor: LexicalEditor, key: string): string | null {
