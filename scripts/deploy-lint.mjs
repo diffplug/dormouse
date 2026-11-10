@@ -146,7 +146,17 @@ export const RULES = [
   },
   {
     rule: 'A 200 does not say who answered — Windows health waits honor the requested release',
-    patterns: { Windows: /\(-not \$ExpectedRelease -or \(Get-ListeningRelease\) -eq \$ExpectedRelease\)/ },
+    // The manage copy reads its own $PORT; the installer copy must pass the
+    // port, which Get-ListeningRelease takes as a mandatory parameter there.
+    patterns: { Windows: /\(-not \$ExpectedRelease -or \(Get-ListeningRelease(?: -Port \$LOOPBACK_PORT)?\) -eq \$ExpectedRelease\)/ },
+    exactMatches: { Windows: 2 },
+    skip: { macOS: 'wait_for_health binds identity directly', Linux: 'service_healthy binds identity directly' },
+  },
+  {
+    // The Relay answers before it writes run\relay.json, so a single read right
+    // after the first 200 can find no file or the previous release's.
+    rule: 'A 200 does not say who answered — Windows install and restore wait for the identity before reading it',
+    patterns: { Windows: /\[void\]\(Wait-Health -Url "http:\/\/127\.0\.0\.1:\$LOOPBACK_PORT\/api\/hello" -Seconds 10 -ExpectedRelease \$(?:RELEASE_ID|OLD_RELEASE)\)/ },
     exactMatches: { Windows: 2 },
     skip: { macOS: 'wait_for_health binds identity directly', Linux: 'service_healthy binds identity directly' },
   },

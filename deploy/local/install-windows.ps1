@@ -443,7 +443,7 @@ function Wait-Health {
   $deadline = (Get-Date).AddSeconds($Seconds)
   while ((Get-Date) -lt $deadline) {
     if ((Test-Health -Url $Url -TimeoutSec 2) -and
-        (-not $ExpectedRelease -or (Get-ListeningRelease) -eq $ExpectedRelease)) { return $true }
+        (-not $ExpectedRelease -or (Get-ListeningRelease -Port $LOOPBACK_PORT) -eq $ExpectedRelease)) { return $true }
     Start-Sleep -Milliseconds 500
   }
   return $false
@@ -2254,6 +2254,9 @@ rem directly.
     }
     if (Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 40) {
       # Same reason the forward path re-checks: a 200 does not say who answered.
+      # The Relay writes run\relay.json just after it starts answering, so wait
+      # for the identity before reading it once.
+      if (-not $TEST_MODE) { [void](Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 10 -ExpectedRelease $OLD_RELEASE) }
       $restored = if ($TEST_MODE) { $OLD_RELEASE } else { Get-ListeningRelease -Port $LOOPBACK_PORT }
       if ($restored -eq $OLD_RELEASE) {
         Write-Warn2 "the previous release ($OLD_RELEASE) is healthy again."
@@ -2310,7 +2313,10 @@ rem directly.
 
     # A 200 only proves something is listening. Confirm it is THIS release --
     # otherwise an orphan of an older one answering on the same port reads as a
-    # successful update while the old code keeps serving.
+    # successful update while the old code keeps serving. The Relay writes
+    # run\relay.json just after it starts answering, so wait for the identity
+    # before reading it once.
+    [void](Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 10 -ExpectedRelease $RELEASE_ID)
     $listening = Get-ListeningRelease -Port $LOOPBACK_PORT
     if ($listening -ne $RELEASE_ID) {
       Write-Warn2 "port $LOOPBACK_PORT is served by '$(if ($listening) { $listening } else { 'an unidentifiable process' })', not by $RELEASE_ID"
