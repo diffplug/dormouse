@@ -22,7 +22,7 @@ Modifier handling: [layout.md](layout.md#keyboard-shortcuts-command-mode).
 |-----|--------|-------------|
 | `\|` or `%` | Split left/right | New pane to the right, selected, in passthrough. |
 | `-` or `"` | Split top/bottom | New pane below, selected, in passthrough. |
-| `z` | Zoom and focus | Enters passthrough; on the pane that already owns zoom, unzooms. |
+| `z` | Zoom and focus | Zooms the selected pane and enters passthrough. |
 | `m` or `d` | Minimize / reattach | Stays in command mode, unlike `Enter` on a door. |
 | `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; a reopenable or trivial close skips it. |
 | `u` | Reopen | Reopens the last closed Surface, Workspace, or window, whatever is selected; macOS `⌘⇧T` works in both modes. |
@@ -89,6 +89,9 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `↑` / `↓`, `Home` / `End` | Move in a menu | Tab menu rows; `Enter` chooses. |
 | Prompted letter (unmodified, Shift optional) | Confirm kill | Type the letter shown; prompt routing: [layout.md](layout.md#kill-confirmation). |
 | `Enter` / `Esc` (stray-key prompt) | Type / stay | Raised by a key no command-mode binding claims ([layout.md](layout.md#keyboard-shortcuts-command-mode)). |
+| `Space` (command) | Activate control | On a focused button or switch; never a stray. |
+| `⌘C` / `Ctrl+C` (terminal context) | Copy diagnostic | Copies selected diagnostic text, never the helper's. |
+| `⌘A` (macOS) | — | Cancelled outside text fields, both modes (`docs/specs/mouse-and-clipboard.md` → "3.9 Select All"). |
 
 ## VS Code host
 

@@ -13,7 +13,7 @@ A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Base
 
 Two areas: Content, the tiling layout of Panes rendered by the Lath engine, and the Baseboard.
 
-Lath holds the geometry; the Wall holds selection (`selectedId` / `selectedType`), modes, and Activity + TODO state. Source of truth: `Wall` in `lib/src/components/Wall.tsx`.
+Lath holds the geometry; the Wall holds selection (`selectedId` / `selectedType`) and modes. Source of truth: `Wall` in `lib/src/components/Wall.tsx`.
 
 ## Content
 
@@ -241,7 +241,7 @@ flowchart TD
   MA -- yes --> CM["command mode"]
 ```
 
-**Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
+**Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key, and stop propagation of its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
 
 Every open dialog holds its own reference-counted lease on the dialog gate; command-mode dispatch resumes only once the last lease is released.
 
