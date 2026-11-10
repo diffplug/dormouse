@@ -124,10 +124,12 @@ export function parseBrowserSection(text: string, path: string): BrowserConfigLa
   return browserFromDocument(parseDocument(text, path).data, path);
 }
 
-/** Substitutions a `prespawn_dedupe` element may use. Closed set: an
+/** Substitutions a list `run` or `prespawn_dedupe` element may use. Closed set: an
  *  unrecognized `$NAME` is a parse error, never a literal, because a typo kept
  *  as a constant string dedupes across every worktree on the machine. */
 const SUBSTITUTIONS = ['$HERE', '$CWD', '$TARGET'] as const;
+
+const unknownSubstitution = (token: string) => `unknown substitution '${token}' (known: ${SUBSTITUTIONS.join(', ')})`;
 
 // `$` followed by an identifier. Matches the whole token so an unknown one can
 // be named in the error rather than silently surviving as text.
@@ -164,9 +166,7 @@ function validateSubstitutions(template: readonly string[], where: string): void
   for (const element of template) {
     for (const token of element.match(SUBSTITUTION_TOKEN) ?? []) {
       if (!(SUBSTITUTIONS as readonly string[]).includes(token)) {
-        throw new ToolFileError(
-          `${where}: unknown substitution '${token}' (known: ${SUBSTITUTIONS.join(', ')})`,
-        );
+        throw new ToolFileError(`${where}: ${unknownSubstitution(token)}`);
       }
     }
   }
@@ -311,7 +311,7 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
       return context.target;
     }
     if (token === '$HERE') return context.here;
-    throw new ToolFileError(`tool '${toolName}': unknown substitution '${token}'`);
+    throw new ToolFileError(`tool '${toolName}': ${unknownSubstitution(token)}`);
   });
 }
 
