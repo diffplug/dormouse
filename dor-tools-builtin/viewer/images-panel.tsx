@@ -84,11 +84,15 @@ export function imageSources(root: LexicalEditor): string[] {
   return [...found];
 }
 
-/** `src` with its file name replaced, keeping its folder and spelling style. */
-function renamedSource(src: string, name: string): string {
+/** `src` with its file name replaced by `name`, keeping its folder and
+ * spelling style, so that it reads back as `path`, the renamed file: escaped
+ * when the old name was, or when the raw name would not read back (a `#`,
+ * `?` or `%` in it). */
+export function renamedSource(src: string, name: string, path: string): string {
   const base = src.split(/[?#]/, 1)[0];
   const folder = base.slice(0, base.lastIndexOf('/') + 1);
-  return folder + (/%[\da-f]{2}/i.test(base.slice(folder.length)) ? encodeURIComponent(name) : name);
+  const raw = folder + name;
+  return /%[\da-f]{2}/i.test(base.slice(folder.length)) || localImagePath(raw) !== path ? folder + encodeURIComponent(name) : raw;
 }
 
 function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: LexicalEditor; generation: number; onEdit(path: string): void }) {
@@ -104,7 +108,7 @@ function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: Le
     setState({ busy: true });
     try {
       await request('rename', { from: path, to: folder + next });
-      const replacement = renamedSource(src, next);
+      const replacement = renamedSource(src, next, folder + next);
       updateImages(editor, node => { if (node.getSrc() === src) node.setSrc(replacement); });
       setState({});
     } catch (error) { setState({ error: message(error) }); }
