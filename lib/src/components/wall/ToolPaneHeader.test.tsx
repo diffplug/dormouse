@@ -118,7 +118,7 @@ describe('ToolPaneHeader — a serving Tool', () => {
   });
 
   it("shows its Session's TODO pill, which clears the TODO", () => {
-    act(() => setTerminalActivity(ID, { todo: true, notification: { title: 'Tool finished', body: null } }));
+    act(() => setTerminalActivity(ID, { todo: true, notification: { source: 'OSC 9', title: 'Tool finished', body: null } }));
     renderHeader(SERVING);
     const pill = container.querySelector<HTMLButtonElement>(`[data-session-todo-for="${ID}"]`);
     expect(pill?.getAttribute('aria-label')).toBe('Dismiss TODO: Tool finished');

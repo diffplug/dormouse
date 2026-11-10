@@ -124,7 +124,7 @@ describe('BurrowRuntime bounds', () => {
   let burrow: BurrowRuntime;
   let clock: ReturnType<typeof createTestClock>;
   let crypto: ReturnType<typeof countCrypto>;
-  let approvals: PendingPairing[] = [];
+  let approvals: Omit<PendingPairing, 'kind'>[] = [];
   let sessions: Array<{
     handled: unknown[];
     disposed: boolean;
@@ -648,8 +648,8 @@ describe('BurrowRuntime bounds', () => {
     // A third authorized identity arriving under c2's relay-chosen key.
     const { outcome } = await connectClient('c2', third);
     expect(outcome).toEqual({ ok: true, burrowLabel: 'Ned’s laptop' });
-    expect(sessions[1]!.disposed).toBe(true, 'c2 held one session, and now holds this one');
-    expect(sessions[0]!.disposed).toBe(false, 'nobody else was touched');
+    expect(sessions[1]!.disposed, 'c2 held one session, and now holds this one').toBe(true);
+    expect(sessions[0]!.disposed, 'nobody else was touched').toBe(false);
     expect(burrow.establishedSessionCount).toBe(2);
     expect(burrow.trackedClientCount).toBe(2);
   });

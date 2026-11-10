@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { touchesHosted } from "./changed.mjs";
+
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 test("Hosted and shared inputs trigger previews; unrelated application changes do not", () => {
   for (const path of [
     "hosted/README.md",
@@ -11,6 +16,9 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "hosted/wrangler.voice.jsonc",
     "pnpm-lock.yaml",
     "website/public/favicon.svg",
+    "website/src/lib/hosted-pricing.ts",
+    "website/src/lib/hosted-withdrawal.ts",
+    "website/src/lib/hosted-cohorts.ts",
     ".github/workflows/hosted-preview.yml",
     "lib/src/theme-colors.css",
     "lib/src/lib/themes/bundled.json",
@@ -28,7 +36,7 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "lib/scripts/assert-pocket-worker.mjs",
     "lib/package.json",
     // Pocket's whole import graph, not only its remote modules.
-    "lib/src/components/wall/MobileWall.tsx",
+    "lib/src/components/MobileWall.tsx",
     "lib/src/lib/platform/types.ts",
     "lib/src/index.css",
     "dor-lib-common/src/spawn.ts",
@@ -50,4 +58,20 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
   ])
     assert.equal(touchesHosted([path]), false, path);
   assert.equal(touchesHosted([]), false);
+});
+
+test("every website module Hosted imports triggers a preview", () => {
+  const targets = new Set();
+  for (const dir of ["hosted/server", "hosted/src"]) {
+    for (const entry of readdirSync(path.join(repo, dir), { recursive: true })) {
+      if (!/\.tsx?$/.test(entry)) continue;
+      const file = path.join(repo, dir, entry);
+      for (const [, spec] of readFileSync(file, "utf8").matchAll(/from\s+["']([./]+website\/[^"']+)["']/g)) {
+        const target = path.relative(repo, path.resolve(path.dirname(file), spec)).split(path.sep).join("/");
+        targets.add(/\.tsx?$/.test(target) ? target : `${target}.ts`);
+      }
+    }
+  }
+  assert.ok(targets.size > 0, "found no website imports");
+  for (const target of targets) assert.equal(touchesHosted([target]), true, target);
 });

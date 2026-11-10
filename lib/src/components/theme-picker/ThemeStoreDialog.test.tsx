@@ -17,12 +17,17 @@ vi.mock('../../lib/themes', () => ({
   setActiveThemeId: vi.fn(),
 }));
 
-import { fetchExtensionThemes, searchThemes, type OpenVSXExtension } from '../../lib/themes';
+import { fetchExtensionThemes, searchThemes, type OpenVSXExtension, type OpenVSXSearchResult } from '../../lib/themes';
 import { ThemeStoreDialog } from './ThemeStoreDialog';
 import { setNativeFieldValue } from '../../lib/dom';
 import { ensureDialogModal } from '../wall/wall-test-utils';
 
 const searchThemesMock = vi.mocked(searchThemes);
+
+/** One page holding every match. */
+function results(...extensions: OpenVSXExtension[]): OpenVSXSearchResult {
+  return { extensions, totalSize: extensions.length, offset: 0 };
+}
 
 function extension(name: string, displayName: string): OpenVSXExtension {
   return {
@@ -104,7 +109,7 @@ describe('ThemeStoreDialog', () => {
   });
 
   it('stops searching when the box is emptied while a request is in flight', async () => {
-    let resolveSearch!: (result: { extensions: OpenVSXExtension[] }) => void;
+    let resolveSearch!: (result: OpenVSXSearchResult) => void;
     searchThemesMock.mockImplementationOnce(
       () => new Promise((resolve) => { resolveSearch = resolve; }),
     );
@@ -120,7 +125,7 @@ describe('ThemeStoreDialog', () => {
       typeQuery('');
       act(() => { vi.advanceTimersByTime(300); });
       await act(async () => {
-        resolveSearch({ extensions: [extension('dracula', 'Dracula Official')] });
+        resolveSearch(results(extension('dracula', 'Dracula Official')));
       });
 
       expect(container.textContent).not.toContain('Searching...');
@@ -160,9 +165,7 @@ describe('ThemeStoreDialog', () => {
   });
 
   it('reports a failed install', async () => {
-    searchThemesMock.mockImplementationOnce(async () => ({
-      extensions: [extension('dracula', 'Dracula Official')],
-    }));
+    searchThemesMock.mockImplementationOnce(async () => results(extension('dracula', 'Dracula Official')));
     let rejectInstall!: (reason: Error) => void;
     vi.mocked(fetchExtensionThemes).mockImplementationOnce(
       () => new Promise((_resolve, reject) => { rejectInstall = reject; }),
@@ -225,9 +228,7 @@ describe('ThemeStoreDialog', () => {
   });
 
   it('keeps a row installing while another install settles', async () => {
-    searchThemesMock.mockImplementationOnce(async () => ({
-      extensions: [extension('dracula', 'Dracula Official'), extension('nord', 'Nord Theme')],
-    }));
+    searchThemesMock.mockImplementationOnce(async () => results(extension('dracula', 'Dracula Official'), extension('nord', 'Nord Theme')));
     let resolveFirst!: () => void;
     vi.mocked(fetchExtensionThemes)
       .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = () => resolve([]); }))
@@ -251,8 +252,8 @@ describe('ThemeStoreDialog', () => {
   });
 
   it('ignores a superseded search whose response arrives last', async () => {
-    let resolveFirst!: (result: { extensions: OpenVSXExtension[] }) => void;
-    let resolveSecond!: (result: { extensions: OpenVSXExtension[] }) => void;
+    let resolveFirst!: (result: OpenVSXSearchResult) => void;
+    let resolveSecond!: (result: OpenVSXSearchResult) => void;
     searchThemesMock
       .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
       .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
@@ -268,10 +269,10 @@ describe('ThemeStoreDialog', () => {
 
       // The newer query answers first; the older one lands afterwards.
       await act(async () => {
-        resolveSecond({ extensions: [extension('nord', 'Nord Theme')] });
+        resolveSecond(results(extension('nord', 'Nord Theme')));
       });
       await act(async () => {
-        resolveFirst({ extensions: [extension('dracula', 'Dracula Official')] });
+        resolveFirst(results(extension('dracula', 'Dracula Official')));
       });
 
       expect(container.textContent).toContain('Nord Theme');

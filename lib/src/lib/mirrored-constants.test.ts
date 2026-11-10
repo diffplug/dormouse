@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve, win32 } from 'node:path';
+import { dirname, resolve, win32 } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PAIRING_OUTCOME_COPY,

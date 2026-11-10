@@ -13,7 +13,6 @@ import { FakeBurrow } from '../../../remote-lib-common/test/harness/fake-burrow.
 export {
   e2eBurrowFrame,
   e2eClientFrame,
-  e2ePrologueFor,
   establish,
   flip,
   newE2eId,

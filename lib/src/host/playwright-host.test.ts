@@ -52,7 +52,7 @@ test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, inp
     const { url: viewUrl } = await pw({ op: 'view', stream: opened.stream! }, req);
     viewer = await openViewer(viewUrl!);
     await waitFor(() => viewer!.frames.length > 0 && viewer!.states.some(m => m.type === 'tabs'));
-    await waitFor(() => viewer!.states.some(m => m.type === 'tabs' && m.tabs.some(t => t.title.startsWith('first:1440x900@'))));
+    await waitFor(() => viewer!.states.some(m => m.type === 'tabs' && m.tabs.some(t => t.title?.startsWith('first:1440x900@'))));
     await expect(openViewer(viewUrl!)).rejects.toThrow('403');
     // Parking drops the viewer socket, then reconnects to the same CLI browser.
     viewer.socket.close();
