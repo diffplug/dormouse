@@ -41,7 +41,6 @@ $INSTALL_ROOT = Join-Path $env:LOCALAPPDATA 'Dormouse Relay'
 $LOOPBACK_PORT = 3100
 
 $ASSUME_YES = $Yes.IsPresent
-if ($env:DORMOUSE_INSTALL_ASSUME_YES -eq '1') { $ASSUME_YES = $true }
 $TEST_MODE = ($env:DORMOUSE_INSTALL_TEST -eq '1')
 
 # A throwaway install root, for exercising path quoting, task generation,
