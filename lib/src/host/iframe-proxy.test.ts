@@ -380,7 +380,8 @@ describe('iframe proxy — serving', () => {
     const fetched = await request(url, { headers: { 'sec-fetch-dest': 'empty' } });
     expect(fetched.body).toBe(json);
     expect(fetched.headers['x-frame-options']).toBeUndefined();
-    for (const headers of [{ 'sec-fetch-dest': 'iframe' }, {}]) {
+    const documentLoads: Record<string, string>[] = [{ 'sec-fetch-dest': 'iframe' }, {}];
+    for (const headers of documentLoads) {
       expect((await request(url, { headers })).body, JSON.stringify(headers)).toContain('__dormouse');
     }
   });
