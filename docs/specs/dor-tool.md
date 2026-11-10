@@ -407,6 +407,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 **Must persist a preview slot's mark and an opened Tool's canonical target with its Tool metadata**, so a cold-restored slot is still the slot ([Preview slot](#preview-slot)); a persisted target containing terminal controls is rejected, as argv is.
 
+**Must persist a declared Tool's origin, the `dormouse.yml` that declared it, with its Tool metadata**, rejecting one that is not an absolute path or contains terminal controls, as the target is. It is the host lookup's answer, never the renderer's, a request's, or the Tool's; a retarget replaces it; built-in and anonymous Tools have none. `dor list --json` reports it with the Tool's name and scope.
+
 **Must retain resolved argv for argument-list Tools and re-quote it for the shell selected at cold restore** (rationale). Literal shell-string commands retain their saved text. Persisted argv containing terminal controls is rejected before any PTY restores.
 
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, never starting the command in a plain terminal with no serving behavior.

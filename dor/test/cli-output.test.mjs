@@ -1678,6 +1678,19 @@ test('list tags the preview slot in text and JSON only', async () => {
   assert.deepEqual(JSON.parse(json.stdout).surfaces.map((surface) => [surface.id, surface.preview]), [['surface:1', undefined], ['surface:2', true]]);
 });
 
+test('list reports a Tool\'s declared identity in JSON only, and nothing for a terminal', async () => {
+  const tool = { ...fixtureSurfaces[1], kind: 'tool', toolName: 'docs', toolScope: 'user', toolOrigin: { file: '/home/me/.config/dormouse/dormouse.yml' } };
+  const surfaces = [fixtureSurfaces[0], tool];
+  const text = await runCli(['list'], { client: fixtureClient(surfaces), env: listEnv });
+  assert.equal(text.stdout, (await runCli(['list'], { client: fixtureClient([fixtureSurfaces[0], { ...fixtureSurfaces[1], kind: 'tool' }]), env: listEnv })).stdout);
+  const rows = JSON.parse((await runCli(['list', '--json'], { client: fixtureClient(surfaces), env: listEnv })).stdout).surfaces;
+  assert.deepEqual(rows.map((row) => [row.tool_name, row.tool_scope, row.tool_origin]), [
+    [undefined, undefined, undefined],
+    ['docs', 'user', { file: '/home/me/.config/dormouse/dormouse.yml' }],
+  ]);
+  assert.equal(Object.keys(rows[0]).some((field) => field.startsWith('tool_')), false);
+});
+
 test('list --all groups every Workspace under a header', async () => {
   const client = fixtureClient();
   const result = await runCli(['list', '--all'], { client, env: listEnv });
@@ -2193,7 +2206,8 @@ test('tool and open escape control and format characters in the host answer, in 
 });
 
 test('list escapes control characters in Tool commands, titles, locations, and Workspace names', async () => {
-  const evil = { ...fixtureSurfaces[0], kind: 'tool', title: 'site\u009b31m', cwd: '/work/\u007fsite', command: 'run \u001b]52;c;x\u0007 \u0085' };
+  const evil = { ...fixtureSurfaces[0], kind: 'tool', title: 'site\u009b31m', cwd: '/work/\u007fsite', command: 'run \u001b]52;c;x\u0007 \u0085',
+    toolName: 'docs\u001b[2J', toolScope: 'project', toolOrigin: { file: '/work/\u009dsite/dormouse.yml' } };
   const client = fixtureClient([evil]);
   client.listWorkspaces = async () => ({ workspaces: [{ ...fixtureWorkspaces[0], name: 'ws\u009d' }], windowRef: 'window:1' });
   const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
@@ -2202,7 +2216,10 @@ test('list escapes control characters in Tool commands, titles, locations, and W
     assert.equal(result.exitCode, 0, argv.join(' '));
     assert.doesNotMatch(result.stdout, controls, argv.join(' '));
   }
-  assert.equal(JSON.parse((await runCli(['list', '--json'], { client })).stdout).surfaces[0].command, evil.command);
+  const row = JSON.parse((await runCli(['list', '--json'], { client })).stdout).surfaces[0];
+  assert.equal(row.command, evil.command);
+  assert.equal(row.tool_name, evil.toolName);
+  assert.deepEqual(row.tool_origin, evil.toolOrigin);
 });
 
 test('workspace verbs escape control characters in the Workspace name', async () => {

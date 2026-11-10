@@ -297,6 +297,20 @@ describe('saveSession', () => {
     expect(tool('named')).not.toHaveProperty('target');
   });
 
+  it('persists a declared Tool\'s origin, and none for a Tool without one', async () => {
+    const platform = createPlatform(null);
+    const params = { surfaceType: 'tool', command: 'pnpm docs', toolName: 'docs', toolOrigin: { file: '/repo/dormouse.yml' } };
+    await saveSession(platform, [
+      { id: 'declared', title: 'docs', surfaceType: 'tool', params },
+      { id: 'anonymous', title: 'pnpm dev', surfaceType: 'tool', params: { surfaceType: 'tool', command: 'pnpm dev' } },
+    ], [{ id: 'door', title: 'docs', component: 'tool', params }]);
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    const tool = (id: string) => saved.panes.find(pane => pane.id === id)?.tool;
+    expect(tool('declared')?.origin).toEqual({ file: '/repo/dormouse.yml' });
+    expect(tool('door')?.origin).toEqual({ file: '/repo/dormouse.yml' });
+    expect(tool('anonymous')).not.toHaveProperty('origin');
+  });
+
   it('keeps resolved argv independently of the live shell command for panes and Doors', async () => {
     const platform = createPlatform(null);
     const toolArgv = ['program path', "it's.txt", '$(literal)'];

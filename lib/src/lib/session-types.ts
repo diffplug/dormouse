@@ -1,10 +1,11 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
-import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
+import { isToolKeyScope, isToolOrigin, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { SessionStatus } from './alert-manager';
 import type { WorkspaceMeta } from './workspace-store';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
+import type { ToolOrigin } from 'dor/commands/types';
 import {
   ACTIVITY_NOTIFICATION_SOURCES,
   type ActivityNotification,
@@ -37,6 +38,8 @@ export interface PersistedToolMetadata {
   preview?: true;
   /** The canonical file an `open` gave this Tool. */
   target?: string;
+  /** The `dormouse.yml` that declared a project or user Tool. */
+  origin?: ToolOrigin;
   /** Stopped while idle: restored with no process, started when shown
    *  (`docs/specs/dor-tool.md` -> Reaping). */
   reaped?: true;
@@ -220,8 +223,15 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string'))) &&
     (value.preview === undefined || value.preview === true) &&
     (value.target === undefined || (typeof value.target === 'string' && !hasShellInputControls(value.target))) &&
+    (value.origin === undefined || isPersistedToolOrigin(value.origin)) &&
     (value.reaped === undefined || value.reaped === true)
   );
+}
+
+/** An origin is held to what a target is held to, and must be absolute. */
+function isPersistedToolOrigin(value: unknown): value is ToolOrigin {
+  return isToolOrigin(value) && !hasShellInputControls(value.file)
+    && /^(?:[\\/]|[A-Za-z]:[\\/])/.test(value.file);
 }
 
 /** Typed into a terminal after quoting: controls cannot be made safe by quotes. */
