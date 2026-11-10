@@ -422,8 +422,7 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(leafCount()).toBe(1);
 
-    // 4. A save (flushed via pagehide) writes the Lath layout only (no legacy
-    //    dockview `layout` key).
+    // 4. A save (flushed via pagehide) writes the Lath layout.
     await act(async () => {
       window.dispatchEvent(new Event('pagehide'));
     });
@@ -4157,7 +4156,7 @@ describe('Wall on the Lath engine', () => {
     await flush();
   }
 
-  it('reattaches an untouched Door only far enough to close it, with no overlay', async () => {
+  it('closes an untouched Door in place, with no overlay', async () => {
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     await killSelectedDoor();
     expect(container.querySelector('[data-door-id="surface:a"]')).toBeNull();

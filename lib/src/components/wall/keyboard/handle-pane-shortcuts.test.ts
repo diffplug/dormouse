@@ -41,7 +41,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     modeRef: { current: 'command' },
     selectedIdRef: { current: 'pane-a' },
     selectedTypeRef: { current: 'pane' },
-    doorsRef: { current: [{ id: 'pane-a', title: 'Pane A' }] },
+    doorsRef: { current: [{ id: 'pane-a' }] },
     dialogKeyboardActiveRef: { current: false },
     strayKeyRef: { current: null },
     raiseStrayKey: vi.fn(),
@@ -72,7 +72,7 @@ function keydownMeta(key: string): KeyboardEvent {
   return new KeyboardEvent('keydown', { key, metaKey: true, bubbles: true, cancelable: true });
 }
 
-describe('handlePaneShortcuts kill behavior', () => {
+describe('handlePaneShortcuts modifiers and kill', () => {
 
   it.each(['metaKey', 'ctrlKey', 'altKey'] as const)('leaves %s chords out of bare pane actions', modifier => {
     for (const key of ['x', 't', '-', 'Enter', ',']) {
