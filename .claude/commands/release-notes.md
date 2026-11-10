@@ -40,12 +40,10 @@ Run `./scripts/bump-version.sh X.Y.Z` with the recommended version before editin
 
 ## 4. Edit `CHANGELOG.md`
 
-Edit `CHANGELOG.md` directly — insert a new section above the most recent existing release, in this exact shape:
+Edit `CHANGELOG.md` directly — insert a new section directly below `## [Unreleased]` and above the most recent existing release, in this exact shape:
 
 ```markdown
 ## [X.Y.Z] - YYYY-MM-DD
-
-_Recommended bump: **<breaking|added|bugfix>** — <one-sentence justification naming the change that drives it>._
 
 ### Added
 - Summary that affects both artifacts (no leading emoji) ...
@@ -66,6 +64,8 @@ Rules for the entries:
 - Link the PR using `https://github.com/diffplug/dormouse/pull/<N>`. For direct-push commits with no PR, link the commit instead: `https://github.com/diffplug/dormouse/commit/<sha>`
 - Omit any of Added / Changed / Fixed if it would be empty
 - Use today's date (`YYYY-MM-DD`) and the recommended `X.Y.Z`
+- Move every entry under `## [Unreleased]` into the new section (they ship in this release), merging any you also derived from git, and leave `## [Unreleased]` in place with nothing under it
+- Put nothing in the section but the heading and the entries: everything in it is copied into the GitHub Release, the Blyg post, and the website changelog
 
 Do not ask the user to paste it themselves — make the edit. The earlier flat-bullet entries (0.8.0 and below) are legacy; do not reformat them.
 
@@ -73,6 +73,6 @@ Do not ask the user to paste it themselves — make the edit. The earlier flat-b
 
 Do not run `website/scripts/generate-changelog.js` as part of the release-notes command. `website/src/data/changelog.json` is a gitignored generated artifact, and the website `prebuild`, `predev`, and `pretest` lifecycle scripts regenerate it from `CHANGELOG.md`.
 
-Then remind the user of the next step:
+Then tell the user the recommended bump — **breaking**, **added**, or **bugfix** — with a one-sentence justification naming the change that drives it, and remind them of the next step:
 
 > Review the diff, then `git commit -am 'Release vX.Y.Z'` and `git tag vX.Y.Z`.
