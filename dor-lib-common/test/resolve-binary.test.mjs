@@ -53,6 +53,18 @@ test('a relative PATH entry is skipped on Windows, whatever the cwd holds', asyn
   });
 });
 
+test('a quoted PATH entry is searched unquoted on Windows, as which does', async () => {
+  await inPlantedFolder(async (root) => {
+    const real = path.join(root, 'real');
+    await mkdir(real);
+    await plant(`${real}\\git.EXE`);
+    await plant(path.join(root, '.\\git.EXE'));
+    await plant(path.join(root, 'bin\\git.EXE'));
+    assert.equal(resolveBinaryPath('git', { Path: `"${real}"`, PATHEXT: '.EXE' }, true), `${real}\\git.EXE`);
+    assert.equal(resolveBinaryPath('git', { Path: `".";"bin"`, PATHEXT: '.EXE' }, true), undefined);
+  });
+});
+
 test('an explicit path comes back only when absolute', async () => {
   await inPlantedFolder(async (root) => {
     await plant(path.join(root, 'agent-browser'));

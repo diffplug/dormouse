@@ -107,7 +107,9 @@ export function resolveBinaryPath(binary: string, env: BinaryEnv, isWindows = pr
   const pathVar = envValue(env, 'PATH', isWindows);
   if (!pathVar) return undefined;
   const names = binaryCandidateNames(binary, env, isWindows);
-  for (const dir of pathVar.split(isWindows ? ';' : ':')) {
+  for (const entry of pathVar.split(isWindows ? ';' : ':')) {
+    // `which` drops one pair of quotes around an entry, as cmd.exe does.
+    const dir = isWindows && /^".*"$/.test(entry) ? entry.slice(1, -1) : entry;
     if (!dir || !isAbsolutePath(dir, isWindows)) continue;
     for (const name of names) {
       const candidate = `${dir}${isWindows ? '\\' : '/'}${name}`;
