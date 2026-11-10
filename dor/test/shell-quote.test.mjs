@@ -61,6 +61,8 @@ test('a Windows-portable command keeps its program bare and refuses what any of 
     buildWindowsPortableCommand(['dor', '__view-file', 'C:\\a b\\it’s (1)&x.md']),
     'dor __view-file "C:\\a b\\it’s (1)&x.md"',
   );
+  // PowerShell would split a bare `-Dkey.sub=value` at its `.`.
+  assert.equal(buildWindowsPortableCommand(['java', '-Dserver.port=8081', '-p:Version=1.2']), 'java "-Dserver.port=8081" -p:Version=1.2');
   assert.equal(buildWindowsPortableCommand(['C:\\Program Files\\view.exe', 'a.md']), null);
   for (const arg of ['', 'C:\\a&rem.md', 'C:\\a^b.md', 'C:\\a b\\', 'C:\\$(whoami).md', 'a`b', '%PATH%', 'a!b', 'a"b', 'a“b', 'a\rb']) {
     assert.equal(buildWindowsPortableCommand(['dor', arg]), null, arg);
@@ -193,7 +195,11 @@ function powerShellValues(line) {
       const end = rest.indexOf(' ', i) < 0 ? rest.length : rest.indexOf(' ', i);
       const word = rest.slice(i, end);
       if (!/^[A-Za-z0-9_+=:./\\-]+$/.test(word)) throw new Error(`PowerShell reads ${word} in ${line} as syntax`);
-      values.push(word);
+      // A word starting `-` and a letter is a parameter, whose name ends at the
+      // first of these characters; at a `.` the rest is a second value.
+      const parameter = /^-[A-Za-z_?][^{}();,|&.[:\s]*/.exec(word)?.[0];
+      if (parameter && word[parameter.length] === '.') values.push(parameter, word.slice(parameter.length));
+      else values.push(word);
       i = end;
     }
   }
@@ -223,6 +229,7 @@ function standardNativeLine([program, ...values]) {
 const POWERSHELL_TRICKY_ARGV = [
   'say "hi"', '"', 'x"y', 'a"&calc&"b', '\\"', 'a\\"b', '"a b"', '', 'a b\\', 'a b\\\\', 'a\u00a0b\\', 'C:\\a b\\', 'a\\',
   'a&b', 'a^b', 'a|b', '<x>', 'a b', "it's", 'x’y', '$HOME', '$(calc)', '`n', '@args', 'a,b', 'tab\there', '%PATH%',
+  '-Dserver.port=8081', '-p:Version=1.2', '--out=a.js',
 ];
 
 test('PowerShell quoting reads back through either native binding and then the program argv parser', () => {

@@ -44,6 +44,12 @@ const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+:,./-][A-Za-z0-9_@%+=:,./-]*$/;
 // `@` starts splatting / array / hashtable syntax. cmd.exe also treats `,` as an
 // argument separator, so the shared set conservatively quotes both characters.
 const WINDOWS_SAFE_ARG = /^[A-Za-z0-9_+=:./\\-]+$/;
+// PowerShell's argument mode scans a bare token that starts with `-` and a
+// letter as a parameter whose name ends at the first `.`, splitting
+// `-Dserver.port=8081` in two; a `:` first ends it as one token. Quoted, it is
+// one argument.
+const POWERSHELL_SPLIT_PARAMETER = /^-[A-Za-z_?][^:]*\./;
+const powerShellBare = (arg: string) => WINDOWS_SAFE_ARG.test(arg) && !POWERSHELL_SPLIT_PARAMETER.test(arg);
 
 export function shellCommandKind(shell: string | undefined, platformString: string): ShellCommandKind {
   const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
@@ -120,7 +126,7 @@ const POWERSHELL_SINGLE_QUOTES = /['\u2018-\u201b]/g;
  *  `EscapeSingleQuotedStringContent` does. */
 export function quotePowerShellArg(arg: string): string {
   if (arg === '') return "''";
-  if (WINDOWS_SAFE_ARG.test(arg)) return arg;
+  if (powerShellBare(arg)) return arg;
   return `'${arg.replace(POWERSHELL_SINGLE_QUOTES, (c) => c + c)}'`;
 }
 
@@ -137,7 +143,7 @@ const WINDOWS_PORTABLE_UNSAFE = /["“-„`%!]|\$(?!\\)/;
  *  literal. Null when no such form exists. */
 export function quoteWindowsPortableArg(arg: string): string | null {
   if (arg === '') return null;
-  if (WINDOWS_SAFE_ARG.test(arg)) return arg;
+  if (powerShellBare(arg)) return arg;
   if (WINDOWS_PORTABLE_UNSAFE.test(arg) || hasShellInputControls(arg)) return null;
   // PowerShell's legacy native binder removes our quotes unless there is an
   // ASCII space. A .cmd target then parses these characters as syntax. Empty
