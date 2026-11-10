@@ -117,6 +117,8 @@ describe('browserSurfaceUrl', () => {
     expect(browserSurfaceUrl('http://localhost:5173/app')).toBe('http://localhost:5173/app');
     expect(browserSurfaceUrl('https://example.test/x?q=1#f')).toBe('https://example.test/x?q=1#f');
     expect(browserSurfaceUrl('localhost:5173')).toBe('http://localhost:5173');
+    expect(browserSurfaceUrl(':5173')).toBe('http://localhost:5173');
+    expect(browserSurfaceUrl(':5173/app?x=1')).toBe('http://localhost:5173/app?x=1');
     expect(browserSurfaceUrl(' example.test ')).toBe('https://example.test');
   });
 
