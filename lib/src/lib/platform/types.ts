@@ -182,7 +182,7 @@ export interface PtyDataDetail {
 /**
  * One host request for an immediate session save. `probeCwd: false` says the
  * answer must not re-read any cwd: after the PTYs are killed every probe answers
- * null and the record keeps its previous value anyway, so the round trips are
+ * null and the record keeps its previous value, so the round trips are
  * pure teardown budget (`docs/specs/standalone.md` → "Quit flow"). Absent probes.
  */
 export interface SessionFlushRequest {

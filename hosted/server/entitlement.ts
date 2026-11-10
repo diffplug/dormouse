@@ -8,18 +8,28 @@ export const ADMIN_EMAIL = "ned.twigg@diffplug.com";
 if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlined into SQL");
 
 /**
+ * How long an `active` subscription keeps entitling past its period end: the
+ * renewal's rollover lands only when Stripe's next webhook does, and a missed
+ * one waits for `resyncBilling`'s every-10-minutes Cron. A renewal that fails
+ * is `past_due`, which `owner_access` grants nothing, so this never extends a
+ * failed one.
+ */
+export const RENEWAL_GRACE = "15 minutes";
+
+/**
  * Whether the SQL expression `owner` holds access now, by the database's
- * clock, as `@pgstencil/stripe`'s `status()` decides: both read its
- * `owner_access` view, which holds the rule (exactly one current
- * subscription, `active` before its period end or `trialing` before its
- * trial end). With `prices`, an SQL `text[]` expression, only while that
- * subscription is on one of them.
+ * clock: `@pgstencil/stripe`'s `owner_access` view holds the rule (exactly
+ * one current subscription, `active` before its period end or `trialing`
+ * before its trial end), and an `active` one keeps it for
+ * {@link RENEWAL_GRACE} more. With `prices`, an SQL `text[]` expression,
+ * only while that subscription is on one of them.
  */
 export function subscribedSql(owner: string, prices?: string): string {
   const on = prices ? ` AND entitling.price_id = ANY (${prices})` : "";
   // An alias no caller's query uses, so `owner` can name the outer row.
   return `EXISTS (SELECT FROM pgstencil_billing.owner_access entitling
-    WHERE entitling.owner_id = ${owner} AND entitling.access_until > now()${on})`;
+    WHERE entitling.owner_id = ${owner}
+      AND entitling.access_until > now() - CASE entitling.status WHEN 'active' THEN interval '${RENEWAL_GRACE}' ELSE interval '0' END${on})`;
 }
 
 /** Whether the SQL expression `owner` has a payment dispute open, which suspends its subscription. */

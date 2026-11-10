@@ -306,10 +306,11 @@ export type BurrowStatus =
   | 'stopped';
 
 /**
- * A relay socket no timer will restore (see {@link BurrowRuntime.start}):
- * `displaced` is one another Burrow took from us; `removed` and `not-entitled`
- * are a Relay that no longer takes this Burrow's token
- * ({@link BurrowStanding}).
+ * A relay socket the reconnect backoff never restores (see
+ * {@link BurrowRuntime.start}): `displaced` is one another Burrow took from
+ * us; `removed` and `not-entitled` are a Relay that no longer takes this
+ * Burrow's token ({@link BurrowStanding}). Only `not-entitled` reverses on its
+ * own, so it alone asks its standing again on a slow timer.
  */
 export type BurrowLatch = 'displaced' | BurrowStanding;
 
@@ -406,6 +407,11 @@ type QueuedRelayFrame = Exclude<RelayToBurrowFrame, RelayPolicyFrame | RelayPass
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
+/** A not-entitled Burrow's first re-probe of its standing (a renewal's gap
+ *  heals within a minute or two), doubling to the cap (a lapsed member's
+ *  computer then costs its Relay two requests an hour). */
+const ENTITLEMENT_PROBE_MS = 60_000;
+const MAX_ENTITLEMENT_PROBE_MS = 30 * 60_000;
 
 export class BurrowRuntime {
   readonly #enrollment: BurrowEnrollment;
@@ -533,6 +539,7 @@ export class BurrowRuntime {
   /** Bumped by `start()` and `stop()`, so a probe answering across either is dropped. */
   #run = 0;
   #backoffMs = INITIAL_BACKOFF_MS;
+  #entitlementProbeMs = ENTITLEMENT_PROBE_MS;
   /** Cancels the armed reconnect, or null when none is armed. */
   #cancelReconnect: (() => void) | null = null;
   /** The open socket's heartbeat, or null while none is open. */
@@ -937,9 +944,11 @@ export class BurrowRuntime {
   // --- Socket lifecycle ----------------------------------------------------
 
   /**
-   * Open the relay socket. Also the one way back from a {@link BurrowLatch}: a
-   * latched Burrow never reconnects on a timer, so returning is a deliberate
-   * act — one that evicts whichever Burrow currently holds the burrowId.
+   * Open the relay socket. Also the one way back from a `displaced` or
+   * `removed` {@link BurrowLatch}: neither reconnects on a timer, so returning
+   * is a deliberate act — one that evicts whichever Burrow currently holds the
+   * burrowId. A `not-entitled` Burrow also returns on its own, once its
+   * standing re-probe finds it entitled ({@link #reprobeStanding}).
    * Idempotent while a socket is live.
    */
   start(): void {
@@ -949,6 +958,7 @@ export class BurrowRuntime {
     this.#run += 1;
     this.#clearReconnectTimer();
     this.#backoffMs = INITIAL_BACKOFF_MS;
+    this.#entitlementProbeMs = ENTITLEMENT_PROBE_MS;
     // Kicked off here so the import is normally settled before the first frame;
     // the connection path awaits the same promise, so a race costs a wait
     // rather than a dropped handshake. A failure surfaces at that await.
@@ -1025,6 +1035,7 @@ export class BurrowRuntime {
       opened = true;
       this.#status = 'connected';
       this.#backoffMs = INITIAL_BACKOFF_MS;
+      this.#entitlementProbeMs = ENTITLEMENT_PROBE_MS;
       this.#probed = false;
       this.#heartbeat = new RelayHeartbeat(ws, this.#setTimer, () => this.#abandonSocket());
       this.#reap();
@@ -1052,7 +1063,8 @@ export class BurrowRuntime {
 
   /**
    * The relay socket policy (`docs/specs/relay.md` -> "Burrow side"): a
-   * latching close ({@link LATCH_FOR_CLOSE}) is terminal; a socket that never
+   * latching close ({@link LATCH_FOR_CLOSE}) stands the Burrow down
+   * ({@link #latch}); a socket that never
    * opened — a refused upgrade reads only as an error event — is probed first,
    * once per failure streak; anything else backs off and reconnects.
    */
@@ -1080,10 +1092,59 @@ export class BurrowRuntime {
     this.#scheduleReconnect();
   }
 
-  /** Stand down until `start()`, as `latch` says why. */
+  /** Stand down until `start()`, as `latch` says why; a not-entitled
+   *  Burrow also asks its standing again later ({@link #reprobeStanding}). */
   #latch(latch: BurrowLatch): void {
     this.#latched = latch;
     this.#status = latch;
+    if (latch === 'not-entitled' && this.#reconnect) this.#scheduleStandingProbe();
+  }
+
+  /**
+   * A not-entitled Burrow's one timer, in the reconnect slot `stop()` and
+   * `start()` clear: the next standing probe, each wait double the last up to
+   * {@link MAX_ENTITLEMENT_PROBE_MS}. Nothing else is asked of the Relay
+   * meanwhile.
+   */
+  #scheduleStandingProbe(): void {
+    const delay = this.#entitlementProbeMs;
+    this.#entitlementProbeMs = Math.min(delay * 2, MAX_ENTITLEMENT_PROBE_MS);
+    this.#clearReconnectTimer();
+    this.#cancelReconnect = this.#setTimer(() => {
+      this.#cancelReconnect = null;
+      this.#reprobeStanding();
+    }, delay);
+  }
+
+  /**
+   * Ask whether the Relay takes this Burrow's token again. Entitled, it
+   * reconnects; not entitled, it waits longer; removed, it latches for good; no
+   * answer, it asks again after the next wait. Without a probe the reconnect
+   * itself asks, a 4002 close latching it again.
+   */
+  #reprobeStanding(): void {
+    const run = this.#run;
+    const resume = () => {
+      this.#latched = null;
+      this.#status = 'disconnected';
+      // A refused upgrade is asked about again rather than retried blind.
+      this.#probed = false;
+      this.#connect();
+    };
+    if (!this.#probeStanding) {
+      resume();
+      return;
+    }
+    void this.#probeStanding().then(
+      (standing) => {
+        if (run !== this.#run || this.#latched !== 'not-entitled') return;
+        if (standing) this.#latch(standing);
+        else resume();
+      },
+      () => {
+        if (run === this.#run && this.#latched === 'not-entitled') this.#scheduleStandingProbe();
+      },
+    );
   }
 
   /**

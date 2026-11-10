@@ -315,7 +315,7 @@ export const MODAL_OVERLAY_INSET = 'px-4 py-6';
  *
  * These exist so a bound can be *narrowed* by an ancestor: a story overrides one
  * to snapshot the short-viewport layout deterministically, which no `dvh` value
- * can (Chromatic controls snapshot width, never height). Unset everywhere in the
+ * can (the Argos snapshot run captures every story at one fixed viewport). Unset everywhere in the
  * app, so each entry below falls through to the real viewport.
  *
  * One property per kind, not one shared: inside the Settings dialog the popover

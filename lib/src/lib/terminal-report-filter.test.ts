@@ -63,6 +63,12 @@ describe('terminal-report-filter: inputIsSyntheticTerminalReport', () => {
     expect(inputIsSyntheticTerminalReport('\x1b[0nx')).toBe(false); // report + stray char
     expect(inputIsSyntheticTerminalReport('x\x1b[0n')).toBe(false); // stray char + report
   });
+
+  it('treats win32-input-mode key records as keystrokes, not reports', () => {
+    expect(inputIsSyntheticTerminalReport('\x1b[13;28;13;1;0;1_')).toBe(false); // Enter down
+    expect(inputIsSyntheticTerminalReport('\x1b[13;28;13;0;0;1_')).toBe(false); // Enter up
+    expect(inputIsSyntheticTerminalReport('\x1b[3;4R\x1b[68;32;100;1;0;1_')).toBe(false); // report + key
+  });
 });
 
 describe('terminal-report-filter: inputIsReplayTerminalReport', () => {

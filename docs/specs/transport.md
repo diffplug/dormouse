@@ -33,8 +33,9 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 
 ### Graceful shutdown
 
-- **Must stop only the explicitly named live PTYs**: use SIGTERM on POSIX and ConPTY close on Windows, never a signal argument there (rationale).
-- **Must acknowledge after the targets exit and a final-output grace tick, or at the caller's timeout**, forwarding output received during the wait; an empty target set still gets the grace tick.
+- **Must stop only the explicitly named live PTYs**: use SIGHUP on POSIX and ConPTY close on Windows, never a signal argument there (rationale).
+- **Must SIGKILL a named POSIX PTY's own process still alive at the caller's timeout, then wait up to 500 ms for its exit** (rationale).
+- **Must acknowledge after the targets exit, or the timeout passes, and a final-output grace tick**, forwarding output received during the wait; an empty target set still gets the grace tick.
 - **Must allow cleanup to follow or overlap graceful shutdown without closing a Windows PTY twice.**
 - **Never promise shell-history or final-output flushing from Windows ConPTY close**; recovery capture precedes shutdown (`docs/compatible-agents.md` → Capture).
 
@@ -71,9 +72,9 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 
 **Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports, and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists.
 
-**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables, and a launching Claude Code session's markers (rationale).
+**Must strip another terminal's identity, and a launching Claude Code session's markers, from the inherited environment before setting Dormouse's** (rationale). **Must drop the AppImage launcher's variables and `$APPDIR` path entries before spawning** (rationale).
 
-Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`.
+Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` and `withoutAppImageEnv` in `standalone/sidecar/pty-core.js`.
 
 ### Reconnection protocol
 
@@ -218,7 +219,7 @@ Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone);
 
 **The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code**, which still operates on a bare `PersistedSession` per Workspace (`docs/specs/standalone.md` → Persistence). **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session.
 
-**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **Must retain the latest request's options when coalescing queued saves.** **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
+**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **Must retain the latest request's options when coalescing queued saves.** **A pane persists the probe's cwd, else its reported local one (`getInheritableCwd`), else the previous record's; a save without the probe, the previous record's, else the reported one** (rationale). **A flush may say `probeCwd: false`**, skipping it — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
 
 **`PersistedSession.version` is 4 and `PersistedWindow.version` 2; a reader must discard any other version as a fresh start, never migrate it.** Every writer stamps both, pinned by `standalone/scripts/persisted-format.json`; the standalone Rust host's discard: `docs/specs/standalone.md` → Persistence.
 

@@ -188,6 +188,13 @@
       "matchFileNames": ["canopy/package.json"],
       "matchPackageNames": ["@xterm/**"],
       "enabled": false
+    },
+    {
+      "description": "The stripe SDK moves the Stripe API version the billing webhook accepts in minor releases, and production's endpoint renders events at the version it was created with, so every update of either package, patches included, is a deliberate endpoint move: approve it on the dependency dashboard only as part of hosted/README.md, Move the Stripe API version. Last, so no later rule lifts it; it also holds the pgstencil group, which @pgstencil/stripe moves with",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["hosted/package.json"],
+      "matchPackageNames": ["stripe", "@pgstencil/stripe"],
+      "dependencyDashboardApproval": true
     }
   ]
 }

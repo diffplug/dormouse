@@ -11,6 +11,16 @@
       ]
     },
     {
+      "name": "gtk",
+      "license": "MIT",
+      "author": "The gtk-rs Project Developers",
+      "homepage": "https://gtk-rs.org/",
+      "declaredName": "gtk",
+      "versions": [
+        "0.18.2"
+      ]
+    },
+    {
       "name": "libc",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
@@ -1143,15 +1153,6 @@
       "homepage": "https://gtk-rs.org/",
       "versions": [
         "0.18.0"
-      ]
-    },
-    {
-      "name": "gtk",
-      "license": "MIT",
-      "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/",
-      "versions": [
-        "0.18.2"
       ]
     },
     {

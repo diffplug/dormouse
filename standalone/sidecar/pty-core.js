@@ -178,6 +178,41 @@ function withoutForeignTerminalEnv(env, platform) {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !foreign.test(key)));
 }
 
+// What the Linux AppImage's launcher adds to the app's environment (measured on
+// v1.3.0): the bundle's Python, GTK, and libraries, which break system programs
+// (`python3` fails to start; `curl` loads the bundle's older libnghttp2).
+const APPIMAGE_SET = ['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD', 'PYTHONHOME', 'GDK_PIXBUF_MODULE_FILE',
+  'GIO_MODULE_DIR', 'GI_TYPELIB_PATH', 'GTK_DATA_PREFIX', 'GTK_EXE_PREFIX', 'GTK_IM_MODULE_FILE', 'GTK_PATH'];
+const APPIMAGE_PATH_LISTS = ['PATH', 'LD_LIBRARY_PATH', 'PYTHONPATH', 'PERLLIB', 'QT_PLUGIN_PATH', 'XDG_DATA_DIRS',
+  'GSETTINGS_SCHEMA_DIR', 'GST_PLUGIN_SYSTEM_PATH', 'GST_PLUGIN_SYSTEM_PATH_1_0'];
+
+/** `env` without the AppImage launcher's additions, when it ran (`APPDIR` set):
+ *  its variables go, and its entries under `$APPDIR` leave the path lists. The
+ *  launcher overwrote any value the user had for the variables it sets, so
+ *  those are gone before the app starts; the two it sets to fixed values are
+ *  kept when they hold something else. A no-op anywhere else (VS Code). */
+function withoutAppImageEnv(env) {
+  if (!env.APPDIR) return env;
+  const norm = (entry) => entry.replace(/\/{2,}/g, '/').replace(/(.)\/$/, '$1');
+  const appDir = norm(env.APPDIR);
+  const next = { ...env };
+  for (const key of APPIMAGE_SET) delete next[key];
+  if (next.PYTHONDONTWRITEBYTECODE === '1') delete next.PYTHONDONTWRITEBYTECODE;
+  if (next.GTK_THEME === 'Adwaita:light' || next.GTK_THEME === 'Adwaita:dark') delete next.GTK_THEME;
+  for (const key of APPIMAGE_PATH_LISTS) {
+    if (next[key] === undefined) continue;
+    // An empty entry, such as the trailing `:` the launcher leaves, means the
+    // current directory in LD_LIBRARY_PATH: never keep one.
+    const kept = next[key].split(':').filter((entry) => {
+      const path = norm(entry);
+      return path !== '' && path !== appDir && !path.startsWith(`${appDir}/`);
+    });
+    if (kept.length) next[key] = kept.join(':');
+    else delete next[key];
+  }
+  return next;
+}
+
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
@@ -407,7 +442,8 @@ function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
   const platform = runtime.platform || process.platform;
   const env = {
-    ...(runtime.env || process.env),
+    // Before `DORMOUSE_CLI_BIN` goes on PATH, which may lie under `$APPDIR`.
+    ...withoutAppImageEnv(runtime.env || process.env),
     ...(options?.env || {}),
   };
   const osModule = runtime.osModule || os;
@@ -474,6 +510,7 @@ module.exports.resolveSpawnConfig = resolveSpawnConfig;
 module.exports.DEHYDRATE_LIMIT = DEHYDRATE_LIMIT;
 module.exports.WSL_CLI_ENV = WSL_CLI_ENV;
 module.exports.withPrependedPath = withPrependedPath;
+module.exports.withoutAppImageEnv = withoutAppImageEnv;
 module.exports.canonicalizeWindowsCwd = canonicalizeWindowsCwd;
 
 // ── Subprocesses ───────────────────────────────────────────────────────────
@@ -1656,9 +1693,8 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     // A spawn over a live generation — a cold restore that believed a host
     // silent through both list asks (`collectLivePtys`) — leaves the old shell
     // unreachable: nothing can write to it, and its output and exit no longer
-    // speak for the id. Stop it rather than leak it — with node-pty's default
-    // SIGHUP, not the graceful SIGTERM: an interactive bash ignores SIGTERM, and
-    // no later kill can reach a PTY that is no longer in `ptys`.
+    // speak for the id. Stop it rather than leak it: no later kill can reach a
+    // PTY that is no longer in `ptys`.
     const displaced = ptys.get(id);
     ptys.set(id, p);
     if (displaced) {
@@ -1820,10 +1856,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   // before onExit can crash the owner, so graceful shutdown and later cleanup
   // share a guard keyed by the PTY object (never by a reusable Session id).
   const closingPtys = new WeakSet();
-  function stopPty(p, graceful = false) {
+  // On POSIX, node-pty's default SIGHUP: an interactive bash or zsh ignores
+  // SIGTERM, and honours the hangup a closing terminal sends.
+  function stopPty(p) {
     if (platform !== 'win32') {
-      if (graceful) p.kill('SIGTERM');
-      else p.kill();
+      p.kill();
       return;
     }
     if (closingPtys.has(p)) return;
@@ -2029,6 +2066,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    * names the window's own PTYs (`pty_graceful_kill` in
    * standalone/src-tauri/src/lib.rs).
    */
+  /** How long the acknowledgement waits, after the deadline's SIGKILL, for a
+   *  killed target's exit. node-pty reports one when its master socket closes,
+   *  and on Linux a child still holding the PTY's slave keeps it open until
+   *  node-pty's own 200 ms fallback destroys the socket: the exit came 211 ms
+   *  after the SIGKILL with such a child, and 1 to 2 ms without one (Ubuntu
+   *  24.04, node-pty 1.2.0-beta.18, 2026-11-10). Must stay above that fallback. */
+  const SIGKILL_EXIT_WAIT_MS = 500;
+
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
@@ -2036,12 +2081,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
     if (targets.length === 0) { setTimeout(done, 50); return; }
-    for (const id of targets) {
+    // By object, not id: a spawn under the same id meanwhile is not this stop's.
+    const stopping = targets.map((id) => [id, ptys.get(id)]);
+    for (const [, p] of stopping) {
       try {
         // WindowsTerminal rejects signals (possibly in a deferred callback,
         // beyond this catch). kill() closes the ConPTY; the pinned addon can
         // terminate its shell immediately, so this is no flush guarantee.
-        stopPty(ptys.get(id), true);
+        stopPty(p);
       } catch { /* already dead */ }
     }
     // Resolve early once every target has exited (onExit removes it) instead
@@ -2051,8 +2098,29 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     const deadline = Date.now() + timeout;
     const tick = () => {
       if (!targets.some((id) => ptys.has(id))) setTimeout(done, 50);
-      else if (Date.now() >= deadline) done();
-      else setTimeout(tick, 50);
+      else if (Date.now() >= deadline) {
+        // A PTY whose own process outlives the hangup (a shell trapping it) is
+        // killed: the caller drops these ids next, and nothing could reach it
+        // after. Only that process: a descendant ignoring the hangup lives on.
+        let killed = false;
+        if (platform !== 'win32') {
+          for (const [id, p] of stopping) {
+            if (ptys.get(id) !== p) continue;
+            try { p.kill('SIGKILL'); killed = true; } catch { /* already dead */ }
+          }
+        }
+        if (!killed) { setTimeout(done, 50); return; }
+        // The killed targets' exits reach the host before the acknowledgement,
+        // then the usual grace tick. One still there at the cap is acknowledged
+        // anyway: the host gets the acknowledgement first, and the exit later,
+        // when node-pty reports it, if the id has not been dropped by then.
+        const cap = Date.now() + SIGKILL_EXIT_WAIT_MS;
+        const awaitExits = () => {
+          if (!stopping.some(([id, p]) => ptys.get(id) === p) || Date.now() >= cap) setTimeout(done, 50);
+          else setTimeout(awaitExits, 25);
+        };
+        setTimeout(awaitExits, 25);
+      } else setTimeout(tick, 50);
     };
     setTimeout(tick, 50);
   }

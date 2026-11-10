@@ -33,9 +33,9 @@ export const POCKET_PERMISSIONS = "camera=(self), microphone=(), geolocation=()"
 export const RELAY_NON_PAGE_PREFIXES = ["/api", "/ws", "/connect"] as const;
 
 /**
- * A response's caching: `immutable` for a content-hashed file (a 200 that is
- * not HTML; anything else there is `no-store`), `no-cache` to store only if
- * revalidated, `no-store` to never store.
+ * A response's caching: `immutable` for a content-hashed file (a 200, or its
+ * 304, that is not HTML; anything else there is `no-store`), `no-cache` to
+ * store only if revalidated, `no-store` to never store.
  */
 export type CacheClass = "immutable" | "no-cache" | "no-store";
 

@@ -5,7 +5,8 @@ import { readRepoFile } from './lint-kit.mjs';
 
 // The mechanical bullets of docs/specs/security-supply-chain.md ->
 // "Bundled runtime" and "Cooldown and alerts", read off the files that carry
-// them. Each case below plants one violation in an in-memory copy and requires
+// them, and the Stripe SDK's update gate (hosted/README.md -> "Move the
+// Stripe API version"). Each case below plants one violation in an in-memory copy and requires
 // `check` to report it, so a rule here that stops judging goes red.
 
 const real = () => ({
@@ -20,6 +21,26 @@ const real = () => ({
 const PGSTENCIL = ['pgstencil', '@pgstencil/*'];
 const PGSTENCIL_RULE = ['pgstencil', '@pgstencil/**'];
 const MANAGERS = ['npm', 'cargo', 'github-actions'];
+/** Hosted's packages whose update moves the Stripe API version the webhook accepts. */
+const STRIPE_PINNED = ['stripe', '@pgstencil/stripe'];
+const UPDATE_TYPES = ['patch', 'minor', 'major'];
+
+/** Whether Renovate's `packageRules`, applied in order, leave an npm update of
+ * `name` in hosted/package.json of type `update` needing dashboard approval.
+ * Reads the matchers this config uses; one it does not model counts as a match. */
+function needsApproval(renovate, name, update) {
+  let approval = renovate.dependencyDashboardApproval === true;
+  for (const rule of renovate.packageRules ?? []) {
+    if (!('dependencyDashboardApproval' in rule)) continue;
+    const names = rule.matchPackageNames;
+    if (names && !names.some((n) => n === name || (n.endsWith('/**') && name.startsWith(n.slice(0, -2))))) continue;
+    if (rule.matchManagers && !rule.matchManagers.includes('npm')) continue;
+    if (rule.matchFileNames && !rule.matchFileNames.includes('hosted/package.json')) continue;
+    if (rule.matchUpdateTypes && !rule.matchUpdateTypes.includes(update)) continue;
+    approval = rule.dependencyDashboardApproval === true;
+  }
+  return approval;
+}
 
 // Keep repository policy durations in positive whole days. Reject unknown forms
 // instead of approximating Renovate's duration parser or accepting any string.
@@ -69,6 +90,10 @@ function check(files) {
   }
   for (const manager of renovate.enabledManagers ?? []) {
     for (const key of ['includePaths', 'ignorePaths']) if (renovate[manager]?.[key] !== undefined) fail(`Renovate limits ${manager} with ${key}`);
+  }
+  for (const name of STRIPE_PINNED) {
+    const ungated = UPDATE_TYPES.filter((update) => !needsApproval(renovate, name, update));
+    if (ungated.length) fail(`Renovate updates ${name} in hosted without dashboard approval (${ungated.join(', ')})`);
   }
   const alerts = renovate.vulnerabilityAlerts;
   if (!alerts || !hasCooldown(alerts.minimumReleaseAge)) fail('Renovate vulnerabilityAlerts does not set a whole-day cooldown explicitly');
@@ -148,6 +173,9 @@ for (const [name, mutate, expected] of [
   ['zizmor by range', (files) => { files.zizmor = files.zizmor.replace(/zizmor==[\d.]+/, 'zizmor>=1.30'); }, 'does not pin zizmor exactly'],
   ['zizmor installed without hashes', text('ci', '--require-hashes ', ''), 'does not install zizmor'],
   ['actionlint unverified', text('ci', 'sha256sum -c', 'true'), 'actionlint at an exact version'],
+  ['the Stripe gate removed', json('renovate', (r) => { r.packageRules = r.packageRules.filter((x) => !x.matchPackageNames?.includes('stripe')); }), 'updates stripe in hosted without dashboard approval (patch, minor)'],
+  ['the Stripe gate limited to majors', json('renovate', (r) => { r.packageRules.find((x) => x.matchPackageNames?.includes('stripe')).matchUpdateTypes = ['major']; }), 'updates @pgstencil/stripe in hosted without dashboard approval (patch, minor)'],
+  ['a later rule lifts the Stripe gate', json('renovate', (r) => { r.packageRules.push({ matchManagers: ['npm'], matchPackageNames: ['@pgstencil/**'], dependencyDashboardApproval: false }); }), 'updates @pgstencil/stripe in hosted without dashboard approval (patch, minor, major)'],
 ]) {
   test(`reports: ${name}`, () => {
     const files = real();

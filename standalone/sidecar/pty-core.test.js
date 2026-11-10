@@ -342,6 +342,52 @@ test('resolveSpawnConfig strips another terminal\'s inherited identity', () => {
   assert.equal(config.env.PATH, '/usr/bin');
 });
 
+// What the v1.3.0 AppImage's launcher handed the app, measured 2026-11-10,
+// over a user environment of PATH, LD_LIBRARY_PATH=/opt/mine/lib, and
+// XDG_DATA_DIRS=/usr/local/share:/usr/share.
+const APPDIR = '/tmp/.mount_DormoXYZ';
+const APPIMAGE_ENV = {
+  APPDIR, APPIMAGE: '/home/u/Dormouse.AppImage', ARGV0: '/home/u/Dormouse.AppImage', OWD: '/home/u',
+  PYTHONHOME: `${APPDIR}/usr/`, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: `${APPDIR}/usr/share/pyshared/:`,
+  GDK_PIXBUF_MODULE_FILE: `${APPDIR}/usr/lib/gdk-pixbuf-2.0/loaders.cache`, GIO_MODULE_DIR: `${APPDIR}/usr/lib/gio/modules`,
+  GI_TYPELIB_PATH: `${APPDIR}/usr/lib/girepository-1.0`, GTK_DATA_PREFIX: APPDIR, GTK_EXE_PREFIX: APPDIR,
+  GTK_IM_MODULE_FILE: `${APPDIR}/usr/lib/gtk-3.0/immodules.cache`, GTK_PATH: `${APPDIR}/usr/lib/gtk-3.0`, GTK_THEME: 'Adwaita:dark',
+  PATH: `${APPDIR}/usr/bin/:${APPDIR}/usr/sbin/:${APPDIR}/usr/games/:${APPDIR}/bin/:${APPDIR}/sbin/:/usr/local/bin:/usr/bin`,
+  LD_LIBRARY_PATH: `${APPDIR}//usr/lib/:${APPDIR}/usr/lib/x86_64-linux-gnu/:${APPDIR}/lib/:/opt/mine/lib`,
+  XDG_DATA_DIRS: `${APPDIR}/usr/share/:/usr/local/share:/usr/share`,
+  PERLLIB: `${APPDIR}/usr/share/perl5/:${APPDIR}/usr/lib/perl5/:`, QT_PLUGIN_PATH: `${APPDIR}/usr/lib/qt4/plugins/:`,
+  GSETTINGS_SCHEMA_DIR: `${APPDIR}/usr/share/glib-2.0/schemas`, GST_PLUGIN_SYSTEM_PATH: `${APPDIR}/usr/lib/gstreamer`,
+  GST_PLUGIN_SYSTEM_PATH_1_0: `${APPDIR}/usr/lib/gstreamer-1.0`,
+  HOME: '/home/u', USER: 'u',
+};
+const linuxSpawn = (env) => resolveSpawnConfig({ shell: '/bin/bash', surfaceId: 'pane-1' }, {
+  platform: 'linux', env, osModule: { homedir: () => '/home/u', tmpdir: () => '/tmp' },
+}).env;
+
+test('resolveSpawnConfig drops the AppImage launcher\'s environment and keeps the user\'s own', () => {
+  const env = linuxSpawn(APPIMAGE_ENV);
+  for (const key of ['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD', 'PYTHONHOME', 'PYTHONDONTWRITEBYTECODE', 'PYTHONPATH', 'PERLLIB',
+    'QT_PLUGIN_PATH', 'GDK_PIXBUF_MODULE_FILE', 'GIO_MODULE_DIR', 'GI_TYPELIB_PATH', 'GTK_DATA_PREFIX', 'GTK_EXE_PREFIX',
+    'GTK_IM_MODULE_FILE', 'GTK_PATH', 'GTK_THEME', 'GSETTINGS_SCHEMA_DIR', 'GST_PLUGIN_SYSTEM_PATH', 'GST_PLUGIN_SYSTEM_PATH_1_0']) {
+    assert.equal(env[key], undefined, key);
+  }
+  assert.equal(env.LD_LIBRARY_PATH, '/opt/mine/lib');
+  assert.equal(env.XDG_DATA_DIRS, '/usr/local/share:/usr/share');
+  assert.equal(env.PATH, '/usr/local/bin:/usr/bin');
+  assert.equal(env.HOME, '/home/u');
+});
+
+test('resolveSpawnConfig keeps a GTK theme the launcher did not set', () => {
+  assert.equal(linuxSpawn({ ...APPIMAGE_ENV, GTK_THEME: 'Yaru-dark' }).GTK_THEME, 'Yaru-dark');
+  assert.equal(linuxSpawn({ ...APPIMAGE_ENV, PYTHONDONTWRITEBYTECODE: 'x' }).PYTHONDONTWRITEBYTECODE, 'x');
+});
+
+test('resolveSpawnConfig changes nothing outside an AppImage, as in VS Code', () => {
+  const own = { PATH: '/opt/py/bin:/usr/bin', PYTHONHOME: '/opt/py', LD_LIBRARY_PATH: '/opt/mine/lib:', GTK_THEME: 'Adwaita:dark', HOME: '/home/u' };
+  const env = linuxSpawn(own);
+  for (const [key, value] of Object.entries(own)) assert.equal(env[key], value, key);
+});
+
 test('resolveSpawnConfig strips foreign terminal identity case-insensitively on win32', () => {
   const env = {
     Path: 'C:\\Windows\\System32',
@@ -923,7 +969,7 @@ test('interrupt with no live PTYs still reports done', async () => {
   assert.deepEqual(events.at(-1), { event: 'interruptDone', data: { requestId: 'req-empty' } });
 });
 
-test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final output', async () => {
+test('gracefulKill hangs up the named PTYs, kills what outlives the deadline, echoes requestId, forwards final output', async () => {
   const events = [];
   const killSignals = [];
   const listeners = {};
@@ -948,8 +994,9 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
   listeners.data?.('final output');
   await done;
 
-  // SIGTERM was delivered, and the done event carries the caller's requestId.
-  assert.deepEqual(killSignals, ['SIGTERM']);
+  // node-pty's default SIGHUP, then SIGKILL for a PTY still there at the
+  // deadline; the done event carries the caller's requestId.
+  assert.deepEqual(killSignals, [undefined, 'SIGKILL']);
   assert.deepEqual(events.at(-1), {
     event: 'gracefulKillDone',
     data: { requestId: 'req-42' },
@@ -959,6 +1006,40 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
     event: 'data',
     data: { id: 'pane-1', data: 'final output' },
   });
+});
+
+for (const exitAfter of [200, null]) test(`gracefulKill acknowledges a SIGKILLed target ${exitAfter === null ? 'that never exits at the cap' : 'after its exit, which Linux reports 200 ms late'}`, async () => {
+  const events = [];
+  const listeners = {};
+  let killedAt = 0;
+  const mgr = create((event, data) => events.push({ event, data, at: Date.now() }), { spawn: () => ({
+    pid: 7,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill(signal) {
+      if (signal !== 'SIGKILL') return;
+      killedAt = Date.now();
+      // node-pty's socket-close fallback, when a child holds the slave.
+      if (exitAfter !== null) setTimeout(() => listeners.exit({ exitCode: 0, signal: 9 }), exitAfter);
+    },
+  }) }, { platform: 'linux' });
+  mgr.spawn('pane-1');
+  const acknowledged = new Promise((resolve) => {
+    const check = setInterval(() => { if (events.some(({ event }) => event === 'gracefulKillDone')) { clearInterval(check); resolve(); } }, 5);
+  });
+  mgr.gracefulKill(['pane-1'], 1, 'req');
+  await acknowledged;
+  const done = events.find(({ event }) => event === 'gracefulKillDone');
+  const exit = events.find(({ event }) => event === 'exit');
+  if (exitAfter === null) {
+    assert.equal(exit, undefined);
+    assert.ok(done.at - killedAt >= 500, `acknowledged ${done.at - killedAt} ms after the SIGKILL`);
+  } else {
+    assert.ok(exit && events.indexOf(exit) < events.indexOf(done), 'the exit reaches the host first');
+    assert.ok(done.at - killedAt < 500, `acknowledged ${done.at - killedAt} ms after the SIGKILL`);
+  }
 });
 
 test('gracefulKill resolves early after exits and a final output grace tick', async () => {
@@ -2550,7 +2631,7 @@ for (const platform of ['linux', 'win32']) test(`gracefulKill targets only the n
   mgr.gracefulKill(['a'], 1, 'req-1');
   await done;
 
-  assert.deepEqual(pty.killed, [['a', platform === 'win32' ? undefined : 'SIGTERM']]);
+  assert.deepEqual(pty.killed, platform === 'win32' ? [['a', undefined]] : [['a', undefined], ['a', 'SIGKILL']]);
   assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
 });
 
@@ -2626,8 +2707,8 @@ test('PTY owner streams only the current generation and stops the one a spawn di
   generations[0].onData('old shell');
   generations[1].onData('new shell');
   assert.deepEqual(sent.filter(([type]) => type === 'data').map(([, msg]) => msg.data), ['new shell']);
-  // `kill()` with no argument is node-pty's SIGHUP; an interactive bash ignores
-  // SIGTERM, so a graceful stop would leave the unreachable shell running.
+  // `kill()` with no argument is node-pty's SIGHUP, which an interactive shell
+  // honours (it ignores SIGTERM).
   assert.deepEqual(generations[0].kills, [undefined]);
   assert.deepEqual(generations[1].kills, []);
   mgr.killAll();

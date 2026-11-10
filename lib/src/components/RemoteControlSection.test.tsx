@@ -1705,7 +1705,7 @@ describe('RemoteControlSection', () => {
     // The `SetupPhoneQr` / `SetupPhoneRedeemed` stories drive the section
     // through `makeStubBurrowLink` and nothing else, so a fixture that
     // stopped answering `setupQr` — or stopped firing the invitation event —
-    // would fail only in Chromatic. The states themselves are covered above, so
+    // would fail only in Argos. The states themselves are covered above, so
     // this pins the fixture rather than re-rendering them.
     const link = makeStubBurrowLink({
       status: enrolledStatus(),

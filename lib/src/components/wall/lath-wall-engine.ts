@@ -125,7 +125,9 @@ export function becomeTerminalMeta(meta: LeafMeta, userTitle: string | null): Le
  * persisted agent-browser `session` would name a daemon that is gone
  * (`docs/specs/dor-tool.md` -> Persistence and hosts). A restored tool is a
  * terminal running its command until it serves again, which is the same state a
- * cold spawn passes through. Everything else about the leaf persists.
+ * cold spawn passes through. Everything else about the leaf persists, a
+ * take-over's shared-shell mark included: a resume keeps the same shell, and a
+ * cold restore drops it (`withToolCommand` in lib/session-restore.ts).
  */
 export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   if (meta.component !== 'tool' || !meta.params) return meta;
@@ -247,7 +249,7 @@ export function createLathWallEngine(
 ): LathWallEngine {
   const snapshot = (): LathWallSnapshot => store.getSnapshot();
 
-  // 0 when motion must be instant (reduced motion, or Storybook's animate=false),
+  // 0 when motion must be instant (reduced motion, or the Argos snapshot run's animate=false),
   // so entry/exit/tween all collapse to instant through the very same code path.
   // Tests inject a fixed duration (or 0) via `opts`.
   const durationMs =

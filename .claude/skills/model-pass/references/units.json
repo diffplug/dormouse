@@ -1,0 +1,1334 @@
+{
+  "_doc": "Unit catalogue for ledger.mjs init. Every tracked file goes to the first unit (in order) one of whose rules matches it, unless an exclude pattern matches first. tests: null means the top-level tests pattern sorts the unit's files into SOURCE and TESTS. Text fields may use {{LEDGER}}, {{SNAPSHOT}}, {{BASE}}, {{CHECKOUT}}, {{WORKTREES}}; SP in them means the ledger, as the reviewer brief defines it.",
+  "tests": "(\\.test\\.|\\.spec\\.|-selftest|/tests?/|/__tests__/|\\.stories\\.|test-utils|/harness/|/snapshots/|\\.smoketest\\.)",
+  "binary": "\\.(png|ico|icns|svg|woff2?|jpg|jpeg|webp|mp4|gif|ttf|otf|wasm|bin|pdf)$",
+  "skipLines": "(pnpm-lock\\.yaml|Cargo\\.lock|\\.snap)$",
+  "exclude": [],
+  "units": [
+    {
+      "unit": "lath",
+      "rules": [
+        "^lib/src/lib/lath/",
+        "^lib/src/components/wall/(?:LathHost|lath\\-wall\\-store|lath\\-wall\\-engine|lath\\-drag\\-controller|LathDropPreview|pane\\-motion)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:rect\\-tween|rect\\-union\\-outline|ui\\-geometry)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/(?:rect\\-motion|motion\\-test\\-utils)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/tiling-engine.md",
+        "docs/specs/tiling-engine.rationale.md",
+        "docs/specs/glossary.md",
+        "docs/specs/layout.md"
+      ],
+      "what": "the in-house headless tiling engine (Lath) and its React host.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/tiling-engine.md` and `docs/specs/tiling-engine.rationale.md`; skim `docs/specs/glossary.md` for vocabulary and the parts of `docs/specs/layout.md` that the engine serves (minimize/reattach, zoom). Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The pure split-tree core: invariants after every operation (split, remove, move, resize, swap, minimize/restore), ratio sums and rounding drift, minimum sizes, degenerate trees (single leaf, empty, deeply nested), id stability.",
+        "The never-re-parent guarantee in `LathHost.tsx`: a pane's DOM node must never be re-parented (xterm canvases and iframes reload). Find any path that remounts or re-parents a pane.",
+        "Persistence round trip of layouts: serialize → restore, malformed or older persisted trees, unknown leaf ids, what happens when restore meets fewer or more surfaces than leaves.",
+        "The drag controller: drop on self, cancel mid-drag (Escape, pointer-capture loss, window blur), stale drop targets after layout changes during a drag, listeners left attached.",
+        "The wall store and engine: subscription granularity, work done per pointer move or per resize frame, `ResizeObserver` loops, tween cancellation and leftover animation frames.",
+        "Dead code: exported operations nothing calls, options never passed, tests pinning behavior no caller uses."
+      ]
+    },
+    {
+      "unit": "workspaces",
+      "rules": [
+        "^lib/src/components/(?:WorkspaceStrip|workspace\\-strip\\-drag|workspace\\-motion|WorkspaceTabMenu|WorkspaceWindow|workspace\\-tab\\-tween|workspace\\-tab\\-elements|WorkspaceMotion|WorkspaceKillConfirm)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/wall/(?:workspace\\-control|workspace\\-lifecycle|workspace\\-transfer|workspace\\-boot\\-plans|surface\\-move|surface\\-workspace\\-drag|MoveWorkspaceAction)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:workspace\\-store|workspace\\-ui\\-store|workspace\\-autoname\\-controller|workspace\\-autoname|workspace\\-union|workspace\\-surfaces|window\\-session\\-aggregator)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/layout.md",
+        "docs/specs/reopen.md",
+        "docs/specs/alert.md",
+        "docs/specs/glossary.md"
+      ],
+      "what": "the Workspace model (`Window ⊃ Workspace ⊃ Pane ⊃ Surface`): the workspace store and UI store, lifecycle, control, transfer of surfaces between Workspaces, the WorkspaceStrip with its drag and motion code, auto-naming, and the window session aggregator.",
+      "read": "**Specs you own** (read first, in the snapshot): the Workspace sections of `docs/specs/layout.md` + `layout.rationale.md`, the workspace parts of `docs/specs/reopen.md`, the Workspace union projection in `docs/specs/alert.md`, and `docs/specs/glossary.md` (invariants I1–I10). Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Moving a Surface between Workspaces: the id must stay stable, the PTY must survive, alerts and TODO state must follow, dirty or pending Tools and iframes must be refused or handled as the spec says. Look for a path where a move drops or duplicates a surface, or leaves it in two Workspaces.",
+        "Closing or killing a Workspace that holds running work, the active Workspace, or the last Workspace; what `--force` paths skip; what Reopen restores.",
+        "Workspace ids: `workspace:<n>` counters must be durable and never reused. Name collisions (`workspace:<name>`, a Workspace literally named `new`).",
+        "Strip drag-reorder and tab tweens: cancel paths, stale indices after a concurrent change, listeners and animation frames left behind.",
+        "Auto-naming: when it runs, what it reads, and whether it can overwrite a user's rename.",
+        "The window session aggregator (standalone has several windows): ordering, a window closing mid-aggregate, work repeated per change.",
+        "Persistence of Workspace order and the active Workspace across restart.",
+        "Dead code and duplicated logic between `workspace-control.ts`, `workspace-lifecycle.ts`, `workspace-transfer.ts`, and `surface-move.ts`."
+      ]
+    },
+    {
+      "unit": "session",
+      "rules": [
+        "^lib/src/components/wall/(?:use\\-session\\-persistence|reopen|window\\-reopen|close\\-kind|close\\-all|close\\-for\\-client)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:session\\-types|session\\-save|session\\-restore|session\\-remap|session\\-dirty|session\\-label|session\\-activity\\-store|reopen\\-stack|pending\\-kills|terminal\\-lifecycle|terminal\\-registry|terminal\\-store|terminal\\-transfer|id\\-pool|surface\\-ids|reconnect|local\\-json\\-store|resume\\-patterns|coding\\-agents|ref\\-count|settle\\-within|throttle|terminal\\-webgl|xterm\\-options|xterm\\-test\\-mock|test\\-local\\-storage|errors|is\\-record|elapsed)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/(?:PendingKillOverlay|TerminalPane)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/wall/(?:TerminalPanel)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/host/(?:recovery\\-capture|recovery\\-store|recovery|owner\\-pty|atomic\\-json\\-file)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^canopy/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/layout.md",
+        "docs/specs/reopen.md",
+        "docs/specs/transport.md",
+        "docs/specs/webgl-text.md"
+      ],
+      "what": "session persistence and restore, terminal lifecycle and registry, id pools, reconnect, Reopen and the close paths, pending (delayed) kills, the host-side recovery capture and store, atomic JSON files, and the small `canopy/` WebGL lab.",
+      "read": "**Specs you own** (read first, in the snapshot): the session-lifecycle and persistence-recovery sections of `docs/specs/layout.md`, all of `docs/specs/reopen.md` + rationale, the persisted-session types and reconnection parts of `docs/specs/transport.md`, `docs/compatible-agents.md` + `docs/compatible-agents.rationale.md` (the hidden recovery contract: shutdown capture, detection, single-use records, cold-restore execution), and `docs/specs/webgl-text.md` for `canopy/` and `terminal-webgl.ts`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Save → restore round trips: what is lost, malformed or truncated persisted data, older shapes, a restore that meets missing PTYs, and writes that race a quit. Persisted formats have reached early users, so treat format changes as `Sure-fix: no`.",
+        "Id pools and surface ids: counters must be durable and never reused, including across a crash between allocating and saving.",
+        "Reopen: stack order and limits, reopening after the Workspace or window that held the surface is gone, single-use guarantees.",
+        "Pending kills: the delayed-kill timer, undo, app quit or window close while a kill is pending, a second kill of the same surface, which surface actually dies.",
+        "Reconnect: backoff, duplicate sessions after a reconnect, buffered output replay ordering, listeners that accumulate per reconnect.",
+        "Terminal lifecycle: dispose order, xterm instances or listeners that leak when a pane closes, WebGL context loss and the browser's context limit, the fallback renderer path.",
+        "Recovery capture and store on the host: single-use records, timestamps that can be `NaN`, files left behind, what an attacker-controlled terminal title or command can inject into a resume command line (`resume-patterns.ts`, `coding-agents.ts`).",
+        "`atomic-json-file.ts` and `local-json-store.ts`: rename atomicity, fsync, Windows behavior, concurrent writers.",
+        "Dead code: compatibility branches for shapes nothing writes, unused helpers."
+      ]
+    },
+    {
+      "unit": "alert",
+      "rules": [
+        "^lib/src/lib/(?:alert\\-manager|alert\\-manager\\-test\\-utils|alert\\-delivery\\-scheduler|alert\\-delivery|alert\\-delivery\\-model|alert\\-delivery\\-policy|alert\\-settings\\-model|alert\\-settings|alert\\-settings\\-host|alert\\-speech|alert\\-speech\\-state|alert\\-episode|speech\\-queue|speech\\-engine|speech\\-synthesis\\-test\\-utils|managed\\-voice\\-engine|alarm\\-upsell|quiesce\\-detector|watched\\-commands|watched\\-command\\-host|presence|engagement|todo\\-spotlight|push\\-devices|ring\\-geometry)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/(?:alert\\-ring|AlarmTestButtons|AlarmSettingsControls|WorkspaceAlarmSettings|AlarmUpsellLine|WatchedCommandList|TodoPillBody|ManagedVoiceSection)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/wall/(?:AlertRingIndicator|SessionTodoPill|use\\-alert\\-delivery|use\\-workspace\\-alert\\-policy|use\\-engagement\\-focus)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/host/(?:alert\\-host|alert\\-client|alert\\-protocol|managed\\-voice\\-host)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/alert.md",
+        "docs/specs/alert.rationale.md",
+        "docs/specs/terminal-escapes.md"
+      ],
+      "what": "the Activity layer: `alert-manager.ts` (1,454 lines), delivery scheduling and policy, alert settings, speech (local engine, speech queue, managed voice engine and its host), quiesce detection, watched commands, presence and engagement, TODO spotlight, push devices, the alert ring and TODO pill components, and the host-side alert protocol (`alert-host.ts`, `alert-client.ts`, `alert-protocol.ts`, `managed-voice-host.ts`).",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/alert.md` + `docs/specs/alert.rationale.md`. The maintainer treats the state-machine diagrams in `alert.md` as the **complete model**: every transition the code makes must be an edge in a diagram, and every edge must exist in code. Check both directions, edge by edge, and list each mismatch as its own finding. Also read the notification-protocol rows in `docs/specs/terminal-escapes.md`.",
+      "focus": [
+        "The attention model and TODO lifecycle: transitions that can strand a session ringing forever, drop a completion the user never saw, or ring for output the user was watching. `attend()` historically conflated acknowledgement, presence, and focus; check what is left of that.",
+        "Notification protocols and their sanitization rules: terminal output is attacker-controlled, so trace every byte from an OSC notification to the DOM, to speech text, to push payloads, and to OS notifications.",
+        "Timers: the delivery scheduler, quiesce detector, speech queue, and presence each own timers. Find ones that are never cleared on session kill, Workspace close, or unmount, and work done per PTY chunk.",
+        "Speech: queue ordering, cancellation, a managed-voice failure falling back (or not), token and error handling in `managed-voice-host.ts`, audio that keeps playing after the alert is dismissed.",
+        "Watched commands and `await` (the `dor await` absorb path): alerts absorbed that the user should have received, or delivered twice.",
+        "Push devices: stale device records, payload contents.",
+        "The Workspace union projection: a Workspace tab showing a state none of its sessions hold.",
+        "Dead code: settings nothing reads, alert tracks or states no transition reaches, the retired bell."
+      ]
+    },
+    {
+      "unit": "termstate",
+      "rules": [
+        "^lib/src/lib/(?:terminal\\-state|terminal\\-state\\-store|terminal\\-protocol|processed\\-pty\\-stream|terminal\\-report\\-filter|osc\\-sanitize|keyboard\\-protocol\\-arbiter|terminal\\-prompt\\-shape|terminal\\-command\\-input|helper\\-terminal|terminal\\-context\\-types|shell\\-store|shell\\-defaults|shell\\-escape|posix\\-escape|terminal\\-buffer\\-read|buffer\\-cells|ansi|terminal\\-controls)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/wall/(?:TerminalContextView|TerminalContext|TerminalContextOverlay|terminal\\-context\\-placement)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/host/(?:git\\-info|git\\-remote\\-url|git\\-upstream|git\\-cli|local\\-directory)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/terminal-state.md",
+        "docs/specs/terminal-context.md",
+        "docs/specs/terminal-escapes.md"
+      ],
+      "what": "per-Session semantic state: `terminal-state.ts` (1,609 lines), its store, `terminal-protocol.ts` (1,091 lines), the processed PTY stream, the report filter, OSC sanitization, the keyboard-protocol arbiter, prompt and command lifecycle, shell store and escaping, the helper terminal and unified terminal context views, and the host-side git info helpers.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/terminal-state.md`, `docs/specs/terminal-context.md`, `docs/specs/terminal-escapes.md`, each with its `.rationale.md`. `terminal-escapes.md` is a registry: every sequence the code parses, answers, or ignores must have a row, and every row must match code. Check both directions and list each mismatch.",
+      "focus": [
+        "Parsing across chunk boundaries: an OSC, CSI, DCS, or APC split between two PTY chunks, an unterminated sequence that grows a buffer without bound, ST vs BEL terminators, 8-bit C1 controls, invalid UTF-8.",
+        "Terminal output is attacker-controlled (`cat` of a hostile file, `curl`, an SSH session). Trace titles, cwd reports, command text, hyperlinks, and notifications to wherever they land: the DOM, a shell command line, a file path, a git spawn, the clipboard. `osc-sanitize.ts`, `shell-escape.ts`, and `posix-escape.ts` must hold for POSIX shells, fish, cmd.exe, and PowerShell.",
+        "`terminal-report-filter.ts`: replies to queries (DA, DSR, color queries, XTVERSION, kitty keyboard) must never let program output inject keyboard input, and must not be answered twice (once by xterm.js and once by Dormouse).",
+        "`keyboard-protocol-arbiter.ts`: push/pop balance, state after a program crashes without popping, state across reconnect.",
+        "Prompt and command lifecycle (OSC 133/633 and friends): states that get stuck, command text mis-attributed, title and header derivation and grouping keys.",
+        "The helper terminal: lifecycle, promotion, source closure, as `terminal-context.md` states them.",
+        "Host git helpers: how often git is spawned (per cwd change? per render?), timeouts, a cwd that is deleted, huge repos, paths with spaces or newlines.",
+        "Per-chunk cost: regexes that can backtrack on long lines, repeated string concatenation of large buffers, state recomputed for every chunk.",
+        "Dead code: parsed fields nothing reads, protocol branches no shell integration script emits (compare with `standalone/sidecar/shell-integration/`)."
+      ]
+    },
+    {
+      "unit": "clipboard",
+      "rules": [
+        "^lib/src/lib/(?:copy\\-text|copy\\-text\\-fixtures|copy\\-editor|copy\\-editor\\-placement|copy\\-selection|terminal\\-mouse\\-router|mouse\\-selection|mouse\\-mode\\-observer|selection\\-reflow|selection\\-geometry|selection\\-watch|selection\\-text|select\\-all|smart\\-token|external\\-links|external\\-link\\-confirmation|clipboard|clipboard\\-write|clipboard\\-failure|drag\\-cells|drag\\-cancel|terminal\\-link\\-activation|redact\\-high\\-entropy|ip\\-literal)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/(?:CopyEditor|copy\\-editor\\-measure|ExternalLinkModal|ExternalLinkModalHost|ExternalTextLink|ClipboardFailureDialog|SelectionOverlay|CopyButton)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/wall/(?:MouseOverrideBanner)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/mouse-and-clipboard.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "terminal-owned selection, the copy editor (Auto / Exact / Spaces / No breaks), paste tiers, smart URL and path extension, external-link confirmation, clipboard write and failure handling, and the mouse-ownership router.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/mouse-and-clipboard.md` + its rationale, and the terminal-output and paste sections of `docs/specs/security-local.md`. The spec includes a mouse-ownership state matrix: check every cell against `terminal-mouse-router.ts`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "`copy-text.ts`: each mode's output for wrapped lines, trailing spaces, wide characters, emoji, combining marks, tabs, box-drawing, prompts, and the per-break marks. Look for off-by-one at line and selection boundaries and for selections that span scrollback.",
+        "Selection across resize and reflow (`selection-reflow.ts`, `selection-geometry.ts`): a selection that points at the wrong cells after the terminal reflows or scrolls.",
+        "Paste: a paste must never smuggle the bracketed-paste end marker or other control characters, in any tier, on any host. Check the confirm tiers and what counts as \"dangerous\".",
+        "OSC 52 and program-driven clipboard writes: size limits, invalid base64, whether a program can write the clipboard silently, the \"From <program>\" attribution.",
+        "Smart tokens: URL and path extension with IPv6 literals, trailing punctuation, parentheses, Windows paths, `file:` URLs, and paths with spaces.",
+        "External links: scheme allowlist, IDN and homograph display, userinfo in URLs, what the confirmation actually shows versus what opens.",
+        "`redact-high-entropy.ts`: false negatives on common secret shapes and where redaction is applied.",
+        "The copy editor component: focus and keyboard handling (`f`/`e`/arrow keys), placement off-screen, listeners left attached, edits lost on resize.",
+        "Mouse-mode programs (vim, tmux, htop): ownership handoff, the override banner, a stuck drag after pointer-capture loss.",
+        "Dead code and duplicated helpers across the `selection-*` and `clipboard*` files."
+      ]
+    },
+    {
+      "unit": "browser-web",
+      "rules": [
+        "^lib/src/components/wall/(?:agent\\-browser\\-surface\\-controller|AgentBrowserPanel|AgentBrowserScreenModal|agent\\-browser\\-connection|agent\\-browser\\-screen|browser\\-surface|IframePanel|agent\\-browser\\-ports|browser\\-automation|browser\\-url|browser\\-binding\\-reservations|agent\\-browser\\-input|BrowserPanel|BrowserDisplayIcon|BrowserProviderSwitch|port\\-url|surface\\-ports|use\\-dev\\-server\\-ports)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:iframe\\-policy|embedder\\-origins|frame\\-shield|agent\\-browser\\-tab|agent\\-browser\\-binary)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/(?:AgentBrowserScreenModalHost)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-browser.md",
+        "docs/specs/dor-browser.rationale.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "the webview side of the browser Surface: `agent-browser-surface-controller.ts` (1,955 lines), the agent-browser panel, screen modal, connection and screen modules, `IframePanel.tsx` (784 lines), browser URL and port helpers, binding reservations, dev-server port detection, and iframe policy.",
+      "read": "**Specs you own** (read first, in the snapshot): the webview-side sections of `docs/specs/dor-browser.md` + `docs/specs/dor-browser.rationale.md`, and the browser-pane sections of `docs/specs/security-local.md`. The host side (`lib/src/host/`) belongs to the `browser-host` unit; read it only to follow a call. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The surface controller as a state machine: every state and transition for connect, launch, tab change, pop-out to a window and back, reconnect, and close. Look for states it cannot leave, a screencast that stays bound to an old tab after the browser changes tabs on its own, and URL or tab state lost in a pop-in or pop-out.",
+        "Binding and port reservations: reservations that leak when a launch fails or a surface closes mid-launch; two surfaces claiming one key.",
+        "Input forwarding: coordinate scaling with device pixel ratio, zoom, and viewport presets; modifier keys; wheel deltas; IME composition; focus theft from the terminal.",
+        "`IframePanel.tsx`: the `sandbox` and `allow` attributes, `postMessage` handlers that do not check `event.origin` or `event.source`, navigation tracking, the proxy URL it builds, reload behavior on re-render or re-parent, the `https://` refusal.",
+        "`use-dev-server-ports.ts`: how often it polls, what each poll costs on the host, whether it stops when no pane needs it.",
+        "URL handling (`browser-url.ts`, `port-url.ts`): `:5173`, `host:port`, IPv6, userinfo, `javascript:` and `data:` URLs.",
+        "Listeners, timers, sockets, and object URLs that outlive the surface; frames decoded but never shown; base64 or image decode work per frame.",
+        "Dead code: render modes, providers, or controller branches nothing selects."
+      ]
+    },
+    {
+      "unit": "browser-host",
+      "rules": [
+        "^lib/src/host/(?:iframe\\-proxy|iframe\\-proxy\\-rewrite|agent\\-browser\\-host|browser\\-host|browser\\-viewer|playwright\\-host|playwright\\-install|browser\\-sync|browser\\-capture|browser\\-capture\\-budget|browser\\-launch\\-env|browser\\-config|browser\\-stream\\-guard|browser\\-neutral\\-cwd|browser\\-host\\-test\\-utils|loopback\\-guard|private\\-capture\\-dir|replay\\-buffer)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/host/(file|folder)-viewer-proxy\\.test\\.ts$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-browser.md",
+        "docs/specs/dor-browser.rationale.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "the Node-side browser stack bundled into both hosts: the iframe proxy and its rewriter, the agent-browser host, the generic browser host, the browser viewer, the Playwright host and installer, browser sync, capture and capture budget, launch environment, the loopback guard, the private capture directory, and the replay buffer.",
+      "read": "**Specs you own** (read first, in the snapshot): the host-side sections of `docs/specs/dor-browser.md` + `docs/specs/dor-browser.rationale.md`, and in `docs/specs/security-local.md` the \"Loopback Listeners\", \"Browser panes\", and \"Network policy\" sections with their `FAIL IF` lines. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The iframe proxy: it must reach only the loopback targets the spec allows. Look for SSRF (redirects, `Host` header tricks, DNS rebinding, IPv6 and decimal-IP forms, a target that resolves off-box), request smuggling, header and CSP rewriting mistakes, cookies crossing between proxied origins, WebSocket upgrade handling, streaming and backpressure, and sockets or servers that are never closed on error.",
+        "`iframe-proxy-rewrite.ts`: HTML and header rewriting on chunk boundaries, compressed bodies, huge bodies, non-UTF-8 content.",
+        "A loopback bind is not an access control: every listener here must check its guard. Find a listener or route that skips `loopback-guard.ts` or its token.",
+        "Process lifecycle in `agent-browser-host.ts`, `browser-host.ts`, and `playwright-host.ts`: spawn failures, zombie or orphaned browser and daemon processes after a host crash or surface close, kill escalation, per-surface state directories, concurrent commands against one browser, Windows differences. The neutral cwd and launch environment: what leaks into the browser's environment.",
+        "Capture: the capture budget, private capture directory permissions and cleanup, files left behind, frame buffers that grow.",
+        "`playwright-install.ts`: what it downloads or runs, and on whose say-so.",
+        "Synchronous filesystem or subprocess calls on a hot path; work done per frame.",
+        "Dead code: hosts, providers, or options nothing constructs. The two test files `file-viewer-proxy.test.ts` and `folder-viewer-proxy.test.ts` have no same-named source: say what they actually test."
+      ]
+    },
+    {
+      "unit": "dor-control",
+      "rules": [
+        "^lib/src/components/wall/(?:use\\-dor\\-control|dor\\-control\\-router|dor\\-control\\-shared|app\\-control)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-cli.md",
+        "docs/specs/dor-tool.md",
+        "docs/specs/dor-browser.md"
+      ],
+      "what": "the webview side of the `dor` control socket: `use-dor-control.ts` (2,538 lines), `dor-control-router.ts`, `dor-control-shared.ts`, and `app-control.ts`. The unit is small on purpose: read it slowly, and read the wire contract it must honor in `dor/src/protocol.ts` and `dor/src/control-methods.ts`, plus the callers of each method in `dor/src/commands/`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/dor-cli.md` + its rationale, for control-socket plumbing, the Surface handle model, and the command set; and the control-verb parts of `docs/specs/dor-tool.md` and `docs/specs/dor-browser.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The method table: every method the CLI can send has a handler, and every handler has a CLI caller. List methods on one side only.",
+        "Reply discipline: every request gets exactly one reply on every path, including thrown errors, a surface killed mid-request, a Workspace closed mid-request, and a client that disconnects while waiting. Find hung requests and double replies.",
+        "Handle resolution: `surface:N`, `surface:self`, `surface:focused`, `title:<exact>`, `workspace:<n>`, `workspace:<name>`. Look for a stale or reused id retargeting a destructive verb (`kill`, `send`), helper terminals leaking into listings or matching, and Workspace scoping mistakes (`--workspace`, `--all`).",
+        "`ensure`: the command + cwd identity key, matching against live commands, `--restart` keeping layout place, races between two simultaneous `ensure` calls creating duplicates.",
+        "`await`: `--until quiet` and `--until exit` semantics, waiter cleanup on kill or disconnect, alert absorption, timeouts.",
+        "`send`: text, key, stdin, and sequence modes; pacing; what happens to a queue when the target dies.",
+        "`kill --confirm-if-read`: what text is compared and whether it can match the wrong thing.",
+        "`move`, `reopen`, `workspace` verbs, and `app restart`.",
+        "Caller identity and authority: which caller may target which Workspace or window, and what an unauthenticated or forged caller id can do.",
+        "Dead code inside the 2,538-line hook: handlers, helpers, or fields nothing reaches; duplicated resolution logic that should be one function."
+      ]
+    },
+    {
+      "unit": "tools",
+      "rules": [
+        "^lib/src/components/wall/(?:tool\\-control|tool\\-navigation|tool\\-takeover|tool\\-transfer|tool\\-reaper|use\\-tool\\-reaper|use\\-tool\\-serving|use\\-tool\\-run\\-end|tool\\-name|ToolPanel|ToolPaneHeader|ToolApproval|ToolPortConflict|ToolNavigationButtons|preview\\-slot|preview\\-transition|preview\\-keep|confirmed\\-file\\-open)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/(?:ToolDirtyIndicator|ToolEditorCloseModalHost)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:tool\\-editor|tool\\-run\\-hold|tool\\-reap\\-store|tool\\-launch\\-latch|tool\\-announce\\-store|tool\\-open\\-requests|tool\\-dirty\\-store|tool\\-open\\-builtin|tool\\-events|preview\\-transition\\-store)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/host/(?:tool\\-registry|tool\\-trust|tool\\-host|tool\\-input|tool\\-open|tool\\-user\\-config|tool\\-list)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^dor-tools-lib/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-tool.md",
+        "docs/specs/dor-tools-lib.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "Dor Tools: the `tool` Surface (a terminal and a browser on one Session spine), on both sides. Webview: tool control, navigation, takeover, transfer, the reaper, serving detection, run-end, the Tool panel and header, approval, port conflict, the preview slot and its transitions. Host: the tool registry, trust, tool host, input, open rules, user config, listing. Plus the whole `dor-tools-lib/` package (the MIT Tool-protocol library).",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/dor-tool.md` + rationale, `docs/specs/dor-tools-lib.md`, and the Tool and trust sections of `docs/specs/security-local.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Trust: a project's `dormouse.yml` must run nothing until the user approves it. What exactly is approved (path, content hash, per Tool?), what invalidates approval, and whether anything can run a project Tool between an edit and re-approval. Comments in the file describe; they never authorize.",
+        "The OSC 367 contract and the launch latch: who may announce a port, when, how many times, and what a hostile program inside the terminal can make the pane do (flip to a browser of an arbitrary port or URL, steal a key, relaunch).",
+        "Registry and config parsing: malformed YAML, unknown fields, `run` as string vs list, `$PROJECT_ROOT` expansion, `prespawn_dedupe` keys colliding across checkouts, viewport values.",
+        "Serving detection and port conflict; the terminal ↔ browser flip in both directions with a stable id; `[keyed]` re-run semantics (`existing`, `adopted`, `--fresh`).",
+        "Takeover and transfer between Workspaces; dirty and pending Tools refusing a move.",
+        "The reaper: it must kill only processes it owns. Find a path that kills the wrong process or leaves the Tool's children running.",
+        "The iframe save channel in `dor-tools-lib`: origin and source checks, message validation.",
+        "The preview slot: one reusable preview per Workspace, replace without stealing focus, transitions that strand a pane.",
+        "`dor-tools-lib`: the license and dependency boundary the spec states (MIT, no runtime dependencies), its entry points, and exports nothing uses.",
+        "Dead code and stores that duplicate each other (`tool-*-store.ts`)."
+      ]
+    },
+    {
+      "unit": "mobile",
+      "rules": [
+        "^lib/src/components/(?:MobileTerminalUi|MobileWall|MobileGestureRadialMenu|MobileBrowserPane|MobileCloseDialog|MobileSettings|touch\\-ui\\-context)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:mobile\\-gesture\\-menu|mobile\\-terminal\\-scroll|mobile\\-font\\-size|dual\\-tap)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/mobile-terminal-ui.md"
+      ],
+      "what": "the mobile composition: `MobileTerminalUi.tsx` (1,261 lines), `MobileWall.tsx`, the radial gesture menu (component and `mobile-gesture-menu.ts`), mobile scroll, font size, the Type composer, the Sessions screen and its Settings, the mobile browser pane and close dialog.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/mobile-terminal-ui.md` + rationale. It ships in the website's Pocket playground and in the Pocket app. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Touch handling: gesture recognition thresholds, a gesture that starts as a scroll and becomes a menu (or the reverse), multi-touch, pointer-cancel, `touch-action` and passive-listener mistakes that block or double-fire, the dual-tap detector. Say for each finding whether your evidence is simulated event ordering or native behavior.",
+        "The on-screen keyboard: the terminal is panned above the keyboard using the visual viewport. Look for resize loops, a stale pan after rotation or keyboard dismissal, and iOS Safari versus Android Chrome differences the code assumes away.",
+        "The Type composer: text lost on blur or orientation change, IME composition and autocorrect, Enter versus newline, paste, what is sent to the PTY and when.",
+        "The radial menu: actions that fire on the wrong session after a session switch, items whose handlers are missing, geometry at screen edges and with safe-area insets.",
+        "Scrolling: momentum scroll fighting xterm's own scrolling, scroll position lost on output, cost per touchmove.",
+        "The Sessions screen and Settings: state that disagrees with the desktop Wall for the same sessions; close and kill confirmation targeting.",
+        "Listeners, timers, and observers left attached after unmount; work per frame.",
+        "Dead code: gesture modes, menu entries, or props nothing uses; desktop-only code paths reachable here by mistake."
+      ]
+    },
+    {
+      "unit": "burrow-b",
+      "rules": [
+        "^lib/src/remote/burrow/(?:one\\-time\\-runtime|one\\-time\\-store|enrollment|activation|passkey\\-sync|pairing\\-approval|enrolled\\-gate|burrow\\-status\\-store|network\\-policy\\-store|RemotePairingModal|RemotePairingModalHost)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/remote/(?:network\\-policy|one\\-time\\-rendezvous|setup\\-copy|ws)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/components/(?:RemoteControlSection|NetworkSettings|PairedDevices|HostedEnrollment|OneTimeConnection|OneTimeIndicator|ScannableCode|QrCode|remote\\-control\\-shared|RetainedPagesIndicator)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/one-time.md",
+        "docs/specs/remote-network.md",
+        "docs/specs/relay.md",
+        "docs/specs/remote-security-model.md"
+      ],
+      "what": "the rest of the laptop-side remote stack and its Settings UI: `one-time-runtime.ts` (861 lines) and its store, enrollment, activation, passkey sync, pairing approval and the pairing modal, the enrolled gate, the Burrow status store, the network-policy store and `network-policy.ts`, the one-time rendezvous client, `ws.ts`, and the Settings components (`RemoteControlSection.tsx` at 1,165 lines, `NetworkSettings.tsx`, `PairedDevices.tsx`, `HostedEnrollment.tsx`, `OneTimeConnection.tsx`, the Baseboard indicator, QR and scannable-code components).",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/one-time.md` + rationale, `docs/specs/remote-network.md` + rationale (Nowhere / Local networks only / Anywhere / Anywhere through your Relay: the choke points, the update reminder, the Local networks path check), the enrollment and \"Settings → Remote control\" sections of `docs/specs/relay.md`, the pairing sections of `docs/specs/remote-security-model.md`, and `docs/stories/pairing.mdx`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The network policy as a choke point: every level must actually stop what it claims to stop. Find a path (a reconnect timer, a status poll, an enrollment check, an update reminder) that reaches the network at \"Nowhere\", or reaches beyond the local network at \"Local networks only\". A policy change while connected must take effect at once.",
+        "One-time connection: the link's lifetime and single use, the two-digit confirm, direct-only (the session must never fall back through Hosted), nothing saved, no resume; what a second scanner of the same QR gets; teardown on the laptop when the panel closes.",
+        "Pairing approval: what the user is shown before approving, an approval that outlives a user-verification requirement being raised, an approval dialog for one device answered while another request arrives, a stale modal.",
+        "Enrollment and activation: device-code flow states, retry and expiry, a token or setup password kept longer than needed or logged, switching between Hosted and a self-host Relay origin (the rule: one relay origin; non-default means self-host and nothing reaches dormouse.sh).",
+        "Passkey sync and removal: removing a passkey must end that passkey's sessions.",
+        "The status store: status that can disagree with reality (shows \"connected\" after the socket died), subscription churn.",
+        "The Settings UI: every control wired to something real, disabled and error states, copy that states something false, a destructive action (unpair, reset) with the wrong target after the list re-sorts.",
+        "`ws.ts`: the shared socket surface: close and error handling, backoff, listeners that accumulate.",
+        "Dead code: Settings sections, store fields, or runtime branches nothing reaches."
+      ]
+    },
+    {
+      "unit": "burrow-a",
+      "rules": [
+        "^lib/src/remote/burrow/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/remote-api.md",
+        "docs/specs/remote-security-model.md",
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the laptop-side remote session in `lib/src/remote/burrow/`: `burrow-runtime.ts` (2,148 lines), `established-session.ts`, `remote-api.ts`, `frame-tunnel.ts`, peer surfaces, the surface provider, directory collection, the ACL, the access log, push delivery, `burrow-fetch.ts`, embedded pages, client close and take-back.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/remote-api.md` + rationale (the shipped terminal-only protocol-v1 and what is staged), `docs/specs/remote-security-model.md` + rationale (one Noise channel per ceremony, per-Burrow Client statics, the Burrow authorizes the pair, not the Relay), and the Burrow rows of `docs/specs/security-remote.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Authorization at the Burrow: every protocol-v1 request from a Client must be checked against the ACL and the session's presence state before it touches a PTY. Find a request type that skips a check, a check done on Relay-supplied data instead of the Noise-authenticated identity, and state that survives a revocation or passkey removal (live sessions must end).",
+        "The ACL writer: the spec says exactly one. Ordering between \"ACL saved\" and \"pair is live\".",
+        "Session establishment and teardown in `burrow-runtime.ts`: a second ceremony for the same Client, a Client that vanishes mid-ceremony, resume, displaced sessions, timers and maps that grow per connection.",
+        "Message handling: every inbound frame is size-bounded and validated before use; unknown types; replay or reordering inside a session; what a malicious Relay can cause (it can drop, delay, and reorder ciphertext but must learn and forge nothing).",
+        "`remote-api.ts`: which surfaces a Client can see and act on, input and resize routing to the right PTY, output replay bounds, what crosses the boundary (titles, cwd, clipboard, alerts).",
+        "`frame-tunnel.ts` and embedded pages (remote iframes and Tools on the phone): which origins and ports can be reached, header handling, body size limits, SSRF through the tunnel.",
+        "`burrow-fetch.ts`: it must use the guarded transport and honor the network policy with no global fallback.",
+        "Push delivery: what is in a push payload, endpoint validation (no re-parsing a stored endpoint into a different host), rate limits.",
+        "The access log: what it records, growth bounds, sensitive content.",
+        "Dead code: staged protocol branches that are wired but unreachable, message types nothing sends."
+      ]
+    },
+    {
+      "unit": "pocket",
+      "rules": [
+        "^lib/src/remote/pocket-app/",
+        "^lib/src/remote/one-time-app/",
+        "^lib/pocket/",
+        "^lib/one-time/",
+        "^lib/vite\\.(pocket|sw|one-time)\\.config\\.ts$",
+        "^lib/scripts/assert-pocket-worker\\.mjs$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/pocket-app.md",
+        "docs/specs/one-time.md",
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the Pocket app shell (`lib/src/remote/pocket-app/`: `App.tsx` at 1,475 lines, the scan-invitation flow, the Pocket wall and browser frame, views, the service worker, deployment and pair-link helpers), the one-time phone page (`lib/src/remote/one-time-app/`), the static shells under `lib/pocket/` and `lib/one-time/`, the diagnostics pages, and the Pocket, service-worker, and one-time Vite configs.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/pocket-app.md` + rationale (the remote session is a `PlatformAdapter`, so Pocket is auth screens plus the mobile composition; the same-origin deployment rule), the phone-page sections of `docs/specs/one-time.md` + rationale, and the Pocket rows of `docs/specs/security-remote.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "`App.tsx` as a state machine: sign-in, pairing, reconnect, session list, session view, sign-out, passkey removal. States it cannot leave, a spinner with no timeout, an error that is swallowed, a stale session shown after the Burrow revokes the phone.",
+        "The service worker (`sw.ts`, `service-worker.ts`, `sw-entry.ts`): cache versioning and update flow (a stale app shell pinned forever), what is cached (never credentials or session data), push event handling and notification click targets, scope. The spec says no checked-in built service worker.",
+        "The scan-invitation flow: QR parsing, camera permission denial, a malformed or hostile invitation link, what is shown to the user before they accept.",
+        "Stored state: what lives in IndexedDB or localStorage, private keys (must be non-extractable if the spec says so), cleanup on sign-out. The one-time page must keep no store at all.",
+        "The one-time page: the take-link parsing, the two-digit confirm, the direct-only session, no resume; what happens on reload or a second tab.",
+        "The browser frame (`PocketBrowserFrame.tsx`, `frame-salt.ts`): origin isolation of remote iframes, `postMessage` origin checks.",
+        "Deployment (`deployment.ts`): same-origin rule, what differs between Hosted and self-host.",
+        "The diagnostics pages: reachable in production? Do they expose anything?",
+        "iOS Safari and installed-PWA specifics the code relies on (push needs a Home Screen install).",
+        "Dead code: views, routes, or branches nothing reaches; leftovers of removed flows."
+      ]
+    },
+    {
+      "unit": "rc-a",
+      "rules": [
+        "^lib/src/remote/client/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/remote-api.md",
+        "docs/specs/remote-security-model.md",
+        "docs/specs/pocket-app.md",
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the phone-side protocol in `lib/src/remote/client/`: `pocket-client.ts` (1,640 lines), `session-core.ts`, `one-time-client.ts`, `pocket-db.ts`, `frame-client.ts`, `remote-adapter.ts` (the `RemotePtyAdapter`), WebAuthn, push subscription, and the private-key store.",
+      "read": "**Specs you own** (read first, in the snapshot): the Client side of `docs/specs/remote-api.md` + rationale and of `docs/specs/remote-security-model.md` + rationale, the adapter sections of `docs/specs/pocket-app.md`, and the Client rows of `docs/specs/security-remote.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The ceremony from the Client's side: every value the Client accepts from the Relay or the Burrow is validated and bound into the transcript; a challenge that is not derived as the spec says; presence proofs; what a malicious Relay or a network attacker can make the Client believe or sign.",
+        "`session-core.ts` and `pocket-client.ts`: reconnect and resume, message ordering, a reply matched to the wrong request, requests that never settle when the socket dies, timers and listeners that accumulate per reconnect, a session that keeps running after sign-out.",
+        "`remote-adapter.ts` against the `PlatformAdapter` contract in `docs/specs/transport.md`: methods that are stubbed, events delivered out of order, resize and input before the session is ready, output replay duplicated after reconnect.",
+        "`pocket-db.ts` and `pocket-private-key.ts`: what is persisted, key extractability, schema upgrades, a blocked or failed IndexedDB open, cleanup on sign-out, behavior in private browsing.",
+        "`webauthn.ts`: the relying-party id and origin assumptions, user-verification requirements, error mapping (a cancelled prompt versus a real failure).",
+        "`push-subscribe.ts`: permission states, a stale subscription, the VAPID key source.",
+        "`frame-client.ts`: remote iframe transport: size bounds, origin handling, a frame for a surface that closed.",
+        "`one-time-client.ts`: no store, direct-only, the confirm digits.",
+        "Dead code: staged-protocol branches, message types no Burrow sends."
+      ]
+    },
+    {
+      "unit": "rc-b",
+      "rules": [
+        "^lib/src/remote/direct/",
+        "^lib/src/remote/frame-origin/",
+        "^lib/src/remote/test-[a-z0-9-]+(\\.test)?\\.ts$",
+        "^lib/frame-origin-public/",
+        "^lib/vite\\.frame-origin\\.config\\.ts$",
+        "^scripts/direct-interop/",
+        "^scripts/frame-origin-check/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/remote-network.md",
+        "docs/specs/remote-security-model.md",
+        "docs/specs/pocket-app.md",
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the WebRTC direct path both ends run (`lib/src/remote/direct/`: `direct-peer.ts`, `direct-endpoint.ts`, path refusal, ICE servers), the frame-origin worker and bridge (`lib/src/remote/frame-origin/` plus `lib/frame-origin-public/` and its Vite config), the shared remote test harness files (`lib/src/remote/test-*.ts`), and the interop and frame-origin check scripts under `scripts/direct-interop/` and `scripts/frame-origin-check/`.",
+      "read": "**Specs you own** (read first, in the snapshot): the direct-path sections of `docs/specs/remote-network.md` + rationale (Cloudflare STUN, the Local networks path check, each level's paired-phone path) and of `docs/specs/remote-security-model.md` (how the direct path is bound to the Noise session), the frame-origin sections of `docs/specs/pocket-app.md` and `docs/specs/security-remote.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Binding: the data channel must be authenticated by the Noise session, not by the signalling path. Find anything accepted from signalling without that binding (candidates, fingerprints, a peer that connects but is not the paired device).",
+        "The path check for \"Local networks only\": which candidate types and addresses are allowed (host candidates on private ranges, IPv6 unique-local and link-local, mDNS names, mixed-family pairs, a pair whose address cannot be read). A relayed or server-reflexive path must be refused where the policy says so.",
+        "Lifecycle in `direct-peer.ts` and `direct-endpoint.ts`: ICE restart, a channel that closes mid-message, fallback to the Relay path and back, message ordering across the switch, duplicate or lost frames, timers and peer connections that leak, backpressure (`bufferedAmount`).",
+        "Message framing and size limits over the data channel.",
+        "The frame-origin worker and bridge: this serves remote iframe content on a separate origin. Check the origin isolation the spec claims, `postMessage` origin and source checks, what the bootstrap page trusts, cache behavior.",
+        "The test harness files are imported by tests across the remote stack: fakes that permit sequences the real transport cannot produce (a mock that proves nothing), and harness code nothing imports.",
+        "The two script directories: do they still run against the current code (imports, paths, flags), and does anything invoke them (`package.json`, CI)?",
+        "Dead code and duplicated helpers between the browser peer, the native peer in `lib/src/host/remote/native-direct-peer.ts`, and the fake peer."
+      ]
+    },
+    {
+      "unit": "host-remote",
+      "rules": [
+        "^lib/src/host/remote/",
+        "^lib/src/host/(?:relay\\-origin)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/relay.md",
+        "docs/specs/remote-network.md",
+        "docs/specs/security-remote.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "the desktop Burrow service both hosts run, in `lib/src/host/remote/`: `service.ts` (2,074 lines), `sidecar-entry.ts`, `service-protocol.ts`, the frame host, the Burrow state store, Hosted approval and enrollment URLs, the link client, network interfaces and the local-networks check, the native direct peer, the ask-surface provider, the enroll offer, plus `lib/src/host/relay-origin.ts`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/relay.md` + rationale for the desktop Burrow service (config, state files, the baked Relay origin, enrollment), `docs/specs/remote-network.md` + rationale for the choke points on the host side, the host rows of `docs/specs/security-remote.md` (credentials at rest, relay origin, network posture) and of `docs/specs/security-local.md` (network policy, outbound). Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Credentials at rest in `burrow-state-store.ts`: file permissions and umask, atomic writes, what is stored in the clear, corruption handling (a corrupt file must not silently reset trust or re-enroll), concurrent writers when the Tauri sidecar and a VS Code window both run a Burrow.",
+        "The relay origin: one origin, baked at build time, with the self-host override; nothing may reach dormouse.sh when a non-default origin is set. Trace every URL the service builds.",
+        "Outbound network: every socket, fetch, and STUN request must go through the guarded transport and obey the network policy. Find one that does not, including retries and timers that fire after the policy changes.",
+        "`service.ts` lifecycle: start and stop, reconnect and backoff to the Relay (a tight loop when the Relay is down or rejects auth), state after sleep and wake, several windows sharing one service, requests pending forever, maps that grow per connection or per surface.",
+        "`service-protocol.ts`: messages between the host service and the webview: validation, unknown types, ordering, version skew between a newer webview and an older host (the sidecar is rebuilt separately in dev).",
+        "`local-networks.ts` and `network-interfaces.ts`: address classification (private IPv4 ranges, CGNAT, IPv6 unique-local and link-local, IPv4-mapped IPv6, interface changes on Wi-Fi switch).",
+        "The frame host and ask-surface provider: which local targets a remote Client can reach through the laptop, and who authorizes it.",
+        "Hosted approval and enrollment: token lifetimes, what is logged.",
+        "The native direct peer (node-datachannel): resource cleanup, a native crash path.",
+        "Dead code: protocol messages nothing sends, options nothing sets, test-only helpers shipped in the bundle (`test-burrow-link.ts`, `test-outbound.ts`: confirm they are not bundled)."
+      ]
+    },
+    {
+      "unit": "theme-settings",
+      "rules": [
+        "^lib/src/lib/themes/",
+        "^lib/src/components/theme-picker/",
+        "^lib/src/components/(?:ThemeDebugger|ThemePicker|design|SettingsDialog|AboutSettings|SettingsPreview|ShellPicker|use\\-anchored\\-menu|use\\-popover\\-focus\\-trap|ScrollFades)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:terminal\\-theme|css\\-color|color\\-contrast|labs\\-settings|feature\\-flags|build\\-info|hosted\\-links)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/site/",
+        "^lib/scripts/bundle-themes\\.mjs$",
+        "^DESIGN\\.md$",
+        "^PRODUCT\\.md$",
+        "^\\.impeccable/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/theme.md"
+      ],
+      "what": "theming, the design system, and the Settings shell: `lib/src/lib/themes/` (the bundled themes and resolver), the theme picker and debugger, `terminal-theme.ts`, color helpers, `design.tsx` (947 lines: the type scale, color strategy, shared chrome constants), `SettingsDialog.tsx`, About, the settings preview, the shell picker, anchored-menu and focus-trap hooks, Labs settings and feature flags, build info, Hosted links, the docs site design in `lib/src/site/`, the theme bundling script, and the root `DESIGN.md`, `PRODUCT.md`, and `.impeccable/`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/theme.md` + rationale (the two-layer CSS variable strategy, the consumed-token resolver, the terminal color contract, the theme debugger), and `DESIGN.md` with its named rules. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The token contract: every CSS variable a component consumes is defined in every theme and host (VS Code's own tokens, the standalone themes, the website, Pocket, Hosted), with a fallback where the spec requires one; tokens defined and consumed nowhere. `DESIGN.md` says never hardcode colors: search `lib/src/` for hex, `rgb(`, `hsl(`, and named colors in components and report real violations (not test fixtures or the theme data itself).",
+        "`design.tsx` against the components: constants defined and unused, classes duplicated inline instead of using the shared constant, type-scale steps nothing uses, values `DESIGN.md` states that differ from the code.",
+        "The terminal color contract: the 16 ANSI colors, foreground, background, cursor, and selection for light and dark themes; contrast checks (`color-contrast.ts`) and what happens when a theme fails them; a theme switch applied to live terminals.",
+        "Theme data and bundling: how themes are bundled (`bundle-themes.mjs`), the bundle's size and whether all themes load eagerly at start-up, malformed theme input, the VS Code theme mapping.",
+        "The Settings dialog: every control persists and takes effect; settings that exist in storage and have no control, or the reverse; focus trap and Escape handling; keyboard navigation; sections shown on hosts where they do nothing.",
+        "Labs settings and feature flags: for each flag, where it is read, whether both branches are still reachable, and flags that are permanently on or off (dead branches).",
+        "`use-anchored-menu.ts` and `use-popover-focus-trap.ts`: positioning at viewport edges, listeners left attached, focus restoration.",
+        "`lib/src/site/`: the docs design shared by the website and Hosted: tokens that drift from the app's.",
+        "`DESIGN.md` and `PRODUCT.md`: statements that are no longer true of the product; `.impeccable/` content that is stale.",
+        "Dead code: themes, tokens, helpers, and components nothing uses."
+      ]
+    },
+    {
+      "unit": "platform",
+      "rules": [
+        "^lib/src/lib/platform/",
+        "^lib/src/lib/__fixtures__/",
+        "^lib/src/lib/(?:vscode\\-message\\-token|vscode\\-keybindings|vscode\\-recovery\\-global|vscode\\-managed\\-voice\\-global|use\\-browser\\-layout\\-effect)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/[^/]+$",
+        "^lib/[^/]+$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/transport.md",
+        "docs/specs/transport.rationale.md"
+      ],
+      "what": "the platform abstraction in `lib/src/lib/platform/` (the `PlatformAdapter` interface, the fake adapter, the VS Code adapter), the small `vscode-*` globals, the `lib/src/` root entry files, and the `lib/` package's own configuration: `package.json`, the Vite configs, the tsconfigs, and `index.html`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/transport.md` + `docs/specs/transport.rationale.md` (the adapter-agnostic webview ↔ host protocol and the invariants every adapter honors). Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The `PlatformAdapter` interface against all of its implementations: the fake adapter and VS Code adapter here, the Tauri adapter in `standalone/src/tauri-adapter.ts`, the dev harness adapter in `standalone/src/browser-sidecar-adapter.ts`, and `RemotePtyAdapter` in `lib/src/remote/client/remote-adapter.ts`. List methods that are optional, stubbed, or behave differently across adapters where `transport.md` says they must agree; and interface members nothing calls.",
+        "Message contracts: for each webview ↔ host message, compare the TypeScript type with what the sender actually builds and what the receiver actually reads on each host (`vscode-ext/src/message-types.ts` and `message-router.ts`; `standalone/src-tauri/src/lib.rs` and `standalone/sidecar/`). Fields sent and never read, read and never sent, or typed differently on the two sides.",
+        "PTY lifecycle and buffering invariants in `transport.md`: ordering, replay on reconnect, backpressure, exit delivery.",
+        "The fake adapter ships in the website playground: check that it honors the same invariants the tutorial relies on.",
+        "The `lib/` package config: which `tsc` invocation actually type-checks `lib/src` (a past finding was that `tsc -p tsconfig.json` checks nothing because of project references); files no tsconfig includes; Vite config duplication across the five configs; `package.json` scripts that call things that do not exist; `exports` and entry points nothing consumes.",
+        "Unused exports from the `lib/src/` entry files."
+      ]
+    },
+    {
+      "unit": "x-stories",
+      "rules": [
+        "^lib/src/stories/",
+        "^lib/\\.storybook/",
+        "^hosted/src/stories/",
+        "^lib/vitest\\.argos\\.config\\.ts$"
+      ],
+      "tests": null,
+      "specs": [],
+      "what": "Storybook and visual testing: the stories in `lib/src/stories/` (about 8,300 lines), the Hosted stories in `hosted/src/stories/` (including the \"emails\" folder: house rule is that every email the product sends has a story there), the Storybook configuration in `lib/.storybook/`, and `lib/vitest.argos.config.ts` (Argos visual tests run the stories and their `play` functions in Chromium and WebKit).",
+      "read": "**Read first** (in the snapshot): `TESTING_AND_MODIFICATION_GUIDE.md` for how stories are used as tests, `.github/workflows/argos.yml`, and `DESIGN.md` for what the components are meant to look like.",
+      "focus": [
+        "Stale stories: a story for a component that no longer exists or has been renamed, args and props the component no longer accepts (TypeScript may not catch a loosely typed story), mock data in a shape the real stores no longer produce, a story that renders an error boundary or an empty frame.",
+        "Coverage gaps that matter: components in `lib/src/components/` with user-visible states (error, empty, loading, disabled, long text, narrow width) and no story. List components with no story at all, most important first. For Hosted, list every email the server sends (`hosted/server/notices.ts`, `notice-message.ts`, `billing-alert-message.ts`, and any other sender) and say which have no story.",
+        "`play` functions: ones that can pass without checking anything, that depend on timing (`setTimeout`, animation) and will flake in Argos, that swallow exceptions (Storybook can hide a `play` failure), and ones whose assertions no longer match the component.",
+        "Snapshot stability: stories that render the current time, random ids, animations, or fonts that load late, without the snapshot clock or settle helpers (`lib/.storybook/snapshot-clock.ts`, `lib/src/stories/settle-terminals.ts`).",
+        "The Storybook config: `main.ts` globs that miss story files or match none, addons configured and unused, the Tauri stubs and window mock against what the components now import, `preview.ts` runtime imports that defeat build caching or pull the whole app into every story, themes listed against the themes that exist.",
+        "`vitest.argos.config.ts` and the Argos workflow: which stories are captured, in which browsers and viewports, what is excluded and why.",
+        "The helper modules (`settle-terminals.ts`, `story-selection.ts`, `PhoneFrame.tsx`, the Hosted `fixtures.tsx`, `HostedFrame.tsx`, `EmailFrame.tsx`): correctness and dead exports.",
+        "Duplicated story setup that should be one decorator.",
+        "Canopy's Storybook (`canopy/.storybook/`) is the `session` unit's; skip it."
+      ]
+    },
+    {
+      "unit": "wall-core",
+      "rules": [
+        "^lib/src/components/wall/",
+        "^lib/src/components/",
+        "^lib/src/lib/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/layout.md",
+        "docs/specs/shortcuts.md",
+        "docs/specs/glossary.md"
+      ],
+      "what": "`Wall.tsx` (2,658 lines) and the interaction model around it: modes, command-mode dispatch, keyboard handlers under `wall/keyboard/`, pane headers, kill and rename, doors and the Baseboard, selection overlay.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/layout.md` + `layout.rationale.md` (everything except the Workspace model, which the `workspaces` unit owns), `docs/specs/shortcuts.md`, and `docs/specs/glossary.md` for vocabulary. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Shortcut completeness: every row in `shortcuts.md` has a handler that does what the row says, in the mode it says; every handler in `wall/keyboard/` has a row; `layout.md` and `shortcuts.md` agree with each other. Check platform differences (⌘ vs Ctrl) and what happens to a chord when an input, the copy editor, a modal, or an iframe has focus.",
+        "Wrong-target risk: kill confirm, rename, and command-mode actions must act on the pane that was targeted when the action began, even if focus or layout changes before the confirm lands.",
+        "Minimize/reattach, doors, and the Baseboard: state that can get stuck (a door with no session, a session with no pane or door).",
+        "`Wall.tsx` effects: stale closures, missing or wrong effect dependencies, listeners and timers that are never removed, state updates after unmount, work repeated on every render. Quantify render cost where PTY output, titles, or alerts cause the whole Wall to re-render.",
+        "What in `Wall.tsx` and `wall-context.tsx` is dead: props never passed, context fields never read, callbacks threaded through but unused, branches for removed features.",
+        "Tests in this unit that mock impossible callbacks or assert something other than their title."
+      ]
+    },
+    {
+      "unit": "rlc-security",
+      "rules": [
+        "^remote-lib-common/src/security/",
+        "^remote-lib-common/test/(?!harness/)[^/]*(noise|acl|pairing|passkey|presence|push-seal|push\\.|challenge|ecdsa|webcrypto|bytes|token-bucket|e2e|direct-path|one-time-link|link-url|vectors)",
+        "^remote-lib-common/test/vectors/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/remote-security-model.md",
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the security primitives in `remote-lib-common/src/security/`: the Noise implementation and transport, the E2E ceremony, the direct-path binding, the ACL, pairing invitations, one-time links, passkeys, presence and the presence window, push sealing, challenges, ECDSA, byte helpers, WebCrypto wrappers, and the token bucket. The package is bare ES2022 with no DOM or Node types.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/remote-security-model.md` + rationale, and the \"Remote Control\" audited checks of `docs/specs/security-remote.md` + rationale with their `FAIL IF` lines. `scripts/e2e-lint.mjs` enforces the structural half mechanically (one Noise suite with no selector, no JavaScript curve, and so on): do not re-report what it checks; look for what it cannot see. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The Noise handshake and transport: the pattern and suite against the spec, nonce handling and exhaustion, key reuse across ceremonies, what is bound into the handshake hash (prologue), rekeying, message length limits, and failure on a tampered or truncated message (it must fail closed and tear the session down, never continue).",
+        "The ceremony: every field that crosses the wire is in the transcript; no optional fields on a ciphertext or transcript; a downgrade, reflection, or replay of an old ceremony; the pairing invitation's lifetime and single use.",
+        "Passkey and presence proofs: challenge derivation, origin and relying-party checks, signature verification (DER versus raw, low-S, curve checks), the user-verification flag, counter handling, the presence window's clock assumptions (clock skew, a clock that jumps).",
+        "Parsing: every decoder is strict (length checks before reads, canonical encodings, rejects trailing bytes), and comparison of secrets is constant-time where it matters.",
+        "`acl.ts`: the record format, what a corrupt or hostile record does, ordering guarantees.",
+        "`push-seal.ts` and `push.ts`: what a push service can read or forge.",
+        "`token-bucket.ts`: refill math, overflow, a clock that goes backwards.",
+        "The test vectors under `remote-lib-common/test/vectors/`: do they come from a published source, and do the tests actually compare against them?",
+        "Tests whose harness permits something the real protocol cannot do.",
+        "Dead code: exported primitives nothing imports, parameters always passed the same value."
+      ]
+    },
+    {
+      "unit": "rlc-remote",
+      "rules": [
+        "^remote-lib-common/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/remote-api.md",
+        "docs/specs/relay.md",
+        "docs/specs/one-time.md",
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the remote wire contract in `remote-lib-common/src/remote/`: `wire.ts` (1,219 lines), `relay-common.ts`, `web-push.ts`, `frame-wire.ts`, `one-time-wire.ts`, the enroll code and offer, relay routing, managed voice, frame-origin helpers, origin and deployment helpers; plus the package's own `index.ts`, config, and the test harness under `remote-lib-common/test/harness/`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/remote-api.md` + rationale (protocol-v1 as shipped), the wire sections of `docs/specs/relay.md` and `docs/specs/one-time.md`, and `docs/specs/security-remote.md` for what crosses the boundary. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "`wire.ts`: every message type's encoder and decoder agree; decoders reject unknown, oversized, and malformed input instead of passing it on; numeric fields are range-checked; strings are length-bounded; no optional field on anything that is encrypted or part of a transcript. Compare each type with what the three consumers actually send and read: the Relay (`relay/src/`), the Burrow (`lib/src/remote/burrow/`, `lib/src/host/remote/`), and the Client (`lib/src/remote/client/`). List types and fields that only one side knows.",
+        "`Reserved:` fields the specs name: present and inert, as stated.",
+        "`relay-common.ts` and `relay-routing.ts`: shared by the self-host Relay and Hosted's relay Worker. Look for behavior that only makes sense for one of them, and routing decisions made on unauthenticated data.",
+        "`web-push.ts`: VAPID signing, payload encryption (aes128gcm record format, padding), endpoint validation (a stored endpoint must not be re-parsed into a different host), TTL and urgency headers.",
+        "`frame-wire.ts`: framing of remote iframe traffic: size limits, header allow and deny lists, chunk reassembly.",
+        "`one-time-wire.ts`: the rendezvous carries only the handshake; nothing else may be representable.",
+        "`enroll-code.ts` and `enroll-offer.ts`: code entropy, alphabet, expiry, comparison.",
+        "`origin.ts`, `pocket-deployment.ts`, `frame-origin*.ts`: origin parsing mistakes (ports, trailing dots, IDN, case).",
+        "The package boundary: it must stay bare ES2022 with no DOM or Node types; `index.ts` exports nothing uses; `globals.d.ts` declarations that hide a missing dependency.",
+        "The test harness: fakes that allow impossible sequences; harness code nothing imports."
+      ]
+    },
+    {
+      "unit": "relay",
+      "rules": [
+        "^relay/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/relay.md",
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the self-host coordinating Relay (Hono): `relay/src/app.ts` (1,513 lines), `state.ts` (846), `relay.ts`, push, the push endpoint, config, setup and enroll tokens, start-up, the runtime file, secrets, and the dev scripts.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/relay.md` + rationale (config, state files, HTTP API, routing, enrollment, installing it), the Relay rows of `docs/specs/security-remote.md` + rationale (trust boundary, relay origin, credentials at rest, the setup password, cross-origin access, network posture), and the Relay parts of `SELF_HOST.md`. The Relay is untrusted for confidentiality by design (it routes ciphertext), but it owns accounts, passkey auth, and availability. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The HTTP API in `app.ts`, route by route: authentication and authorization on every route, CSRF and cross-origin rules (CORS allowlist, `Origin` checks on state-changing requests and on WebSocket upgrades), body size limits, rate limits and the token buckets, error responses that leak whether an account exists, cookies (flags, scope, lifetime), and session fixation.",
+        "Passkey registration and sign-in: challenge storage and single use, origin and relying-party id checks, user verification, what the setup password and setup token gate and for how long, re-auth for sensitive actions, passkey removal ending sessions.",
+        "`state.ts`: accounts live in local JSON files with no database. Atomic writes, concurrent requests mutating the same file, crash between two files that must agree, corruption handling, file permissions, unbounded growth (sessions, challenges, push subscriptions, enroll tokens never pruned).",
+        "WebSocket routing in `relay.ts`: which sockets may be paired with which (account scoping), a displaced Burrow or Client, slow-consumer backpressure, message size limits, idle timeouts, a Burrow revoked while connected.",
+        "Push (`push.ts`, `push-endpoint.ts`): endpoint validation against SSRF (the Relay makes outbound requests to URLs clients supply), what the Relay can learn from a payload, retry and pruning of dead subscriptions.",
+        "Config and start-up: binding (loopback by default versus exposed), proxy headers trusted, TLS assumptions, secrets from the environment, the runtime file's permissions and staleness.",
+        "Static serving of the built Pocket app: path traversal, cache headers, the same-origin deployment rule.",
+        "Dead code: routes no client calls (check `lib/src/remote/client/`, `lib/src/host/remote/`, and the Pocket app), config keys nothing reads, the dev scripts."
+      ]
+    },
+    {
+      "unit": "hosted-server-a",
+      "rules": [
+        "^hosted/server/(relay-[a-z-]+|one-time[a-z-]*|socket-room|pocket|frame-origin|frame-worker|try-worker|relay-worker|account-gate|account-app|account-auth|account-routes|worker-app|worker|headers|bindings|db|migrations|runtime-roles|providers|dev|dev-host-guard|policy|policy-constants|prelaunch|workers-runtime\\.d|preview-[a-z-]+)\\.(ts|js|sql)$",
+        "^hosted/server/tests/(relay|relay-room|relay-push|one-time|pocket|workers|boundary|runtime-roles|frame-origin|enrollment|policy|migrations|artifacts)\\.test\\.ts$",
+        "^hosted/server/tests/(raw-socket|relay-room-entry|bundle|worker-roles|worker-entry|one-time-entry|one-time-limits|rate-limit|oauth-server)\\.ts$",
+        "^hosted/server/runtime-roles\\.sql$",
+        "^hosted/server/preview-migrations/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/hosted.md",
+        "docs/specs/security-hosted.md",
+        "docs/specs/one-time.md"
+      ],
+      "what": "Hosted's relay, one-time, and account-plumbing Workers in `hosted/server/`: `relay-api.ts` (834 lines), `relay-room.ts` (the per-account Durable Object), `relay-push.ts`, relay auth, account, sockets, and rows, the one-time room and routes, the Pocket and frame-origin Workers, the account gate and app, headers, bindings, the database layer, migrations runner, runtime roles (`runtime-roles.sql`), policy, prelaunch, dev helpers, and the preview Workers. The billing, voice, notices, withdrawal, closure, and metrics modules belong to `hosted-server-b`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/hosted.md` + rationale (login and linking policy, account-scoped Relay and enrollment, Worker deployment, local development), `docs/specs/security-hosted.md` + rationale (account origin, identity, deployment checks, with `FAIL IF` lines), and the Hosted rendezvous sections of `docs/specs/one-time.md`. The origin split is: `hosted.dormouse.sh` = account and Better Auth; `relay.` = account-scoped Relay, Pocket, and the one-time Burrow route; `try.` = one-time page and client route; `voice.` = voice. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Per-Worker route tables: every route's authentication, account scoping, `Origin` and CSRF checks, and which origin it is served from. Find a route served from the wrong Worker, an account-scoped object reachable with another account's id, and a WebSocket upgrade that skips a check its HTTP sibling makes.",
+        "The `RelayRoom` Durable Object: it must never decode or keep a frame; hibernation and wake-up state, alarms, storage growth, a displaced socket, limits per account.",
+        "The one-time room: it must carry only the handshake and read no frame; room lifetime, single use, limits, abuse (an unauthenticated endpoint anyone can open).",
+        "Enrollment: device-code flow, confirm digits, redemption exactly once, expiry, brute-force limits.",
+        "Push (`relay-push.ts`): endpoint validation, what Hosted can read, pruning.",
+        "The database layer: SQL built by string concatenation, transactions that must be atomic and are not, the runtime roles' grants against what each Worker's queries need (least privilege: a grant nothing uses, a query that would fail under its role).",
+        "Headers (`headers.ts`): CSP, HSTS, frame-ancestors, cache-control on authenticated responses, cookie flags and scope across the four origins.",
+        "`wrangler*.jsonc` bindings against `bindings.ts`: a binding declared and unused, or used and undeclared; environment differences between preview and production.",
+        "Preview Workers and dev helpers: anything dev-only reachable in production (`dev.ts`, `preview-inbox.ts`, `billing-dev.ts` is the other unit's).",
+        "Dead code: routes no client calls, columns nothing reads."
+      ]
+    },
+    {
+      "unit": "hosted-server-b",
+      "rules": [
+        "^hosted/server/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/hosted.md",
+        "docs/specs/pricing.md",
+        "docs/specs/security-hosted.md"
+      ],
+      "what": "Hosted's money, voice, and account-lifecycle modules in `hosted/server/`: `billing-routes.ts`, `billing.ts`, the billing summary, alerts, and dev helper, `withdrawal.ts`, `closure.ts`, `notices.ts` and the notice messages, cohort routes, `voice.ts` and the voice supplier, token, and Workers, entitlement, metrics and metric labels, terms, disclosure, and every SQL migration under `hosted/server/dormouse-migrations/`. The relay, one-time, and account-plumbing modules belong to `hosted-server-a`.",
+      "read": "**Specs you own** (read first, in the snapshot): the billing, plan, voice, withdrawal, closure, and notice sections of `docs/specs/hosted.md` + rationale, `docs/specs/pricing.md` + rationale (it is marked design-stage: check which parts are in fact built, and which built parts contradict it), the same areas of `docs/specs/security-hosted.md`, and `docs/stories/hosted-account.mdx` and `hosted-voice.mdx`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Stripe: webhook signature verification and replay handling, idempotency of every state change a webhook or a redirect can trigger twice, the order of events arriving out of sequence, the mapping from Stripe state to entitlement (a cancelled, disputed, refunded, or past-due subscription must lose or keep access exactly as the spec says), amounts and currency, test-mode versus live-mode keys, and anything that trusts a client-supplied price, plan, or customer id.",
+        "Entitlement checks: every paid capability (managed voice first) checks entitlement on the server at use time; what a lapsed account can still do; caching that outlives a cancellation.",
+        "Withdrawal and closure: these are legal obligations (consumer withdrawal rights, account deletion). Check that each completes everything it promises, is idempotent, cannot be triggered for another account, and that billing records which must outlive closure do, while personal data that must go does.",
+        "Notices and email: every email sent has the right recipient and content, no notice is sent twice or to a closed account, and unsubscribe or required-notice rules hold.",
+        "Voice: the token (lifetime, idle expiry, scope), per-account usage limits and abuse, what text reaches the supplier and what is logged, error handling when the supplier fails.",
+        "Metrics and labels: nothing personal in a metric label; cardinality bounds.",
+        "Migrations 001–028 read in order as one schema: a column added and never used, a constraint the code violates, an index a hot query needs and lacks, a migration that is not safe to run twice or on a live table, and code that still reads something a later migration dropped.",
+        "Dev-only helpers (`billing-dev.ts`) reachable in production.",
+        "Dead code: routes no client calls, tables or columns nothing reads."
+      ]
+    },
+    {
+      "unit": "hosted-web",
+      "rules": [
+        "^hosted/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/hosted.md",
+        "docs/specs/security-hosted.md"
+      ],
+      "what": "the Hosted account frontend in `hosted/src/` (`HostedPage.tsx`, `App.tsx`, the API client, Plan, Checkout, Withdrawal, Closure, AdminMetrics, enrollment, settle), the Hosted scripts in `hosted/scripts/` (preview and production deploy, smoke tests, staging, backups, tagging, dev-one-time, pgstencil provenance, test databases), and the package's configuration: `package.json`, the five `wrangler*.jsonc` files, Vite and vitest configs, `README.md`, `DESIGN.md`. The Storybook stories belong to `x-stories`; the server belongs to `hosted-server-a` and `-b`.",
+      "read": "**Specs you own** (read first, in the snapshot): the frontend and deployment sections of `docs/specs/hosted.md` + rationale (Worker deployment, local development), the deployment checks of `docs/specs/security-hosted.md`, and `docs/stories/hosted-account.mdx`, `hosted-remote-control.mdx`, `hosted-voice.mdx`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The API client (`api.ts`) against the server's routes (`hosted/server/*-routes.ts`, `relay-api.ts`, `account-routes.ts`): every call hits a route that exists with the method, path, and body the server expects; response shapes read on the client match what the server sends; error handling for each non-2xx.",
+        "The account flows as state machines: sign-in and linking, plan selection, checkout and the return from Stripe (`settle.ts`: a return that arrives before the webhook, a reload on the return page, a double submit), withdrawal, closure, device enrollment approval with confirm digits. States with no exit, spinners with no timeout, an error swallowed, an action that can be submitted twice.",
+        "Copy that states a price, a right, or a deadline: it must match `docs/specs/pricing.md`, the Terms under `website/public/terms/`, and the server's constants (`policy-constants.ts`). House rule: a bare `$` and no \"USD\" beside prices.",
+        "`AdminMetrics`: the admin gate is enforced on the server, not just hidden in the UI.",
+        "The deploy scripts: `preview.mjs` and `production.mjs` do what `hosted.md` says in the order it says (migrations before code? roles? secrets?), fail closed on a partial deploy, and never print a secret. `production-backup.mjs` and `production-tag.mjs` likewise. Check each script's flags and paths against the workflows that call them (`.github/workflows/hosted-preview.yml`, `hosted-production.yml`).",
+        "The `wrangler*.jsonc` files against each other and the server's `bindings.ts`: routes and custom domains for the four origins, compatibility dates and flags that differ without a reason, bindings declared and unused.",
+        "`README.md`: every command and path in it exists and does what it says.",
+        "Dead code: components, API methods, scripts, and config nothing uses."
+      ]
+    },
+    {
+      "unit": "dor-a",
+      "rules": [
+        "^dor/src/commands/",
+        "^dor/test/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-cli.md",
+        "docs/specs/dor-browser.md",
+        "docs/specs/dor-tool.md",
+        "docs/specs/website-docs.md"
+      ],
+      "what": "the `dor` CLI's commands in `dor/src/commands/` (`types.ts`, `browser-cli.ts`, `open-picker.ts`, `list.ts`, `send.ts`, `fuzzy.ts`, `tool.ts`, `workspace.ts`, `await.ts`, `shell-quote.ts`, `split.ts`, `ensure.ts`, `shared.ts`, `agent-browser.ts`, `iframe.ts`, `kill.ts`, `skill.ts`, `open.ts`, `read.ts`, `app.ts`, `playwright.ts`, `reopen.ts`, `move.ts`, WSL paths, and the rest) and the CLI's tests and help snapshots under `dor/test/`.",
+      "read": "**Specs you own** (read first, in the snapshot): the command set and Surface handle model in `docs/specs/dor-cli.md` + rationale, the CLI-facing parts of `docs/specs/dor-browser.md` and `docs/specs/dor-tool.md`, and the generated public reference rules in `docs/specs/website-docs.md`. The skill text that `dor skill` prints is what agents are taught: every statement in it must be true of the commands. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "`shell-quote.ts`: the command tail after `--` is forwarded as raw argv and quoted for the target shell (POSIX shells, fish, cmd.exe, PowerShell). Hunt for an argument that changes meaning or injects a second command: empty strings, spaces, quotes of each kind, `$`, backticks, `!`, `%VAR%`, `^`, newlines, a leading `-`, non-ASCII and curly quotes in PowerShell, backslashes before quotes in fish and cmd.",
+        "Each command's flag parsing against its `--help` snapshot and the skill text: flags documented and not implemented, implemented and not documented, mutually exclusive flags that are not rejected, defaults that differ from the docs, exit codes.",
+        "`send`: the text, key, stdin, and sequence modes; escape interpretation (`\\\\n`, `\\\\r`, `\\\\t`, `--raw`); key names; very large stdin.",
+        "`kill`: `--confirm-if-read` (the four-non-whitespace-character minimum, what screen text is compared) and `--confirm-dangerously`.",
+        "`ensure` and `split`: cwd resolution, `--restart`, the missing `--` case (a bare `dor split` steals focus: is that still true and still documented?).",
+        "`await`: timeouts, exit codes, what is printed.",
+        "`list`: filters ANDed together, `--port`/`--ports`, `--json` shape stability, the `(you)` and `*` markers, helper terminals excluded.",
+        "`browser-cli.ts`, `agent-browser.ts`, `playwright.ts`: identity flags (`--key`, `--surface`, `--session`) mutual exclusion, argument pass-through to the native CLI (injection, flag collisions), navigation targets (`:port`, `host:port`, `surface:N`), `dor-embed-size`.",
+        "`open`, `open-picker.ts`, `fuzzy.ts`, `file-list.ts`: path handling (relative, `~`, spaces, symlinks, WSL and Windows paths, a URL passed where a path is required), the picker's cost on a huge directory.",
+        "`app restart`, `move`, `reopen`, `workspace`: destructive verbs and their guards.",
+        "Dead code: commands, flags, or helpers nothing reaches; snapshot files for commands that no longer exist."
+      ]
+    },
+    {
+      "unit": "dor-b",
+      "rules": [
+        "^dor/",
+        "^dor-lib-common/",
+        "^scripts/(generate-dor-skill|stage-dor-cli)\\.mjs$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-cli.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "the `dor` CLI's core (`dor/src/cli-core.ts`, `protocol.ts`, `control-methods.ts`, `control-client.ts`, `cli.ts`, `dor.ts`, `node-host.ts`), its package config and build, the whole `dor-lib-common/` package (cross-platform spawning: `spawn.ts`, `resolve-binary.ts`, `cmd-shim.ts`, `git.ts`, `browser-providers.ts`, `browser-viewports.ts`, `local-path.ts`), and the two staging and skill-generation scripts.",
+      "read": "**Specs you own** (read first, in the snapshot): the bundling and env contract, `spawnAndCapture` rules, and control-socket plumbing in `docs/specs/dor-cli.md` + rationale, and the `dor` control socket section of `docs/specs/security-local.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The control client: how it finds the socket and token (`DORMOUSE_CONTROL_SOCKET`, `DORMOUSE_HOST`, `DORMOUSE_SURFACE_ID`), connection errors mapped to the messages the skill text promises (`EPERM`/`EACCES`, `ENOENT`, refused, auth failure), timeouts, a partial or oversized reply, a host that never answers, and never printing the token.",
+        "`protocol.ts` and `control-methods.ts` against the two servers: `standalone/sidecar/dor-control-server.js` and the VS Code side, and the webview handlers in `lib/src/components/wall/use-dor-control.ts`. Version skew: an old `dor` binary on `PATH` talking to a newer host, and the reverse.",
+        "`spawn.ts` (`spawnAndCapture`): the spec's rules for spawning external processes on Windows (no shell where avoidable, `.cmd` shims, bare-name resolution, UNC paths), output size bounds, timeouts and kill of the whole process tree, encoding. `resolve-binary.ts` and `cmd-shim.ts`: a binary resolved from the current directory or an attacker-writable `PATH` entry, `PATHEXT` handling, a `.cmd` shim parsed wrongly.",
+        "`git.ts`: arguments built from repository-controlled data (branch names, remote URLs, paths that start with `-`), timeouts, huge output, a repository with hooks or config that runs code (`core.fsmonitor`, `core.sshCommand`): does any git command here run in an untrusted directory in a way that executes repository-configured programs?",
+        "`browser-providers.ts` and `browser-viewports.ts`: provider detection, presets against `dormouse.yml` and the docs.",
+        "`local-path.ts`: path normalization across Windows, WSL, and POSIX; `file:` URLs; traversal.",
+        "The build and staging: how `dor` is bundled and staged onto every terminal's `PATH` on each host (`scripts/stage-dor-cli.mjs`, `standalone/scripts/stage-dor-cli.mjs`, the VS Code staging), the Node runtime it runs on, start-up time of the CLI (it runs on every agent command: measure or estimate cold start and what is loaded eagerly).",
+        "`scripts/generate-dor-skill.mjs`: what generates the skill text, and whether the checked-in output is fresh.",
+        "Dead code: protocol methods nothing sends, exports of `dor-lib-common` nothing imports."
+      ]
+    },
+    {
+      "unit": "builtin-b",
+      "rules": [
+        "^dor-tools-builtin/viewer/image/",
+        "^dor-tools-builtin/test/image-[a-z-]+\\.test\\.mjs$",
+        "^dor\\-tools\\-builtin/src/(?:image\\-editability|image\\-resolution|image\\-format)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^dor\\-tools\\-builtin/viewer/(?:image\\-resize|image\\-drag|images\\-panel)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-tools-builtin.md"
+      ],
+      "what": "the image editor inside the built-in file Tool: `dor-tools-builtin/viewer/image/` (`controller.ts` at 1,172 lines, pixels, the PNG codec and worker, JPEG, ICC, objects, history, IO, color, the editor component and view) plus `image-resize.tsx`, `image-drag.ts`, `images-panel.tsx`, and the host-side `image-editability.ts`, `image-resolution.ts`, and `image-format.ts`.",
+      "read": "**Specs you own** (read first, in the snapshot): the image sections of `docs/specs/dor-tools-builtin.md` + rationale (PNG and JPEG editing, save-over, flatten, no SVG editing). Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The PNG codec (`png.ts`, `png-worker.ts`): chunk parsing on hostile files (length fields, CRC, zlib bombs, dimensions that overflow an allocation, interlacing, every color type and bit depth, palette and tRNS, 16-bit), and encoding (filter choice, what metadata is kept or dropped: gAMA, sRGB, iCCP, pHYs, text chunks).",
+        "JPEG (`jpeg.ts`) and ICC (`icc.ts`): what is decoded by the browser versus by this code, EXIF orientation, color profile handling (an image whose colors shift after an open-and-save), quality and generation loss on re-save.",
+        "`pixels.ts` and `color.ts`: premultiplied-alpha mistakes, rounding, off-by-one at image edges, operations on huge images (memory: width × height × 4 copies per history step).",
+        "`history.ts`: undo and redo correctness, memory bounds, history after a resize or crop.",
+        "`controller.ts`: tool state machine (select, draw, text, crop, resize), pointer capture and cancel paths, zoom and pan coordinate math with device pixel ratio, keyboard shortcuts that collide with the terminal's or the Markdown editor's, an edit lost when the pane flips or closes.",
+        "`io.ts` and saving: save-over semantics, flatten, format preserved, a save failing halfway, the lost-update check against a file changed on disk, the save channel to the host.",
+        "Editability and resolution checks on the host: files that should be refused and are not (too large, animated, unsupported), and files refused wrongly.",
+        "Performance: main-thread work on large images, the worker's use, copies between threads (transferables), redraw per pointer move.",
+        "Dead code: object types, tools, or codec branches nothing reaches."
+      ]
+    },
+    {
+      "unit": "builtin-a",
+      "rules": [
+        "^dor-tools-builtin/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/dor-tools-builtin.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "the built-in Tools except the image editor: `dor-tools-builtin/src/` (the file viewer, folder viewer and its page, editor routes, the viewer server and HTTP helpers, editable-file and atomic save, Markdown image and link handling, the error viewer, runtime packaging) and `dor-tools-builtin/viewer/` outside `viewer/image/` (the Markdown editor on MDXEditor, document session, tooltip, navigation, comments, Mermaid blocks, Markdown safety and formatting, the text editor). The image editor belongs to `builtin-b`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/dor-tools-builtin.md` + rationale (`builtin:file`, `builtin:code`, `builtin:folder`: formats, grants, disk saves, listings, runtime packaging), and the built-in Tool rows of `docs/specs/security-local.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The viewer server is a loopback HTTP server that reads and writes the user's files. Every route: the loopback guard and token, the grant model (which paths a viewer instance may read or write: path traversal, symlinks out of the grant, case-insensitive filesystems, Windows drive and UNC paths), `Host` and `Origin` checks against DNS rebinding and cross-origin pages, methods allowed, response headers (content type sniffing, CSP on served HTML).",
+        "Saving to disk: `atomic-save.ts` and `editable-file.ts`: atomic rename, preserving permissions and line endings and a trailing newline and a BOM, a file changed on disk since it was opened (lost-update detection), a save to a read-only or deleted file, two editors on one file, encodings other than UTF-8, very large files.",
+        "Markdown rendering is an XSS surface because the content is untrusted files: raw HTML, `javascript:` and `data:` links, image sources, Mermaid diagrams (script injection through diagram text, KaTeX), MDX expressions (must never evaluate), comments. `markdown-safety.ts` and the link and image resolvers: what is allowed and whether a bypass exists.",
+        "Round-trip fidelity of the Markdown editor: opening and saving a file without edits must not rewrite it (list markers, tables, front matter, HTML comments, hard breaks, the repo's one-line-per-paragraph rule).",
+        "The document session and dirty state: an edit lost on reload, on Tool flip, or on close; the save channel to the host (the iframe save channel in `dor-tools-lib`).",
+        "The folder viewer: listings of huge directories, hidden files and ignore rules, names with odd characters, preview behavior.",
+        "Runtime packaging: the Tools load from a separate runtime bundle (`scripts/build.mjs`, `scripts/build-viewer.mjs`, `runtime.ts`, `viewer-assets.ts`): what is in it, how big it is (Monaco, Mermaid, MDXEditor), what is lazy-loaded, and what happens when the bundle is missing or stale.",
+        "Dead code: routes, formats, or viewer modules nothing reaches."
+      ]
+    },
+    {
+      "unit": "rust-lib",
+      "rules": [
+        "^standalone/src-tauri/src/lib\\.rs$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/standalone.md",
+        "docs/specs/standalone.rationale.md",
+        "docs/specs/auto-update.md",
+        "docs/specs/transport.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "one file: `standalone/src-tauri/src/lib.rs`, 7,145 lines, the Tauri backend that bridges the webview and the Node sidecar. Read all of it, in order. The sibling Rust modules (`routing.rs`, `quit_state.rs`, `ids.rs`, `workspaces.rs`, and the rest) belong to the `rust-other` unit; read them only to follow a call.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/standalone.md` + `docs/specs/standalone.rationale.md` (the Rust ↔ Node-sidecar bridge, boot sequence, persistence, shutdown ordering), `docs/specs/auto-update.md` + rationale, the host obligations in `docs/specs/transport.md`, and the standalone parts of `docs/specs/security-local.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The command surface: every `#[tauri::command]` must be registered in the invoke handler and invoked from the frontend, and every frontend `invoke('…')` must name a command that exists. Search `standalone/src/` and `lib/src/` for `invoke(` and list commands on one side only, and argument-name or type mismatches (Tauri maps camelCase to snake_case).",
+        "Events: every event emitted is listened for, and every listener's event is emitted; payload shapes agree.",
+        "The sidecar bridge: message framing, a partial line or oversized message, sidecar crash and restart, requests left pending forever when the sidecar dies, backpressure when the webview is slow or hung, ordering between PTY output and exit.",
+        "Shutdown and quit ordering as the spec states it: session save versus window destroy versus sidecar kill; what is lost if the app is killed at each step; the Windows sidecar teardown the updater needs.",
+        "Panics: `unwrap`, `expect`, indexing, and integer conversion reachable from runtime input (file contents, sidecar messages, webview arguments). Say what input reaches each one you report.",
+        "Locks: `Mutex`/`RwLock` guards held across `.await`, across an emit, or across a blocking call; lock ordering that can deadlock; blocking I/O or `block_on` on the main thread (the app has a UI watchdog because of hangs).",
+        "Persistence I/O: atomic writes, partial files, error handling that swallows a failed save.",
+        "`unsafe` blocks and FFI: each one's safety argument.",
+        "`#[cfg(target_os = …)]` divergence: a feature implemented on one platform and silently missing or stubbed on another.",
+        "Dead code: functions, fields, enum variants, and `#[allow(dead_code)]` items nothing uses; duplicated helpers; logic that belongs in a sibling module and is duplicated there.",
+        "You cannot run `cargo` builds for long; reason from source. `cargo check` is not needed."
+      ]
+    },
+    {
+      "unit": "rust-other",
+      "rules": [
+        "^standalone/src-tauri/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/standalone.md",
+        "docs/specs/reopen.md",
+        "docs/specs/security-local.md",
+        "docs/specs/deploy.md"
+      ],
+      "what": "everything in `standalone/src-tauri/` except `src/lib.rs`: `routing.rs`, `quit_state.rs`, `clipboard_win.rs`, `ui_watchdog.rs`, `ids.rs`, `workspaces.rs`, `console_parent.rs`, `macos_terminate.rs`, `log_tail.rs`, `macos_siri_affordance.rs`, `panic_policy.rs`, `pe_subsystem.rs`, `build.rs`, `Cargo.toml`, `tauri.conf.json`, the capability files, the macOS entitlements, and the integration test. `lib.rs` belongs to the `rust-lib` unit; read the parts of it that call into your modules.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/standalone.md` + rationale (quit and shutdown ordering, multi-window routing, ids, the build), `docs/specs/reopen.md` for window reopen, `docs/specs/security-local.md` for the capability and CSP rules, and `docs/specs/deploy.md` for what the bundle must contain. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "`quit_state.rs` as a state machine: every state and transition, states it cannot leave, a second quit request mid-quit, a window closing during quit, platform differences (macOS terminate versus Windows and Linux close).",
+        "`routing.rs`: delivery of sidecar messages to the right window and Workspace, a window that closes while messages are in flight, messages for an unknown surface, fan-out cost per PTY chunk.",
+        "`ids.rs` and `workspaces.rs`: the never-reused counters must be durable (written atomically before the id is used) across a crash; concurrent allocation from several windows.",
+        "`clipboard_win.rs`: every Win32 open/close and lock/unlock pair on every error path, size and null checks, UTF-16 handling, handle leaks.",
+        "`ui_watchdog.rs`: false positives (sleep, debugger, a modal dialog), what it does on a hang, files it writes and their permissions.",
+        "`macos_terminate.rs`, `macos_siri_affordance.rs`, `panic_policy.rs`, `console_parent.rs`, `pe_subsystem.rs`: each one's `unsafe` and FFI safety argument, and whether the workaround it implements is still needed (check the comments' cited upstream issues against `Cargo.toml` versions).",
+        "`tauri.conf.json` and the capability files: least privilege (permissions nothing uses, windows that get more than they need), the CSP, updater endpoints and public key, bundle resources that do not exist or are missing.",
+        "`Cargo.toml`: dependencies and features nothing uses; `build.rs`: work it repeats on every build, environment it depends on (a past issue: it breaks under the wrong Node version).",
+        "Dead code: modules, functions, and `#[allow(dead_code)]` items nothing uses."
+      ]
+    },
+    {
+      "unit": "sidecar",
+      "rules": [
+        "^standalone/sidecar/",
+        "^standalone/scripts/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/standalone.md",
+        "docs/specs/transport.md",
+        "docs/specs/dor-cli.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "the Node.js sidecar the Tauri app bundles (`standalone/sidecar/`: `pty-core.js` at 2,061 lines, `dor-control-server.js`, `clipboard-ops.js`, `main.js`, the port scanner, and the bash, zsh, and PowerShell shell-integration scripts) and the standalone dev tooling in `standalone/scripts/`.",
+      "read": "**Specs you own** (read first, in the snapshot): the sidecar sections of `docs/specs/standalone.md` + rationale, the host obligations in `docs/specs/transport.md` (PTY lifecycle and buffering), the control-socket and env-contract sections of `docs/specs/dor-cli.md`, and in `docs/specs/security-local.md` the `dor` control socket, loopback listener, and terminal-output sections. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "PTY lifecycle in `pty-core.js`: spawn failure, exit codes and signals, kill escalation, orphaned shells when the sidecar or the app dies, resize races, Windows ConPTY specifics (graceful kill, the conpty dialog), environment handed to the shell (what leaks in, what `dor` needs).",
+        "Buffering and flow control: output queues that grow without bound when the webview is slow, pause/resume, replay buffers, ordering of output versus exit.",
+        "The control socket server: authentication (token comparison, where the token lives, who can read it), socket file permissions and path length on macOS, the Windows named pipe, a client that sends a partial or oversized message, requests left pending when the webview never answers.",
+        "Shell integration scripts (bash, zsh, pwsh): quoting, chaining with a user's existing `PROMPT_COMMAND`/`precmd`/`preexec`/`prompt` function, behavior in nested shells and over SSH, and above all how cwd, command text, and exit status are escaped into the OSC sequences they emit. A directory or command containing `;`, a BEL, an ESC, or a newline must not break or spoof the terminal-state parser.",
+        "The port scanner: how it finds ports (`lsof`, `netstat`, `/proc`), how often, what it costs, and whether it runs synchronously.",
+        "Synchronous subprocess or filesystem calls on the sidecar's event loop (a test claims there are none: check the claim).",
+        "`clipboard-ops.js`: platform commands it spawns, injection through clipboard contents or file paths, large payloads.",
+        "`standalone/scripts/`: dev scripts that reference files or flags that no longer exist, duplicated logic, and anything dev-only that reaches the production bundle.",
+        "Dead code: message types the Rust side never sends, handlers nothing calls."
+      ]
+    },
+    {
+      "unit": "standalone-web",
+      "rules": [
+        "^standalone/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/standalone.md",
+        "docs/specs/auto-update.md",
+        "docs/specs/reopen.md",
+        "docs/specs/layout.md"
+      ],
+      "what": "the Tauri app's webview frontend in `standalone/src/` (`tauri-adapter.ts`, `workspace-move.ts`, `updater.ts`, `browser-sidecar-adapter.ts`, `workspace-drag.ts`, quit and teardown flows, window restore, close, and recovery, the session store, the AppBar) and the package's own config (`package.json`, `vite.config.ts`, `vitest.config.ts`, `tsconfig.json`, `index.html`).",
+      "read": "**Specs you own** (read first, in the snapshot): the webview-side sections of `docs/specs/standalone.md` + rationale (boot sequence, AppBar, persistence, shutdown ordering, the build and dev workflow), all of `docs/specs/auto-update.md` + rationale, and the window parts of `docs/specs/reopen.md` and `docs/specs/layout.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Quit, window close, and teardown (`quit.ts`, `quit-confirm-store.ts`, `teardown-flow.ts`, `window-close.ts`, the teardown arbiter): sessions lost because a save raced the close, a confirm dialog that targets the wrong window, a quit that hangs because one window never answers, differences between ⌘Q, the window close button, and an OS-initiated quit.",
+        "Cross-window Workspace move and drag (`workspace-move.ts`, `workspace-drag.ts`, `workspace-registry.ts`): a Workspace lost or duplicated when a window closes mid-move, PTY ownership during the handoff, stale drop targets, a drop outside any window.",
+        "The updater (`updater.ts`, `UpdateBanner.tsx`, `UpdateDebugModal.tsx`): check → approved download → install-on-quit; every error and retry state; a download finishing after the user dismissed; the debug modal's reachability in production.",
+        "Window restore and recovery: geometry on a display that no longer exists, restoring more windows than existed, a corrupt session blob.",
+        "`tauri-adapter.ts`: every `invoke` and `listen` against what the Rust side offers; listeners never unlistened; ordering assumptions between events; requests that never resolve if Rust never answers.",
+        "`browser-sidecar-adapter.ts` and `browser-sidecar-host.ts` are a dev harness: check whether any of it is reachable or bundled in a production build.",
+        "`tauri-session-store.ts`: where the session blob lives (a past problem: a large blob in WebKit localStorage bloating its WAL), write frequency, size.",
+        "Dev-only code or flags that reach production; config that references things that no longer exist.",
+        "Dead code and duplicated helpers."
+      ]
+    },
+    {
+      "unit": "vscode",
+      "rules": [
+        "^vscode-ext/",
+        "^scripts/dogfood-vscode\\.mjs$",
+        "^\\.vscode/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/vscode.md",
+        "docs/specs/vscode.rationale.md",
+        "docs/specs/transport.md",
+        "docs/specs/relay.md"
+      ],
+      "what": "the VS Code extension in `vscode-ext/`: `peer-link.ts` (1,650 lines), `message-router.ts` (930), `burrow.ts` (752), `pty-manager.ts` and the forked `pty-host.js`, `surface-ids.ts`, `extension.ts`, session state, the webview HTML and view provider, the burrow store, managed voice, the esbuild and staging scripts, `package.json` contributions, `.vscodeignore`, and the README.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/vscode.md` + `docs/specs/vscode.rationale.md` (webview ↔ Workspace mapping, persistence ordering, CSP, the build, update policy, the `engines.vscode` floor), the host obligations in `docs/specs/transport.md`, and the desktop Burrow service parts of `docs/specs/relay.md` for `burrow.ts`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Activation and deactivation: everything created is disposed; shutdown capture and session save happen in the order the spec states; what is lost when VS Code kills the extension host on window close.",
+        "The message router: every webview → host and host → webview message type is handled on the other side with the same shape; unknown messages; the message token check; a webview that reloads mid-session; several webviews (panel, sidebar, editor) at once.",
+        "`pty-manager.ts` and `pty-host.js`: the forked child crashing, orphaned shells after deactivation, kill escalation, backpressure, the node-pty native module on each platform.",
+        "`peer-link.ts`: work out what links to what (extension hosts across VS Code windows?), then check its protocol, authentication, reconnection, message ordering, and failure when the peer window closes. It is the largest file: look for dead protocol branches.",
+        "`surface-ids.ts`: never-reused durable counters shared across windows; compare with `lib/src/lib/surface-ids.ts` and `standalone/src-tauri/src/ids.rs` for drift.",
+        "`webview-html.ts`: the CSP and nonce handling against the spec; resource URIs.",
+        "`package.json`: every contributed command, keybinding, menu, view, and configuration key is implemented, and every command registered in code is contributed; activation events; the `engines.vscode` floor against APIs actually used; scripts that reference missing files.",
+        "`.vscodeignore` and the esbuild script: files shipped that should not be, files needed at runtime that are excluded, externals (node-pty, node-datachannel, every platform's addon in one VSIX).",
+        "`README.md` is the canonical public guide published off-site: every claim, shortcut, setting, and command in it must be true of the code.",
+        "Dead code and duplication with `lib/src/host/`."
+      ]
+    },
+    {
+      "unit": "website-play",
+      "rules": [
+        "^website/src/lib/",
+        "^website/public/playground-fs/",
+        "^website/src/pages/(Playground|PlaygroundDesktop|PocketPlayground|Pocket)(\\.test)?\\.tsx$",
+        "^website/src/components/(PocketTerminalExperience|PlaygroundHeader|PlaygroundTabs|PlaceToPaste)(\\.test)?\\.tsx$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/tutorial.md"
+      ],
+      "what": "the website's interactive playground and tutorial: `website/src/lib/` (`tut-runner.ts` at 1,090 lines, the ASCII splash runner, the tutorial shell, items, detector, and state, the changelog runner, alert programs, the playground filesystem under `playground-fs/` with its copy-on-write overlay, playground `dor`, viewers, and service-worker relay, comparison data, pricing and cohort helpers, analytics, site metadata), the playground pages and components, and `website/public/playground-fs/sw.js`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/tutorial.md` + rationale (device-specific routes, the `tutorial` runner and progress state, desktop and Pocket profiles, the desktop's copy-on-write in-memory filesystem and playground `dor`, the lib hooks for tutorial observability). The playground runs the real lib on `FakePtyAdapter`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "The tutorial runner and detector: steps that can never complete, complete without the user doing the thing, or complete out of order; progress lost or corrupted in storage; a step whose instructions name a shortcut or command that the real app no longer has (cross-check every shortcut and `dor` command the tutorial teaches against `docs/specs/shortcuts.md` and the real CLI).",
+        "The fake shell (`tutorial-shell.ts`, `playground-shells.ts`): command parsing, quoting, history, what a visitor can type that throws or hangs the page (an infinite loop, a huge output), and commands whose output misrepresents the real product.",
+        "The playground filesystem: copy-on-write correctness (a write that leaks into the shared base, a delete that resurrects), path normalization and traversal, size limits, the snapshot format.",
+        "The service-worker relay (`sw-relay.ts`, `public/playground-fs/sw.js`) that serves real viewers from the in-memory filesystem: scope, update and unregister behavior, what it intercepts (it must not hijack the rest of the site), caching, behavior when service workers are unavailable (private mode, Firefox, an embedded webview).",
+        "Playground `dor` (`playground-fs/dor.ts`, `cli.ts`, `tool-control.ts`, `control-client.ts`): parity with the real CLI for the commands it implements; error text.",
+        "Device routing: the desktop versus Pocket playground chosen by device; a phone landing on the desktop route and the reverse; resize and rotation.",
+        "Analytics (`site-analytics.ts`): what is collected and sent, against the privacy policy under `website/public/privacy/` (the newest dated version); consent; anything personal.",
+        "`hosted-pricing.ts`, `hosted-cohorts.ts`, `comparison.tsx`: prices, tiers, and claims against `docs/specs/pricing.md` and the Hosted server's constants; comparison claims about other products that are stale or unverifiable.",
+        "Cost: what the landing page loads before it is interactive, timers and animations that run while the tab is hidden, the splash runner's per-frame work.",
+        "Dead code: tutorial items, shell commands, runners, and helpers nothing reaches."
+      ]
+    },
+    {
+      "unit": "website-site",
+      "rules": [
+        "^website/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/website-docs.md",
+        "docs/specs/pricing.md"
+      ],
+      "what": "the rest of the marketing and docs site: `website/src/pages/` (Home, Hosted, Comparison, SupplyChain, Changelog, the docs pages, Privacy, Terms, Subscribed), `website/src/components/`, the generated data under `website/src/data/`, the generators in `website/scripts/` (`generate-docs.js` at 1,312 lines, the docs and help parsers, `generate-deps.js`, canary recall, changelog, hosted bundles, product sections), `website/public/` (the Pages `_worker.js`, `_redirects`, `_routes.json`, the dated Terms and Privacy archives, `standalone-latest.json`), the React Router and Vite config.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/website-docs.md` + rationale (the generated references, the Markdown rendering contract, the left rail, `vscode-ext/README.md` as the canonical guide, the lint that pins links), the `/security` gathering rules it describes, and the `/hosted` page contract in `docs/specs/pricing.md`. `scripts/public-docs-lint.mjs` enforces part of this mechanically: do not re-report what it checks. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Generated content freshness: for each generator, is its checked-in output what it would produce today? (`generate-deps.js` output is gated in CI; the others may not be.) Read the generator and compare with the data and with its source of truth (`dor --help` text, `CHANGELOG.md`, the specs, `.github/audit/canaries/`). Do not run a generator that writes files; reason from source or run it only with an output directory under `SP/probes/website-site/`.",
+        "The docs parsers (`docs-parser.js`, `help-parser.js`, `changelog-parser.js`): Markdown and help-text edge cases they mis-parse; content they silently drop.",
+        "`MarkdownDocument.tsx`: the rendering contract (links, anchors, code blocks, tables); raw HTML handling.",
+        "Every public claim on Home, Hosted, Comparison, SupplyChain, and the security pages: features, platforms, shortcuts, prices, limits, and security guarantees must be true of the code and consistent with the specs and with each other. List each false or stale claim with the source that contradicts it. Prices follow the house rule: a bare `$`, no \"USD\".",
+        "Links: internal routes that do not exist, anchors that do not resolve, external links that are obviously stale (do not fetch; judge from the repo), `_redirects` rules that shadow a real route or point at a missing one.",
+        "`_worker.js`, `_routes.json`, and the React Router config: routes prerendered versus served by the worker, a path served by neither, headers (CSP, caching, `X-Frame-Options` for a site that embeds an interactive demo), the ingest or signup endpoint's validation and abuse limits.",
+        "The Terms and Privacy archives: the pages render the newest version and link the archive as the spec says; dates agree across the site, Hosted's `terms.ts`, and the policy tests.",
+        "`standalone-latest.json` and download links: versions and URLs against `CHANGELOG.md` and the release pipeline.",
+        "SEO and metadata (`site-meta.ts`): titles, descriptions, canonical URLs, social images that exist.",
+        "Accessibility basics that are plainly broken (not taste): images without alt text, controls without names, focus traps.",
+        "Dead code: pages not routed, components nothing renders, generators nothing runs, data nothing reads, assets nothing references."
+      ]
+    },
+    {
+      "unit": "deploy-windows",
+      "rules": [
+        "^deploy/local/install-windows\\.ps1$",
+        "^scripts/ps1-cmdlet-lint",
+        "^scripts/patch-nsis-paths\\.pl$"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the Windows self-host installer `deploy/local/install-windows.ps1` (2,485 lines), its only syntax gate `scripts/ps1-cmdlet-lint.mjs` with its self-test, and `scripts/patch-nsis-paths.pl`. No CI job has a PowerShell, so nothing ever parses or runs this file before a user does: read it as the only reviewer it will get.",
+      "read": "**Specs you own** (read first, in the snapshot): the Installer contract in `SELF_HOST.md` + `SELF_HOST.rationale.md`, and in `docs/specs/security-remote.md` the \"Credentials at rest\" and \"Network posture (self-hosted)\" sections with their `FAIL IF` lines, which `scripts/deploy-lint.mjs` pins on all three installers. Compare behavior with `deploy/local/install-linux.sh` wherever the contract is the same. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "PowerShell that cannot parse or cannot run: unbalanced braces and here-strings, a cmdlet or parameter that does not exist in Windows PowerShell 5.1 (the version every Windows machine has) versus PowerShell 7, `&&`/`||` and ternaries that 5.1 lacks, functions called before definition in script scope, typos in variable names (PowerShell silently treats an unset variable as `$null` unless strict mode is on: check whether `Set-StrictMode` is on, and list every variable read that is never assigned).",
+        "Error handling: `$ErrorActionPreference`, native commands whose non-zero exit code is never checked (`$LASTEXITCODE`), `try`/`catch` that swallows a failure, a pipeline that continues after an error, cleanup on every exit path, a re-run after a failed half-install.",
+        "Quoting and encoding: paths with spaces, arguments to native executables, curly quotes (PowerShell treats typographic quotes as quote characters), file encodings written by `Out-File`/`Set-Content` (UTF-16 or a BOM where the reader wants UTF-8), line endings.",
+        "What is downloaded and run: pinned and verified before use (hash or Authenticode), TLS settings on 5.1, no `Invoke-Expression` on downloaded content, the Node runtime pin.",
+        "Credentials at rest on Windows: ACLs set on files and directories that hold secrets (inheritance disabled, only the service account and administrators), secrets never on a command line (visible in the process list and event logs), never in the transcript, the service account and its privileges, how the secret reaches the service.",
+        "The Windows service or scheduled task: how it is registered, what account runs it, restart on failure, an unquoted service path with spaces (a classic privilege-escalation bug), the install directory's ACL (a directory writable by users plus a service running as SYSTEM is a privilege escalation), uninstall.",
+        "Network posture: binding, Windows Firewall rules created and their scope, Tailscale steps.",
+        "Elevation: what requires administrator, what happens without it, UAC prompts mid-script.",
+        "Bare-name spawns and UNC paths: an executable resolved from the current directory or `PATH`.",
+        "`ps1-cmdlet-lint.mjs`: what it can and cannot catch; approved verbs; whether its self-test mutates every rule.",
+        "`patch-nsis-paths.pl`: what calls it (the release pipeline?), and whether it still matches the NSIS output it patches.",
+        "Dead code: functions never called, parameters never used."
+      ]
+    },
+    {
+      "unit": "deploy-unix",
+      "rules": [
+        "^deploy/",
+        "^SELF_HOST",
+        "^scripts/installer-verify-test\\.mjs$",
+        "^scripts/deploy-lint"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/security-remote.md"
+      ],
+      "what": "the self-host installers for macOS and Linux (`deploy/local/install-macos.sh`, 1,641 lines, and `install-linux.sh`, 1,917 lines), the `deploy/blyg/` publishing bundle, `SELF_HOST.md` and `SELF_HOST.rationale.md`, and the checks that audit them: `scripts/deploy-lint.mjs`, its self-test, and `scripts/installer-verify-test.mjs`. The Windows installer belongs to `deploy-windows`.",
+      "read": "**Specs you own** (read first, in the snapshot): `SELF_HOST.md` (the assistant-run install runbook plus the Installer contract) and its rationale, and in `docs/specs/security-remote.md` the \"Credentials at rest\" and \"Network posture (self-hosted)\" sections with their `FAIL IF` lines, which `deploy-lint` pins on all three installers. Report spec-vs-code disagreements in both directions.",
+      "before": [
+        "**Read both installers completely, side by side.** They implement one contract twice, so every difference between them is either a deliberate platform difference or drift. List the drift."
+      ],
+      "focus": [
+        "Shell correctness: `set -euo pipefail` and its gaps (a failing command inside `$(…)`, in a pipeline, in an `if` or `||` chain, in a function called from a condition), unquoted expansions, word splitting on paths with spaces, `local` masking a failed command substitution, traps and cleanup on every exit path, behavior on a re-run (idempotence) and after a failed half-install, behavior under `sudo` versus a normal user, bash-version assumptions (macOS ships bash 3.2).",
+        "What is downloaded and run: every download is pinned and verified (checksum or signature) before use, over HTTPS, with no pipe-to-shell; the Node runtime pin; nothing fetched from a mutable URL.",
+        "Credentials at rest: files created with the right owner and mode from the first byte (umask before create, not chmod after), secrets never passed on a command line or echoed, never left in a temp file or shell history, service definitions (launchd plists, systemd units) that do not embed secrets readable by other users.",
+        "Network posture: the service binds where the contract says, firewall or Tailscale steps do what the runbook claims, nothing is exposed by default.",
+        "The service definitions: restart policy, the user they run as, hardening options on systemd, log locations and growth, uninstall that removes everything it installed.",
+        "macOS specifics: code signing and notarization checks, Gatekeeper and quarantine attributes, launchd domains, a symlinked install root (`/tmp` versus `/private/tmp`).",
+        "Linux specifics: distributions covered, systemd user versus system units, SELinux or AppArmor, architecture detection.",
+        "`SELF_HOST.md` as a runbook an AI assistant executes: every command, flag, path, and file name in it exists in the installers and does what the text says; steps that would fail or mislead.",
+        "The lint and verify test: rules the contract states that the lint does not check, and lint rules with no self-test mutation (such a rule \"is not enforced\").",
+        "`deploy/blyg/`: what it publishes, the authorization script, config that is stale.",
+        "Dead code: functions never called, variables never read, flags never parsed."
+      ]
+    },
+    {
+      "unit": "ci",
+      "rules": [
+        "^\\.github/workflows/",
+        "^\\.github/(actionlint\\.yaml|renovate\\.json|zizmor)",
+        "^\\.config/",
+        "^scripts/(workflow-lint|workflow-audit|supply-chain-config|dependency-overrides)"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/security-ci.md",
+        "docs/specs/security-supply-chain.md",
+        "docs/specs/deploy.md",
+        "docs/specs/security-audit.md"
+      ],
+      "what": "GitHub Actions and repository automation: every workflow in `.github/workflows/` (`security-audit.yaml` at 835 lines, `workflow-audit.yaml`, `ci.yml`, `release.yml`, the Hosted preview and production deploys, Argos, the blyg publish, the tend bot's workflows, red-team and Codex report workflows), `.github/renovate.json`, `actionlint.yaml`, `zizmor.yml`, `.config/tend.yaml`, and the checks on them: `scripts/workflow-lint.mjs` with its test, `scripts/workflow-audit.test.mjs`, `scripts/supply-chain-config.test.mjs`, `scripts/dependency-overrides.test.mjs`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/security-ci.md` + rationale (what each identity can reach and what stays admin-gated, with `FAIL IF` lines), `docs/specs/security-supply-chain.md` + rationale (dependency cooldown, alerts, the runtime pin), the CI and release parts of `docs/specs/deploy.md` + rationale, and the schedule and release-gate parts of `docs/specs/security-audit.md`. `workflow-lint.mjs` enforces the workflow-file `FAIL IF` lines mechanically (commit-pinned actions, triggers, effective permissions, where credentials are read): do not re-report what it checks; look for what it cannot see. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "`ci.yml` against the root `package.json`: every check `pnpm test` runs locally also runs in CI and the reverse; jobs that can never fail (`continue-on-error`, `|| true`, a step whose result is ignored); matrix gaps (does anything run on Windows or Linux? the product ships on all three); caches keyed so they can go stale or be poisoned from a fork PR; path filters that skip a needed job; required checks that a conflicted or draft PR never triggers.",
+        "Script injection: `${{ … }}` of attacker-controlled values (PR titles, branch names, issue bodies, comment text) interpolated into `run:` blocks; `pull_request_target` and `workflow_run` workflows that check out or execute PR code with secrets in scope; artifacts passed from an untrusted run to a privileged one.",
+        "Token scope: each job's effective `permissions`, secrets exposed to steps that do not need them, environments and their protection rules as the spec describes them, OIDC and attestation steps in `release.yml`.",
+        "`release.yml` and the two-stage sign-and-release pipeline against `deploy.md`: the artifact matrix, what is signed and notarized where, the updater manifest, a release that could publish with a failed or skipped job, tag handling.",
+        "The Hosted deploy workflows: preview label gate, production promotion, migrations ordering, what a fork PR can trigger.",
+        "The tend bot's workflows and `.config/tend.yaml`: triggers, what the bot can push or merge, the credential isolation the spec claims.",
+        "`renovate.json`: rules that match nothing, package rules that contradict the cooldown in `pnpm-workspace.yaml`, automerge scope, lockfile handling, the `@xterm/*` lockstep and pgstencil exceptions.",
+        "Concurrency groups and timeouts: jobs that can run forever or cancel each other wrongly.",
+        "Workflow steps that reference scripts, paths, pnpm filters, or secrets that do not exist.",
+        "Dead config: workflows that can never trigger, jobs whose condition is always false, inputs nothing passes, `zizmor.yml` and `actionlint.yaml` ignores for things that no longer exist."
+      ]
+    },
+    {
+      "unit": "scripts-audit",
+      "rules": [
+        "^\\.github/audit/",
+        "^\\.github/red-team-issue\\.md$",
+        "^scripts/(security-audit|github-state-check|red-team-since|clamp-issue-body|security-rule-ids)"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/security-audit.md",
+        "docs/specs/security*.md"
+      ],
+      "what": "the nightly security-audit machinery: the audit prompts and orchestrator in `.github/audit/` (`_preamble.md`, `orchestrator.md`, the five domain prompts, `expected-github-state.json`, the canary patches under `canaries/`), and the scripts that drive and report it: `scripts/security-audit-report.mjs`, `security-audit-public-body.mjs`, `security-audit-canary.mjs`, `security-audit-plan.mjs`, `security-audit-codex.mjs`, `security-audit-local.sh`, `github-state-check.mjs` with its fixture, `red-team-since.mjs`, `clamp-issue-body.mjs`, `security-rule-ids.json`, and their tests.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/security-audit.md` + rationale (schedule and release gate, the domains and their prompts, orchestration, outcomes, reporting, `AUDIT_PAT`), and the rule that each `FAIL IF` in a `docs/specs/security*.md` spec is claimed by exactly one domain prompt, which cites sections and never restates values. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "Coverage of the rules: enumerate every `FAIL IF` id across `docs/specs/security*.md`, and check that each is claimed by exactly one domain prompt, that `security-rule-ids.json` (`next`, `retired`) agrees with the ids in use, and that no retired id is reused. `spec-lint` may enforce part of this: read it, then report only what it does not catch.",
+        "The canaries: each patch under `.github/audit/canaries/` plants a known defect to measure whether the audit finds it. For each: does the patch still apply to the snapshot (`git apply --check` in a scratch copy under `SP/probes/scripts-audit/`, never in the checkout), does the defect it plants still violate the rule it targets, and is the rule it targets still in a spec? `scripts/security-audit-canary.test.mjs` fails on a stale seed: check what \"stale\" means there and what it misses.",
+        "The report pipeline: how findings become an issue body, what is public versus embargoed (a private ledger holds unfixed findings: nothing from it may reach a public issue, a log, or an artifact), the verdict computation, the release gate (can a release proceed when the audit failed, errored, or never ran?), clamping of long bodies (`clamp-issue-body.mjs`: truncation in the middle of a code fence or a multi-byte character).",
+        "`github-state-check.mjs` against `expected-github-state.json`: which repository settings it verifies (rulesets, environments, secrets' locations), what it cannot see, and a check that passes when the API call fails.",
+        "Prompt quality as code: the preamble and domain prompts are instructions to an auditing model. Report instructions that contradict each other or the spec, sections they cite that no longer exist, and files or paths they name that are gone.",
+        "`security-audit-local.sh`: does it still match the workflow it mirrors (`.github/workflows/security-audit.yaml`)?",
+        "`red-team-since.mjs` and the red-team issue template: what they compute and whether it is still wired to a workflow.",
+        "Shell and Node hygiene in these scripts: unquoted expansions, command injection through issue or PR text, secrets echoed.",
+        "Dead code: scripts nothing invokes, fixture entries nothing reads, canaries for rules that were retired."
+      ]
+    },
+    {
+      "unit": "scripts-release",
+      "rules": [
+        "^scripts/(sign-and-deploy|publish-blyg|build-stamp|release-artifact|bump-version|build-workspace-deps|workspace-sources|workspace-packages|assert-not-inlined|relay-origin|entrypoint-check)",
+        "^scripts/pairing-walkthrough/",
+        "^scripts/dor-tool-qc/",
+        "^CHANGELOG\\.md$",
+        "^\\.claude/commands/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/deploy.md",
+        "docs/specs/auto-update.md",
+        "docs/specs/relay.md"
+      ],
+      "what": "release, build, and walkthrough tooling in `scripts/`: `sign-and-deploy.sh` (1,107 lines) with its test, `publish-blyg.mjs`, `build-stamp.mjs`, `release-artifact.mjs`, `bump-version.sh`, `build-workspace-deps.mjs`, the workspace-sources helpers, `assert-not-inlined.mjs`, `relay-origin.mjs`, the entrypoint check, the pairing walkthrough harness (`scripts/pairing-walkthrough/`, about 2,900 lines), `scripts/dor-tool-qc/`, plus `CHANGELOG.md` and the release-notes command in `.claude/commands/`.",
+      "read": "**Specs you own** (read first, in the snapshot): `docs/specs/deploy.md` + rationale (artifact matrix, release checklist, the two-stage sign-and-release pipeline, the updater manifest, the changelog flow), the updater-manifest parts of `docs/specs/auto-update.md`, and the baked Relay origin rule in `docs/specs/relay.md`. Report spec-vs-code disagreements in both directions.",
+      "focus": [
+        "`sign-and-deploy.sh`, completely: `set -euo pipefail` gaps (a failure inside `$(…)`, a pipeline, or a condition), unquoted expansions, a partial release left published when a later step fails (what is the rollback?), secrets on command lines or in `set -x` output, signing identity and notarization handling, checksum and signature generation for every artifact in the matrix, the updater manifest's fields against what the app's updater reads (`standalone/src/updater.ts`, `standalone/src-tauri/tauri.conf.json`), idempotence on a re-run, platform assumptions (which machine runs it).",
+        "The artifact matrix in `deploy.md` against what the scripts and `.github/workflows/release.yml` actually build, sign, and upload: an artifact listed and not produced, or produced and not listed; names and paths that disagree; the VS Code extension's publish path; the `dor` CLI staging.",
+        "`bump-version.sh`: every file that carries a version is bumped together (the `package.json` files, `Cargo.toml` and its lockfile, `tauri.conf.json`, the VS Code extension, the website's `standalone-latest.json`, the changelogs). List version strings in the repo it does not touch and whether they are currently in step.",
+        "`build-stamp.mjs` and `relay-origin.mjs`: what is baked into a build (commit, version, the Relay origin), a dev default that could reach a production build, a production origin that could reach a self-host build.",
+        "`assert-not-inlined.mjs`, `entrypoint-check`, the workspace-sources helpers: what each guards, and whether anything still calls it.",
+        "`CHANGELOG.md`: the format the changelog parsers expect (`website/scripts/changelog-parser.js`, the in-app changelog), entries out of order, versions that disagree with the package versions, claims about features that were since removed or renamed.",
+        "The release checklist in `deploy.md`: steps that name commands, scripts, or files that no longer exist.",
+        "The pairing walkthrough harness and `dor-tool-qc`: do they still run against the current code (imports, selectors, ports, flags)? What invokes them? Their README against reality.",
+        "The release-notes command: paths and steps it names.",
+        "Dead code: scripts nothing invokes and no document mentions, flags never passed, functions never called."
+      ]
+    },
+    {
+      "unit": "scripts-lints",
+      "rules": [
+        "^scripts/"
+      ],
+      "tests": null,
+      "specs": [
+        "docs/specs/website-docs.md",
+        "docs/specs/webgl-text.md",
+        "docs/specs/security-local.md"
+      ],
+      "what": "the repository's own lints and their self-tests in `scripts/`: `spec-lint.mjs` (809 lines) with `spec-md.mjs`, its self-test, and `spec-word-budgets.json`; `e2e-lint.mjs` (940) and its self-test; `outbound-lint.mjs` (765) and its self-test; `public-docs-lint.mjs` (671); `loopback-lint.mjs` and its self-test; `xterm-lint.mjs` and `xterm-bump.mjs`; `lint-kit.mjs`; the Markdown tooling (`md-unwrap.mjs`, `md-merge.mjs`, `setup-git.mjs`); `prose-audit.mjs`; `docs-surfaces.mjs`; the isolation test. `deploy-lint`, `ps1-cmdlet-lint`, `workflow-lint`, and the security-audit scripts belong to other units.",
+      "read": "**Specs you own** (read first, in the snapshot): the \"Specs\", \"Spec lifecycle\", and \"Markdown\" sections of `AGENTS.md` (they state what each lint enforces and the conventions `spec-lint` checks: its header comment lists the checks), `docs/prose-audit.md`, `docs/specs/website-docs.md` for `public-docs-lint`, `docs/specs/webgl-text.md` for `xterm-lint`, and the sections of `docs/specs/security-local.md` and `security-remote.md` that the loopback, outbound, and e2e lints name. Report disagreements between what a document says a lint enforces and what it enforces.",
+      "before": [
+        "**The central question for each lint: can it pass while the thing it guards is broken?** A lint that silently checks nothing is worse than no lint."
+      ],
+      "focus": [
+        "Vacuous passes: a glob or file list that matches nothing (a renamed directory, a moved file) so the rule checks zero files and reports success; a regex that can no longer match because the code's shape changed; an allowlist entry for a file that no longer exists; a rule keyed on a string that a spec no longer contains (`AGENTS.md` says only `public-docs-lint` and `e2e-lint` fail when the line they enforce is gone: confirm that for those two, and say what the others do).",
+        "Rule versus self-test: `AGENTS.md` states that a rule added to a lint without its self-test case \"is not enforced\". For `spec-lint`, `e2e-lint`, `outbound-lint`, and `loopback-lint`, list each rule and its mutation case, and report rules with none. Check each self-test really asserts the lint goes red for the right reason (the expected message), not merely non-zero.",
+        "Sandbox isolation: self-tests must never write the checkout; they run in a sandbox copy through `lint-kit.mjs`. Find a path that writes to the real tree, leaves a temp directory behind, or follows a symlink out of the sandbox.",
+        "Allowlists and exemptions in each lint: every entry still needed, each with a true reason.",
+        "`spec-lint`: every convention `AGENTS.md` calls mechanically checkable is in fact checked, and conventions the lint checks that `AGENTS.md` no longer states. The word budgets in `spec-word-budgets.json`: entries for specs that no longer exist, specs with no entry, budgets not equal to the size rounded up to the nearest 50 (run `node scripts/spec-lint.mjs` read-only to see its view; never run `--ratchet`).",
+        "`md-unwrap.mjs` and `md-merge.mjs`: Markdown constructs they corrupt (lists, tables, code fences, front matter, MDX, HTML blocks, hard breaks), the merge driver on conflict, `--fix` idempotence. Never run `--fix` in the checkout.",
+        "`xterm-lint.mjs` and `xterm-bump.mjs`: the `@xterm/*` lockstep as the spec states it.",
+        "`public-docs-lint.mjs`: inventories derived from the owning file as claimed, or hardcoded copies that can drift.",
+        "Cost: these run first in every `pnpm test`. Report a lint that re-reads the whole tree several times or spawns many processes, with its wall time (time one run each; they are read-only).",
+        "Dead code: helper exports nothing imports, options nothing passes, rules that can never fire."
+      ]
+    },
+    {
+      "unit": "specs-owned-by-feature-units",
+      "rules": [
+        "^docs/specs/(?!glossary|security\\.|shortcuts)"
+      ],
+      "tests": null,
+      "holding": true,
+      "specs": [],
+      "what": "Feature specs, each read and checked by the feature unit that owns it: this unit collects them so the split stays complete and gets no reviewer of its own.",
+      "read": null,
+      "focus": []
+    },
+    {
+      "unit": "docs-root",
+      "rules": [
+        "^docs/",
+        "^[^/]+$",
+        "^\\.claude/"
+      ],
+      "tests": null,
+      "specs": [],
+      "what": "the repository's top-level documents and configuration: `README.md`, `AGENTS.md`, `TESTING_AND_MODIFICATION_GUIDE.md`, `SECURITY.md`, `LICENSE`, `docs/compatible-agents.md` + rationale (the public half), `docs/prose-audit.md`, `docs/testing/`, the four walkthroughs in `docs/stories/`, the registries `docs/specs/glossary.md` and `docs/specs/shortcuts.md`, `docs/specs/security.md` + rationale, the root `package.json`, `pnpm-workspace.yaml`, `tsconfig.workspace-sources.json`, `dormouse.yml`, `.gitignore`, `.gitattributes`, `.git-blame-ignore-revs`, and the project's Claude configuration under `.claude/` (skills, settings, output style). Skip `pnpm-lock.yaml` (the `x-deps` unit covers it). Every other spec is owned by a feature reviewer.",
+      "read": null,
+      "before": [
+        "**Your job is cross-document truth.** These files tell a new contributor, an AI agent, and a prospective user what the project is and how to work on it. Every statement in them is a claim to check against the repository."
+      ],
+      "focus": [
+        "`AGENTS.md`, line by line: the Setup commands exist and work as described; the Architecture bullets match the directories (every top-level package is listed, nothing listed is gone, each description is still true, including the sub-paths it names); the spec index lists every file in `docs/specs/` and nothing that does not exist, and each one-line description still matches that spec's own front matter and headings; the lint table matches the scripts (names, `pnpm` script names, what each enforces, the count \"Eight sibling lints … Seven enforce …\"); the statements about which self-tests `pnpm test` runs match `package.json`.",
+        "`TESTING_AND_MODIFICATION_GUIDE.md`: every command, path, section number other files cite (the audit skill cites \"§8\"), and harness description.",
+        "`README.md`: what the product is, install and build steps, links, badges, and license statements against `LICENSE` and each `package.json` `license` field (the root says FSL-1.1-MIT; `dor-tools-lib` is MIT; check every package and the VS Code extension's own `LICENSE`).",
+        "`SECURITY.md` and `docs/specs/security.md`: the published guarantees and known gaps. Each guarantee row points at a domain spec section: check the pointers resolve and the summary matches what that section says. Contact details are consistent everywhere (the support address is `support@dormouse.sh`).",
+        "The glossary: terms the code and other specs use with a different meaning, terms defined and used nowhere, invariants I1–I10 cited by number elsewhere with the wrong content.",
+        "`shortcuts.md` against `layout.md` (the `wall-core` reviewer checks both against code; you check that the two documents agree with each other and with `vscode-ext/package.json` keybindings and `vscode-ext/README.md`).",
+        "The four `docs/stories/*.mdx` walkthroughs against the specs they narrate: \"the specs win where they disagree\", so list the disagreements.",
+        "`docs/compatible-agents.md`: the public agent guide: every agent, flag, and behavior it documents against `lib/src/lib/coding-agents.ts` and `resume-patterns.ts`.",
+        "Root config: `package.json` scripts that call missing files or are never used and undocumented; `pnpm-workspace.yaml` packages against the directories; `tsconfig.workspace-sources.json` paths against the packages; `dormouse.yml` Tools against the scripts they run; `.gitignore` and `.gitattributes` entries for paths that no longer exist, and generated or sensitive paths that are not ignored; `.git-blame-ignore-revs` commits that exist.",
+        "`.claude/`: skills that name commands, files, or section headings that no longer exist; settings that grant permissions for tools the project no longer uses.",
+        "Contradictions between any two of these documents."
+      ]
+    }
+  ],
+  "cross": [
+    {
+      "unit": "x-dead",
+      "what": "a tool-driven, whole-repository hunt for code that is no longer needed. The per-feature reviewers read the code by hand; your job is the mechanical sweep they cannot do: build the import graph and report what nothing reaches. Work in the live checkout `{{CHECKOUT}}` (it has `node_modules`), strictly read-only; put scripts and their output under `SP/probes/x-dead/`.",
+      "focusHeading": "**Produce, for every workspace package** (`lib`, `standalone`, `standalone/sidecar`, `vscode-ext`, `website`, `relay`, `hosted`, `dor`, `dor-lib-common`, `dor-tools-builtin`, `dor-tools-lib`, `remote-lib-common`, `canopy`) **and for `scripts/`:**",
+      "numbered": true,
+      "focus": [
+        "**Unreachable files**: source files no entrypoint reaches. Entrypoints include each `package.json`'s `main`/`exports`/`bin`/scripts, every Vite, esbuild, vitest, Storybook, wrangler, and Tauri config, HTML files, service-worker and Worker entries, `scripts/` invoked from any `package.json` or any workflow in `.github/workflows/`, and dynamic `import()`/`require()`/`new Worker(new URL(...))`/`fork()` strings. A file reached only from tests or stories is its own class (\"test-only\").",
+        "**Unused exports**: exported symbols no other file imports. Separate three classes: never referenced anywhere; referenced only inside their own file (the `export` is unneeded); referenced only from tests or stories (test-only production code).",
+        "**Unused and misplaced dependencies** are the `x-deps` unit's job: skip them.",
+        "**Orphans**: test files whose subject no longer exists, snapshot files with no test, fixtures nothing loads, binary assets nothing references, `package.json` scripts nothing calls and that call nothing that exists, CSS classes or custom properties defined and never used in the hand-written stylesheets.",
+        "**Stale markers**: `TODO`/`FIXME`/`XXX`/`HACK` comments, `@deprecated` symbols still exported, `it.skip`/`describe.skip`/`it.todo`, commented-out code blocks of five lines or more, feature flags and Labs settings whose branches are constant."
+      ],
+      "notes": [
+        "**How:** try an existing tool first, run from a scratch directory so nothing is written to the checkout (for example `pnpm dlx knip` or `ts-prune`; the registry enforces a minimum release age, so pin an older version if the latest is refused, and the project compiles with TypeScript 7 whose package has no classic compiler API, so a tool may need its own TypeScript 5). If tooling fights you for more than a few minutes, write your own resolver in Node or Python: parse `import`/`export`/`require` with a tolerant regex or a parser from `node_modules`, resolve relative specifiers and workspace package names (see `tsconfig.workspace-sources.json` and each package's `exports`), and walk from the entrypoints. Then **verify every candidate by hand** with a whole-repo text search for the symbol or file name (including string references in configs, HTML, YAML, Rust `include_str!`, and shell scripts) before reporting it. A false \"unused\" costs more than a missed one.",
+        "Report each confirmed item with its path and line, what you searched, and `Sure-fix: yes` only when deletion is mechanical (no public API, no persisted format, no cross-package contract). Group by package. Put the long raw lists in `SP/probes/x-dead/` and reference them; keep the findings file to verified items."
+      ]
+    },
+    {
+      "unit": "x-deps",
+      "what": "dependency hygiene across the pnpm workspace and the Rust crate. Read from the snapshot; use the live checkout `{{CHECKOUT}}` for read-only commands (`pnpm why`, `pnpm ls`, reading `node_modules`); put scripts under `SP/probes/x-deps/`. Never run `pnpm install`, `add`, `update`, or `dedupe`, and never touch the lockfile.",
+      "read": "**Specs to read first** (in the snapshot): `docs/specs/security-supply-chain.md` + rationale (disclosure of everything that reaches a user's machine, the bundled runtime pin, dependency cooldown), and the comments in `pnpm-workspace.yaml`.",
+      "focusHeading": "**Answer each of these with evidence, per package** (`lib`, `standalone`, `standalone/sidecar`, `vscode-ext`, `website`, `relay`, `hosted`, `dor`, `dor-lib-common`, `dor-tools-builtin`, `dor-tools-lib`, `remote-lib-common`, `canopy`, and the root):",
+      "numbered": true,
+      "focus": [
+        "**Declared but unused**: every `dependencies`/`devDependencies`/`optionalDependencies`/`peerDependencies` entry that no source file, config, script, or CLI invocation uses. Search imports, `require`, config plugin strings, `package.json` scripts (binaries), Vite/esbuild externals, and type-only uses (`@types/*`).",
+        "**Used but undeclared** (phantom dependencies that resolve only through hoisting or another package).",
+        "**Misplaced**: a runtime import of a `devDependency` in code that ships unbundled, or a build-only tool in `dependencies` (this matters for the dependency disclosure: `website/scripts/generate-deps.js` publishes the production dependency list, so a misplaced entry is a false disclosure in either direction).",
+        "**Version skew**: one package required at different versions or ranges across workspace packages (React, xterm, TypeScript, Vite, vitest, hono, zod, and so on). Check the `@xterm/*` lockstep rule in `docs/specs/webgl-text.md`.",
+        "**Overrides and allowances** in `pnpm-workspace.yaml`: for each `overrides` entry, each `peerDependencyRules.allowedVersions` entry, and each `allowBuilds` entry, is it still needed today? The comments state the removal condition for each: evaluate the condition against the current lockfile (`pnpm why <pkg>` helps) and report entries whose condition is now met, and entries naming packages that are no longer installed.",
+        "**Duplicates in the lockfile** for heavy libraries (several copies of the same major version) that a single range would collapse.",
+        "**Rust**: every crate and feature in `standalone/src-tauri/Cargo.toml` against `use`/path references in `standalone/src-tauri/src/` and `build.rs`; target-specific dependencies used on the wrong `cfg`; features enabled and unused.",
+        "**The disclosure pipeline**: does `website/src/data/dependencies-*.json` match what `website/scripts/generate-deps.js` would produce now? Run the generator only if it has a check or dry-run mode that writes nothing; otherwise compare by reading. Report anything that reaches a user's machine and is not disclosed (bundled binaries, downloaded runtimes, CDN assets, fonts).",
+        "**Root `devDependencies`**: each is used by a root script."
+      ],
+      "notes": [
+        "Verify each item with a whole-repo search before reporting it. Removing a dependency touches the lockfile and the disclosure data, so say exactly which files a fix must regenerate, and mark `Sure-fix: yes` only when nothing imports the package anywhere."
+      ]
+    },
+    {
+      "unit": "x-wiring",
+      "what": "is everything that looks checked actually checked? Work from the snapshot for reading and the live checkout `{{CHECKOUT}}` for read-only commands; put scripts under `SP/probes/x-wiring/`.",
+      "focusHeading": "**Answer each of these with evidence:**",
+      "numbered": true,
+      "focus": [
+        "**Tests that never run.** Enumerate every test-shaped file in the repo (`*.test.*`, `*.spec.*`, `*-selftest.mjs`, `*.smoketest.*`, files under `test/` or `tests/`, Rust `#[test]`/`tests/`). For each, name the command that runs it, and whether that command is reachable from the root `pnpm test` and from a job in `.github/workflows/ci.yml` (or another workflow). List files matched by no runner glob, runners invoked by nothing, and suites CI runs that `pnpm test` does not (and the reverse). `AGENTS.md` states which lints and self-tests `pnpm test` runs: check each claim against `package.json`.",
+        "**Skipped and hollow tests.** Every `skip`, `todo`, `only`, platform-conditional skip, and early `return` that makes a test vacuous; tests with no assertion; every skipped file and test a root `pnpm test` run reports, each with its reason.",
+        "**Type-check coverage.** For each package, which command type-checks it in CI and locally, and which source files no tsconfig `include` covers (a past finding: `tsc -p tsconfig.json` in `lib` checks nothing because of project references; CI is said to run `tsc -b` in `lib` and `tsc --noEmit` in `standalone`). List source files that are never type-checked, and `// @ts-ignore`/`@ts-expect-error`/`as any` clusters that hide real errors.",
+        "**Script and workflow references.** Every path, script name, pnpm filter, and package name referenced from any `package.json` script, any workflow file, `dormouse.yml`, `AGENTS.md`, `TESTING_AND_MODIFICATION_GUIDE.md`, and `README.md` must exist. List dangling references and scripts defined but never invoked by anything (a human-run script should be documented somewhere: say where).",
+        "**Lint self-tests.** `AGENTS.md` says a lint rule without a self-test case \"is not enforced\". For `deploy-lint`, `e2e-lint`, `loopback-lint`, `outbound-lint`, `spec-lint`, `workflow-lint`, and `ps1-cmdlet-lint`, compare the rules each lint implements with the cases its self-test mutates, and list rules with no mutation case. Also check which self-tests the root `pnpm test` actually runs versus only the `lint:*` scripts.",
+        "**Config drift.** Vitest, Vite, tsconfig, and Storybook configs with options that reference missing files or have no effect; duplicated config that has drifted between packages; Node, pnpm, Rust toolchain, and action versions pinned in more than one place that disagree (`package.json` `devEngines`, workflow `node-version`, `.nvmrc`-style files, `rust-toolchain`, Tauri config).",
+        "**Build outputs and ignores.** Tracked files that are build outputs or generated (and whether a check keeps them fresh), `.gitignore` entries for things that no longer exist, generated files with no generator."
+      ],
+      "notes": [
+        "Verify each item before reporting it. Mark `Sure-fix: yes` only for mechanical repairs."
+      ]
+    },
+    {
+      "unit": "x-perf",
+      "what": "end-to-end performance, across unit boundaries. You have no file list. The per-feature reviewers each look at efficiency inside their own area; your job is the paths that cross areas, where nobody else sees the whole cost. The live checkout at `{{CHECKOUT}}` has a finished production build, so you can read real bundle sizes from the `dist` directories. Put scripts under `SP/probes/x-perf/`. Read code from the snapshot.",
+      "focusHeading": "**Trace each of these paths hop by hop and report what each hop costs, where work is repeated, and where growth is unbounded:**",
+      "numbered": true,
+      "focus": [
+        "**PTY output to pixels on the desktop app**: node-pty → `standalone/sidecar/pty-core.js` → stdio to Rust (`standalone/src-tauri/src/lib.rs`, `routing.rs`) → Tauri event → `standalone/src/tauri-adapter.ts` → `lib/src/lib/processed-pty-stream.ts`, `terminal-protocol.ts`, `terminal-state.ts`, the alert layer's quiesce detection → xterm.js `write`. Count copies, encodings (base64? JSON string escaping of binary?), allocations, and per-chunk passes over the data. A `cat` of a large file or a build log is the stress case: what stops the webview from being flooded, and what does a hidden or minimized pane cost?",
+        "**The same path in VS Code**: `vscode-ext/src/pty-host.js` → `pty-manager.ts` → `message-router.ts` → `postMessage` → the VS Code adapter in `lib/src/lib/platform/`.",
+        "**Keystroke to PTY**, both hosts: per-key work, and anything that scales with the number of panes.",
+        "**React render cost**: which stores do `Wall.tsx`, the pane headers, the `WorkspaceStrip`, and the `Baseboard` subscribe to, and what re-renders when one terminal's title, cwd, alert state, or output changes? Look for a context value rebuilt every render, selectors that return new objects, and a whole-Wall render per PTY chunk.",
+        "**Persistence**: how often the session is saved, what triggers it, how big the blob is with many panes and long scrollback, and where it goes (a past problem: a large blob in WebKit localStorage bloating its write-ahead log).",
+        "**Start-up**: what the app bundle loads eagerly (themes, Monaco, Mermaid, MDXEditor, xterm addons, WebGL), bundle sizes by chunk, work done before first paint, and the same question for the website's landing page and the Pocket app (a phone on cellular).",
+        "**Remote**: the phone path: per-frame encryption, framing, and copies from PTY to phone; replay buffers per session; the agent-browser screencast path (frame encoding, base64, decode per frame, frames sent to hidden panes).",
+        "**Timers and polling**: every `setInterval`, recurring `setTimeout`, and polling loop in shipped code (port scans, git status, presence, update checks, status polls), with its period and what it costs; ones that run while the app is hidden or idle.",
+        "**Scale**: anything quadratic in panes, sessions, Workspaces, or windows."
+      ],
+      "notes": [
+        "Quantify roughly (bytes, passes, milliseconds if you can reason to them, Hz). Report only real costs with a concrete repair, most expensive first. Mark `Sure-fix: yes` only when the repair is local and cannot change behavior."
+      ]
+    },
+    {
+      "unit": "x-dupe",
+      "what": "duplication across the repository. You have no file list. Work in the live checkout `{{CHECKOUT}}` read-only for tooling and read code from the snapshot; put scripts and raw output under `SP/probes/x-dupe/`.",
+      "focusHeading": "**Find, in non-test source across all packages:**",
+      "numbered": true,
+      "focus": [
+        "**Copied code**: run a clone detector from a scratch directory so nothing is written to the checkout (for example `pnpm dlx jscpd`, pinning an older version if the registry's minimum release age refuses the latest), or write a token-window detector yourself. Report clones of roughly 25 lines or 150 tokens and up, excluding generated files, lockfiles, snapshots, theme data, and SQL migrations. For each: both locations, whether the copies have already drifted (show the diff), and where one shared implementation should live given the package boundaries in `AGENTS.md`.",
+        "**Parallel implementations of one concept**, which a clone detector misses. Check at least these suspects, and look for more:\n   - Surface and workspace id allocation: `lib/src/lib/surface-ids.ts`, `lib/src/lib/id-pool.ts`, `vscode-ext/src/surface-ids.ts`, `standalone/src-tauri/src/ids.rs`.\n   - `scripts/stage-dor-cli.mjs` versus `standalone/scripts/stage-dor-cli.mjs`; `standalone/scripts/dev-host-guard.mjs` versus `hosted/server/dev-host-guard.ts`.\n   - `lib/src/host/remote/enroll-offer.ts` versus `remote-lib-common/src/remote/enroll-offer.ts`; `lib/src/host/relay-origin.ts` versus `scripts/relay-origin.mjs` versus `remote-lib-common/src/remote/origin.ts`.\n   - Shell quoting and escaping: `dor/src/commands/shell-quote.ts`, `lib/src/lib/shell-escape.ts`, `lib/src/lib/posix-escape.ts`, and any quoting inside the sidecar or the installers.\n   - Atomic file writes: `lib/src/host/atomic-json-file.ts`, `dor-tools-builtin/src/atomic-save.ts`, the Relay's state writes, the Rust persistence code.\n   - Loopback guards: `lib/src/host/loopback-guard.ts`, `dor-tools-builtin/src/file-viewer-loopback-guard.ts`, the dev host guards.\n   - Token buckets and rate limits; base64 and hex helpers; throttle and debounce helpers; `isRecord`-style type guards; path normalization; origin parsing; QR code generation; the processed-PTY-stream logic on the host (`vscode-ext/src/processed-pty-streams.ts`) versus the lib's.\n   - The three installers under `deploy/local/` implement one contract in bash twice and PowerShell once: shared shell functions copied between `install-macos.sh` and `install-linux.sh` that have drifted.\n   - Mirrored constants: `lib/src/lib/mirrored-constants.test.ts` exists to pin constants duplicated across packages. List constants that are duplicated and NOT pinned by it or by another test.",
+        "**For each pair**, say whether the duplication is deliberate and documented (a comment, a spec line, a test that pins the two together), and if so whether the pin actually covers the parts that matter. A deliberate, pinned duplicate is not a finding."
+      ],
+      "notes": [
+        "Report drifted duplicates first: a behavioral difference between two copies is usually a bug in one of them, so say which is right. Mark `Sure-fix: yes` only when merging is mechanical and does not cross a package boundary the architecture forbids (for example, `remote-lib-common` is bare ES2022 with no DOM or Node types, and `dor-tools-lib` has no runtime dependencies)."
+      ]
+    }
+  ]
+}

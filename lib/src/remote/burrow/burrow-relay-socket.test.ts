@@ -93,11 +93,10 @@ describe('BurrowRuntime relay socket policy', () => {
     socket.closeWith(1006);
   }
 
-  it('latches on 4000, 4001, and 4002, arming no timer and opening nothing until start()', () => {
+  it('latches on 4000 and 4001, arming no timer and opening nothing until start()', () => {
     for (const [code, latch] of [
       [WS_CLOSE_BURROW_REPLACED, 'displaced'],
       [WS_CLOSE_BURROW_REVOKED, 'removed'],
-      [WS_CLOSE_BURROW_NOT_ENTITLED, 'not-entitled'],
     ] as const) {
       sockets = [];
       makeBurrow();
@@ -127,17 +126,79 @@ describe('BurrowRuntime relay socket policy', () => {
   it('latches what the probe of a refused upgrade answers, opening nothing more', async () => {
     for (const standing of ['removed', 'not-entitled'] as const) {
       sockets = [];
-      const probe = scriptedProbe(standing);
+      const probe = scriptedProbe(standing, standing);
       makeBurrow(probe.run);
       refuse();
       await settle();
       expect(probe.calls).toBe(1);
       expect(burrow.status).toBe(standing);
-      expect(clock.armed).toBe(0);
+      // Only not-entitled asks again, and only its standing.
+      expect(clock.armed).toBe(standing === 'removed' ? 0 : 1);
       clock.advance(60_000);
+      await settle();
+      expect(probe.calls).toBe(standing === 'removed' ? 1 : 2);
       expect(sockets).toHaveLength(1);
       burrow.stop();
     }
+  });
+
+  it('asks a not-entitled standing again after a minute, and reconnects once the Relay takes it', async () => {
+    const probe = scriptedProbe(null);
+    makeBurrow(probe.run);
+    sockets[0]!.open();
+    sockets[0]!.closeWith(WS_CLOSE_BURROW_NOT_ENTITLED);
+    expect(burrow.status).toBe('not-entitled');
+    expect(clock.armed).toBe(1);
+    clock.advance(59_999);
+    await settle();
+    expect(probe.calls).toBe(0);
+    clock.advance(1);
+    await settle();
+    expect(probe.calls).toBe(1);
+    expect(sockets).toHaveLength(2);
+    expect(burrow.status).toBe('connecting');
+    sockets[1]!.open();
+    expect(burrow.status).toBe('connected');
+  });
+
+  it('doubles the wait while the Relay still refuses, to half an hour, asking nothing else', async () => {
+    const probe = scriptedProbe(...Array<BurrowStanding>(8).fill('not-entitled'));
+    makeBurrow(probe.run);
+    sockets[0]!.open();
+    sockets[0]!.closeWith(WS_CLOSE_BURROW_NOT_ENTITLED);
+    const minutes = [1, 2, 4, 8, 16, 30, 30];
+    for (const [index, wait] of minutes.entries()) {
+      clock.advance(wait * 60_000 - 1);
+      await settle();
+      expect(probe.calls).toBe(index);
+      clock.advance(1);
+      await settle();
+      expect(probe.calls).toBe(index + 1);
+      expect(burrow.status).toBe('not-entitled');
+    }
+    // Only the probe: no socket, no reconnect.
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('stops asking on stop(), and on a later removal', async () => {
+    const probe = scriptedProbe('removed');
+    makeBurrow(probe.run);
+    sockets[0]!.open();
+    sockets[0]!.closeWith(WS_CLOSE_BURROW_NOT_ENTITLED);
+    clock.advance(60_000);
+    await settle();
+    expect(burrow.status).toBe('removed');
+    expect(clock.armed).toBe(0);
+
+    burrow.start();
+    sockets.at(-1)!.open();
+    sockets.at(-1)!.closeWith(WS_CLOSE_BURROW_NOT_ENTITLED);
+    expect(clock.armed).toBe(1);
+    burrow.stop();
+    expect(clock.armed).toBe(0);
+    clock.advance(30 * 60_000);
+    await settle();
+    expect(probe.calls).toBe(1);
   });
 
   it('probes once per failure streak, and again once a socket has opened', async () => {

@@ -319,7 +319,7 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
 
 describe('SelectionRing settled render', () => {
   // A resting ring (first-appearance snap → no tween → null velocity) carries no
-  // motion smear at all — this is what keeps Chromatic deterministic — and the
+  // motion smear at all — this is what keeps Argos snapshots deterministic — and the
   // passthrough ring is a 1px solid stroke, pixel-parity with the retired CSS border.
   it('is a 1px non-dashed stroke with no motion smear', async () => {
     const store = makeStore();
