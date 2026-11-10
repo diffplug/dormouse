@@ -110,7 +110,7 @@ function clearSelection(s: MouseSelectionState): void {
 }
 
 /** A drag the program owned, shadowed and waiting for the copy chord (§3.8). */
-export function isShadowed(state: MouseSelectionState): boolean {
+export function isShadowed(state: Pick<MouseSelectionState, 'selection' | 'copyEditor'>): boolean {
   return state.selection?.owner === 'program' && !state.copyEditor;
 }
 

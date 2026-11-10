@@ -2,8 +2,7 @@ import { clsx } from 'clsx';
 import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { CheckIcon } from '@phosphor-icons/react';
 import {
-  DEFAULT_MOUSE_SELECTION_STATE,
-  getMouseSelectionSnapshot,
+  getMouseSelectionState,
   setSelection,
   subscribeToMouseSelection,
   subscribeToRenderTick,
@@ -87,11 +86,15 @@ const PREVIEW_LINES_CLASS = 'py-1 font-mono text-sm leading-[18px] text-foregrou
  * (`handle-mouse-selection-keys.ts`); this owns the pointer.
  */
 export function CopyEditor({ terminalId }: { terminalId: string }) {
-  const states = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
+  // Each field on its own, every one replaced rather than mutated, so another
+  // pane's drag renders nothing here.
+  const selection = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).selection);
+  const copyEditor = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).copyEditor);
+  const copyOutcome = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).copyOutcome);
+  const programCopy = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).programCopy);
   // A hidden Workspace consumes no window input (docs/specs/layout.md →
   // "Workspaces"); the selection stays in the store for the way back.
   const workspaceActive = useContext(WorkspaceActiveContext);
-  const { selection, copyEditor, copyOutcome, programCopy } = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
   if (!workspaceActive || !copyEditor || !selection) return null;
   return <OpenCopyEditor terminalId={terminalId} selection={selection} editor={copyEditor} copyState={copyOutcome ?? 'idle'} programCopy={programCopy} />;
 }

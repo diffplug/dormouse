@@ -4,6 +4,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { MouseOverrideBanner } from './MouseOverrideBanner';
+import { SelectionOverlay } from '../SelectionOverlay';
+import { CopyEditor } from '../CopyEditor';
 import { ensureResizeObserver, stubWallActions } from './wall-test-utils';
 import { WallActionsContext } from './wall-context';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
@@ -11,6 +13,7 @@ import { setPlatform } from '../../lib/platform';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
+  bumpRenderTick,
   getMouseSelectionState,
   setHintToken,
   setMouseReporting,
@@ -76,6 +79,40 @@ it('does not rerender pane headers or banners for selection and hover updates', 
 
   expect(commits.mock.calls.length).toBe(0);
   expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+});
+
+it('renders only the dragging pane\'s selection overlay and copy editor', () => {
+  act(() => {
+    root.render(
+      <>
+        {['one', 'two'].map((id) => (
+          <div key={id}>
+            <Profiler id={`overlay-${id}`} onRender={commits}>
+              <SelectionOverlay terminalId={id} />
+            </Profiler>
+            <Profiler id={`editor-${id}`} onRender={commits}>
+              <CopyEditor terminalId={id} />
+            </Profiler>
+          </div>
+        ))}
+      </>,
+    );
+  });
+  commits.mockClear();
+
+  act(() => bumpRenderTick());
+  expect(commits.mock.calls.length).toBe(0);
+
+  act(() => beginDrag('one', { row: 0, col: 0, altKey: false, startedInScrollback: false }));
+  for (let col = 1; col <= 5; col++) {
+    act(() => updateDrag('one', { row: 0, col, altKey: false }));
+  }
+  act(() => setHintToken('one', { kind: 'url', start: { row: 0, col: 0 }, end: { row: 0, col: 11 }, text: 'https://a.co' }));
+  act(() => bumpRenderTick());
+
+  const rendered = new Set(commits.mock.calls.map(([id]) => id));
+  expect(rendered.has('overlay-one')).toBe(true);
+  expect([...rendered].filter((id) => id.endsWith('-two'))).toEqual([]);
 });
 
 it('updates only the owning pane for reporting and override transitions', () => {
