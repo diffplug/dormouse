@@ -180,6 +180,19 @@ export const RULES = [
     },
   },
   {
+    // The call and its verdict as one span: `installer-verify-test.mjs` drives
+    // `has_off_loopback` itself, so only this pins that `manage verify` still
+    // asks it and fails on its answer.
+    rule: 'Network posture — manage verify fails a listener bound off-loopback',
+    patterns: {
+      macOS: /elif has_off_loopback "\$PORT" "\$listeners"; then\n\s*fail "port \$PORT is bound off-loopback/,
+      Linux: /elif has_off_loopback "\$PORT" "\$listeners"; then\n\s*fail "port \$PORT is bound off-loopback/,
+      Windows:
+        /\$offLoopback = @\(\$listeners \| Where-Object \{ \$_\.LocalAddress -ne '127\.0\.0\.1' \}\)\n\s*if \(\$offLoopback\.Count -gt 0\) \{\n\s*Fail "port \$PORT is bound off-loopback/,
+    },
+    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
+  },
+  {
     // The probe's verdict, and on unix the one call into the helper holding it:
     // a helper nobody calls keeps its message and asserts nothing.
     rule: 'Network posture — manage verify probes the plaintext port on the Tailscale IP',
@@ -330,6 +343,17 @@ export const RULES = [
     },
   },
   {
+    // The unix search above lives in `names_credential`; this pins its one
+    // consumer, call and verdict as one span, as the bind check does.
+    rule: 'Credentials at rest — manage verify fails a service definition that names a credential',
+    patterns: {
+      macOS: /elif names_credential "\$PLIST" "\$ROOT\/bin\/run-relay"; then\n\s*fail "the LaunchAgent or wrapper names a credential/,
+      Linux: /elif names_credential "\$UNIT_FILE" "\$ROOT\/bin\/run-relay"; then\n\s*fail "the unit or wrapper names a credential/,
+    },
+    exactMatches: { macOS: 1, Linux: 1 },
+    skip: { Windows: 'its search is inline in the verify condition, which the search rule above already matches' },
+  },
+  {
     // SELF_HOST.md -> "Definition of done": "a definition it cannot read at all
     // fails rather than passes". Both searches above read the service
     // definition and the `run-relay` wrapper, and on every platform an
@@ -395,12 +419,15 @@ export const RULES = [
     // it killed by SIGPIPE, so the decision rides on a race; capture first,
     // then search the captured text. `ts ip -4 | head -1` sat in both
     // `manage verify`s while every rule above stayed green.
-    rule: 'Network posture — no Tailscale CLI output is piped into `head` or `grep -q`',
+    rule: 'Network posture — no Tailscale CLI output or listening-socket listing is piped into `head` or `grep -q`',
     forbidden: true,
-    violation: 'tsip="$(ts ip -4 2>/dev/null | head -1 || true)"',
+    violations: {
+      macOS: ['tsip="$(ts ip -4 2>/dev/null | head -1 || true)"', 'lsof -nP -iTCP:"$PORT" -sTCP:LISTEN | grep -q LISTEN'],
+      Linux: ['tsip="$(ts ip -4 2>/dev/null | head -1 || true)"', 'ss -lntH "sport = :$PORT" | grep -q LISTEN'],
+    },
     patterns: {
-      macOS: /(?:\btailscale|\bts)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
-      Linux: /(?:\btailscale|\bts)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
+      macOS: /(?:\btailscale|\bts|\blsof)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
+      Linux: /(?:\btailscale|\bts|\bss)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
     },
     skip: { Windows: 'every Tailscale decision is a `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE' },
   },
@@ -420,6 +447,33 @@ export const RULES = [
       Linux: /chmod 0700 "\$CONFIG_DIR" "\$STATE_DIR" "\$RUN_DIR"/,
       Windows:
         /Protect-Path -Path \$CONFIG_DIR -Directory\n\s*Protect-Path -Path \$STATE_DIR -Directory\n\s*Protect-Path -Path \$RUN_DIR -Directory/,
+    },
+  },
+  {
+    // The guard and the write it gates as one span: the file is written only
+    // when absent, so an update never regenerates it.
+    rule: 'Credentials at rest — an existing config/relay.env is never rewritten',
+    patterns: {
+      macOS: /if \[ ! -f "\$ENV_FILE" \]; then\n\s*umask 077\n\s*cat > "\$ENV_FILE" <<ENV_EOF/,
+      Linux: /if \[ ! -f "\$ENV_FILE" \]; then\n(?:\s*#[^\n]*\n)*\s*: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"\n\s*cat > "\$ENV_FILE" <<ENV_EOF/,
+      Windows: /if \(-not \(Test-Path -LiteralPath \$ENV_FILE\)\) \{\n\s*\$envLines = @\(/,
+    },
+    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
+  },
+  {
+    // The offer's token goes only into its publication file; no output helper
+    // may carry it.
+    rule: 'Credentials at rest — the enroll token is never printed',
+    forbidden: true,
+    violations: {
+      macOS: ['ok "enrollment token: $ENROLL_TOKEN"', 'printf "token: %s\\n" "${ENROLL_TOKEN}"'],
+      Linux: ['ok "enrollment token: $ENROLL_TOKEN"', 'printf "token: %s\\n" "${ENROLL_TOKEN}"'],
+      Windows: ['Write-Ok "enrollment token: $enrollToken"', 'Write-Host $enrollToken'],
+    },
+    patterns: {
+      macOS: /\b(?:echo|printf|step|info|detail|ok|warn|die)\b[^\n]*\$\{?ENROLL_TOKEN\b/,
+      Linux: /\b(?:echo|printf|step|info|detail|ok|warn|die)\b[^\n]*\$\{?ENROLL_TOKEN\b/,
+      Windows: /\b(?:Write-Host|Write-Output|Write-Step|Write-Info|Write-Detail|Write-Ok|Write-Warn2|Die)\b[^\n]*\$enrollToken\b/i,
     },
   },
   {
