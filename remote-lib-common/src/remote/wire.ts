@@ -1,6 +1,6 @@
 /**
  * The remote wire contract (docs/specs/relay.md): HTTP routes and payloads,
- * relay frames, and the terminal-only remote-api v1 messages. Shared by
+ * relay frames, and the remote-api v1 messages. Shared by
  * `relay`, Hosted's Workers, the Burrow module in `lib`, and the Pocket UI so
  * the sides cannot drift.
  */
@@ -583,8 +583,8 @@ export interface SetupRetireRequest {
 
 /**
  * How many unspent setup tokens ONE Burrow may hold, capping both sides of the
- * credential: the Relay's issuer map and the Burrow's own map of the nonces it
- * paired with them. One constant, so live-on-one-side and spent-on-the-other
+ * credential: the Relay's issuer map and the Burrow's own map of the invitations
+ * it minted with them. One constant, so live-on-one-side and spent-on-the-other
  * cannot drift. A human scans one at a time, so it is far above any real use.
  *
  * Source of truth for the eviction rule: `relay/src/setup-token.ts`.

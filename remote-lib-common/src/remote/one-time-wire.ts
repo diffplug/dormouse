@@ -158,7 +158,8 @@ export const ONE_TIME_EXPIRY_GRACE_MS = 45_000;
 
 // ---------------------------------------------------------------------------
 // Close codes, in the 4000-4999 application-private range beside
-// `WS_CLOSE_BURROW_REPLACED` / `WS_CLOSE_BURROW_REVOKED`. Shared because each end
+// `WS_CLOSE_BURROW_REPLACED` / `WS_CLOSE_BURROW_REVOKED` /
+// `WS_CLOSE_BURROW_NOT_ENTITLED`. Shared because each end
 // keys fixed copy on them, and the room is the only party that knows which
 // happened.
 

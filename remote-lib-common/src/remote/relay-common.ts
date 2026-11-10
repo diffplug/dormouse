@@ -150,8 +150,7 @@ export const MAX_ENROLLED_BURROWS = 32;
 export const MAX_PASSKEY_LABEL_LENGTH = 64;
 
 /**
- * Longest request body any Relay route but the self-host `/api/push/send`
- * will read.
+ * Longest request body any Relay route but `/api/push/send` will read.
  *
  * Unauthenticated routes — `/api/burrow/enroll`, `/api/setup/*`,
  * `/api/signin/finish` — read their body BEFORE the credential gate, so
