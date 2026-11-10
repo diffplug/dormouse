@@ -7,8 +7,6 @@
 
 import type { HttpHeader } from 'remote-lib-common';
 
-export type { HttpHeader };
-
 /** One request a framed page made, as the tunnel forwards it. */
 export interface FrameHttpInit {
   method: string;
