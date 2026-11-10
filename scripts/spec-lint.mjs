@@ -122,6 +122,10 @@ const TOP_LEVEL_DIRS = [
   'lib/', 'standalone/', 'vscode-ext/', 'website/', 'relay/', 'hosted/',
   'remote-lib-common/', 'dor/', 'dor-lib-common/', 'dor-tools-builtin/', 'dor-tools-lib/', 'canopy/', 'docs/',
   'scripts/', 'deploy/', '.github/', '.claude/', '.vscode/',
+  // Plus every top-level directory git tracks, so a new one (`.config/`) is
+  // checked without anyone remembering to list it; the listed ones stay
+  // checkable after a rename removes them.
+  ...trackedFiles().filter((f) => f.includes('/')).map((f) => `${f.split('/')[0]}/`),
 ];
 // Path prefixes that are legitimate references to build/staged/generated
 // output which does not exist in a clean checkout.
@@ -136,12 +140,13 @@ const SKIP_PATH_PREFIXES = [
 const ROOT_FILES = ['AGENTS.md', 'DESIGN.md', 'PRODUCT.md', 'SECURITY.md', 'SELF_HOST.md', 'SELF_HOST.rationale.md', 'package.json', 'pnpm-workspace.yaml'];
 
 /**
- * A backticked token check 4 verifies on disk: a listed root file, or a repo
- * path under a known top-level dir with no glob or placeholder that is not
+ * A backticked token check 4 verifies on disk: a root file, or a repo
+ * path under a top-level dir with no glob or placeholder that is not
  * build output. Check 12 uses the same notion, so "verifiable" means one thing.
  */
+const CHECKABLE_ROOT_FILES = new Set([...ROOT_FILES, ...trackedFiles().filter((f) => !f.includes('/'))]);
 function checkablePath(token) {
-  if (ROOT_FILES.includes(token)) return true;
+  if (CHECKABLE_ROOT_FILES.has(token)) return true;
   if (!token.includes('/')) return false;
   if (/[\s*{<>$%(?\\]|\.\.\.|…/.test(token)) return false;
   if (!TOP_LEVEL_DIRS.some((d) => token.startsWith(d))) return false;

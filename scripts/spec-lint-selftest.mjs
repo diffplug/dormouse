@@ -79,6 +79,7 @@ const CASES = [
   ['check 8: an external rationale key with no heading', EXTERNAL_RATIONALE, '\n## No matching heading\n'],
   ['check 13: a missing heading in an external spec', SOURCE, `\n// ${EXTERNAL_SPEC} -> "No Such Heading"\n`],
   ['check 4: a repo path that does not exist', SPEC, '\nSee `lib/src/no-such-file.ts`.\n'],
+  ['check 4: a missing path under a top-level directory nobody listed', SPEC, '\nSee `.config/no-such-file.yaml`.\n'],
   // Start a new root: a rationale keyed to the original H1 also covers every
   // appended H2, so that would not plant a defect in specs such as security.md.
   ['check 11: a (rationale) marker under a heading the rationale does not key', SPEC, '\n# Planted\n\nA rule (rationale).\n'],
