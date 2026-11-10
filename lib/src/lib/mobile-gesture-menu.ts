@@ -56,7 +56,6 @@ export type MobileGestureOptionTriple = readonly [MobileGestureOption, MobileGes
 export type MobileGestureOptions = readonly [MobileGestureOption] | MobileGestureOptionTriple;
 
 export interface MobileGestureGroup {
-  direction: MobileGestureDirection;
   options: MobileGestureOptions;
 }
 
@@ -164,7 +163,6 @@ const MOBILE_GESTURE_DIRECT_DIRECTIONS = new Set<MobileGestureDirection>(['n', '
 
 export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGestureGroup> = {
   nw: {
-    direction: 'nw',
     options: [
       { label: 'Esc', action: { kind: 'input', input: 'esc' } },
       {
@@ -175,13 +173,11 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     ],
   },
   n: {
-    direction: 'n',
     options: [
       { label: '▲', action: { kind: 'input', input: 'up' } },
     ],
   },
   ne: {
-    direction: 'ne',
     options: [
       { label: 'Backspace', action: { kind: 'input', input: 'backspace' } },
       { label: 'Paste', action: { kind: 'confirm', confirmation: 'paste', action: { kind: 'paste' } } },
@@ -189,19 +185,16 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     ],
   },
   w: {
-    direction: 'w',
     options: [
       { label: '◀', action: { kind: 'input', input: 'left' } },
     ],
   },
   e: {
-    direction: 'e',
     options: [
       { label: '▶', action: { kind: 'input', input: 'right' } },
     ],
   },
   sw: {
-    direction: 'sw',
     options: [
       { label: 'Tab', action: { kind: 'input', input: 'tab' } },
       { label: '⬆︎Tab', action: { kind: 'input', input: 'shiftTab' } },
@@ -209,13 +202,11 @@ export const MOBILE_GESTURE_GROUPS: Record<MobileGestureDirection, MobileGesture
     ],
   },
   s: {
-    direction: 's',
     options: [
       { label: '▼', action: { kind: 'input', input: 'down' } },
     ],
   },
   se: {
-    direction: 'se',
     options: [
       { label: 'Enter', action: { kind: 'input', input: 'enter' } },
       { label: '⬆︎Enter', action: { kind: 'input', input: 'shiftEnter' } },
@@ -249,8 +240,7 @@ export const MOBILE_GESTURE_OPTION_DIRECTIONS: Record<
   nw: ['se', 'e', 's'],
 };
 
-export const MOBILE_GESTURE_QUIT_GROUP: { direction: MobileGestureDirection; options: MobileGestureOptionTriple } = {
-  direction: 'n',
+export const MOBILE_GESTURE_QUIT_GROUP: { options: MobileGestureOptionTriple } = {
   options: [
     { label: 'q', action: { kind: 'text', text: 'q' } },
     { label: '⌃X', action: { kind: 'input', input: 'ctrlX' } },

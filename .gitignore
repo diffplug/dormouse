@@ -14,7 +14,6 @@ lib/dist-one-time/
 *.tsbuildinfo
 
 # Vite cache
-lib/.vite/
 .react-router/
 
 # VSCode extension

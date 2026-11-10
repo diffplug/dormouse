@@ -99,13 +99,11 @@
     }
   },
   "scripts": {
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "build:frontend": "vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm typecheck && vitest run",
     "test:smoke": "vitest run --config vitest.smoketest.config.mts",
-    "prebuild": "node ../scripts/build-workspace-deps.mjs",
-    "build": "pnpm stage:dor-cli && node scripts/esbuild.mjs && rm -rf dist/node-pty && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/node-pty/src dist/node-pty/scripts dist/node-pty/typings dist/node-pty/binding.gyp dist/node-pty/third_party dist/node-pty/prebuilds/*/*.pdb && node scripts/stage-native-direct.mjs && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
+    "build": "node ../scripts/build-workspace-deps.mjs && pnpm stage:dor-cli && node scripts/esbuild.mjs && rm -rf dist/node-pty && cp -RL node_modules/node-pty dist/node-pty && rm -rf dist/node-pty/src dist/node-pty/scripts dist/node-pty/typings dist/node-pty/binding.gyp dist/node-pty/third_party dist/node-pty/prebuilds/*/*.pdb && node scripts/stage-native-direct.mjs && rm -rf dist/shell-integration && cp -RL ../standalone/sidecar/shell-integration dist/shell-integration",
     "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
     "watch": "node ../scripts/build-workspace-deps.mjs && pnpm stage:dor-cli && node scripts/esbuild.mjs --watch",
     "package": "vsce package --no-dependencies --baseImagesUrl https://dormouse.sh/guide --out dormouse.vsix",
@@ -116,7 +114,7 @@
   "dependencies": {
     "node-datachannel": "0.33.6",
     "node-pty": "1.2.0-beta.18",
-    "ws": "^8.18.0"
+    "ws": "^8.21.3"
   },
   "optionalDependencies": {
     "@node-datachannel/darwin-arm64": "0.33.6",
@@ -128,12 +126,12 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.13.6",
     "@types/vscode": "1.92.0",
-    "@types/ws": "^8.5.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.2",
     "@vscode/vsce": "^4.0.0",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.2",
     "ovsx": "^1.0.0",
     "playwright-core": "^1.63.0",
     "remote-lib-common": "workspace:*",

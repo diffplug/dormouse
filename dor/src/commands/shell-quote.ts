@@ -37,17 +37,24 @@ export const CONTROL_OR_FORMAT_TEXT = 'terminal control characters or invisible 
 
 // No leading `=`: zsh's default EQUALS option expands a word starting with one
 // to a command's path (`=python3` → `/usr/bin/python3`). `~` is outside the set
-// for the same reason in every shell.
-const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+:,./-][A-Za-z0-9_@%+=:,./-]*$/;
+// for the same reason in every shell. No leading `%`: fish expands the word
+// `%self` to its pid.
+const POSIX_SAFE_ARG = /^[A-Za-z0-9_@+:,./-][A-Za-z0-9_@%+=:,./-]*$/;
 // No `,` or `@`, unlike the posix set: PowerShell's argument mode reads a comma
 // as the array operator (`cat a,b.txt` passes two arguments), while an initial
 // `@` starts splatting / array / hashtable syntax. cmd.exe also treats `,` as an
 // argument separator, so the shared set conservatively quotes both characters.
 const WINDOWS_SAFE_ARG = /^[A-Za-z0-9_+=:./\\-]+$/;
+// PowerShell's argument mode scans a bare token that starts with `-` and a
+// letter as a parameter whose name ends at the first `.`, splitting
+// `-Dserver.port=8081` in two; a `:` first ends it as one token. Quoted, it is
+// one argument.
+const POWERSHELL_SPLIT_PARAMETER = /^-[A-Za-z_?][^:]*\./;
+const powerShellBare = (arg: string) => WINDOWS_SAFE_ARG.test(arg) && !POWERSHELL_SPLIT_PARAMETER.test(arg);
 
 export function shellCommandKind(shell: string | undefined, platformString: string): ShellCommandKind {
   const normalizedShell = (shell ?? '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
-  if (!normalizedShell && /win/i.test(platformString)) return 'cmd';
+  if (!normalizedShell && /^win/i.test(platformString)) return 'cmd';
   if (normalizedShell === 'cmd.exe' || normalizedShell === 'cmd') return 'cmd';
   if (normalizedShell === 'powershell.exe' || normalizedShell === 'powershell' || normalizedShell === 'pwsh.exe' || normalizedShell === 'pwsh') {
     return 'powershell';
@@ -120,7 +127,7 @@ const POWERSHELL_SINGLE_QUOTES = /['\u2018-\u201b]/g;
  *  `EscapeSingleQuotedStringContent` does. */
 export function quotePowerShellArg(arg: string): string {
   if (arg === '') return "''";
-  if (WINDOWS_SAFE_ARG.test(arg)) return arg;
+  if (powerShellBare(arg)) return arg;
   return `'${arg.replace(POWERSHELL_SINGLE_QUOTES, (c) => c + c)}'`;
 }
 
@@ -137,7 +144,7 @@ const WINDOWS_PORTABLE_UNSAFE = /["“-„`%!]|\$(?!\\)/;
  *  literal. Null when no such form exists. */
 export function quoteWindowsPortableArg(arg: string): string | null {
   if (arg === '') return null;
-  if (WINDOWS_SAFE_ARG.test(arg)) return arg;
+  if (powerShellBare(arg)) return arg;
   if (WINDOWS_PORTABLE_UNSAFE.test(arg) || hasShellInputControls(arg)) return null;
   // PowerShell's legacy native binder removes our quotes unless there is an
   // ASCII space. A .cmd target then parses these characters as syntax. Empty

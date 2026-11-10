@@ -99,6 +99,24 @@ test('with Windows semantics, refuses a repository that names a share before any
   }
 });
 
+// A FIFO (or socket, or device) git opens blocks git, and any reader of it, forever.
+test('refuses a repository where git would open an entry that is neither a file nor a directory', async () => {
+  const fifo = {};
+  const cases = {
+    'HEAD': { 'C:\\work\\.git\\HEAD': fifo },
+    'config': { 'C:\\work\\.git\\config': fifo },
+    'index': { 'C:\\work\\.git\\index': fifo },
+    'info/exclude': { 'C:\\work\\.git\\info': dir, 'C:\\work\\.git\\info\\exclude': fifo },
+    'the branch HEAD names': { 'C:\\work\\.git\\refs\\heads': dir, 'C:\\work\\.git\\refs\\heads\\main': fifo },
+    'alternates': { 'C:\\work\\.git\\objects\\info': dir, 'C:\\work\\.git\\objects\\info\\alternates': fifo },
+    'an excludes file': { 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = x\n'), 'C:\\work\\x': fifo },
+    'a link to one': { 'C:\\work\\.git\\HEAD': link('C:\\work\\pipe'), 'C:\\work\\pipe': fifo },
+  };
+  for (const [name, extra] of Object.entries(cases)) {
+    assert.equal(await localGitRepository('C:\\work\\src', windows(windowsRepo(extra))), null, name);
+  }
+});
+
 test('refuses a repository whose parent folder holds the path-list delimiter, which no ceiling can name', async () => {
   const under = (parent) => fakeFs({
     'C:\\': dir,
@@ -111,6 +129,40 @@ test('refuses a repository whose parent folder holds the path-list delimiter, wh
   });
   assert.equal(await localGitRepository('C:\\evil;x\\work', windows(under('C:\\evil;x'))), null);
   assert.equal((await localGitRepository('C:\\evil x\\work', windows(under('C:\\evil x'))))?.gitDir, 'C:\\evil x\\work\\.git');
+});
+
+test('accepts the null device as an excludes or attributes file, and still refuses a FIFO there', async () => {
+  const posixRepo = (config, extra = {}) => fakeFs({
+    '/': dir, '/work': dir, '/work/.git': dir, '/work/.git/HEAD': file('ref: refs/heads/main\n'),
+    '/work/.git/objects': dir, '/work/.git/refs': dir, '/work/.git/config': file(config),
+    // The null device: neither a file nor a directory.
+    '/dev': dir, '/dev/null': {}, ...extra,
+  });
+  const posix = (fs) => ({ fs, path: path.posix, home: '/home/me' });
+  for (const key of ['excludesFile', 'attributesFile']) {
+    assert.equal((await localGitRepository('/work', posix(posixRepo(`[core]\n\t${key} = /dev/null\n`))))?.gitDir, '/work/.git', key);
+    assert.equal(await localGitRepository('/work', posix(posixRepo(`[core]\n\t${key} = /work/pipe\n`, { '/work/pipe': {} }))), null, `${key} FIFO`);
+    assert.equal(await localGitRepository('/work', posix(posixRepo(`[core]\n\t${key} = /work/null\n`, { '/work/null': link('/dev/null') }))), null, `${key} link to the null device`);
+  }
+  const nul = windowsRepo({ 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = \\\\\\\\.\\\\NUL\n') });
+  assert.equal((await localGitRepository('C:\\work', windows(nul)))?.gitDir, 'C:\\work\\.git', 'Windows NUL');
+  const pipe = windowsRepo({ 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = \\\\\\\\.\\\\pipe\\\\x\n') });
+  assert.equal(await localGitRepository('C:\\work', windows(pipe)), null, 'another device path');
+});
+
+// git opens a relative excludes or attributes file from its own cwd, which
+// only in an ordinary repository is the work tree the check resolves against.
+test('refuses a relative config-named file where git may open it from another directory', async () => {
+  const bare = fakeFs({
+    'C:\\': dir, 'C:\\work': dir, 'C:\\work\\src': dir, 'C:\\work\\src\\ign': link('\\\\host\\share'),
+    'C:\\work\\HEAD': file('ref: refs/heads/main\n'), 'C:\\work\\objects': dir, 'C:\\work\\refs': dir,
+    'C:\\work\\config': file('[core]\n\tbare = true\n\texcludesFile = ign/x\n'),
+  });
+  assert.equal(await localGitRepository('C:\\work\\src', windows(bare)), null, 'a bare repository');
+  const worktree = windowsRepo({ 'C:\\work\\.git\\config': file('[core]\n\tattributesFile = ign/x\n\tworktree = ../src\n') });
+  assert.equal(await localGitRepository('C:\\work', windows(worktree)), null, 'core.worktree');
+  const ordinary = windowsRepo({ 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = ign/x\n') });
+  assert.equal((await localGitRepository('C:\\work', windows(ordinary)))?.gitDir, 'C:\\work\\.git', 'an ordinary repository');
 });
 
 test('with Windows semantics, accepts a config naming local paths', async () => {

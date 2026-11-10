@@ -14,8 +14,8 @@ const configDir = path.join(import.meta.dirname, '.storybook');
 
 // Argos names a screenshot by story id alone, so each browser writes its own
 // directory and uploads it as its own build; a shared root would let one
-// browser's files overwrite the other's. Chromium and WebKit mirror Chromatic's
-// Chrome and Safari.
+// browser's files overwrite the other's. Chromium and WebKit stand in for Chrome
+// and Safari.
 function storybookProject(browser: 'chromium' | 'webkit'): TestProjectInlineConfiguration {
   return {
     extends: true,
@@ -41,7 +41,7 @@ function storybookProject(browser: 'chromium' | 'webkit'): TestProjectInlineConf
             : {}),
         }),
         instances: [{ browser }],
-        // Chromatic's default capture width; Vitest's default is a 414px phone.
+        // A desktop capture width; Vitest's default is a 414px phone.
         viewport: { width: 1200, height: 900 },
       },
     },

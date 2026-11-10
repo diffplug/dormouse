@@ -22,7 +22,7 @@ pnpm test:hosted
 pnpm build:hosted
 ```
 
-Tests run each production Worker in real workerd, the account's with disposable Postgres clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, boundary, and push-egress suites alone, without Docker. The build writes each Worker's static files under `dist/<worker>/` (Pocket at `dist/relay/`, `/connect/` at `dist/try/connect/`) and dry-runs every Worker; it does not deploy. Production deploys only through the release workflow.
+Tests run each production Worker in real workerd, the account's with disposable Postgres clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, boundary, and push-egress suites alone, without Docker. `test:server-unit` runs the server tests that need neither Docker nor workerd. The build writes each Worker's static files under `dist/<worker>/` (Pocket at `dist/relay/`, `/connect/` at `dist/try/connect/`) and dry-runs every Worker; it does not deploy. Production deploys only through the release workflow.
 
 The one-time rendezvous and `/connect/` page run on their own, without Docker or Postgres (the relay Worker's Relay routes answer 503 there):
 
@@ -42,7 +42,7 @@ A test clock needs its customer from the start: after the first checkout creates
 
 ## Update pgstencil
 
-`hosted/package.json` installs released `pgstencil` and `@pgstencil/auth` from npm. They share a version and Hosted declares their peer dependencies. Approved pgstencil releases are exempt from the pnpm and Renovate cooldowns because the release workflow requires a passing security audit, stages the archives, and requires a maintainer's 2FA approval before publishing.
+`hosted/package.json` installs released `pgstencil`, `@pgstencil/auth`, and `@pgstencil/stripe` from npm. They share a version and Hosted declares their peer dependencies. Approved pgstencil releases are exempt from the pnpm and Renovate cooldowns because the release workflow requires a passing security audit, stages the archives, and requires a maintainer's 2FA approval before publishing.
 
 Run `pnpm install` and re-run Hosted's integration tests after an update. The production preflight reads `dist/provenance.json` from the installed packages and requires matching clean commits. `docs/specs/security-hosted.md` -> "Deployment boundary" owns the upstream audit check. For an unreleased change, pack pgstencil in a clean checkout and use a temporary pnpm override on a branch.
 
@@ -51,8 +51,8 @@ Run `pnpm install` and re-run Hosted's integration tests after an update. The pr
 | Boundary | Resources |
 | --- | --- |
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
-| Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `RelayRoom` Durable Object namespace), `dormouse-try-pr-N` (with its own `OneTimeRoom` one), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share as the branch's owner role, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1007` shared by every relay and account preview |
-| Production | Dedicated Dormouse Postgres database, a migration role and one runtime role per Worker, three uncached Hyperdrives, one per Worker connecting as its role; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `RelayRoom` Durable Object namespace and rate-limit namespaces `1` and `3`–`6`), `dormouse-try` (`try.dormouse.sh`, with its `OneTimeRoom` Durable Object namespace and rate-limit namespace `2`, and no Hyperdrive), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep and idle-token Cron Triggers), each on its custom domain; GitHub `hosted-production` environment |
+| Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `RelayRoom` Durable Object namespace), `dormouse-try-pr-N` (with its own `OneTimeRoom` one), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share as the branch's owner role, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1007` shared by every preview |
+| Production | Dedicated Dormouse Postgres database, a migration role and one runtime role per Worker, three uncached Hyperdrives, one per Worker connecting as its role; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `RelayRoom` Durable Object namespace and rate-limit namespaces `1` and `3`–`6`), `dormouse-try` (`try.dormouse.sh`, with its `OneTimeRoom` Durable Object namespace and rate-limit namespace `2`, and no Hyperdrive), `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep and idle-token Cron Triggers), each on its custom domain, and `dormouse-frames` (the `*.dormouseusercontent.com/*` route, with no Hyperdrive); GitHub `hosted-production` environment |
 | Email | Dedicated Postmark server, verified `signin@dormouse.sh` and `support@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, the `dormouse-hosted-tagger` GitHub App, the `Hosted tag creation` and `Hosted tag history` tag rulesets, immutable annotated `hosted/` tags |
@@ -66,7 +66,7 @@ Public identifiers recorded during provisioning on 2026-09-29; secret values rem
 
 | Service | Dedicated registration |
 | --- | --- |
-| Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Workers `dormouse-hosted`, `dormouse-relay`, `dormouse-voice`, `dormouse-frames`; the account's Hyperdrive ID in `wrangler.jsonc`, the relay's and voice's in `wrangler.relay.jsonc` and `wrangler.voice.jsonc` once provisioned (all zeros until then) |
+| Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Workers `dormouse-hosted`, `dormouse-relay`, `dormouse-try`, `dormouse-voice`, `dormouse-frames`; the account's Hyperdrive ID in `wrangler.jsonc`, the relay's and voice's in `wrangler.relay.jsonc` and `wrangler.voice.jsonc` once provisioned (all zeros until then) |
 | Neon | Project `young-dust-56119072`; production branch `br-billowing-brook-b4cuf3y4`; database `neondb`; migration role `neondb_owner`; SQL-created runtime role `dormouse_app`, the account Worker's; `dormouse_relay` and `dormouse_voice`, created NOLOGIN and granted by the release, then given LOGIN by hand for the relay's and voice's Hyperdrives |
 | Postmark | Server `21034461`, `dormouse-hosted`; senders `signin@dormouse.sh` and `support@dormouse.sh`, each also an Apple Private Email Relay source; return path `pm-bounces.dormouse.sh` |
 | GitHub OAuth | DiffPlug organization app `3890420`; client ID `Ov23liX1HSz03AAN3Psf` |
@@ -440,7 +440,7 @@ Before the first one, either build a recorded notice to the billing and contact 
 
    The release needs all three Hyperdrive variables. A missing one, two Workers on one Hyperdrive, or a Hyperdrive that caches, reaches another database, or connects as anything but its Worker's role stops it at preflight, before the backup, so nothing in production changes. Preflight reads only Cloudflare's side: a role Postgres refuses (no LOGIN, a wrong password, a missing grant) passes it. A refused relay role stops the release at the relay's readiness, right after the relay deploys and before the voice or account; a refused voice or account role is caught only by the live verification after all three deploy. Either way the new Worker is already serving and its lookups fail, so before the first release on a new role, confirm it connects with `psql` as that role; on a failure, fix the role at once and rerun.
 
-   The first release after the split creates the relay's `OneTimeRoom` (`v1`), then deletes the account Worker's (its append-only migration `v2`): links open at that moment drop, and both become rollback floors. Its smokes repeat the relay and voice checks up to six times, 10 s apart, while their new custom domains' certificates issue.
+   The smokes repeat the frames, try, relay, and voice checks up to six times, 10 s apart, while a newly attached custom domain's certificate issues.
 3. Tagging runs only after live verification, on the terms in `docs/specs/hosted.md` -> "Production releases". If only tagging fails, rerun failed jobs: it records the original deployment without deploying again. These tags do not trigger the desktop `v*` release workflows, and they are code history, not database backups.
 
 ## Acceptance
@@ -460,6 +460,6 @@ Do not mark all five login methods complete until email and all four providers p
 
 ## Recovery
 
-A failed migration or deployment may already have changed production state; workflow failure does not automatically reverse it. Use the Worker's deployment history for code rollback and investigate database compatibility first; `docs/specs/hosted.md` -> "Production releases" owns what a code rollback does not undo. Cloudflare refuses a rollback of `dormouse-relay` past its `OneTimeRoom` migration, or of `dormouse-hosted` past the deletion of its own; every relay deploy or rollback drops the one-time links still open, and established sessions run directly and are unaffected. Restore a backup only after an explicit operator decision, into a separate database first.
+A failed migration or deployment may already have changed production state; workflow failure does not automatically reverse it. Use the Worker's deployment history for code rollback and investigate database compatibility first; `docs/specs/hosted.md` -> "Production releases" owns what a code rollback does not undo. Cloudflare refuses a rollback of a Worker past its latest Durable Object migration: `dormouse-relay`'s `v3`, `dormouse-try`'s `v1`, and `dormouse-hosted`'s `v2`. The same section says what a deploy drops. Restore a backup only after an explicit operator decision, into a separate database first.
 
 Current provisioning status is discoverable with `gh secret list --env NAME`, `gh variable list --env NAME`, and each provider console. Configuration presence alone is not acceptance. The account limitations an operator will be asked about — login lifetime, no device revocation or sign-out-everywhere, no merge or recovery — and billing, closed until its bindings are set, are in `docs/specs/hosted.md`.

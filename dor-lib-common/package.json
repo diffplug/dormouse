@@ -30,7 +30,7 @@
     "cross-spawn": "^7.0.6"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.13.6",
     "typescript": "^7.0.0"
   }
 }

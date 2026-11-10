@@ -48,13 +48,13 @@ export const WITHDRAWN: BillingSummary = {
     startedAt: "2026-10-21T12:00:00Z", submittedAt: "2026-10-28T09:30:00Z", acknowledged: true, settled: true,
   },
 };
-export type HostedStoryArgs = Partial<HostedPageProps> & { phone?: boolean; light?: boolean };
+type HostedStoryArgs = Partial<HostedPageProps> & { phone?: boolean; light?: boolean };
 const idle = async () => {};
 const nothing = () => {};
 
 /** Only form editing is local. Fixtures do not emulate authentication, polling,
  * or account mutations; App's DOM tests exercise those production handlers. */
-export function HostedStory({ phone, light, ...args }: HostedStoryArgs) {
+function HostedStory({ phone, light, ...args }: HostedStoryArgs) {
   const [email, setEmail] = useState(args.email ?? "");
   const [code, setCode] = useState(args.code ?? "");
   const [enterCode, setEnterCode] = useState(args.enterCode ?? false);

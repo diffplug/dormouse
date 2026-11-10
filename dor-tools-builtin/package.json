@@ -22,7 +22,7 @@
     "@codemirror/language": "^6.12.4",
     "@lexical/link": "0.48.0",
     "@lezer/highlight": "^1.2.5",
-    "@mdxeditor/editor": "4.3.4",
+    "@mdxeditor/editor": "4.5.0",
     "dor-lib-common": "workspace:*",
     "dor-tools-lib": "workspace:*",
     "lexical": "0.48.0",
@@ -32,10 +32,11 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@types/node": "^24.13.4",
+    "@types/node": "^24.13.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.0",
     "typescript": "^7.0.0"
   }
 }

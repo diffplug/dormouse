@@ -149,7 +149,11 @@ export function documentSession<Mark, Content = string, Loaded = Content>(editor
       version = file.version;
       saved = { mark: current() };
       report();
-    })().catch(fail).finally(() => { loading = null; });
+    })().catch(reason => {
+      fail(reason);
+      // Nothing loaded holds no edit: clean, so closing the page asks nothing.
+      if (!saved) stateQueue = stateQueue.then(() => request('state', { dirty: false })).then(() => {}, fail);
+    }).finally(() => { loading = null; });
     return loading;
   }
   const save = () => write().catch(() => {});

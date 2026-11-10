@@ -48,9 +48,6 @@ import {
   type SealedPushRecipient,
 } from './wire.js';
 
-/** The bearer shape lives in the wire contract; re-exported for the Relays. */
-export { RELAY_BEARER_BYTE_LENGTH, RELAY_BEARER_LENGTH, isRelayBearer } from './wire.js';
-
 /**
  * The largest relay frame either Relay will read, from either socket kind.
  * Derived from the wire bounds the frame guards enforce — a maximal `ct` plus
@@ -150,8 +147,7 @@ export const MAX_ENROLLED_BURROWS = 32;
 export const MAX_PASSKEY_LABEL_LENGTH = 64;
 
 /**
- * Longest request body any Relay route but the self-host `/api/push/send`
- * will read.
+ * Longest request body any Relay route but `/api/push/send` will read.
  *
  * Unauthenticated routes — `/api/burrow/enroll`, `/api/setup/*`,
  * `/api/signin/finish` — read their body BEFORE the credential gate, so

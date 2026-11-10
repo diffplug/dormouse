@@ -22,6 +22,7 @@ import {
   RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
+  WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
   WS_CLOSE_ONE_TIME_DEADLINE,
@@ -199,7 +200,7 @@ test('each close code is distinct, application-private, and carries a short reas
     [WS_CLOSE_ONE_TIME_DEADLINE, WS_CLOSE_ONE_TIME_DEADLINE_REASON, 4014],
     [WS_CLOSE_ONE_TIME_VIOLATION, WS_CLOSE_ONE_TIME_VIOLATION_REASON, 4015],
   ];
-  const seen = new Set([WS_CLOSE_BURROW_REPLACED, WS_CLOSE_BURROW_REVOKED]);
+  const seen = new Set([WS_CLOSE_BURROW_REPLACED, WS_CLOSE_BURROW_REVOKED, WS_CLOSE_BURROW_NOT_ENTITLED]);
   for (const [code, reason, expected] of codes) {
     assert.equal(code, expected);
     assert.equal(seen.has(code), false, `${code} collides`);

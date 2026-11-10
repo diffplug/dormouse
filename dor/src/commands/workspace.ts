@@ -20,7 +20,8 @@ import type {
 import {
   errorMessage,
   parseNonNegativeInt,
-  renderJson,
+  printable,
+  renderPrintableJson,
   requireControlClient,
   stringParser,
   writeStdout,
@@ -221,13 +222,15 @@ function parseAction(value: string | undefined): ParseResult<WorkspaceAction> {
   };
 }
 
+// A Workspace name carries repo and remote-shell text (auto-naming), so it is
+// escaped as `dor list` escapes it.
 function renderWorkspaceResponse(response: WorkspaceMutationResponse, json: boolean): string {
   if (json) {
-    return renderJson({
+    return renderPrintableJson({
       status: response.status,
       workspace_id: response.workspaceId,
       name: response.name,
     });
   }
-  return `${response.status} ${response.workspaceId} ${JSON.stringify(response.name)}\n`;
+  return `${response.status} ${response.workspaceId} ${printable(JSON.stringify(response.name))}\n`;
 }
