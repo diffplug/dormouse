@@ -1,6 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Terms acceptance".
 import type { Context, Hono } from "hono";
-import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
+import { accountQuery, cookieLogin, smallBody, type AccountHost } from "./account-gate";
 import { TERMS_VERSION } from "./policy-constants";
 
 /**
@@ -13,7 +13,7 @@ export function termsRoutes(
   app: Hono<any>,
   host: (c: Context) => AccountHost,
 ) {
-  app.post("/api/terms/acceptance", cookieLogin(host), async (c) => {
+  app.post("/api/terms/acceptance", smallBody(1024), cookieLogin(host), async (c) => {
     const body = await c.req
       .json<{ version?: unknown }>()
       .catch(() => null);

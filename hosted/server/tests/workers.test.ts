@@ -906,6 +906,7 @@ test("terms acceptance: any signed-in account records the current version once, 
   for (const sameSite of SAME_SITE)
     expect((await user.accept(TERMS_VERSION, sameSite)).status, sameSite).toBe(403);
   expect((await user.accept("2026-09-29")).status).toBe(409);
+  expect((await user.accept("x".repeat(2048))).status).toBe(413);
   expect((await user.accept(TERMS_VERSION)).status).toBe(204);
   const [first] = await queryDatabase<{ acceptedAt: Date }>(
     f.database.url,
