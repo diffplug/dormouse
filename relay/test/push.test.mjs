@@ -20,7 +20,9 @@ import { join } from 'node:path';
 
 import {
   API_ROUTES,
+  MAX_PUSH_ENDPOINT_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
+  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   MAX_SEALED_PUSH_LENGTH,
   generateNoiseKeyPair,
   mintPushDeliveryId,
@@ -42,12 +44,7 @@ import {
   defaultVapidSubject,
   generateVapidKeys,
 } from '../dist/push.js';
-import { MAX_PUSH_ENDPOINT_LENGTH } from '../dist/push-endpoint.js';
-import {
-  BurrowStore,
-  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
-  PushSubscriptionStore,
-} from '../dist/state.js';
+import { BurrowStore, PushSubscriptionStore } from '../dist/state.js';
 import { enrollBurrow, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';

@@ -237,9 +237,6 @@ export const BURROW_ENROLL_ATTEMPT_BURST = 8;
 /** Sustained Burrow-enrollment admission: one attempt per second. */
 export const BURROW_ENROLL_ATTEMPT_REFILL_MS = 1_000;
 
-// Shared with the Hosted Relay, which derives its send-body bound the same way.
-export { MAX_PUSH_SEND_BODY_BYTES };
-
 /** The one answer to an over-long body: 413, before any route has run. */
 function tooLarge(c: Context<AppEnv>): Response {
   return c.json({ error: BODY_TOO_LARGE_ERROR }, 413);

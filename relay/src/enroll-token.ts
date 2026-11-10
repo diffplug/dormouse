@@ -157,15 +157,9 @@ async function releaseClaim(claimPath: string, path: string): Promise<void> {
   // only if the well-known path is still absent. `stat` followed by `rename`
   // cannot make that promise on POSIX, where rename would overwrite an offer
   // the installer published between those two calls.
-  const restored = await link(claimPath, path).then(
-    () => true,
-    () => false,
-  );
-  if (restored) {
-    // Both names refer to the same inode; removing the inert claim leaves the
-    // restored well-known link and its owner-only permissions intact.
-    await unlink(claimPath).catch(() => {});
-    return;
-  }
+  await link(claimPath, path).catch(() => {});
+  // When restored, both names refer to the same inode; removing the inert
+  // claim leaves the restored well-known link and its owner-only permissions
+  // intact.
   await unlink(claimPath).catch(() => {});
 }
