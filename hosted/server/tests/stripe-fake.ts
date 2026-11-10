@@ -85,8 +85,9 @@ export async function stripeFake(time: Time, random: RandomSource) {
   const idempotent = new Map<string, { at: number; status: number; body: unknown }>();
   /** How many times billing read a customer, and a Price. */
   const reads = { customers: 0, prices: 0 };
-  /** Refund and cancellation requests to fail, before any is made, with a Stripe outage. */
-  const failing = { refunds: 0, cancels: 0 };
+  /** Refund and cancellation requests to fail, before any is made, with a Stripe outage;
+   *  and, while `lostCancels` holds, cancels Stripe makes whose answer is lost. */
+  const failing = { refunds: 0, cancels: 0, lostCancels: false };
   /** What runs as each request arrives, before it is answered. */
   const before: { request: ((method: string, path: string) => Promise<void>) | null } = { request: null };
   const server = createServer(async (req, res) => {
@@ -284,6 +285,13 @@ export async function stripeFake(time: Time, random: RandomSource) {
       if (failing.cancels > 0) {
         failing.cancels--;
         return json(500, { error: { type: "api_error", message: "Stripe fake outage" } });
+      }
+      if (failing.lostCancels) {
+        if (live.get(subscription[1]!)?.status !== "canceled") {
+          cancels.push({ subscription: subscription[1]! });
+          dev.transition(subscription[1]!, "cancel");
+        }
+        return json(500, { error: { type: "api_error", message: "Stripe fake outage after the cancel" } });
       }
       cancels.push({ subscription: subscription[1]! });
       dev.transition(subscription[1]!, "cancel");

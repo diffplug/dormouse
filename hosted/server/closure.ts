@@ -7,6 +7,7 @@ import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import { accountQuery, cookieLogin, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
 import { DAY_MS, END_REASONS, run, withBilling, type BillingSetup } from "./billing";
 import { BillingOverdue } from "./billing-alert";
+import { outliveRequest } from "./cohort-routes";
 import { RECENT_LOGIN_WINDOW, REFUND_DAYS, type Plan } from "./policy-constants";
 import type { RelayAccountHost } from "./relay-account";
 import { refundPaidInvoices } from "./withdrawal";
@@ -34,6 +35,12 @@ export const ACCOUNT_CLOSING = "This account is being closed.";
 const CLOSING_HOLD_MINUTES = 15;
 
 /**
+ * How far Stripe's clock, which stamps a subscription's `ended_at`, may run
+ * ahead of this Worker's, which stamps a hold's `cancelingBy`.
+ */
+const STRIPE_CLOCK_SKEW_MINUTES = 5;
+
+/**
  * Whether `owner`'s account is gone or being closed. Checkout asks once it has
  * opened a checkout and before it answers its URL: a closure that started
  * after this read then expires that checkout, since it writes its row before
@@ -53,22 +60,48 @@ export async function accountClosing(billing: Billing<Plan>, owner: string): Pro
 /**
  * Expires `owner`'s open checkout, then ends in Stripe at once, without
  * proration or a final invoice (`billing.end`), every subscription of theirs
- * still current; answers the ones it ended. An owner billing never knew has
- * none.
+ * still current; answers those and every one an earlier attempt of this
+ * closure ended, whose refunds that attempt never settled. An owner billing
+ * never knew has none.
  */
 async function endSubscriptions(billing: Billing<Plan>, owner: string): Promise<string[]> {
   if (!(await billing.customerOf(owner))) return [];
-  // A checkout Stripe completed meanwhile is confirmed here, and so ended below.
+  // A checkout Stripe completed meanwhile is confirmed here, and so ended
+  // below; so is a cancel an earlier attempt made but never recorded.
   await billing.cancelCheckout(owner);
   await billing.reconcile(owner);
-  const current = await billing.db
-    .selectFrom("subscriptions")
-    .select("id")
-    .where("owner_id", "=", owner)
-    .where("status", "in", SUBSCRIBED)
-    .execute();
-  for (const { id } of current) await billing.end(owner, id, { reason: END_REASONS.closure });
-  return current.map(({ id }) => id);
+  const current = (
+    await billing.db.selectFrom("subscriptions").select("id").where("owner_id", "=", owner).where("status", "in", SUBSCRIBED).execute()
+  ).map(({ id }) => id);
+  // Recorded before the first cancel and kept across a failed attempt: a
+  // cancel that lands in Stripe but not here leaves no other trace. Such a
+  // cancel ends its subscription during the attempt that named it, which
+  // lasts at most the hold (`cancelingBy`); one named that ended later lapsed
+  // for another reason, and is dropped before this attempt names its own.
+  await run(
+    billing.db,
+    `UPDATE public.dormouse_account_closing
+    SET "canceling" = ARRAY(
+        SELECT c.id FROM unnest("canceling") AS c(id) WHERE NOT EXISTS (
+          SELECT FROM pgstencil_billing.subscriptions s
+          WHERE s.id = c.id AND s.ended_at > "cancelingBy" + make_interval(mins => $4)))
+      || ARRAY(SELECT id FROM unnest($2::text[]) id WHERE id <> ALL ("canceling")),
+      "cancelingBy" = $3::timestamptz + make_interval(mins => $5)
+    WHERE "userId" = $1`,
+    [owner, current, billing.time.now(), STRIPE_CLOCK_SKEW_MINUTES, CLOSING_HOLD_MINUTES],
+  );
+  for (const id of current) await billing.end(owner, id, { reason: END_REASONS.closure });
+  // Read after the cancels, so a concurrent closure's are seen. While the
+  // account stands, a subscription ended for closure is an earlier attempt's,
+  // as is one still named on the hold that ended for no other reason.
+  const earlier = await run<{ id: string }>(
+    billing.db,
+    `SELECT s.id FROM pgstencil_billing.subscriptions s
+    WHERE s.owner_id = $1 AND s.ended_at IS NOT NULL AND (s.end_reason = $2 OR (s.end_reason IS NULL
+      AND s.id = ANY (SELECT unnest("canceling") FROM public.dormouse_account_closing WHERE "userId" = $1)))`,
+    [owner, END_REASONS.closure],
+  );
+  return [...new Set([...current, ...earlier.map(({ id }) => id)])];
 }
 
 /**
@@ -212,13 +245,19 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
     const close = async (canceled: string[]) => {
       // The account's rows cascade from its user; billing records, consents,
       // withdrawals, disputes, and this closure have no foreign key and stay.
+      // A concurrent close of the same account may have recorded first: its
+      // ids and this one's are kept, unsettled while this one adds any.
       const [closed] = await accountQuery<{ burrows: string[] | null; sessions: string[] | null }>(
         deployment,
         `WITH burrows AS (SELECT array_agg("burrowId") AS ids FROM dormouse_relay_burrows WHERE "userId" = $1),
           sessions AS (SELECT array_agg("tokenHash") AS ids FROM dormouse_relay_sessions WHERE "userId" = $1),
           recorded AS (
-            INSERT INTO dormouse_account_closures ("userId", "canceledSubscriptions", "settledAt")
+            INSERT INTO dormouse_account_closures AS k ("userId", "canceledSubscriptions", "settledAt")
             VALUES ($1, $2, CASE WHEN cardinality($2::text[]) = 0 THEN now() END)
+            ON CONFLICT ("userId") DO UPDATE SET
+              "canceledSubscriptions" = k."canceledSubscriptions"
+                || ARRAY(SELECT id FROM unnest(EXCLUDED."canceledSubscriptions") id WHERE id <> ALL (k."canceledSubscriptions")),
+              "settledAt" = CASE WHEN EXCLUDED."canceledSubscriptions" <@ k."canceledSubscriptions" THEN k."settledAt" END
           ),
           deleted AS (DELETE FROM "user" WHERE id = $1)
         SELECT (SELECT ids FROM burrows) AS burrows, (SELECT ids FROM sessions) AS sessions`,
@@ -244,9 +283,13 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
       return c.body(null, 204);
     }
     try {
-      await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, async (billing) => {
+      // Run to the end even if the member's client goes away: a closure cut
+      // off after a Stripe cancel leaves a subscription ended and unrefunded
+      // until the member closes again.
+      await outliveRequest(c, withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, async (billing) => {
         // Committed before any Stripe call, so checkout opens nothing past it
-        // (`accountClosing`); deleted with the account, or here on a failure.
+        // (`accountClosing`); deleted with the account, or by a failure while
+        // it names nothing.
         await run(
           billing.db,
           `INSERT INTO public.dormouse_account_closing ("userId") VALUES ($1)
@@ -258,16 +301,23 @@ export function closureRoutes(app: Hono<any>, host: (c: Context) => ClosureHost)
           canceled = await endSubscriptions(billing, userId);
           await close(canceled);
         } catch (error) {
-          await run(billing.db, `DELETE FROM public.dormouse_account_closing WHERE "userId" = $1`, [userId]).catch(
-            (cleared: unknown) => console.error("Clearing a failed closure's hold on checkout failed; it lapses", cleared),
-          );
+          // Checkout opens again at once. A hold naming subscriptions some
+          // attempt was canceling stays, lifted, for the next attempt to refund.
+          await run(
+            billing.db,
+            `WITH lifted AS (
+              UPDATE public.dormouse_account_closing SET "startedAt" = '-infinity' WHERE "userId" = $1 AND "canceling" <> '{}'
+            )
+            DELETE FROM public.dormouse_account_closing WHERE "userId" = $1 AND "canceling" = '{}'`,
+            [userId],
+          ).catch((cleared: unknown) => console.error("Lifting a failed closure's hold on checkout failed; it lapses", cleared));
           throw error;
         }
         if (canceled.length)
           await settleClosure(billing, userId, canceled).catch((error: unknown) =>
             console.error(`Closure of ${userId} is recorded but its refunds are not complete; the cron retries them`, error),
           );
-      });
+      }));
     } catch (error) {
       // A checkout still being created, say: the account stays, and the page shows why.
       if (error instanceof BillingError) return c.json({ message: error.message }, error.status as 409);

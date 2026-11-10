@@ -15,7 +15,7 @@
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak, a token's own delete, and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 | `dormouse-frames` | `https://*.dormouseusercontent.com` | a frame origin's own files (`docs/specs/pocket-app.md` -> "Frame origin") | its assets |
 
-Every Worker but `dormouse-frames` answers `/api/health` and, but `dormouse-try`, which holds no database, `/api/ready`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` and `/connect` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. `/api/ready` answers 200 once a query its role must be granted runs through its Hyperdrive, else a bare 503; it reads no row and has no rate limit. The account falls back to its SPA assets, the relay to Pocket's, the try Worker to nothing. Origin and binding isolation: `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
+Every Worker but `dormouse-frames` answers `/api/health` and, but `dormouse-try`, which holds no database, `/api/ready`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` and `/connect` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. `/api/ready` answers 200 once a query its role must be granted runs through its Hyperdrive, else a bare 503; it reads no row and has no rate limit. Origin and binding isolation: `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
 
 **Must keep serving `/account` on the account origin**: every desktop since v1.2.0 opens it by a hard-coded path.
 
@@ -51,7 +51,7 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must link the account footer to the public Hosted privacy policy and terms.**
 
-**Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets. **`/checkout` keeps only its plan and ref in `sessionStorage`, for ten minutes**, so they survive a provider's sign-in, which returns to `/account`; `/billing` strips the `?checkout=` Stripe returns with and confirms it until the server answers.
+**Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets. **`/checkout` keeps only its plan and ref in `sessionStorage`, for ten minutes**, so they survive a provider's sign-in, which returns to `/account`.
 
 **Must be built from the dormouse.sh reference pages' own design** (`lib/src/site/`), never a copy of it: their theme and picker, offered without the theme store, the site's Ubuntu faces served from Hosted's own origin, and the site header. It loads no marketing scripts or analytics.
 
@@ -63,7 +63,7 @@ Continuing past the sign-in notice is how an account agrees to the Hosted terms 
 
 - **Must show the notice beside every sign-in method**, naming `TERMS_VERSION` and linking the terms and privacy policy without leaving the page.
 - **`TERMS_VERSION` is the policy pages' revision date** and changes with every revision of the terms or the privacy policy.
-- **Must keep each published version of both policies as a static file, `website/public/terms/<version>/index.html` and `website/public/privacy/<version>/index.html`, served at `https://dormouse.sh/terms/<version>/` and `https://dormouse.sh/privacy/<version>/`; never change or remove one.** The current version's file holds what its live page renders, so moving `TERMS_VERSION` without its files, or changing a policy's text without moving it, fails `website/src/pages/policy-archive.test.tsx`.
+- **Must keep each published version of both policies as a static file, `website/public/terms/<version>/index.html` and `website/public/privacy/<version>/index.html`, served at `https://dormouse.sh/terms/<version>/` and `https://dormouse.sh/privacy/<version>/`; never change or remove one.** The current version's file holds what its live page renders (`website/src/pages/policy-archive.test.tsx`).
 - **Must link the agreed version's archive, never the live page,** from the purchase agreement and what confirms it: checkout, the `/billing` confirmation, and the purchase email.
 - **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice, current version only.
 
@@ -157,7 +157,8 @@ Source of truth: `accountCron` in `hosted/server/account-routes.ts`; `alertBilli
 Errors are JSON `{ message }`; it needs no entitlement and works with billing closed. What the page says first: `docs/specs/pricing.md` -> "Checkout and entitlement".
 
 - **Must refuse a login older than `LOGIN_FRESH_AGE_MS`** with 403 `CLOSE_RECENT_LOGIN`, and, billing closed, an account with a current subscription row with 409 `CLOSE_UNAVAILABLE`.
-- **Must commit a hold on checkout (`dormouse_account_closing`) before any Stripe call, then expire an open checkout, then end every current subscription in Stripe (reason `closure`), before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay; a failure clears the hold. Its Burrows' and sessions' sockets then close as removals' do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must commit a hold on checkout (`dormouse_account_closing`) before any Stripe call, then expire an open checkout, then end every current subscription in Stripe (reason `closure`), named on the hold first, before one statement records the closure (`dormouse_account_closures`) and deletes the `"user"` row**; rows without a foreign key stay. Its Burrows' and sessions' sockets then close as removals' do ("Relay sockets"). Checks: `docs/specs/security-hosted.md` -> "Account boundary".
+- **Must record, so refund, what an earlier attempt ended**: a subscription ended for `closure`, or named on the hold and ended for no reason within its attempt; racing records merge. A failure lifts the hold, deleting one naming none; a closure outlives its request (rationale).
 - **Never answer a checkout URL for an account gone or under a hold younger than `CLOSING_HOLD_MINUTES`**: checked once it opened, the checkout is expired (409 `ACCOUNT_CLOSING`).
 - **Must end, and refund as closing does, a subscription the webhook finds current for an owner with no `"user"` row**, recorded unsettled on its closure first; a failed end fails the event.
 - **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done, as a withdrawal is ("Billing").
