@@ -11,12 +11,12 @@ You are drafting release notes, recommending and applying a version bump, and up
 Run these commands and read their output:
 
 ```bash
-git describe --tags --abbrev=0
-git log $(git describe --tags --abbrev=0)..HEAD --merges --first-parent --pretty=format:'%H %s'
-git log $(git describe --tags --abbrev=0)..HEAD --first-parent --pretty=format:'%H %s'
+LAST=$(git describe --tags --abbrev=0 --match 'v[0-9]*'); echo "$LAST"
+git log "$LAST"..HEAD --merges --first-parent --pretty=format:'%H %s'
+git log "$LAST"..HEAD --first-parent --pretty=format:'%H %s'
 ```
 
-The second command catches true merge commits; the third catches squash-merged PRs that don't appear as merges. Deduplicate by SHA. If a commit subject contains no PR number (e.g. `(#123)` or `Merge pull request #123`), treat it as a direct push and still include it (link to the commit instead of a PR).
+`--match 'v[0-9]*'` keeps the range on release tags: Hosted production deploys tag `main` as `hosted/<date>`, and a bare `git describe --tags` would start from the latest of those instead. The second command catches true merge commits; the third catches squash-merged PRs that don't appear as merges. Deduplicate by SHA. If a commit subject contains no PR number (e.g. `(#123)` or `Merge pull request #123`), treat it as a direct push and still include it (link to the commit instead of a PR).
 
 For each PR/commit in the range:
 - Read the diff with `git show <sha>` to understand what actually changed — do not rely solely on the commit message
