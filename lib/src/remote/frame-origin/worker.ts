@@ -165,8 +165,13 @@ export function responseFrom(port: MessagePort, finished: () => void, abandoned?
       cancel();
       resolve(failure(504, 'Your computer did not answer in time.'));
     }, HEAD_TIMEOUT_MS);
-    // A page's own abort, which must stop a request still waiting its turn too.
-    abandoned?.addEventListener('abort', cancel, { once: true });
+    // A page's own abort, which must stop a request still waiting its turn too,
+    // and answer the fetch event, whose head timer `cancel` clears; after the
+    // head the answer is a no-op.
+    abandoned?.addEventListener('abort', () => {
+      cancel();
+      resolve(failure(503, 'The page gave up on this request.'));
+    }, { once: true });
     const settlePull = () => {
       wake?.();
       wake = null;
@@ -186,9 +191,12 @@ export function responseFrom(port: MessagePort, finished: () => void, abandoned?
           // A field the browser will not hold; the page goes without it.
         }
       }
+      // Nor a reason phrase it refuses (a C0 control other than tab, or DEL),
+      // which a server can write and nothing here reads.
+      const statusText = /^[\t\x20-\x7e\x80-\xff]*$/.test(head.statusText) ? head.statusText : '';
       if (NULL_BODY_STATUS.has(head.status)) {
         cancel();
-        return new Response(null, { status: head.status, statusText: head.statusText, headers });
+        return new Response(null, { status: head.status, statusText, headers });
       }
       alive = setInterval(() => send({ kind: 'alive' }), WORKER_ALIVE_MS);
       const body = new ReadableStream<Uint8Array>({
@@ -199,7 +207,7 @@ export function responseFrom(port: MessagePort, finished: () => void, abandoned?
         }),
         cancel,
       }, { highWaterMark: 0 });
-      return new Response(body, { status: head.status, statusText: head.statusText, headers });
+      return new Response(body, { status: head.status, statusText, headers });
     };
 
     port.onmessage = (event: MessageEvent<ResponseMessage>) => {

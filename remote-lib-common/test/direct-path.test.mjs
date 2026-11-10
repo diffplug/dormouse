@@ -398,13 +398,15 @@ test('overflows on the byte cap, whatever the frame count', () => {
  * drain whatever landed in it next.
  */
 test('a held frame is copied, so the caller’s buffer may be reused', () => {
-  const cutover = new DirectCutover();
-  cutover.begin();
-  const buffer = frame(1);
-  assert.equal(cutover.onChannelFrame(buffer), 'held');
-  buffer.fill(9);
+  // A `Buffer` too, as Node's WebRTC addon delivers one: its `slice` is a view.
+  for (const buffer of [frame(1), Buffer.from(frame(1))]) {
+    const cutover = new DirectCutover();
+    cutover.begin();
+    assert.equal(cutover.onChannelFrame(buffer), 'held');
+    buffer.fill(9);
 
-  assert.deepEqual(cutover.onSwitchDecrypted(), { kind: 'drain', frames: [frame(1)] });
+    assert.deepEqual(cutover.onSwitchDecrypted(), { kind: 'drain', frames: [frame(1)] });
+  }
 });
 
 test('clear releases what a disposed session will never drain', () => {

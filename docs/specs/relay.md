@@ -288,7 +288,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 
 ## Burrow side (`lib` + the two Node hosts)
 
-**The Burrow is a service in the process that owns the PTYs, never a webview**: `BurrowService`, in the Tauri sidecar and in the VS Code extension host. The webview holds only UI — the pairing modal, the `window.dormouseBurrow` console hook, ring detection for push (`docs/specs/alert.md` -> "Push notifications"), and answering for its own panes and terminal sizes — reaching the service over the `burrow:*` bridge. `lib/src/host/remote/` is shared by both hosts; only the store, process plumbing, and bridge transport are host-owned.
+**The Burrow is a service in the process that owns the PTYs, never a webview**: `BurrowService`, in the Tauri sidecar and in the VS Code extension host. The webview holds only UI — the pairing modal, the `window.dormouseBurrow` console hook, the push device list for Settings, and answering for its own panes and terminal sizes — reaching the service over the `burrow:*` bridge. `lib/src/host/remote/` is shared by both hosts; only the store, process plumbing, and bridge transport are host-owned.
 
 **The store contract.** Both `BurrowStateStore` implementations:
 

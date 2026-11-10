@@ -23,6 +23,7 @@
  */
 
 import type {
+  BurrowStatusEvent,
   PairingQueueEvent,
   PairingQueueItem,
   PushDevicesResult,
@@ -67,6 +68,24 @@ function installBridgeMode(link: BurrowLink): void {
   link.on('pairing-queue', (data) => {
     mirrorPairingQueue(link, (data as PairingQueueEvent).queue);
   });
+  const seedPairingQueue = (): void => {
+    void link
+      .command('pairingQueue')
+      .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
+      .catch(() => {});
+  };
+  // A status naming another `serviceId` is a new service instance — in VS Code,
+  // another window took over as broker — which holds none of the requests the
+  // old one mirrored here and announces no queue of its own. Read its queue,
+  // or a modal for a request nothing holds stays up with buttons that do
+  // nothing, whether or not the `serving` gate moved.
+  let serviceId: string | null = null;
+  link.on('status', (data) => {
+    const next = (data as BurrowStatusEvent | null)?.serviceId;
+    if (!next || next === serviceId) return;
+    serviceId = next;
+    seedPairingQueue();
+  });
 
   const refresh = (): void => {
     void commitPushDevices(async () => {
@@ -97,10 +116,7 @@ function installBridgeMode(link: BurrowLink): void {
       // pushes the queue only when it changes, so a webview that joins — or a
       // machine that enrolls — mid-pairing would otherwise show no modal at all
       // until the next change.
-      void link
-        .command('pairingQueue')
-        .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
-        .catch(() => {});
+      seedPairingQueue();
       return () => {};
     },
   });

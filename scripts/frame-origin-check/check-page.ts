@@ -25,8 +25,8 @@ function record(name: string, ok: boolean, detail = ''): void {
   list.append(row);
 }
 
-const sumOf = (bytes: Uint8Array, start = 0): number => {
-  let sum = start;
+const sumOf = (bytes: Uint8Array): number => {
+  let sum = 0;
   for (let i = 0; i < bytes.length; i += 1) sum = (sum + bytes[i]!) >>> 0;
   return sum;
 };

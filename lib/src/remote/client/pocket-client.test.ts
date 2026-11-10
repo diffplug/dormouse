@@ -626,6 +626,9 @@ describe('connecting, end to end', () => {
     expect(gone).toHaveBeenCalledWith(true);
     expect(harness.client.connectedBurrowId).toBeNull();
     expect(harness.burrow.establishedSessionCount).toBe(0);
+    // The relay socket stays bound to the Burrow; its later drop ends no session.
+    harness.relay.burrowGone();
+    expect(gone).toHaveBeenCalledTimes(1);
     await expect(harness.client.hello()).rejects.toThrow();
     // Still paired: the next connection needs no new pairing.
     expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
@@ -1291,6 +1294,21 @@ describe('the direct path, end to end', () => {
     expect(gone).not.toHaveBeenCalled();
     expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
     expect(run.harness.client.transportPath).toBe('direct');
+    expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
+  });
+
+  it('leaves a working session alone when the replacement’s handshake fails', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+    // A second machine the relay is not connected to: its init earns an error.
+    const offline = await seedRecord(run.harness.knownBurrows, testRoutingId());
+
+    expect(await run.harness.client.connect(offline.burrowId)).toMatchObject({ ok: false });
+
+    expect(gone).not.toHaveBeenCalled();
+    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
     expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
   });
 
@@ -1965,6 +1983,19 @@ describe('session expiry', () => {
     foreground.resolve();
     expect(await refresh).toBeInstanceOf(SessionExpiredError);
     expect(harness.client.sessionToken).toBeNull();
+  });
+
+  it('reports expiry to a request made after a background 401 cleared the session', async () => {
+    const harness = await signedIn({
+      '/api/push/subscriptions/query': () => ({ status: 401, json: { error: 'unauthorized' } }),
+    });
+    await seedRecord(harness.knownBurrows, 'h1');
+    // The app swallows a background request's failure.
+    await harness.client.listPushSubscribedBurrows().catch(() => {});
+    expect(harness.client.sessionToken).toBeNull();
+
+    await expect(harness.client.listBurrows()).rejects.toBeInstanceOf(SessionExpiredError);
+    await expect(harness.client.openSocket()).rejects.toBeInstanceOf(SessionExpiredError);
   });
 
   it('diagnoses a relay upgrade as expiry when a concurrent 401 already cleared the session', async () => {

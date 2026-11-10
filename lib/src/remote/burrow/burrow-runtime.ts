@@ -1,6 +1,7 @@
 /**
- * Burrow-side relay controller. The Burrow speaks exactly two frames — the `e2e`
- * envelope and `client-gone` — and runs both end-to-end ceremonies itself:
+ * Burrow-side relay controller. The Burrow sends one frame, the `e2e` envelope,
+ * and reads four — `e2e`, `client-gone`, `policy`, and `passkeys-changed` — and
+ * runs both end-to-end ceremonies itself:
  * `docs/specs/remote-security-model.md` owns Pairing, Connection, and the Burrow
  * bounds; `docs/specs/relay.md` → "Routing" owns the envelope it rides in. The
  * remote-api session is injected, keeping this module environment-free.
@@ -326,7 +327,7 @@ export interface BurrowOptions {
    * would bypass the network policy (`docs/specs/remote-network.md` -> "Policy").
    */
   createWebSocket: (url: string) => WebSocketLike;
-  /** Build the remote-api handler for an authorized client (see activation.ts). */
+  /** Build the remote-api handler for an authorized client (`BurrowService.#createApiSession` in `lib/src/host/remote/service.ts`). */
   createSession?: (opts: RemoteApiSessionContext) => RemoteApiSessionLike;
   /**
    * Where the ACL comes from and goes. Required, with no webview-store default:
@@ -1549,15 +1550,16 @@ export class BurrowRuntime {
         if (this.#policy === approval.policy) {
           this.#presenceWindows.seed(pending.clientStaticPublicKey, record, approval.verifiedAt);
         }
-        // Consent already happened, so a successful save stays committed even
-        // after transport loss. Never answer on a retired or replacement pipe.
-        if (this.#clients.get(clientId)?.pairing !== pending) return;
+        // Logged with the record, which is live whatever became of the pipe.
         this.#logAccess({
           at: this.#now(),
           event: 'paired',
           device: record.label,
           deviceId: deviceIdFor(record.clientStaticPublicKey),
         });
+        // Consent already happened, so a successful save stays committed even
+        // after transport loss. Never answer on a retired or replacement pipe.
+        if (this.#clients.get(clientId)?.pairing !== pending) return;
         this.#sendPairingOutcome(clientId, pending, {
           ok: true,
           burrowStaticPublicKey: this.#enrollment.noiseStaticPublicKey,
