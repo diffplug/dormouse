@@ -59,6 +59,13 @@ describe('the committed npm disclosure', () => {
     for (const name of ['vitest', 'vite', 'playwright', 'jsdom']) expect(npm.hosted.map((row) => row.name)).not.toContain(name);
   });
 
+  // One license shows under one name: SPDX ids joined only by operators.
+  it('spells every license as an SPDX expression', () => {
+    const spaced = Object.values(npm).flat().map((row) => row.license)
+      .filter((license) => license && /\s/.test(license.replace(/ (?:OR|AND|WITH) /g, '')));
+    expect([...new Set(spaced)]).toEqual([]);
+  });
+
   // Hosted's Workers serve Pocket and the one-time page, built from
   // `dormouse-lib`, whose React and xterm.js the Terminal's root discloses.
   it('leaves Pocket\'s packages under the Terminal', () => {

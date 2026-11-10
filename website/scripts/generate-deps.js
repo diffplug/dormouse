@@ -211,6 +211,8 @@ function moveMitFirstInOrGroup(orExpression) {
 
 function normalizeLicense(license) {
   if (!license) return null;
+  // Non-SPDX spellings packages publish, mapped to the SPDX id the page shows.
+  license = { "MPL 2.0": "MPL-2.0" }[license] ?? license;
   // Legacy dual-license syntax uses "/" to mean "OR" (e.g. "Apache-2.0/MIT").
   const normalized = license.replace(/\s*\/\s*/g, " OR ");
   // Reorder OR choices, both standalone and inside parenthesized groups
