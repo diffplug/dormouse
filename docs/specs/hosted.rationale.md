@@ -87,3 +87,9 @@ A `RelayRoom` that opened a Postgres connection through Hyperdrive could not be 
 ## Metrics
 
 Rows are kept forever because none describes anyone: a row holds a day, an event, a fixed label, and a count, never an identifier (`docs/specs/security-hosted.md` -> "Account boundary").
+
+## Account closure
+
+A closure cancels in Stripe before it records anything, so a failure after a cancel (the next Stripe call, the closure's own write, a cancel whose answer never arrived, or the Worker cancelling the request when the member's client went away) left the subscription ended, the account standing, and the retry seeing nothing current: it closed with no refund owed, stamped settled (2026-11). `end_reason = 'closure'` marks a cancel `billing.end` committed; the hold's `canceling` marks one Stripe made whose answer was lost, so `billing.end` committed nothing. While the `"user"` row stands only this account's own attempts write either: `endAfterClosure` runs once it is gone, and a withdrawal or refund records its own reason. A repeated settle refunds nothing twice: `refundInFull` refunds only what Stripe lists as unrefunded on the payment, under an idempotency key naming it.
+
+A failed attempt keeps a hold that names a subscription because it is the only trace of a lost cancel; its `startedAt` moves to `-infinity` so checkout opens again. Two racing closures merge their records because one starting after the other's cancel committed sees nothing current, and, recording first, it would leave the other's insert to fail on the primary key.

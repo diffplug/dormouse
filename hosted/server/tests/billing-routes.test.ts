@@ -1486,6 +1486,123 @@ test("closing within the 30-day guarantee refunds that payment in full, once, an
   expect([await settled(yearlyMember.id), await settled(monthlyMember.id)]).toEqual([true, true]);
 });
 
+/** A fixture for closures cut off mid-way, with the probes their tests share. */
+const interrupted = async (onTestFinished: (fn: () => void | Promise<void>) => void) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const close = (who: Awaited<ReturnType<typeof f.account>>) =>
+    who.request("/api/account/close", { method: "POST", body: { close: true } });
+  const closure = (userId: string) =>
+    f.sql<{ canceled: string[]; settled: boolean }>(
+      `SELECT "canceledSubscriptions" AS canceled, "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`,
+      [userId],
+    );
+  const present = async (userId: string) => (await f.sql(`SELECT id FROM "user" WHERE id = $1`, [userId])).length === 1;
+  /** Every Stripe list of subscriptions after a cancel fails, retries included, as in an outage. */
+  const failListsAfterCancel = () => {
+    let canceled = false;
+    f.before.request = async (method, path) => {
+      if (method === "DELETE") canceled = true;
+      else if (canceled && path === "/v1/subscriptions") f.dev.failNext(path);
+    };
+  };
+  /** A member holding a founding subscription whose first payment is `intent`. */
+  const founder = async (intent: string) => {
+    const who = await f.account();
+    const { subscription } = await f.buy(who, "founding");
+    f.paidInvoices.set(intent, subscription.id);
+    return { who, subscription };
+  };
+  return { f, close, closure, present, failListsAfterCancel, founder };
+};
+
+test("a closure whose Stripe list fails after the cancel keeps the account and refunds on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, present, failListsAfterCancel, founder } = await interrupted(onTestFinished);
+  const listed = await founder("pi_listed");
+  failListsAfterCancel();
+  expect((await close(listed.who)).status).toBe(503);
+  f.before.request = null;
+  expect([await present(listed.who.id), f.refunds]).toEqual([true, []]);
+  expect((await close(listed.who)).status).toBe(204);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_listed", withdrawal: null, closure: listed.subscription.id }]);
+  expect(await closure(listed.who.id)).toEqual([{ canceled: [listed.subscription.id], settled: true }]);
+});
+
+test("a closure whose own write fails after the cancel refunds on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, present, founder } = await interrupted(onTestFinished);
+  const written = await founder("pi_written");
+  await f.sql(`CREATE SEQUENCE closure_write_failures`);
+  await f.sql(`CREATE FUNCTION fail_closure_write() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF nextval('closure_write_failures') = 1 THEN RAISE EXCEPTION 'closure write failed'; END IF; RETURN NEW; END $$`);
+  await f.sql(`CREATE TRIGGER fail_closure_write BEFORE INSERT ON dormouse_account_closures FOR EACH ROW EXECUTE FUNCTION fail_closure_write()`);
+  expect((await close(written.who)).status).toBe(503);
+  expect([await present(written.who.id), f.refunds]).toEqual([true, []]);
+  expect((await close(written.who)).status).toBe(204);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_written", withdrawal: null, closure: written.subscription.id }]);
+  expect(await closure(written.who.id)).toEqual([{ canceled: [written.subscription.id], settled: true }]);
+});
+
+test("a closure cut off after Stripe's cancel, before Hosted records it, refunds on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, present, founder } = await interrupted(onTestFinished);
+  const cut = await founder("pi_cut");
+  f.failing.lostCancels = true;
+  expect((await close(cut.who)).status).toBe(503);
+  f.failing.lostCancels = false;
+  expect([await present(cut.who.id), f.refunds]).toEqual([true, []]);
+  expect((await close(cut.who)).status).toBe(204);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_cut", withdrawal: null, closure: cut.subscription.id }]);
+  expect(await closure(cut.who.id)).toEqual([{ canceled: [cut.subscription.id], settled: true }]);
+});
+
+test("a close that runs whole while another waits to record its cancel keeps that subscription, refunded once", async ({
+  onTestFinished,
+}) => {
+  const { f, close, closure, founder } = await interrupted(onTestFinished);
+  const twice = await founder("pi_twice");
+  // The first closure's record, the statement that also deletes the account,
+  // waits after its cancel until the gate opens, before it touches a row.
+  await f.sql(`CREATE TABLE closure_gate ()`);
+  await f.sql(`CREATE SEQUENCE closure_writes`);
+  await f.sql(`CREATE FUNCTION hold_closure_write() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF nextval('closure_writes') = 1 THEN
+        WHILE NOT EXISTS (SELECT FROM closure_gate) LOOP PERFORM pg_sleep(0.02); END LOOP;
+      END IF;
+      RETURN NULL;
+    END $$`);
+  for (const [name, on] of [
+    ["insert", `INSERT ON dormouse_account_closures`],
+    ["delete", `DELETE ON "user"`],
+  ])
+    await f.sql(`CREATE TRIGGER hold_closure_${name} BEFORE ${on} FOR EACH STATEMENT EXECUTE FUNCTION hold_closure_write()`);
+  const first = close(twice.who);
+  await vi.waitFor(async () => expect(await f.sql(`SELECT FROM pg_stat_activity WHERE wait_event = 'PgSleep'`)).toHaveLength(1), {
+    timeout: 10_000,
+  });
+  const second = await close(twice.who);
+  await f.sql(`INSERT INTO closure_gate DEFAULT VALUES`);
+  const answers = [second.status, (await first).status];
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_twice", withdrawal: null, closure: twice.subscription.id }]);
+  expect(await closure(twice.who.id)).toEqual([{ canceled: [twice.subscription.id], settled: true }]);
+  expect(answers).toEqual([204, 204]);
+});
+
+test("an interrupted closure past the refund window refunds nothing on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, failListsAfterCancel } = await interrupted(onTestFinished);
+  const late = await f.account();
+  const { subscription: lateMonthly } = await f.buy(late, "monthly");
+  f.paidInvoices.set("pi_late", lateMonthly.id);
+  f.time.advanceMilliseconds(40 * DAY_MS);
+  failListsAfterCancel();
+  expect((await close(late)).status).toBe(503);
+  f.before.request = null;
+  expect((await close(late)).status).toBe(204);
+  expect(f.refunds).toEqual([]);
+  expect(await closure(late.id)).toEqual([{ canceled: [lateMonthly.id], settled: true }]);
+});
+
 test("closing answers billing's refusal, such as a checkout still being created, and keeps the account", async ({
   onTestFinished,
 }) => {
