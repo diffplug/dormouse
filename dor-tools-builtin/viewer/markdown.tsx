@@ -113,10 +113,14 @@ function CellEdits() {
     const cell = element ? getNearestEditorFromDOMNode(element) : null;
     if (!cell || cell.getRootElement() !== element) return;
     const stop = cell.registerUpdateListener(({ dirtyElements, dirtyLeaves, tags }) => {
-      // A selection or focus change dirties no node; the table writing its own
-      // contents back in (an undo in the document) is not the user's edit.
+      // A selection or focus change dirties no node.
       if (!dirtyElements.size && !dirtyLeaves.size) return;
-      if (tags.has(HISTORIC_TAG) && tags.has(SKIP_DOM_SELECTION_TAG)) return;
+      // The table writing its own contents back in (an undo in the document)
+      // is not the user's edit, and leaves the cell matching its table.
+      if (tags.has(HISTORIC_TAG) && tags.has(SKIP_DOM_SELECTION_TAG)) {
+        if (pendingCells.delete(cell)) session.changed();
+        return;
+      }
       pendingCells.add(cell);
       session.changed();
     });
