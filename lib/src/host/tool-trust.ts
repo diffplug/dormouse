@@ -11,9 +11,10 @@
  * directory need no lock between them — and answers "is it trusted yet?".
  */
 import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
+import { lstat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import { canonicalLocalDirectory } from 'dor-lib-common/local-path';
 import { writeJsonAtomic } from './atomic-json-file';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { resolveUpstreamUrl } from './git-upstream';
@@ -198,14 +199,6 @@ export interface ProjectWalkOptions {
   readonly readTextFile?: (path: string) => Promise<string>;
 }
 
-async function canonical(dir: string): Promise<string | null> {
-  try {
-    return await realpath(dir);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Walk up from `startDir` for the nearest `dormouse.yml`. Its directory is
  * `$PROJECT_ROOT` — free, since the host knows where it found the file, and
@@ -223,11 +216,11 @@ export async function findToolFile(
   { userPath, readTextFile = readToolFile }: ProjectWalkOptions,
 ): Promise<{ path: string; dir: string; text: string } | null> {
   const userDir = resolve(dirname(userPath));
-  const userDirs = new Set([userDir, await canonical(userDir) ?? userDir]);
+  const userDirs = new Set([userDir, await canonicalLocalDirectory(userDir) ?? userDir]);
   let dir = resolve(startDir);
   // Bounded by the filesystem root; `dirname('/') === '/'` is the terminator.
   for (;;) {
-    if (userDirs.has(dir) || userDirs.has(await canonical(dir) ?? dir)) return null;
+    if (userDirs.has(dir) || userDirs.has(await canonicalLocalDirectory(dir) ?? dir)) return null;
     const path = join(dir, TOOL_FILE_NAME);
     try {
       const text = await readTextFile(path);
