@@ -8,10 +8,7 @@ scripts/
 node_modules/
 *.mts
 icon-no-border.svg
-.gitignore
 tsconfig.json
-pnpm-lock.yaml
-pnpm-workspace.yaml
 icon.svg
 *.vsix
 *.ts
