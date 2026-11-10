@@ -99,6 +99,24 @@ test('with Windows semantics, refuses a repository that names a share before any
   }
 });
 
+// A FIFO (or socket, or device) git opens blocks git, and any reader of it, forever.
+test('refuses a repository where git would open an entry that is neither a file nor a directory', async () => {
+  const fifo = {};
+  const cases = {
+    'HEAD': { 'C:\\work\\.git\\HEAD': fifo },
+    'config': { 'C:\\work\\.git\\config': fifo },
+    'index': { 'C:\\work\\.git\\index': fifo },
+    'info/exclude': { 'C:\\work\\.git\\info': dir, 'C:\\work\\.git\\info\\exclude': fifo },
+    'the branch HEAD names': { 'C:\\work\\.git\\refs\\heads': dir, 'C:\\work\\.git\\refs\\heads\\main': fifo },
+    'alternates': { 'C:\\work\\.git\\objects\\info': dir, 'C:\\work\\.git\\objects\\info\\alternates': fifo },
+    'an excludes file': { 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = x\n'), 'C:\\work\\x': fifo },
+    'a link to one': { 'C:\\work\\.git\\HEAD': link('C:\\work\\pipe'), 'C:\\work\\pipe': fifo },
+  };
+  for (const [name, extra] of Object.entries(cases)) {
+    assert.equal(await localGitRepository('C:\\work\\src', windows(windowsRepo(extra))), null, name);
+  }
+});
+
 test('refuses a repository whose parent folder holds the path-list delimiter, which no ceiling can name', async () => {
   const under = (parent) => fakeFs({
     'C:\\': dir,
