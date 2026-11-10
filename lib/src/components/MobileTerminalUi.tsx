@@ -990,6 +990,14 @@ export function MobileTerminalUi({
     setPendingGestureConfirmation(null);
   }, [clearGestureCompletionTimer, commitGestureState, terminalInteractive, touchMode, stopEdgeScroll]);
 
+  // The consumer may change the active Session on its own (Pocket falls back to
+  // another when the active one closes). A confirmation or a draft was meant
+  // for the Session it opened on, so neither is sent to the next.
+  useEffect(() => {
+    setPendingGestureConfirmation(null);
+    closeComposer();
+  }, [activeSessionId, closeComposer]);
+
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
   useEffect(() => blurRetries.cancel, [blurRetries]);

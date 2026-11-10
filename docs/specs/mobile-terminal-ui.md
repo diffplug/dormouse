@@ -67,7 +67,7 @@ Source of truth: the `RADIUS_*` constants in `lib/src/lib/mobile-gesture-menu.ts
 
 Each diagonal group carries three options — its primary and two secondaries.
 
-**Must confirm `⌃C` and `Paste` in an in-pane modal before running them.** **Must open a second exploded-option menu for `Quit`** instead of sending input, under the same reset-center, highlight, and select rules as normal option selection.
+**Must confirm `⌃C` and `Paste` in an in-pane modal before running them.** **Must drop that confirmation, and close the composer, when the active Session changes**, so neither reaches a Session the phone did not pick. **Must open a second exploded-option menu for `Quit`** instead of sending input, under the same reset-center, highlight, and select rules as normal option selection.
 
 Source of truth: `MOBILE_GESTURE_GROUPS` and `MOBILE_GESTURE_QUIT_GROUP` in `lib/src/lib/mobile-gesture-menu.ts`; `MOBILE_TERMINAL_KEY_SEQUENCES` in `lib/src/components/MobileTerminalUi.tsx`.
 

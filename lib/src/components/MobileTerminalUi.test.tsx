@@ -346,6 +346,31 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(keydown(document.body, { key: 'Enter' }).defaultPrevented).toBe(false);
     expect(onSendInput).not.toHaveBeenCalled();
   });
+
+  // Pocket moves to another Session when the active one closes on the computer.
+  it('drops a confirmation and closes the composer when the active Session changes under them', () => {
+    const onSendInput = vi.fn();
+    vi.spyOn(activity, 'acknowledgeSession').mockImplementation(() => {});
+    const sessionsOn = (id: string) => ({ onSendInput, sessions: [{ id, title: id, active: true, episode: null }] });
+    const { container, terminal, typeButton, field, renderWith } = renderUi(sessionsOn('pane-a'));
+    vi.spyOn(gestureMenu, 'finishMobileGesture').mockReturnValue({
+      state: gestureMenu.MOBILE_GESTURE_IDLE_STATE,
+      action: { kind: 'confirm', confirmation: 'ctrlC', action: { kind: 'input', input: 'ctrlC' } },
+    });
+    act(() => {
+      terminal.dispatchEvent(pointerEvent('pointerdown'));
+      terminal.dispatchEvent(pointerEvent('pointerup'));
+    });
+    expect(container.querySelector('[data-mobile-gesture-dialog]')).not.toBeNull();
+    renderWith(sessionsOn('pane-b'));
+    expect(container.querySelector('[data-mobile-gesture-dialog]')).toBeNull();
+
+    act(() => typeButton.click());
+    expect(field()).not.toBeNull();
+    renderWith(sessionsOn('pane-c'));
+    expect(field()).toBeNull();
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
 });
 
 describe('MobileTerminalUi controls inside the host', () => {
