@@ -262,6 +262,22 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('leaves the source terminal unfocused when a context opened in command mode closes', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true })); });
+      const menu = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+      expect(menu).not.toBeNull();
+      await act(async () => { menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); });
+      expect(menu.hasAttribute('inert') || !menu.isConnected).toBe(true);
+      expect(focus).not.toHaveBeenCalledWith('surface:a', true);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
   it('cancels an ensure restart before a late prompt can relaunch its command', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
