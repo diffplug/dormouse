@@ -2148,6 +2148,10 @@ export function useDorControl({
       const target = requireListedSurface(params.surface, detail);
       if (!target) return;
       if (confirmation.mode === 'if-read') {
+        if (!hasTerminal(target.kind)) {
+          detail.respond({ ok: false, error: `surface '${target.id}' has no terminal to read (kind: ${target.kind}); use --confirm-dangerously` });
+          return;
+        }
         const text = readSurfaceText(target.id, undefined, false);
         if (!text.includes(confirmation.text)) {
           detail.respond({ ok: false, error: `surface '${target.id}' read text did not contain confirmation text` });

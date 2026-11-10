@@ -887,6 +887,24 @@ describe('Wall on the Lath engine', () => {
     expect(respond).toHaveBeenCalledWith({ ok: false, error: "await on 'surface:1' was cancelled" });
   });
 
+  it('names the missing terminal when dor kill --confirm-if-read targets a browser', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
+    let response: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.kill,
+        params: { surface: surfaceId, confirmation: { mode: 'if-read', text: 'localhost' } },
+        respond: (r: typeof response) => { response = r; },
+      } }));
+    });
+    expect(response).toEqual({ ok: false, error: `surface '${surfaceId}' has no terminal to read (kind: browser); use --confirm-dangerously` });
+    expect(container.querySelector(`[data-lath-leaf="${surfaceId}"]`)).not.toBeNull();
+  });
+
   it('parks a minimized browser surface so its DOM survives, and unparks it on kill', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
