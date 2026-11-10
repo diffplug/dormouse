@@ -71,18 +71,21 @@ export function handOffImageEdits(editor: LexicalEditor, key: string): () => voi
   }, { skipInitialization: true });
 }
 
-/** The distinct image sources in the document `root` edits, its table cells'
- * included, in order. */
+/** The image sources in the document `root` edits, its table cells'
+ * included, in order: the first spelling of each local file
+ * (`localImagePath`), and each other source once. */
 export function imageSources(root: LexicalEditor): string[] {
-  const found = new Set<string>();
+  const found = new Map<string, string>();
   const read = (editor: LexicalEditor) => editor.getEditorState().read(() => {
     for (const node of $imagesAndTables()) {
-      if ($isImageNode(node)) found.add(node.getSrc());
-      else nestedEditors(editor.getElementByKey(node.getKey())).forEach(read);
+      if ($isImageNode(node)) {
+        const src = node.getSrc(), file = localImagePath(src) ?? src;
+        if (!found.has(file)) found.set(file, src);
+      } else nestedEditors(editor.getElementByKey(node.getKey())).forEach(read);
     }
   });
   read(root);
-  return [...found];
+  return [...found.values()];
 }
 
 /** `src` with its file name replaced by `name`, keeping its folder and
@@ -94,6 +97,16 @@ export function renamedSource(src: string, name: string, path: string): string {
   const folder = base.slice(0, base.lastIndexOf('/') + 1);
   const raw = folder + name;
   return /%[\da-f]{2}/i.test(base.slice(folder.length)) || localImagePath(raw) !== path ? folder + encodeURIComponent(name) : raw;
+}
+
+/** Points every source in the document `root` edits that names `from`, a
+ * `localImagePath`, however it is spelled, at the file renamed to `to`. */
+export function renameImageSources(root: LexicalEditor, from: string, to: string): void {
+  const name = to.slice(to.lastIndexOf('/') + 1);
+  updateImages(root, node => {
+    const src = node.getSrc();
+    if (localImagePath(src) === from) node.setSrc(renamedSource(src, name, to));
+  });
 }
 
 /** The rename field's keys: Enter commits and Escape reverts, except while an
@@ -117,8 +130,7 @@ function ImageRow({ src, editor, generation, onEdit }: { src: string; editor: Le
     setState({ busy: true });
     try {
       await request('rename', { from: path, to: folder + next });
-      const replacement = renamedSource(src, next, folder + next);
-      updateImages(editor, node => { if (node.getSrc() === src) node.setSrc(replacement); });
+      renameImageSources(editor, path, folder + next);
       setState({});
     } catch (error) { setState({ error: message(error) }); }
   }

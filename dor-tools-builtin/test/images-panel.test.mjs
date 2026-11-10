@@ -76,3 +76,20 @@ test('the rename field leaves an IME\'s Enter and Escape to the composition', ()
   renameKey(keydown('Escape'), () => done.push('commit'), () => done.push('revert'));
   assert.deepEqual(done, ['commit', 'revert']);
 });
+
+test('one image spelled several ways is one row, and a rename rewrites every spelling', async () => {
+  const m = await load('./lexical-images.ts', { platform: 'node' });
+  const editor = m.createEditor({ nodes: [m.ImageNode], onError: error => { throw error; } });
+  const srcs = ['./shot.png', 'shot.png', 'img/a%20b.png', 'img/a b.png', './img/a b.png', 'other.png', 'https://example.test/shot.png'];
+  editor.update(() => {
+    const paragraph = m.$createParagraphNode();
+    paragraph.append(...srcs.map(src => m.$createImageNode({ src, altText: '' })));
+    m.$getRoot().append(paragraph);
+  }, { discrete: true });
+  assert.deepEqual(m.imageSources(editor), ['./shot.png', 'img/a%20b.png', 'other.png', 'https://example.test/shot.png']);
+
+  m.renameImageSources(editor, 'shot.png', 'Figure #1.png');
+  m.renameImageSources(editor, 'img/a b.png', 'img/c d.png');
+  const after = editor.getEditorState().read(() => m.$getRoot().getFirstChild().getChildren().map(node => node.getSrc()));
+  assert.deepEqual(after, ['./Figure%20%231.png', 'Figure%20%231.png', 'img/c%20d.png', 'img/c d.png', './img/c d.png', 'other.png', 'https://example.test/shot.png']);
+});
