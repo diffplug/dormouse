@@ -67,6 +67,7 @@ import {
   PAIRING_UNKNOWN_DEVICE_LABEL,
   RELAY_BEARER_LENGTH,
   UNAUTHORIZED_ERROR,
+  WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
   mintNoiseStaticKeyPair,
   parseOneTimeLinkUrl,
@@ -121,12 +122,13 @@ import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import {
   BurrowService,
   enqueuePending,
-  enrollVerificationUrl,
   REVOCATION_SAVE_RETRY_MS,
   suggestedBurrowLabel,
   type BurrowServiceOptions,
 } from './service';
+import { enrollVerificationUrl } from './hosted-enrollment-url';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
+import { BURROW_COMMAND_TIMEOUT_MS } from './link-client';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
   BurrowStatusEvent,
@@ -932,6 +934,19 @@ describe('start', () => {
     expect(status).toMatchObject({ enrolled: true, connection: 'connecting' });
   });
 
+  it('rebuilds a displaced Burrow from the store, so what the other instance revoked stays revoked', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    await service.start();
+    sockets[0]!.open();
+    sockets[0]!.closeWith(WS_CLOSE_BURROW_REPLACED);
+    // The Dormouse that took the slot revokes the phone in the shared state.
+    store.acl[BURROW_ID] = [{ ...aclRecord('device-1'), revokedAt: 2000 }];
+
+    await command('reconnect');
+    expect(sockets).toHaveLength(2);
+    expect(((await command('pairedDevices')).result as PairedDevicesResult).devices).toEqual([]);
+  });
+
   it('builds one Burrow when a start and a reconnect race', async () => {
     // Both read `#burrow`, both await the store, and both then act on what they
     // read. Unserialized they each see no Burrow and each build one — and the
@@ -1602,6 +1617,14 @@ describe('setup QR', () => {
     expect(requests).toEqual([]);
   });
 
+  it('refuses to mint on a Burrow another instance displaced', async () => {
+    const socket = await running();
+    socket.closeWith(WS_CLOSE_BURROW_REPLACED);
+    requests = [];
+    expect((await command('setupQr')).error).toContain('not connected');
+    expect(requests).toEqual([]);
+  });
+
   it('fails the mint when the Relay answers a 200 that is not a setup token', async () => {
     await running();
     setupTokenMalformed = true;
@@ -2108,8 +2131,10 @@ describe('paired devices and revocation', () => {
       expect((await pairedResult()).unsavedRevocations).toBeUndefined();
 
       const eventsBefore = accessEvents();
-      await vi.advanceTimersByTimeAsync(REVOCATION_SAVE_RETRY_MS);
-      expect((await revoking).error).toMatch(/refused.*has not finished/);
+      // Answered before the webview's own command budget gives up on it.
+      await vi.advanceTimersByTimeAsync(BURROW_COMMAND_TIMEOUT_MS - 1);
+      const answered = await Promise.race([revoking, Promise.resolve(null)]);
+      expect(answered?.error).toMatch(/refused.*has not finished/);
       expect(accessEvents()).toBeGreaterThan(eventsBefore);
       expect((await pairedResult()).unsavedRevocations).toEqual([{ id: phoneId, label: BROWSER }]);
 

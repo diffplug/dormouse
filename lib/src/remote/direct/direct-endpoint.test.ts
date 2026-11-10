@@ -68,7 +68,7 @@ interface Side {
 interface Options extends FakeDirectNetworkOptions {
   /** Give the offerer no peer factory, as a browser without WebRTC has. */
   offererHasPeer?: boolean;
-  /** Give the answerer none, as the VS Code host has. */
+  /** Give the answerer none, as a host whose addon will not load has. */
   answererHasPeer?: boolean;
 }
 

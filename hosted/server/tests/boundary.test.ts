@@ -60,8 +60,8 @@ import {
   type Name,
 } from "./bundle";
 
-// The partition between Hosted's three Workers (`docs/specs/hosted.md` ->
-// "Application boundary"), each production bundle in real workerd without
+// The partition between Hosted's account, relay, try, and voice Workers
+// (`docs/specs/hosted.md` -> "Application boundary"), each production bundle in real workerd without
 // Postgres: nothing here gets past a 421, a 404, a missing bearer token, or a
 // bodyless request, so no route reaches the database.
 

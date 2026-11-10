@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
-const { existsSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -30,9 +30,10 @@ function findShell(name) {
 const BASH = findShell('bash');
 const ZSH = findShell('zsh');
 
-// The three sequences that terminate an OSC string (terminal-protocol.ts →
-// findOscTerminator): BEL, ST, and the C1 ST.
-const TERMINATORS = ['\x07', '\x1b\\', '\u009c'];
+// The sequences that end an OSC string (`stringControlEndScan` in
+// lib/src/lib/terminal-controls.ts): BEL, ST, the C1 ST, and the CAN and SUB
+// that abort one.
+const TERMINATORS = ['\x07', '\x1b\\', '\u009c', '\x18', '\x1a'];
 
 /**
  * Source a shell's integration script, call one of its helpers, and echo the
@@ -71,8 +72,8 @@ assert.ok(BASH, 'bash must be available to test the shell-integration emitters')
 
 for (const [name, bin] of shells) {
   test(`${name}: safe_cwd removes every OSC terminator`, () => {
-    // One fixture carrying all three, rather than one spawn per terminator for
-    // a byte-identical hazard set.
+    // One fixture carrying all of them, rather than one spawn per terminator
+    // for a byte-identical hazard set.
     const hostile = `/tmp/evil${TERMINATORS.join('x')}\x1b]9;PWNED\x07`;
     const out = callHelper(bin, '__dormouse_633_safe_cwd', hostile);
     for (const t of TERMINATORS) {
@@ -100,7 +101,7 @@ for (const [name, bin] of shells) {
   });
 
   test(`${name}: escape neutralizes terminators in the E command line`, () => {
-    const hostile = `echo hi\x07\x1b]9;PWNED\x07`;
+    const hostile = `echo hi${TERMINATORS.join('x')}\x1b]9;PWNED\x07`;
     const out = callHelper(bin, '__dormouse_633_escape', hostile);
     for (const t of TERMINATORS) {
       assert.ok(!out.includes(t), `${name}: ${JSON.stringify(t)} survived in ${JSON.stringify(out)}`);
@@ -108,6 +109,8 @@ for (const [name, bin] of shells) {
     // Escaped, not dropped — the parser decodes \xNN back, so E stays verbatim.
     assert.ok(out.includes('\\x07'), `${name}: expected \\x07 in ${JSON.stringify(out)}`);
     assert.ok(out.includes('\\x1b'), `${name}: expected \\x1b in ${JSON.stringify(out)}`);
+    assert.ok(out.includes('\\x18'), `${name}: expected \\x18 in ${JSON.stringify(out)}`);
+    assert.ok(out.includes('\\x1a'), `${name}: expected \\x1a in ${JSON.stringify(out)}`);
   });
 
   test(`${name}: escape still handles what it always did`, () => {
@@ -286,5 +289,31 @@ test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line'
     assert.match(printed, /n=4 s=7/);
   } finally {
     await bash.close();
+  }
+});
+
+// Setting ZDOTDIR in ~/.zshenv is how a user moves the rest of their zsh
+// dotfiles. The integration sources that .zshenv itself, so it must follow the
+// ZDOTDIR it leaves, or such a user's .zprofile and .zshrc never run. The
+// default form only applies if that .zshenv sees ZDOTDIR unset, as it would
+// without Dormouse.
+for (const zshenv of ['ZDOTDIR="$HOME/.config/zsh"', 'export ZDOTDIR=${ZDOTDIR:-$HOME/.config/zsh}']) test(`zsh: \`${zshenv}\` in the user's .zshenv still finds their .zprofile and .zshrc`, { skip: !ZSH }, () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'dormouse-zsh-'));
+  try {
+    const moved = path.join(home, '.config', 'zsh');
+    mkdirSync(moved, { recursive: true });
+    writeFileSync(path.join(home, '.zshenv'), `${zshenv}\n`);
+    writeFileSync(path.join(moved, '.zprofile'), 'PROFILE_MARK=profile\n');
+    writeFileSync(path.join(moved, '.zshrc'), 'RC_MARK=rc\n');
+    const out = execFileSync(ZSH, ['-l', '-i', '-c', 'print -r -- "$PROFILE_MARK $RC_MARK $ZDOTDIR"'], {
+      encoding: 'utf8',
+      cwd: home,
+      // What applyShellIntegration hands a zsh pane whose environment has no ZDOTDIR.
+      env: { PATH: process.env.PATH, HOME: home, TERM: 'xterm-256color', ZDOTDIR: path.join(dir, 'shell-integration/zsh'), USER_ZDOTDIR: home },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    assert.equal(out.trim(), `profile rc ${moved}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });

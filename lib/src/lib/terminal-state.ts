@@ -1,5 +1,8 @@
 import { isUncOrDevicePath } from 'dor-lib-common/browser-providers';
+import { cwdPathsEqual } from 'dor/commands/cwd';
 import { POSIX_ESCAPABLE } from './posix-escape';
+
+export { cwdPathsEqual } from 'dor/commands/cwd';
 
 export type CwdSource = 'osc7' | 'osc9_9' | 'osc633' | 'osc1337' | 'process' | 'manual';
 export type PathKind = 'posix' | 'windows' | 'unknown';
@@ -455,36 +458,6 @@ export function resolveCommandStart(
       : event.source ?? (raw ? 'osc633_E' : 'osc133_boundaries'),
     startedAt: event.startedAt ?? (options.now ?? Date.now)(),
   };
-}
-
-// Fold the Windows spellings of one directory to a single key so `dor ensure`
-// can match a surface across the dialect split. On Windows + Git Bash the shell
-// integration reports its cwd as a POSIX path (`/c/Users/...`) while the `dor`
-// CLI sends a native Windows path (`C:\Users\...`) for the very same folder, so
-// an exact compare never matches and every ensure spawns a duplicate. This
-// normalizes the MSYS drive form (`/c/` -> `C:\`), slash direction, and
-// drive-letter case. It is anchored to leave genuine POSIX paths (`/Users/...`,
-// `/home/...`) untouched — only a single-letter root segment, i.e. an MSYS drive,
-// is rewritten — so it is a no-op on macOS/Linux. Applied symmetrically, so
-// already-equal paths stay equal.
-function canonicalizeCwdForMatch(path: string): string {
-  const withDrive = path.replace(/^\/([A-Za-z])\//, (_match, drive: string) => `${drive}:/`);
-  if (!/^[A-Za-z]:[\\/]/.test(withDrive)) return path;
-  const unified = withDrive.replace(/\//g, '\\');
-  return unified.charAt(0).toUpperCase() + unified.slice(1);
-}
-
-/**
- * Whether two reported paths name the same directory. The CLI sends a
- * path.resolve'd cwd (trailing slashes, `..`, `.` collapsed), so the only
- * remaining divergence to bridge is the Windows/MSYS dialect split (see
- * canonicalizeCwdForMatch). Symlinks and true case differences are still
- * treated as distinct, matching the exact-key intent. A missing path on either
- * side never matches.
- */
-export function cwdPathsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
-  return canonicalizeCwdForMatch(a) === canonicalizeCwdForMatch(b);
 }
 
 /**

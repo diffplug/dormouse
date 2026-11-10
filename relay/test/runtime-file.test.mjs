@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -50,12 +50,15 @@ test('a bound Relay records its pid, release and port, owner-only', async () => 
 });
 
 test('nothing is written when no installer asked for it', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'dormouse-rt-'));
-  const runtimeFile = join(dir, 'server.json');
-  const { child } = await startRelay({ DORMOUSE_BIND_HOST: '127.0.0.1' });
+  // Blank, so a value in the developer's own environment is not inherited
+  // (`readConfig` reads blank as unset); and a home of its own, where a
+  // default path outside the state dir would most plausibly land.
+  const home = await mkdtemp(join(tmpdir(), 'dormouse-rt-'));
+  const { child, stateDir } = await startRelay({ DORMOUSE_RUNTIME_FILE: '', HOME: home });
   try {
     await new Promise((r) => setTimeout(r, 500));
-    await assert.rejects(readFile(runtimeFile, 'utf8'), /ENOENT/);
+    assert.deepEqual((await readdir(stateDir)).sort(), ['setup-password.json', 'vapid.json']);
+    assert.deepEqual(await readdir(home), []);
   } finally {
     await stopRelay(child);
   }

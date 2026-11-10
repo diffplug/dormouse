@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { workspaceSourceAliases } from "../scripts/workspace-sources.mjs";
 
-// What a frame origin serves (docs/specs/pocket-app.md -> scope pocket-frames):
+// What a frame origin serves (docs/specs/pocket-app.md -> "Frame origin"):
 // a worker at the origin root and a bootstrap page. One classic script each, so
 // one config run per script: library mode takes a single IIFE entry, `--mode`
 // picks it, and only the worker's run clears the directory.

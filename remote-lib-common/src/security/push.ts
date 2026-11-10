@@ -88,7 +88,14 @@ export async function deliveryIdMintedBy(
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<boolean> {
   if (!isExactBase64Url(deliveryId, DELIVERY_ID_LENGTH)) return false;
-  const id = fromBase64Url(deliveryId);
+  let id: Uint8Array;
+  try {
+    // The length check passes a last character with spare bits set, which
+    // the decoder refuses; no Burrow minted that.
+    id = fromBase64Url(deliveryId);
+  } catch {
+    return false;
+  }
   const nonce = id.slice(0, DELIVERY_ID_NONCE_LENGTH);
   const tag = await deliveryIdTag(deliveryKey, burrowId, nonce, crypto);
   return constantTimeEqual(id.slice(DELIVERY_ID_NONCE_LENGTH), tag);

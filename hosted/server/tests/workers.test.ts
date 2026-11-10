@@ -14,7 +14,7 @@ import { migrations } from "../migrations";
 import { previewMigrations } from "../preview-migrations";
 import { postgresInbox } from "../preview-inbox";
 import { smoke } from "../../scripts/preview-smoke.mjs";
-import { providerIds } from "../policy";
+import { providerIds } from "../providers.js";
 import {
   betterAuthCredentials,
   endpointPaths,
@@ -720,6 +720,13 @@ test("pre-launch, production signs in only the allowlist's verified emails", asy
   });
   expect(refused.status).toBe(403);
   expect(await refused.json()).toEqual({ message: PRELAUNCH_REFUSAL });
+  // A body past the adapter's cap is refused before the gate parses it.
+  const oversized = await stranger.post("email-otp/send-verification-otp", {
+    email: "stranger@example.test",
+    type: "sign-in",
+    padding: "x".repeat(16 * 1024),
+  });
+  expect(oversized.status).toBe(413);
   expect(
     (
       await stranger.post("sign-in/email-otp", {
@@ -867,6 +874,8 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
   expect(await detail.text()).toContain("&lt;img");
   const page = await f.worker.dispatchFetch(origin + "/dev/emails");
   expect(await page.text()).not.toContain("<script>");
+  const listed = await f.worker.dispatchFetch(origin + "/api/dev/emails");
+  expect(await listed.text()).not.toContain('"html"');
   expect(
     (await f.worker.dispatchFetch("https://wrong.invalid/dev/emails")).status,
   ).toBe(421);
@@ -896,6 +905,7 @@ test("terms acceptance: any signed-in account records the current version once, 
   for (const sameSite of SAME_SITE)
     expect((await user.accept(TERMS_VERSION, sameSite)).status, sameSite).toBe(403);
   expect((await user.accept("2026-09-29")).status).toBe(409);
+  expect((await user.accept("x".repeat(2048))).status).toBe(413);
   expect((await user.accept(TERMS_VERSION)).status).toBe(204);
   const [first] = await queryDatabase<{ acceptedAt: Date }>(
     f.database.url,
