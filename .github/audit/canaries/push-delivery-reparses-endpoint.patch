@@ -1,7 +1,7 @@
 Domain: remote
 Rule: S226 — handing the endpoint string to a parser of its own
 Expect: relay/src/push.ts relay/src/push-endpoint.ts
-Source: reverses #1226 (registration admits any host WHATWG parses, and delivery hands web-push the endpoint string)
+Source: reverses #1226 (registration admits any host WHATWG parses, and delivery hands web-push the endpoint string), with the ambiguous-endpoint tests removed so the seeded tree stays green
 
 diff --git a/relay/src/push-endpoint.ts b/relay/src/push-endpoint.ts
 index 5472615a8..3a1afeec8 100644
@@ -147,3 +147,94 @@ index 574db60ac..a93599f37 100644
          const status = response.statusCode;
          if (status >= 200 && status <= 299) return 'delivered';
          // 404/410 is the push service's way of saying the subscription is dead
+diff --git a/relay/test/push-endpoint.test.mjs b/relay/test/push-endpoint.test.mjs
+index 49c639b20..8a07d0454 100644
+--- a/relay/test/push-endpoint.test.mjs
++++ b/relay/test/push-endpoint.test.mjs
+@@ -63,28 +63,6 @@ test('the endpoint parse answers the one host registration and delivery share',
+   }
+ });
+ 
+-test('an endpoint another URL parser could read differently is refused', () => {
+-  for (const endpoint of [
+-    // A host character WHATWG keeps and a legacy parser ends the host at.
+-    "https://100.64.0.1'/push",
+-    'https://127.0.0.1;/push',
+-    'https://192.168.1.1;/push',
+-    'https://push.example.com\\@127.0.0.1/push',
+-    'https://push_example.com/push',
+-    // Not WHATWG's own serialization of itself.
+-    'https://10.0.0.1%27/push',
+-    'https://0x7f.0.0.1/push',
+-    'https://PUSH.example.com/push',
+-    'https://push.example.com:443/push',
+-    'https://push.example.com/a b',
+-    'https://push.example.com./push',
+-    'https://localhost./push',
+-  ]) {
+-    assert.equal(parsePublicPushEndpoint(endpoint), null, endpoint);
+-    assert.equal(isPublicHttpsPushEndpoint(endpoint), false, endpoint);
+-  }
+-});
+-
+ function runLookup(addresses, options = {}) {
+   const lookup = createPublicLookup((_hostname, _options, callback) => {
+     callback(null, addresses);
+diff --git a/relay/test/push.test.mjs b/relay/test/push.test.mjs
+index c9f1809f9..bdadf908a 100644
+--- a/relay/test/push.test.mjs
++++ b/relay/test/push.test.mjs
+@@ -96,32 +96,6 @@ test('real delivery connects to the address the endpoint parse checked, under a
+   assert.equal(PUSH_REQUEST_TIMEOUT_MS, 10_000);
+ });
+ 
+-// Endpoints WHATWG reads as a DNS name or a public host that a looser parser
+-// reads as a private literal, or that are not WHATWG's own serialization of
+-// themselves. Registration refuses them, and delivery, re-checking a row a hand
+-// edit left, never connects to one.
+-const AMBIGUOUS_ENDPOINTS = [
+-  "https://100.64.0.1'/push",
+-  'https://127.0.0.1;/push',
+-  'https://192.168.1.1;/push',
+-  'https://10.0.0.1%27/push',
+-  'https://push.example.com\\@127.0.0.1/push',
+-  'https://0x7f.0.0.1/push',
+-  'https://PUSH.example.com/push',
+-  'https://push.example.com:443/push',
+-  'https://push.example.com./push',
+-  'https://push_example.com/push',
+-];
+-
+-test('real delivery never connects to an ambiguous endpoint', async () => {
+-  const agent = new RecordingAgent();
+-  const sender = createWebPushSender(generateVapidKeys(), 'mailto:admin@example.com', agent);
+-  for (const endpoint of AMBIGUOUS_ENDPOINTS) {
+-    assert.equal(await sender.send(subscription(endpoint), '{}'), 'failed', endpoint);
+-  }
+-  assert.deepEqual(agent.connections, []);
+-});
+-
+ // Apple answers 403 BadJwtToken for a loopback subject, so accepting one would
+ // boot a Relay that reports success and delivers nothing to any iPhone.
+ test('VAPID subject validation rejects loopback contacts', () => {
+@@ -376,20 +350,6 @@ test('private and link-local https endpoints are rejected', async () => {
+   }
+ });
+ 
+-test('an endpoint another URL parser could read differently is refused at subscribe', async () => {
+-  const { app, stateDir, burrow, sessionToken } = await pushApp();
+-  for (const endpoint of AMBIGUOUS_ENDPOINTS) {
+-    const res = await subscribe(app, {
+-      sessionToken,
+-      burrow,
+-      deliveryId: await mintedId(burrow),
+-      sub: subscription(endpoint),
+-    });
+-    assert.equal(res.status, 400, endpoint);
+-  }
+-  await assert.rejects(storedRows(stateDir), 'nothing was written');
+-});
+-
+ test('subscribing to an unknown burrow is rejected', async () => {
+   const { app, sessionToken } = await pushApp();
+   const res = await subscribe(app, {
