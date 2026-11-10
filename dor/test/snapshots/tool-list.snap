@@ -10,6 +10,9 @@ user  /home/me/.config/dormouse/dormouse.yml
   storybook  "npx storybook"  [iframe]  [port auto]  [shadowed]
   md  ["glow","$TARGET"]  [iframe]  [port announced]  [keyed]
       Render Markdown.
+  pridm  ["node","$HERE/main.js"]  [iframe]  [port auto]  [from /home/me/.config/dormouse/pridm/dormouse.yml]
+      PR dashboard.
+  prs  [broken: /home/me/.config/dormouse/supertools/dormouse.yml: not found]  [from /home/me/.config/dormouse/supertools/dormouse.yml]
 
 stderr:
 /work/site/dormouse.yml: tools.harness: ignoring unknown field 'colour'

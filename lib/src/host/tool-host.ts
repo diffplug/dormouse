@@ -100,11 +100,13 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
 
         // A project miss falls through to the user's own Tools, which need no grant.
         const file = await readUserToolFile(userPath);
+        const broken = file?.broken.get(request.name);
+        if (broken) return { status: 'error', message: broken.message };
         const entry = file?.tools.get(request.name);
-        if (file && entry) return await resolveUserTool(file, userPath, entry, request.cwd, args,
+        if (file && entry) return await resolveUserTool(file, entry, request.cwd, args,
           request.global ? mergeBrowserConfig(file.browser) : await readBrowserConfig(request.cwd, userPath));
         if (project && (project.status !== 'no-file' || !file)) return project;
-        return { status: 'unknown-tool', projectRoot: dirname(userPath), path: userPath, names: [...(file?.tools.keys() ?? [])].sort() };
+        return { status: 'unknown-tool', projectRoot: dirname(userPath), path: userPath, names: [...(file?.names ?? [])].sort() };
       } catch (error) {
         return { status: 'error', message: error instanceof Error ? error.message : String(error) };
       }

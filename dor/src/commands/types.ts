@@ -345,22 +345,37 @@ export interface ToolListRequest {
   global: boolean;
 }
 
-/** One declared Tool, as `dor tool --list` reports it. */
-export interface ToolListEntry {
+interface ToolListEntryBase {
   name: string;
   scope: 'project' | 'user';
-  run: string | string[];
-  render: 'iframe' | 'agent-browser-screencast' | 'playwright-screencast';
-  port: 'announced' | 'auto';
-  /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
-  keyed: boolean;
   /** The comment block directly above the entry, raw: control characters are
    *  escaped by whatever prints it. Null when there is none. Repo text: it
    *  describes, it never authorizes. */
   description: string | null;
   /** A user Tool hidden from `dor tool <name>` by a project Tool of that name. */
   shadowed: boolean;
+  /** A user Tool imported from another `dormouse.yml`: that file. */
+  from?: string;
 }
+
+/** One declared Tool, as `dor tool --list` reports it. */
+export interface ResolvedToolListEntry extends ToolListEntryBase {
+  run: string | string[];
+  render: 'iframe' | 'agent-browser-screencast' | 'playwright-screencast';
+  port: 'announced' | 'auto';
+  /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
+  keyed: boolean;
+  broken?: never;
+}
+
+/** A user-file import that did not resolve, so it has no command to report. */
+export interface BrokenToolListEntry extends ToolListEntryBase {
+  from: string;
+  /** Why, naming that file. */
+  broken: string;
+}
+
+export type ToolListEntry = ResolvedToolListEntry | BrokenToolListEntry;
 
 export interface ToolListResponse {
   /** The nearest project `dormouse.yml`, and whether the user has approved it;

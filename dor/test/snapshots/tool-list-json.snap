@@ -52,6 +52,28 @@ stdout:
       "keyed": true,
       "description": "Render Markdown.",
       "shadowed": false
+    },
+    {
+      "name": "pridm",
+      "scope": "user",
+      "run": [
+        "node",
+        "$HERE/main.js"
+      ],
+      "render": "iframe",
+      "port": "auto",
+      "keyed": false,
+      "description": "PR dashboard.",
+      "shadowed": false,
+      "from": "/home/me/.config/dormouse/pridm/dormouse.yml"
+    },
+    {
+      "name": "prs",
+      "scope": "user",
+      "description": null,
+      "shadowed": false,
+      "from": "/home/me/.config/dormouse/supertools/dormouse.yml",
+      "broken": "/home/me/.config/dormouse/supertools/dormouse.yml: not found"
     }
   ]
 }
