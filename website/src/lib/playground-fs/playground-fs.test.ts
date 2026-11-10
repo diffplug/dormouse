@@ -162,7 +162,7 @@ describe("PlaygroundViewers", () => {
     expect(page.body).toContain("assets/markdown.js");
     expect(page.body).toContain("<script>");
     expect(JSON.parse(await text(await viewer.handle(get("source")))))
-      .toEqual({ text: SNAPSHOT_FILES["README.md"], version: sha256(SNAPSHOT_FILES["README.md"]), name: "README.md" });
+      .toEqual({ text: SNAPSHOT_FILES["README.md"], version: sha256(SNAPSHOT_FILES["README.md"]), name: "README.md", editing: "rich" });
   });
 
   it("saves text over its revision, refuses a stale one, and reports dirty state to the viewer's terminal", async () => {

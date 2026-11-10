@@ -26,6 +26,7 @@
     "dor-lib-common": "workspace:*",
     "dor-tools-lib": "workspace:*",
     "lexical": "0.48.0",
+    "micromark": "4.0.2",
     "mermaid": "11.17.2",
     "monaco-editor": "0.58.0-dev-20261108",
     "react": "^19.3.0",
