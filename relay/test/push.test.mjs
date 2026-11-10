@@ -322,6 +322,16 @@ test('subscribe round-trip persists the subscription owner-only', async () => {
   assert.equal((await stat(join(stateDir, 'push-subscriptions.json'))).mode & 0o777, 0o600);
 });
 
+test('subscribe stores only the two bounded key fields', async () => {
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  const sub = subscription();
+  sub.keys.pad = 'A'.repeat(1000);
+  const res = await subscribe(app, { sessionToken, burrow, deliveryId: await mintedId(burrow), sub });
+  assert.equal(res.status, 200);
+  const [stored] = await storedRows(stateDir);
+  assert.deepEqual(Object.keys(stored.keys), ['p256dh', 'auth']);
+});
+
 test('subscribe requires a session', async () => {
   const { app, burrow } = await pushApp();
   const res = await post(app, API_ROUTES.pushSubscribe, {

@@ -1117,7 +1117,9 @@ export function createApp(config: AppConfig): CreatedApp {
       burrowId: body.burrowId,
       deliveryId: body.deliveryId,
       endpoint: body.subscription.endpoint,
-      keys: body.subscription.keys,
+      // The two bounded fields, not the caller's object: anything else it
+      // carries would be written to the file whole.
+      keys: { p256dh: body.subscription.keys.p256dh, auth: body.subscription.keys.auth },
       vapidPublicKey: config.vapidPublicKey,
     });
     // The state the mutation left behind, not the delta: a committed POST whose
