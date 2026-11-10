@@ -1148,6 +1148,18 @@ fn init_log() {
     }
 }
 
+/// What the log keeps of a stdout line that is not JSON. A protocol line
+/// (one cut short at exit, or one `serde_json` rejects) carries terminal
+/// output, which never goes to the log; anything else is a stray print,
+/// kept short.
+fn unparseable_stdout_message(line: &str) -> String {
+    if line.trim_start().starts_with('{') {
+        return format!("[sidecar stdout] unparseable protocol line ({} bytes)", line.len());
+    }
+    let stray: String = line.trim_end().chars().take(200).collect();
+    format!("[sidecar stdout] {stray}")
+}
+
 fn append_log(message: impl AsRef<str>) {
     let Some(file) = log_file() else { return };
     if let Ok(mut file) = file.lock() {
@@ -4531,7 +4543,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
                 break;
             };
             let Ok(mut msg) = serde_json::from_str::<JsonValue>(&line) else {
-                append_log(format!("[sidecar stdout] {}", line.trim_end()));
+                append_log(unparseable_stdout_message(&line));
                 continue;
             };
             let Some(event) = msg.get("event").and_then(|e| e.as_str()).map(String::from)
@@ -7070,6 +7082,17 @@ mod tests {
         let arm = src.split("WindowEvent::DragDrop(DragDropEvent::Drop").nth(1).unwrap()
             .split("WindowEvent::").next().unwrap();
         assert!(arm.contains("emit_to(window.label(), \"dormouse://files-dropped\""), "{arm}");
+    }
+
+    #[test]
+    fn an_unparseable_protocol_line_logs_no_terminal_output() {
+        let cut = r#"{"event":"pty:data","data":{"id":"p","data":"secret prompt"#;
+        let message = super::unparseable_stdout_message(cut);
+        assert!(!message.contains("secret"), "{message}");
+        assert!(message.contains(&format!("{} bytes", cut.len())), "{message}");
+        // A stray print is not protocol: it is kept, and kept short.
+        assert_eq!(super::unparseable_stdout_message("hello\n"), "[sidecar stdout] hello");
+        assert_eq!(super::unparseable_stdout_message(&"é".repeat(500)).chars().count(), 217);
     }
 
     /// The print macros panic when stdout or stderr is closed (a launching

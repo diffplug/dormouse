@@ -440,7 +440,7 @@ Behavior: `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
 ## Logging
 
-Windows release builds use the GUI subsystem, so nothing streams to a launching terminal. Rust appends sidecar stderr, malformed stdout, and its own diagnostics to `dormouse.log`, overridable via `DORMOUSE_LOG_FILE`:
+Windows release builds (GUI subsystem) stream nothing to a launching terminal. Rust appends sidecar stderr, stray stdout, an unparseable protocol line's size alone, and its diagnostics to `dormouse.log`, overridable via `DORMOUSE_LOG_FILE`:
 
 | Platform | Directory |
 |---|---|
