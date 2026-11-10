@@ -89,7 +89,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
         if (request.op === 'open-handlers') return { status: 'open-handlers', handlers: await listOpenHandlers(request, userPath) };
         if (request.op === 'list') return { status: 'list', listing: await listTools(request, { trust, userPath }) };
         const args = request.args ?? [];
-        const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
+        const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args, userPath });
         if (project?.status === 'ok') {
           // Only the user's browser presets: a malformed user Tool must not
           // fail a project Tool.
@@ -115,7 +115,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
 /** Same bounded discovery and parsing as Tools, without their execution gate. */
 async function readBrowserConfig(cwd: string, userPath: string): Promise<BrowserViewportConfig> {
   const user = await readUserBrowserConfig(userPath);
-  const found = await findToolFile(cwd);
+  const found = await findToolFile(cwd, { userPath });
   const project = found ? parseBrowserSection(found.text, found.path) : undefined;
   return mergeBrowserConfig(user, project);
 }
