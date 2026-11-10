@@ -1,6 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "enabledManagers": ["github-actions", "npm", "cargo"],
+  "minimumReleaseAge": "1 day",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "internalChecksFilter": "strict",
   "dependencyDashboard": true,
   "timezone": "America/Los_Angeles",
   "schedule": ["* * * * 1"],
@@ -144,17 +147,10 @@
       "separateMajorMinor": false
     },
     {
-      "matchManagers": ["npm", "cargo"],
-      "matchUpdateTypes": ["patch"],
-      "minimumReleaseAge": "1 day"
-    },
-    {
-      "matchManagers": ["npm", "cargo"],
       "matchUpdateTypes": ["minor"],
       "minimumReleaseAge": "3 days"
     },
     {
-      "matchManagers": ["npm", "cargo"],
       "matchUpdateTypes": ["major"],
       "minimumReleaseAge": "14 days"
     },

@@ -19,8 +19,21 @@ const real = () => ({
 
 const PGSTENCIL = ['pgstencil', '@pgstencil/*'];
 const PGSTENCIL_RULE = ['pgstencil', '@pgstencil/**'];
-const MANAGERS = ['npm', 'cargo'];
-const UPDATE_TYPES = ['patch', 'minor', 'major'];
+const MANAGERS = ['npm', 'cargo', 'github-actions'];
+
+// Keep repository policy durations in positive whole days. Reject unknown forms
+// instead of approximating Renovate's duration parser or accepting any string.
+const hasCooldown = (value) => typeof value === 'string' && /^[1-9]\d* days?$/.test(value);
+
+function* configScopes(value, path = 'renovate') {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    for (const [i, child] of value.entries()) yield* configScopes(child, `${path}[${i}]`);
+  } else {
+    yield [path, value];
+    for (const [key, child] of Object.entries(value)) yield* configScopes(child, `${path}.${key}`);
+  }
+}
 
 function check(files) {
   const failures = [];
@@ -32,27 +45,34 @@ function check(files) {
   if (excluded.length) fail(`pnpm-workspace.yaml minimumReleaseAgeExclude also exempts ${excluded.join(', ')}`);
 
   const renovate = JSON.parse(files.renovate);
-  const rules = renovate.packageRules ?? [];
-  for (const rule of rules.filter((r) => 'minimumReleaseAge' in r && r.minimumReleaseAge === null)) {
-    const names = rule.matchPackageNames;
-    const scoped = Array.isArray(names) && names.length > 0 && names.every((n) => PGSTENCIL_RULE.includes(n));
-    if (!scoped) fail(`a Renovate rule drops the cooldown for ${JSON.stringify(names ?? 'every package')}`);
+  // A global floor covers new managers and digest updates too. No later scope
+  // may weaken it, regardless of package-rule ordering or matcher specificity.
+  if (!hasCooldown(renovate.minimumReleaseAge)) fail('Renovate lacks a global cooldown of at least one whole day');
+  for (const [key, expected] of Object.entries({ minimumReleaseAgeBehaviour: 'timestamp-required', internalChecksFilter: 'strict' })) {
+    if (renovate[key] !== expected) fail(`Renovate must explicitly set ${key}: ${expected}`);
+  }
+  for (const [path, scope] of configScopes(renovate)) {
+    if ('minimumReleaseAge' in scope && !hasCooldown(scope.minimumReleaseAge)) {
+      const names = scope.matchPackageNames;
+      const pgstencilException = /^renovate\.packageRules\[\d+\]$/.test(path)
+        && scope.minimumReleaseAge === null
+        && scope.matchManagers?.length === 1 && scope.matchManagers[0] === 'npm'
+        && Array.isArray(names) && names.length > 0 && names.every((n) => PGSTENCIL_RULE.includes(n));
+      if (!pgstencilException) fail(`${path} drops the cooldown: minimumReleaseAge must be positive whole days`);
+    }
+    if ('minimumReleaseAgeBehaviour' in scope && scope.minimumReleaseAgeBehaviour !== 'timestamp-required') fail(`${path} permits missing release timestamps`);
+    if ('internalChecksFilter' in scope && scope.internalChecksFilter !== 'strict') fail(`${path} permits pending release checks`);
   }
   for (const key of ['includePaths', 'ignorePaths']) if (renovate[key] !== undefined) fail(`Renovate limits every manager with ${key}`);
   for (const manager of MANAGERS) {
     if (!(renovate.enabledManagers ?? []).includes(manager)) fail(`Renovate does not enable ${manager}`);
+  }
+  for (const manager of renovate.enabledManagers ?? []) {
     for (const key of ['includePaths', 'ignorePaths']) if (renovate[manager]?.[key] !== undefined) fail(`Renovate limits ${manager} with ${key}`);
-    for (const type of UPDATE_TYPES) {
-      // A covering rule narrows by manager and update type alone.
-      const covers = rules.some((r) => typeof r.minimumReleaseAge === 'string'
-        && (!r.matchManagers || r.matchManagers.includes(manager))
-        && (!r.matchUpdateTypes || r.matchUpdateTypes.includes(type))
-        && Object.keys(r).every((k) => !k.startsWith('match') || k === 'matchManagers' || k === 'matchUpdateTypes'));
-      if (!covers) fail(`no Renovate minimumReleaseAge rule covers ${manager} ${type} updates`);
-    }
   }
   const alerts = renovate.vulnerabilityAlerts;
-  if (!alerts || typeof alerts.minimumReleaseAge !== 'string') fail('Renovate vulnerabilityAlerts does not set minimumReleaseAge explicitly');
+  if (!alerts || !hasCooldown(alerts.minimumReleaseAge)) fail('Renovate vulnerabilityAlerts does not set a whole-day cooldown explicitly');
+  if (alerts?.enabled !== true || !Array.isArray(alerts.schedule) || alerts.schedule.length !== 0) fail('Renovate vulnerabilityAlerts must be enabled without a schedule');
 
   const pkg = JSON.parse(files.pkg);
   if (!/^\d+\.\d+\.\d+$/.test(pkg.devEngines?.runtime?.version ?? '') || pkg.devEngines?.runtime?.name !== 'node') {
@@ -95,15 +115,30 @@ for (const [name, mutate, expected] of [
   ['the pnpm cooldown shortened', text('workspace', 'minimumReleaseAge: 1440', 'minimumReleaseAge: 60'), 'minimumReleaseAge is 60'],
   ['the pnpm cooldown removed', text('workspace', 'minimumReleaseAge: 1440\n', ''), 'minimumReleaseAge is undefined'],
   ['another package exempted from the pnpm cooldown', text('workspace', '  - pgstencil\n', '  - pgstencil\n  - lodash\n'), 'also exempts lodash'],
-  ['a Renovate rule drops the cooldown for everything', json('renovate', (r) => r.packageRules.push({ matchManagers: ['npm'], minimumReleaseAge: null })), 'drops the cooldown for "every package"'],
-  ['a Renovate rule drops the cooldown for another package', json('renovate', (r) => r.packageRules.push({ matchPackageNames: ['pgstencil', 'left-pad'], minimumReleaseAge: null })), 'drops the cooldown for'],
+  ['a Renovate rule drops the cooldown for everything', json('renovate', (r) => r.packageRules.push({ matchManagers: ['npm'], minimumReleaseAge: null })), 'drops the cooldown'],
+  ['a Renovate rule drops the cooldown for another package', json('renovate', (r) => r.packageRules.push({ matchManagers: ['npm'], matchPackageNames: ['pgstencil', 'left-pad'], minimumReleaseAge: null })), 'drops the cooldown'],
   ['cargo disabled in Renovate', json('renovate', (r) => { r.enabledManagers = r.enabledManagers.filter((m) => m !== 'cargo'); }), 'does not enable cargo'],
   ['Renovate ignoring paths', json('renovate', (r) => { r.ignorePaths = ['standalone/**']; }), 'limits every manager with ignorePaths'],
   ['Renovate npm limited to paths', json('renovate', (r) => { r.npm = { includePaths: ['lib/**'] }; }), 'limits npm with includePaths'],
-  ['no cooldown on npm majors', json('renovate', (r) => { r.packageRules = r.packageRules.filter((x) => !(x.matchUpdateTypes?.includes('major') && x.minimumReleaseAge)); }), 'covers npm major'],
-  ['the patch cooldown narrowed to one package', json('renovate', (r) => { r.packageRules.find((x) => x.matchUpdateTypes?.includes('patch') && x.minimumReleaseAge).matchPackageNames = ['react']; }), 'covers npm patch'],
-  ['vulnerabilityAlerts inherits the cooldown', json('renovate', (r) => { delete r.vulnerabilityAlerts.minimumReleaseAge; }), 'vulnerabilityAlerts does not set minimumReleaseAge'],
-  ['vulnerabilityAlerts removed', json('renovate', (r) => { delete r.vulnerabilityAlerts; }), 'vulnerabilityAlerts does not set minimumReleaseAge'],
+  ['Actions disabled in Renovate', json('renovate', (r) => { r.enabledManagers = r.enabledManagers.filter((m) => m !== 'github-actions'); }), 'does not enable github-actions'],
+  ['Actions limited to paths', json('renovate', (r) => { r['github-actions'] = { includePaths: ['.github/workflows/ci.yml'] }; }), 'limits github-actions with includePaths'],
+  ['the global floor removed', json('renovate', (r) => { delete r.minimumReleaseAge; }), 'lacks a global cooldown'],
+  ['only version bumps covered', json('renovate', (r) => { delete r.minimumReleaseAge; r.packageRules.push({ matchUpdateTypes: ['patch', 'minor', 'major'], minimumReleaseAge: '1 day' }); }), 'lacks a global cooldown'],
+  ['the global floor zeroed', json('renovate', (r) => { r.minimumReleaseAge = '0 days'; }), 'lacks a global cooldown'],
+  ['a late package rule shortens the cooldown', json('renovate', (r) => { r.packageRules.push({ matchPackageNames: ['react'], minimumReleaseAge: '1 hour' }); }), 'drops the cooldown'],
+  ['a digest scope drops the cooldown', json('renovate', (r) => { r.digest = { minimumReleaseAge: null }; }), 'renovate.digest drops the cooldown'],
+  ['a manager scope drops the cooldown', json('renovate', (r) => { r['github-actions'] = { minimumReleaseAge: '0 days' }; }), 'renovate.github-actions drops the cooldown'],
+  ['a nested update scope drops the cooldown', json('renovate', (r) => { r.packageRules.push({ matchManagers: ['npm'], major: { minimumReleaseAge: '0 days' } }); }), 'major drops the cooldown'],
+  ['the pgstencil exception widened to Actions', json('renovate', (r) => { r.packageRules.find((x) => x.minimumReleaseAge === null).matchManagers.push('github-actions'); }), 'drops the cooldown'],
+  ['the timestamp policy removed', json('renovate', (r) => { delete r.minimumReleaseAgeBehaviour; }), 'must explicitly set minimumReleaseAgeBehaviour'],
+  ['a rule allows missing timestamps', json('renovate', (r) => { r.packageRules.push({ matchManagers: ['github-actions'], minimumReleaseAgeBehaviour: 'timestamp-optional' }); }), 'permits missing release timestamps'],
+  ['strict filtering removed', json('renovate', (r) => { delete r.internalChecksFilter; }), 'must explicitly set internalChecksFilter'],
+  ['a rule allows pending checks', json('renovate', (r) => { r.packageRules.push({ matchPackageNames: ['react'], internalChecksFilter: 'flexible' }); }), 'permits pending release checks'],
+  ['vulnerabilityAlerts inherits the cooldown', json('renovate', (r) => { delete r.vulnerabilityAlerts.minimumReleaseAge; }), 'does not set a whole-day cooldown explicitly'],
+  ['vulnerabilityAlerts removed', json('renovate', (r) => { delete r.vulnerabilityAlerts; }), 'does not set a whole-day cooldown explicitly'],
+  ['vulnerabilityAlerts shortens the cooldown', json('renovate', (r) => { r.vulnerabilityAlerts.minimumReleaseAge = '0 days'; }), 'does not set a whole-day cooldown explicitly'],
+  ['vulnerabilityAlerts disabled', json('renovate', (r) => { r.vulnerabilityAlerts.enabled = false; }), 'must be enabled without a schedule'],
+  ['vulnerabilityAlerts waits for Monday', json('renovate', (r) => { r.vulnerabilityAlerts.schedule = ['* * * * 1']; }), 'must be enabled without a schedule'],
   ['the runtime pin loosened to a major', json('pkg', (p) => { p.devEngines.runtime.version = '24'; }), 'not an exact node version'],
   ['a volta pin added', json('pkg', (p) => { p.volta = { node: '24.0.0' }; }), 'declares volta.node'],
   ['an engines pin added', json('pkg', (p) => { p.engines = { node: '>=24' }; }), 'declares engines.node'],
