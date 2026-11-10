@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 import {
   DELIVERY_ID_LENGTH,
@@ -30,6 +30,22 @@ test('a minted id has the delivery-id shape and verifies for its Burrow', async 
   assert.ok(isPushDeliveryId(id));
   assert.equal(await deliveryIdMintedBy(key, BURROW, id), true);
   assert.notEqual(await mintPushDeliveryId(key, BURROW), id);
+});
+
+test('a minted id is its nonce then the documented HMAC tag, rebuilt with node:crypto', async () => {
+  // Rebuilt without this package: the minter (a Burrow) and the checker (a
+  // self-host or Hosted Relay) ship apart, so a round trip proves too little.
+  const key = await pushDeliveryKey(TOKEN);
+  const id = Buffer.from(fromBase64Url(await mintPushDeliveryId(key, BURROW)));
+  const nonce = id.subarray(0, 16);
+  const framed = [];
+  for (const part of [Buffer.from('dormouse/push-delivery/v1'), Buffer.from(BURROW), nonce]) {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(part.length);
+    framed.push(length, part);
+  }
+  const tag = createHmac('sha256', Buffer.from(key)).update(Buffer.concat(framed)).digest().subarray(0, 16);
+  assert.deepEqual(id.subarray(16), tag);
 });
 
 test('the key is the SHA-256 of the token, the digest Hosted stores', async () => {
