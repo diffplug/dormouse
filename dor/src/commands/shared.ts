@@ -50,7 +50,7 @@ export interface PreDelimiterArgSpec {
 
 /**
  * The argv-head shape check `dor ensure` and `dor tool` share. stricli cannot
- * express "only these flags may precede `--`", so `cli.ts` runs this before it
+ * express "only these flags may precede `--`", so `cli-core.ts` runs this before it
  * parses; each command supplies its own flag sets and keeps them beside its
  * `parameters.flags`.
  */

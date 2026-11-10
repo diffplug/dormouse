@@ -660,8 +660,8 @@ export interface ControlEndpoint {
 }
 
 /**
- * Everything `dor` needs from the machine it runs on (`docs/specs/dor-cli.md`
- * -> Bundling and Environment): `dor/src/node-host.ts` is the real one, and the
+ * Everything `dor` needs from the machine it runs on
+ * (`docs/specs/dor-cli.md` -> "Bundling And PATH"): `dor/src/node-host.ts` is the real one, and the
  * website playground supplies its own, so the CLI itself loads in a browser.
  */
 export interface CliHost {
@@ -713,13 +713,13 @@ export interface CliResult {
 
 export interface DorCommandContext extends CommandContext {
   /** Narrower than stricli's `CommandContext`, which exposes only the writable
-   *  streams. `cli.ts` always supplies a full `StricliProcess`, and a command
+   *  streams. `cli-core.ts` always supplies a full `StricliProcess`, and a command
    *  that needs an exit code other than `dor`'s usual 0/1 sets `exitCode` on it
    *  directly (`dor await`); stricli assigns its own with `??=`, so the
    *  command's wins. */
   readonly process: StricliProcess;
   readonly options: CliOptions;
-  /** The raw argv after the command name, as `cli.ts` saw it before stricli
+  /** The raw argv after the command name, as `cli-core.ts` saw it before stricli
    *  parsed it. stricli consumes `--` and leaves no trace in the parsed
    *  positionals, so this is the only way a command can tell `dor split --`
    *  (empty tail) from a bare `dor split`, or a named `dor tool` from an
@@ -733,7 +733,7 @@ export interface Command {
   helpPatches?: readonly HelpPatch[];
   /** Argv validation that must run *before* stricli parses (e.g. the `--` command
    *  tail in `dor ensure`, or `dor send`'s input-flag ordering). Defined next to
-   *  the command's flags so the check and the flag list can't drift apart; `cli.ts`
+   *  the command's flags so the check and the flag list can't drift apart; `cli-core.ts`
    *  dispatches it generically. Receives argv with the command name already
    *  stripped, and is skipped for help invocations. */
   preParse?: (args: string[]) => ParseResult<void>;
