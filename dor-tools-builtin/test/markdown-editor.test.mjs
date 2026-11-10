@@ -264,6 +264,20 @@ test('the scan finds every indented code block CommonMark does', () => {
   }
 });
 
+test('an open parses its text once, though view and source both decide it', () => {
+  const calls = [];
+  const spy = text => { calls.push(text); return parsesIndentedCode(text); };
+  const [indented, rich] = ['Open:\n\n    code\n', 'Open.\n'];
+  // As `view` then `source` ask about one file.
+  assert.deepEqual([markdownEditing(indented, spy), markdownEditing(indented, spy)], ['indented', 'indented']);
+  assert.deepEqual(calls, [indented]);
+  // Changed on disk between the two: decided again.
+  assert.equal(markdownEditing(rich, spy), 'rich');
+  // Two documents alternating each decide afresh, and correctly.
+  assert.deepEqual([markdownEditing(indented, spy), markdownEditing(rich, spy), markdownEditing(rich, spy)], ['indented', 'rich', 'rich']);
+  assert.deepEqual(calls, [indented, rich, indented, rich]);
+});
+
 test('micromark alone decides under the bound, and the scan past it', () => {
   const calls = [];
   const spy = text => { calls.push(text.length); return parsesIndentedCode(text); };

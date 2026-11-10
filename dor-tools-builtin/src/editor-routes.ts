@@ -227,8 +227,17 @@ export function parsesIndentedCode(text: string): boolean {
  * (docs/specs/dor-tools-builtin.md -> Markdown editor). */
 export function markdownEditing(text: string, findIndentedCode = parsesIndentedCode): 'rich' | 'indented' | 'large' {
   if (text.length > MARKDOWN_PARSE_BOUND) return mayHoldIndentedCode(text) ? 'large' : 'rich';
-  return findIndentedCode(text) ? 'indented' : 'rich';
+  if (lastDecided?.text === text && lastDecided.find === findIndentedCode) return lastDecided.editing;
+  const editing = findIndentedCode(text) ? 'indented' : 'rich';
+  lastDecided = { text, find: findIndentedCode, editing };
+  return editing;
 }
+
+/** The last parsed decision, for `view` and the `source` that follows it,
+ * which read the same file moments apart; keyed on the text, so a changed file
+ * is decided again. Holds at most one document of at most
+ * `MARKDOWN_PARSE_BOUND`, replaced by the next one parsed. */
+let lastDecided: { text: string; find: (text: string) => boolean; editing: 'rich' | 'indented' } | null = null;
 
 /** Whether `file` opens in the rich Markdown editor, decided on each page
  * load; a file it cannot read opens there, to show why. */
