@@ -131,6 +131,21 @@ test('refuses a repository whose parent folder holds the path-list delimiter, wh
   assert.equal((await localGitRepository('C:\\evil x\\work', windows(under('C:\\evil x'))))?.gitDir, 'C:\\evil x\\work\\.git');
 });
 
+// git opens a relative excludes or attributes file from its own cwd, which
+// only in an ordinary repository is the work tree the check resolves against.
+test('refuses a relative config-named file where git may open it from another directory', async () => {
+  const bare = fakeFs({
+    'C:\\': dir, 'C:\\work': dir, 'C:\\work\\src': dir, 'C:\\work\\src\\ign': link('\\\\host\\share'),
+    'C:\\work\\HEAD': file('ref: refs/heads/main\n'), 'C:\\work\\objects': dir, 'C:\\work\\refs': dir,
+    'C:\\work\\config': file('[core]\n\tbare = true\n\texcludesFile = ign/x\n'),
+  });
+  assert.equal(await localGitRepository('C:\\work\\src', windows(bare)), null, 'a bare repository');
+  const worktree = windowsRepo({ 'C:\\work\\.git\\config': file('[core]\n\tattributesFile = ign/x\n\tworktree = ../src\n') });
+  assert.equal(await localGitRepository('C:\\work', windows(worktree)), null, 'core.worktree');
+  const ordinary = windowsRepo({ 'C:\\work\\.git\\config': file('[core]\n\texcludesFile = ign/x\n') });
+  assert.equal((await localGitRepository('C:\\work', windows(ordinary)))?.gitDir, 'C:\\work\\.git', 'an ordinary repository');
+});
+
 test('with Windows semantics, accepts a config naming local paths', async () => {
   const fs = windowsRepo({
     'C:\\work\\.git\\config': file('[core]\n\tworktree = ../..\n\texcludesFile = ~/ignores\n[remote "origin"]\n\turl = //host/share/repo.git\n'),

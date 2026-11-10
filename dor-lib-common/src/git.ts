@@ -169,21 +169,28 @@ async function checkRepository({ gitDir, commonDir, workTree }: LocalGitReposito
   }
   for (const name of LEGACY_REMOTE_DIRS) await checkDirectory(path.join(commonDir, name), options);
   let hashLength = 20;
+  const entries: GitConfigEntry[] = [];
   for (const config of [path.join(commonDir, 'config'), path.join(gitDir, 'config.worktree')]) {
     const file = await gitEntry(config, options);
     if (!file?.stats.isFile()) continue;
-    const entries = gitConfigEntries(await readFile(file.path, CONFIG_LIMIT, options));
-    if (!entries) throw new Error('a config git would refuse');
-    for (const { section, key, value } of entries) {
-      if (section === 'include' || section.startsWith('includeif.')) throw new NonLocalPathError();
-      if (section === 'extensions' && key === 'objectformat' && value.toLowerCase() === 'sha256') hashLength = 32;
-      if (!PATH_KEYS.has(`${section}.${key}`)) continue;
-      if (isUncOrDevicePath(value) || /^~[^/\\]/.test(value)) throw new NonLocalPathError();
-      // `core.worktree` is relative to the git directory, the others to the work tree.
-      const base = key === 'worktree' ? gitDir : workTree ?? gitDir;
-      const named = value.startsWith('~') ? path.join(options.home ?? homedir(), value.slice(1)) : path.resolve(base, value);
-      await gitEntry(named, options);
-    }
+    const parsed = gitConfigEntries(await readFile(file.path, CONFIG_LIMIT, options));
+    if (!parsed) throw new Error('a config git would refuse');
+    entries.push(...parsed);
+  }
+  // git opens a relative excludes or attributes file from its own cwd: the
+  // work tree of an ordinary repository, but the caller's directory for a bare
+  // one, and wherever `core.worktree` leads otherwise, which no check here knows.
+  const cwdUnknown = workTree === null || entries.some(({ section, key }) => section === 'core' && key === 'worktree');
+  for (const { section, key, value } of entries) {
+    if (section === 'include' || section.startsWith('includeif.')) throw new NonLocalPathError();
+    if (section === 'extensions' && key === 'objectformat' && value.toLowerCase() === 'sha256') hashLength = 32;
+    if (!PATH_KEYS.has(`${section}.${key}`)) continue;
+    if (isUncOrDevicePath(value) || /^~[^/\\]/.test(value)) throw new NonLocalPathError();
+    if (key !== 'worktree' && cwdUnknown && !value.startsWith('~') && !path.isAbsolute(value)) throw new NonLocalPathError();
+    // `core.worktree` is relative to the git directory, the others to the work tree.
+    const base = key === 'worktree' ? gitDir : workTree ?? gitDir;
+    const named = value.startsWith('~') ? path.join(options.home ?? homedir(), value.slice(1)) : path.resolve(base, value);
+    await gitEntry(named, options);
   }
   await checkHeadRefs(gitDir, commonDir, options);
   const objects = await gitEntry(path.join(commonDir, 'objects'), options);
