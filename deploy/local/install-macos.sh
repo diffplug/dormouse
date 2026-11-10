@@ -232,7 +232,7 @@ printf '%sDormouse selfhost Relay — macOS installer%s\n' "$C_BLD" "$C_OFF"
 
 step "Checking Tailscale"
 
-TS_STATUS_JSON="$(mktemp -t dormouse-ts-status)"
+TS_STATUS_JSON="$(/usr/bin/mktemp -t dormouse-ts-status)"
 trap 'rm -f "$TS_STATUS_JSON"' EXIT
 ts status --json > "$TS_STATUS_JSON" 2>/dev/null || die "\`tailscale status --json\` failed. Is Tailscale running and signed in?"
 
@@ -395,7 +395,7 @@ ok "Relay built"
 # (onFail: download), so this is the pinned runtime, not whatever is on PATH.
 # Write it to a file: pnpm can emit progress chatter on stdout, which would
 # contaminate a command substitution.
-EXECPATH_FILE="$(mktemp -t dormouse-execpath)"
+EXECPATH_FILE="$(/usr/bin/mktemp -t dormouse-execpath)"
 pnpm exec node -e 'require("fs").writeFileSync(process.argv[1], process.execPath)' "$EXECPATH_FILE" >/dev/null 2>&1 \
   || die "could not resolve the pinned Node runtime via pnpm exec."
 NODE_BIN="$(cat "$EXECPATH_FILE")"
@@ -436,7 +436,7 @@ create_release_stage "$STAGE" || die "could not create a new release directory: 
 info "pnpm deploy --prod --legacy"
 WS_STATE_BACKUP=""
 if [ -f "$WS_STATE" ]; then
-  WS_STATE_BACKUP="$(mktemp -t dormouse-wsstate)"
+  WS_STATE_BACKUP="$(/usr/bin/mktemp -t dormouse-wsstate)"
   cp -p "$WS_STATE" "$WS_STATE_BACKUP"
 fi
 pnpm --filter relay deploy --prod --legacy "$STAGE/relay" >/dev/null 2>&1 \
@@ -708,7 +708,9 @@ release_field() {
 owner_only() {
   local out mode owner me
   me="$(id -u)"
-  out="$(stat -f '%Lp %u' "$1" 2>/dev/null || true)"
+  # BSD stat by absolute path: with GNU coreutils first on PATH, `stat -f`
+  # means file-system status.
+  out="$(/usr/bin/stat -f '%Lp %u' "$1" 2>/dev/null || true)"
   if [ -z "$out" ]; then
     fail "$3 is missing: $1"
     return
@@ -1230,8 +1232,8 @@ step "Health-checking the candidate release"
 # the live service or the real state while we prove the new code boots, mints
 # its credential, and serves.
 PROBE_PORT="$("$STAGE/runtime/node" -e 'const n=require("net");const s=n.createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>process.stdout.write(String(p)))});')"
-PROBE_STATE="$(mktemp -d -t dormouse-probe-state)"
-PROBE_LOG="$(mktemp -t dormouse-probe-log)"
+PROBE_STATE="$(/usr/bin/mktemp -d -t dormouse-probe-state)"
+PROBE_LOG="$(/usr/bin/mktemp -t dormouse-probe-log)"
 chmod 0700 "$PROBE_STATE"
 
 env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \

@@ -259,7 +259,9 @@ function cases(platform, env, definitions) {
     ['', 'fail', 'stat failed or path missing'],
   ].map(([metadata, expected, label]) => [
     `owner_only: ${label}`,
-    `pass() { echo pass; }; fail() { echo fail; }; id() { echo fixture-owner; }; stat() { printf '%s' '${metadata}'; }; owner_only /unused 700 secret`,
+    // macOS calls BSD stat by absolute path; point it at the stub.
+    `pass() { echo pass; }; fail() { echo fail; }; id() { echo fixture-owner; }; stat() { printf '%s' '${metadata}'; }; ` +
+      `eval "$(declare -f owner_only | sed 's#/usr/bin/stat #stat #')"; owner_only /unused 700 secret`,
     expected,
   ]);
   const configCases = [
@@ -497,6 +499,12 @@ export function run() {
         `create_release_stage ${quotedStage}; printf keep > ${quotedStage}/marker; if create_release_stage ${quotedStage} 2>/dev/null; then echo overwritten; else cat ${quotedStage}/marker; fi`,
         'keep',
       ]);
+      // GNU `mktemp -t` refuses a template without XXX, so macOS names BSD's.
+      if (platform === 'macOS') {
+        checked += 1;
+        const bare = text.split('\n').filter((line) => /(?<![\w/])mktemp (?:-d )?-t /.test(line));
+        if (bare.length) failures.push(`macOS  mktemp -t by bare name:\n    ${bare.join('\n    ')}`);
+      }
       // `purge` deletes state only once `uninstall` has removed bin/run-relay:
       // a Relay still registered keeps its setup password and recreates state/.
       const purgeRoot = sq(join(fixtureDir, `purge-${platform}`));
@@ -535,6 +543,18 @@ export function run() {
             expected,
           ]);
         }
+      }
+      // A GNU coreutils `stat` first on PATH, as Homebrew documents for its
+      // gnubin, must not change the macOS answer.
+      if (platform === 'macOS' && process.platform === 'darwin') {
+        const gnubin = join(fixtureDir, 'gnubin');
+        mkdirSync(gnubin);
+        writeFileSync(join(gnubin, 'stat'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+        allCases.push([
+          'owner_only: a foreign stat first on PATH',
+          `PATH=${sq(gnubin)}:"$PATH"; pass() { echo pass; }; fail() { echo fail; }; owner_only ${sq(protectedDir)} 700 secret`,
+          'pass',
+        ]);
       }
       for (const [label, body, expected] of allCases) {
         checked += 1;

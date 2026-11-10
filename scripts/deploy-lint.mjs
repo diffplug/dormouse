@@ -121,7 +121,7 @@ export const RULES = [
   {
     rule: 'Credentials at rest — permission checks bind ownership to the installing account',
     patterns: {
-      macOS: /me="\$\(id -u\)"|out="\$\(stat -f '%Lp %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
+      macOS: /me="\$\(id -u\)"|out="\$\(\/usr\/bin\/stat -f '%Lp %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
       Linux: /me="\$\(id -un\)"|out="\$\(stat -c '%a %U' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
       Windows: /\$ownerSid = \$acl\.GetOwner\(\[Security\.Principal\.SecurityIdentifier\]\)\.Value\s+if \(\$ownerSid -ne \$script:CurrentUserSid\) \{\s+return \[pscustomobject\]@\{ Ok = \$false;/,
     },
