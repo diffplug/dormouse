@@ -10,6 +10,7 @@ import {
   surfaceKindFromParams,
   toolFace,
   toolKeysEqual,
+  toolListIdentity,
   toolPendingFromParams,
 } from './browser-surface';
 import { persistableLeafMeta, shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
@@ -63,6 +64,13 @@ describe('which half of a tool is forward', () => {
 
   it('defaults a tool with no explicit renderMode to the iframe', () => {
     expect(resolveRenderMode(booting)).toBe('iframe');
+  });
+});
+
+describe('a Tool\'s identity in dor list', () => {
+  it('reports nothing for an anonymous Tool or another kind', () => {
+    expect(toolListIdentity(booting)).toEqual({});
+    expect(toolListIdentity({ surfaceType: 'browser', toolName: 'docs' })).toEqual({});
   });
 });
 
