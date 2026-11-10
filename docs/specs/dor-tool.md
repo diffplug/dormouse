@@ -26,6 +26,8 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 
 **Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` only when that value is absolute**, else `~/.config/dormouse/dormouse.yml`, on both local hosts. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
 
+**Never resolve the user file as a project file**: project discovery ends, finding none, at the configured user file's directory, matched lexically or canonically before reading there; a nearer `dormouse.yml` below it stays a project file.
+
 - **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file or directory input (rationale).
 - **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, as well as on a trusted lookup.
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never a command to execute; future computed keys get fields of their own (rationale).

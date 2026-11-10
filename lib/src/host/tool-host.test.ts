@@ -1,6 +1,6 @@
-import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createToolHost } from './tool-host';
 
@@ -18,11 +18,14 @@ tools:
 
 let repo = '';
 let stateDir = '';
+/** A user file outside the project root, which project discovery never reads. */
+const userFile = (name: string) => join(repo, 'user', name);
 
 beforeEach(async () => {
   repo = await realpath(await mkdtemp(join(tmpdir(), 'dor-tool-host-')));
   stateDir = join(repo, '.state');
   await writeFile(join(repo, 'dormouse.yml'), YML);
+  await mkdir(join(repo, 'user'));
   // A host built without `userConfigPath` reads the real user file; point it
   // into the fixture so a developer's own Tools can't change these results.
   vi.stubEnv('XDG_CONFIG_HOME', join(repo, '.config'));
@@ -34,7 +37,7 @@ afterEach(async () => {
 
 describe('createToolHost', () => {
   it('reads browser settings before any Tool execution grant and merges user presets', async () => {
-    const userConfigPath = join(repo, 'user.yml');
+    const userConfigPath = userFile('user.yml');
     await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800, dpr: 2 }\n');
     await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  default_viewport: custom\n');
     const host = createToolHost({ userConfigPath });
@@ -44,7 +47,7 @@ describe('createToolHost', () => {
   });
 
   it('reads browser preferences despite invalid unrelated Tool entries in either file', async () => {
-    const userConfigPath = join(repo, 'user.yml');
+    const userConfigPath = userFile('user.yml');
     await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1600, height: 1000 }\ntools:\n  broken:\n    render: ab-screencast\n');
     await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  default_viewport: custom\ntools:\n  broken:\n    run: pnpm dev\n    render: ab-screencast\n');
     const host = createToolHost({ userConfigPath });
@@ -56,7 +59,7 @@ describe('createToolHost', () => {
   });
 
   it('still reports invalid browser sections and malformed YAML explicitly', async () => {
-    const host = createToolHost({ userConfigPath: join(repo, 'missing-user.yml') });
+    const host = createToolHost({ userConfigPath: userFile('missing-user.yml') });
     await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  viewports:\n    broken: { width: 0, height: 900 }\ntools:\n  valid:\n    run: echo ok\n');
     expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({ status: 'error', message: expect.stringContaining('browser.viewports.broken') });
     await writeFile(join(repo, 'dormouse.yml'), 'browser: [invalid\n');
@@ -64,7 +67,7 @@ describe('createToolHost', () => {
   });
 
   it('resolves a trusted Tool viewport from project and user configuration', async () => {
-    const userConfigPath = join(repo, 'user.yml');
+    const userConfigPath = userFile('user.yml');
     await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\n');
     await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  app:\n    run: pnpm dev\n    render: playwright-screencast\n    viewport: custom\n');
     const host = createToolHost({ userConfigPath });
@@ -75,7 +78,7 @@ describe('createToolHost', () => {
   });
 
   it('resolves a trusted project Tool beside an invalid unrelated user Tool, keeping the user presets', async () => {
-    const userConfigPath = join(repo, 'user.yml');
+    const userConfigPath = userFile('user.yml');
     await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\ntools:\n  broken:\n    render: ab-screencast\n');
     await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  app:\n    run: pnpm dev\n    render: playwright-screencast\n    viewport: custom\n');
     const host = createToolHost({ stateDir, userConfigPath });
@@ -170,10 +173,10 @@ describe('createToolHost', () => {
 
   it('names the user configuration and available tools after a project-file miss', async () => {
     await rm(join(repo, 'dormouse.yml'));
-    const path = join(repo, 'user.yml');
+    const path = userFile('user.yml');
     await writeFile(path, 'tools:\n  viewer:\n    run: viewer\n');
     expect(await createToolHost({ stateDir, userConfigPath: path }).handle({ op: 'lookup', name: 'viewr', cwd: repo }))
-      .toEqual({ status: 'unknown-tool', projectRoot: repo, path, names: ['viewer'] });
+      .toEqual({ status: 'unknown-tool', projectRoot: dirname(path), path, names: ['viewer'] });
   });
 
   it('returns a parse error rather than throwing across the wire', async () => {
@@ -183,7 +186,7 @@ describe('createToolHost', () => {
   });
 
   it('resolves user tools without repo approval and keeps explicit project names ahead of them', async () => {
-    const path = join(repo, 'user.yml');
+    const path = userFile('user.yml');
     await writeFile(path, `tools:\n  storybook:\n    run: [user-storybook, $ARGS]\n  viewer:\n    run: [viewer, $TARGET]\n    prespawn_dedupe: [$TARGET]\n`);
     const target = join(repo, 'a b; $(echo bad).md');
     await writeFile(target, 'hello');
@@ -211,7 +214,7 @@ describe('createToolHost', () => {
   });
 
   it('does not silently ignore malformed user configuration or input to shell strings', async () => {
-    const path = join(repo, 'user.yml');
+    const path = userFile('user.yml');
     const host = createToolHost({ stateDir, userConfigPath: path });
     await writeFile(path, 'tools:\n  viewer:\n    run: [viewer, $PROJECT_ROOT]\n');
     expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo })).toMatchObject({ status: 'error' });
@@ -227,18 +230,96 @@ describe('createToolHost', () => {
   });
 
   it('names the actual user path when --global has no config', async () => {
-    const path = join(repo, 'absent-user.yml');
+    const path = userFile('absent-user.yml');
     expect(await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'view', cwd: repo, global: true }))
       .toMatchObject({ status: 'unknown-tool', path, names: [] });
   });
 
   it.skipIf(process.platform === 'win32')('follows a user-config dotfiles symlink', async () => {
-    const path = join(repo, 'user-link.yml');
+    const path = userFile('user-link.yml');
     const source = join(repo, 'dotfiles.yml');
     await writeFile(source, 'tools:\n  scratch:\n    run: echo hi\n');
     await symlink(source, path);
     const result = await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'scratch', cwd: repo, global: true });
     expect(result).toMatchObject({ status: 'ok', scope: 'user', run: 'echo hi' });
+  });
+
+  describe('from inside the user config directory', () => {
+    // `repo/dormouse.yml` sits above the user directory, so a walk that went
+    // on past it would find a project file and an untrusted `scratch`.
+    const OUTER = 'browser:\n  viewports:\n    outer: { width: 1000, height: 700 }\ntools:\n  scratch:\n    run: echo outer\n';
+    const USER = 'browser:\n  viewports:\n    mine: { width: 1100, height: 800 }\ntools:\n  scratch:\n    run: echo user\n  md:\n    run: echo md\n';
+    let userDir = '';
+    let userConfigPath = '';
+
+    beforeEach(async () => {
+      await writeFile(join(repo, 'dormouse.yml'), OUTER);
+      userDir = join(repo, 'home', '.config', 'dormouse');
+      userConfigPath = join(userDir, 'dormouse.yml');
+      await mkdir(join(userDir, 'tools', 'sub'), { recursive: true });
+    });
+
+    /** Every expected answer from `cwd`, against a host reading `userPath`. */
+    async function expectUserOnly(cwd: string, userPath = userConfigPath) {
+      const host = createToolHost({ stateDir, userConfigPath: userPath });
+      expect(await host.handle({ op: 'lookup', name: 'scratch', cwd }))
+        .toMatchObject({ status: 'ok', scope: 'user', run: 'echo user' });
+      expect(await host.handle({ op: 'lookup', name: 'nope', cwd }))
+        .toEqual(await host.handle({ op: 'lookup', name: 'nope', cwd, global: true }));
+      expect(await host.handle({ op: 'list', cwd, global: false })).toMatchObject({ status: 'list', listing: {
+        project: null,
+        tools: [{ name: 'scratch', scope: 'user', shadowed: false }, { name: 'md', scope: 'user', shadowed: false }],
+        warnings: [],
+      } });
+      const browser = await host.handle({ op: 'browser-config', cwd });
+      expect(browser).toMatchObject({ status: 'browser-config', config: { viewports: { mine: { width: 1100, height: 800 } } } });
+      expect(browser.status === 'browser-config' && browser.config.viewports.outer).toBeUndefined();
+    }
+
+    it('never resolves the user file as a project file, nor walks past its directory', async () => {
+      await writeFile(userConfigPath, USER);
+      await expectUserOnly(userDir);
+      await expectUserOnly(join(userDir, 'tools', 'sub'));
+    });
+
+    it.skipIf(process.platform === 'win32')('excludes a user file that is a dotfiles symlink, by its configured directory', async () => {
+      const dotfiles = join(repo, 'home', 'dotfiles');
+      await mkdir(dotfiles, { recursive: true });
+      await writeFile(join(dotfiles, 'dormouse.yml'), USER);
+      await symlink(join(dotfiles, 'dormouse.yml'), userConfigPath);
+      await expectUserOnly(join(userDir, 'tools', 'sub'));
+      // Where the bytes live is an ordinary project directory.
+      expect(await createToolHost({ stateDir, userConfigPath }).handle({ op: 'lookup', name: 'scratch', cwd: dotfiles }))
+        .toMatchObject({ status: 'untrusted', projectRoot: dotfiles });
+    });
+
+    it.skipIf(process.platform === 'win32')('excludes the directory when the cwd reaches it through a symlink', async () => {
+      await writeFile(userConfigPath, USER);
+      const link = join(repo, 'home', 'link');
+      await symlink(userDir, link);
+      await expectUserOnly(join(link, 'tools', 'sub'));
+    });
+
+    it.skipIf(process.platform === 'win32')('excludes the directory when the configured path reaches it through a symlink', async () => {
+      // `~/.config/dormouse` links to a real directory the cwd names directly.
+      const real = join(repo, 'home', 'dotfiles', 'dormouse');
+      await mkdir(join(real, 'tools', 'sub'), { recursive: true });
+      await writeFile(join(real, 'dormouse.yml'), USER);
+      await rm(userDir, { recursive: true });
+      await symlink(real, userDir);
+      await expectUserOnly(join(real, 'tools', 'sub'));
+    });
+
+    it('treats a nearer dormouse.yml below the user directory as an ordinary project file', async () => {
+      await writeFile(userConfigPath, USER);
+      const nested = join(userDir, 'tools');
+      await writeFile(join(nested, 'dormouse.yml'), 'tools:\n  scratch:\n    run: echo nested\n');
+      const host = createToolHost({ stateDir, userConfigPath });
+      expect(await host.handle({ op: 'lookup', name: 'scratch', cwd: join(nested, 'sub') }))
+        .toMatchObject({ status: 'untrusted', projectRoot: nested, run: 'echo nested' });
+      expect(await host.handle({ op: 'list', cwd: join(nested, 'sub'), global: false }))
+        .toMatchObject({ listing: { project: { path: join(nested, 'dormouse.yml'), approved: false } } });
+    });
   });
 
   describe('list', () => {
@@ -264,7 +345,7 @@ describe('createToolHost', () => {
 
     it('lists project then user Tools with comments, approval, and shadowing, running nothing', async () => {
       await writeFile(join(repo, 'dormouse.yml'), PROJECT);
-      const userConfigPath = join(repo, 'user.yml');
+      const userConfigPath = userFile('user.yml');
       await writeFile(userConfigPath, USER);
       const host = createToolHost({ stateDir, userConfigPath });
       const before = await host.handle({ op: 'list', cwd: join(repo), global: false });
@@ -285,7 +366,7 @@ describe('createToolHost', () => {
 
     it('--global lists only user Tools, none shadowed', async () => {
       await writeFile(join(repo, 'dormouse.yml'), PROJECT);
-      const userConfigPath = join(repo, 'user.yml');
+      const userConfigPath = userFile('user.yml');
       await writeFile(userConfigPath, USER);
       const result = await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo, global: true });
       expect(result).toMatchObject({ status: 'list', listing: { project: null, warnings: [] } });
@@ -296,7 +377,7 @@ describe('createToolHost', () => {
 
     it('answers an empty listing when neither file exists', async () => {
       await rm(join(repo, 'dormouse.yml'));
-      const userConfigPath = join(repo, 'missing-user.yml');
+      const userConfigPath = userFile('missing-user.yml');
       expect(await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo, global: false })).toEqual({ status: 'list', listing: {
         project: null, user: { path: userConfigPath, found: false }, tools: [], warnings: [],
       } });
@@ -304,7 +385,7 @@ describe('createToolHost', () => {
 
     it('fails on a malformed file, as lookup does', async () => {
       await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  broken:\n    render: iframe\n');
-      expect(await createToolHost({ userConfigPath: join(repo, 'missing-user.yml') }).handle({ op: 'list', cwd: repo, global: false }))
+      expect(await createToolHost({ userConfigPath: userFile('missing-user.yml') }).handle({ op: 'list', cwd: repo, global: false }))
         .toMatchObject({ status: 'error', message: expect.stringContaining("'run' is required") });
     });
   });
