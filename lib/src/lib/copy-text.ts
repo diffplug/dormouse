@@ -58,7 +58,9 @@ function readRows(buffer: IBuffer, index: number, rows: Map<number, CopyRow>): v
   for (let k = lines.length - 1; k >= 0; k--) {
     const cells = textCells(lines[k], lines[k + 1]);
     const holdsText = cells.some((c) => /\S/.test(c));
-    if (!textFollows) while (cells.length && /^\s*$/.test(cells[cells.length - 1])) cells.pop();
+    // A wide character's continuation `''` is blank only when its owner is.
+    const blankAt = (i: number) => /^\s+$/.test(cells[i]) || (cells[i] === '' && /^\s+$/.test(cells[i - 1] ?? ''));
+    if (!textFollows) while (cells.length && blankAt(cells.length - 1)) cells.pop();
     rows.set(top + k, { cells, wrapped: lines[k].isWrapped, top, bottom });
     textFollows ||= holdsText;
   }

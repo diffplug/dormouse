@@ -217,6 +217,10 @@ describe('detectTokenAt: non-matches', () => {
   it('a bare word with colon but no digits is not an error location', () => {
     expect(detectTokenAt('foo:bar baz', 0)).toBeNull();
   });
+
+  it.each(['12:30:45', '10:02', '16:9'])('a clock time or ratio is not an error location: %s', (token) => {
+    expect(detectTokenAt(`at ${token} today`, 4)).toBeNull();
+  });
 });
 
 describe('detectTokenAt: position sensitivity', () => {

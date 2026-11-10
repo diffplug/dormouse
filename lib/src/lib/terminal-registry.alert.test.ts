@@ -40,7 +40,7 @@ import {
   getActivitySnapshot,
   getTerminalShellKind,
   getTerminalPaneState,
-  getWatchedCommands,
+  getWatchedCommandsSnapshot,
   initAlertStateReceiver,
   setCommandWatched,
   isUntouched,
@@ -186,7 +186,7 @@ function enableAlert(id: string, commandLine = 'longtask'): void {
 
 /** The rule set is app-global and outlives a single test. */
 function clearWatchedCommands(): void {
-  for (const name of getWatchedCommands()) setCommandWatched(name, false);
+  for (const name of getWatchedCommandsSnapshot()) setCommandWatched(name, false);
 }
 
 // Timing helpers based on cfg.alert values:
@@ -1197,7 +1197,7 @@ describe('terminal-registry alert behavior', () => {
 
     setCommandWatched('claude', true);
 
-    expect(getWatchedCommands()).toEqual(['claude']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['claude']);
     expect(getActivity(alpha).watchingEnabled).toBe(true);
     expect(getActivity(beta).watchingEnabled).toBe(true);
 
@@ -1215,7 +1215,7 @@ describe('terminal-registry alert behavior', () => {
 
     dismissSessionAlert(id);
 
-    expect(getWatchedCommands()).toEqual(['longtask']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['longtask']);
     expect(getActivity(id)).toMatchObject({ status: 'BUSY', todo: false });
   });
 
@@ -1226,7 +1226,7 @@ describe('terminal-registry alert behavior', () => {
     dismissSessionAlert(id);
 
     expect(getActivity(id).watchingEnabled).toBe(false);
-    expect(getWatchedCommands()).toEqual([]);
+    expect(getWatchedCommandsSnapshot()).toEqual([]);
   });
 
   it('the alert action dismisses ringing alerts and keeps their TODO', () => {
@@ -1258,7 +1258,7 @@ describe('terminal-registry alert behavior', () => {
 
     dismissSessionAlert(id);
 
-    expect(getWatchedCommands()).toEqual(['longtask']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['longtask']);
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       todo: true,

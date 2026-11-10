@@ -206,7 +206,7 @@ stateDiagram-v2
     [*] --> Quiet
     Quiet --> Candidate: output
     Candidate --> Candidate: output within the candidate gap
-    Candidate --> MIGHT_BE_BUSY: output spanning the candidate gap
+    Candidate --> MIGHT_BE_BUSY: a second chunk, once the candidate gap has passed
     Candidate --> Quiet: candidate history expires, or reset
     MIGHT_BE_BUSY --> BUSY: output
     MIGHT_BE_BUSY --> Candidate: no output for the confirm gap, the last chunk a new candidate
@@ -321,7 +321,7 @@ stateDiagram-v2
     Queued --> Silent: the engine never starts
     Queued --> Speaking: engine start — speaking
     Speaking --> Spoken: end, or error after start — spoken
-    Speaking --> CutOff: the episode ends
+    Speaking --> CutOff: the episode ends, or speech turned off
     Spoken --> [*]: the episode ends
   }
 ```
@@ -439,7 +439,7 @@ The output/silence detector is always on, one per Session for its whole lifetime
 
 **Must use the detector as the single output-activity signal for status and inferred completion**; its states are the Output detector machine (Completion events → State machines). **Never dispatch a settle while an `OSC 9;4` cycle is Active or Ending, and reset the detector when one ends**; the cycle's end completes the turn (rationale).
 
-**A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let raw output or input revive a retired id**; a semantic or protocol event may (rationale).
+**A retired id must stay retired.** A host removes the alert entry in the same turn as its kill, ahead of any output still in flight. **Never let anything the killed generation emits, or a control racing the kill, revive a retired id**; only a respawn under the id clears it (rationale).
 
 Rules:
 

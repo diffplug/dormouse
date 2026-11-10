@@ -10,7 +10,7 @@ vi.mock('./platform', () => ({
 import {
   applyWatchedCommandsFromHost,
   getRunningCommandWatchRule,
-  getWatchedCommands,
+  getWatchedCommandsSnapshot,
   publishWatchedCommands,
   setCommandWatched,
   subscribeToWatchedCommands,
@@ -20,7 +20,7 @@ import { applyTerminalSemanticEvents, removeTerminalPaneState } from './terminal
 const PANE = 'watched-commands-pane';
 
 function clearRules(): void {
-  for (const name of getWatchedCommands()) setCommandWatched(name, false);
+  for (const name of getWatchedCommandsSnapshot()) setCommandWatched(name, false);
 }
 
 function run(commandLine: string): void {
@@ -48,11 +48,11 @@ describe('watched-commands store', () => {
       'foo:bar',
       '/usr/bin/claude',
     ]);
-    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['claude', 'foo:bar']);
     // Same gate on the write path — a drive-relative invocation is the one
     // shape a program name can still arrive in with a `:` in it.
     setCommandWatched('C:foo.exe', true);
-    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['claude', 'foo:bar']);
     // A launcher suffix is the other tell: a relative invocation had no
     // separator to eat (`tools\\dor.cmd` -> `toolsdor.cmd`), and a bare
     // `npm.cmd` stored cleanly — but `commandProgramName` strips the suffix, so
@@ -64,7 +64,7 @@ describe('watched-commands store', () => {
       'claude',
       'foo:bar',
     ]);
-    expect(getWatchedCommands()).toEqual(['claude', 'foo:bar']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['claude', 'foo:bar']);
   });
 
   it('keeps a runner and script key and drops a malformed one', () => {
@@ -78,23 +78,23 @@ describe('watched-commands store', () => {
       'make build/app.o',
       ' pnpm',
     ]);
-    expect(getWatchedCommands()).toEqual(['npm test:unit', 'pnpm', 'pnpm dev']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['npm test:unit', 'pnpm', 'pnpm dev']);
     setCommandWatched('npm.cmd dev', true);
     setCommandWatched('cargo build', true);
-    expect(getWatchedCommands()).toEqual(['cargo build', 'npm test:unit', 'pnpm', 'pnpm dev']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['cargo build', 'npm test:unit', 'pnpm', 'pnpm dev']);
   });
 
   it('adds, reports, and removes the rule covering a running command', () => {
     run('cd web && pnpm dev');
-    expect(getWatchedCommands()).toEqual([]);
+    expect(getWatchedCommandsSnapshot()).toEqual([]);
     expect(getRunningCommandWatchRule(PANE)).toBeNull();
 
     setCommandWatched('pnpm', true);
-    expect(getWatchedCommands()).toEqual(['pnpm']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['pnpm']);
     expect(getRunningCommandWatchRule(PANE)).toBe('pnpm');
 
     setCommandWatched('pnpm', false);
-    expect(getWatchedCommands()).toEqual([]);
+    expect(getWatchedCommandsSnapshot()).toEqual([]);
     expect(getRunningCommandWatchRule(PANE)).toBeNull();
   });
 
@@ -104,7 +104,7 @@ describe('watched-commands store', () => {
     setCommandWatched('claude', true);
     setCommandWatched('  ', true);
 
-    expect(getWatchedCommands()).toEqual(['claude', 'pnpm']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['claude', 'pnpm']);
   });
 
   it('names no rule for a Session at a prompt or never seen', () => {
@@ -138,7 +138,7 @@ describe('watched-commands store', () => {
     run('claude');
     applyWatchedCommandsFromHost(['claude', 'npm', 'claude']);
 
-    expect(getWatchedCommands()).toEqual(['claude', 'npm']);
+    expect(getWatchedCommandsSnapshot()).toEqual(['claude', 'npm']);
     expect(getRunningCommandWatchRule(PANE)).toBe('claude');
     expect(listener).toHaveBeenCalledTimes(1);
     expect(alertSetCommandWatched).toHaveBeenCalledTimes(1);

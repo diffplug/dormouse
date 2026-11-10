@@ -23,7 +23,7 @@ const ID = 'term-1';
 
 /** The reply's first paragraph, or part of it, as mouse-up leaves it. */
 function select(over: Partial<Selection>): void {
-  setSelection(ID, { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, ...over });
+  setSelection(ID, { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, ...over });
   openCopyEditor(ID, terminal);
 }
 const editor = () => getMouseSelectionState(ID).copyEditor!;
@@ -92,7 +92,7 @@ describe('copy editor transitions', () => {
 
 describe('the program’s own copy', () => {
   function shadowWithOffer(text: string): void {
-    setSelection(ID, { startRow: 2, startCol: 27, endRow: 3, endCol: 5, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+    setSelection(ID, { startRow: 2, startCol: 27, endRow: 3, endCol: 5, shape: 'linewise', dragging: false, owner: 'program' });
     offerProgramCopy(ID, text);
     openCopyEditor(ID, terminal);
   }
@@ -221,7 +221,7 @@ describe('copySelection', () => {
 
   it.each([true, false])('neither flashes nor fails a newer selection when an earlier copy finishes (copied: %s)', async (copied) => {
     const newer = [
-      () => beginDrag(ID, { row: 9, col: 1, altKey: false, startedInScrollback: false }),
+      () => beginDrag(ID, { row: 9, col: 1, altKey: false }),
       () => select({ startRow: 9, endRow: 9 }),
     ];
     for (const replace of newer) {

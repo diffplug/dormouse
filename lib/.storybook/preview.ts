@@ -13,7 +13,7 @@ import {
   getActivitySnapshot,
   getTerminalInstance,
   getTerminalPaneStateSnapshot,
-  getWatchedCommands,
+  getWatchedCommandsSnapshot,
   setTerminalActivity,
   removeTerminalPaneState,
   resetPushDevices,
@@ -162,7 +162,7 @@ const DEFAULT_STORYBOOK_THEME = VSCODE_THEMES[PREFERRED_STORYBOOK_THEME]
  * it into every story that runs after it — always clear before applying.
  */
 function applyWatchedCommands(names: readonly string[]): void {
-  for (const existing of getWatchedCommands()) setCommandWatched(existing, false);
+  for (const existing of getWatchedCommandsSnapshot()) setCommandWatched(existing, false);
   for (const name of names) setCommandWatched(name, true);
 }
 

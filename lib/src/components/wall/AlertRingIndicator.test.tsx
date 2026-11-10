@@ -144,7 +144,7 @@ describe('AlertRingIndicator', () => {
     expect(Number.parseInt(ringLayer()!.style.animationDelay, 10)).toBeLessThan(-59_000);
   });
 
-  it('suppresses the burst and its dead clock under the Chromatic freeze', () => {
+  it('suppresses the burst and its dead clock under the Argos snapshot freeze', () => {
     cfg.alert.ringingPaused = true;
     ring();
 

@@ -63,6 +63,7 @@ export class Terminal {
   focus(): void {}
   blur(): void {}
   clearSelection(): void {}
+  hasSelection(): boolean { return false; }
   dispose(): void {}
 
   /** The user typed `data`: what xterm's `onData` hands the registry. */

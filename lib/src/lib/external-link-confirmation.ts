@@ -48,7 +48,7 @@ export function linkOpenRequest(path: string, origin: LinkOrigin): Omit<PendingE
     uri: path,
     displayText: '',
     verdict: 'match',
-    decision: { status: 'openable', rawUri: path, uri: path, scheme: 'file', displayUri: path, otherApp: false },
+    decision: { status: 'openable', uri: path, scheme: 'file', displayUri: path, otherApp: false },
     note: `A link in ${origin === 'terminal' ? 'this terminal' : 'the document you are viewing'} opens this file, which runs its own scripts and can read files beside it. Open it only if you expected this file.`,
   };
 }

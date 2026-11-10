@@ -214,7 +214,7 @@ A token is whitespace-delimited and **runs on across soft wraps**. Trailing char
 
 ### 5.3 Extension Action
 
-- **e** during a drag over a qualifying token extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary away from it. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
+- **e** during a drag over a qualifying token extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary in the drag's direction, even from an anchor inside the token. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
 - **e** with no qualifying token is consumed (per §3.6) but extends nothing; once the drag has ended, `e` is the editor's expand instead (§4.3). Release finalizes whatever boundaries the drag, extensions included, produced.
 - **Only this single extension step is offered mid-drag**, and no "open URL" action (§9.1); the editor's scopes are the wider steps (§4.2).
 - **Must preserve extension on keys that leave the shape unchanged.** Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
@@ -338,14 +338,14 @@ Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle
 
 Neither `params` nor the URI is parsed at the PTY boundary.
 
-**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the full target in one of three states:
+**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the full target in one of these states:
 
 | State | Target | Dialog |
 |---|---|---|
 | **Openable** | `http:`, `https:`, `mailto:`, and `file:` | cancel plus an open action |
 | **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning that whichever app handles it gets the link; cancel plus an open action |
 | **Deceptive** | display text URL-shaped (a full URL, a dotted name, or `localhost`) but resolving to a different host than the target, compared after NFKC, without invisible characters, wrapping brackets or punctuation, a root dot, or a port, and with a non-ASCII name as its punycode; a `file:` target's own file name, or text naming no host, such as `12.5%` or `v1.2.3`, is not a host claim; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
-| **Blocked** | malformed URIs, targets carrying a control or a character drawn as nothing or as a space it is not (`hasControlOrFormatCharacters`), browser-executable or opaque pseudo-schemes (`javascript:`, `vbscript:`, `data:`, `blob:`, `about:`), Windows handlers refused outright (`docs/specs/security-local.md` -> "Terminal output") | **Never silently dropped**: the dialog opens with the reason, close the only action |
+| **Blocked** | malformed URIs, targets carrying a control or a character drawn as nothing or as a space it is not (`hasControlOrFormatCharacters`), browser-executable or opaque pseudo-schemes (`javascript:`, `vbscript:`, `data:`, `blob:`, `about:`), a Windows drive path the parser reads as a one-letter scheme (`c:/x.bat`), Windows handlers refused outright (`docs/specs/security-local.md` -> "Terminal output") | **Never silently dropped**: the dialog opens with the reason, close the only action |
 
 **Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **Must show the target, display text, and any error with those characters escaped** (`printableExact`), so the text read is the text there. **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
 

@@ -438,6 +438,27 @@ describe('Wall on the Lath engine', () => {
     expect(Object.keys(saved!.lathLayout!.leafMeta ?? {})).toContain('surface:a');
   });
 
+  it('saves on pagehide without waiting on a CWD probe the unloading page never hears back from', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    const saveState = vi.spyOn(fake, 'saveState');
+    vi.spyOn(fake, 'getCwd').mockReturnValue(new Promise(() => {}));
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    expect(saveState).toHaveBeenCalledWith(expect.objectContaining({ panes: [expect.objectContaining({ id: 'surface:a' })] }));
+  });
+
+  it('saves on pagehide while a probing save is still waiting on its CWD answer', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+    await flush();
+    const saveState = vi.spyOn(fake, 'saveState');
+    vi.spyOn(fake, 'getCwd').mockReturnValue(new Promise(() => {}));
+    // A Session exiting flushes a save, which then waits on the probe forever.
+    await act(async () => fake.killPty('surface:b'));
+    expect(saveState).not.toHaveBeenCalled();
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    expect(saveState).toHaveBeenCalledWith(expect.objectContaining({ panes: expect.arrayContaining([expect.objectContaining({ id: 'surface:a' })]) }));
+  });
+
   it.each(['split', 'close', 'minimize', 'no change'] as const)('validates the transfer snapshot after %s during its CWD probe', async (change) => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
     await flush();

@@ -19,11 +19,11 @@ function TextSelectionStory({
 }: {
   id: string;
   /** None for a story whose `play` selects with the mouse. */
-  selection?: Omit<Selection, 'startedInScrollback'>;
+  selection?: Selection;
 }) {
   useStorySelection(id, (terminal) => {
     if (!selection) return;
-    setSelection(id, { ...selection, startedInScrollback: false });
+    setSelection(id, { ...selection });
     // A finalized drag opens the copy editor, as mouse-up does.
     if (!selection.dragging) openCopyEditor(id, terminal);
   }, [selection]);

@@ -35,12 +35,6 @@ export interface Selection {
    * shadowed: no outline and no editor until the copy chord (spec §3.8).
    */
   owner?: 'program';
-  /**
-   * True when the drag originated in scrollback. Scrollback-origin drags are
-   * always handled by the terminal regardless of the inside program's mouse
-   * reporting (spec §3.5).
-   */
-  startedInScrollback: boolean;
 }
 
 /** The copy editor over a finalized selection (spec §4). */
@@ -110,7 +104,7 @@ function clearSelection(s: MouseSelectionState): void {
 }
 
 /** A drag the program owned, shadowed and waiting for the copy chord (§3.8). */
-export function isShadowed(state: MouseSelectionState): boolean {
+export function isShadowed(state: Pick<MouseSelectionState, 'selection' | 'copyEditor'>): boolean {
   return state.selection?.owner === 'program' && !state.copyEditor;
 }
 
@@ -225,7 +219,7 @@ export function setCopyEditor(id: string, editor: CopyEditorState): void {
  */
 export function beginDrag(
   id: string,
-  args: { row: number; col: number; altKey: boolean; blockLatched?: boolean; startedInScrollback: boolean },
+  args: { row: number; col: number; altKey: boolean; blockLatched?: boolean },
 ): void {
   const s = ensure(id);
   // Clearing the in-flight copy flash too keeps its timer from clearing this
@@ -239,7 +233,6 @@ export function beginDrag(
     shape: dragShape(args.altKey, args.blockLatched),
     ...(args.blockLatched ? { blockLatched: true } : {}),
     dragging: true,
-    startedInScrollback: args.startedInScrollback,
   };
   notify();
 }
@@ -286,15 +279,15 @@ export function isDragging(id: string): boolean {
 
 /**
  * Extend the in-progress selection to fully cover a detected token (spec §5.3).
- * No-op when no drag is active. Preserves the drag anchor; adjusts the end
- * toward whichever token boundary is farther from the anchor so the drag
- * direction is respected.
+ * No-op when no drag is active. Preserves the drag anchor and moves the end to
+ * the token boundary in the drag's direction, read from the end against the
+ * anchor so a drag that began inside the token keeps what it covered.
  */
 export function extendSelectionToToken(id: string, token: BufferToken): void {
   const s = states.get(id);
   if (!s?.selection?.dragging) return;
   const sel = s.selection;
-  const forward = comparePos({ row: sel.startRow, col: sel.startCol }, token.start) <= 0;
+  const forward = comparePos({ row: sel.startRow, col: sel.startCol }, { row: sel.endRow, col: sel.endCol }) <= 0;
   const edge = forward ? token.end : token.start;
   s.selection = { ...sel, endRow: edge.row, endCol: edge.col };
   notify();

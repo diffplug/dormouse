@@ -27,7 +27,9 @@ interface Pattern {
 const PATTERNS: Pattern[] = [
   { kind: 'url', re: /^https?:\/\/\S+$/ },
   { kind: 'url', re: /^file:\/\/\S+$/ },
-  { kind: 'path', re: /^\S+:\d+(:\d+)?$/ }, // error-location first (so it beats generic path)
+  // Error-location first (so it beats generic path); a token of only digits
+  // and colons is a clock time or a ratio, not a file.
+  { kind: 'path', re: /^(?![\d:]+$)\S+:\d+(:\d+)?$/ },
   { kind: 'path', re: /^~\/\S*$/ },
   { kind: 'path', re: /^\/\S+$/ },
   { kind: 'path', re: /^\.\.?\/\S*$/ },
