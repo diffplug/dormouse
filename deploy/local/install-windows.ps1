@@ -1002,7 +1002,7 @@ $CmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
 
 function Write-ServiceLog {
   param([string]$Text)
-  $stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+  $stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
   try { [IO.File]::AppendAllText($ErrLog, "[run-relay $stamp] $Text`r`n") } catch { }
 }
 
@@ -1502,7 +1502,7 @@ function Invoke-Status {
   Write-Host "State files ($StateDir)"
   if (Test-Path -LiteralPath $StateDir) {
     Get-ChildItem -LiteralPath $StateDir -Force | ForEach-Object {
-      Write-Host ("  {0,10}  {1}  {2}" -f $_.Length, $_.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss'Z'"), $_.Name)
+      Write-Host ("  {0,10}  {1}  {2}" -f $_.Length, $_.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture), $_.Name)
     }
   } else {
     Write-Host "  ${C_RED}missing$C_OFF"
