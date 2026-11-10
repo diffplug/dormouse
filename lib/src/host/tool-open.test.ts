@@ -347,3 +347,53 @@ describe('file URLs', () => {
     expect(await openLink('elsewhere.example')).toEqual({ status: 'error', message: expect.stringContaining('not a file on this machine') });
   });
 });
+
+describe('imports', () => {
+  beforeEach(async () => {
+    await mkdir(join(root, 'viewer'));
+    await writeFile(join(root, 'viewer', 'dormouse.yml'), 'tools:\n  viewer:\n    run: [view, $HERE/main.js, $TARGET]\n  shell:\n    run: shell-viewer\n');
+    await writeConfig(`tools:
+  viewer:
+    from: viewer
+  shell:
+    from: viewer
+  gone:
+    from: missing
+  markdown:
+    run: [markdown, $TARGET]
+open:
+  - {match: '*.view', tool: viewer}
+  - {match: '*.shell', tool: shell}
+  - {match: '*.gone', tool: gone}
+  - {match: '*', tool: markdown}
+`);
+  });
+  const open = async (name: string, extra: { tool?: string } = {}) => {
+    const target = join(root, name);
+    await writeFile(target, 'hi');
+    return { target, result: await host().handle({ op: 'open', target, cwd: root, ...extra }) };
+  };
+
+  it('opens through a rule naming an import, from the imported file', async () => {
+    const { target, result } = await open('a.view');
+    expect(result).toMatchObject({ status: 'ok', scope: 'user', name: 'viewer', path: join(root, 'viewer', 'dormouse.yml'),
+      run: ['view', join(root, 'viewer', 'main.js'), target], target });
+  });
+
+  it('fails an open that selects a broken import, without falling through to a later rule or a built-in', async () => {
+    expect((await open('a.gone')).result).toEqual({
+      status: 'error', message: `${config}: tools.gone imports 'gone': ${join(root, 'missing', 'dormouse.yml')}: not found`,
+    });
+    expect((await open('b.md', { tool: 'gone' })).result).toMatchObject({ status: 'error', message: expect.stringContaining('tools.gone imports') });
+  });
+
+  it('fails only the rule that selects an import with a string run, saying so', async () => {
+    expect((await open('a.shell')).result).toEqual({
+      status: 'error',
+      message: `${config}: open rule for 'shell' needs an argument-list run to receive the path, and ${join(root, 'viewer', 'dormouse.yml')} declares a string`,
+    });
+    expect((await open('a.md')).result).toMatchObject({ status: 'ok', name: 'markdown' });
+    // Named explicitly, it is not a rule's choice: the input check answers.
+    expect((await open('b.shell', { tool: 'shell' })).result).toEqual({ status: 'error', message: "tool 'shell': use an argument-list run to accept arguments" });
+  });
+});

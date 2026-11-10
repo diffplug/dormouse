@@ -171,12 +171,15 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       };
     },
     // An approved project and a user file; the user `storybook` is hidden by
-    // the project's. `--global` answers the user file alone, as the host does.
+    // the project's, `pridm` is imported, and `prs` an import that is broken.
+    // `--global` answers the user file alone, as the host does.
     async toolList(request) {
       this.requests.push({ method: 'toolList', request });
       const user = [
         { name: 'storybook', scope: 'user', run: 'npx storybook', render: 'iframe', port: 'auto', keyed: false, description: null, shadowed: !request.global },
         { name: 'md', scope: 'user', run: ['glow', '$TARGET'], render: 'iframe', port: 'announced', keyed: true, description: 'Render Markdown.', shadowed: false },
+        { name: 'pridm', scope: 'user', run: ['node', '$HERE/main.js'], render: 'iframe', port: 'auto', keyed: false, description: 'PR dashboard.', shadowed: false, from: '/home/me/.config/dormouse/pridm/dormouse.yml' },
+        { name: 'prs', scope: 'user', description: null, shadowed: false, from: '/home/me/.config/dormouse/supertools/dormouse.yml', broken: '/home/me/.config/dormouse/supertools/dormouse.yml: not found' },
       ];
       return {
         project: request.global ? null : { path: '/work/site/dormouse.yml', approved: true },
@@ -2164,7 +2167,11 @@ test('tool --list escapes control and format characters in repo text, in every o
   const listing = {
     project: { path: '/work/s\u2067ite/dormouse.yml', approved: false },
     user: { path: '/home/me/.config/dormouse/dormouse.yml', found: false },
-    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext \u202eexe.txt \u00adsoft\u00a0nb\u3164fill\ufe0fsel\u{e0041}tag', shadowed: false }],
+    tools: [
+      { name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext \u202eexe.txt \u00adsoft\u00a0nb\u3164fill\ufe0fsel\u{e0041}tag', shadowed: false },
+      { name: 'imported', scope: 'user', run: ['x'], render: 'iframe', port: 'auto', keyed: false, description: null, shadowed: false, from: '/c/fr\u009dom/dormouse.yml' },
+      { name: 'broken', scope: 'user', description: null, shadowed: false, from: '/c/b\u202eroken/dormouse.yml', broken: '/c/b/dormouse.yml: tools.x\u001b[2J: bad' },
+    ],
     warnings: ['/work/site/dormouse.yml: tools.evil\u001b[2J\u200b: ignoring unknown field \'x\''],
   };
   const client = fixtureClient();
@@ -2177,6 +2184,9 @@ test('tool --list escapes control and format characters in repo text, in every o
   assert.match(text.stdout, /fine\\u001b\[2Jtext \\u202eexe\.txt/);
   assert.match(text.stdout, /s\\u2067ite/);
   assert.match(text.stdout, /\\u00adsoft\\u00a0nb\\u3164fill\\ufe0fsel\\udb40\\udc41tag/);
+  assert.match(text.stdout, /\[from \/c\/fr\\u009dom\/dormouse\.yml\]/);
+  assert.match(text.stdout, /\[from \/c\/b\\u202eroken\/dormouse\.yml\]/);
+  assert.match(text.stdout, /\[broken: \/c\/b\/dormouse\.yml: tools\.x\\u001b\[2J: bad\]/);
   const json = await runCli(['tool', '--list', '--json'], { client });
   assert.doesNotMatch(json.stdout, HIDDEN);
   assert.deepEqual(JSON.parse(json.stdout).tools, listing.tools);
