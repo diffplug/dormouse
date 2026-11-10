@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { createAlertHost, type AlertRealm } from '../../lib/src/host/alert-host';
@@ -312,6 +313,7 @@ function getOwnerPtyStream(id: string): OwnerPtyStream {
     stream = createOwnerPtyStream(id, {
       alerts: alertManager,
       colorProvider: themeColorProvider,
+      localHost: hostname(),
       onToolEvents: (events) => { for (const listener of toolEventsListeners) listener(id, events); },
       onSemanticEvents: (events) => { for (const listener of semanticEventsListeners) listener(id, events); },
       onClipboardOffer: (text) => { for (const listener of clipboardOfferListeners) listener(id, text); },

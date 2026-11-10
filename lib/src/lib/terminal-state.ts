@@ -235,7 +235,17 @@ function sameActivity(a: ShellActivity, b: ShellActivity): boolean {
   return true;
 }
 
-export function cwdFromOsc7(rawUriInput: string, now = Date.now()): CwdState | null {
+/** Whether `host` names the machine called `own`, both lowercased: the empty
+ *  host, `own` itself, or either one's first label (`mac` for `mac.lan`). */
+export function namesMachine(host: string, own: string): boolean {
+  if (host === '') return true;
+  const short = (value: string) => value.split('.')[0];
+  return host === own || host === short(own) || short(host) === own;
+}
+
+/** `localHost` is this machine's hostname, when known: a URI naming it is a
+ *  local directory, its host dropped. */
+export function cwdFromOsc7(rawUriInput: string, now = Date.now(), localHost?: string): CwdState | null {
   // Bounded before the URL parse and the percent-decode, not after: every value
   // below is retained per Session (see `boundedCwdValue`).
   const rawUri = boundedCwdValue(rawUriInput);
@@ -251,7 +261,8 @@ export function cwdFromOsc7(rawUriInput: string, now = Date.now()): CwdState | n
   // Bounded the same way `decodedPath` is. The host is retained, rendered, and
   // part of `cwdIdentity`, so it is sanitized where it is built rather than on
   // the URL parser rejecting every control character a host could decode to.
-  const host = boundedCwdValue(fileUriHost(rawUri, parsed.hostname)) || undefined;
+  const named = boundedCwdValue(fileUriHost(rawUri, parsed.hostname)) || undefined;
+  const host = named && localHost && namesMachine(named.toLowerCase(), localHost.toLowerCase()) ? undefined : named;
   return {
     uri: rawUri,
     path: decodedPath,
@@ -306,10 +317,10 @@ export function processCwdMayReplace(source: CwdSource | undefined): boolean {
   return source === undefined || source === 'process' || source === 'manual';
 }
 
+/** The scheme is left out: `file:///x` and a plain `/x` are one directory. */
 export function cwdIdentity(cwd: CwdState): string {
-  const scheme = cwd.scheme ?? 'path';
   const host = cwd.host ?? '';
-  return `${scheme}|${host}|${cwd.pathKind}|${cwd.path}`;
+  return `${host}|${cwd.pathKind}|${cwd.path}`;
 }
 
 export function cwdDisplay(cwd: CwdState, options: DirectoryDisplayOptions = {}): string {

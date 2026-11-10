@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { localRealpath, NonLocalPathError } from 'dor-lib-common/local-path';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
+import { namesMachine } from '../lib/terminal-state';
 import { resolveDedupeKey, substituteToolTokens, ToolFileError, usesTarget, type ToolEntry } from './tool-registry';
 
 /** What one invocation's inputs resolved an entry to: the argv (or literal
@@ -66,10 +67,7 @@ function localFileUrlPath(input: string): string {
 /** The URL parser has already lowercased `host` and turned `localhost` into
  * the empty host. */
 function namesThisHost(host: string): boolean {
-  if (host === '') return true;
-  const own = hostname().toLowerCase();
-  const short = (value: string) => value.split('.')[0];
-  return host === own || host === short(own) || short(host) === own;
+  return namesMachine(host, hostname().toLowerCase());
 }
 
 export async function resolveToolInput(

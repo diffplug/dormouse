@@ -7,6 +7,7 @@ import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, resetWorkspaces, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { SessionFlushRequest } from '../lib/platform/types';
 import { installWorkspaceAutoNaming } from '../lib/workspace-autoname-controller';
+import { setReplayLocalHost } from '../lib/platform/replay-parse';
 import type { WallBootPlans, WallBootProps, WallEvent, WallMode } from './wall/wall-types';
 import type { WorkspaceId } from '../lib/session-types';
 import { RingHandoffContext } from './wall/wall-context';
@@ -87,7 +88,10 @@ export function WorkspaceWindow({
 
   useEffect(() => {
     const platform = getPlatform();
-    const home = platform.terminalContext?.({ op: 'home' }).then((info) => info.home);
+    const home = platform.terminalContext?.({ op: 'home' }).then((info) => {
+      setReplayLocalHost(info.hostname);
+      return info.home;
+    });
     return installWorkspaceAutoNaming(platform.gitInfo?.bind(platform), home);
   }, []);
 

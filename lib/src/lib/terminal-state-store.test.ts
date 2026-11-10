@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { TerminalProtocolParser } from './terminal-protocol';
+import { collectTerminalSemanticEvents, TerminalProtocolParser } from './terminal-protocol';
+import { parseReplay, setReplayLocalHost } from './platform/replay-parse';
 import {
   applyTerminalSemanticEvents,
+  getInheritableCwd,
   countRunningSessions,
   fillTerminalProcessCwd,
   getTerminalPaneState,
@@ -481,5 +483,33 @@ describe('seedLaunchedCommand (dor split/ensure command launches)', () => {
       expect(surfaceRunsCommand(live, command, '/repo/app'), command.slice(0, 30)).toBe(true);
       removeTerminalPaneState('launch');
     }
+  });
+});
+
+describe('a local directory reported by OSC 7 with this machine\'s name', () => {
+  afterEach(() => {
+    removeTerminalPaneState('fish');
+    setReplayLocalHost(undefined);
+  });
+
+  // fish's own report on every prompt: `file://` and the machine's hostname.
+  const FISH = '\x1b]7;file://mac-mini.lan/Users/me/repo\x07';
+
+  it('is inheritable, and so persisted, when the owner parses it', () => {
+    const { events } = new TerminalProtocolParser(undefined, 'mac-mini.lan').process(FISH);
+    applyTerminalSemanticEvents('fish', collectTerminalSemanticEvents(events));
+    expect(getInheritableCwd('fish')).toBe('/Users/me/repo');
+  });
+
+  it('is inheritable when a replay parses it, once the host has named itself', () => {
+    setReplayLocalHost('mac-mini');
+    parseReplay('fish', FISH);
+    expect(getInheritableCwd('fish')).toBe('/Users/me/repo');
+  });
+
+  it('stays remote from another machine', () => {
+    const { events } = new TerminalProtocolParser(undefined, 'build-box').process(FISH);
+    applyTerminalSemanticEvents('fish', collectTerminalSemanticEvents(events));
+    expect(getInheritableCwd('fish')).toBeUndefined();
   });
 });

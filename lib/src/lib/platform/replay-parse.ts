@@ -3,6 +3,13 @@ import { applyTerminalSemanticEvents } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 import { recordToolEvents } from '../tool-events';
 
+/** The host machine's name, once its `terminalContext` home answer arrives;
+ *  a replay parsed before then reads an OSC 7 naming any host as remote. */
+let localHost: string | undefined;
+export function setReplayLocalHost(name: string | undefined): void {
+  localHost = name;
+}
+
 /**
  * One `pty:replay`, parsed where it lands. Replay arrives as raw buffered
  * output, the one stream its host does not parse for the renderer, so a
@@ -14,7 +21,7 @@ import { recordToolEvents } from '../tool-events';
  * reach xterm.js instead, and answering is the owner's alone.
  */
 export function parseReplay(id: string, data: string): string {
-  const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
+  const parsed = new TerminalProtocolParser(themeColorProvider, localHost).process(data);
   recordToolEvents(id, parsed.events);
   applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
   return parsed.visibleData;

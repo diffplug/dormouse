@@ -11,6 +11,7 @@
  * (`docs/specs/terminal-escapes.md` → "Parsing location").
  */
 
+import { hostname } from 'node:os';
 import type { AlertManager, AlertState } from '../../lib/alert-manager';
 import { parseTerminalColors, type TerminalColorProvider, type TerminalColors } from '../../lib/terminal-protocol';
 import { createAlertHost, type AlertRealm } from '../alert-host';
@@ -174,6 +175,7 @@ export function createSidecarSurfaceBridge(
     const parsed = createOwnerPtyStream(id, {
       alerts: options.alerts,
       colorProvider: themeColorProvider,
+      localHost: hostname(),
       onToolEvents: (events) => options.send('terminal:toolEvents', { id, events }),
       onSemanticEvents: (events) => options.send('terminal:semanticEvents', { id, events }),
       onClipboardOffer: (text) => options.send('terminal:clipboardOffer', { id, text }),

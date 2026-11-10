@@ -46,6 +46,9 @@ export interface ProcessedPtyStreamOptions {
    * colour query, which leaves it in `visibleData` for xterm.js to answer.
    */
   colorProvider?: TerminalColorProvider;
+  /** This machine's hostname, so an OSC 7 naming it reports a local directory.
+   *  Absent where the owner runs on no machine of its own. */
+  localHost?: string;
   /**
    * Everything one chunk's parse produced, delivered once per chunk and never
    * per sink — a response fanned out per attachment would be written to the PTY
@@ -84,7 +87,7 @@ interface Subscription {
 }
 
 export function createProcessedPtyStream(options: ProcessedPtyStreamOptions): ProcessedPtyStream {
-  const parser = new TerminalProtocolParser(options.colorProvider);
+  const parser = new TerminalProtocolParser(options.colorProvider, options.localHost);
   const subscriptions = new Set<Subscription>();
 
   function deliver(piece: string): void {

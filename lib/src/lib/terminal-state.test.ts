@@ -116,6 +116,34 @@ describe('terminal CWD normalization', () => {
     expect(osc7.uri).toHaveLength(MAX_CWD_LENGTH);
   });
 
+  it('reads an OSC 7 naming this machine, by its own or short name, as a local directory', () => {
+    for (const [uri, local] of [
+      ['file://mac-mini/repo', 'mac-mini'],
+      ['file://Mac-Mini/repo', 'mac-mini.lan'],
+      ['file://mac-mini.lan/repo', 'mac-mini'],
+      ['file://mac-mini.lan/repo', 'Mac-Mini.lan'],
+    ]) {
+      const cwd = cwdFromOsc7(uri, 100, local)!;
+      expect(cwd.isRemote, `${uri} on ${local}`).toBe(false);
+      expect(cwd.host, `${uri} on ${local}`).toBeUndefined();
+      expect(cwd.path).toBe('/repo');
+    }
+    // Another machine, or no name to compare with, stays remote.
+    for (const local of ['build-box', 'mac-mini2', undefined]) {
+      expect(cwdFromOsc7('file://mac-mini/repo', 100, local)).toMatchObject({ isRemote: true, host: 'mac-mini' });
+    }
+    // A share is remote whatever names the host; empty and `localhost` are as before.
+    expect(cwdFromOsc7('file://mac-mini//server/share', 100, 'mac-mini')?.isRemote).toBe(true);
+    expect(cwdFromOsc7('file:///repo', 100, 'mac-mini')).toMatchObject({ isRemote: false, host: undefined });
+    expect(cwdFromOsc7('file://localhost/repo', 100, 'mac-mini')).toMatchObject({ isRemote: false, host: 'localhost' });
+  });
+
+  it('gives an OSC 7 directory on this machine and the same reported path one identity', () => {
+    expect(cwdIdentity(cwdFromOsc7('file://mac-mini/x', 100, 'mac-mini')!)).toBe(cwdIdentity(cwdFromOsc633('/x', 100)!));
+    expect(cwdIdentity(cwdFromOsc7('file:///x', 100)!)).toBe(cwdIdentity(cwdFromOsc633('/x', 100)!));
+    expect(cwdIdentity(cwdFromOsc7('file://build-box/x', 100, 'mac-mini')!)).not.toBe(cwdIdentity(cwdFromOsc633('/x', 100)!));
+  });
+
   it('builds shortest unique labels without losing remote hosts', () => {
     const local = cwd('/Users/me/app', 'localhost');
     const remote = cwd('/Users/me/app', 'prod-box');

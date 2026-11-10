@@ -28,6 +28,8 @@ export interface OwnerPtyStreamOptions {
   /** The host's one manager (`lib/src/host/alert-host.ts`). */
   alerts: AlertManager;
   colorProvider: TerminalColorProvider;
+  /** This machine's hostname (`ProcessedPtyStreamOptions.localHost`). */
+  localHost?: string;
   /** The Tool announcements, state, admitted `open` requests and command-start
    *  resets of one parse, in stream order, for the renderer that holds the Tool
    *  stores. */
@@ -66,6 +68,7 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
   let chrome = false;
   const stream = createProcessedPtyStream({
     colorProvider: options.colorProvider,
+    localHost: options.localHost,
     onEvents(events) {
       const semanticEvents = applyTerminalEvents(options.alerts, id, events);
       const toolEvents = collectTerminalToolEvents(launch.admit(events));
