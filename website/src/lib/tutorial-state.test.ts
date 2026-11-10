@@ -99,4 +99,16 @@ describe("tutorial persistence", () => {
     const desktop = new TutorialState(DESKTOP_SECTIONS);
     expect(desktop.isComplete("cp-override")).toBe(false);
   });
+
+  it("keeps what another tab completed when this one completes an item", () => {
+    installStorage();
+    const first = new TutorialState(DESKTOP_SECTIONS);
+    const second = new TutorialState(DESKTOP_SECTIONS);
+    expect(first.markComplete("kb-mode")).toBe(true);
+    expect(second.markComplete("th-theme")).toBe(true);
+
+    const reloaded = new TutorialState(DESKTOP_SECTIONS);
+    expect(reloaded.isComplete("kb-mode")).toBe(true);
+    expect(reloaded.isComplete("th-theme")).toBe(true);
+  });
 });

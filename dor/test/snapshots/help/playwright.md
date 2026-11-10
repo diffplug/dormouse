@@ -4,7 +4,7 @@ Invocation: `dor playwright --help`
 
 ```text
 USAGE
-  dor playwright [--key name] [--session name] [--surface handle] [--workspace ref] <args>...
+  dor playwright [--key name|--session name|--surface handle] [--workspace ref] [args...]
   dor playwright --help
 
 Forwards native playwright-cli commands to your installed @playwright/cli.

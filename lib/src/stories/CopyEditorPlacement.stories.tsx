@@ -96,10 +96,6 @@ async function place({ from, to, fill, exact, expected }: Props): Promise<{ box:
   return { box, pane };
 }
 
-const passed = (canvasElement: HTMLElement) => {
-  canvasElement.dataset.placementCheck = 'passed';
-};
-
 const meta = {
   title: 'App/Copy editor placement',
   component: PlacementWall,
@@ -110,9 +106,8 @@ const meta = {
   },
   args: { layout: 'single', from: 0, to: 0, fill: false, exact: false, expected: 'below' },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) } },
-  play: async ({ args, canvasElement }) => {
+  play: async ({ args }) => {
     await place(args);
-    passed(canvasElement);
   },
 } satisfies Meta<typeof PlacementWall>;
 export default meta;
@@ -122,10 +117,9 @@ type Story = StoryObj<typeof meta>;
  *  spilling over the neighbor under the source. */
 export const BelowOverNeighbor: Story = {
   args: { layout: 'source-over-peer', from: 0, to: 1, expected: 'below' },
-  play: async ({ args, canvasElement }) => {
+  play: async ({ args }) => {
     const { box, pane } = await place(args);
     expect(box.bottom).toBeGreaterThan(pane.bottom);
-    passed(canvasElement);
   },
 };
 
@@ -141,10 +135,9 @@ export const Side: Story = { args: { layout: 'three-columns', from: 0, to: 1, ex
  *  side beside it has the most room, so it squishes there to the window's height. */
 export const SquishedBeside: Story = {
   args: { layout: 'two-columns', from: 0, to: 1, fill: true, exact: true, expected: 'squish-right' },
-  play: async ({ args, canvasElement }) => {
+  play: async ({ args }) => {
     const { box } = await place(args);
     expect(box.height).toBeGreaterThan(window.innerHeight / 2);
-    passed(canvasElement);
   },
 };
 
@@ -158,7 +151,7 @@ export const Overlay: Story = { args: { layout: 'single', from: 0, to: 1, fill: 
  *  editor widens past the pane and its line to show every control whole. */
 export const NarrowPane: Story = {
   args: { layout: 'narrow-source', from: 0, to: 0, expected: 'below' },
-  play: async ({ args, canvasElement }) => {
+  play: async ({ args }) => {
     const { box, pane } = await place(args);
     expect(box.width).toBeGreaterThan(pane.width);
     const shown = Array.from(editor()!.querySelectorAll('button')).filter((b) => !b.closest('[inert]'));
@@ -172,6 +165,5 @@ export const NarrowPane: Story = {
     }
     // No scope or format scrolled out of its segment.
     for (const segment of new Set(options.map((b) => b.parentElement!))) expect(segment.scrollWidth).toBeLessThanOrEqual(segment.clientWidth);
-    passed(canvasElement);
   },
 };

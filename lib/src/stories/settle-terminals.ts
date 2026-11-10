@@ -10,13 +10,13 @@ export const TODO_SPOTLIGHT_HELD_CLASS = '[&_.todo-spotlight]:!animate-none [&_.
 const DEFAULT_TIMEOUT_MS = 4000;
 
 /**
- * A Chromatic readiness gate for terminal-bearing stories.
+ * An Argos readiness gate for terminal-bearing stories.
  *
  * The FakePty adapter emits scenario data on a `setTimeout` (even `flattenScenario`'s
  * "instant" output is a `setTimeout(0)`), and xterm then parses and paints on its own
  * async schedule. A story with no `play` is snapshotted the moment React finishes
  * rendering — before that write lands — so the terminal is captured mid-paint (a
- * partial prompt like `user@dormo`). Chromatic awaits a story's `play` function, so
+ * partial prompt like `user@dormo`). Argos awaits a story's `play` function, so
  * awaiting this in `play` holds the snapshot until every visible terminal has written
  * its content and painted a settled frame.
  *
@@ -33,11 +33,11 @@ export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<vo
     return terms.length > 0 && terms.every(terminalHasContent);
   };
   // Unlike the gates below, `settled` is not monotonic: a terminal that mounts
-  // during `waitForCondition`'s trailing paint frames flips it back to false. So
+  // during `pollUntil`'s trailing paint frames flips it back to false. So
   // re-poll until it holds after those frames, within the one budget.
   const deadline = performance.now() + (opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   do {
-    await waitForCondition(settled, { timeoutMs: Math.max(0, deadline - performance.now()) });
+    await pollUntil(settled, { timeoutMs: Math.max(0, deadline - performance.now()) });
   } while (!settled() && performance.now() < deadline);
   if (!settled()) {
     const terms = liveTerminals();
@@ -68,7 +68,7 @@ export async function settleTerminalContext(opts?: { timeoutMs?: number }): Prom
  */
 export async function waitForPrimedState(opts?: { timeoutMs?: number }): Promise<void> {
   const primed = () => document.documentElement.dataset.storyPrimed === 'true';
-  await waitForCondition(primed, opts);
+  await pollUntil(primed, opts);
   if (!primed()) throw new Error('story state was never primed');
 }
 
@@ -96,7 +96,7 @@ export async function requireElement<T extends Element = HTMLElement>(
     const all = [...document.querySelectorAll<T>(selector)];
     return all.find((candidate) => visibleArea(candidate) > 0) ?? all[0] ?? null;
   };
-  await waitForCondition(() => {
+  await pollUntil(() => {
     const el = find();
     return !!el && visibleArea(el) > 0;
   }, opts);
@@ -154,20 +154,35 @@ function containsFixed(style: CSSStyleDeclaration): boolean {
 
 /**
  * Wait until `predicate()` is true (bounded by `timeoutMs`), then a couple of paint
- * frames so whatever it gates has rendered. The primitive behind `settleTerminals`,
- * and the direct tool for stories that reveal content asynchronously *after* the
+ * frames so whatever it gates has rendered. The tool for stories that reveal
+ * content asynchronously *after* the
  * terminal paints — e.g. a programmatic selection overlay applied on the story's own
- * timer, chained after `settleTerminals` so Chromatic never captures a painted
+ * timer, chained after `settleTerminals` so Argos never captures a painted
  * terminal that is still missing its overlay.
  *
- * Robustness rules (a hanging gate is worse than none — it stalls Chromatic to its
+ * Throws if `predicate()` is still false after those frames, with `message()` when
+ * given, so a state that never arrives fails the story instead of being captured.
+ */
+export async function waitForCondition(
+  predicate: () => boolean,
+  { timeoutMs = DEFAULT_TIMEOUT_MS, message }: { timeoutMs?: number; message?: () => string } = {},
+): Promise<void> {
+  await pollUntil(predicate, { timeoutMs });
+  if (!predicate()) throw new Error(message?.() ?? `condition never held within ${timeoutMs} ms: ${predicate}`);
+}
+
+/**
+ * `waitForCondition` without the throw, for a gate that re-checks with its own
+ * message or loops on a predicate that can flip back.
+ *
+ * Robustness rules (a hanging gate is worse than none — it stalls the snapshot run to its
  * own timeout):
  *  - The poll clock is `setTimeout`, never `requestAnimationFrame` alone: rAF is
  *    fully paused in a hidden/backgrounded tab, so an rAF-only wait can hang forever.
  *  - Every wait is bounded: the poll by `timeoutMs`, each paint wait by its own
  *    fallback timer, so the returned promise always resolves.
  */
-export async function waitForCondition(
+async function pollUntil(
   predicate: () => boolean,
   { timeoutMs = DEFAULT_TIMEOUT_MS }: { timeoutMs?: number } = {},
 ): Promise<void> {

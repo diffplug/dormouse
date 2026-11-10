@@ -9,6 +9,7 @@ vi.mock('../../lib/themes', () => ({
   addInstalledTheme: vi.fn(),
   applyTheme: vi.fn(),
   fetchExtensionThemes: vi.fn(),
+  getBundledThemes: vi.fn(() => [{ id: 'vscode.theme-monokai.monokai' }]),
   getInstalledThemes: vi.fn(() => []),
   removeInstalledTheme: vi.fn(),
   restoreActiveTheme: vi.fn(),
@@ -181,6 +182,42 @@ describe('ThemeStoreDialog', () => {
       });
 
       expect(container.textContent).toContain('Install failed: 503');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports an extension that has no color themes', async () => {
+    searchThemesMock.mockImplementationOnce(async () => results(extension('icons', 'Some Icon Theme')));
+    vi.mocked(fetchExtensionThemes).mockResolvedValueOnce([]);
+    const onThemesChanged = vi.fn();
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        root.render(<ThemeStoreDialog onClose={() => {}} onThemesChanged={onThemesChanged} />);
+      });
+      await search('icons');
+      await act(async () => { installButton('Some Icon Theme').click(); });
+
+      expect(container.textContent).toContain('This extension has no color themes');
+      expect(onThemesChanged).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('offers no Install for an extension whose themes are bundled', async () => {
+    searchThemesMock.mockImplementationOnce(async () => results({ ...extension('theme-monokai', 'Monokai Theme'), namespace: 'vscode' }));
+
+    vi.useFakeTimers();
+    try {
+      render();
+      await search('monokai');
+
+      expect(container.textContent).toContain('Monokai Theme');
+      expect(container.textContent).toContain('Built in');
+      expect([...container.querySelectorAll('button')].map((button) => button.textContent)).not.toContain('Install');
     } finally {
       vi.useRealTimers();
     }

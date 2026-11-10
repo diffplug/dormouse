@@ -33,6 +33,17 @@ describe("ChangelogRunner", () => {
     expect((runner as unknown as { detailOffset: number }).detailOffset).toBeGreaterThan(0);
   });
 
+  it("prints its header without markup", () => {
+    const adapter = new FakePtyAdapter();
+    let output = "";
+    adapter.onPtyData(({ data }) => { output += data; });
+    adapter.spawnPty("changelog", { cols: 80, rows: 24 });
+    new ChangelogRunner({ adapter, terminalId: "changelog", onExit: () => {} }).start();
+    const header = output.split("\r\n").find((line) => line.includes("Dormouse changelog"));
+    expect(header).toContain("q to quit");
+    expect(header).not.toContain("`");
+  });
+
   it("exits on a bare Escape", () => {
     const { onExit, runner } = createHarness();
     runner.handleInput("\x1b");

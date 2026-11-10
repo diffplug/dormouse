@@ -275,6 +275,9 @@ export class TutRunner implements InteractiveProgram {
   private startFlappyTicks(): void {
     if (this.flappyTimer) return;
     this.flappyTimer = setInterval(() => {
+      // Nothing moves before the first flap or after a crash, so the screen
+      // stays as the input or step that got it there drew it.
+      if (!this.flappy?.alive || !this.flappy.started) return;
       this.stepFlappy();
       this.render();
     }, FLAPPY_TICK_MS);

@@ -2,12 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { ShareIcon } from "@phosphor-icons/react";
 
 interface ShareUrlButtonProps {
-  path?: string;
+  path: string;
   title: string;
-  children?: React.ReactNode;
 }
 
-export function ShareUrlButton({ path, title, children }: ShareUrlButtonProps) {
+export function ShareUrlButton({ path, title }: ShareUrlButtonProps) {
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<number | null>(null);
 
@@ -20,9 +19,7 @@ export function ShareUrlButton({ path, title, children }: ShareUrlButtonProps) {
   }, []);
 
   async function handleShare() {
-    const url = path
-      ? new URL(`${path}${window.location.search}${window.location.hash}`, window.location.origin).href
-      : window.location.href;
+    const url = new URL(`${path}${window.location.search}${window.location.hash}`, window.location.origin).href;
     if (navigator.share) {
       try {
         await navigator.share({ url, title });
@@ -54,7 +51,6 @@ export function ShareUrlButton({ path, title, children }: ShareUrlButtonProps) {
       className="inline-flex items-center gap-1 align-[-0.2em] rounded text-[var(--color-text)]/90 transition duration-150 hover:scale-120 hover:text-[var(--color-text)]"
     >
       <ShareIcon size={22} weight="bold" />
-      {children}
       {copied && <span className="text-sm">copied!</span>}
     </button>
   );

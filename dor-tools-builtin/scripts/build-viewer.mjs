@@ -29,7 +29,6 @@ export async function buildViewerAssets(outdir) {
       entryPoints: { markdown: 'viewer/markdown.tsx' },
       outdir, bundle: true, format: 'esm', platform: 'browser', splitting: true, alias,
       target: 'es2022', minify: true, jsx: 'automatic', chunkNames: 'markdown-[hash]',
-      loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' }, assetNames: 'markdown-[name]-[hash]',
       define: { 'process.env.NODE_ENV': '"production"' },
     }),
     // The image editor: `image.js` and `image.css`, no chunks, and its PNG

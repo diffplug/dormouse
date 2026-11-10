@@ -181,12 +181,38 @@ export function labelledBody(node) {
   return node.raw.split('\n').slice(1).join('\n').replace(/\s+$/, '');
 }
 
-/** Prose paragraphs, blank-line separated, with single-newline unwrapping. */
+/**
+ * Prose paragraphs, blank-line separated, with single-newline unwrapping.
+ * Indented lines are literal text (a flag table, a command to copy), so each
+ * run of them comes back verbatim, dedented, as `{ pre }`.
+ */
 export function proseParagraphs(node) {
-  return node.raw
-    .split(/\n\s*\n/)
-    .map((p) => p.split('\n').map((l) => l.trim()).filter(Boolean).join(' ').trim())
-    .filter(Boolean);
+  const items = [];
+  for (const chunk of node.raw.split(/\n\s*\n/)) {
+    let run = [];
+    let indented = false;
+    const flush = () => {
+      const lines = run.filter((l) => l.trim());
+      run = [];
+      if (lines.length === 0) return;
+      if (!indented) {
+        items.push(lines.map((l) => l.trim()).join(' '));
+        return;
+      }
+      const indent = Math.min(...lines.map((l) => l.length - l.trimStart().length));
+      items.push({ pre: lines.map((l) => l.slice(indent).trimEnd()).join('\n') });
+    };
+    for (const line of chunk.split('\n')) {
+      const lineIndented = /^\s/.test(line);
+      if (line.trim() && lineIndented !== indented) {
+        flush();
+        indented = lineIndented;
+      }
+      run.push(line);
+    }
+    flush();
+  }
+  return items;
 }
 
 /** Command names from the root help's COMMANDS section, in listed order. */

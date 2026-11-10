@@ -13,13 +13,15 @@ import { ACCENT_TEXT_CLASS, BODY_TEXT_CLASS, MUTED_TEXT_CLASS, PRE_CLASS, TABLE_
 
 export type DefinitionGroup = { label: string; rows: { term: string; description: string }[] };
 export type LabelledBlock = { label: string; body: string };
+/** A reflowed paragraph, or an indented literal run kept line for line. */
+export type ProseItem = string | { pre: string };
 
 export type CommandSection = {
   id: string;
   title: string;
   invocation: string;
   usage: string[];
-  prose: string[];
+  prose: ProseItem[];
   definitions: DefinitionGroup[];
   blocks: LabelledBlock[];
   raw: string;
@@ -55,10 +57,14 @@ export default function DorCommandReference({
         </pre>
       )}
 
-      {section.prose.map((paragraph, i) => (
+      {section.prose.map((paragraph, i) => typeof paragraph === "string" ? (
         <p key={i} className={`mb-4 ${BODY_TEXT_CLASS}`}>
           {paragraph}
         </p>
+      ) : (
+        <pre key={i} className={`${PRE_CLASS} mb-4`}>
+          <code>{paragraph.pre}</code>
+        </pre>
       ))}
 
       {section.definitions.map((group, i) => (

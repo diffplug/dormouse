@@ -10,6 +10,7 @@ import type {
 } from '../remote/client/remote-adapter';
 import { installRemoteAdapter } from '../remote/pocket-app/remote-wall';
 import { disposeAllSessions, getTerminalInstance } from '../lib/terminal-registry';
+import { getPlatformOrNull, setPlatform, type PlatformAdapter } from '../lib/platform';
 import { settleTerminals } from './settle-terminals';
 
 // The adapter decodes `terminal.data` as base64url UTF-8, so encode splash text
@@ -114,7 +115,11 @@ class FakeRemoteClient implements RemoteAdapterClient {
 
 function PocketWallStory({ snapshot = SINGLE_SESSION }: { snapshot?: DirectoryEntry[] }) {
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
+  // The preview's adapter, put back on unmount: the stories after this one in
+  // the same preview run on it.
+  const previousRef = useRef<PlatformAdapter | null>(null);
   if (!adapterRef.current) {
+    previousRef.current = getPlatformOrNull();
     // `mountRemoteWall` minus its `hello`, and without awaiting the start.
     const adapter = installRemoteAdapter(new FakeRemoteClient(snapshot));
     void adapter.init();
@@ -123,9 +128,11 @@ function PocketWallStory({ snapshot = SINGLE_SESSION }: { snapshot?: DirectoryEn
 
   useEffect(() => {
     const adapter = adapterRef.current;
+    const previous = previousRef.current;
     return () => {
       void adapter?.dispose();
       disposeAllSessions();
+      if (previous) setPlatform(previous);
     };
   }, []);
 

@@ -142,7 +142,10 @@ const COPY_PASTE_SECTION: Section = {
 
 const POCKET_COPY_PASTE_SECTION: Section = {
   ...COPY_PASTE_SECTION,
-  items: COPY_PASTE_SECTION.items.filter((item) => item.id !== 'cp-override'),
+  // The hint names the prose below it, which Pocket replaces.
+  items: COPY_PASTE_SECTION.items
+    .filter((item) => item.id !== 'cp-override')
+    .map((item) => item.id === 'cp-select' ? { ...item, hint: 'The paragraph below is a good example — "`Select` mode helps..."' } : item),
   prose: [
     '`Select` mode helps you copy text out of a TUI, while `Gestures` mode makes it easy to enter common keystrokes. `Mouse` mode turns your taps into clicks, but it is only available when the running program is capturing mouse input.',
   ],

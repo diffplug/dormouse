@@ -74,6 +74,20 @@ const snapProgress = (p: number, eps = 0.005): number =>
   p < eps ? 0 : p > 1 - eps ? 1 : p;
 const useClientLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
+/**
+ * Keeps the page hidden until the hero's first layout and poster are ready,
+ * without blanking it for a visit whose JavaScript is off or fails: only a
+ * script marks the page pending, and the prerender's inline script opens it
+ * after 3 s whatever happens.
+ */
+const HERO_GATE_ATTR = "data-hero-gate";
+const HERO_GATE_STYLE = `html[${HERO_GATE_ATTR}="pending"] .hero-paint-gate { visibility: hidden; }`;
+const HERO_GATE_SCRIPT = `(() => {
+  const root = document.documentElement;
+  root.setAttribute('${HERO_GATE_ATTR}', 'pending');
+  setTimeout(() => root.setAttribute('${HERO_GATE_ATTR}', 'open'), 3000);
+})();`;
+
 const downloadAccentStyle = {
   "--download-accent": "oklch(72% 0.15 72)",
   "--download-accent-strong": "oklch(77% 0.16 72)",
@@ -199,10 +213,24 @@ function FeatureVideo({
   className?: string;
   variant?: keyof typeof FEATURE_VIDEO_VARIANTS;
 }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  // Plays only within a screen of the viewport: `autoPlay` would fetch every
+  // feature video on arrival, before the reader has scrolled past the hero.
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) video.play().catch(() => {});
+      else video.pause();
+    }, { rootMargin: "100% 0px" });
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, []);
   return (
     <video
+      ref={ref}
       src={src}
-      autoPlay
+      preload="none"
       loop
       muted
       playsInline
@@ -314,6 +342,15 @@ export default function Home() {
   const [heroLayoutReady, setHeroLayoutReady] = useState(false);
   const [showHeroPoster, setShowHeroPoster] = useState(true);
   const heroCanPaint = heroPosterReady && heroLayoutReady;
+
+  // The prerender's inline script has already marked the page pending (or
+  // timed out and opened it); a client-side navigation here marks it now.
+  useClientLayoutEffect(() => {
+    const root = document.documentElement;
+    if (heroCanPaint) root.setAttribute(HERO_GATE_ATTR, "open");
+    else if (!root.hasAttribute(HERO_GATE_ATTR)) root.setAttribute(HERO_GATE_ATTR, "pending");
+  }, [heroCanPaint]);
+  useEffect(() => () => document.documentElement.removeAttribute(HERO_GATE_ATTR), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -725,7 +762,9 @@ export default function Home() {
   }, []);
 
   return (
-    <div style={{ visibility: heroCanPaint ? "visible" : "hidden" }}>
+    <div className="hero-paint-gate">
+      <style>{HERO_GATE_STYLE}</style>
+      <script dangerouslySetInnerHTML={{ __html: HERO_GATE_SCRIPT }} />
       <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} prelaunch />
 
       {/* ── Fixed video layer — bottom-anchored, scrubs for the full runway ── */}

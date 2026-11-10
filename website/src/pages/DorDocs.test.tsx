@@ -9,6 +9,12 @@ const headingLevel = new Map(
   [...markup.matchAll(/<h([1-6]) id="([^"]+)"/g)].map(([, level, id]) => [id, Number(level)]),
 );
 
+describe("dor CLI reference prose", () => {
+  it("keeps an indented command in help prose as a block of its own", () => {
+    expect(markup).toMatch(/<pre[^>]*><code>npm i -g agent-browser<\/code><\/pre>/);
+  });
+});
+
 describe("dor CLI reference outline", () => {
   it("renders each command one heading level below the entry that nests it", () => {
     // A reader on a screen reader navigates the outline, not the rail. If the

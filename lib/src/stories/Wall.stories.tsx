@@ -41,8 +41,7 @@ const doorCount = () => document.querySelectorAll('[data-door-id]').length;
  * begin with different shapes.
  */
 async function expectCount(count: () => number, want: number, what: string) {
-  await waitForCondition(() => count() === want);
-  if (count() !== want) throw new Error(`expected ${want} ${what}, saw ${count()}`);
+  await waitForCondition(() => count() === want, { message: () => `expected ${want} ${what}, saw ${count()}` });
 }
 
 /**

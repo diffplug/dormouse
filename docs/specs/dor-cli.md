@@ -29,7 +29,7 @@ The CLI also reads `DORMOUSE_AGENT_BROWSER_BIN` and `DORMOUSE_PLAYWRIGHT_BIN`, t
 
 **`dor.cmd` (and any `.cmd`/`.bat`) must be checked out with CRLF** — cmd.exe misparses LF-only batch files (rationale), and staging copies bytes verbatim. `.gitattributes` pins it (`*.cmd text eol=crlf`; the POSIX launcher `eol=lf`).
 
-**Must keep `dor/src/cli-core.ts`, every command module, and the other browser-shared CLI modules free of Node runtime dependencies**, even though the CLI package uses Node types: Node reaches the CLI only through the `CliHost` that `dor/src/node-host.ts` supplies, which the website playground replaces. `dor/test/browser-shared.test.mjs` bundles their dependency graphs for the browser. (rationale)
+**Must keep `dor/src/cli-core.ts`, its command modules, and the other browser-shared CLI modules free of Node runtime dependencies**, even though the CLI package uses Node types: Node reaches the CLI only through the `CliHost` that `dor/src/node-host.ts` supplies, which the website playground replaces. `dor/test/browser-shared.test.mjs` bundles their dependency graphs for the browser. (rationale)
 
 ### Git Bash PATH survival
 
@@ -249,7 +249,7 @@ Source of truth: `dor/src/commands/reopen.ts`, `handleReopenControl` in `lib/src
 
 ## Browser Open Target Resolution
 
-`dor agent-browser open <target>` and `dor iframe <target>` accept, wherever they take an absolute URL, a terminal **Surface handle** ([Handle Model](#handle-model)) or a schemeless **`host:port`** (including `:port`). `host:port` inference is a string rewrite and works outside Dormouse; a Surface handle requires a live control endpoint.
+`dor agent-browser open <target>` and `dor iframe <target>` accept, wherever they take an absolute URL, a terminal **`surface:` handle** ([Handle Model](#handle-model)) or a schemeless **`host:port`** (including `:port`). `host:port` inference is a string rewrite and works outside Dormouse; a Surface handle requires a live control endpoint.
 
 **The explicit port, never the hostname, is the signal for the `http` default** (rationale). An explicit scheme is always honored. This overrides `agent-browser`'s own `https` default for a bare `host:port`. **`dor iframe` rejects** an input that is neither an http(s) URL nor a `host:port`, including a purely numeric "host" like `800:600` (rationale); `dor agent-browser` forwards any such target to the provider unchanged.
 

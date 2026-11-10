@@ -132,7 +132,7 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 
 **Must describe the Hosted Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains.
 
-**Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. `/hosted`'s Hosted Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
+**Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. `/hosted`'s Hosted Relay section discloses metadata and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
 **Must also link it from** Pocket marketing/tutorial, self-host docs, and the settings where an account has no plan (`docs/specs/alert.md` -> "Settings dialog"); `linkedFrom` owns the rest.
 
@@ -232,7 +232,7 @@ Source of truth: `buildSecurity`, `gatherGuarantees`, `SECURITY_AUDIENCES` (spec
 
 **Must generate public references from their canonical sources at build time.** `generateDocs` owns the inputs; `PUBLISHED_PAGES` owns which results are emitted. **Must write a separate gitignored `website/src/data/docs.<page>.json` per published result, never one combined module** (rationale).
 
-**Must parse and validate the unpublished product guide and sync its media without emitting its data.** Reserved: **Scope: guide-page-return** restores that write. **Must strip `BUILD_ONLY_FIELDS` from emitted results while retaining them in memory for tests and public-doc lint.**
+**Must parse and validate the unpublished product guide and sync its media without emitting its data.** Reserved: **Scope: guide-page-return** restores that write. **Must strip `BUILD_ONLY_FIELDS` and `PAGE_BUILD_ONLY_FIELDS` from emitted results while retaining them in memory for tests and public-doc lint.**
 
 **Never import Node-based Dor command implementations into browser pages.**
 

@@ -291,6 +291,17 @@ describe("PlaygroundViewers", () => {
     expect(await viewer.handle(get("list", "?dir=..%2F.."))).toMatchObject({ status: 403 });
   });
 
+  it("keeps the folder page's view state for a reload, as the Node viewer does", async () => {
+    const { open } = harness();
+    const viewer = open("__view-folder", ["."], PLAYGROUND_CWD);
+    const empty = await viewer.handle(get("state"));
+    expect(empty).toMatchObject({ status: 200 });
+    expect(JSON.parse(await text(empty))).toBeNull();
+    const view = { expanded: ["src"], selected: "src/osc.ts", showIgnored: true };
+    expect(JSON.parse(await text(await viewer.handle(post("state", view))))).toEqual({ ok: true });
+    expect(JSON.parse(await text(await viewer.handle(get("state"))))).toEqual(view);
+  });
+
   it("answers nothing for a token it does not hold, or once closed", async () => {
     const { viewers, open } = harness();
     const viewer = open("__view-error", [README, "gone"]);

@@ -39,7 +39,7 @@ interface ChangelogData {
 }
 
 const RELEASES = (changelog as ChangelogData).releases;
-const INLINE_TOKEN_RE = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)/g;
+const INLINE_TOKEN_RE = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|\\([\\`*_<>[\]])/g;
 const DATE_FORMATTER = new Intl.DateTimeFormat("en", {
   month: "long",
   day: "numeric",
@@ -57,7 +57,8 @@ function formatDate(date: string | null) {
   return DATE_FORMATTER.format(new Date(`${date}T00:00:00Z`));
 }
 
-function renderInlineMarkdown(text: string) {
+/** The inline Markdown CHANGELOG.md uses: code spans, links, bold, and backslash escapes. */
+export function renderInlineMarkdown(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let cursor = 0;
   let key = 0;
@@ -88,6 +89,10 @@ function renderInlineMarkdown(text: string) {
           {match[2]}
         </a>,
       );
+    } else if (match[4]) {
+      nodes.push(<strong key={`strong-${key}`}>{renderInlineMarkdown(match[4])}</strong>);
+    } else if (match[5]) {
+      nodes.push(match[5]);
     }
 
     cursor = match.index + match[0].length;

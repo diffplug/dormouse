@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
-import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
+import { readRepoFile, repoRoot, SHIPPED_DIRS, trackedFiles } from './lint-kit.mjs';
 import { workspaceDeps, workspacePackages } from './workspace-packages.mjs';
 import { WORKSPACE_SOURCES } from './workspace-sources.mjs';
 
@@ -93,4 +93,63 @@ test('no package.json script builds an internal package dist by name; build-work
     }
   }
   assert.deepEqual(offenders, [], 'call `node ../scripts/build-workspace-deps.mjs` instead');
+});
+
+// pnpm skips `pre<name>` (and `post<name>`) when the body of `<name>` contains
+// that hook's name anywhere, a guard against a script that calls its own hook.
+// A path is enough to trip it: `rm -rf dist/node-pty/prebuilds` in a `build`
+// script silently drops `prebuild`, and with it the workspace `dist` builds.
+test('no script body contains the name of its own pre or post hook', () => {
+  const manifests = [{ dir: '.', manifest: JSON.parse(readRepoFile('package.json')) }, ...packages];
+  const skipped = manifests.flatMap(({ dir, manifest }) =>
+    Object.entries(manifest.scripts ?? {}).flatMap(([name, body]) =>
+      [`pre${name}`, `post${name}`]
+        .filter((hook) => manifest.scripts[hook] && body.includes(hook))
+        .map((hook) => `${dir}/package.json: "${name}" contains "${hook}", so pnpm never runs that hook`),
+    ),
+  );
+  assert.deepEqual(skipped, []);
+});
+
+test('every internal package source is in the shipped scope the network lints scan', () => {
+  const unscanned = Object.values(WORKSPACE_SOURCES).filter((dir) => !SHIPPED_DIRS.some((shipped) => `${dir}/`.startsWith(shipped)));
+  assert.deepEqual(unscanned, []);
+});
+
+test('every package whose tests run in jsdom declares jsdom', () => {
+  // vitest loads jsdom as an optional peer, so a package that omits it passes
+  // only while a sibling happens to declare it.
+  const missing = new Set();
+  for (const file of trackedFiles().filter((f) => /\.(?:[cm]?[jt]sx?)$/.test(f))) {
+    const text = readRepoFile(file);
+    if (!/@vitest-environment jsdom|environment:\s*['"]jsdom['"]/.test(text)) continue;
+    const pkg = owner(file);
+    const { devDependencies = {}, dependencies = {} } = pkg?.manifest ?? {};
+    if (pkg && !('jsdom' in devDependencies || 'jsdom' in dependencies)) missing.add(pkg.dir);
+  }
+  assert.deepEqual([...missing], []);
+});
+
+test('every package with TypeScript importing a node: builtin declares @types/node', () => {
+  // Typings that arrive through another package's reference follow its `*`
+  // range, not the runtime-aligned one this repository pins.
+  const missing = new Set();
+  for (const file of trackedFiles().filter((f) => /\.(?:[cm]?tsx?)$/.test(f))) {
+    if (!/from\s+['"]node:/.test(readRepoFile(file))) continue;
+    const pkg = owner(file);
+    if (pkg && !('@types/node' in (pkg.manifest.devDependencies ?? {}) || '@types/node' in (pkg.manifest.dependencies ?? {}))) missing.add(pkg.dir);
+  }
+  assert.deepEqual([...missing], []);
+});
+
+test('no workspace manifest declares an install lifecycle script', () => {
+  // pnpm runs a project's own lifecycle scripts in the platform shell, which is
+  // cmd.exe on Windows, so a POSIX one-liner there fails `pnpm install`.
+  const offenders = [];
+  for (const { dir, manifest } of [...packages, { dir: '.', manifest: JSON.parse(readRepoFile('package.json')) }]) {
+    for (const script of ['preinstall', 'install', 'postinstall', 'prepare']) {
+      if (manifest.scripts?.[script] !== undefined) offenders.push(`${dir}: ${script}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
 });

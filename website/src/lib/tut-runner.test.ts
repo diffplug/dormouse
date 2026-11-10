@@ -288,6 +288,8 @@ describe("TutRunner snapshots", () => {
     expect(lastFrame()).toContain('Tap "Select" to enable drag-to-copy');
     expect(lastFrame()).toContain("\x1b[33m●");
     expect(lastFrame()).not.toContain("Click the cursor icon");
+    // The hint quotes the paragraph Pocket shows, not the desktop's.
+    expect(lastFrame()).not.toContain("Some terminal programs");
 
     setPocketTouchMode("selection");
     expect(lastFrame()).toContain("Select is active");
@@ -379,6 +381,33 @@ describe("TutRunner snapshots", () => {
     expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).toContain("[High score: 7]");
     dispose();
+  });
+
+  it("draws Flappy Term only while the bird is in flight", () => {
+    vi.useFakeTimers();
+    try {
+      const allItemIds = SECTIONS.flatMap((section) => section.items.map((i) => i.id));
+      const { adapter, sendKeys, lastFrame, dispose } = mountRunner(allItemIds);
+      let writes = 0;
+      adapter.onPtyData(() => { writes += 1; });
+      sendKeys(extraRow("flappy") + ENTER);
+
+      writes = 0;
+      vi.advanceTimersByTime(1000);
+      expect(writes).toBe(0);
+
+      sendKeys(" ");
+      vi.advanceTimersByTime(30_000);
+      expect(writes).toBeGreaterThan(0);
+      expect(lastFrame()).toContain("GAME OVER");
+
+      writes = 0;
+      vi.advanceTimersByTime(1000);
+      expect(writes).toBe(0);
+      dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("opens Flappy Term, shows the start hint, and exits back to the menu", () => {

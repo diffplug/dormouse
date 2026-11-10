@@ -259,10 +259,12 @@ export async function startCheckout(plan: Plan, price: number, ref: string | nul
   }
   leaveFor(((await response.json()) as { url: string }).url, BILLING_UNAVAILABLE);
 }
+/** A confirm the server answered with a refusal, which asking again would only repeat. */
+export class CheckoutRefusedError extends Error {}
 /** Confirms the checkout Stripe returned from, answering the plan it bought. */
 export async function confirmCheckout(checkout: string): Promise<BillingSummary> {
   const response = await billing("/confirm", sendJson("POST", { checkout }));
-  if (!response.ok) throw await refused(response);
+  if (!response.ok) throw new CheckoutRefusedError((await refused(response)).message);
   return (await response.json()) as BillingSummary;
 }
 /** Sends this tab to Stripe's billing portal for this account's subscription. */

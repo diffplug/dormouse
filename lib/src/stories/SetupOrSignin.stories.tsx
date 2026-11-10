@@ -39,7 +39,7 @@ type Story = StoryObj<typeof SetupOrSignin>;
 // passkey syncs and a fresh browser may already hold one.
 export const FirstRun: Story = {};
 
-// Canonical Pocket default theme, pinned so Chromatic captures the dark shell.
+// Canonical Pocket default theme, pinned so Argos captures the dark shell.
 export const FirstRunKimbieDark: Story = {
   globals: { theme: 'Kimbie Dark' },
 };

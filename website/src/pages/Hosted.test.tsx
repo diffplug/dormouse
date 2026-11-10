@@ -11,6 +11,11 @@ vi.mock("dormouse-lib/site/DocsThemeControl", () => ({ default: () => null }));
 vi.mock("dormouse-lib/site/docs-paint", () => ({ useDocsThemedBody: () => {}, DOCS_HEADER_STYLE: {}, DOCS_PAINT_PROFILE: {} }));
 const analytics = vi.hoisted(() => ({ trackPageview: vi.fn(), trackEvent: vi.fn() }));
 vi.mock("../lib/site-analytics", () => analytics);
+// Not the real cap, so the page is seen to state the enforced constant.
+vi.mock("../../../hosted/server/policy-constants", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../hosted/server/policy-constants")>(),
+  VOICE_DAILY_CAP: 321,
+}));
 // `CHECKOUT_OPEN` is committed false; the open page is tested by flipping it here.
 const checkout = vi.hoisted(() => ({ open: false }));
 vi.mock("../lib/hosted-pricing", async (importOriginal) => ({
@@ -98,6 +103,10 @@ describe("what the Hosted page prerenders", () => {
     // review is the one qualifier, and it is about the review, not the service.
     expect(markup).not.toMatch(/coming soon|once it ships|when it ships|ships after|not (open )?yet|will run|design target/i);
     expect(markup.match(/Included with any plan/g)).toHaveLength(2);
+  });
+
+  it("states the voice cap the voice Worker enforces", () => {
+    expect(markup).toContain("Natural Voice allows 321 requests per subscriber per UTC day");
   });
 
   it("states the refund beside every buy button", () => {

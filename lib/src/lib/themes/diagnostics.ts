@@ -293,6 +293,11 @@ export function captureThemeDiagnostics(): ThemeDiagnosticSnapshot {
   const applied = getAppliedThemeSnapshot();
   const visibleVars = captureVisibleVars(styles, applied);
   const resolver = traceThemeVars(traceInputFromVisibleVars(visibleVars, applied), themeKind);
+  // `applyTheme` paints more than the resolver gives (selection backgrounds
+  // flattened to opaque), so report the value the page actually carries.
+  const resolverTraces = applied
+    ? resolver.traces.map((trace) => ({ ...trace, resolvedValue: applied.resolvedVars[trace.name] ?? trace.resolvedValue }))
+    : resolver.traces;
   const dynamicPalette = captureDynamicPalette(styles);
   const terminalColors = captureTerminalColors(styles);
   const semanticTokens = captureSemanticTokens(styles, dynamicPalette);
@@ -302,7 +307,7 @@ export function captureThemeDiagnostics(): ThemeDiagnosticSnapshot {
     themeKind,
     activeTheme: activeThemeMetadata(applied),
     visibleVars,
-    resolverTraces: resolver.traces,
+    resolverTraces,
     semanticTokens,
     terminalColors,
     dynamicPalette,

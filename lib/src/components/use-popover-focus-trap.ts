@@ -6,9 +6,9 @@ import { isComposingKey } from '../lib/dom';
 export const POPOVER_FOCUSABLE_SELECTOR = 'button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Manages focus trapping, Escape-to-close, and click-outside-to-close for
- * portal-based popovers. Scopes keyboard handling to the popover's DOM subtree
- * so Tab/Escape don't leak to the rest of the app.
+ * Manages focus trapping and Escape-to-close for portal-based popovers.
+ * Scopes keyboard handling to the popover's DOM subtree so Tab/Escape don't
+ * leak to the rest of the app.
  */
 export function usePopoverFocusTrap(
   ref: React.RefObject<HTMLElement | null>,
@@ -17,10 +17,6 @@ export function usePopoverFocusTrap(
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-
-    const handleMouseDown = (e: MouseEvent) => {
-      if (!el.contains(e.target as Node)) onClose();
-    };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle keys when focus is inside the popover
@@ -41,10 +37,8 @@ export function usePopoverFocusTrap(
       );
     };
 
-    window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [ref, onClose]);
