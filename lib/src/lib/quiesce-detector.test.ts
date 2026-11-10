@@ -166,6 +166,18 @@ describe('QuiesceDetector', () => {
     expect(settled).not.toHaveBeenCalled();
   });
 
+  it('gives a silence timer that ran late a full confirmation window', () => {
+    const { monitor, settled } = createMonitor();
+    driveMonitorToBusy(monitor);
+    // A host suspended with its PTYs: the clock jumps, then the timer fires.
+    vi.setSystemTime(Date.now() + 218_342);
+    vi.advanceTimersByTime(2_001);
+    expect(monitor.getStatus()).toBe('MIGHT_NEED_ATTENTION');
+    monitor.onData();
+    expect(settled).not.toHaveBeenCalled();
+    expect(monitor.getStatus()).toBe('BUSY');
+  });
+
   it('publishes stale history expiring on arrival, since its owner publishes nothing after a gated chunk', () => {
     const { monitor, changes } = createMonitor();
     monitor.onData();

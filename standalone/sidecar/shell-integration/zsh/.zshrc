@@ -34,17 +34,17 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
 
   autoload -Uz add-zsh-hook
 
-  # The three byte sequences that end an OSC string, and therefore the three
-  # that no field of ours may contain raw: BEL, ESC (which begins ST, "ESC \\"),
-  # and the C1 ST U+009C. The last is held as its UTF-8 bytes because that is
-  # how it reaches us from a filename, and because [[:cntrl:]] does not cover it
-  # under LC_ALL=C — verified, not assumed.
+  # The byte sequences that end (or, for CAN and SUB, abort) an OSC string, and
+  # therefore those no field of ours may contain raw: BEL, CAN, SUB, ESC (which
+  # begins ST, "ESC \\"), and the C1 ST U+009C. The last is held as its UTF-8
+  # bytes because that is how it reaches us from a filename, and because
+  # [[:cntrl:]] does not cover it under LC_ALL=C — verified, not assumed.
   __dormouse_633_c1st=$'\302\234'
 
   # Escape a value for the E command field, leaving the result in
   # __dormouse_633_out. Backslash and semicolon are escaped because the parser
   # splits on the first raw ';' then decodes \\ and \xNN; newlines/CR keep the
-  # sequence single-line; BEL/ESC/C1-ST are the OSC terminators. Escaping costs
+  # sequence single-line; BEL/CAN/SUB/ESC/C1-ST end an OSC string. Escaping costs
   # nothing here because the parser decodes \xNN back.
   # Why terminators must not survive: docs/specs/terminal-state.md -> "Shell-integration injection".
   #
@@ -57,6 +57,8 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
     value=${value//$'\n'/\\x0a}
     value=${value//$'\r'/\\x0d}
     value=${value//$'\a'/\\x07}
+    value=${value//$'\x18'/\\x18}
+    value=${value//$'\x1a'/\\x1a}
     value=${value//$'\e'/\\x1b}
     value=${value//"$__dormouse_633_c1st"/\\x9c}
     __dormouse_633_out=$value

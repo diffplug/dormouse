@@ -88,7 +88,24 @@ describe('crossing the strip edge', () => {
   it('reports leaving even on a move that also reorders', () => {
     // The reorder scan returns as soon as it moves a tab, and the host still
     // has to hear that the pointer is outside.
+    drag.dispose();
+    const tabs = new Map(['w1', 'w2'].map((id, index) => {
+      const tab = document.createElement('div');
+      tab.getBoundingClientRect = () => ({ left: index * 100, right: index * 100 + 100, width: 100 }) as DOMRect;
+      return [id, tab];
+    }));
+    const move = vi.fn();
+    drag = createWorkspaceStripDrag({
+      order: () => ['w1', 'w2'],
+      tabElement: (id) => tabs.get(id) ?? null,
+      stripRects: () => [STRIP, PINNED],
+      move,
+      setDragging: () => {},
+      onDragOutsideWindow: outside,
+    });
+    drag.press('w1', pointer('pointerdown', 10, 10));
     window.dispatchEvent(pointer('pointermove', 900, 300));
+    expect(move).toHaveBeenCalledWith('w1', 1);
     expect(outside).toHaveBeenCalledTimes(1);
   });
 });

@@ -170,7 +170,6 @@ export class QuiesceDetector {
 
   private schedule(kind: DetectorTimer, delay: number): void {
     clearTimeout(this.timers.get(kind));
-    const dueAt = Date.now() + delay;
     const timer = setTimeout(() => {
       this.timers.delete(kind);
       if (this.disposed) return;
@@ -186,8 +185,10 @@ export class QuiesceDetector {
         case 'mightNeedAttention':
           if (this.status !== 'BUSY') break;
           this.setStatus('MIGHT_NEED_ATTENTION');
-          // Carry the original deadline through a callback that ran late.
-          this.schedule('settledConfirm', Math.max(0, dueAt + T_SETTLED_CONFIRM - Date.now()));
+          // A full window even when this callback ran late: the detector runs
+          // beside its PTYs, so a late callback means the program was
+          // suspended too, and its silence was no silence.
+          this.schedule('settledConfirm', T_SETTLED_CONFIRM);
           break;
         case 'settledConfirm':
           if (this.status !== 'MIGHT_NEED_ATTENTION') break;

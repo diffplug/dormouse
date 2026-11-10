@@ -15,10 +15,19 @@ const fsProbe = vi.hoisted(() => ({
   chmodFails: false,
   /** Stand in for a read that fails for a reason other than "no file yet". */
   readFileError: null as (Error & { code?: string }) | null,
+  /** Stand in for a temp write that fails, such as a full disk. */
+  tmpWriteError: null as (Error & { code?: string }) | null,
 }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:fs/promises')>();
+  const tmpWrite = async (): Promise<void> => {
+    if (fsProbe.tmpWriteError) throw fsProbe.tmpWriteError;
+    fsProbe.steps.push('write');
+    if (fsProbe.tmpWriteDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, fsProbe.tmpWriteDelayMs));
+    }
+  };
   return {
     ...real,
     chmod: async (path: string, mode: number) => {
@@ -30,13 +39,24 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       return real.readFile(path, options);
     },
     writeFile: async (path: string, data: never, options: never) => {
-      if (String(path).endsWith('.tmp')) {
-        fsProbe.steps.push('write');
-        if (fsProbe.tmpWriteDelayMs) {
-          await new Promise((resolve) => setTimeout(resolve, fsProbe.tmpWriteDelayMs));
-        }
-      }
+      if (String(path).endsWith('.tmp')) await tmpWrite();
       return real.writeFile(path, data, options);
+    },
+    // A durable write goes through a handle: its write and its flush.
+    open: async (path: string, flags: never, mode: never) => {
+      const handle = await real.open(path, flags, mode);
+      if (!String(path).endsWith('.tmp')) return handle;
+      return Object.assign(Object.create(handle) as typeof handle, {
+        writeFile: async (data: string) => {
+          await tmpWrite();
+          return handle.writeFile(data);
+        },
+        sync: async () => {
+          fsProbe.steps.push('sync');
+          return handle.sync();
+        },
+        close: () => handle.close(),
+      });
     },
     rename: async (from: string, to: string) => {
       fsProbe.steps.push('rename');
@@ -97,6 +117,7 @@ beforeEach(async () => {
   fsProbe.tmpWriteDelayMs = 0;
   fsProbe.chmodFails = false;
   fsProbe.readFileError = null;
+  fsProbe.tmpWriteError = null;
 });
 
 afterEach(async () => {
@@ -194,6 +215,25 @@ describe('FileBurrowStateStore', () => {
     expect(await reopened.loadAcl('burrow-1')).toHaveLength(1);
   });
 
+  it('never rewrites what another store on the same directory saved since', async () => {
+    // A second Dormouse on the same state directory: its revocation and its
+    // un-enrollment must survive this one's next save of the other slot.
+    const a = new FileBurrowStateStore(dir);
+    await a.saveEnrollment(ENROLLMENT);
+    await a.saveAcl('burrow-1', [aclRecord('burrow-1', 'client-1')]);
+    expect(await a.loadAcl('burrow-1')).toHaveLength(1);
+
+    const b = new FileBurrowStateStore(dir);
+    await b.saveAcl('burrow-1', [{ ...aclRecord('burrow-1', 'client-1'), revokedAt: 2000 }]);
+    await a.saveEnrollment({ ...ENROLLMENT, label: 'Renamed' });
+    expect((await new FileBurrowStateStore(dir).loadAcl('burrow-1'))[0]?.revokedAt).toBe(2000);
+    expect(await a.loadAcl('burrow-1')).toMatchObject([{ revokedAt: 2000 }]);
+
+    await b.clearEnrollment();
+    await a.saveAcl('burrow-2', [aclRecord('burrow-2', 'client-2')]);
+    expect(await new FileBurrowStateStore(dir).loadEnrollment()).toBeNull();
+  });
+
   // Skipped on Windows, and it has always failed there — CI runs this suite only on ubuntu, so nothing
   // caught it. A Unix mode is a silent no-op on Windows: `stat().mode` reports
   // a synthesized value that has nothing to do with what the ACL permits, so
@@ -269,7 +309,9 @@ describe('FileBurrowStateStore', () => {
       store.saveEnrollment(ENROLLMENT),
     ]);
 
-    expect(fsProbe.steps).toEqual(['write', 'rename', 'write', 'rename']);
+    // Each flushed before its rename: these records decide who is authorized,
+    // and a save reported done must survive a power loss.
+    expect(fsProbe.steps).toEqual(['write', 'sync', 'rename', 'write', 'sync', 'rename']);
     // And the file the last one left is whole, with both changes in it.
     const parsed = JSON.parse(await readFile(file(), 'utf8')) as {
       enrollment: BurrowEnrollment;
@@ -285,19 +327,15 @@ describe('FileBurrowStateStore', () => {
     // The chain must not wedge on a single unwritable moment, and the caller
     // still has to see the failure.
     const store = new FileBurrowStateStore(dir);
-    // Read the (absent) file first, so what fails below is the write: a read
-    // that fails for a reason other than ENOENT refuses to save at all, which
-    // is the case below rather than this one.
-    expect(await store.loadEnrollment()).toBeNull();
-    await rm(dir, { recursive: true, force: true });
-    const blocker = join(dir);
-    await writeFile(blocker, 'not a directory');
+    // What fails below is the write: a read that fails for a reason other than
+    // ENOENT refuses to save at all, which is the case below rather than this one.
+    fsProbe.tmpWriteError = Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
 
     await expect(store.saveEnrollment(ENROLLMENT)).rejects.toBeTruthy();
-    // A failed flush is not a successful in-memory save: a change reaches later
-    // reads only once its atomic rename has succeeded.
+    // A failed flush is not a successful save: a change reaches later reads
+    // only once its atomic rename has succeeded.
     expect(await store.loadEnrollment()).toBeNull();
-    await rm(blocker, { force: true });
+    fsProbe.tmpWriteError = null;
     await expect(store.saveEnrollment(ENROLLMENT)).resolves.toBeUndefined();
     expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
   });

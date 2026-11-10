@@ -521,7 +521,8 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
  * lost, and a window still booting — or torn out moments ago — is a legal drop
  * target (`docs/specs/standalone.md` → "Arrival queue"). The answer is not
  * consumed by the drain: a record leaves it only at `adopt_done` or
- * `adopt_failed`, so a list is current only until the next adoption settles.
+ * `adopt_failed`, so two drains at once would each walk a copy holding what
+ * the other settles. `initWorkspaceMoves` runs one at a time.
  */
 async function drainArrivals(): Promise<MovePayload[]> {
   try {

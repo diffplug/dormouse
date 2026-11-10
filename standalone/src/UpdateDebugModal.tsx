@@ -5,6 +5,7 @@ import {
   modalActionButton,
   modalReviewBlock,
 } from '../../lib/src/components/design';
+import { useDialogKeyboardOwner } from '../../lib/src/components/wall/wall-context';
 import { writeTextToClipboard } from 'dormouse-lib/lib/clipboard-write';
 import { openIssueSearch } from './updater';
 
@@ -22,6 +23,8 @@ interface UpdateDebugModalProps {
 export function UpdateDebugModal({ onClose, failure, body }: UpdateDebugModalProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
+  // Rendered in the Baseboard's notice slot, inside the Wall's lease provider.
+  useDialogKeyboardOwner(true);
 
   useEffect(() => {
     if (!copied) return;

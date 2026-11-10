@@ -57,6 +57,18 @@ describe('PTY manager lifetime and buffers', () => {
     expect(await answer).toEqual(ports);
   });
 
+  it('asks the child once for every cwd a save probes', async () => {
+    const { manager, child } = await startManager();
+    const answer = manager.getCwds(['pane-a', 'pane-b', 'pane-c']);
+    const request = child.send.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'getCwds', ids: ['pane-a', 'pane-b', 'pane-c'] });
+    const cwds = { 'pane-a': '/repo', 'pane-b': '/tmp', 'pane-c': null };
+    child.emit('message', { type: 'cwds', cwds: { 'pane-a': '/elsewhere' }, requestId: 'someone-else' });
+    child.emit('message', { type: 'cwds', cwds, requestId: request.requestId });
+    expect(await answer).toEqual(cwds);
+    expect(child.send).toHaveBeenCalledTimes(2);
+  });
+
   it('caps even a single oversized output chunk and retains absolute stream positions', async () => {
     const { manager, child } = await startManager();
     const data = 'prefix' + 'x'.repeat(1_000_000);
@@ -107,6 +119,18 @@ describe('PTY manager lifetime and buffers', () => {
       child.emit('exit', 1);
       await vi.advanceTimersByTimeAsync(0);
       expect(settled).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('answers a pending request at once when the child exits before replying', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, child } = await startManager();
+      let shells: unknown;
+      void manager.getAvailableShells().then((answer) => { shells = answer; });
+      child.emit('exit', 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shells).toEqual([]);
     } finally { vi.useRealTimers(); }
   });
 

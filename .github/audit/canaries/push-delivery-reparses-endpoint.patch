@@ -7,9 +7,9 @@ diff --git a/relay/src/push-endpoint.ts b/relay/src/push-endpoint.ts
 index 5472615a8..3a1afeec8 100644
 --- a/relay/src/push-endpoint.ts
 +++ b/relay/src/push-endpoint.ts
-@@ -93,14 +93,6 @@ export function isPublicNetworkAddress(address: string): boolean {
- /** Shared with the Hosted Relay (`docs/specs/relay.md` -> State files). */
- export { MAX_PUSH_ENDPOINT_LENGTH };
+@@ -90,14 +90,6 @@ export function isPublicNetworkAddress(address: string): boolean {
+   return false;
+ }
  
 -/**
 - * One DNS name: lowercase letters, digits, and inner hyphens per label, at
@@ -22,7 +22,7 @@ index 5472615a8..3a1afeec8 100644
  /**
   * The one parse of a push endpoint, shared by registration and delivery: the
   * URL delivery connects to, or `null`. Refuses anything another URL parser
-@@ -117,11 +109,10 @@ export function parsePublicPushEndpoint(value: string): URL | null {
+@@ -114,11 +106,10 @@ export function parsePublicPushEndpoint(value: string): URL | null {
    } catch {
      return null;
    }

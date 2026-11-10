@@ -6,6 +6,8 @@
 
 **Why a non-Windows path on `osc9_9` is `unknown`, not `posix`.** The channel is a Windows-ism (Windows Terminal, ConEmu), so a lone `/foo` on it is no evidence of a POSIX shell; guessing `posix` would collide two genuinely different locations on the `scheme|host|pathKind|path` grouping key.
 
+**Why `osc9_9` drops quotes.** Microsoft's new-tab-same-directory prompt quotes the path, and Windows Terminal and ConEmu strip one pair; keeping them made every split and restore look for a directory named with quotes.
+
 Native path payloads are not URLs: decoding `%20` or trimming edge spaces changes directory identity. The [iTerm2 CurrentDir contract](https://iterm2.com/documentation-escape-codes.html) reports a directory, while OSC 7 carries a file URL; Dormouse's OSC 633 emitters likewise write the sanitized path verbatim.
 
 **What the CWD bound and control-character strip protect.** A directory name may hold any byte but `/` and NUL, and the CWD it produces is retained per Session, rendered in the pane header, and used as a grouping key — so unbounded or control-bearing text reaches the UI and a map key, not just a log line.

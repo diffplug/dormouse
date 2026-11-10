@@ -1065,9 +1065,10 @@ function appendLimited(existing: string, next: string, limit: number): string {
   return truncateText(`${existing}${next}`, limit);
 }
 
-const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>', '\x1b[', '\x1b', '\x9b>', '\x9b'];
-/** The iTerm2 extended-DA query, in both its ESC and C1 spellings. */
-const DEVICE_ATTRIBUTE_QUERY = /\x1b\[>q|\x9b>q/g;
+const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>0', '\x1b[>', '\x1b[', '\x1b', '\x9b>0', '\x9b>', '\x9b'];
+/** The iTerm2 extended-DA query, in both its ESC and C1 spellings, with or
+ *  without its default parameter `0` written out. */
+const DEVICE_ATTRIBUTE_QUERY = /\x1b\[>0?q|\x9b>0?q/g;
 
 /**
  * Consume every `CSI > q` in a run of **ground text** and queue its answer.

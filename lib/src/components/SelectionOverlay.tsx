@@ -1,8 +1,7 @@
 import { clsx } from 'clsx';
 import { useContext, useMemo, useSyncExternalStore, type CSSProperties } from 'react';
 import {
-  DEFAULT_MOUSE_SELECTION_STATE,
-  getMouseSelectionSnapshot,
+  getMouseSelectionState,
   getRenderTick,
   isShadowed,
   subscribeToMouseSelection,
@@ -28,18 +27,22 @@ interface Props {
  */
 export function SelectionOverlay({ terminalId }: Props) {
   const touchUi = useContext(TouchUiContext);
-  const states = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
-  // Subscribe to render tick so we re-render whenever xterm scrolls or resizes.
-  useSyncExternalStore(subscribeToRenderTick, getRenderTick);
+  // Each field on its own, every one replaced rather than mutated, so another
+  // pane's drag renders nothing here.
+  const selection = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).selection);
+  const copyOutcome = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).copyOutcome);
+  const editor = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).copyEditor);
+  const hintToken = useSyncExternalStore(subscribeToMouseSelection, () => getMouseSelectionState(terminalId).hintToken);
+  // Re-render whenever any xterm scrolls, resizes, or draws output, but only
+  // while there is a selection to re-measure.
+  useSyncExternalStore(subscribeToRenderTick, () => (selection ? getRenderTick() : 0));
   // Pulled outside render-tick reads: --color-focus-ring only changes on theme
   // switch, but onRender fires every output frame.
   const focusRingColor = useFocusRingColor();
 
-  const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
-  const copied = state.copyOutcome === 'copied';
+  const copied = copyOutcome === 'copied';
   // Read once per flash, not per render tick.
   const pulse = useMemo(() => copied && !motionIsInstant(), [copied]);
-  const selection = state.selection;
   if (!selection) return null;
 
   const dims = getTerminalOverlayDims(terminalId);
@@ -52,7 +55,7 @@ export function SelectionOverlay({ terminalId }: Props) {
   const { cellWidth, cellHeight, gridLeft, gridTop } = dims;
   // A shadowed program drag (spec §3.8): the program paints its own highlight,
   // so Dormouse draws only the hint until the copy chord opens the editor.
-  const shadowed = isShadowed(state);
+  const shadowed = isShadowed({ selection, copyEditor: editor });
   const pathOf = (sel: typeof selection) => rectsToPath(computeRects(sel, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight));
 
   const style: CSSProperties = {
@@ -66,7 +69,6 @@ export function SelectionOverlay({ terminalId }: Props) {
   const pathD = shadowed ? '' : pathOf(selection);
 
   // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
-  const editor = state.copyEditor;
   const scopeD = editor && editor.scope > 0 ? pathOf(selectionOfSpan(editor.scopes[editor.scope].span, selection)) : '';
 
   // Mid-drag hint. Placed outside the selection on the side opposite the
@@ -156,10 +158,10 @@ export function SelectionOverlay({ terminalId }: Props) {
                   : `Hold ${IS_MAC ? 'Opt' : 'Alt'} for block selection`}
               </div>
             )}
-            {state.hintToken && (
+            {hintToken && (
               <div>
                 Press <span className="text-foreground">e</span> to select the full{' '}
-                {state.hintToken.kind === 'url' ? 'URL' : 'path'}
+                {hintToken.kind === 'url' ? 'URL' : 'path'}
               </div>
             )}
           </div>

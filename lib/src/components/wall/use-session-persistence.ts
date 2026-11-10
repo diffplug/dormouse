@@ -1,8 +1,8 @@
 import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-types';
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { assemblePersistedSession, buildPersistedSession, cwdSurfaceIds, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
+import { assemblePersistedSession, buildPersistedSession, cwdSurfaceIds, saveSession, type SaveOptions } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
@@ -91,13 +91,10 @@ export function useSessionPersistence({
   // cwd and alert live. The aggregator holds it because the first save after a
   // restore has to read the record BOOT seeded, not the (still empty) one this
   // Wall has published.
-  const sink = useMemo<SaveSink | undefined>(() => {
-    if (workspaceId === undefined) return undefined;
-    return {
-      previous: () => previousWorkspaceSession(workspaceId),
-      publish: (session) => publishWorkspaceSession(workspaceId, session),
-    };
-  }, [workspaceId]);
+  const previous = useCallback(
+    () => (workspaceId === undefined ? null : previousWorkspaceSession(workspaceId)),
+    [workspaceId],
+  );
 
   const collect = useCallback(() => {
     const panes = lath.listPanes().map((p) => {
@@ -142,17 +139,17 @@ export function useSessionPersistence({
     const { panes, doors, lathLayout } = collect();
     return buildPersistedSession(
       getPlatform(), panes, doors, lathLayout,
-      sink?.previous() ?? null, saveOptions(options),
+      previous(), saveOptions(options),
     );
-  }, [collect, sink, saveOptions]);
+  }, [collect, previous, saveOptions]);
 
   const serializeNow = useCallback((): PersistedSession => {
     const { panes, doors, lathLayout } = collect();
     return assemblePersistedSession(
       panes, doors, lathLayout,
-      sink?.previous() ?? null, null, saveOptions().alertDelivery,
+      previous(), null, saveOptions().alertDelivery,
     );
-  }, [collect, sink, saveOptions]);
+  }, [collect, previous, saveOptions]);
 
   const serializeReported = useCallback((include: (id: string) => boolean = () => true): PersistedSession => {
     const collected = collect();
@@ -161,21 +158,21 @@ export function useSessionPersistence({
     const cwds = Object.fromEntries(cwdSurfaceIds(panes, doors).map(id => [id, getInheritableCwd(id) ?? null]));
     return assemblePersistedSession(
       panes, doors, collected.lathLayout,
-      sink?.previous() ?? null, cwds, saveOptions().alertDelivery,
+      previous(), cwds, saveOptions().alertDelivery,
     );
-  }, [collect, sink, saveOptions]);
+  }, [collect, previous, saveOptions]);
 
   const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     if (workspaceId === undefined) {
       const { panes, doors, lathLayout } = collect();
-      return saveSession(getPlatform(), panes, doors, lathLayout, sink, saveOptions(options));
+      return saveSession(getPlatform(), panes, doors, lathLayout, saveOptions(options));
     }
     // A Surface move bumps the revision; a record collected before it is stale.
     const revision = workspaceSessionRevision(workspaceId);
     return serialize(options).then(session => {
       if (revision === workspaceSessionRevision(workspaceId) && hasWorkspace(workspaceId)) publishWorkspaceSession(workspaceId, session);
     });
-  }, [collect, serialize, sink, saveOptions, workspaceId]);
+  }, [collect, serialize, saveOptions, workspaceId]);
 
   const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {
@@ -259,8 +256,12 @@ export function useSessionPersistence({
           platform.notifySessionFlushComplete(detail.requestId);
         });
     };
+    // No CWD probe: the page is torn down before a host round trip answers,
+    // so a probing save would never publish. Each pane keeps its last cwd. It
+    // bypasses the queue too: a save already in flight is waiting on that same
+    // unanswered round trip, and a request queued behind it would never run.
     const handlePageHide = () => {
-      void flushSessionSave().catch(() => undefined);
+      void doSave({ probeCwd: false }).catch(() => undefined);
     };
 
     // One subscription: every store commit (add/remove/resize/swap/meta, including
@@ -335,6 +336,7 @@ export function useSessionPersistence({
     ownsHostFlush,
     workspaceId,
     lath,
+    doSave,
     flushSessionSave,
     ownsSurface,
     ownsHostFlush,

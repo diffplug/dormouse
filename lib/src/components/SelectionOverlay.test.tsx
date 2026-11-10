@@ -35,7 +35,7 @@ beforeEach(() => {
   container = document.body.appendChild(document.createElement('div'));
   root = createRoot(container);
   act(() => {
-    setSelection('term-1', { startRow: 2, startCol: 4, endRow: 3, endCol: 10, shape: 'linewise', dragging: false, startedInScrollback: false });
+    setSelection('term-1', { startRow: 2, startCol: 4, endRow: 3, endCol: 10, shape: 'linewise', dragging: false });
     root.render(<SelectionOverlay terminalId="term-1" />);
   });
 });

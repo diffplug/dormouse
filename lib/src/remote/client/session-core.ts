@@ -787,6 +787,11 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // stayed relayed would sit in the indicator through the whole of the next.
     if (direct?.relayCause) this.#onTransportChanged?.('relay', null);
     this.#established = null;
+    // Subscriptions are the session's: none of its streams can deliver again,
+    // and a handler kept here would hold its owner (an adapter, a wall) for the
+    // life of the page. One still being answered removes its own entry when
+    // `rejectAll` fails it.
+    this.#events.clear();
     this.#settleDirect('retired');
     this.#watchVisibility();
   }

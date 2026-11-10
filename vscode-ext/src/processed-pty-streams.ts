@@ -19,6 +19,12 @@ export interface ProcessedPtyStreams {
    * no-op rather than an error.
    */
   streamPty(ptyId: string, sink: PtySink): () => void;
+  /**
+   * A spawn is replacing the generation under `ptyId`. `pty-core` never
+   * reports a displaced generation's exit, so its sinks are ended here, or
+   * they would wait on it forever and leave the Client on a frozen pane.
+   */
+  endGeneration(ptyId: string): void;
 }
 
 export interface PtyStatus {
@@ -45,24 +51,30 @@ export function createProcessedPtyStreams(
     stopExitListener = null;
   };
 
+  const endSinks = (id: string, exitCode: number): void => {
+    const targets = streams.get(id);
+    if (!targets) return;
+    // Dropped before the fan-out, so a sink that unsubscribes from inside its
+    // own `onExit` finds nothing left to take out — and so a re-subscribe
+    // during the fan-out keeps the listener rather than losing it below.
+    streams.delete(id);
+    for (const [target, stopChunks] of targets) {
+      stopChunks();
+      target.onExit(exitCode);
+    }
+    uninstallIfIdle();
+  };
+
   const install = (): void => {
     if (stopExitListener) return;
-    stopExitListener = onProcessedPtyExit((id, exitCode) => {
-      const targets = streams.get(id);
-      if (!targets) return;
-      // Dropped before the fan-out, so a sink that unsubscribes from inside its
-      // own `onExit` finds nothing left to take out — and so a re-subscribe
-      // during the fan-out keeps the listener rather than losing it below.
-      streams.delete(id);
-      for (const [target, stopChunks] of targets) {
-        stopChunks();
-        target.onExit(exitCode);
-      }
-      uninstallIfIdle();
-    });
+    stopExitListener = onProcessedPtyExit(endSinks);
   };
 
   return {
+    endGeneration(ptyId) {
+      endSinks(ptyId, 0);
+    },
+
     streamPty(ptyId, sink) {
       let sinks = streams.get(ptyId);
       if (!sinks) {

@@ -92,3 +92,40 @@ describe('workspace row navigation', () => {
     expect(handlePaneShortcuts(new KeyboardEvent('keydown', { key: 'ArrowLeft' }), ctx, { current: null })).toBe(false);
   });
 });
+
+describe('pane backtracking', () => {
+  const press = (ctx: WallKeyboardCtx, history: NavHistoryRef, key: string) => handlePaneNavigation(new KeyboardEvent('keydown', { key }), ctx, history);
+  function panes(): WallKeyboardCtx {
+    const ctx = context();
+    ctx.selectedIdRef.current = 'pane-a';
+    vi.mocked(ctx.selectPane).mockImplementation(id => { ctx.selectedIdRef.current = id; });
+    // row[a, col[b, c]]: only spatial neighbors resolve.
+    vi.mocked(ctx.nav.findInDirection).mockImplementation((id, dir) => (
+      id === 'pane-a' && dir === 'ArrowRight' ? 'pane-b'
+        : id === 'pane-b' && dir === 'ArrowDown' ? 'pane-c'
+          : (id === 'pane-b' || id === 'pane-c') && dir === 'ArrowLeft' ? 'pane-a'
+            : null));
+    return ctx;
+  }
+
+  it('returns to the origin pane on the opposite arrow', () => {
+    const ctx = panes();
+    const history: NavHistoryRef = { current: null };
+    press(ctx, history, 'ArrowRight');
+    press(ctx, history, 'ArrowDown');
+    press(ctx, history, 'ArrowUp');
+    expect(ctx.selectedIdRef.current).toBe('pane-b');
+  });
+
+  it('drops the breadcrumb once the selection moved by other means', () => {
+    const ctx = panes();
+    const history: NavHistoryRef = { current: null };
+    press(ctx, history, 'ArrowRight');
+    press(ctx, history, 'ArrowDown');
+    // A click selects pane-a, which has nothing above it but the tab strip.
+    ctx.selectedIdRef.current = 'pane-a';
+    press(ctx, history, 'ArrowUp');
+    expect(ctx.nav.findInDirection).toHaveBeenLastCalledWith('pane-a', 'ArrowUp');
+    expect(ctx.selectWorkspace).toHaveBeenCalledWith('ws-a');
+  });
+});

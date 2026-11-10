@@ -31,11 +31,6 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
 
   setSelectedShell(opts: { shell?: string; args?: string[] } | null): void {
     this.selectedShell = opts;
-    void this.postMessage({
-      type: 'dormouse:selectedShell',
-      shell: opts?.shell,
-      args: opts?.args,
-    });
   }
 
   getSelectedShell(): { shell?: string; args?: string[] } | null {
@@ -101,7 +96,6 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
 
     this.routerDisposable?.dispose();
     this.routerDisposable = ownedRouter = attachRouter(this.channel, {
-      reconnect: true,
       onSaveState: (state) => {
         return saveSessionState(this.context, mergeAlertStates(state, getAlertStates()));
       },
@@ -116,9 +110,5 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       },
       shown: { current: () => view.visible, onDidChange: view.onDidChangeVisibility },
     });
-  }
-
-  focus(): void {
-    this.view?.show?.(true);
   }
 }

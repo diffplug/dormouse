@@ -1,7 +1,7 @@
 /**
  * The load/save dance for a single JSON blob kept in `localStorage`. Several
- * stores (the ACL, the enrollment credentials, the selected shell) persist one
- * value under one key with identical failure semantics:
+ * renderer stores (alert settings, watched commands, the selected shell, the
+ * theme) persist one value under one key with identical failure semantics:
  *
  *   - absent `localStorage` (SSR / no-storage host / test context) must not
  *     throw — reads yield the fallback, writes are silently dropped;

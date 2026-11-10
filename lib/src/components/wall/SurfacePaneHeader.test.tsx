@@ -505,6 +505,26 @@ describe('SurfacePaneHeader — browser chrome', () => {
     registration.dispose();
   });
 
+  it('keeps an inline URL edit through a resize, and drops it once the URL leaves the header', () => {
+    const registration = register('pane-url-resize');
+    renderHeader(headerProps('pane-url-resize', 'x'), stubActions());
+    const editor = () => container.querySelector<HTMLInputElement>('[data-url-input-for="pane-url-resize"]');
+    act(() => {
+      (container.querySelector('span[title="Vite + React"]') as HTMLElement)
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    act(() => setNativeFieldValue(editor()!, 'localhost:3000/draft'));
+
+    act(() => resizeHeader(600));
+    expect(editor()?.value).toBe('localhost:3000/draft');
+
+    act(() => resizeHeader(OVERFLOW_PX));
+    act(() => resizeHeader(620));
+    expect(editor()).toBeNull();
+
+    registration.dispose();
+  });
+
   it('cancels URL editing on Escape without navigating', () => {
     const navigate = vi.fn();
     const registration = registerAgentBrowserScreen('pane-url-esc', {

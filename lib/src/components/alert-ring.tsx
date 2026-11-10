@@ -33,7 +33,7 @@ export const ALERT_RING_LABEL: Record<AlertRingState, { pane: string; door: stri
  * The alarm's motion — one bounded arrival burst, or the pulse that runs for a
  * live utterance.
  *
- * `cfg.alert.ringingPaused` is the Chromatic freeze: an animation otherwise
+ * `cfg.alert.ringingPaused` is the Argos snapshot freeze: an animation otherwise
  * snapshots at whatever phase the runner lands on, so every build diffs against
  * itself. `motion-safe:` alone covers reduced motion; a `motion-reduce:`
  * counterpart would be dead, since the animation is never emitted there to

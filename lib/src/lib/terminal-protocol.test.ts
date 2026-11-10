@@ -857,6 +857,21 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it('answers the query with its default parameter written out, whole or split', () => {
+    const answer = [{ kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE }];
+    expect(new TerminalProtocolParser().process('a\x1b[>0qb')).toMatchObject({ visibleData: 'ab', events: answer });
+    expect(new TerminalProtocolParser().process('a\x9b>0qb')).toMatchObject({ visibleData: 'ab', events: answer });
+    for (const [head, tail] of [['a\x1b[>', '0qb'], ['a\x1b[>0', 'qb'], ['a\x9b>0', 'qb']]) {
+      const parser = new TerminalProtocolParser();
+      expect(parser.process(head)).toMatchObject({ visibleData: 'a', events: [] });
+      expect(parser.process(tail)).toMatchObject({ visibleData: 'b', events: answer });
+    }
+    // A held `> 0` that turns out to be another query is released intact.
+    const parser = new TerminalProtocolParser();
+    expect(parser.process('\x1b[>0')).toMatchObject({ visibleData: '', events: [] });
+    expect(parser.process('c')).toMatchObject({ visibleData: '\x1b[>0c', events: [] });
+  });
+
   it('releases buffered CSI prefixes when they are not device attribute queries', () => {
     const parser = new TerminalProtocolParser();
 

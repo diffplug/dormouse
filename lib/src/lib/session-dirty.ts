@@ -15,7 +15,7 @@
  *
  * A fresh tracker starts DIRTY (`gen = 1`, `savedGen = 0`) so the first
  * heartbeat after boot always persists: post-restore the blob legitimately
- * changes (panes respawn, scrollback is replaced) even with no user activity,
+ * changes (panes respawn and report fresh state) even with no user activity,
  * and the first save should land.
  */
 export interface SessionDirtyTracker {

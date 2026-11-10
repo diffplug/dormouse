@@ -1,6 +1,9 @@
 import { isUncOrDevicePath } from 'dor-lib-common/browser-providers';
 import { isReportedCommandLine } from './osc-sanitize';
+import { cwdPathsEqual } from 'dor/commands/cwd';
 import { POSIX_ESCAPABLE } from './posix-escape';
+
+export { cwdPathsEqual } from 'dor/commands/cwd';
 
 export type CwdSource = 'osc7' | 'osc9_9' | 'osc633' | 'osc1337' | 'process' | 'manual';
 export type PathKind = 'posix' | 'windows' | 'unknown';
@@ -45,10 +48,6 @@ export interface CommandRun {
    * Only set on finished commands; never read before `finishedAt`.
    */
   finalTerminalTitle?: TerminalTitle;
-  outputRange?: {
-    startMarkId?: string;
-    endMarkId?: string;
-  };
 }
 
 export type TerminalTitleSource =
@@ -86,9 +85,7 @@ export type TerminalSemanticEvent =
   | { type: 'title'; title: TerminalTitle };
 
 export interface DirectoryDisplayOptions {
-  includeHost?: 'auto' | 'always' | 'never';
   style?: 'basename' | 'short' | 'full';
-  maxSegments?: number;
   homePath?: string;
 }
 
@@ -269,7 +266,12 @@ export function cwdFromOsc7(rawUriInput: string, now = Date.now()): CwdState | n
 }
 
 export function cwdFromOsc9_9(rawPath: string, now = Date.now()): CwdState | null {
-  const path = boundedCwdValue(rawPath);
+  // Prompts written for Windows Terminal and ConEmu quote the path, and both
+  // drop one surrounding pair.
+  const unquoted = rawPath.length >= 2 && rawPath.startsWith('"') && rawPath.endsWith('"')
+    ? rawPath.slice(1, -1)
+    : rawPath;
+  const path = boundedCwdValue(unquoted);
   if (!path) return null;
   return {
     path,
@@ -312,14 +314,10 @@ export function cwdIdentity(cwd: CwdState): string {
 
 export function cwdDisplay(cwd: CwdState, options: DirectoryDisplayOptions = {}): string {
   const style = options.style ?? 'short';
-  const hostMode = options.includeHost ?? 'auto';
   const pathLabel = style === 'full'
     ? formatFullPath(cwd.path, options.homePath)
-    : formatTrailingPath(cwd.path, cwd.pathKind, style === 'basename' ? 1 : options.maxSegments ?? 2);
-  const shouldIncludeHost =
-    hostMode === 'always' ||
-    (hostMode === 'auto' && cwd.isRemote && !!cwd.host);
-  return shouldIncludeHost && cwd.host ? `${cwd.host}:${pathLabel}` : pathLabel;
+    : formatTrailingPath(cwd.path, cwd.pathKind, style === 'basename' ? 1 : 2);
+  return cwd.isRemote && cwd.host ? `${cwd.host}:${pathLabel}` : pathLabel;
 }
 
 export function shortestUniqueCwdLabels(
@@ -336,18 +334,15 @@ export function shortestUniqueCwdLabels(
     for (const cwd of uniqueCwds) {
       baseLabels.set(cwdIdentity(cwd), formatTrailingPath(cwd.path, cwd.pathKind, depth));
     }
-    labels = withRequiredHostPrefixes(uniqueCwds, baseLabels, options);
+    labels = withRequiredHostPrefixes(uniqueCwds, baseLabels);
     if (findLabelCollisions(uniqueCwds, labels).size === 0) return labels;
   }
 
   const remainingCollisions = findLabelCollisions(uniqueCwds, labels);
-  const includeHost = options.includeHost ?? 'auto';
   for (const cwd of uniqueCwds) {
     const id = cwdIdentity(cwd);
     const label = labels.get(id) ?? cwdDisplay(cwd, options);
-    const needsHost =
-      includeHost === 'always' ||
-      (includeHost === 'auto' && (cwd.isRemote || remainingCollisions.has(label)));
+    const needsHost = cwd.isRemote || remainingCollisions.has(label);
     labels.set(id, needsHost && cwd.host ? `${cwd.host}:${label}` : label);
   }
 
@@ -464,36 +459,6 @@ export function resolveCommandStart(
       : event.source ?? (raw ? 'osc633_E' : 'osc133_boundaries'),
     startedAt: event.startedAt ?? (options.now ?? Date.now)(),
   };
-}
-
-// Fold the Windows spellings of one directory to a single key so `dor ensure`
-// can match a surface across the dialect split. On Windows + Git Bash the shell
-// integration reports its cwd as a POSIX path (`/c/Users/...`) while the `dor`
-// CLI sends a native Windows path (`C:\Users\...`) for the very same folder, so
-// an exact compare never matches and every ensure spawns a duplicate. This
-// normalizes the MSYS drive form (`/c/` -> `C:\`), slash direction, and
-// drive-letter case. It is anchored to leave genuine POSIX paths (`/Users/...`,
-// `/home/...`) untouched — only a single-letter root segment, i.e. an MSYS drive,
-// is rewritten — so it is a no-op on macOS/Linux. Applied symmetrically, so
-// already-equal paths stay equal.
-function canonicalizeCwdForMatch(path: string): string {
-  const withDrive = path.replace(/^\/([A-Za-z])\//, (_match, drive: string) => `${drive}:/`);
-  if (!/^[A-Za-z]:[\\/]/.test(withDrive)) return path;
-  const unified = withDrive.replace(/\//g, '\\');
-  return unified.charAt(0).toUpperCase() + unified.slice(1);
-}
-
-/**
- * Whether two reported paths name the same directory. The CLI sends a
- * path.resolve'd cwd (trailing slashes, `..`, `.` collapsed), so the only
- * remaining divergence to bridge is the Windows/MSYS dialect split (see
- * canonicalizeCwdForMatch). Symlinks and true case differences are still
- * treated as distinct, matching the exact-key intent. A missing path on either
- * side never matches.
- */
-export function cwdPathsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
-  return canonicalizeCwdForMatch(a) === canonicalizeCwdForMatch(b);
 }
 
 /**
@@ -873,10 +838,8 @@ function findLabelCollisions(cwds: CwdState[], labels: Map<string, string>): Set
 function withRequiredHostPrefixes(
   cwds: CwdState[],
   baseLabels: Map<string, string>,
-  options: DirectoryDisplayOptions,
 ): Map<string, string> {
   const result = new Map(baseLabels);
-  const hostMode = options.includeHost ?? 'auto';
   const groups = new Map<string, CwdState[]>();
   for (const cwd of cwds) {
     const label = baseLabels.get(cwdIdentity(cwd));
@@ -891,10 +854,7 @@ function withRequiredHostPrefixes(
     const samePathDifferentHosts = new Set(group.map((cwd) => cwd.path)).size < group.length &&
       new Set(group.map((cwd) => cwd.host ?? '')).size > 1;
     for (const cwd of group) {
-      const shouldIncludeHost =
-        hostMode === 'always' ||
-        (hostMode === 'auto' && !!cwd.host && (cwd.isRemote || (hasCollision && samePathDifferentHosts)));
-      if (shouldIncludeHost && cwd.host) {
+      if (cwd.host && (cwd.isRemote || (hasCollision && samePathDifferentHosts))) {
         result.set(cwdIdentity(cwd), `${cwd.host}:${label}`);
       }
     }
@@ -1444,9 +1404,6 @@ function commandTitleTokens(tokens: string[]): string[] {
   const program = commandProgramName(command);
   const rest = tokens.slice(1);
 
-  if (program === 'npm' && rest[0] === 'run') return [program, ...rest.slice(0, 2)];
-  if (program === 'pnpm' || program === 'yarn' || program === 'bun') return [program, ...rest.slice(0, 2)];
-  if (program === 'docker' && rest[0] === 'compose') return [program, ...rest.slice(0, 2)];
   if (program === 'cargo' && rest[0] === 'watch') return [program, ...rest.slice(0, 3)];
   if (program === 'ssh') return [program, ...rest.slice(0, 1)];
   if (program === 'vim' || program === 'nvim' || program === 'vi' || program === 'pytest') return [program];

@@ -52,7 +52,7 @@ function deps(order: string[] = [], overrides: Partial<Parameters<typeof prepare
 }
 
 describe('prepareWorkspaceTransfer', () => {
-  it('keeps the pending kill until commit, then dismisses only the departing Workspace', async () => {
+  it('keeps the pending confirmation until commit, then dismisses only the departing Workspace', async () => {
     const answer = vi.fn();
     requestConfirmation({ id: 'ws-id', char: 'q', answer });
     const prepared = await prepareWorkspaceTransfer(deps());

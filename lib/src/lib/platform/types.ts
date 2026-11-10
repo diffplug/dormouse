@@ -151,9 +151,9 @@ export interface BurrowLink {
   respond(op: string, handler: (params: unknown) => unknown[] | Promise<unknown[]>): void;
 
   /**
-   * Announce that future answers may differ. Carries no subject: the directory
-   * is the only thing a peer can be asked to answer, so naming it would be a
-   * field every layer copies and nobody reads.
+   * Announce that future answers may differ. Carries no subject: every
+   * listener re-collects what it depends on, so naming one would be a field
+   * every layer copies and nobody reads.
    */
   notify(): void;
 

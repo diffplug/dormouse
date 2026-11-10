@@ -125,7 +125,7 @@ The device-code routes `burrowEnrollBegin` / `burrowEnrollPoll` are Hosted's (`d
 
 **Must compare the setup password in constant time, and delay only that rejection** (rationale); Burrow tokens use a constant-time full-row scan. **Must reject a `burrowToken` outside its minted 32-byte base64url shape before reading `burrows.json`**; a hand edit revokes at once.
 
-**Every session-gated route, the `/ws/client` upgrade included, answers an unknown or expired token 401 with exactly `UNAUTHORIZED_ERROR`**, which Pocket keys its sign-in recovery on (`docs/specs/pocket-app.md` -> "An expired session drops to sign-in"); a rejected enroll token answers the same body and delay. **A rejected setup token answers the distinct `SETUP_TOKEN_INVALID_ERROR`**, undelayed, which Pocket keys "scan again" on.
+**Every session-gated route answers an unknown or expired token 401 with exactly `UNAUTHORIZED_ERROR`**, which Pocket keys its sign-in recovery on (`docs/specs/pocket-app.md` -> "An expired session drops to sign-in"); a refused `/ws/client` upgrade gets a bare 401; a rejected enroll token answers the same body and delay. **A rejected setup token answers the distinct `SETUP_TOKEN_INVALID_ERROR`**, undelayed, which Pocket keys "scan again" on.
 
 Source of truth: `createApp` in `relay/src/app.ts`; `TokenBucket` in `remote-lib-common/src/security/token-bucket.ts`.
 
@@ -191,7 +191,7 @@ Resource bounds:
 
 * **`maxPayload` is `MAX_RELAY_FRAME_BYTES`**, derived from the frame guards' bounds and counted in UTF-8 bytes on every Relay; over it the socket closes 1009.
 * **Client sockets are capped at `MAX_RELAY_CLIENT_SOCKETS`; the next is refused (1013), never admitted by evicting another.**
-* **An expired session's socket is closed** 1008 `unauthorized`, the pair the upgrade answers with. **Only a registered conn is routed or torn down**, so a frame buffered behind that close cannot open a ceremony.
+* **An expired session's socket is closed** 1008 `unauthorized`. **Only a registered conn is routed or torn down**, so a frame buffered behind that close cannot open a ceremony.
 * **A half-open socket is closed by heartbeat**: unanswered within `RELAY_IDLE_TIMEOUT_MS`, three ping intervals, it is unregistered and closed 1001.
 
 **Must answer the text `RELAY_PING` with `RELAY_PONG`** on either socket kind, compared whole before any parse, never forwarded and never an `error`. **The Burrow and Pocket ping every `RELAY_PING_INTERVAL_MS` (30 s), and a ping still unanswered when the next is due ends the socket**; Pocket pauses while the page is hidden.
@@ -288,7 +288,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 
 ## Burrow side (`lib` + the two Node hosts)
 
-**The Burrow is a service in the process that owns the PTYs, never a webview**: `BurrowService`, in the Tauri sidecar and in the VS Code extension host. The webview holds only UI — the pairing modal, the `window.dormouseBurrow` console hook, ring detection for push (`docs/specs/alert.md` -> "Push notifications"), and answering for its own panes and terminal sizes — reaching the service over the `burrow:*` bridge. `lib/src/host/remote/` is shared by both hosts; only the store, process plumbing, and bridge transport are host-owned.
+**The Burrow is a service in the process that owns the PTYs, never a webview**: `BurrowService`, in the Tauri sidecar and in the VS Code extension host. The webview holds only UI — the pairing modal, the `window.dormouseBurrow` console hook, the push device list for Settings, and answering for its own panes and terminal sizes — reaching the service over the `burrow:*` bridge. `lib/src/host/remote/` is shared by both hosts; only the store, process plumbing, and bridge transport are host-owned.
 
 **The store contract.** Both `BurrowStateStore` implementations:
 

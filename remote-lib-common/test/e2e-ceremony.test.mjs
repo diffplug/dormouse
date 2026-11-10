@@ -344,6 +344,18 @@ test('every sampled pairing code is two digits, and the space is covered', async
   assert.equal(seen.has('00'), true, 'the padded low end must be reachable');
 });
 
+test('the pairing code rejects bytes 200–255 rather than folding them onto 00–55', () => {
+  const draws = [200, 255, 5];
+  const crypto = {
+    getRandomValues: (array) => {
+      array[0] = draws.shift();
+      return array;
+    },
+  };
+  assert.equal(samplePairingCode(crypto), '05');
+  assert.equal(draws.length, 0);
+});
+
 test('isPairingCode takes exactly two ASCII digits', () => {
   for (const value of [undefined, null, 42, '', '1', '123', '0x', ' 1', '१२', '९', '-1', '1.']) {
     assert.equal(isPairingCode(value), false, JSON.stringify(value));

@@ -755,8 +755,7 @@ async function consumeChallenge(db: Client, challenge: string, burrowId: string 
  * Inserts `row` into `spec`'s table for `owner`, under that owner's lock and
  * in one statement: its own expired rows pruned, its live rows trimmed to
  * leave one slot under the cap (latest expiry kept), then the row. No other
- * owner's rows are read. `expiry` is a TTL in milliseconds or an instant; a
- * row already expired is not inserted and trims nothing. Answers its expiry
+ * owner's rows are read. The row expires `ttlMs` from now. Answers its expiry
  * in epoch milliseconds, or undefined when nothing was inserted.
  */
 export async function admit(
@@ -764,29 +763,26 @@ export async function admit(
   { table, pk, owner, cap }: Capped,
   ownerValue: string,
   row: Record<string, unknown>,
-  expiry: number | Date,
+  ttlMs: number,
 ): Promise<number | undefined> {
   const columns = Object.keys(row);
   const values = Object.values(row);
-  const expiryParam = `$${columns.length + 3}`;
-  const expiresAt =
-    typeof expiry === "number" ? after(expiryParam) : `${expiryParam}::timestamptz`;
+  const expiresAt = after(`$${columns.length + 3}`);
   return locked(db, `${table}:${ownerValue}`, async () => {
     const { rows } = await db.query<{ expiresAt: number }>(
       `WITH pruned AS (
         DELETE FROM ${table} WHERE ${owner} = $1 AND "expiresAt" <= ${LOCKED_NOW}
       ), trimmed AS (
-        DELETE FROM ${table} WHERE ${expiresAt} > ${LOCKED_NOW} AND ${pk} IN (
+        DELETE FROM ${table} WHERE ${pk} IN (
           SELECT ${pk} FROM ${table} WHERE ${owner} = $1 AND "expiresAt" > ${LOCKED_NOW}
           ORDER BY "expiresAt" DESC, ${pk} OFFSET $2
         )
       )
       INSERT INTO ${table} (${columns.map((column) => `"${column}"`).join(", ")}, "expiresAt")
       SELECT ${columns.map((_, i) => `$${i + 3}`).join(", ")}, ${expiresAt}
-      WHERE ${expiresAt} > ${LOCKED_NOW}
       ON CONFLICT (${pk}) DO NOTHING
       RETURNING ${epochMs('"expiresAt"')} AS "expiresAt"`,
-      [ownerValue, cap - 1, ...values, expiry],
+      [ownerValue, cap - 1, ...values, ttlMs],
     );
     return rows[0]?.expiresAt;
   });

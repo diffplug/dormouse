@@ -77,6 +77,19 @@ describe('helper lifecycle', () => {
     await vi.waitFor(() => expect(registry.has(fresh.id)).toBe(false));
   });
 
+  it('keeps a helper restored while a fresh one waits on its directory', async () => {
+    const old = await openHelper('parent');
+    detachHelper('parent');
+    let answer!: (cwd: string | null) => void;
+    host.getCwd.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+    const opening = openHelper('parent');
+    expect(reattachHelper(old)).toBe(true);
+    answer(null);
+    expect(await opening).toBe(old);
+    expect(getHelper('parent')).toBe(old);
+    expect([...registry.keys()]).toEqual(['parent', old.id]);
+  });
+
   it('resets into a pending kill under Labs, which restores the old helper in place of the fresh one', async () => {
     const labs = await import('./labs-settings');
     const pending = await import('./pending-kills');

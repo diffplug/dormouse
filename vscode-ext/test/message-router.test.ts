@@ -90,6 +90,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   getBufferedPtys: () => new Map(ptys.buffered),
   getScrollback: (id: string) => ptys.scrollback.get(id) ?? null,
   ptyIds: () => ptys.buffered.keys(),
+  getCwds: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, ptys.cwd])),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
     await ptys.cwdWait;
@@ -187,6 +188,18 @@ it('answers a voice command under its request id, null where the window has no m
   try {
     webview.send({ type: 'voice:command', payload: { op: 'status' }, requestId: 'req-7' });
     await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'voice:result', requestId: 'req-7', result: null }));
+  } finally { disposable.dispose(); }
+});
+
+it('answers a batched cwd probe under its request id', async () => {
+  ptys.cwd = '/repo';
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    webview.send({ type: 'pty:getCwds', ids: ['pty-1', 'pty-2'], requestId: 'req-3' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({
+      type: 'pty:cwds', cwds: { 'pty-1': '/repo', 'pty-2': '/repo' }, requestId: 'req-3',
+    }));
   } finally { disposable.dispose(); }
 });
 
@@ -725,7 +738,7 @@ describe('alarm delivery', () => {
   });
 
   it('holds a push back while this VS Code window is focused and active', () => {
-    const moveWindow = (state: { focused: boolean; active?: boolean }) =>
+    const moveWindow = (state: { focused: boolean; active: boolean }) =>
       router.reportWindowPresence(state as never);
     const webview = fakeWebview();
     const disposable = router.attachRouter(webview.channel);
@@ -737,11 +750,11 @@ describe('alarm delivery', () => {
       vi.advanceTimersByTime(1_000);
       expect(wiring.pushes).toEqual([]);
 
-      // Focus alone is not presence: an older VS Code reports no `active`.
+      // Focus alone is not presence: VS Code lapses `active` without input.
       alert(webview, { op: 'dismiss', id: 'pty-1' });
       webview.send({ type: 'pty:input', id: 'pty-1', data: 'y\r' });
       ptys.callbacks!.onData('pty-1', 'output');
-      moveWindow({ focused: true });
+      moveWindow({ focused: true, active: false });
       ptys.callbacks!.onData('pty-1', REPORT);
       // One isolated chunk is not confirmed work, so nothing defers the ring.
       vi.advanceTimersByTime(999);
@@ -761,15 +774,15 @@ describe('alarm delivery', () => {
  */
 it('leaves a disposed view\'s PTYs for the view, not a re-initializing panel', () => {
   const view = fakeWebview();
-  const viewRouter = router.attachRouter(view.channel, { reconnect: true });
+  const viewRouter = router.attachRouter(view.channel, {});
   view.send({ type: 'dormouse:init' });
   view.send({ type: 'pty:spawn', id: 'view-pty', options: { cwd: '/repo' } });
   viewRouter.dispose();
 
   const panel = fakeWebview();
-  const panelRouter = router.attachRouter(panel.channel, { reconnect: true, killOnDispose: true });
+  const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
   const reopened = fakeWebview();
-  const reopenedRouter = router.attachRouter(reopened.channel, { reconnect: true });
+  const reopenedRouter = router.attachRouter(reopened.channel, {});
   try {
     panel.send({ type: 'dormouse:init' });
     expect(panel.posted.filter((message) => message.type === 'pty:list').at(-1)).toMatchObject({ ptys: [] });
@@ -782,18 +795,80 @@ it('leaves a disposed view\'s PTYs for the view, not a re-initializing panel', (
   }
 });
 
+/**
+ * VS Code reloads an editor tab's document under the same router when it moves
+ * the tab to another window; the reloaded page resumes only if it is told its
+ * PTYs are still here.
+ */
+describe('an editor panel re-initializing', () => {
+  it('lists nothing to a brand-new panel, so it boots a fresh terminal', () => {
+    // A disposed view's orphan is about, which the panel must not adopt.
+    const view = fakeWebview();
+    const viewRouter = router.attachRouter(view.channel, {});
+    view.send({ type: 'dormouse:init' });
+    view.send({ type: 'pty:spawn', id: 'view-pty', options: { cwd: '/repo' } });
+    viewRouter.dispose();
+
+    const panel = fakeWebview();
+    const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
+    try {
+      panel.send({ type: 'dormouse:init' });
+      expect(panel.posted.filter((message) => message.type === 'pty:list')).toEqual([{ type: 'pty:list', ptys: [] }]);
+      expect(panel.posted.filter((message) => message.type === 'pty:replay')).toEqual([]);
+    } finally {
+      panelRouter.dispose();
+    }
+  });
+
+  it('lists its own live PTYs to its reloaded document, with their history', () => {
+    const panel = fakeWebview();
+    const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
+    try {
+      panel.send({ type: 'dormouse:init' });
+      panel.send({ type: 'pty:spawn', id: 'panel-pty', options: { cwd: '/repo' } });
+      ptys.scrollback.set('panel-pty', 'history');
+      panel.posted.length = 0;
+
+      panel.send({ type: 'dormouse:init' });
+      expect(panel.posted.filter((message) => message.type === 'pty:list'))
+        .toMatchObject([{ ptys: [{ id: 'panel-pty', alive: true }] }]);
+      expect(panel.posted.filter((message) => message.type === 'pty:replay'))
+        .toEqual([{ type: 'pty:replay', id: 'panel-pty', data: 'history' }]);
+      expect(ptys.order).not.toContain('kill panel-pty');
+    } finally {
+      panelRouter.dispose();
+    }
+  });
+});
+
+it('tells the view and every editor panel a newly selected shell', () => {
+  const view = fakeWebview();
+  const panel = fakeWebview();
+  const viewRouter = router.attachRouter(view.channel, {});
+  const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
+  try {
+    router.broadcastSelectedShell({ shell: '/bin/zsh', args: ['-l'] });
+    for (const webview of [view, panel]) {
+      expect(webview.posted).toContainEqual({ type: 'dormouse:selectedShell', shell: '/bin/zsh', args: ['-l'] });
+    }
+  } finally {
+    viewRouter.dispose();
+    panelRouter.dispose();
+  }
+});
+
 // The shared collector finishes on one replay per listed PTY
 // (collectLivePtys), so an empty buffer still gets one rather than leaving the
 // reconnect to wait out its timeout.
 it('replays every listed PTY at a reconnect, an empty buffer included', () => {
   const view = fakeWebview();
-  const viewRouter = router.attachRouter(view.channel, { reconnect: true });
+  const viewRouter = router.attachRouter(view.channel, {});
   view.send({ type: 'dormouse:init' });
   view.send({ type: 'pty:spawn', id: 'quiet-pty', options: { cwd: '/repo' } });
   viewRouter.dispose();
 
   const reopened = fakeWebview();
-  const reopenedRouter = router.attachRouter(reopened.channel, { reconnect: true });
+  const reopenedRouter = router.attachRouter(reopened.channel, {});
   try {
     reopened.send({ type: 'dormouse:init' });
     expect(reopened.posted.filter((message) => message.type === 'pty:replay'))
@@ -808,7 +883,7 @@ it('replays the whole retained history to every router that adopts a PTY', () =>
   // the router and a new one adopts the PTY. An adoption that drained a buffer
   // left the second one only the output since the first.
   const first = fakeWebview();
-  const firstRouter = router.attachRouter(first.channel, { reconnect: true });
+  const firstRouter = router.attachRouter(first.channel, {});
   first.send({ type: 'dormouse:init' });
   first.send({ type: 'pty:spawn', id: 'moved-pty', options: { cwd: '/repo' } });
   ptys.scrollback.set('moved-pty', 'history');
@@ -816,7 +891,7 @@ it('replays the whole retained history to every router that adopts a PTY', () =>
 
   for (const _move of [1, 2]) {
     const view = fakeWebview();
-    const viewRouter = router.attachRouter(view.channel, { reconnect: true });
+    const viewRouter = router.attachRouter(view.channel, {});
     try {
       view.send({ type: 'dormouse:init' });
       expect(view.posted.filter((message) => message.type === 'pty:replay'))

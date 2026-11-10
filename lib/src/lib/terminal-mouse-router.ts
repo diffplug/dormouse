@@ -114,7 +114,6 @@ export function attachTerminalMouseRouter({
     b: number;
     altKey: boolean;
     block: boolean;
-    startedInScrollback: boolean;
     clientX: number;
     clientY: number;
     touchLike: boolean;
@@ -192,7 +191,6 @@ export function attachTerminalMouseRouter({
         endCol: end.col,
         shape: 'linewise',
         dragging: false,
-        startedInScrollback: cell.startedInScrollback,
       });
     }
     pendingDrag = {
@@ -201,7 +199,6 @@ export function attachTerminalMouseRouter({
       b: cell.b,
       altKey: ev.altKey,
       block: opts.block ?? false,
-      startedInScrollback: cell.startedInScrollback,
       clientX: ev.clientX,
       clientY: ev.clientY,
       touchLike: opts.touchLike,
@@ -228,7 +225,6 @@ export function attachTerminalMouseRouter({
         col: pendingDrag.col,
         altKey: pendingDrag.altKey,
         blockLatched: pendingDrag.block,
-        startedInScrollback: pendingDrag.startedInScrollback,
       });
       dragAnchor = { row: pendingDrag.row, b: pendingDrag.b };
       terminal.clearSelection();
@@ -262,6 +258,10 @@ export function attachTerminalMouseRouter({
           }));
         }
       }
+      // A press left unconsumed reaches xterm.js, whose own selection follows a
+      // move under the drag threshold across a cell's midpoint; a click must
+      // leave none painted.
+      if (terminal.hasSelection()) terminal.clearSelection();
       if (pendingDrag.multiClick) openCopyEditor(id, terminal);
       clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;
@@ -298,7 +298,6 @@ export function attachTerminalMouseRouter({
       endCol: head.col,
       shape: 'linewise',
       dragging: false,
-      startedInScrollback: false,
       owner: 'program',
     });
   };

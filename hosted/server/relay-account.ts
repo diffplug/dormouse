@@ -31,7 +31,7 @@ export const ALREADY_APPROVED = "That code is already approved.";
 /**
  * The account's half of the Hosted Relay: approving a device-code enrollment,
  * and listing and removing the account's Burrows and passkeys. Cookie routes
- * under the voice routes' gate; the relay Worker serves none of them. Call
+ * behind `cookieEntitled`; the relay Worker serves none of them. Call
  * before any `/api/*` catch-all.
  */
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {

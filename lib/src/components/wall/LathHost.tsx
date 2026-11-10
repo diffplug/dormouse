@@ -340,7 +340,7 @@ export function LathHost({
     const measure = (entries?: ResizeObserverEntry[]) => {
       // Workspace presentation can scale this subtree; layout stays full-size.
       const r = entries?.[0]?.contentRect ?? el.getBoundingClientRect();
-      store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height }, LATH_LAYOUT_OPTS);
+      store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height });
       setSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }));
     };
     measure();
@@ -509,6 +509,13 @@ export function LathHost({
   // Create-once-per-id callback bundle so the memoized LathLeaf sees a stable
   // `registerEl` identity across commits.
   const leafCallbacksRef = useRef(new Map<string, LeafCallbacks>());
+  // Pruned by membership, never on a ref detach: StrictMode detaches a mounted
+  // leaf's ref, and evicting there would mint fresh callbacks on the next render,
+  // which detaches the ref again, so every leaf would re-render on every host render.
+  useEffect(() => {
+    const live = new Set(sortedIds);
+    for (const id of leafCallbacksRef.current.keys()) if (!live.has(id)) leafCallbacksRef.current.delete(id);
+  }, [sortedIds]);
   const leafCallbacks = (id: string): LeafCallbacks => {
     let cb = leafCallbacksRef.current.get(id);
     if (!cb) {
@@ -518,14 +525,12 @@ export function LathHost({
             leafElsRef.current.set(id, el);
           } else {
             // Ref DETACHED — which is NOT the same as "the leaf is gone": React also
-            // detaches and re-attaches whenever the callback's identity changes (which
-            // this very cache eviction causes, and which StrictMode does on every
-            // commit). Only bookkeeping that is re-established on the matching attach
+            // detaches and re-attaches whenever the callback's identity changes, and
+            // StrictMode does both on mount. Only bookkeeping that is re-established on the matching attach
             // may be dropped here; anything a leaf must REMEMBER across a detach — a
             // parked leaf's rect, say — belongs in the store, not in a ref pruned from
             // this branch.
             leafElsRef.current.delete(id);
-            leafCallbacksRef.current.delete(id);
           }
         },
         onHeaderPointerDown: (e) => {
