@@ -60,5 +60,5 @@ export function bufferLine(parts: ReadonlyArray<readonly [string, number]>): IBu
 
 /** A finalized linewise selection, as mouse-up leaves one. */
 export function finalizedSelection(over: Partial<Selection> = {}): Selection {
-  return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, shape: 'linewise', dragging: false, startedInScrollback: false, ...over };
+  return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, shape: 'linewise', dragging: false, ...over };
 }

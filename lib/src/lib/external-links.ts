@@ -22,7 +22,6 @@ export type DisplayMatchVerdict = 'match' | 'plain' | 'deceptive';
 export type ExternalUriDecision =
   | {
     status: 'openable';
-    rawUri: string;
     uri: string;
     scheme: string;
     displayUri: string;
@@ -31,7 +30,6 @@ export type ExternalUriDecision =
   }
   | {
     status: 'blocked';
-    rawUri: string;
     scheme: string | null;
     displayUri: string;
     reason: string;
@@ -40,39 +38,38 @@ export type ExternalUriDecision =
 export function inspectExternalUri(input: string): ExternalUriDecision {
   const trimmed = input.trim();
   if (!trimmed) {
-    return blocked(input, trimmed, null, 'No URL was provided.');
+    return blocked(trimmed, null, 'No URL was provided.');
   }
 
   // Format characters too: the dialog would show a URL other than the one
   // that opens.
   if (hasControlOrFormatCharacters(trimmed)) {
-    return blocked(input, trimmed, null, `The URL contains ${CONTROL_OR_FORMAT_TEXT}.`);
+    return blocked(trimmed, null, `The URL contains ${CONTROL_OR_FORMAT_TEXT}.`);
   }
 
   try {
     const uri = new URL(trimmed);
     const scheme = uri.protocol.slice(0, -1);
     if (PSEUDO_SCHEMES.has(uri.protocol)) {
-      return blocked(input, trimmed, scheme, `${scheme}: URLs cannot be opened from terminal output.`);
+      return blocked(trimmed, scheme, `${scheme}: URLs cannot be opened from terminal output.`);
     }
     if (REFUSED_APP_SCHEMES.has(uri.protocol)) {
-      return blocked(input, trimmed, scheme, `${scheme}: links can run code on this computer, so Dormouse never opens them.`);
+      return blocked(trimmed, scheme, `${scheme}: links can run code on this computer, so Dormouse never opens them.`);
     }
     // `c:/x/y.bat` parses with scheme `c`, but Windows opens it as a local
     // file, which must go through `dor open`, never the system opener.
     if (DRIVE_LETTER_RE.test(uri.protocol)) {
-      return blocked(input, trimmed, null, 'This is a file path, not a link.');
+      return blocked(trimmed, null, 'This is a file path, not a link.');
     }
     return {
       status: 'openable',
-      rawUri: input,
       uri: uri.href,
       scheme,
       displayUri: trimmed,
       otherApp: !STANDARD_SCHEMES.has(uri.protocol),
     };
   } catch {
-    return blocked(input, trimmed, null, 'The URL is not valid.');
+    return blocked(trimmed, null, 'The URL is not valid.');
   }
 }
 
@@ -220,14 +217,12 @@ function extractUrlShapedHost(text: string, folded: string): string | null {
 }
 
 function blocked(
-  rawUri: string,
   displayUri: string,
   scheme: string | null,
   reason: string,
 ): ExternalUriDecision {
   return {
     status: 'blocked',
-    rawUri,
     scheme,
     displayUri,
     reason,

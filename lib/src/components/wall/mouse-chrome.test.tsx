@@ -71,7 +71,7 @@ it('does not rerender pane headers or banners for selection and hover updates', 
   setOverride('one', 'temporary');
   renderChrome();
 
-  act(() => beginDrag('one', { row: 0, col: 0, altKey: false, startedInScrollback: false }));
+  act(() => beginDrag('one', { row: 0, col: 0, altKey: false }));
   for (let col = 1; col <= 10; col++) {
     act(() => updateDrag('one', { row: 0, col, altKey: false }));
   }
@@ -103,7 +103,7 @@ it('renders only the dragging pane\'s selection overlay and copy editor', () => 
   act(() => bumpRenderTick());
   expect(commits.mock.calls.length).toBe(0);
 
-  act(() => beginDrag('one', { row: 0, col: 0, altKey: false, startedInScrollback: false }));
+  act(() => beginDrag('one', { row: 0, col: 0, altKey: false }));
   for (let col = 1; col <= 5; col++) {
     act(() => updateDrag('one', { row: 0, col, altKey: false }));
   }

@@ -554,7 +554,7 @@ function PreviewRow({ n, gutterCh, pieces, onFlip }: { n: number; gutterCh: numb
       <div className="min-w-0 flex-1 whitespace-pre-wrap px-2 [overflow-wrap:anywhere]">
         {pieces.map((p, i) => {
           if (p.t === 'break') return <Mark key={i} index={p.index} kind={p.kind} auto={p.auto} onFlip={onFlip} />;
-          const text = p.lead ? p.text.replace(/ /g, '·').replace(/\t/g, '→') : p.text;
+          const text = p.lead ? p.text.replace(/ /g, '·') : p.text;
           return <span key={i} className={clsx(p.lead && 'text-muted/60', p.added && COPY_EXPANDED_TEXT_CLASS)}>{text}</span>;
         })}
       </div>

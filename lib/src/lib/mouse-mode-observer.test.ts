@@ -33,7 +33,7 @@ describe('attachMouseModeObserver', () => {
     const { terminal } = setup();
     await write(terminal, '\x1b[?1003h\x1b[?2004h');
     setOverride('a', 'permanent');
-    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, owner: 'program' });
     await write(terminal, '\x1bc');
     expect(terminal.modes.mouseTrackingMode).toBe('none');
     expect(terminal.modes.bracketedPasteMode).toBe(false);

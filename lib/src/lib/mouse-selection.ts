@@ -35,12 +35,6 @@ export interface Selection {
    * shadowed: no outline and no editor until the copy chord (spec §3.8).
    */
   owner?: 'program';
-  /**
-   * True when the drag originated in scrollback. Scrollback-origin drags are
-   * always handled by the terminal regardless of the inside program's mouse
-   * reporting (spec §3.5).
-   */
-  startedInScrollback: boolean;
 }
 
 /** The copy editor over a finalized selection (spec §4). */
@@ -225,7 +219,7 @@ export function setCopyEditor(id: string, editor: CopyEditorState): void {
  */
 export function beginDrag(
   id: string,
-  args: { row: number; col: number; altKey: boolean; blockLatched?: boolean; startedInScrollback: boolean },
+  args: { row: number; col: number; altKey: boolean; blockLatched?: boolean },
 ): void {
   const s = ensure(id);
   // Clearing the in-flight copy flash too keeps its timer from clearing this
@@ -239,7 +233,6 @@ export function beginDrag(
     shape: dragShape(args.altKey, args.blockLatched),
     ...(args.blockLatched ? { blockLatched: true } : {}),
     dragging: true,
-    startedInScrollback: args.startedInScrollback,
   };
   notify();
 }

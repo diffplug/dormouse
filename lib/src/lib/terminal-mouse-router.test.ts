@@ -409,7 +409,7 @@ describe('terminal-mouse-router: override suppression', () => {
 
   it('clears a finalized selection as soon as a new touch starts, before movement', () => {
     const { cleanup, element } = createHarness(windowHost);
-    beginDrag('t1', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('t1', { row: 0, col: 0, altKey: false });
     endDrag('t1');
     element.emit('pointerdown', pointerEvent());
     expect(getMouseSelectionState('t1').selection).toBeNull();

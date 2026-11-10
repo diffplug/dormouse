@@ -29,7 +29,7 @@ function SelectionOverlayStory({
   touch = false,
 }: {
   id: string;
-  selection: Omit<Selection, 'startedInScrollback'>;
+  selection: Selection;
   hintToken?: BufferToken | null;
   touch?: boolean;
 }) {
@@ -56,7 +56,7 @@ function SelectionOverlayStory({
   }, [id]);
 
   useStorySelection(id, () => {
-    setSelection(id, { ...selection, startedInScrollback: false });
+    setSelection(id, { ...selection });
     setHintToken(id, hintToken);
   }, [selection, hintToken]);
 

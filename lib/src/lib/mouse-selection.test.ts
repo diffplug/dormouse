@@ -52,21 +52,21 @@ describe('mouse-selection: default state', () => {
 describe('mouse-selection: shadowed program drags', () => {
   it('drops a shadowed drag when the program stops reporting', () => {
     setMouseReporting('a', 'vt200');
-    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, owner: 'program' });
     setMouseReporting('a', 'none');
     expect(getMouseSelectionState('a').selection).toBeNull();
   });
 
   it('keeps a terminal selection when reporting stops', () => {
     setMouseReporting('a', 'vt200');
-    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: true });
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false });
     setMouseReporting('a', 'none');
     expect(getMouseSelectionState('a').selection).not.toBeNull();
   });
 });
 
 describe('mouse-selection: program copy offers', () => {
-  const sel = (owner?: 'program') => ({ startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, startedInScrollback: false, owner });
+  const sel = (owner?: 'program') => ({ startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, owner });
 
   it('takes an offer only over a shadowed drag, and drops it with the selection', () => {
     offerProgramCopy('a', 'nothing armed');
@@ -84,7 +84,7 @@ describe('mouse-selection: program copy offers', () => {
 
 describe('mouse-selection: the program format needs its offer', () => {
   const editor = (format: 'auto' | 'program') => ({ buffer: {} as never, scopes: [], scope: 0, format, overrides: { 0: 'keep' as const } });
-  const sel = { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, startedInScrollback: false, owner: 'program' as const };
+  const sel = { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, owner: 'program' as const };
 
   it('refuses the program format while no offer is held', () => {
     setSelection('a', sel, editor('auto'));
@@ -118,7 +118,7 @@ describe('mouse-selection: state setters', () => {
   });
 
   it('setSelection stores a selection', () => {
-    const sel: Selection = { startRow: 5, startCol: 3, endRow: 5, endCol: 10, shape: 'linewise', dragging: false, startedInScrollback: false };
+    const sel: Selection = { startRow: 5, startCol: 3, endRow: 5, endCol: 10, shape: 'linewise', dragging: false };
     setSelection('a', sel);
     expect(getMouseSelectionState('a').selection).toBe(sel);
 
@@ -150,7 +150,7 @@ describe('mouse-selection: state setters', () => {
 
   it('removeMouseSelectionState drops all state for an id', () => {
     setMouseReporting('a', 'vt200');
-    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 5, shape: 'linewise', dragging: false, startedInScrollback: false });
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 5, shape: 'linewise', dragging: false });
     removeMouseSelectionState('a');
     expect(getMouseSelectionState('a')).toEqual(DEFAULT_MOUSE_SELECTION_STATE);
   });
@@ -161,29 +161,29 @@ describe('mouse-selection: smart extension', () => {
   const token: BufferToken = { kind: 'url', start: { row: 3, col: 50 }, end: { row: 4, col: 9 }, text: 'https://example.com/a/b' };
 
   it('moves the end to the token edge away from the anchor, across rows', () => {
-    beginDrag('a', { row: 3, col: 10, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 3, col: 10, altKey: false });
     updateDrag('a', { row: 3, col: 55, altKey: false });
     extendSelectionToToken('a', token);
     expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 10, endRow: 4, endCol: 9 });
 
-    beginDrag('a', { row: 4, col: 30, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 4, col: 30, altKey: false });
     updateDrag('a', { row: 4, col: 5, altKey: false });
     extendSelectionToToken('a', token);
     expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 4, startCol: 30, endRow: 3, endCol: 50 });
 
     // A drag that began inside the token keeps its direction.
-    beginDrag('a', { row: 3, col: 55, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 3, col: 55, altKey: false });
     updateDrag('a', { row: 4, col: 5, altKey: false });
     extendSelectionToToken('a', token);
     expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 55, endRow: 4, endCol: 9 });
 
-    beginDrag('a', { row: 4, col: 5, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 4, col: 5, altKey: false });
     updateDrag('a', { row: 3, col: 55, altKey: false });
     extendSelectionToToken('a', token);
     expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 4, startCol: 5, endRow: 3, endCol: 50 });
 
     // An anchor on the token's first cell reads as a forward drag.
-    beginDrag('a', { row: 3, col: 50, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 3, col: 50, altKey: false });
     extendSelectionToToken('a', token);
     expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 50, endRow: 4, endCol: 9 });
   });
@@ -251,7 +251,7 @@ describe('mouse-selection: subscription', () => {
 
     setBracketedPaste('a', true);
     setOverride('a', 'temporary');
-    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 1, shape: 'linewise', dragging: true, startedInScrollback: false });
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 1, shape: 'linewise', dragging: true });
     setHintToken('a', { kind: 'path', row: 0, startCol: 0, endCol: 5, text: '/tmp' });
 
     expect(listener).toHaveBeenCalledTimes(4);
@@ -283,7 +283,7 @@ describe('mouse-selection: subscription', () => {
 
 describe('mouse-selection: drag lifecycle', () => {
   it('beginDrag creates a selection anchored at the starting cell', () => {
-    beginDrag('a', { row: 5, col: 10, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 5, col: 10, altKey: false });
     const sel = getMouseSelectionState('a').selection;
     expect(sel).not.toBeNull();
     expect(sel).toMatchObject({
@@ -293,28 +293,27 @@ describe('mouse-selection: drag lifecycle', () => {
       endCol: 10,
       shape: 'linewise',
       dragging: true,
-      startedInScrollback: false,
     });
   });
 
   it('beginDrag with altKey starts in block shape', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: true, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: true });
     expect(getMouseSelectionState('a').selection?.shape).toBe('block');
   });
 
   it('beginDrag replaces an existing selection (spec §3.7)', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: false });
     updateDrag('a', { row: 2, col: 5, altKey: false });
     endDrag('a');
 
-    beginDrag('a', { row: 8, col: 3, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 8, col: 3, altKey: false });
     const sel = getMouseSelectionState('a').selection;
     expect(sel?.startRow).toBe(8);
     expect(sel?.dragging).toBe(true);
   });
 
   it('updateDrag moves the end of an active drag', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: false });
     updateDrag('a', { row: 4, col: 12, altKey: false });
     const sel = getMouseSelectionState('a').selection;
     expect(sel?.endRow).toBe(4);
@@ -322,7 +321,7 @@ describe('mouse-selection: drag lifecycle', () => {
   });
 
   it('updateDrag flips shape live as Alt is pressed / released (spec §3.2)', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: false });
     updateDrag('a', { row: 4, col: 12, altKey: true });
     expect(getMouseSelectionState('a').selection?.shape).toBe('block');
     updateDrag('a', { row: 4, col: 12, altKey: false });
@@ -330,7 +329,7 @@ describe('mouse-selection: drag lifecycle', () => {
   });
 
   it('updateDrag is a no-op after endDrag', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: false });
     endDrag('a');
     updateDrag('a', { row: 9, col: 9, altKey: false });
     const sel = getMouseSelectionState('a').selection;
@@ -340,7 +339,7 @@ describe('mouse-selection: drag lifecycle', () => {
   });
 
   it('updateDrag with no change does not notify', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: false });
     updateDrag('a', { row: 3, col: 5, altKey: false });
     const listener = vi.fn();
     subscribeToMouseSelection(listener);
@@ -349,7 +348,7 @@ describe('mouse-selection: drag lifecycle', () => {
   });
 
   it('endDrag freezes the selection but does not clear it', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: false });
     updateDrag('a', { row: 3, col: 5, altKey: false });
     endDrag('a');
     const sel = getMouseSelectionState('a').selection;
@@ -367,15 +366,10 @@ describe('mouse-selection: drag lifecycle', () => {
 
   it('isDragging reflects the drag state', () => {
     expect(isDragging('a')).toBe(false);
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 0, col: 0, altKey: false });
     expect(isDragging('a')).toBe(true);
     endDrag('a');
     expect(isDragging('a')).toBe(false);
-  });
-
-  it('beginDrag with startedInScrollback=true preserves the flag', () => {
-    beginDrag('a', { row: 2, col: 0, altKey: false, startedInScrollback: true });
-    expect(getMouseSelectionState('a').selection?.startedInScrollback).toBe(true);
   });
 });
 
@@ -385,7 +379,7 @@ describe('mouse-selection: flashCopy race', () => {
   });
 
   function finalize(row: number): void {
-    beginDrag('a', { row, col: 0, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row, col: 0, altKey: false });
     updateDrag('a', { row: row + 3, col: 5, altKey: false });
     endDrag('a');
   }
@@ -397,7 +391,7 @@ describe('mouse-selection: flashCopy race', () => {
     expect(getMouseSelectionState('a').copyOutcome).toBe('copied');
 
     // New drag starts before the 500ms timer.
-    beginDrag('a', { row: 10, col: 2, altKey: false, startedInScrollback: false });
+    beginDrag('a', { row: 10, col: 2, altKey: false });
     expect(getMouseSelectionState('a').copyOutcome).toBeNull();
     vi.advanceTimersByTime(500);
     expect(getMouseSelectionState('a').selection?.startRow).toBe(10);
@@ -423,7 +417,7 @@ describe('mouse-selection: failCopy', () => {
     vi.useRealTimers();
   });
 
-  const select = () => setSelection('a', { startRow: 0, startCol: 0, endRow: 1, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false });
+  const select = () => setSelection('a', { startRow: 0, startCol: 0, endRow: 1, endCol: 4, shape: 'linewise', dragging: false });
 
   it('says so for COPY_FAILED_MS, then clears only itself, keeping the selection', () => {
     vi.useFakeTimers();
