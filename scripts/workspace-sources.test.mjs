@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
-import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
+import { readRepoFile, repoRoot, SHIPPED_DIRS, trackedFiles } from './lint-kit.mjs';
 import { workspaceDeps, workspacePackages } from './workspace-packages.mjs';
 import { WORKSPACE_SOURCES } from './workspace-sources.mjs';
 
@@ -93,6 +93,11 @@ test('no package.json script builds an internal package dist by name; build-work
     }
   }
   assert.deepEqual(offenders, [], 'call `node ../scripts/build-workspace-deps.mjs` instead');
+});
+
+test('every internal package source is in the shipped scope the network lints scan', () => {
+  const unscanned = Object.values(WORKSPACE_SOURCES).filter((dir) => !SHIPPED_DIRS.some((shipped) => `${dir}/`.startsWith(shipped)));
+  assert.deepEqual(unscanned, []);
 });
 
 test('no workspace manifest declares an install lifecycle script', () => {
