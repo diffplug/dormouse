@@ -146,8 +146,8 @@ export type DorControlParams = {
 export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
-  /** Absent on the in-process dispatch path (and in tests), which has no
-   *  client to hang up — every consumer must treat it as optional. */
+  /** `dispatchDorControlRequest` supplies one for every request; a test that
+   *  dispatches the event itself may not, so consumers treat it as optional. */
   signal?: AbortSignal;
   /** The caller's own OSC 367 `open`, which only a running designated Tool
    *  may make and whose failure shows in the preview slot. Never set by a
@@ -458,10 +458,10 @@ const ENSURE_CANCELLED = 'ensure was cancelled';
 async function interruptToPrompt(id: string, signal?: AbortSignal, timeoutMs = PROMPT_RETURN_TIMEOUT_MS): Promise<ParseResult<undefined>> {
   // Checked before the interrupt is written, not just before each wait.
   if (signal?.aborted) return RESTART_CANCELLED;
-  // A match is by construction OSC-driven (surfaceRunsCommand only matches a
-  // shell that reports its command), so this never fires on the real path — but
-  // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
-  // popping `Terminate batch job (Y/N)?`).
+  // A match can be a shell without integration — a launched command is seeded
+  // before any report, and the keystroke heuristic reports one for such a
+  // shell — so never fire Ctrl+C into one (e.g. cmd.exe popping `Terminate
+  // batch job (Y/N)?`).
   if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
   // The interrupt is the host's own doing: never a command-exit ring or a
   // push, and never the end of a Tool's designation (docs/specs/dor-tool.md ->
@@ -736,7 +736,7 @@ export function useDorControl({
   updateSurfaceParams: (id: string, patch: Record<string, unknown>) => void;
   /** Run one `dor` request against this Wall. `dor-control-router.ts` owns the
    *  window listener that chooses which Wall's handler runs. */
-  handleDorControl: (detail: DorControlRequest) => void;
+  handleDorControl: (detail: DorControlRequest) => void | Promise<void>;
 } {
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
@@ -2094,7 +2094,6 @@ export function useDorControl({
       const handle = getPlatform().alertAwait(target.id, { until, timeoutMs });
       // The client hung up (Ctrl-C) or the control server's deadline passed:
       // release the wait so it stops absorbing completions nobody can receive.
-      // Guarded because in-process callers may dispatch a request without one.
       detail.signal?.addEventListener('abort', () => handle.cancel());
 
       const outcome = await handle.promise;

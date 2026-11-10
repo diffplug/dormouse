@@ -83,7 +83,7 @@ export interface WallHandle {
    *  once the Wall is empty, else the first refusal's message with the Workspace
    *  left as it was. `editors` are the dirty Tools whose close was consented. */
   closeAll(editors?: readonly string[]): Promise<string | null>;
-  handleDorControl(detail: DorControlRequest): void;
+  handleDorControl(detail: DorControlRequest): void | Promise<void>;
 }
 
 const handles = new Map<WorkspaceId, WallHandle>();

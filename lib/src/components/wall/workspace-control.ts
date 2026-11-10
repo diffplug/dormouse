@@ -89,7 +89,7 @@ function askWall(
       resolve(response);
     };
     try {
-      const running = handle.handleDorControl({ ...requestForWall(handle, detail), params, respond }) as unknown;
+      const running = handle.handleDorControl({ ...requestForWall(handle, detail), params, respond });
       if (running instanceof Promise) void running.catch((error) => respond({ ok: false, error: errorText(error) }));
     } catch (error) {
       respond({ ok: false, error: errorText(error) });

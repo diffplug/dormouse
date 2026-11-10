@@ -500,9 +500,10 @@ export function cwdPathsEqual(a: string | null | undefined, b: string | null | u
  * The idempotency predicate for `dor ensure`: true when the pane is *currently
  * running* `command` in `cwdPath`. It matches only while the command is live
  * (`currentCommand` is set between commandStart and commandFinish) and only on
- * the exact command line the shell reported via integration — never the
- * summarized display label, and never a forked child. Panes with no reported
- * command line (no shell integration) never match.
+ * the command line the pane reports — by shell integration, as seeded for a
+ * command Dormouse launched, or by the keystroke heuristic of a shell without
+ * integration — never the summarized display label, and never a forked child.
+ * Panes with no reported command line never match.
  */
 export function surfaceRunsCommand(
   state: TerminalPaneState,
