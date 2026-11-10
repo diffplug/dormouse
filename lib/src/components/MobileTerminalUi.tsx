@@ -148,7 +148,6 @@ export interface MobileTerminalUiProps {
   defaultView?: MobileTerminalView;
   onViewChange?: (view: MobileTerminalView) => void;
   activeTouchMode?: MobileTerminalTouchMode;
-  defaultTouchMode?: MobileTerminalTouchMode;
   onTouchModeChange?: (mode: MobileTerminalTouchMode) => void;
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
@@ -170,7 +169,6 @@ export interface MobileTerminalUiProps {
   sessionsHeader?: ReactNode;
   fillViewport?: boolean;
   className?: string;
-  terminalClassName?: string;
   style?: CSSProperties;
 }
 
@@ -696,7 +694,6 @@ export function MobileTerminalUi({
   defaultView = 'terminal',
   onViewChange,
   activeTouchMode,
-  defaultTouchMode = 'gestures',
   onTouchModeChange,
   cursorTouchAvailable = false,
   onSendInput,
@@ -711,12 +708,11 @@ export function MobileTerminalUi({
   sessionsHeader,
   fillViewport = false,
   className,
-  terminalClassName,
   style,
 }: MobileTerminalUiProps) {
   useDynamicPalette();
   const [internalView, setInternalView] = useState<MobileTerminalView>(defaultView);
-  const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
+  const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>('gestures');
   const view = activeView ?? internalView;
   const touchMode = activeTouchMode ?? internalTouchMode;
   const terminalInteractive = interactive && !browserShown;
@@ -1226,7 +1222,6 @@ export function MobileTerminalUi({
         className={clsx(
           'relative min-h-0 flex-1 overflow-hidden bg-terminal-bg',
           !browserShown && 'touch-none',
-          terminalClassName,
         )}
         style={inset.pan ? { transform: `translateY(-${inset.pan}px)` } : undefined}
         onPointerDownCapture={handlePanePointerDownCapture}

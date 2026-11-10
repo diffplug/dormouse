@@ -38,17 +38,15 @@ export interface MobileWallSession {
 }
 
 export interface MobileWallProps {
-  sessions?: MobileWallSession[];
+  sessions: MobileWallSession[];
   /** Authoritative presentation, when the Session state lives on another machine. */
   sessionItems?: MobileTerminalSessionItem[];
   /** Null makes TODO display-only for a consumer with no dismissal capability. */
   onSessionTodoClear?: ((id: string) => void) | null;
   activeSessionId?: string;
-  defaultActiveSessionId?: string;
   onActiveSessionChange?: (id: string) => void;
   /** Tapping the header's Session title asks for the Sessions screen; omitted, the title is plain text. */
   onShowSessions?: () => void;
-  onSessionKill?: (id: string) => void;
   showKillButton?: boolean;
   /** What covers the active Session's terminal; omitted, nothing does. */
   browser?: ReactNode;
@@ -62,8 +60,6 @@ export interface MobileWallProps {
   onBrowserClose?: (id: string) => void;
   className?: string;
 }
-
-const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
 
 
 export function useMobileWallSessionItems(
@@ -102,14 +98,12 @@ export function useMobileWallSessionItems(
 }
 
 export function MobileWall({
-  sessions: controlledSessions,
+  sessions,
   sessionItems: controlledSessionItems,
   onSessionTodoClear = clearSessionTodo,
   activeSessionId,
-  defaultActiveSessionId,
   onActiveSessionChange,
   onShowSessions,
-  onSessionKill,
   showKillButton = true,
   browser,
   browserShown: showingBrowser = false,
@@ -117,10 +111,8 @@ export function MobileWall({
   onBrowserClose,
   className,
 }: MobileWallProps) {
-  const [internalSessions, setInternalSessions] = useState<MobileWallSession[]>(() => controlledSessions ?? [DEFAULT_MOBILE_SESSION]);
-  const sessions = controlledSessions ?? internalSessions;
   const firstSessionId = sessions[0]?.id ?? null;
-  const [internalActiveSessionId, setInternalActiveSessionId] = useState<string | null>(defaultActiveSessionId ?? firstSessionId);
+  const [internalActiveSessionId, setInternalActiveSessionId] = useState<string | null>(firstSessionId);
   const resolvedActiveSessionId = activeSessionId ?? internalActiveSessionId ?? firstSessionId;
   const localSessionItems = useMobileWallSessionItems(sessions, resolvedActiveSessionId);
   const sessionItems = controlledSessionItems ?? localSessionItems;
@@ -133,20 +125,9 @@ export function MobileWall({
 
   const killSession = useCallback((id: string) => {
     disposeSession(id);
-    onSessionKill?.(id);
-    if (controlledSessions) {
-      const fallback = sessions.find((session) => session.id !== id)?.id ?? null;
-      if (fallback && id === resolvedActiveSessionId) selectSession(fallback);
-      return;
-    }
-
-    setInternalSessions((current) => {
-      const next = current.filter((session) => session.id !== id);
-      const fallback = next[0]?.id ?? null;
-      if (id === resolvedActiveSessionId) setInternalActiveSessionId(fallback);
-      return next;
-    });
-  }, [controlledSessions, onSessionKill, resolvedActiveSessionId, selectSession, sessions]);
+    const fallback = sessions.find((session) => session.id !== id)?.id ?? null;
+    if (fallback && id === resolvedActiveSessionId) selectSession(fallback);
+  }, [resolvedActiveSessionId, selectSession, sessions]);
 
   useEffect(() => {
     for (const session of sessions) {
