@@ -95,6 +95,8 @@ export class RemoteApiSession {
   #unsubDirectory: (() => void) | null = null;
   #directoryTimer: ReturnType<typeof setTimeout> | null = null;
   #directoryGeneration = 0;
+  /** The newest collect that emitted; an older one that settles later is stale. */
+  #directoryEmitted = 0;
   #attachment: Attachment | null = null;
   #attachGeneration = 0;
   readonly #frames: FrameTunnel | null;
@@ -290,10 +292,12 @@ export class RemoteApiSession {
     const subId = this.#directorySubId;
     // Per collect, like the attach generation below and for the same reason:
     // two collects overlap whenever something changes during a slow round trip,
-    // and they can settle in either order. Only the newest may emit, or a stale
-    // one — including a collect that timed out to an empty answer — lands on
-    // the client after a fresh snapshot and blanks its picker until the next
-    // change.
+    // and they can settle in either order. None may emit after a newer one
+    // has, or a stale one — including a collect that timed out to an empty
+    // answer — lands on the client after a fresh snapshot and blanks its picker
+    // until the next change. Measured against the newest emitted, not the
+    // newest started: changes that keep coming faster than a collect settles
+    // would otherwise supersede every collect before it could emit.
     const generation = ++this.#directoryGeneration;
     // One snapshot per collect: the provider answers for every surface the Burrow
     // can reach, so no subset is known sooner than the rest.
@@ -315,11 +319,12 @@ export class RemoteApiSession {
       return;
     }
     // The subscription may have been replaced or torn down while we waited.
-    if (this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
+    if (this.#directorySubId !== subId || generation <= this.#directoryEmitted) return;
     // Awaited here rather than beside the collect, since it needs only the pages
     // the Burrow will list; the generation is read again after it.
     const listed = this.#listsFrames ? await this.#openablePages(entries) : terminalsOnly(entries);
-    if (this.#disposed || this.#directorySubId !== subId || this.#directoryGeneration !== generation) return;
+    if (this.#disposed || this.#directorySubId !== subId || generation <= this.#directoryEmitted) return;
+    this.#directoryEmitted = generation;
     this.#event(subId, REMOTE_EVENTS.directorySnapshot, { entries: listed });
   }
 

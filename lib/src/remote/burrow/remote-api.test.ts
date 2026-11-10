@@ -592,6 +592,37 @@ describe('RemoteApiSession directory.watch', () => {
     ]);
   });
 
+  it('emits a collect that settles while a newer one is still in flight', async () => {
+    // Changes that keep arriving faster than a collect settles must not
+    // supersede every collect before it can emit.
+    vi.useFakeTimers();
+    const provider = new FakeProvider();
+    provider.entries = [entry('surface:1', 'first')];
+    const { session, sent } = makeSession(provider);
+    await watchDirectory(session);
+    expect(snapshots(sent)).toHaveLength(1);
+
+    const older = gate();
+    provider.collectGate = older.promise;
+    provider.entries = [entry('surface:1', 'second')];
+    provider.changeDirectory();
+    vi.advanceTimersByTime(150);
+    await settle();
+
+    provider.collectGate = gate().promise;
+    provider.changeDirectory();
+    vi.advanceTimersByTime(150);
+    await settle();
+    expect(provider.collects).toBe(3);
+
+    older.release();
+    await settle();
+    expect(snapshots(sent).map((s) => s.entries)).toEqual([
+      [entry('surface:1', 'first')],
+      [entry('surface:1', 'second')],
+    ]);
+  });
+
   it('watches once across repeated directory.watch requests', async () => {
     const provider = new FakeProvider();
     const { session } = makeSession(provider);
