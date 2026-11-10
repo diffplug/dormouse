@@ -37,7 +37,7 @@ import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../..
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
-import { errorText, stringParam } from './dor-control-shared';
+import { stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
@@ -301,7 +301,7 @@ export const PREVIEW_INTERRUPT_GRACE_MS = 1_000;
 
 /** Await `wait` with the launch queue released, then retake it behind
  *  whatever queued meanwhile: anything read of the Wall before is stale after. */
-export type ReleasedWait = <T>(wait: PromiseLike<T>) => Promise<T>;
+type ReleasedWait = <T>(wait: PromiseLike<T>) => Promise<T>;
 
 /** A serial queue whose work can step out of it for a wait only the user ends
  *  (docs/specs/dor-tool.md -> Identity and dedupe). */
@@ -2135,7 +2135,7 @@ export function useDorControl({
           dangerouslyDestroyIframePageState: booleanParam(params.dangerouslyDestroyIframePageState),
         });
         detail.respond({ ok: true, result });
-      } catch (error) { detail.respond({ ok: false, error: errorText(error) }); }
+      } catch (error) { detail.respond({ ok: false, error: messageOf(error) }); }
       return;
     }
 
@@ -2281,7 +2281,7 @@ export function useDorControl({
         let initialViewport: BrowserViewportSetting;
         try { initialViewport = resolveBrowserViewport(config); }
         catch (error) {
-          detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          detail.respond({ ok: false, error: messageOf(error) });
           return;
         }
         const launchViewport = initialViewport.mode === 'fixed' ? initialViewport : { width: 1440, height: 900 };
@@ -2380,7 +2380,7 @@ export function useDorControl({
               setting = resolveBrowserViewport(config, { width: setting.width, height: setting.height, dpr: choice.dpr });
             }
           } catch (error) {
-            detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+            detail.respond({ ok: false, error: messageOf(error) });
             return;
           }
         } else {
@@ -2423,7 +2423,7 @@ export function useDorControl({
           requested: effective, ...(measured.viewport ? { actual: measured.viewport } : {}), ready: measured.ok && !!measured.viewport,
         } });
       } catch (error) {
-        detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        detail.respond({ ok: false, error: messageOf(error) });
       }
       return;
     }

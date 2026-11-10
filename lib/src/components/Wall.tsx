@@ -127,7 +127,6 @@ import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertDelivery } from './wall/use-alert-delivery';
 import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
-import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
 import { useEngagementFocus } from './wall/use-engagement-focus';
 import {
@@ -1853,7 +1852,7 @@ export function Wall({
         await waitForNewToolCommand(id, command, cwd);
       });
     } catch (error) {
-      showFailure(errorText(error));
+      showFailure(messageOf(error));
     } finally {
       toolApprovalsInFlightRef.current.delete(id);
     }

@@ -16,11 +16,6 @@ export function stringParam(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-/** The message a failed response carries, from a throw or a rejection. */
-export function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * How many macrotasks a request waits for a Wall to appear. A Wall registers its
  * handle in a passive effect, so a request landing between `createWorkspace()`
