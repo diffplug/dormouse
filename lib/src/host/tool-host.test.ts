@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ const YML = `
 tools:
   storybook:
     run: pnpm storybook
-    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+    prespawn_dedupe: [storybook, $HERE]
   scratch:
     run: echo hi
   noisy:
@@ -199,8 +199,19 @@ describe('createToolHost', () => {
       .toMatchObject({ status: 'error', message: expect.stringContaining('exactly one') });
   });
 
+  it('substitutes the user file\'s own directory for $HERE in a user Tool', async () => {
+    const userDir = join(repo, 'config');
+    await mkdir(userDir);
+    const path = join(userDir, 'dormouse.yml');
+    await writeFile(path, 'tools:\n  pridm:\n    run: [node, $HERE/pridm/main.js, $CWD]\n    prespawn_dedupe: [pridm, $HERE]\n');
+    const cwd = join(repo, 'work');
+    await mkdir(cwd);
+    expect(await createToolHost({ stateDir, userConfigPath: path }).handle({ op: 'lookup', name: 'pridm', cwd, global: true }))
+      .toMatchObject({ status: 'ok', scope: 'user', run: ['node', join(userDir, 'pridm', 'main.js'), cwd], key: ['pridm', userDir], warnings: [] });
+  });
+
   it('re-resolves input argv after project approval without shell interpolation', async () => {
-    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  viewer:\n    run: [viewer, $TARGET]\n    prespawn_dedupe: [$PROJECT_ROOT, $TARGET]\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  viewer:\n    run: [viewer, $TARGET]\n    prespawn_dedupe: [$HERE, $TARGET]\n');
     const target = join(repo, "quoted ' document.md");
     await writeFile(target, 'hello');
     const host = createToolHost({ stateDir });
@@ -247,7 +258,7 @@ describe('createToolHost', () => {
   storybook:
     run: pnpm storybook
     port: auto
-    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+    prespawn_dedupe: [storybook, $HERE]
   harness:
     run: [pnpm, harness, $ARGS]
     render: agent-browser-screencast
