@@ -233,7 +233,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 ### What is persisted
 
-**Must persist structure only, never scrollback or recovery commands.** The accepted shapes are `PersistedSession` / `PersistedWindow` in `lib/src/lib/session-types.ts`; their behavioral contracts are in Persisted session types.
+**Must persist structure only, never scrollback or recovery commands.**
 
 ### Retiring the transcripts already on disk
 
@@ -270,7 +270,7 @@ Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Re
 - **Never report the exit of a PTY replaced under its id**; a killed one still reports.
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`; `error` reaches no webview (rationale).
 - **Teardown acks are correlated by request id, never by message type alone.** For `interrupt` and the graceful kill the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out call's ack still arrives afterwards (rationale).
-- **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op, so a caller whose computed set comes out empty never sends the blanket second press that destroys codex's hint.
+- **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op (rationale).
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
 - **Never run a synchronous subprocess on a PTY host's event loop** (the Tauri sidecar, VS Code's pty-host); `/proc` reads and small state files are exempt (rationale). Pinned by `standalone/sidecar/no-sync-subprocess.test.js`.
 - **Must discard a probe's answer for a PTY replaced or exited mid-probe.**
