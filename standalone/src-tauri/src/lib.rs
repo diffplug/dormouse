@@ -7213,6 +7213,10 @@ mod tests {
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",
                 "kill_sidecar_and_wait", "arrival_payloads",
+                // File writes that fsync, and a window build, which deadlocks
+                // inside a sync command on Windows.
+                "reserve_blocks(", "reserve_ids(", "reserve_id_strings(", "next_window_label(",
+                "write_session_to(", "write_file_atomically(", "build_window(",
             ].iter().any(|helper| body.contains(helper));
             if reaches_blocking && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());
