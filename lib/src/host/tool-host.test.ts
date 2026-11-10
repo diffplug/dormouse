@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -398,6 +398,173 @@ describe('createToolHost', () => {
       await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  broken:\n    render: iframe\n');
       expect(await createToolHost({ userConfigPath: userFile('missing-user.yml') }).handle({ op: 'list', cwd: repo, global: false }))
         .toMatchObject({ status: 'error', message: expect.stringContaining("'run' is required") });
+    });
+  });
+
+  describe('imports', () => {
+    // The user file and the clones kept beside it, as git submodules would be.
+    let config = '';
+    let userPath = '';
+    let clone = '';
+    let supertools = '';
+    const PRIDM = `tools:
+  # The clone's own words.
+  pridm:
+    run: [node, $HERE/main.js, $CWD]
+    prespawn_dedupe: [pridm, $HERE]
+    colour: blue
+  # Not imported.
+  other:
+    run: other
+    shade: red
+open:
+  - {match: '*', tool: other}
+browser:
+  default_viewport: nonsense
+`;
+    const USER_IMPORTS = (supertoolsDir: string) => `tools:
+  # PR dashboard, in my words.
+  pridm:
+    from: pridm
+  prs:
+    from: ${supertoolsDir}
+    tool: pr-dashboard
+  scratch:
+    run: echo hi
+`;
+    const write = async (path: string, text: string) => {
+      await mkdir(join(path, '..'), { recursive: true });
+      await writeFile(path, text);
+    };
+
+    beforeEach(async () => {
+      config = join(repo, 'config');
+      userPath = join(config, 'dormouse.yml');
+      clone = join(config, 'pridm');
+      supertools = join(repo, 'elsewhere', 'supertools');
+      await write(join(clone, 'dormouse.yml'), PRIDM);
+      await write(join(supertools, 'dormouse.yml'), 'tools:\n  # Review PRs.\n  pr-dashboard:\n    run: [dash, $ARGS]\n');
+      await write(userPath, USER_IMPORTS(supertools));
+    });
+
+    it('resolves a relative import as a user Tool whose $HERE is the imported directory, needing no grant', async () => {
+      const cwd = join(repo, 'work');
+      await mkdir(cwd);
+      // `repo` holds a project file without `pridm`, so this is the user fallback.
+      expect(await createToolHost({ stateDir, userConfigPath: userPath }).handle({ op: 'lookup', name: 'pridm', cwd })).toEqual({
+        status: 'ok', scope: 'user', name: 'pridm', path: join(clone, 'dormouse.yml'), projectRoot: clone,
+        run: ['node', join(clone, 'main.js'), cwd], key: ['pridm', clone], render: 'iframe', port: 'announced',
+        viewport: { mode: 'pane-sync' },
+        warnings: [`${join(clone, 'dormouse.yml')}: tools.pridm: ignoring unknown field 'colour'`],
+      });
+    });
+
+    it('resolves an absolute import under its local name, and a tool: rename', async () => {
+      expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'prs', cwd: repo, global: true, args: ['--all'] }))
+        .toMatchObject({ status: 'ok', scope: 'user', name: 'prs', path: join(supertools, 'dormouse.yml'), projectRoot: supertools, run: ['dash', '--all'] });
+      expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'pr-dashboard', cwd: repo, global: true }))
+        .toMatchObject({ status: 'unknown-tool', names: ['pridm', 'prs', 'scratch'] });
+    });
+
+    it.skipIf(process.platform === 'win32')('follows a symlinked directory to the import, keying it on the real one', async () => {
+      await symlink(clone, join(config, 'pridm-link'));
+      await writeFile(userPath, 'tools:\n  pridm:\n    from: pridm-link\n');
+      expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'pridm', cwd: repo, global: true }))
+        .toMatchObject({ status: 'ok', path: join(clone, 'dormouse.yml'), key: ['pridm', clone] });
+    });
+
+    it('carries no checkout warning for an imported key without $HERE: an import has one clone', async () => {
+      await writeFile(join(supertools, 'dormouse.yml'), 'tools:\n  pr-dashboard:\n    run: [dash]\n    prespawn_dedupe: dash\n');
+      expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'prs', cwd: repo, global: true }))
+        .toMatchObject({ status: 'ok', key: ['dash'], warnings: [`${join(clone, 'dormouse.yml')}: tools.pridm: ignoring unknown field 'colour'`] });
+    });
+
+    it('lists an import with the file it came from and the local comment over the imported one', async () => {
+      const result = await createToolHost({ userConfigPath: userPath }).handle({ op: 'list', cwd: repo, global: true });
+      expect(result).toEqual({ status: 'list', listing: {
+        project: null,
+        user: { path: userPath, found: true },
+        tools: [
+          { name: 'pridm', scope: 'user', run: ['node', '$HERE/main.js', '$CWD'], render: 'iframe', port: 'announced', keyed: true,
+            description: 'PR dashboard, in my words.', shadowed: false, from: join(clone, 'dormouse.yml') },
+          { name: 'prs', scope: 'user', run: ['dash', '$ARGS'], render: 'iframe', port: 'announced', keyed: false,
+            description: 'Review PRs.', shadowed: false, from: join(supertools, 'dormouse.yml') },
+          { name: 'scratch', scope: 'user', run: 'echo hi', render: 'iframe', port: 'announced', keyed: false, description: null, shadowed: false },
+        ],
+        warnings: [`${join(clone, 'dormouse.yml')}: tools.pridm: ignoring unknown field 'colour'`],
+      } });
+    });
+
+    it('still finds the clone\'s own file as an unapproved project file from inside it', async () => {
+      expect(await createToolHost({ stateDir, userConfigPath: userPath }).handle({ op: 'lookup', name: 'pridm', cwd: clone }))
+        .toMatchObject({ status: 'untrusted', path: join(clone, 'dormouse.yml'), projectRoot: clone });
+      expect(await createToolHost({ stateDir, userConfigPath: userPath }).handle({ op: 'list', cwd: clone, global: false }))
+        .toMatchObject({ listing: { project: { path: join(clone, 'dormouse.yml'), approved: false } } });
+    });
+
+    describe('a broken import fails only itself', () => {
+      const BROKEN = {
+        nodir: ['from: missing', 'missing/dormouse.yml', ': not found'],
+        nofile: ['from: empty', 'empty/dormouse.yml', ': not found'],
+        malformed: ['from: malformed', 'malformed/dormouse.yml', ": tools.malformed: 'run' is required and must be a non-empty string or argument list"],
+        noentry: ['from: pridm\n    tool: absent', 'pridm/dormouse.yml', ": no Tool 'absent' (declares: pridm, other)"],
+        chained: ['from: chained', 'chained/dormouse.yml', ": tools.chained: 'from' imports a Tool only in the user file"],
+      } as const;
+
+      beforeEach(async () => {
+        await mkdir(join(config, 'empty'));
+        await write(join(config, 'malformed', 'dormouse.yml'), 'tools:\n  malformed:\n    render: iframe\n');
+        await write(join(config, 'chained', 'dormouse.yml'), 'tools:\n  chained:\n    from: ../pridm\n');
+        await writeFile(userPath, `${USER_IMPORTS(supertools)}${Object.entries(BROKEN).map(([name, [entry]]) => `  # Why ${name}.\n  ${name}:\n    ${entry}\n`).join('')}`
+          + 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\n');
+      });
+
+      it.each(Object.entries(BROKEN))('%s: its lookup names both files and why', async (name, [, file, reason]) => {
+        expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name, cwd: repo, global: true })).toEqual({
+          status: 'error', message: `${userPath}: tools.${name} imports '${name === 'noentry' ? 'absent' : name}': ${join(config, file)}${reason}`,
+        });
+      });
+
+      it('leaves every other Tool, the listing, and browser settings working', async () => {
+        const host = createToolHost({ userConfigPath: userPath });
+        expect(await host.handle({ op: 'lookup', name: 'scratch', cwd: repo, global: true })).toMatchObject({ status: 'ok', run: 'echo hi' });
+        expect(await host.handle({ op: 'lookup', name: 'pridm', cwd: repo, global: true })).toMatchObject({ status: 'ok' });
+        expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({ status: 'browser-config', config: { viewports: { custom: { width: 1100 } } } });
+        const result = await host.handle({ op: 'list', cwd: repo, global: true });
+        expect(result.status === 'list' && result.listing.tools.map(tool => tool.name)).toEqual(['pridm', 'prs', 'scratch', ...Object.keys(BROKEN)]);
+        expect(result.status === 'list' && result.listing.tools.find(tool => tool.name === 'nodir')).toEqual({
+          name: 'nodir', scope: 'user', description: 'Why nodir.', shadowed: false,
+          from: join(config, 'missing', 'dormouse.yml'), broken: `${join(config, 'missing', 'dormouse.yml')}: not found`,
+        });
+      });
+
+      it('lists a broken import among the names an unknown lookup reports', async () => {
+        expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'nope', cwd: repo, global: true }))
+          .toMatchObject({ status: 'unknown-tool', names: ['chained', 'malformed', 'nodir', 'noentry', 'nofile', 'pridm', 'prs', 'scratch'] });
+      });
+
+      it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('reports an unreadable imported file', async () => {
+        await chmod(join(config, 'malformed', 'dormouse.yml'), 0);
+        expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'malformed', cwd: repo, global: true })).toEqual({
+          status: 'error', message: `${userPath}: tools.malformed imports 'malformed': ${join(config, 'malformed', 'dormouse.yml')}: cannot read (EACCES)`,
+        });
+      });
+
+      it.skipIf(process.platform === 'win32')('refuses a symlinked imported file', async () => {
+        await mkdir(join(config, 'linked'));
+        await symlink(join(clone, 'dormouse.yml'), join(config, 'linked', 'dormouse.yml'));
+        await writeFile(userPath, 'tools:\n  pridm:\n    from: linked\n');
+        expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'pridm', cwd: repo, global: true })).toEqual({
+          status: 'error', message: `${userPath}: tools.pridm imports 'pridm': ${join(config, 'linked', 'dormouse.yml')}: tool file must be a regular file, not a symbolic link`,
+        });
+      });
+
+      it.skipIf(process.platform === 'win32')('refuses a directory that is a link to a share', async () => {
+        await symlink('//fileserver/share', join(config, 'share'));
+        await writeFile(userPath, 'tools:\n  pridm:\n    from: share\n');
+        expect(await createToolHost({ userConfigPath: userPath }).handle({ op: 'lookup', name: 'pridm', cwd: repo, global: true }))
+          .toMatchObject({ status: 'error', message: expect.stringContaining('not a folder on this machine') });
+      });
     });
   });
 });

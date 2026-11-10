@@ -139,7 +139,7 @@ function renderItem(tool: ToolListEntry, positions: readonly number[], selected:
   const cells = [
     ...textCells(tool.name, index => (matched.has(index) ? SGR.match : ''), printableExact),
     GAP,
-    ...textCells(JSON.stringify(tool.run), () => SGR.dim, printableExact),
+    ...textCells(tool.broken === undefined ? JSON.stringify(tool.run) : `[broken: ${tool.broken}]`, () => SGR.dim, printableExact),
     ...(tool.shadowed ? [GAP, ...textCells('[shadowed]', () => SGR.dim)] : []),
   ];
   return renderRow(fitCells(cells, width - 2, 'end'), selected);

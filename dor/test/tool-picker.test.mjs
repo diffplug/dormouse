@@ -192,6 +192,27 @@ test('Tool names, commands, descriptions, and paths cannot write terminal contro
   }
 });
 
+test('an imported Tool shows its file, and a broken import its reason, both escaped', async () => {
+  const base = { scope: 'user', description: null, shadowed: false };
+  const client = toolClient({ tools: [
+    { ...base, name: 'md', run: ['glow', '$TARGET'], render: 'iframe', port: 'auto', keyed: false, from: '/home/me/cl\x1b[2Jone/dormouse.yml' },
+    { ...base, name: 'gone', from: '/home/me/nodir/dormouse.yml', broken: '/home/me/nodir/dormouse.yml: not\x9b31m found' },
+  ] });
+  const { terminal, client: used, result } = await startPicker([], { client, terminal: fakeTerminal({ columns: 120 }) });
+  // The highlighted import's panel names the file it came from.
+  // The tag wraps in the panel, so match its two halves.
+  await until(() => plain(terminal.output).includes('[from') && terminal.output.includes('/home/me/cl\\u001b[2Jone/dormouse.yml]'), 'the imported file');
+  // A broken import's row says why in place of a command, before it is highlighted.
+  assert.ok(plain(terminal.output).includes('gone  [broken: /home/me/nodir/dormouse.yml: not\\u009b31m found]'), 'the broken row');
+  terminal.send('gone');
+  await until(() => plain(terminal.output).includes('1/2'), 'the filtered list');
+  for (const planted of ['\x1b[2J', '\x9b31m']) assert.equal(terminal.output.includes(planted), false, `${JSON.stringify(planted)} drawn raw`);
+  // Picking it launches by name, so the host reports the reason.
+  terminal.send('\r');
+  await result;
+  assert.equal(launch(used).name, 'gone');
+});
+
 test('validateToolArgs accepts the bare form with any flag; the -- form still needs its command', () => {
   for (const argv of [[], ['--global'], ['--minimize'], ['--json', '--cwd', 'x'], ['--surface', 'surface:2', '--fresh']]) {
     assert.deepEqual(validateToolArgs(argv), { ok: true, value: undefined }, argv.join(' '));
