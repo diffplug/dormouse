@@ -5,6 +5,7 @@ import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
 import { markdownPage } from '../dist/editor-page.js';
+import { mayHoldIndentedCode } from '../dist/editor-routes.js';
 
 // The real Markdown page, bundled as one classic script and mounted in jsdom
 // against a stubbed viewer server: what it shows, and every POST it makes.
@@ -228,3 +229,26 @@ test('a save keeps a line break that ends its paragraph from writing a literal b
   assert.ok(!saved.trimEnd().endsWith('\\'), saved);
   assert.ok(saved.startsWith('Intro word.\n\nLine one\\\nLine two'), saved);
 });
+
+// What the rich editor writes must never look like it could hold indented
+// code, or a document it saved would reopen as source.
+for (const text of [
+  '- a\n  - b\n    - c\n',
+  '1. a\n   1. b\n      1. c\n',
+  '1. a\n\n   para a\n\n   1. b\n\n      para b\n\n      1. c\n\n         para c\n',
+  '- a\n\n  - b\n\n    - c\n\n      para c\n',
+  '- first\n\n  second\n- next\n',
+  '- item\n\n  ```js\n  x\n      indented in the fence\n  ```\n',
+  '- [ ] todo\n- [x] done\n  - [ ] nested\n',
+  '| a | b |\n| - | - |\n| 1 | 2 |\n',
+  '> - a\n>   - b\n>     - c\n',
+  '> quote\n>\n> - a\n>\n>   para\n',
+  '# H1\n\n## H2\n\ntext\n',
+  'Line one\\\nLine two\n\n- item one\\\n  item two\n',
+]) {
+  test(`what the rich editor saves passes the indented-code scan: ${JSON.stringify(text)}`, { timeout: 30_000 }, async () => {
+    const saved = await fixedAndSaved(text);
+    assert.ok(saved.startsWith('Intro word.'), saved);
+    assert.ok(!mayHoldIndentedCode(saved), JSON.stringify(saved));
+  });
+}

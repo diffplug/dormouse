@@ -123,26 +123,87 @@ const image = ({ bytes, version }: { bytes: Uint8Array; version: string }, type:
 const jsonBody = (request: EditorRequest, limit: number) =>
   parseJsonBody(request.contentType, limit, bound => request.body({ limit: bound, message: '' })) as Promise<Record<string, unknown> | null>;
 
-// At a line start: four columns of indent, after any blockquote markers, then
-// content; and a line that lets the next one start a code block — blank, or a
-// heading, fence, HTML block, or rule, none of which a paragraph continues.
-const INDENTED_LINE = /(?: {0,3}> ?)*(?: {4}| {0,3}\t)[ \t]*\S/y;
-const OPENS_BLOCK = /(?: {0,3}> ?)*[ \t]*(?:$|\n|#|```|~~~|<|(?:[-*_=][ \t]*)+(?:$|\n))/y;
+const LIST_MARKER = /^([-*+]|\d{1,9}[.)])(?=[ \t]|$)( *)/;
+const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const FENCE = /^(`{3,}|~{3,})/;
+// A heading, an HTML block, or a rule or setext underline: no paragraph
+// continues past one, so the next line may start a code block.
+const OPENS_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|<|(?:[-*_=][ \t]*)+$)/;
+const blank = (line: string) => /^[ \t]*$/.test(line);
 
-/** Whether `text` has a line that could start an indented code block: a
- * necessary condition, not a detector, since a list item's continuation
- * paragraph passes it too. One pass, no parse. */
+/**
+ * Whether `text` has a line that could start an indented code block: four
+ * columns past the content of the list item enclosing it, where a block may
+ * start (the document's start, after a blank line, a heading, rule, HTML, or a
+ * fence's end), outside any fence. A necessary condition, not a detector: one
+ * linear pass, no parse, that errs toward a candidate wherever it is unsure (a
+ * tab in an indent, a blockquote, a marker that cannot start a list there),
+ * because a missed block is a file rewritten on save. List-aware, so what the
+ * rich editor writes never passes.
+ */
 export function mayHoldIndentedCode(text: string): boolean {
-  let opens = true;
-  for (let start = 0; ; ) {
-    INDENTED_LINE.lastIndex = start;
-    if (opens && INDENTED_LINE.test(text)) return true;
-    OPENS_BLOCK.lastIndex = start;
-    opens = OPENS_BLOCK.test(text);
+  /** The content offsets of the list items enclosing the line, innermost last. */
+  const items: number[] = [];
+  let fence: { char: string; length: number; offset: number } | null = null;
+  let blockStart = true;
+  for (let start = 0; start <= text.length; ) {
     const end = text.indexOf('\n', start);
-    if (end < 0) return false;
-    start = end + 1;
+    const line = text.slice(start, end < 0 ? text.length : end).replace(/\r$/, '');
+    start = end < 0 ? text.length + 1 : end + 1;
+    if (blank(line)) { blockStart = true; continue; }
+    const lead = /^[ \t]*/.exec(line)![0];
+    const indent = lead.length;
+    const rest = line.slice(indent);
+    if (fence && indent < fence.offset) fence = null; // its list item ended
+    if (fence) {
+      const close = FENCE.exec(rest);
+      if (close && close[1][0] === fence.char && close[1].length >= fence.length && blank(rest.slice(close[1].length))) {
+        fence = null;
+        blockStart = true;
+      } else blockStart = false;
+      continue;
+    }
+    const closesItem = items.length > 0 && indent < items[items.length - 1];
+    while (items.length && indent < items[items.length - 1]) items.pop();
+    const offset = items.length ? items[items.length - 1] : 0;
+    if (blockStart && (lead.includes('\t') || indent - offset >= 4)) return true;
+    if (indent - offset >= 4) { blockStart = false; continue; } // a paragraph's continuation
+    if (rest.startsWith('>')) {
+      // No list or fence tracking inside a quote: any four-column indent after
+      // its markers, where a block may start, is a candidate.
+      let quoted = rest;
+      while (/^ {0,3}>/.test(quoted)) quoted = quoted.replace(/^ {0,3}> ?/, '');
+      const inner = /^[ \t]*/.exec(quoted)![0];
+      if (blank(quoted)) blockStart = true;
+      else if (blockStart && (inner.includes('\t') || inner.length >= 4)) return true;
+      else blockStart = OPENS_BLOCK.test(quoted) || FENCE.test(quoted.slice(inner.length));
+      continue;
+    }
+    if (THEMATIC_BREAK.test(rest)) { blockStart = true; continue; }
+    let content = rest;
+    const marker = LIST_MARKER.exec(rest);
+    // An ordered list not starting at 1, or an empty item, cannot interrupt a
+    // paragraph, so such a line there is the paragraph's text.
+    if (marker && (blockStart || closesItem || (marker[1].length === 1 || marker[1] === '1.' || marker[1] === '1)') && rest.length > marker[0].length)) {
+      content = rest.slice(marker[0].length);
+      // Past four spaces the item opens with indented code; a tab, unsure.
+      if (!blank(content) && (marker[2].length > 4 || content.startsWith('\t'))) return true;
+      // CommonMark: past four spaces, or none before the line's end, the
+      // content starts one column after the marker.
+      const spaces = blank(content) || marker[2].length > 4 ? 1 : marker[2].length;
+      items.push(indent + marker[1].length + spaces);
+      if (blank(content)) { blockStart = true; continue; }
+      content = content.replace(/^ +/, '');
+    }
+    const opening = FENCE.exec(content);
+    if (opening && !(opening[1][0] === '`' && content.slice(opening[1].length).includes('`'))) {
+      fence = { char: opening[1][0], length: opening[1].length, offset: items.length ? items[items.length - 1] : 0 };
+      blockStart = false;
+      continue;
+    }
+    blockStart = OPENS_BLOCK.test(content);
   }
+  return false;
 }
 
 /** Whether CommonMark, with no extensions, reads an indented code block in

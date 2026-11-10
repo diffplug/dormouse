@@ -6,7 +6,7 @@ import { request } from 'node:http';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
 import { editorStore } from '../dist/editor-store.js';
-import { MARKDOWN_PARSE_BOUND, markdownEditing, parsesIndentedCode, pasteImage } from '../dist/editor-routes.js';
+import { MARKDOWN_PARSE_BOUND, markdownEditing, mayHoldIndentedCode, parsesIndentedCode, pasteImage } from '../dist/editor-routes.js';
 import { resolveInside } from '../dist/viewer-server.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108020000009077' + '53de0000000c4944415408d763f8cfc000000301010018dd8db00000000049454e44ae426082', 'hex');
@@ -233,13 +233,34 @@ test('a Markdown file with no indented code block opens rich', async () => {
   }
 });
 
+test('the scan finds every indented code block CommonMark does', () => {
+  for (const text of [
+    'Run:\n\n    make\n',
+    '    code at the start\n',
+    'Text\n\n\tcode after a tab\n',
+    '# Heading\n    code after a heading\n',
+    '- a\n- b\n\nAfter the list.\n\n    code\n',
+    '- a\n\n      code in the item\n',
+    '1. a\n\n       code in an ordered item\n',
+    '- a\n  - b\n\n        code in a nested item\n',
+    '> quote\n>\n>     code in a quote\n',
+    '- a\n  ```\n  x\n- b\n\nend\n\n    code after a fence its item ended\n',
+    '```\nx\n```\n    code after a fence\n',
+    '-     code after a marker\n',
+  ]) {
+    assert.equal(parsesIndentedCode(text), true, `fixture: ${JSON.stringify(text)}`);
+    assert.equal(mayHoldIndentedCode(text), true, JSON.stringify(text));
+  }
+});
+
 test('only a line that could start indented code costs a parse, and only under the bound', () => {
   const calls = [];
   const spy = text => { calls.push(text.length); return parsesIndentedCode(text); };
   for (const text of INDENTED) assert.equal(markdownEditing(text, spy), 'indented');
   for (const text of RICH) assert.equal(markdownEditing(text, spy), 'rich');
-  // The empty file and the fenced-only document have no candidate line.
-  assert.equal(calls.length, INDENTED.length + 2);
+  // None of the rich cases has a candidate line: a list item's continuation
+  // sits within the item, and indented lines in a fence are code already.
+  assert.equal(calls.length, INDENTED.length);
 
   calls.length = 0;
   const prose = 'A paragraph of prose,\nwrapped over lines\n    and a lazy indented one.\n\n'.repeat(Math.ceil(300 * 1024 / 72));
