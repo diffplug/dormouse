@@ -5,7 +5,7 @@
  * in "Peer surfaces across windows".
  */
 
-import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { linkSync, statSync, unlinkSync, type BigIntStats } from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
@@ -40,6 +40,10 @@ import {
 import { freshEndpointName, publishesEndpoint } from './peer-endpoint';
 import type { PtySink } from './processed-pty-streams';
 import { log } from './log';
+
+const { ensureControlDir } = require('../../standalone/sidecar/dor-control-server.js') as {
+  ensureControlDir(dir: string): string | null;
+};
 
 /**
  * What this module needs from the router, injected rather than imported: the
@@ -158,33 +162,10 @@ function peerDirPath(): string {
  * here to check; a fresh name per bind, published only in this user's storage
  * ({@link attemptPublished}), stands in for it.
  *
- * The same predicate is duplicated as `ensureControlDir()` in
- * standalone/sidecar/dor-control-server.js (sync fs, returns the directory
- * rather than a boolean) for the `dor` control socket. Nothing tests the two
- * against each other, so a correction to the hardening rule belongs in both.
+ * The predicate is the `dor` control socket's own `ensureControlDir`.
  */
-async function peerDirIsSafe(): Promise<boolean> {
-  if (process.platform === 'win32') return true;
-  const dir = peerDirPath();
-  await mkdir(dir, { recursive: true, mode: 0o700 }).catch(() => {});
-  const uid = process.getuid?.();
-  let info = await lstat(dir).catch(() => null);
-  // Ours but loose — a permissive umask, or a directory from before this check
-  // existed. Tightening something we already own is safe and keeps the test
-  // below exact rather than "0700 or better".
-  if (info?.isDirectory() && info.uid === uid && (info.mode & 0o777) !== 0o700) {
-    await chmod(dir, 0o700).catch(() => {});
-    info = await lstat(dir).catch(() => null);
-  }
-  return (
-    !!info &&
-    info.isDirectory() &&
-    // `lstat` does not follow, so a symlink reports as one rather than as
-    // whatever it points at — which is the whole reason it is `lstat`.
-    !info.isSymbolicLink() &&
-    info.uid === uid &&
-    (info.mode & 0o777) === 0o700
-  );
+function peerDirIsSafe(): boolean {
+  return process.platform === 'win32' || ensureControlDir(peerDirPath()) !== null;
 }
 
 /**
@@ -1331,7 +1312,7 @@ function settle(broker: boolean): void {
  */
 async function attempt(): Promise<boolean> {
   if (!context) return false;
-  if (!(await peerDirIsSafe())) {
+  if (!peerDirIsSafe()) {
     log.error(
       `[peer-link] ${peerDirPath()} is not a private directory of this user; the peer link is off`,
     );
@@ -1407,7 +1388,7 @@ async function attempt(): Promise<boolean> {
         }
         // Another window cleared the same corpse after we published, so the
         // path now names its socket (or nothing) and ours is unreachable.
-        // Stand down rather than run a second Host: `link` is only the arbiter
+        // Stand down rather than run a second Burrow: `link` is only the arbiter
         // when nobody unlinks. Our close leaves the path alone, so the loop's
         // next round finds that window and connects.
         await closeServer(false);
@@ -1485,7 +1466,17 @@ async function attemptPublished(token: string): Promise<boolean> {
     await closeServer(true);
     return true;
   }
-  if (!(await publishEndpoint(raw))) {
+  let publishedOurs: boolean;
+  try {
+    publishedOurs = await publishEndpoint(raw);
+  } catch (error) {
+    // Nothing names our bind, so no window can reach it: give it up, or the
+    // contention loop would end holding a server it never confirms.
+    log.error(`[peer-link] could not publish the peer endpoint ${endpointPath()}: ${String(error)}`);
+    await closeServer(false);
+    return false;
+  }
+  if (!publishedOurs) {
     // Another window published first, so it is the broker and we are not.
     await closeServer(false);
     const winner = await readEndpoint();
@@ -1524,10 +1515,8 @@ const RECLAIM_JITTER_MS = 250;
  * reach. Unlinking only the file that refused ({@link unlinkIfStill}) narrows
  * that to a few microseconds; this catches what is left.
  *
- * A path that has *gone* is the same failure on unix: somebody unlinked it after
- * our bind, so every window dialing it will miss us. Only Windows may read that
- * as ours — named pipes are not filesystem objects, cannot be stat-ed, and die
- * with the process that made them, so nothing there can displace us.
+ * A path that has *gone* is the same failure: somebody unlinked it after our
+ * bind, so every window dialing it will miss us.
  */
 interface SocketFileIdentity {
   dev: bigint;
@@ -1584,12 +1573,11 @@ function unlinkIfStill(path: string, expected: SocketFileIdentity): void {
 }
 
 async function stillOurs(path: string): Promise<boolean> {
-  const unstattable = process.platform === 'win32';
   const mine = boundSocketFile;
-  if (!mine) return unstattable;
+  if (!mine) return false;
   await delay(RECLAIM_VERIFY_MS);
   const now = await socketFileIdentity(path);
-  if (!now) return unstattable;
+  if (!now) return false;
   return sameSocketFile(now, mine);
 }
 

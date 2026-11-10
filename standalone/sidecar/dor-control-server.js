@@ -59,12 +59,9 @@ function lstatOrNull(target) {
  * Anything but a plain directory of ours at mode 0700 is somebody else's,
  * possibly on purpose, and no amount of retrying makes it ours — so the caller
  * stands the control channel down rather than binding inside it. Returns the
- * directory when it is safe, `null` when it is not.
- *
- * The same predicate as `peerDirIsSafe()` in vscode-ext/src/peer-link.ts, which
- * carries the matching pointer back here: sync-vs-async fs and the return type
- * are the only differences, so a correction to the hardening rule belongs in
- * both copies.
+ * directory when it is safe, `null` when it is not. The VS Code peer link
+ * holds its socket directory to this same predicate (`peerDirIsSafe` in
+ * vscode-ext/src/peer-link.ts).
  */
 function ensureControlDir(dir = controlDirPath()) {
   try {

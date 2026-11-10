@@ -311,6 +311,17 @@ export class VSCodeAdapter implements PlatformAdapter {
     return this.requestResponse('pty:getCwd', 'pty:cwd', { id }, (msg) => msg.cwd);
   }
 
+  /** One round trip and one pty-host scan for every pane a save probes. */
+  async getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    const result = await this.requestResponse<Record<string, string | null>>(
+      'pty:getCwds', 'pty:cwds', { ids },
+      (msg) => msg.cwds as Record<string, string | null>,
+      // Past the extension host's own 2 s bound, so its answer arrives first.
+      2500,
+    );
+    return result ?? {};
+  }
+
   async getOpenPorts(id: string): Promise<OpenPort[]> {
     const result = await this.requestResponse<OpenPort[]>(
       'pty:getOpenPorts', 'pty:openPorts', { id },

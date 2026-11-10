@@ -693,6 +693,24 @@ describe('VSCodeAdapter port deadline', () => {
   });
 });
 
+describe('VSCodeAdapter cwd probes', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it('asks the host once for every cwd a save probes', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    const answer = adapter.getCwds(['pane-1', 'pane-2']);
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    const request = postMessage.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'pty:getCwds', ids: ['pane-1', 'pane-2'] });
+    // Past a single probe's budget, inside the host's own bound for the batch.
+    await vi.advanceTimersByTimeAsync(2000);
+    const cwds = { 'pane-1': '/repo', 'pane-2': null };
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:cwds', requestId: request.requestId, cwds }));
+    expect(await answer).toEqual(cwds);
+  });
+});
+
 describe('VSCodeAdapter host capabilities', () => {
   beforeEach(stubWebviewEnv);
   afterEach(() => vi.unstubAllGlobals());
