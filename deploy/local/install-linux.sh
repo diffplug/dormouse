@@ -277,7 +277,7 @@ esac
 # (`DORMOUSE_RUNTIME_FILE`), so the only thing left that needs `ss` is
 # `manage verify`'s bind check — worth a warning, not a refusal.
 command -v ss >/dev/null 2>&1 \
-  || warn "ss not found (iproute2). The install works without it, but \`manage verify\` cannot confirm that port $LOOPBACK_PORT is bound only to 127.0.0.1."
+  || warn "ss not found (iproute2). The install works without it, but \`manage verify\` fails until it can confirm that port $LOOPBACK_PORT is bound only to 127.0.0.1."
 
 if [ "$TEST_MODE" != "1" ]; then
   # A user manager is what runs the service. Without one — a bare `su`, a
@@ -1113,12 +1113,12 @@ cmd_verify() {
     if systemd-analyze --user verify "$UNIT_FILE" >/dev/null 2>&1; then
       pass "unit file passes systemd-analyze verify"
     else
-      # systemd-analyze is absent on some minimal images; only fail when it ran
-      # and objected.
+      # systemd-analyze is absent on some minimal images. A check that did not
+      # run has shown nothing, so that fails too, with its own message.
       if command -v systemd-analyze >/dev/null 2>&1; then
         fail "unit file fails systemd-analyze verify: $UNIT_FILE"
       else
-        note "skipped systemd-analyze verify (not installed)"
+        fail "could not run systemd-analyze verify (not installed)"
       fi
     fi
     if grep -q '^Restart=always$' "$UNIT_FILE" && grep -q '^WantedBy=default.target$' "$UNIT_FILE"; then
@@ -1180,7 +1180,7 @@ cmd_verify() {
   # release; this only asks what the socket is bound to.
   local listeners
   if ! command -v ss >/dev/null 2>&1; then
-    note "skipped the bind check (ss from iproute2 is not installed)"
+    fail "could not check what port $PORT is bound to: ss (iproute2) is not installed"
   else
     listeners="$(ss -lntH "sport = :$PORT" 2>/dev/null || true)"
     if [ -z "$listeners" ]; then

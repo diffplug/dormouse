@@ -193,6 +193,20 @@ export const RULES = [
     exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
   },
   {
+    // SELF_HOST.md -> "Definition of done" lists both checks; a missing tool
+    // means the check never ran, which fails rather than notes and passes.
+    rule: 'Definition of done — Linux manage verify fails a check its tool could not run',
+    patterns: {
+      Linux:
+        /if ! command -v ss >\/dev\/null 2>&1; then\n\s*fail "|if command -v systemd-analyze >\/dev\/null 2>&1; then\n\s*fail "unit file fails systemd-analyze verify: \$UNIT_FILE"\n\s*else\n\s*fail "/,
+    },
+    exactMatches: { Linux: 2 },
+    skip: {
+      macOS: 'lsof and plutil ship with the OS',
+      Windows: 'Get-NetTCPConnection and the ScheduledTasks module ship with the OS',
+    },
+  },
+  {
     // The probe's verdict, and on unix the one call into the helper holding it:
     // a helper nobody calls keeps its message and asserts nothing.
     rule: 'Network posture — manage verify probes the plaintext port on the Tailscale IP',
