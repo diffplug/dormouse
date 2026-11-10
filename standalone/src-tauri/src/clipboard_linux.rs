@@ -17,7 +17,7 @@ use std::time::Duration;
 use gtk::gdk;
 use tauri::AppHandle;
 
-use crate::clipboard_read::{paths_from_uris, text_from, write_drop_png, MAX_READ_BYTES};
+use crate::clipboard_read::{paths_from_uris, text_from, write_drop_png};
 
 /// The sidecar path's bounds for these commands (`request_from_sidecar_timeout`).
 const TEXT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -60,8 +60,7 @@ pub fn read_file_paths(app: &AppHandle) -> Result<Vec<String>, String> {
 pub fn read_image_as_file_path(app: &AppHandle) -> Result<Option<String>, String> {
     let png = read(app, IMAGE_TIMEOUT, |clipboard, tx| {
         clipboard.request_contents(&gdk::Atom::intern("image/png"), move |_, data| {
-            let length = data.length();
-            let bytes = if length > 0 && length as usize <= MAX_READ_BYTES { data.data() } else { Vec::new() };
+            let bytes = if data.length() > 0 { data.data() } else { Vec::new() };
             let _ = tx.send(bytes);
         });
     })?;

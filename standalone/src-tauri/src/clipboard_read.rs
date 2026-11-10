@@ -1,41 +1,32 @@
 //! What a native clipboard read hands back, apart from how it reads: the file
-//! references in a `text/uri-list`, the size bound, and the temp file an image
-//! paste is written to. Kept free of GTK so it builds and is tested on every
-//! platform; `clipboard_linux` is its one caller. Each rule mirrors the sidecar's
-//! Linux read (`standalone/sidecar/clipboard-ops.js`), which the Linux app used
-//! before it read natively.
+//! references in a `text/uri-list`, and the temp file an image paste is written
+//! to. Kept free of GTK so it builds and is tested on every platform;
+//! `clipboard_linux` calls it, and `clipboard_win` for that temp file. Each rule
+//! mirrors the sidecar's Linux read (`standalone/sidecar/clipboard-ops.js`),
+//! which the Linux app used before it read natively. No read is bounded in
+//! size: the platform already holds the payload, as the Windows reads take it.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
-use std::fs::{DirBuilder, OpenOptions};
+use std::fs::{DirBuilder, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// The largest clipboard payload a read takes, the sidecar's `MAX_BUFFER`: a
-/// larger one reads as empty there, because its tool's output overflows.
-pub const MAX_READ_BYTES: usize = 16 * 1024 * 1024;
-
 /// How long a pasted image's temp file lives, the sidecar's `DROP_TTL_MS`: long
 /// enough for a command the user ran against the path to have read it.
 const DROP_TTL: Duration = Duration::from_secs(5 * 60);
 
-/// Clipboard text, or empty when there is none or it is over the bound.
+/// Clipboard text, or empty when there is none.
 pub fn text_from(text: Option<&str>) -> String {
-    match text {
-        Some(text) if text.len() <= MAX_READ_BYTES => text.to_string(),
-        _ => String::new(),
-    }
+    text.unwrap_or_default().to_string()
 }
 
 /// The local paths a `text/uri-list` names, in order, as the sidecar's
 /// `parseUriList` returns them: comments and anything but a `file://` URI are
 /// skipped, the rest of each URI is percent-decoded, and one that does not
-/// decode to UTF-8 is dropped. None at all for a list over the bound.
+/// decode to UTF-8 is dropped.
 pub fn paths_from_uris<S: AsRef<str>>(uris: &[S]) -> Vec<String> {
-    if uris.iter().map(|uri| uri.as_ref().len() + 1).sum::<usize>() > MAX_READ_BYTES {
-        return Vec::new();
-    }
     uris.iter()
         .map(|uri| uri.as_ref().trim())
         .filter(|uri| !uri.is_empty() && !uri.starts_with('#'))
@@ -68,13 +59,21 @@ fn percent_decode(text: &str) -> Option<String> {
 
 static DROP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Writes a pasted image's PNG bytes to a fresh owner-only directory under the
-/// temp directory, as the sidecar does, removes it after `DROP_TTL`, and answers
-/// its path; None for no bytes, too many, or a write that fails.
+/// Writes a pasted image's PNG bytes to a temp file (`write_drop_file`) and
+/// answers its path; None for no bytes or a write that fails.
 pub fn write_drop_png(png: &[u8]) -> Option<String> {
-    if png.is_empty() || png.len() > MAX_READ_BYTES {
+    if png.is_empty() {
         return None;
     }
+    write_drop_file("clipboard.png", |file| file.write_all(png))
+}
+
+/// Writes a pasted image, through `write`, to `name` in a fresh directory under
+/// the temp directory, as the sidecar does, removes both after `DROP_TTL`, and
+/// answers its path; None when the directory, the file, or `write` fails. The
+/// directory and file are owner-only on Unix; on Windows they take the per-user
+/// temp directory's own access list.
+pub fn write_drop_file(name: &str, write: impl FnOnce(&mut File) -> std::io::Result<()>) -> Option<String> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let counter = DROP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("dormouse-drops-{nanos}-{counter}"));
@@ -88,8 +87,8 @@ pub fn write_drop_png(png: &[u8]) -> Option<String> {
         options.mode(0o600);
     }
     builder.create(&dir).ok()?;
-    let path = dir.join("clipboard.png");
-    let written = options.open(&path).and_then(|mut file| file.write_all(png));
+    let path = dir.join(name);
+    let written = options.open(&path).and_then(|mut file| write(&mut file));
     if written.is_err() {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
@@ -125,20 +124,24 @@ mod tests {
     fn a_reference_that_does_not_decode_is_dropped() {
         assert_eq!(paths_from_uris(&["file:///tmp/bad%zz", "file:///tmp/%FF", "file:///tmp/cut%2", "file:///ok"]), vec!["/ok"]);
         assert!(paths_from_uris::<&str>(&[]).is_empty());
-        assert!(paths_from_uris(&[format!("file:///{}", "a".repeat(MAX_READ_BYTES))]).is_empty());
     }
 
     #[test]
-    fn text_is_empty_when_absent_or_over_the_bound() {
+    fn text_is_empty_only_when_absent() {
         assert_eq!(text_from(Some("hello\n")), "hello\n");
         assert_eq!(text_from(None), "");
-        assert_eq!(text_from(Some(&"x".repeat(MAX_READ_BYTES + 1))), "");
+        // Past the sidecar's 16 MiB `MAX_BUFFER`, which read as empty there.
+        let large = "x".repeat(17 * 1024 * 1024);
+        assert_eq!(text_from(Some(&large)).len(), large.len());
     }
 
     #[test]
-    fn an_image_is_written_owner_only_and_refused_when_empty_or_too_large() {
+    fn an_image_is_written_owner_only_and_refused_when_empty() {
         assert_eq!(write_drop_png(&[]), None);
-        assert_eq!(write_drop_png(&vec![0; MAX_READ_BYTES + 1]), None);
+        let large = PathBuf::from(write_drop_png(&vec![0; 17 * 1024 * 1024]).unwrap());
+        assert_eq!(std::fs::metadata(&large).unwrap().len(), 17 * 1024 * 1024);
+        let _ = std::fs::remove_file(&large);
+        let _ = std::fs::remove_dir(large.parent().unwrap());
         let path = PathBuf::from(write_drop_png(b"\x89PNG\r\n\x1a\n").unwrap());
         assert_eq!(std::fs::read(&path).unwrap(), b"\x89PNG\r\n\x1a\n");
         assert!(path.ends_with("clipboard.png"));
