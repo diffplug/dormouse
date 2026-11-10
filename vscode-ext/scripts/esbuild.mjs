@@ -55,7 +55,7 @@ if (watch) {
   for (const options of builds) {
     const ctx = await esbuild.context(options);
     // Build once and assert before watching. The assertion exists because a
-    // lost `define` compiles green, and a watch loop (`pnpm dogfood:vscode`)
+    // lost `define` compiles green, and a watch loop (`pnpm --filter dormouse watch`)
     // is exactly where one plausibly goes missing — skipping it here left the
     // check absent from the build people actually iterate in.
     const result = await ctx.rebuild();

@@ -1,36 +1,6 @@
-# Workspaces stack: testing and modification guide
+# Testing and modification guide
 
-For an agent picking up the Workspaces work. Read `AGENTS.md` first (worktree rules, spec conventions); this guide covers only what is specific to the stack.
-
-## 1. Where the code is
-
-The work is a stack of eleven branches, each PR based on the one before it. Every branch has its own worktree listed below. **Sections 1 and 1a apply while the stack is open**; after it lands, use `main` and the owning specs. Branch and worktree paths below are historical after merge:
-
-| # | PR | Branch | Worktree | What it adds |
-|---|---|---|---|---|
-| 1 | #614 | `workspaces-window` | `dormouse.workspaces-2/.claude/worktrees/workspaces-window` | Workspace strip, one Wall per Workspace, hidden-Workspace minimize |
-| 2 | #615 | `workspaces-persist` | `dormouse.workspaces-2/.claude/worktrees/workspaces-persist` | Per-Workspace persistence, agent recovery |
-| 3 | #616 | `workspaces-multiwindow` | `dormouse.workspaces-2/.claude/worktrees/workspaces-multiwindow` | Several windows, routing, quit voting, transfer, drag |
-| 4 | #617 | `workspaces-dor` | `dormouse.workspaces-2/.claude/worktrees/workspaces-dor` | `dor workspace` verbs |
-| 5 | #618 | `workspaces-harden` | `dormouse.workspaces-harden` | Held events in the transfer gap, drift cleanup |
-| 6 | #619 | `workspaces-registry` | `dormouse.workspaces-registry` | Rust registry, stable `workspace:<n>` refs, cross-window routing |
-| 7 | #620 | `workspaces-durability` | `dormouse.workspaces-durability` | Journal in-flight transfers for crash recovery |
-| 8 | #621 | `workspaces-fidelity` | `dormouse.workspaces-fidelity` | Marks and serialized xterm buffers; pin transfer superseded by #630 |
-| 9 | #622 | `workspaces-move-verb` | `dormouse.workspaces-move-verb` | `dor workspace move`, `dor list --window`, iframe move gate |
-| 10 | #623 | `workspaces-harness` | `dormouse.workspaces-harness` | Harness alert stores through the sidecar |
-| 11 | #630 | `workspaces-transfer-fixes` | `dormouse.workspaces-transfer-fixes` | Transfer mouse/grid/command state, shared Workspace kill confirmation, review fixes |
-
-**Work on the tip** (`dormouse.workspaces-transfer-fixes`) for testing and for any tweak, unless the tweak clearly belongs to an earlier stage and you want it reviewed there. If you commit on an earlier stage, merge it forward through every later branch (`git merge --no-ff <previous>` in each worktree, in order), or the PRs diverge. Push with `git push origin <branch>`; the PRs update themselves.
-
-Never `git switch -c` inside an existing worktree. New branches: `wt switch --create <name> --base @` from the worktree you are stacking on.
-
-## 1a. Changing the stack, and landing it
-
-**Test Workspace changes locally before opening a PR.** The final fixes for this stack are collected in #630.
-
-**Default after this stack: put changes in new PRs on top of the tip.** A change to an early stage has to be merged forward through every later branch; a new PR at the tip touches nothing behind it, and testing findings usually cut across stages anyway. Edit an existing PR only when (a) the bug would make that PR wrong to merge on its own, (b) it answers review feedback on that PR, or (c) the stage's spec text is untrue. After editing an earlier stage, merge it forward at once, stage by stage, and run the tip's suites once at the end.
-
-**Land with merge commits, in order, never squash.** The stack is built on merge commits, so merging PR N with a merge commit leaves PR N+1's diff exactly its own and GitHub retargets it to `main` when PR N's branch is deleted; nothing else is needed. If a PR is squash-merged by mistake, PR N+1 will show PR N's changes again until `main` is merged into its branch (that merge resolves cleanly, since both sides carry identical content). The repo's default is a merge commit; keep it.
+Read `AGENTS.md` first (worktree rules, spec conventions).
 
 ## 2. Setup in a worktree
 
@@ -65,14 +35,14 @@ Opening a second window: drag a Workspace tab out of the strip and release it ou
 Per package, from the worktree root:
 
 ```
-(cd lib && npx tsc -b && npx vitest run)                     # tsconfig.json is a references root: `-p .` checks nothing
+(cd lib && npx tsc -b && npx vitest run)                     # tsconfig.json is a references root (`-p .` checks nothing); tsconfig.test.json carries the tests and .storybook
 (cd standalone && npx tsc --noEmit -p . && npx vitest run && node --test scripts/*.test.mjs)
 (cd standalone/sidecar && node --test)
 (cd dor && node --test)                                        # help snapshots
-(cd vscode-ext && npx vitest run)
+(cd vscode-ext && pnpm test)                                   # tsc on src/, then on test/ (tsconfig.test.json), then vitest
 (cd website && pnpm test)                                      # tsc --noEmit, then vitest: the website's only typecheck
 pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loop
-pnpm test                                                      # full CI test gate
+pnpm test                                                      # CI's two test jobs; not the smoketests, cargo, or Hosted's database suites
 cargo test                                                     # see §2
 ```
 
@@ -102,7 +72,7 @@ Helper placement snapshots: defer the fake helper's first prompt until its termi
 
 Help snapshots: after changing any `dor` help text, rebuild and refresh with `cd dor && pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then run `node --test` again and commit `dor/test/snapshots/`.
 
-Tests that pin the stack's non-obvious rules, by concern:
+Tests that pin the Workspace model's non-obvious rules, by concern:
 
 | Concern | Tests |
 |---|---|
@@ -186,7 +156,7 @@ Each row names the code and the spec section that must change with it. Spec lint
 | Quit and per-window close | `standalone/src/quit.ts`, `teardown-flow.ts`, `window-close.ts`; Rust `quit_state.rs`, `macos_terminate.rs` | `standalone.md` → Quit flow, Per-window close |
 | Persistence and restore | `lib/src/lib/window-session-aggregator.ts`, `standalone/src/window-restore.ts`, Rust `save_session` etc. | `standalone.md` → Persistence; `transport.md` |
 | `dor workspace` verbs, `dor list` | `dor/src/commands/workspace.ts`, `list.ts`, `dor/src/protocol.ts`, `dor/src/control-client.ts`, `dor/src/commands/types.ts`; window handler `lib/src/components/wall/workspace-control.ts`; router `dor-control-router.ts` | `dor-cli.md` → dor workspace, Standalone, Handle Model |
-| Platform hooks the stack added | `onPtyMarked`, `transferWorkspace` on `PlatformAdapter` (`lib/src/lib/platform/types.ts`), implemented in `standalone/src/tauri-adapter.ts` and `browser-sidecar-adapter.ts` | `transport.md` |
+| Platform hooks Workspaces added | `onPtyMarked`, `transferWorkspace` on `PlatformAdapter` (`lib/src/lib/platform/types.ts`), implemented in `standalone/src/tauri-adapter.ts` and `browser-sidecar-adapter.ts` | `transport.md` |
 | Browser harness | `standalone/scripts/dev-agent-browser.mjs` (`invokeMap`, `fireAndForget`), `browser-sidecar-adapter.ts` | `standalone.md` → Standalone browser-dev harness |
 
 ## 7. Rules that bite

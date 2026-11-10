@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
@@ -11,8 +11,8 @@ const WATCHED = 'longtask';
 const DELAY = 10_000;
 let manager: AlertManager;
 let scheduler: AlertDeliveryScheduler;
-let spoken: ReturnType<typeof vi.fn>;
-let pushed: ReturnType<typeof vi.fn>;
+let spoken: Mock<(id: string, episodeId: string) => void>;
+let pushed: Mock<(id: string, title: string) => void>;
 
 beforeEach(() => {
   vi.useFakeTimers();

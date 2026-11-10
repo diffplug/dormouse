@@ -22,7 +22,7 @@ pnpm test:hosted
 pnpm build:hosted
 ```
 
-Tests run each production Worker in real workerd, the account's with disposable Postgres clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, boundary, and push-egress suites alone, without Docker. The build writes each Worker's static files under `dist/<worker>/` (Pocket at `dist/relay/`, `/connect/` at `dist/try/connect/`) and dry-runs every Worker; it does not deploy. Production deploys only through the release workflow.
+Tests run each production Worker in real workerd, the account's with disposable Postgres clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, boundary, and push-egress suites alone, without Docker. `test:server-unit` runs the server tests that need neither Docker nor workerd. The build writes each Worker's static files under `dist/<worker>/` (Pocket at `dist/relay/`, `/connect/` at `dist/try/connect/`) and dry-runs every Worker; it does not deploy. Production deploys only through the release workflow.
 
 The one-time rendezvous and `/connect/` page run on their own, without Docker or Postgres (the relay Worker's Relay routes answer 503 there):
 

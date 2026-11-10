@@ -105,7 +105,7 @@ it('removes the remote alarm when the next snapshot clears it, even if local sta
 
 const page = { render: 'iframe' as const, url: 'http://localhost:5173/' };
 const browsers = () => ({
-  session: { request: vi.fn(), subscribe: vi.fn(() => new Promise(() => {})), unsubscribe: vi.fn() },
+  session: { request: vi.fn(), subscribe: vi.fn(() => new Promise<never>(() => {})), unsubscribe: vi.fn() },
   burrowId: 'burrow-1',
   frameDomain: 'frames.example',
   salt: () => new Uint8Array(32),
