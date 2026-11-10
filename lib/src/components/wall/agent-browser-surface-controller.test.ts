@@ -1424,7 +1424,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(host.relaunches(false)).toHaveLength(1);
   });
 
-  it('pop-in while the first launch is in flight is a no-op', async () => {
+  it('pop-in while the first launch is in flight waits for the browser', async () => {
     const host = relaunchHost();
     // The first launch opens a new session, and never answers.
     host.answers.launch = () => new Promise<never>(() => {});

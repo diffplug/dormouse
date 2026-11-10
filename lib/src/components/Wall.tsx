@@ -1728,8 +1728,9 @@ export function Wall({
     previewSlot,
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
     answeringWorkspaceId: effectiveWorkspaceId,
-    // The raw prop, not `effectiveWorkspaceId`: a bare Wall keeps the unscoped
-    // agent-browser session names (docs/specs/dor-browser.md → Managed identity).
+    // The raw prop, not `effectiveWorkspaceId`: a bare Wall has no Workspace id,
+    // so its browser keys take a scope of its own (docs/specs/dor-browser.md →
+    // Managed identity).
     workspaceScope: useCallback(() => workspaceId, [workspaceId]),
   });
 

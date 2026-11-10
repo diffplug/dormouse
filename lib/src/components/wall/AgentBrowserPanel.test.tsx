@@ -34,11 +34,10 @@ type TestPanelParams = {
   session: string;
   stream?: number;
   url?: string;
-  poppedOut?: boolean;
   cwd?: string;
 };
 
-const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
+const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'browser', session: 'browser-session' };
 
 /** The operations that drive a live browser, rather than bind or view one. */
 const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'close']);
@@ -878,7 +877,7 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     selectedId: string | null,
     workspaceActive = true,
   ): Promise<HTMLCanvasElement> {
-    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', stream: 4321 });
+    const props = paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 4321 });
     await act(async () => {
       root.render(
         <StrictMode>
@@ -1089,7 +1088,7 @@ describe('AgentBrowserPanel tab strip actions', () => {
   // just exercises the onClick → selectTab/closeTab wiring.
   async function renderWithTwoTabs(): Promise<ReturnType<typeof installBrowserHost>> {
     const host = installBrowserHost();
-    const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', stream: 4321 });
+    const props = paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 4321 });
     await renderPanel(props);
     const ws = WebSocketMock.instances[WebSocketMock.instances.length - 1];
     await act(async () => {
