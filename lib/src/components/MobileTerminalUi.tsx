@@ -202,11 +202,14 @@ function terminalKeySequence(id: MobileGestureInputId, sessionId: string | undef
   return getTerminalInstance(sessionId)?.modes.applicationCursorKeysMode ? `\x1bO${data.slice(2)}` : data;
 }
 
-/** What a physical keyboard's key sends; null leaves the key to the page. */
+/** What a physical keyboard's key sends; null leaves the key to the page.
+ *  `Ctrl (+Shift) + V` is a paste chord, as on the desktop, so the page's
+ *  `paste` comes back instead of `0x16`. */
 function hardwareKeySequence(event: globalThis.KeyboardEvent, sessionId: string | undefined): string | null {
   if (event.metaKey || event.altKey) return null;
   if (event.ctrlKey) {
     const key = event.key.toLowerCase();
+    if (key === 'v') return null;
     return /^[a-z]$/.test(key) ? String.fromCharCode(key.charCodeAt(0) - 96) : null;
   }
   let id = HARDWARE_KEYS[event.key];
@@ -844,8 +847,8 @@ export function MobileTerminalUi({
 
   // A physical keyboard types straight into the terminal while the composer is
   // closed and no gesture confirmation is asking. No soft keyboard reaches
-  // here: one opens only for a focused field. Its Command+V comes back from
-  // the page as a `paste` on the same targets.
+  // here: one opens only for a focused field. Its Command+V and Ctrl+V come
+  // back from the page as a `paste` on the same targets.
   const confirming = pendingGestureConfirmation !== null;
   useEffect(() => {
     if (!terminalInteractive || composing || confirming || view !== 'terminal') return;

@@ -309,7 +309,10 @@ describe('MobileTerminalUi physical keyboard', () => {
   it('leaves named keys, Command chords, and IME composition to the page', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput });
-    for (const init of [{ key: 'Shift' }, { key: 'F1' }, { key: 'v', metaKey: true }, { key: 'a', isComposing: true }, { key: 'a', keyCode: 229 }]) {
+    for (const init of [
+      { key: 'Shift' }, { key: 'F1' }, { key: 'v', metaKey: true }, { key: 'v', ctrlKey: true }, { key: 'V', ctrlKey: true, shiftKey: true },
+      { key: 'a', isComposing: true }, { key: 'a', keyCode: 229 },
+    ]) {
       expect(keydown(document.body, init).defaultPrevented).toBe(false);
     }
     expect(onSendInput).not.toHaveBeenCalled();
