@@ -1,16 +1,15 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), '..');
 
-// `dor skill <topic>` prints `dor/skill-<topic>.md`; a new topic is one more name here.
-const TOPICS = ['tools'];
-
 const read = (name) => readFile(resolve(repoRoot, 'dor', name), 'utf8');
 const markdown = await read('skill.md');
-const topics = Object.fromEntries(await Promise.all(TOPICS.map(async (topic) => [topic, await read(`skill-${topic}.md`)])));
+// `dor skill <topic>` prints `dor/skill-<topic>.md`: a new topic is just a new file.
+const topicFiles = (await readdir(resolve(repoRoot, 'dor'))).filter((name) => /^skill-.+\.md$/.test(name)).sort();
+const topics = Object.fromEntries(await Promise.all(topicFiles.map(async (name) => [name.slice('skill-'.length, -'.md'.length), await read(name)])));
 const outPath = resolve(repoRoot, 'dor/src/generated-skill.ts');
 
 await mkdir(dirname(outPath), { recursive: true });

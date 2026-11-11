@@ -9,8 +9,13 @@ import type { CliHost, CliResult, ControlClient, PickerTerminal } from "dor/comm
 import { readBuildStamp } from "dormouse-lib/lib/build-info";
 import changelog from "../../data/changelog.json";
 import SKILL_MARKDOWN from "../../../../dor/skill.md?raw";
-import SKILL_TOOLS_MARKDOWN from "../../../../dor/skill-tools.md?raw";
 import { HOME, normalizePath, type VirtualFs } from "./vfs";
+
+// `dor skill <topic>`'s documents, `dor/skill-<topic>.md`, as the CLI's codegen finds them.
+const SKILL_TOPIC_FILES = import.meta.glob("../../../../dor/skill-*.md", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const SKILL_TOPICS = Object.fromEntries(
+  Object.entries(SKILL_TOPIC_FILES).map(([path, text]) => [path.slice("../../../../dor/skill-".length, -".md".length), text]),
+);
 
 export const UNSUPPORTED = "UNSUPPORTED IN PLAYGROUND";
 
@@ -40,7 +45,7 @@ function playgroundHost(fs: VirtualFs): CliHost {
     // The build Settings → About names; unstamped (tests), the latest release.
     versionMetadata: readBuildStamp() ?? { version: changelog.releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 },
     skillMarkdown: SKILL_MARKDOWN,
-    skillTopics: { tools: SKILL_TOOLS_MARKDOWN },
+    skillTopics: SKILL_TOPICS,
   };
 }
 
