@@ -292,6 +292,9 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
+    // Only a PTY that is running reports the exit its kill causes; an id with
+    // none stops nothing, and a host reports nothing for it.
+    const running = this.terminals.has(id);
     const timers = this.activeTimers.get(id);
     if (timers) {
       timers.forEach(clearTimeout);
@@ -306,6 +309,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     // The Session is over, so its alert state goes with it.
     this.alertManager.remove(id);
     this.helpers.delete(id);
+    if (!running) return;
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
     }
