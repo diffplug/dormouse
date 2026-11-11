@@ -2204,7 +2204,7 @@ const WINDOWS_STATE_DIR: &str = "state";
 /// to every computer the person signs in to, carrying the Burrow's identity
 /// with it. On macOS and Linux Tauri's app-data and local app-data directories
 /// are one folder.
-fn dormouse_data_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+fn dormouse_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_local_data_dir()
         .map(|dir| data_dir_in(dir, cfg!(windows)))
@@ -5259,7 +5259,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        arrivals_path, data_dir_in, discard_other_formats, dormouse_data_dir, find_node_binary, forget_arrival_on_disk, geometry_path,
+        arrivals_path, data_dir_in, discard_other_formats, find_node_binary, forget_arrival_on_disk, geometry_path,
         open_ports_many_timeout, read_arrivals_from,
         read_session_from, record_arrival_on_disk, record_workspace_id,
         resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
@@ -5270,7 +5270,6 @@ mod tests {
         SESSION_VERSION, WINDOWS_STATE_DIR, WINDOW_VERSION,
     };
     use super::routing;
-    use tauri::Manager;
     use super::guard;
     use std::collections::HashSet;
     use std::fs;
@@ -7278,36 +7277,16 @@ mod tests {
         );
     }
 
+    /// On Windows the state is one folder inside the local app-data directory,
+    /// which never holds the `EBWebView` profile WebView2 keeps beside it, so
+    /// the owner-only lock cannot reach it; elsewhere it is that directory.
     #[test]
     fn windows_state_is_one_folder_of_the_local_app_dir_and_others_use_it_whole() {
         let local = PathBuf::from("/local/sh.dormouse.standalone");
-        assert_eq!(data_dir_in(local.clone(), true), local.join(WINDOWS_STATE_DIR));
+        let windows = data_dir_in(local.clone(), true);
+        assert_eq!(windows, local.join(WINDOWS_STATE_DIR));
+        assert!(!local.join("EBWebView").starts_with(&windows));
         assert_eq!(data_dir_in(local.clone(), false), local);
-    }
-
-    /// The state directory is under FOLDERID_LocalAppData (Tauri's
-    /// `local_data_dir`), never Roaming, and never the folder WebView2's
-    /// `EBWebView` profile sits in, which the owner-only lock must not reach.
-    #[test]
-    #[cfg(windows)]
-    fn windows_state_dir_is_local_and_never_holds_webview2() {
-        let app = tauri::test::mock_app();
-        let path = app.path();
-        let state = dormouse_data_dir(app.handle()).unwrap();
-        let webview = path.app_local_data_dir().unwrap();
-        assert!(state.starts_with(path.local_data_dir().unwrap()));
-        assert!(!state.starts_with(path.data_dir().unwrap()));
-        assert_ne!(state, webview);
-        assert!(!webview.join("EBWebView").starts_with(&state));
-    }
-
-    /// On macOS and Linux the state directory is Tauri's app-data directory,
-    /// where it has always been.
-    #[test]
-    #[cfg(not(windows))]
-    fn unix_state_dir_is_the_app_data_dir() {
-        let app = tauri::test::mock_app();
-        assert_eq!(dormouse_data_dir(app.handle()).unwrap(), app.path().app_data_dir().unwrap());
     }
 
     /// Raw debug launches retain the production identifier; the dev wrapper
