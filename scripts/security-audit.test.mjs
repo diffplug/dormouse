@@ -518,7 +518,7 @@ test('duplicate findings merge in the private report and the ledger', (t) => {
 });
 
 // The ledger: open if new, a comment if already open, never closed by a run.
-test('the ledger opens a new finding and comments on one already open', (t) => {
+test('the ledger opens a new finding and leaves one already open as it is', (t) => {
   const { dir, env } = fixture(t);
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
@@ -527,13 +527,12 @@ test('the ledger opens a new finding and comments on one already open', (t) => {
     ? { stated: 'FAIL', results: { [failId]: `- FAIL: ${failId} — c: violated` }, lines: finding('BLOCKER', 'lib/a.ts:10', 'runIt', 'new one') }
     : {})));
   const known = failKeyOf(failId);
-  const { published, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: `41 [audit-finding ${known}] FAIL: old\n42 [audit-finding 0123456789ab] WARNING: other\n` } });
+  const { published, embargoed, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: `41 [audit-finding ${known}] FAIL: old\n42 [audit-finding 0123456789ab] WARNING: other\n` } });
   assert.equal(published.status, 1);
   assert.equal(outputs.embargo.result, 'filed');
   const embargoCalls = ghCalls(dir).filter(({ embargo }) => embargo);
-  const comment = embargoCalls.find(({ args }) => args[1] === 'comment' && args[2] === '41');
-  assert.ok(comment, JSON.stringify(embargoCalls));
-  assert.match(comment.body, /^Seen again as FAIL in \[run 123\]/);
+  assert.match(embargoed.stdout, /Ledger: 1 opened, 1 seen again/);
+  assert.ok(!embargoCalls.some(({ args }) => args[1] === 'comment' && args[2] === '41'), JSON.stringify(embargoCalls));
   const ledgerCreates = embargoCalls.filter(({ args }) => args[1] === 'create' && args[args.indexOf('--title') + 1].startsWith('[audit-finding '));
   assert.equal(ledgerCreates.length, 1);
   assert.ok(ledgerCreates[0].body.includes('- BLOCKER: `lib/a.ts:10` `runIt` — new one'));
@@ -653,15 +652,15 @@ for (const [name, open, ci, expected, note, options = {}] of [
 }
 
 // The open failure re-reported on another clause is the same failure: the
-// ledger comments on its issue rather than opening a second.
+// ledger counts it seen again on its issue rather than opening a second.
 test('a failure re-reported under another clause letter is seen again, not refiled', (t) => {
-  const { dir, outputs } = runOverOpen(t, MINTED_OPEN, { stated: 'FAIL', results: { [MINTED_RULE]:
+  const { dir, embargoed, outputs } = runOverOpen(t, MINTED_OPEN, { stated: 'FAIL', results: { [MINTED_RULE]:
     `- PASS: ${MINTED_RULE}.a — c: holds\n- PASS: ${MINTED_RULE}.b — c: holds\n- FAIL: ${MINTED_RULE}.c — c: violated again\n- FAIL: ${MINTED_RULE}.d — c: and here` } });
   assert.equal(outputs.compose.status, 'FAIL');
   assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), `${MINTED_KEY}\tFAIL\n`);
   assert.ok(readFileSync(join(dir, 'audit-ledger/1.md'), 'utf8').includes(`- FAIL: ${MINTED_RULE}.d — c: and here`));
   const embargoCalls = ghCalls(dir).filter(({ embargo }) => embargo);
-  assert.ok(embargoCalls.some(({ args }) => args[1] === 'comment' && args[2] === '41'), JSON.stringify(embargoCalls));
+  assert.match(embargoed.stdout, /Ledger: 0 opened, 1 seen again/);
   assert.ok(!embargoCalls.some(({ args }) => args[1] === 'create' && args[args.indexOf('--title') + 1].startsWith('[audit-finding ')));
 });
 
@@ -687,12 +686,12 @@ for (const [where, spec, heading] of [
     writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
     fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f, f === CI
       ? { stated: 'FAIL', results: { [MINTED_RULE]: `- FAIL: ${MINTED_RULE} — c: violated again` } } : {})));
-    const { outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: MINTED_OPEN } });
+    const { embargoed, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: MINTED_OPEN } });
     assert.equal(outputs.compose.status, 'FAIL');
     assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), `${MINTED_KEY}\tFAIL\n`);
     assert.ok(readFileSync(join(dir, 'audit-ledger/1.md'), 'utf8').startsWith(ledgerMeta({ key: MINTED_KEY, severity: 'FAIL', rule: MINTED_RULE, spec, heading })));
     const embargoCalls = ghCalls(dir).filter(({ embargo }) => embargo);
-    assert.ok(embargoCalls.some(({ args }) => args[1] === 'comment' && args[2] === '41'), JSON.stringify(embargoCalls));
+    assert.match(embargoed.stdout, /Ledger: 0 opened, 1 seen again/);
     assert.ok(!embargoCalls.some(({ args }) => args[1] === 'create' && args[args.indexOf('--title') + 1].startsWith('[audit-finding ')));
   });
 }
