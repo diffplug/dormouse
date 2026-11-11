@@ -403,11 +403,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   useEffect(() => {
     const registration = registerAgentBrowserScreen(id, {
       snapshot: {
-        state: 'SYNCED',
         renderMode: 'iframe',
         viewport: { w: 0, h: 0, dpr: 1 },
-        paneCss: { w: 0, h: 0 },
-        displayDpr: 1,
         syncEngaged: false,
       },
       actions: screenActions,

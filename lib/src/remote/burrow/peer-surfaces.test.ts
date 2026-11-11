@@ -355,7 +355,7 @@ describe('embedded pages', () => {
   function registerPage(id: string, url: string, renderMode: 'iframe' | 'agent-browser-screencast' = 'iframe') {
     const registration = registerAgentBrowserScreen(id, {
       snapshot: {
-        state: 'SYNCED', renderMode, viewport: { w: 0, h: 0, dpr: 1 }, paneCss: { w: 0, h: 0 }, displayDpr: 1, syncEngaged: false,
+        renderMode, viewport: { w: 0, h: 0, dpr: 1 }, syncEngaged: false,
       },
       actions: { engageSync() {}, applyViewport() {}, openModal() {} },
       chrome: { url, displayUrl: url, title: 'Page', key: null },

@@ -30,7 +30,6 @@ import {
   type ScreenActions,
   type ScreenRegistration,
   type ScreenSnapshot,
-  type ScreenState,
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
@@ -1429,23 +1428,17 @@ export class AgentBrowserSurfaceController {
     }
   }
 
-  // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
+  // --- screen snapshot + sync-to-pane ---
 
   private computeScreenSnapshot(): ScreenSnapshot {
-    // Read the cached pane size (updated by the ResizeObserver)
-    // rather than forcing layout on every frame. null ⇒ no attached view ⇒ 0×0.
-    const pane = this.paneSize;
     const displayDpr = window.devicePixelRatio || 1;
     const device = this.device;
-    const paneCss = { w: pane?.w ?? 0, h: pane?.h ?? 0 };
     // Frames never show the ratio: report the one the browser measures
     // (Playwright's poll, which keeps its own ratio), else the one this Surface
     // fixed, else the one it would sync to.
     const viewport = { w: device.width, h: device.height, dpr: this.status?.devicePixelRatio ?? this.fixedDpr ?? displayDpr };
-    // SYNCED only on the host's word that the browser is at this pane's size.
-    const state: ScreenState = this.syncEngaged && this.hostSynced ? 'SYNCED' : 'SCALED';
     const renderMode = this.renderMode();
-    return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
+    return { viewport, syncEngaged: this.syncEngaged, renderMode };
   }
 
   // Publish to the registry only when something the header/modal cares about
@@ -1455,15 +1448,11 @@ export class AgentBrowserSurfaceController {
     const prev = this.lastPublishedScreen;
     const changed =
       !prev ||
-      prev.state !== next.state ||
       prev.viewport.w !== next.viewport.w ||
       prev.viewport.h !== next.viewport.h ||
       prev.viewport.dpr !== next.viewport.dpr ||
-      prev.displayDpr !== next.displayDpr ||
       prev.syncEngaged !== next.syncEngaged ||
-      prev.renderMode !== next.renderMode ||
-      prev.paneCss.w !== next.paneCss.w ||
-      prev.paneCss.h !== next.paneCss.h;
+      prev.renderMode !== next.renderMode;
     if (changed) {
       this.lastPublishedScreen = next;
       this.registration?.update(next);
@@ -1477,8 +1466,7 @@ export class AgentBrowserSurfaceController {
    * missed — and never from a popped-out window, which is its own size.
    */
   private syncToPane(): void {
-    // A host that cannot drive the provider (the web demo) sizes nothing; the
-    // surface just reads SCALED.
+    // A host that cannot drive the provider (the web demo) sizes nothing.
     if (!this.syncEngaged || this.headed || !this.hosted || this.phase.k !== 'live') return;
     const el = this.sink?.viewport;
     if (!el) return;

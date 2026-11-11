@@ -15,11 +15,8 @@ import {
 } from './agent-browser-screen';
 
 const SNAPSHOT: ScreenSnapshot = {
-  state: 'SCALED',
   renderMode: 'agent-browser-screencast',
   viewport: { w: 1280, h: 720, dpr: 1 },
-  paneCss: { w: 980, h: 560 },
-  displayDpr: 2,
   syncEngaged: true,
 };
 
@@ -91,7 +88,7 @@ describe('agent-browser screen registry', () => {
       updates += 1;
     });
 
-    const next: ScreenSnapshot = { ...SNAPSHOT, state: 'SYNCED' };
+    const next: ScreenSnapshot = { ...SNAPSHOT, syncEngaged: false };
     registration.update(next);
     expect(updates).toBe(1);
     expect(controller.snapshot()).toEqual(next);
@@ -116,7 +113,7 @@ describe('agent-browser screen registry', () => {
     // A chrome change must NOT wake the screen subscribers, and vice versa.
     expect(screenUpdates).toBe(0);
 
-    registration.update({ ...SNAPSHOT, state: 'SYNCED' });
+    registration.update({ ...SNAPSHOT, syncEngaged: false });
     expect(screenUpdates).toBe(1);
     expect(chromeUpdates).toBe(1);
 
@@ -135,7 +132,7 @@ describe('agent-browser screen registry', () => {
     expect(controller.chrome()).toBe(chrome);
     expect(controller.snapshot()).toBe(snapshot);
 
-    const nextSnapshot: ScreenSnapshot = { ...SNAPSHOT, state: 'SYNCED' };
+    const nextSnapshot: ScreenSnapshot = { ...SNAPSHOT, syncEngaged: false };
     registration.update(nextSnapshot);
     expect(controller.snapshot()).toBe(nextSnapshot);
     expect(controller.chrome()).toBe(chrome);

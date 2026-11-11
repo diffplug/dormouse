@@ -76,7 +76,7 @@ export function AgentBrowserScreenModal({
   const hostCapable = controller.hostCapable;
 
   // Pre-select from intent, not the transient dimension comparison: while a
-  // resize is landing, sync stays engaged even though the live state is SCALED.
+  // resize is landing, sync stays engaged even though the sizes differ.
   const [initialSetting] = useState(() => controller.viewportSetting?.());
   const builtins = defaultBrowserViewportConfig();
   const initialPreset = matchingPreset(builtins, initialSetting);

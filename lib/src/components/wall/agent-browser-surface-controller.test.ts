@@ -457,7 +457,23 @@ describe('sync-to-pane', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(syncs(4321).at(-1)).toEqual([800, 600, 1]);
     expect(syncs(4321)).not.toContainEqual([790, 593, 1]);
-    expect(getAgentBrowserScreenController('id')!.snapshot()?.paneCss).toEqual({ w: 800, h: 600 });
+  });
+
+  it('publishes no screen snapshot for a pane resize alone', async () => {
+    installBrowserHost();
+    const pane = resizablePane();
+    const controller = withPort('id', { session: 'sess', browserViewport: { mode: 'fixed', width: 1280, height: 720 } }, 4321);
+    controller.attachView(pane.sink);
+    await vi.advanceTimersByTimeAsync(0);
+    const screen = getAgentBrowserScreenController('id')!;
+    let published = 0;
+    const unsubscribe = screen.subscribe(() => { published += 1; });
+    for (const width of [700, 710, 720]) {
+      pane.resize(width, 500);
+      await vi.advanceTimersByTimeAsync(20);
+    }
+    unsubscribe();
+    expect(published).toBe(0);
   });
 
   it('follows the host alone: its `off` disengages, never a frame, a status or an older engagement', async () => {
@@ -468,8 +484,10 @@ describe('sync-to-pane', () => {
     const screen = getAgentBrowserScreenController('id')!;
     const socket = streamSocket(4321)!;
     const first = engagementAt(4321)!;
+    const hostSynced = async () => ((await controller.diagnostics()).webview.viewport as { hostSynced: boolean }).hostSynced;
     hostSync(4321, 'synced');
-    expect(screen.snapshot()).toMatchObject({ syncEngaged: true, state: 'SYNCED' });
+    expect(screen.snapshot()?.syncEngaged).toBe(true);
+    expect(await hostSynced()).toBe(true);
 
     // The stream reporting another size — a poll measured before the host's
     // write landed, a frame in flight, an agent's `set viewport` — is the
@@ -479,7 +497,8 @@ describe('sync-to-pane', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(screen.snapshot()).toMatchObject({ syncEngaged: true, viewport: { w: 640, h: 480 } });
     hostSync(4321, 'applying');
-    expect(screen.snapshot()).toMatchObject({ syncEngaged: true, state: 'SCALED' });
+    expect(screen.snapshot()?.syncEngaged).toBe(true);
+    expect(await hostSynced()).toBe(false);
 
     // Resize with pane chosen again is a new engagement, which the host's word
     // on the old one does not undo.
@@ -490,7 +509,8 @@ describe('sync-to-pane', () => {
 
     const sink = pane.sink;
     hostSync(4321, 'off');
-    expect(screen.snapshot()).toMatchObject({ syncEngaged: false, state: 'SCALED' });
+    expect(screen.snapshot()?.syncEngaged).toBe(false);
+    expect(await hostSynced()).toBe(false);
     // `browserViewport` alone persists the choice, once a measurement says what took over.
     expect(sink.updateParameters).not.toHaveBeenCalledWith(expect.objectContaining({ syncEngaged: expect.anything() }));
     // Disengaged, the pane's size goes nowhere.
