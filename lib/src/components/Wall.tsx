@@ -1131,9 +1131,10 @@ export function Wall({
 
   /**
    * Close every Surface in this Workspace, each through the same coordinator a
-   * manual close uses (helper guard → kill). Resolves null once the Wall is
-   * empty and safe to unmount, or the first refusal's message with the Workspace left as
-   * it was — the strip then reveals it so the refusal is visible.
+   * manual close uses (helper guard → kill), in order. Resolves null once the
+   * Wall is empty and safe to unmount, or the first refusal's message with the
+   * Workspace left open — Surfaces ahead of the refusing one already closed — and
+   * the strip then reveals it so the refusal is visible.
    */
   const closeAll = useCallback(async (editors: readonly string[] = []): Promise<string | null> => {
     closingWorkspaceRef.current = true;
