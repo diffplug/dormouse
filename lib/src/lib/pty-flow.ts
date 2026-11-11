@@ -9,17 +9,21 @@
  */
 import type { PtyDataClaim, PtyDataDetail, PtyDataHandler } from './platform/types';
 
+// Sized by measurement (docs/specs/transport.rationale.md -> "Output flow
+// control"): the low watermark keeps the renderer parsing through a resume's
+// round trip, and the high one bounds what a terminal can hold unparsed.
+
 /** The renderer sends one acknowledgement per this many parsed chars of an id. */
-export const PTY_ACK_BATCH_CHARS = 5_000;
+export const PTY_ACK_BATCH_CHARS = 262_144;
 /** The host pauses a PTY once more than this many sent chars are unacknowledged. */
-export const PTY_HIGH_WATERMARK_CHARS = 100_000;
+export const PTY_HIGH_WATERMARK_CHARS = 2_097_152;
 /**
  * The host resumes a paused PTY at or below this many. **Must stay at or above
  * `PTY_ACK_BATCH_CHARS - 1`**: what a renderer has parsed but not yet
  * acknowledged is always below one batch, and a PTY paused above that residue
  * would never resume.
  */
-export const PTY_LOW_WATERMARK_CHARS = 5_000;
+export const PTY_LOW_WATERMARK_CHARS = 1_048_576;
 
 /**
  * The live-output dispatch every adapter shares: it calls each `onPtyData`

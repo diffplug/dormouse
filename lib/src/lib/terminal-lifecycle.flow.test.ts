@@ -55,15 +55,18 @@ afterEach(() => {
 describe('a terminal acknowledging its output', () => {
   it('acknowledges from the write callback, a batch at a time', () => {
     getOrCreateTerminal('flow-batch');
+    // The parse splits a big read into pieces; each is its own write.
     platform.sendOutput('flow-batch', 'x'.repeat(PTY_ACK_BATCH_CHARS - 1));
+    const first = parsed.splice(0);
     platform.sendOutput('flow-batch', 'yz');
     // Written but not parsed: nothing is owed yet.
     expect(acks).toEqual([]);
-    expect(parsed).toHaveLength(2);
+    expect(first.length).toBeGreaterThan(0);
+    expect(parsed).toHaveLength(1);
 
-    parsed[0]();
+    for (const done of first) done();
     expect(acks).toEqual([]);
-    parsed[1]();
+    parsed[0]();
     expect(acks).toEqual([['flow-batch', PTY_ACK_BATCH_CHARS + 1]]);
   });
 
@@ -90,7 +93,7 @@ describe('a terminal acknowledging its output', () => {
     try {
       expect(() => platform.sendOutput('flow-throw', 'x'.repeat(PTY_ACK_BATCH_CHARS))).not.toThrow();
       // Every handler behind the terminal's still ran...
-      expect(later).toHaveBeenCalledOnce();
+      expect(later).toHaveBeenCalled();
       // ...and the discarded chunk was paid for, or the host would hold its PTY paused.
       expect(acks).toEqual([['flow-throw', PTY_ACK_BATCH_CHARS]]);
     } finally {

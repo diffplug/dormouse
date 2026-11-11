@@ -22,6 +22,17 @@ A second close before `onExit` crashed the Node process in the native test.
 
 **Why Rust acknowledges what it drops.** After a transfer mark Rust drops an id's output until the target's replay; a suppression no arrival claims fails open after `AWAITING_REPLAY_MAX` with no `requestInit` behind it, which would have left the PTY paused on output no window ever saw.
 
+**The constants** (measured 2026-11-11, macOS 27 on Apple silicon, node-pty 1.2.0-beta.18, Node 24.22): the real `pty-core` and node-pty, the host counter, and a renderer child process parsing with real xterm over Node IPC (headless, so faster than a webview that also renders), with 0, 2 or 5 ms added each way. Median of three, MB/s of parsed output; `yes` is `y\n`, logs are 80-column lines:
+
+| Batch / low / high (chars) | `yes`, +0 ms | logs, +0 ms | `yes`, +2 ms | logs, +2 ms | logs, +5 ms |
+|---|---|---|---|---|---|
+| unbounded (before) | 8.3 (7.7–17) | 95.8 | 26.7 | 100.3 | 103.9 |
+| 5,000 / 5,000 / 100,000 (VS Code's) | 19.6 | 43.6 | — | — | — |
+| 65,536 / 262,144 / 1,048,576 | 24.5 | 95.3 | — | — | 50.1 |
+| 262,144 / 1,048,576 / 2,097,152 (chosen) | — | — | 26.4 | 98.3 | 83.9 |
+
+The low watermark has to cover a resume's round trip at the parse rate, so VS Code's values starve a fast renderer; the chosen ones are within 4% at 2 ms each way and 19% at 5 ms, the pessimistic case. Unbounded, a `yes` flood ran slower, the renderer's event loop saturated with queued messages. A renderer that never acknowledges stops the PTY at the high watermark plus 900 chars (macOS reads are about 1 KB): about 4.2 MB per terminal at the worst. Ctrl+C on a 2 s `yes` flood took effect, everything before it parsed, in 48–77 ms, against 4–25 s unbounded with 93–677 million chars queued; on 80-column logs, 7–9 ms against 0.5–1.4 s. Ack messages: about 100 per second at 25 MB/s.
+
 **Why resume when the process is gone.** node-pty reports no exit while its socket is paused: on POSIX it destroys the socket, unread tail and all, 200 ms after the child exits; with `useConptyDll` on Windows it reports the exit only when the socket closes. Measured on macOS (same date): with everything read before the pause, a child writing a tail and exiting lost it unless resumed. With output still unread in the kernel when the child exits, macOS holds the exit about 610 ms and then discards that output, with the pid still alive throughout, so the watch cannot see it; only the renderer catching up within that window saves it. Unmeasured on Linux and Windows.
 
 **Why every stop resumes.** node-pty finishes a kill by reading: on Windows the ConPTY worker is disposed on the next data event, and a paused socket never delivers one.
