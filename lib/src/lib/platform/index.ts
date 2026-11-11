@@ -6,14 +6,7 @@ import { getPlatformOrNull, setPlatform } from './current';
 export type { PlatformAdapter } from './types';
 export { FakePtyAdapter } from './fake-adapter';
 export type { FakeScenario } from './fake-adapter';
-export {
-  flattenScenario,
-  makeAlertScenario,
-  SCENARIO_SHELL_PROMPT,
-  SCENARIO_LS_OUTPUT,
-  SCENARIO_ANSI_COLORS,
-  SCENARIO_FAST_OUTPUT,
-} from './fake-scenarios';
+export { SCENARIO_SHELL_PROMPT } from './fake-scenarios';
 
 /**
  * Best available platform identifier from the browser. Prefers the

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent } from 'storybook/test';
 import { TerminalPane } from '../components/TerminalPane';
-import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
+import { flattenScenario, SCENARIO_LS_OUTPUT } from './fake-scenarios';
 import { getMouseSelectionState, setSelection, type Selection } from '../lib/mouse-selection';
 import { openCopyEditor } from '../lib/copy-editor';
 import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';

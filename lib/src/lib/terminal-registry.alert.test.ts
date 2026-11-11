@@ -16,7 +16,8 @@ vi.mock('./platform', async () => {
 });
 
 import * as platformModule from './platform';
-import { makeAlertScenario, type FakePtyAdapter, type FakeScenario, type PlatformAdapter } from './platform';
+import type { FakePtyAdapter, FakeScenario, PlatformAdapter } from './platform';
+import { makeAlertScenario } from './alert-manager-test-utils';
 import {
   DEFAULT_ACTIVITY_STATE,
   applyTerminalSemanticEvents,

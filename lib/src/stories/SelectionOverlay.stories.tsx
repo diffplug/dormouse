@@ -9,7 +9,7 @@ import {
   refitSession,
   unmountElement,
 } from '../lib/terminal-registry';
-import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
+import { flattenScenario, SCENARIO_LS_OUTPUT } from './fake-scenarios';
 import {
   getMouseSelectionState,
   setHintToken,

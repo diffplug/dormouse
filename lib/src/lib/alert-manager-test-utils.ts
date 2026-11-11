@@ -10,6 +10,7 @@
 import { vi } from 'vitest';
 import { cfg } from '../cfg';
 import type { ActivityNotification, AlertManager } from './alert-manager';
+import type { FakeScenario } from './platform';
 
 /** The viewer a suite reports for when one renderer realm is enough. */
 export const VIEWER = 'viewer';
@@ -112,4 +113,42 @@ export function heartbeat(manager: AlertManager, id: string, ms: number): void {
     vi.advanceTimersByTime(1_000);
     manager.onData(id);
   }
+}
+
+export interface AlertScenarioChunk {
+  at: number;
+  data: string;
+}
+
+export interface AlertScenarioOptions {
+  name?: string;
+  exitCode?: number;
+}
+
+/** Build a fake scenario from absolute event times for alert-focused tests. */
+export function makeAlertScenario(
+  chunks: readonly AlertScenarioChunk[],
+  options?: AlertScenarioOptions,
+): FakeScenario {
+  if (chunks.length === 0) {
+    throw new Error('makeAlertScenario requires at least one chunk');
+  }
+
+  let previousAt = 0;
+  return {
+    name: options?.name ?? 'alert-scenario',
+    chunks: chunks.map((chunk, index) => {
+      if (!Number.isFinite(chunk.at) || chunk.at < 0) {
+        throw new Error(`Chunk ${index} has an invalid "at" value`);
+      }
+      if (chunk.at < previousAt) {
+        throw new Error(`Chunk ${index} is earlier than the previous chunk`);
+      }
+
+      const delay = index === 0 ? chunk.at : chunk.at - previousAt;
+      previousAt = chunk.at;
+      return { delay, data: chunk.data };
+    }),
+    exitCode: options?.exitCode,
+  };
 }

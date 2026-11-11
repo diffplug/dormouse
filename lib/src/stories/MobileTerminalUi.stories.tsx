@@ -14,10 +14,8 @@ import {
   MobileGestureConfirmDialog,
   MobileGestureRadialMenu,
 } from '../components/MobileGestureRadialMenu';
-import {
-  flattenScenario,
-  type FakeScenario,
-} from '../lib/platform';
+import type { FakeScenario } from '../lib/platform';
+import { flattenScenario } from './fake-scenarios';
 import {
   completeMobileGesture,
   displayOriginAwayFromThumb,
