@@ -252,6 +252,15 @@ function cdCommand(row, dir) {
 
 // ── A pane ────────────────────────────────────────────────────────────────
 let paneCount = 0;
+/** Every PTY the suite spawned: `{ id, pid, exited, exit }`. */
+const SPAWNED = [];
+/** What keeps this process alive before any pane, by resource type. */
+const RESOURCES_AT_START = countResources();
+function countResources() {
+  const counts = new Map();
+  for (const type of process.getActiveResourcesInfo()) counts.set(type, (counts.get(type) ?? 0) + 1);
+  return counts;
+}
 // A cold Windows PowerShell 5.1 start is the slowest first prompt measured
 // (about 1.5 s, now and then past 15 s; ci.yml warms it first).
 const FIRST_PROMPT_MS = 20_000;
@@ -279,7 +288,16 @@ function freshHome(files = {}) {
 function openPane(t, row, located, { home = freshHome(), cwd = home } = {}) {
   const id = `surface:conformance-${++paneCount}`;
   const spawned = [];
-  const ptyModule = { spawn: (...args) => { const p = nodePty.spawn(...args); spawned.push(p); return p; } };
+  const ptyModule = {
+    spawn: (...args) => {
+      const p = nodePty.spawn(...args);
+      const record = { id, pid: p.pid, exited: false };
+      record.exit = new Promise((resolve) => p.onExit(() => { record.exited = true; resolve(); }));
+      SPAWNED.push(record);
+      spawned.push(record);
+      return p;
+    },
+  };
   const waiters = new Set();
   const notify = () => { for (const check of [...waiters]) check(); };
   const pane = {
@@ -327,9 +345,16 @@ function openPane(t, row, located, { home = freshHome(), cwd = home } = {}) {
       answeredTo = Math.max(answeredTo, pane.visible.length - 6);
     },
   });
-  t.after(() => {
+  // Stop through pty-core, as the host does, and join the exits: a ConPTY
+  // closes asynchronously, and terminating its shell from outside meanwhile
+  // left Windows runs alive for ten minutes after their last test. Only a
+  // shell still there after the wait is killed from outside.
+  t.after(async () => {
     try { mgr.killAll(); } catch { /* already gone */ }
-    for (const p of spawned) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } }
+    await Promise.race([Promise.all(spawned.map((record) => record.exit)), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    for (const record of spawned) {
+      if (!record.exited) { try { process.kill(record.pid, 'SIGKILL'); } catch { /* gone */ } }
+    }
   });
 
   /** Resolve with `predicate()` once truthy, checked on every event from the
@@ -694,4 +719,35 @@ shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async
   assert.equal(env.TERM_PROGRAM, 'iTerm.app');
   assert.equal(env.COLORTERM, 'truecolor');
   for (const key of MUST_NOT_LEAK) assert.equal(env[key], undefined, `${row.name}: the host's ${key} reached the distro`);
+});
+
+// ── Last: nothing left running ────────────────────────────────────────────
+// Every shell this file spawned has exited, and nothing it opened still holds
+// the event loop, which would keep the file running until the step's timeout
+// (as it did on Windows). Timers are the runner's own and are listed, not
+// failed. A leftover fails here and ends the process soon after, so the
+// report says what was left instead of hanging.
+test('the suite leaves no shell or handle behind', { timeout: 60_000 }, async () => {
+  const deadline = Date.now() + 10_000;
+  const pending = () => SPAWNED.filter((record) => !record.exited);
+  const leftovers = () => {
+    const extra = [];
+    for (const [type, count] of countResources()) {
+      const more = count - (RESOURCES_AT_START.get(type) ?? 0);
+      if (more > 0 && type !== 'Timeout' && type !== 'Immediate') extra.push(`${type} x${more}`);
+    }
+    return extra;
+  };
+  while ((pending().length || leftovers().length) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const unexited = pending().map((record) => `${record.id} (pid ${record.pid})`);
+  const held = leftovers();
+  if (unexited.length || held.length) {
+    // Printed here as well: the forced exit can beat the report's details.
+    console.error(`shell-conformance left behind: PTYs ${unexited.join(', ') || 'none'}; handles ${held.join(', ') || 'none'} (all: ${process.getActiveResourcesInfo().join(', ')})`);
+    setTimeout(() => process.exit(1), 3_000);
+  }
+  assert.deepEqual(unexited, [], `PTYs that never exited: ${unexited.join(', ')}`);
+  assert.deepEqual(held, [], `still holding the event loop: ${held.join(', ')} (all: ${process.getActiveResourcesInfo().join(', ')})`);
 });
