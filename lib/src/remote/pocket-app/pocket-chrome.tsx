@@ -61,6 +61,9 @@ export const PK = {
   // A settled fact about the band it sits in — which path carries the session —
   // captioned in alpha-on-fg rather than coloured: it reports, never alerts.
   headerNote: 'shrink-0 text-[11px] text-header-active-fg/70',
+  // The same caption on a line of its own under the band: a touch browser
+  // never shows a `title`, so a sentence that must be read is text.
+  headerCaption: 'm-0 shrink-0 bg-header-active-bg px-4 pb-2.5 text-[11px] text-header-active-fg/70',
   body:
     'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]',
   // Safe centering: the first-run screen (install notice + the scan action + the

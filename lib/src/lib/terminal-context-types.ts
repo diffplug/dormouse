@@ -10,6 +10,8 @@ export interface TerminalContextInfo {
   error?: string;
   /** `home`: the host's home directory. */
   home?: string;
+  /** `home`: the host machine's name, for telling a local OSC 7 from a remote one. */
+  hostname?: string;
   /** `info`: null means inspection failed; never treat that as idle. */
   busy?: boolean | null;
 }

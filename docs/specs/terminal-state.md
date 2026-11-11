@@ -27,6 +27,7 @@
 CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 
 - **OSC 7 is parsed as a `file:` URI, its host taken from the URL parser's normalized hostname, preserving raw case and the literal `localhost` spelling only.**
+- **An OSC 7 host naming this machine is local and dropped**, as `dor open` decides (`namesMachine`; rationale).
 - **OSC 9;9 drops one surrounding pair of double quotes; its drive-letter and UNC paths are Windows paths, every other path `unknown`, never `posix`** (rationale).
 - **A path opening with two separators in either spelling is remote**, OSC 7's `file:////host/share` included (`isUncOrDevicePath` in `dor-lib-common/src/browser-providers.ts`).
 - **Must preserve native CWD text, including percent signs, semicolons and edge spaces; percent-decode only OSC 7 file URIs** (rationale).
@@ -164,7 +165,7 @@ Source of truth: `deriveHeader` / `deriveSurfaceLabel` / `resolveDisplayPrimary`
 
 ## Grouping
 
-**Directory keys use `cwdIdentity(cwd)`** (`scheme|host|pathKind|path`), so remote hosts and Windows/POSIX path kinds stay distinct.
+**Directory keys use `cwdIdentity(cwd)`** (`host|pathKind|path`, no scheme), so remote hosts and Windows/POSIX path kinds stay distinct.
 
 Source of truth: `cwdIdentity` in `lib/src/lib/terminal-state.ts`.
 
