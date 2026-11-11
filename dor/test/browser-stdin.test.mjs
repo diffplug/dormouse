@@ -48,3 +48,36 @@ for (const provider of ['agent-browser', 'playwright']) {
     assert.ok(calls.filter(call => !forwarded.includes(call)).every(call => call.stdin === undefined));
   });
 }
+
+// The passthrough prints a native command's output only once it exits, so a
+// form that waits on the terminal or never exits is refused before any spawn.
+test('refuses exactly the native forms that wait on the terminal or never exit', async () => {
+  const cases = [
+    { argv: ['agent-browser', 'chat'], tty: true, refused: 'run agent-browser chat directly' },
+    { argv: ['agent-browser', '-q', 'chat', '--model', 'openai/gpt-4o'], tty: true, refused: 'run agent-browser chat directly' },
+    { argv: ['agent-browser', 'chat', 'open example.com'], tty: true },
+    { argv: ['agent-browser', 'chat'], tty: false },
+    { argv: ['agent-browser', 'chat', '--help'], tty: true },
+    { argv: ['agent-browser', 'mcp'], tty: false, refused: 'run agent-browser mcp directly' },
+    { argv: ['playwright', 'show', '--port', '0'], tty: true, refused: 'run playwright-cli show --port directly' },
+    { argv: ['playwright', 'show', '--port=0'], tty: false, refused: 'run playwright-cli show --port directly' },
+    { argv: ['playwright', 'show'], tty: true },
+  ];
+  for (const { argv, tty, refused } of cases) {
+    const calls = [];
+    const exec = async (_binary, args) => {
+      calls.push(args);
+      return { exitCode: 0, stdout: '', stderr: '' };
+    };
+    const result = await runCli(argv, { env: { PWD: process.cwd() }, stdinIsTTY: tty, execAgentBrowser: exec, execPlaywright: exec });
+    const label = `${argv.join(' ')} (stdin ${tty ? 'a terminal' : 'piped'})`;
+    if (refused) {
+      assert.equal(result.exitCode, 1, label);
+      assert.ok(result.stderr.includes(refused), `${label}: ${result.stderr}`);
+      assert.equal(calls.length, 0, label);
+    } else {
+      assert.equal(result.exitCode, 0, `${label}: ${result.stderr}`);
+      assert.equal(calls.length, 1, label);
+    }
+  }
+});

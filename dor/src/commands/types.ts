@@ -728,6 +728,9 @@ export interface CliOptions {
   env?: CliEnv;
   client?: ControlClient;
   readStdin?: () => Promise<string>;
+  /** Whether `dor`'s stdin is a terminal, which a forwarded native command
+   *  inherits. Unset reads as not. */
+  stdinIsTTY?: boolean;
   terminal?: PickerTerminal;
   versionMetadata?: VersionMetadata;
   execAgentBrowser?: BrowserExec;

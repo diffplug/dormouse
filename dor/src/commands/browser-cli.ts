@@ -347,6 +347,32 @@ function playwrightDestination(args: string[]): { blank: string[]; goto: string[
   return { blank, goto };
 }
 
+/** Native forms that wait on the terminal or never exit. The passthrough prints
+ *  a command's output only once it exits, so through `dor` each would sit
+ *  silent; they are refused instead. `blocks` sees the args after the command. */
+const BLOCKING_FORMS: readonly {
+  provider: BrowserAutomationProvider;
+  command: string;
+  form: string;
+  blocks(args: string[], stdinIsTTY: boolean): boolean;
+}[] = [
+  // A REPL only with no message and a terminal on stdin; piped input runs once.
+  { provider: 'agent-browser', command: 'chat', form: 'chat', blocks: (args, tty) => tty && !hasAgentBrowserPositional(args) },
+  // An MCP stdio server: its replies are its stdout, and it serves until stdin closes.
+  { provider: 'agent-browser', command: 'mcp', form: 'mcp', blocks: () => true },
+  // `--port` makes the dashboard a blocking HTTP server whose URL is its output.
+  { provider: 'playwright', command: 'show', form: 'show --port', blocks: (args) => args.some((arg) => arg === '--port' || arg.startsWith('--port=')) },
+];
+
+function hasAgentBrowserPositional(args: string[]): boolean {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (!arg.startsWith('-')) return true;
+    if (AGENT_BROWSER_VALUE_FLAGS.has(arg)) i += 1;
+  }
+  return false;
+}
+
 /** First command after known options; never mistake a flag value for a verb. */
 function nativeCommandIndex(provider: BrowserAutomationProvider, args: string[]): number | undefined {
   if (provider === 'playwright') {
@@ -396,6 +422,10 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   const mayBind = command !== undefined && !d.noBind.has(command) && !informational;
 
   const spec = BROWSER_PROVIDERS[d.provider];
+  // A matched command has an index, so the slice starts after it.
+  const blocking = informational ? undefined : BLOCKING_FORMS.find((row) => row.provider === d.provider && row.command === command
+    && row.blocks(flags.rest.slice(nativeCommandIndex(d.provider, flags.rest)! + 1), options.stdinIsTTY === true));
+  if (blocking) return fail(`dor ${d.provider} ${blocking.form} would show nothing until it exits; run ${spec.defaultBin} ${blocking.form} directly.`);
   const env = options.env ?? {};
   // An empty override is unset, as for the host.
   const defaultBinary = env[spec.binEnv] || spec.defaultBin;
