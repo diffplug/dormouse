@@ -911,17 +911,23 @@ test("a dispute on a closed account still records, and a lost one still runs its
   f.paidInvoices.set("pi_du_closed", subscription.id);
   expect((await member.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
   await f.deliver();
-  const dispute = (status: string) => {
-    f.disputes.set("du_closed", { status, customer: session.customer as string, paymentIntent: "pi_du_closed" });
-    return f.send(f.event("charge.dispute.updated", { id: "du_closed", object: "dispute", charge: "ch_for_du_closed", status }));
+  const dispute = (status: string, id = "du_closed") => {
+    f.disputes.set(id, { status, customer: session.customer as string, paymentIntent: "pi_du_closed" });
+    return f.send(f.event("charge.dispute.updated", { id, object: "dispute", charge: "ch_for_du_closed", status }));
   };
   expect((await dispute("needs_response")).status).toBe(200);
   expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([{ userId: member.id }]);
+  // Nothing is paused for a closed account, so no mail says so.
+  expect(f.email.all().some((mail) => mail.subject.includes("payment dispute"))).toBe(false);
   expect((await dispute("lost")).status).toBe(200);
   expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([]);
   // Closing already ended the subscription; the lost dispute ends nothing more.
   expect(f.cancels).toEqual([{ subscription: subscription.id }]);
   expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.closure }]);
+  // Nor is anything restored.
+  expect((await dispute("needs_response", "du_closed_won")).status).toBe(200);
+  expect((await dispute("won", "du_closed_won")).status).toBe(200);
+  expect(f.email.all().some((mail) => mail.subject.includes("access is restored"))).toBe(false);
 });
 
 test("a purchase ending otherwise counts as canceled, and one ending within the refund window as refunded", async ({
@@ -2162,14 +2168,14 @@ test("notices that keep failing go to the back, so they never starve a newer one
   const f = await fixture();
   onTestFinished(f.close);
   const resync = () => resyncBilling(f.setup, f.database.url, origin, f.mail).catch((error: unknown) => error);
-  // A full pass of notices to accounts Stripe holds no email for, then one it does.
-  await f.sql(
-    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
-    SELECT 'failing-' || n, 'nobody-' || n, 'dispute_restored', 'du_failing_' || n, $1 FROM generate_series(1, 50) n`,
-    [new Date(f.time.now().getTime() - DAY_MS)],
-  );
   const member = await f.account();
   const { session } = await f.buy(member, "monthly");
+  // A full pass of notices to accounts Stripe holds no email for, then one it does.
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "subscriptionId", "checkoutId", "createdAt")
+    SELECT 'failing-' || n, 'nobody-' || n, 'purchase', 'sub_failing_' || n, 'cs_failing_' || n, $1 FROM generate_series(1, 50) n`,
+    [new Date(f.time.now().getTime() - DAY_MS)],
+  );
   await f.sql(
     `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt") VALUES ('newer', $1, 'dispute_restored', 'du_newer', $2)`,
     [member.id, f.time.now()],

@@ -1,6 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Billing notices"; docs/specs/pricing.md ->
 // "Checkout and entitlement".
-import type { Billing } from "@pgstencil/stripe";
+import { SUBSCRIBED, type Billing } from "@pgstencil/stripe";
 import { postmarkEmail } from "@pgstencil/auth/postmark";
 import type { EmailSender } from "pgstencil";
 import { planInterval } from "../../website/src/lib/hosted-pricing";
@@ -61,7 +61,8 @@ async function verifyChange(billing: Billing<Plan>, change: PriceChange) {
  * A renewal-type notice still applies while its subscription renews at that
  * renewal, a price change's only while it is further off than
  * {@link PRICE_SEND_BY_DAYS} and its change is among `verified`; a suspension
- * while its dispute is open; a dispute notice for {@link RETRY_DAYS}; a
+ * while its dispute is open; a dispute notice for {@link RETRY_DAYS}, while
+ * its account holds a current subscription; a
  * withdrawal's acknowledgement and a purchase's confirmation until sent.
  * The batch is leased in the statement that picks it, so two passes never
  * send one twice. Never-tried notices go first, then the least recently
@@ -120,10 +121,14 @@ export async function sendNotices(
             s.status = 'active' AND NOT s.cancel_at_period_end AND s.period_end = n."renewsAt"
             AND s.price_id = c."fromPriceId" AND c.id = ANY ($6::text[])
             AND n."renewsAt" > $1::timestamptz + make_interval(days => $7)
+          -- A dispute notice tells of a paused or restored subscription, so it
+          -- goes only to an account that still holds one: not a closed one.
           WHEN n.kind = 'dispute_suspended' THEN
             n."createdAt" > $4
             AND EXISTS (SELECT FROM public.dormouse_billing_disputes d WHERE d."disputeId" = n."disputeId")
+            AND EXISTS (SELECT FROM pgstencil_billing.subscriptions cur WHERE cur.owner_id = n."userId" AND cur.status = ANY ($9::text[]))
           WHEN n.kind = 'dispute_restored' THEN n."createdAt" > $4
+            AND EXISTS (SELECT FROM pgstencil_billing.subscriptions cur WHERE cur.owner_id = n."userId" AND cur.status = ANY ($9::text[]))
           ELSE n.kind IN ('withdrawal', 'purchase')
         END
       ORDER BY n."attemptedAt" NULLS FIRST, n."createdAt", n.id LIMIT $5
@@ -141,6 +146,7 @@ export async function sendNotices(
       verified,
       PRICE_SEND_BY_DAYS,
       PRICE_NOTICE_MIN_DAYS,
+      SUBSCRIBED,
     ],
   );
   const failed: unknown[] = [];
