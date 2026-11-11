@@ -5,6 +5,7 @@
 
 import {
   MAX_RELAY_CLIENT_SOCKETS,
+  MAX_RELAY_SOCKET_BUFFERED_BYTES,
   RELAY_PING,
   RELAY_PONG,
   WS_CLOSE_UNAUTHORIZED,
@@ -13,6 +14,8 @@ import {
   WS_CLOSE_BURROW_REPLACED_REASON,
   WS_CLOSE_BURROW_REVOKED,
   WS_CLOSE_BURROW_REVOKED_REASON,
+  WS_CLOSE_BACKLOGGED_REASON,
+  WS_CLOSE_TRY_AGAIN_LATER,
   newClientId,
   offlineError,
   readBurrowFrame,
@@ -30,6 +33,8 @@ import type { RelayToClientFrame, RelayToBurrowFrame } from 'remote-lib-common';
 export interface RelaySocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  /** Bytes sent to this socket that have not yet left for its peer. */
+  readonly bufferedAmount: number;
 }
 
 /** A live Burrow socket. */
@@ -310,11 +315,25 @@ export class RelayHub {
 
   // --- Sending -------------------------------------------------------------
 
+  // A socket whose peer has stopped reading is closed rather than sent more
+  // (`docs/specs/relay.md` -> "Routing"). Judged on the socket's own buffered
+  // byte count alone, so nothing here reads what it was carrying.
+
   #toClient(client: ClientConn, frame: RelayToClientFrame): void {
+    if (backlogged(client.socket)) {
+      this.unregisterClient(client);
+      safeClose(client.socket, WS_CLOSE_TRY_AGAIN_LATER, WS_CLOSE_BACKLOGGED_REASON);
+      return;
+    }
     safeSend(client.socket, frame);
   }
 
   #toBurrow(burrow: BurrowConn, frame: RelayToBurrowFrame): void {
+    if (backlogged(burrow.socket)) {
+      this.unregisterBurrow(burrow);
+      safeClose(burrow.socket, WS_CLOSE_TRY_AGAIN_LATER, WS_CLOSE_BACKLOGGED_REASON);
+      return;
+    }
     safeSend(burrow.socket, frame);
   }
 }
@@ -335,6 +354,10 @@ function answeredPing(socket: RelaySocket, raw: string): boolean {
     // mid-close
   }
   return true;
+}
+
+function backlogged(socket: RelaySocket): boolean {
+  return socket.bufferedAmount > MAX_RELAY_SOCKET_BUFFERED_BYTES;
 }
 
 /** Serialize and send, swallowing errors from a socket that is mid-close. */
