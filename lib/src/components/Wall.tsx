@@ -310,7 +310,8 @@ export function Wall({
   // One reference-counted lease per open dialog: overlapping dialogs each hold
   // their own, so the one closing cannot release the other's suppression.
   const dialogKeyboardActiveRef = useRef(false);
-  const [acquireDialogKeyboard] = useState(() => createDialogKeyboardCoordinator(dialogKeyboardActiveRef));
+  const dialogsClosedRef = useRef<() => void>(() => {});
+  const [acquireDialogKeyboard] = useState(() => createDialogKeyboardCoordinator(dialogKeyboardActiveRef, () => dialogsClosedRef.current()));
 
   // Consumed once by the Lath seed effect to restore existing sessions
   const initialPaneIdsRef = useRef(initialPaneIds);
@@ -2081,17 +2082,18 @@ export function Wall({
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
   }, [enterPassthrough, lath, nav, transferRefusal]);
 
-  /** An inline rename closing drops DOM focus on `<body>`, where passthrough
-   *  keys reach nothing; the selected pane's terminal takes it back, unless
-   *  the gesture that closed the editor focused something else. */
-  const refocusAfterRename = useCallback(() => {
+  /** An inline rename or the last dialog closing drops DOM focus on `<body>`,
+   *  where passthrough keys reach nothing; the selected pane's terminal takes
+   *  it back, unless the gesture that closed it focused something else. */
+  const refocusPassthroughTerminal = useCallback(() => {
     if (modeRef.current !== 'passthrough') return;
     requestAnimationFrame(() => {
       const active = document.activeElement;
-      if (active && active !== document.body) return;
+      if (!activeRef.current || (active && active !== document.body)) return;
       focusSelected(true);
     });
   }, [focusSelected]);
+  dialogsClosedRef.current = refocusPassthroughTerminal;
 
   // --- Wall actions (for tab buttons) ---
 
@@ -2164,7 +2166,7 @@ export function Wall({
       const trimmed = value.trim();
       if (!trimmed) {
         setRenamingPaneId(null);
-        refocusAfterRename();
+        refocusPassthroughTerminal();
         return { accepted: false, reason: 'empty' as const };
       }
       const result = setTerminalUserTitle(id, trimmed);
@@ -2172,12 +2174,12 @@ export function Wall({
         lath.store.setTitle(id, trimmed);
       }
       setRenamingPaneId(null);
-      refocusAfterRename();
+      refocusPassthroughTerminal();
       return result;
     },
     onCancelRename: () => {
       setRenamingPaneId(null);
-      refocusAfterRename();
+      refocusPassthroughTerminal();
     },
     onSwapRenderMode: async (id, mode, viewport) => {
       if (transferRefusal(id)) return;
@@ -2332,7 +2334,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal, livePaneId, showShellSpawnNotice, refocusAfterRename]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal, livePaneId, showShellSpawnNotice, refocusPassthroughTerminal]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
