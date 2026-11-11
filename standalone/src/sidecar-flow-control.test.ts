@@ -90,6 +90,8 @@ interface Pty {
   head: string;
   /** The last 200 chars the host sent. */
   tail: string;
+  /** How many \`T\`s the host sent: a tail test's tail is made of them. */
+  ts: number;
   exit?: { exitCode: number; at: number };
 }
 
@@ -120,7 +122,7 @@ function sidecar() {
   const ptys = new Map<string, Pty>();
   const pty = (id: string) => {
     let entry = ptys.get(id);
-    if (!entry) ptys.set(id, entry = { forwarded: 0, head: '', tail: '' });
+    if (!entry) ptys.set(id, entry = { forwarded: 0, head: '', tail: '', ts: 0 });
     return entry;
   };
   // The Burrow's memory-only store says so once.
@@ -134,6 +136,7 @@ function sidecar() {
       const entry = pty(detail.id);
       entry.forwarded += detail.data.length;
       entry.tail = (entry.tail + detail.data).slice(-200);
+      for (const char of detail.data) if (char === 'T') entry.ts++;
     } else if (event === 'pty:exit' && detail.id) {
       pty(detail.id).exit = { exitCode: detail.exitCode ?? -1, at: Date.now() };
     }
@@ -200,25 +203,27 @@ function sidecar() {
 
 type Sidecar = ReturnType<typeof sidecar>;
 
+/** What a paused PTY may still forward in a window: on macOS it is read once
+ *  every peek, about 1 KB each. A flowing one forwards megabytes. */
+const TRICKLE = ONE_READ / 2;
+
 /**
  * Waits until `id`'s program has started and its PTY has forwarded more than
- * `above`, then forwards nothing for `quietMs`: its PTY is paused. Never
- * before the program starts, which a slow `node` start on Windows took longer
- * than `quietMs` to do, while ConPTY's own setup sequences sat quiet.
+ * `above`, then no more than a trickle over `quietMs`: its PTY is paused.
+ * Never before the program starts, which a slow `node` start on Windows took
+ * longer than `quietMs` to do, while ConPTY's own setup sequences sat quiet.
  */
 async function settled(side: Sidecar, id: string, above = 0, quietMs = 400): Promise<number> {
-  let last = -1;
-  let since = Date.now();
+  const samples: Array<[number, number]> = [];
   await until(() => {
-    const now = side.pty(id).forwarded;
-    if (now !== last) {
-      last = now;
-      since = Date.now();
-      return false;
-    }
-    return side.written(id) > 0 && now > above && Date.now() - since >= quietMs;
+    const now = Date.now();
+    const forwarded = side.pty(id).forwarded;
+    samples.push([now, forwarded]);
+    while (samples.length > 1 && now - samples[1][0] >= quietMs) samples.shift();
+    const [since, then] = samples[0];
+    return side.written(id) > 0 && forwarded > above && now - since >= quietMs && forwarded - then < TRICKLE;
   }, `${id} to forward past ${above} and stop`, 15_000, () => side.describe(id));
-  return last;
+  return side.pty(id).forwarded;
 }
 
 describe('a flood nobody acknowledges', { timeout: 30_000 }, () => {
@@ -228,10 +233,10 @@ describe('a flood nobody acknowledges', { timeout: 30_000 }, () => {
     const forwarded = await settled(side, 'a');
     expect(forwarded, side.describe('a')).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS);
     expect(forwarded, side.describe('a')).toBeLessThanOrEqual(PTY_HIGH_WATERMARK_CHARS + ONE_READ);
-    // The program's own count stops: its writes block on the full PTY.
+    // The program's own count all but stops: its writes block on the full PTY.
     const before = side.written('a');
     await sleep(500);
-    expect(side.written('a'), side.describe('a')).toBe(before);
+    expect(side.written('a') - before, side.describe('a')).toBeLessThan(TRICKLE);
     expect(before, side.describe('a')).toBeLessThan(FLOOD_CAP);
   });
 
@@ -277,7 +282,7 @@ describe('a flood nobody acknowledges', { timeout: 30_000 }, () => {
     cleanup.push(() => clearInterval(keepUp));
     await until(() => side.pty('free').exit !== undefined, 'the free PTY to finish', 20_000, () => side.describe('free'));
     expect(side.written('free'), side.describe('free')).toBeGreaterThanOrEqual(cap);
-    expect(side.pty('stuck').forwarded, side.describe('stuck')).toBe(stuck);
+    expect(side.pty('stuck').forwarded - stuck, side.describe('stuck')).toBeLessThan(TRICKLE);
   });
 });
 
@@ -285,12 +290,15 @@ describe('a paused PTY', { timeout: 30_000 }, () => {
   it('delivers the tail its program wrote before exiting, then the exit', async () => {
     const side = sidecar();
     // One char past the high watermark, then quiet while the host pauses,
-    // then a tail nothing reads until the program is gone.
-    side.floodThenTail('a', PTY_HIGH_WATERMARK_CHARS + 1, 'TAIL-OF-THE-RUN', 300);
+    // then a tail nothing reads until the program is gone. Over 1 KB, which
+    // macOS discards from an exit it holds unread.
+    const tail = `${'T'.repeat(1500)}-end-of-run`;
+    side.floodThenTail('a', PTY_HIGH_WATERMARK_CHARS + 1, tail, 300);
     await until(() => side.pauses.includes('a'), 'the pause', 15_000, () => side.describe('a'));
     await until(() => side.pty('a').exit !== undefined, 'the exit', 10_000, () => side.describe('a'));
     expect(side.pty('a').exit!.exitCode, side.describe('a')).toBe(7);
-    expect(side.pty('a').tail, side.describe('a')).toContain('TAIL-OF-THE-RUN');
+    expect(side.pty('a').ts, side.describe('a')).toBe(1500);
+    expect(side.pty('a').tail, side.describe('a')).toContain('-end-of-run');
   });
 
   // `yes` itself, which Windows does not have; the case after it is the same
@@ -298,13 +306,8 @@ describe('a paused PTY', { timeout: 30_000 }, () => {
   it.skipIf(!YES)('ends a paused `yes` at a Ctrl+C (POSIX: no `yes` on Windows)', async () => {
     const side = sidecar();
     side.spawn('yes', YES!, ['y']);
-    let last = -1;
-    let since = Date.now();
-    await until(() => {
-      const now = side.pty('yes').forwarded;
-      if (now !== last) { last = now; since = Date.now(); return false; }
-      return now > PTY_HIGH_WATERMARK_CHARS && Date.now() - since >= 400;
-    }, 'yes to stop forwarding', 15_000, () => side.describe('yes'));
+    await until(() => side.pty('yes').forwarded > PTY_HIGH_WATERMARK_CHARS && side.pauses.includes('yes'), 'yes to pause', 15_000, () => side.describe('yes'));
+    await sleep(400);
     const pressed = Date.now();
     side.interrupt('yes');
     await until(() => side.pty('yes').exit !== undefined, 'yes to exit', 5_000, () => side.describe('yes'));

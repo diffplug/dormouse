@@ -11,6 +11,7 @@ import {
   PTY_INPUT_CEILING_CHARS,
   PTY_INPUT_GRACE_MS,
   PTY_LOW_WATERMARK_CHARS,
+  PTY_PAUSED_PEEK_MS,
 } from '../lib/pty-flow';
 
 /** Where a decision lands: `pty-core`'s `pause` / `resume`, in process or over IPC. */
@@ -40,6 +41,8 @@ export interface PtyFlowControl {
   forget(id: string): void;
   /** What `id`'s renderer owes. */
   unacknowledged(id: string): number;
+  /** Stop every timer this holds. */
+  dispose(): void;
 }
 
 export function createPtyFlowControl(target: PtyFlowTarget, { platform = process.platform }: PtyFlowOptions = {}): PtyFlowControl {
@@ -52,13 +55,34 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
   const inputResumes = platform === 'win32';
   /** PTYs input has resumed past the high watermark, each with its grace timer. */
   const graces = new Map<string, ReturnType<typeof setTimeout>>();
+  // macOS holds an exiting program's close while more than about 1 KB is
+  // unread, then discards it (measured, see the rationale), and nothing shows
+  // the hold. So a paused PTY there is read once every peek, below the ceiling.
+  const peeks = platform === 'darwin';
+  const peekTimers = new Map<string, ReturnType<typeof setInterval>>();
+  /** Paused PTYs resumed for one read, paused again by the read it delivers. */
+  const peeking = new Set<string>();
 
+  const stopPeeks = (id: string) => {
+    clearInterval(peekTimers.get(id));
+    peekTimers.delete(id);
+    peeking.delete(id);
+  };
   const pause = (id: string) => {
     paused.add(id);
     target.pause(id);
+    if (!peeks || peekTimers.has(id)) return;
+    const timer = setInterval(() => {
+      if (!paused.has(id) || peeking.has(id) || (owed.get(id) ?? 0) >= PTY_INPUT_CEILING_CHARS) return;
+      peeking.add(id);
+      target.resume(id);
+    }, PTY_PAUSED_PEEK_MS);
+    (timer as { unref?: () => void }).unref?.();
+    peekTimers.set(id, timer);
   };
   const resume = (id: string) => {
     if (!paused.delete(id)) return;
+    stopPeeks(id);
     target.resume(id);
   };
   const endGrace = (id: string) => {
@@ -80,6 +104,10 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
       if (chars <= 0) return;
       const total = (owed.get(id) ?? 0) + chars;
       owed.set(id, total);
+      if (peeking.delete(id)) {
+        target.pause(id);
+        return;
+      }
       if (paused.has(id)) return;
       // Input's grace holds the PTY open up to the ceiling, never past it.
       const limit = graces.has(id) ? PTY_INPUT_CEILING_CHARS - 1 : PTY_HIGH_WATERMARK_CHARS;
@@ -122,8 +150,14 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
       owed.delete(id);
       paused.delete(id);
       endGrace(id);
+      stopPeeks(id);
     },
 
     unacknowledged: (id) => owed.get(id) ?? 0,
+
+    dispose() {
+      for (const id of [...graces.keys()]) endGrace(id);
+      for (const id of [...peekTimers.keys()]) stopPeeks(id);
+    },
   };
 }

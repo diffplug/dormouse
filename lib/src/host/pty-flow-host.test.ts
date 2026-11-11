@@ -4,6 +4,7 @@ import {
   PTY_INPUT_CEILING_CHARS,
   PTY_INPUT_GRACE_MS,
   PTY_LOW_WATERMARK_CHARS,
+  PTY_PAUSED_PEEK_MS,
 } from '../lib/pty-flow';
 import { createPtyFlowControl } from './pty-flow-host';
 
@@ -149,11 +150,13 @@ describe('input to a paused PTY', () => {
   it('does nothing on POSIX, where the line discipline delivers it to the blocked program', () => {
     vi.useFakeTimers();
     for (const platform of ['darwin', 'linux']) {
-      const { calls, flow } = flowWithCalls(platform);
-      flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
-      flow.input('a');
+      const typed = flowWithCalls(platform);
+      const untyped = flowWithCalls(platform);
+      for (const { flow } of [typed, untyped]) flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+      typed.flow.input('a');
       vi.advanceTimersByTime(PTY_INPUT_GRACE_MS * 2);
-      expect(calls).toEqual(['pause a']);
+      expect(typed.calls).toEqual(untyped.calls);
+      for (const { flow } of [typed, untyped]) flow.reset();
     }
   });
 
@@ -171,6 +174,61 @@ describe('input to a paused PTY', () => {
     flow.sent('c', 1);
     vi.advanceTimersByTime(PTY_INPUT_GRACE_MS * 2);
     expect(calls).toEqual(['pause b', 'resume b', 'pause c', 'resume c']);
+  });
+});
+
+// macOS discards an exiting program's unread output past about 1 KB, so a
+// paused PTY there is read once every peek (docs/specs/transport.md ->
+// "Output flow control").
+describe('a paused PTY on macOS', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('is resumed for one read every peek, which counts like any other', () => {
+    vi.useFakeTimers();
+    const { calls, flow } = flowWithCalls('darwin');
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS - 1);
+    expect(calls).toEqual(['pause a']);
+    vi.advanceTimersByTime(1);
+    expect(calls).toEqual(['pause a', 'resume a']);
+    // Nothing to read yet: it stays open until the read comes.
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS * 3);
+    expect(calls).toEqual(['pause a', 'resume a']);
+    flow.sent('a', 1024);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a']);
+    expect(flow.unacknowledged('a')).toBe(PTY_HIGH_WATERMARK_CHARS + 1025);
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a', 'resume a']);
+  });
+
+  it('stops peeking at the ceiling, and once the renderer catches up', () => {
+    vi.useFakeTimers();
+    const { calls, flow } = flowWithCalls('darwin');
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS);
+    flow.sent('a', PTY_INPUT_CEILING_CHARS - PTY_HIGH_WATERMARK_CHARS - 1);
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS * 4);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a']);
+    flow.acknowledge('a', PTY_INPUT_CEILING_CHARS - PTY_LOW_WATERMARK_CHARS);
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS * 4);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a', 'resume a']);
+  });
+
+  it('peeks on no other platform, and a reset or kill ends the peeks', () => {
+    vi.useFakeTimers();
+    const linux = flowWithCalls('linux');
+    linux.flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS * 4);
+    expect(linux.calls).toEqual(['pause a']);
+    const mac = flowWithCalls('darwin');
+    mac.flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    mac.flow.sent('b', PTY_HIGH_WATERMARK_CHARS + 1);
+    mac.flow.reset(['a']);
+    mac.flow.forget('b');
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS * 4);
+    expect(mac.calls).toEqual(['pause a', 'pause b', 'resume a']);
   });
 });
 

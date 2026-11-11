@@ -30,8 +30,13 @@ export const PTY_LOW_WATERMARK_CHARS = 1_048_576;
  * watermark. ConPTY delivered an interrupt 16 ms after the resume.
  */
 export const PTY_INPUT_GRACE_MS = 250;
-/** Input never resumes a PTY owing this many chars or more. */
+/** Neither input nor a peek resumes a PTY owing this many chars or more. */
 export const PTY_INPUT_CEILING_CHARS = 2 * PTY_HIGH_WATERMARK_CHARS;
+/**
+ * On macOS a paused PTY is resumed for one read this often: an exiting
+ * program with more than about 1 KB unread is held ~600 ms, then loses it.
+ */
+export const PTY_PAUSED_PEEK_MS = 150;
 
 /**
  * The live-output dispatch every adapter shares: it calls each `onPtyData`

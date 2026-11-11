@@ -47,13 +47,13 @@ Source of truth: `gracefulKill` in `standalone/sidecar/pty-core.js`.
 
 ### Output flow control
 
-The renderer acknowledges the live output it parsed; the host pauses a PTY its renderer has fallen behind on, so nothing between node-pty and xterm holds more than the high watermark plus one read (rationale). **Must count UTF-16 code units of the `data` sent as `pty:data`**, the renderer's unit, so after the parse; the scrollback, received counts, parse, and alerts sit before the pause.
+The renderer acknowledges the live output it parsed; the host pauses a PTY its renderer has fallen behind on, so nothing between node-pty and xterm holds more than the high watermark plus one read (rationale). **Must count UTF-16 code units of the `data` sent as `pty:data`**, the renderer's unit, so after the parse; scrollback, received counts, parse, and alerts sit before the pause.
 
 - **Must acknowledge every char of live `pty:data` exactly once**: from xterm's write callback once parsed, in batches; at once when no terminal took it or xterm refused it. **Never from a timer**, so a throttled window acknowledges as fast as it parses. A replay is never counted.
 - **Standalone's Rust acknowledges each `pty:data` it drops** (mid-transfer, or no owner) for the window.
 - **Must pause a PTY whose unacknowledged output passes the high watermark, and resume it at or below the low one, which stays at or above one batch less one**, the most a renderer holds parsed but unsent.
 - **Must forgive what a renderer owes, and resume, when it can no longer pay or no longer needs to**: a `requestInit` (its ids; every one when it names none), a transfer mark, a spawn over the id, a VS Code view leaving its PTYs running, the recovery capture's interrupt. A kill drops the count. **Must clamp it at zero**, so a stale acknowledgement owes nothing.
-- **Must resume a paused PTY once its process is gone, and before stopping it**, so node-pty reads its tail and reports its exit (rationale). **Must deliver input to a paused PTY**: on POSIX the line discipline reaches the blocked program; ConPTY reads no input while its output is blocked, so on Windows input resumes the PTY until none has come for a grace, unless it owes twice the high watermark, when input waits (rationale).
+- **Must resume a paused PTY once its process is gone, and before stopping it**, so node-pty reads its tail (rationale). **On macOS, must read a paused PTY once a peek, below twice the high watermark**: an exit over 1 KB unread loses it. **Must deliver input to a paused PTY**: POSIX's line discipline reaches the blocked program; ConPTY reads none while output is blocked, so on Windows input resumes the PTY for a grace, likewise below twice the high watermark (rationale).
 - **Only the local owning renderer exerts backpressure**: Pocket's and the fake adapter's `acknowledgePtyData` are no-ops. A Client's stream through the Burrow and Relay is never paced by it.
 
 Source of truth: `PtyDataDispatch` in `lib/src/lib/pty-flow.ts`; `createPtyFlowControl` in `lib/src/host/pty-flow-host.ts`; `pause` in `standalone/sidecar/pty-core.js`; `dropped_output_ack` in `standalone/src-tauri/src/lib.rs`.

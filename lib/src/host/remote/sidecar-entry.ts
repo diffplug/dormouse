@@ -703,6 +703,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
 
     dispose() {
       for (const stop of stops) stop();
+      flow.dispose();
       alertHost.dispose();
       service.dispose();
       voice.dispose();
