@@ -51,6 +51,8 @@ export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
 }
 
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
+/** The refusal a member's own close gives for its helper's running work. */
+const HELPER_WORK_REFUSAL = 'Helper has running work. Stop it in the helper, then close this terminal again.';
 const TRANSFERRING_REFUSAL = 'Workspace is transferring';
 
 /** Why a pinned Workspace stays open: only its Window's close takes it
@@ -83,9 +85,10 @@ export function workspaceMetadataRefusal(id: WorkspaceId): string | null {
 /**
  * Close every member Surface through the closure coordinator, then drop the
  * Workspace itself. Resolves the first refusal's message with the Workspace left
- * open, members ahead of the refusing one already closed and recorded nowhere
- * for reopen, or null once it is gone. Membership is cleared by the Wall's own
- * unmount.
+ * open, or null once it is gone. A helper with running work, or one that cannot
+ * be inspected, refuses before any member closes; only a refusal that arises
+ * during the close itself leaves the members ahead of it closed and recorded
+ * nowhere for reopen. Membership is cleared by the Wall's own unmount.
  *
  * `mode` is `prompt` for a user gesture, `silent` for `dor workspace close`.
  * `record: false` leaves no reopen record, for a close the user never made.
@@ -114,6 +117,17 @@ export async function closeWorkspaceWithSurfaces(
       // Commit visibility before collapse measures the Wall, even for an
       // untouched Workspace whose close skips the confirmation.
       flushSync(() => { setActiveWorkspace(id); handle.selectWorkspaceTab(); });
+    }
+    // Ahead of the Tool question too: nothing asked about can close anyway.
+    // Probed only where a helper exists, so a close with none still reaches
+    // the question, or `closeAll`, in the tick it was asked.
+    const members = handle.surfaceIds();
+    if (members.some(member => getHelper(member)) && await helpersHaveWork(members)) {
+      if (mode === 'prompt') {
+        setActiveWorkspace(id);
+        handle.showNotice(HELPER_WORK_REFUSAL);
+      }
+      return HELPER_WORK_REFUSAL;
     }
     // One question for every dirty Tool, before any Surface closes; a command
     // close refuses instead (`docs/specs/dor-tool.md` → Closing unsaved Tools).
@@ -257,8 +271,14 @@ function pendWorkspace(id: WorkspaceId): void {
     restore,
     finalize: async (context) => {
       const handle = getWallHandle(id);
-      // Unsaved Tool edits are discarded: the pending kill was the decision.
-      const refusal = handle ? await handle.closeAll(handle.dirtyToolIds()) : null;
+      let refusal: string | null = null;
+      if (handle) {
+        // Helper work started during the countdown refuses before any member
+        // closes; teardown, which can join while this probes, closes anyway.
+        const busy = !context.teardown && await helpersHaveWork(handle.surfaceIds());
+        // Unsaved Tool edits are discarded: the pending kill was the decision.
+        refusal = busy && !context.teardown ? HELPER_WORK_REFUSAL : await handle.closeAll(handle.dirtyToolIds());
+      }
       // Work that refuses to close (a helper's) brings the Workspace back to
       // say so, except when the window is going anyway.
       if (refusal && !context.teardown) restore(false);

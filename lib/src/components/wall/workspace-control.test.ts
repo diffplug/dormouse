@@ -18,6 +18,8 @@ import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspac
 import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { setPlatform } from '../../lib/platform';
+import * as helperTerminal from '../../lib/helper-terminal';
+import type { HelperTerminal } from '../../lib/helper-terminal';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
 
 const disposers: Array<() => void> = [];
@@ -54,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disposers.splice(0).forEach((dispose) => dispose());
+  vi.restoreAllMocks();
 });
 
 describe('workspace.list', () => {
@@ -323,6 +326,24 @@ describe('workspace.close', () => {
     });
     expect(closeAll).toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+  });
+
+  it('refuses running helper work even with force, closing no member', async () => {
+    const second = createWorkspace({ id: 'workspace:2', name: 'build', activate: false }).id;
+    const closeAll = vi.fn(async () => null);
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second, { needsCloseConfirmation: () => true, closeAll, surfaceIds: () => ['surface:a', 'surface:b'] });
+    vi.spyOn(helperTerminal, 'getHelper').mockImplementation((id) =>
+      id === 'surface:b' ? { id: 'surface:helper', parentId: 'surface:b' } as HelperTerminal : undefined);
+    vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValue(true);
+
+    const forced = request('workspace.close', { workspace: 'workspace:2', force: true });
+    await handleWorkspaceControl(forced);
+    expect(answer(forced)).toBe(
+      "workspace 'workspace:2' was not closed: Helper has running work. Stop it in the helper, then close this terminal again.",
+    );
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
   });
 
   it('refuses a pinned Workspace even with force', async () => {
