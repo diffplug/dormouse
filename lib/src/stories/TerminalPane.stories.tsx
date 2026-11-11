@@ -6,7 +6,7 @@ import {
   SCENARIO_ANSI_COLORS,
   SCENARIO_FAST_OUTPUT,
   SCENARIO_LS_OUTPUT,
-} from '../lib/platform';
+} from './fake-scenarios';
 import { clearSizeHold, holdSize } from '../lib/size-hold-store';
 import { getTerminalInstance } from '../lib/terminal-registry';
 import { settleTerminals } from './settle-terminals';

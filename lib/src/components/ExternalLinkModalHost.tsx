@@ -69,7 +69,7 @@ function PendingLinkDialog({ request }: { request: PendingExternalLink }) {
       setBusy(false);
       setHandlers(found);
     }, fail);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed per request
+  // keyed per request
   }, []);
 
   const confirm = () => {

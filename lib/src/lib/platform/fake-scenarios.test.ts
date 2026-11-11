@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { SCENARIO_SHELL_PROMPT } from './fake-scenarios';
 import {
   flattenScenario,
-  makeAlertScenario,
-  SCENARIO_SHELL_PROMPT,
   SCENARIO_LS_OUTPUT,
   SCENARIO_ANSI_COLORS,
   SCENARIO_FAST_OUTPUT,
-} from './fake-scenarios';
+} from '../../stories/fake-scenarios';
+import { makeAlertScenario } from '../alert-manager-test-utils';
 import type { FakeScenario } from './fake-adapter';
 
 function validateScenario(scenario: FakeScenario) {

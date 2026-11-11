@@ -638,7 +638,6 @@ export function ModalOverlay({
   children,
   targetElement,
   layer = 'pane',
-  zIndex,
   backdrop = 'standard',
   className,
   style,
@@ -646,10 +645,9 @@ export function ModalOverlay({
 }: HTMLAttributes<HTMLDivElement> & ModalOverlayVariants & {
   targetElement?: HTMLElement | null;
   layer?: ModalLayer;
-  zIndex?: number;
 }) {
   const rect = useMeasuredElementRect(targetElement ?? null);
-  const resolvedZIndex = zIndex ?? MODAL_LAYERS[layer];
+  const resolvedZIndex = MODAL_LAYERS[layer];
   const overlayStyle: CSSProperties = rect
     ? {
         position: 'fixed',

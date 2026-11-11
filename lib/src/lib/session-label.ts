@@ -16,9 +16,9 @@ import { getTerminalPaneStateSnapshot } from './terminal-state-store';
  * terminal-supplied OSC 0/2/9 title when it wins the normal display priority
  * (`docs/specs/alert.md` -> Spoken alarms).
  */
-export function deriveSessionLabel(id: string, fallbackTitle: string | null = null): string {
+export function deriveSessionLabel(id: string): string {
   const states = getTerminalPaneStateSnapshot();
-  return labelOf(states.get(id), buildAppTitleResolver(states, getActivitySnapshot()), fallbackTitle);
+  return labelOf(states.get(id), buildAppTitleResolver(states, getActivitySnapshot()), null);
 }
 
 /** A {@link deriveSessionLabel} for one caller that asks on every store

@@ -1,11 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { surfaceIdFor } from 'dor/protocol';
 import { Wall } from '../components/Wall';
-import {
-  flattenScenario,
-  SCENARIO_SHELL_PROMPT,
-  SCENARIO_LS_OUTPUT,
-} from '../lib/platform';
+import { SCENARIO_SHELL_PROMPT } from '../lib/platform';
+import { flattenScenario, SCENARIO_LS_OUTPUT } from './fake-scenarios';
 import type { ActivityState } from '../lib/terminal-registry';
 import { requireElement, settleTerminalContext, settleTerminals, waitForCondition } from './settle-terminals';
 

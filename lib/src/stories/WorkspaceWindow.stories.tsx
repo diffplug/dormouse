@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { AppBar } from '../../../standalone/src/AppBar';
 import { WorkspaceWindow } from '../components/WorkspaceWindow';
-import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
+import { flattenScenario, SCENARIO_LS_OUTPUT } from './fake-scenarios';
 import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
 
 const WORKSPACES = [

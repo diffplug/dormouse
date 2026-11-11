@@ -124,9 +124,9 @@ const OPENING = <>{SPINNER}opening…</>;
 
 /** Drag-selectable diagnostic text. A press focuses it, so Cmd/Ctrl+C reaches
  *  `handleContextCopy` rather than the helper terminal. */
-function ContextDiagnostic({ className, style, children }: { className: string; style?: CSSProperties; children: ReactNode }) {
+function ContextDiagnostic({ className, children }: { className: string; children: ReactNode }) {
   return <div role="alert" data-context-diagnostic tabIndex={-1} onPointerDown={event => event.currentTarget.focus({ preventScroll: true })}
-    style={style} className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
+    className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
 }
 
 /** `compact`: the button shows only its icon, so opening shows only the spinner. */

@@ -19,8 +19,6 @@ Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in `dor-lib-common/sr
 
 ## Canonical Params
 
-Invariants on the flat persisted `BrowserPanelParams`:
-
 - **Must treat `renderMode` as canonical, resolving an absent one to `iframe`, never to a live agent-browser.** Only params may omit it; a live `ScreenSnapshot` always carries one.
 - `url` is the canonical target across render swaps and relaunches. Agent-browser mirrors the newest http(s) active tab URL into it, and the host relaunches at nothing else; iframe persists only navigations Dormouse chrome initiated.
 - **Must keep persisted browser params flat** — `browserViewport` stores resolved sizing, `launchFallback` may carry restore params — and derive popped-out presentation from `renderMode`, never a separate flag.
@@ -28,7 +26,7 @@ Invariants on the flat persisted `BrowserPanelParams`:
 - `contextPortKey` is persisted, carried only by a Surface the pane context menu opened for a port. **Must keep agent-browser's provider suffix `agent`**, the value persisted before Playwright existed, so a restored pane still matches.
 - **Never move a browser Surface's DOM, and never let a minimize unmount it** (rationale): a minimize parks the leaf (`docs/specs/tiling-engine.md` → "Parked leaves"), keeping scroll, form, and script state. A restart is a cold load: every param survives it, no document state does.
 
-Source of truth: `BrowserPanelParams` in `lib/src/components/wall/BrowserPanel.tsx`.
+Source of truth: `resolveRenderMode` and `launchFallbackFromParams` in `lib/src/components/wall/browser-surface.ts`; `openContextPort` in `lib/src/components/Wall.tsx`.
 
 ## Placement And Lifetime
 

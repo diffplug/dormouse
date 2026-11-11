@@ -247,7 +247,6 @@ function DownloadButton({
   href,
   children,
   icon,
-  className = "",
   onClick,
   peek,
   variant = "primary",
@@ -256,7 +255,6 @@ function DownloadButton({
   href: string;
   children: ReactNode;
   icon: ReactNode;
-  className?: string;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
   peek: keyof typeof PEEK_MOTIONS;
   variant?: "primary" | "wide" | "compact";
@@ -279,7 +277,7 @@ function DownloadButton({
         aria-hidden="true"
         className={`${DOWNLOAD_MOUSE_BASE} ${motion.mouseClass}`}
       />
-      <span className={`${DOWNLOAD_BUTTON_BASE} ${motion.faceClass} group-hover:rotate-[var(--peek-rotate)] group-focus-visible:rotate-[var(--peek-rotate)] ${DOWNLOAD_BUTTON_VARIANTS[variant]} ${fill ? "h-full w-full" : "w-full sm:w-auto"} ${className}`}>
+      <span className={`${DOWNLOAD_BUTTON_BASE} ${motion.faceClass} group-hover:rotate-[var(--peek-rotate)] group-focus-visible:rotate-[var(--peek-rotate)] ${DOWNLOAD_BUTTON_VARIANTS[variant]} ${fill ? "h-full w-full" : "w-full sm:w-auto"}`}>
         <span
           aria-hidden="true"
           className="flex size-6 shrink-0 items-center justify-center"

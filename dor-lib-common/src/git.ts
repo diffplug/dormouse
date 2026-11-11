@@ -152,10 +152,10 @@ async function gitDirectory(candidate: string, options: GitRepositoryOptions): P
  * `GIT_COMMON_DIR`, or `GIT_WORK_TREE` the host inherited is dropped for the
  * same reason.
  */
-export function untrustedGitEnv(repository: LocalGitRepository, env: NodeJS.ProcessEnv = process.env, path: Pick<typeof nodePath, 'dirname'> = nodePath): NodeJS.ProcessEnv {
-  const { GIT_DIR: _dir, GIT_COMMON_DIR: _common, GIT_WORK_TREE: _tree, ...rest } = env;
+export function untrustedGitEnv(repository: LocalGitRepository): NodeJS.ProcessEnv {
+  const { GIT_DIR: _dir, GIT_COMMON_DIR: _common, GIT_WORK_TREE: _tree, ...rest } = process.env;
   const level = repository.workTree ?? repository.gitDir;
-  const above = path.dirname(level);
+  const above = nodePath.dirname(level);
   return above === level ? rest : { ...rest, GIT_CEILING_DIRECTORIES: above };
 }
 

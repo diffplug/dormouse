@@ -356,8 +356,8 @@ const MODEL = /^[a-z0-9][a-z0-9.-]{0,63}$/;
 const COUNT = /^(?:0|[1-9]\d{0,5})$/;
 
 /** `domain=VERDICT …` read into pairs, every domain one the prompts name, each at most once. */
-export function parseVerdicts(text, root = '.') {
-  const known = domains(root).map((d) => d.domain);
+export function parseVerdicts(text) {
+  const known = domains().map((d) => d.domain);
   const out = [];
   for (const word of text.split(/\s+/).filter(Boolean)) {
     const [, domain, verdict] = valid(word, /^([a-z-]+)=(PASS|FAIL|INCONCLUSIVE)$/, 'verdict').match(/^([a-z-]+)=(\w+)$/);

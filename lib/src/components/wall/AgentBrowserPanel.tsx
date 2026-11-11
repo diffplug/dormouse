@@ -75,7 +75,6 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     () => acquireAgentBrowserSurfaceController(id, { ...params, renderMode: seededMode }),
     // Later param changes flow through updateParams below (acquire is
     // get-or-create and ignores params when the controller already exists).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [id, provider, generation],
   );
 
@@ -138,7 +137,6 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     // The sink closes over `paneWrite` + `id`, both stable for a mounted pane
     // (Wall memoizes paneWrite; id never changes), so this still binds once per
     // controller — preserving the sink's identity stability.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller, paneWrite, id]);
 
   // Feed effective on-screen visibility (foreground window, not a parked leaf,

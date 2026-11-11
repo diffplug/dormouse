@@ -6,7 +6,8 @@ import { MobileCloseDialog, type MobileCloseDialogState } from '../components/Mo
 import { MobileSettings } from '../components/MobileSettings';
 import { MobileTerminalUi, type MobileTerminalSessionItem, type MobileTerminalView } from '../components/MobileTerminalUi';
 import { MobileWall, type MobileWallSession } from '../components/MobileWall';
-import { flattenScenario, type FakeScenario } from '../lib/platform';
+import type { FakeScenario } from '../lib/platform';
+import { flattenScenario } from './fake-scenarios';
 
 const TOOL = 'surface:1';
 const BROWSER = 'surface:2';

@@ -27,7 +27,8 @@ import {
   type TerminalTitle,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState } from '../lib/terminal-state';
-import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
+import { SCENARIO_SHELL_PROMPT } from '../lib/platform';
+import { flattenScenario } from './fake-scenarios';
 import { requireElement, settleTerminals, waitForPrimedState } from './settle-terminals';
 
 const HEADER_WIDTH = 380;

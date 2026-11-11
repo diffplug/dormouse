@@ -54,10 +54,6 @@ export function isToolReaped(id: string): boolean {
   return reaped.has(id);
 }
 
-export function getToolReap(id: string): ToolReapRecord | null {
-  return reaped.get(id) ?? null;
-}
-
 /** The record a rehydrate consumes: one rehydrate per reap, so a payload is
  *  handed to one run alone. */
 export function takeToolReap(id: string): ToolReapRecord | null {

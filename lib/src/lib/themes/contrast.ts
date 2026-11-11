@@ -123,13 +123,12 @@ function boostAway(
 export function docsAccentFor(
   accent: string,
   background: string,
-  minContrast = MIN_CONTRAST,
 ): string | null {
   const flat = flatten(accent, background);
   if (!flat) return null;
   const { base, bg } = flat;
-  if (contrastRatio(base, bg) >= minContrast) return toHex(base);
-  return boostAway(base, bg, (candidate) => contrastRatio(candidate, bg) >= minContrast);
+  if (contrastRatio(base, bg) >= MIN_CONTRAST) return toHex(base);
+  return boostAway(base, bg, (candidate) => contrastRatio(candidate, bg) >= MIN_CONTRAST);
 }
 
 /**
@@ -144,9 +143,8 @@ export function docsAccentFor(
 export function docsMutedTextFor(
   foreground: string,
   background: string,
-  minContrast = MIN_CONTRAST,
 ): string | null {
-  return docsMutedTextForSurfaces(foreground, [background], minContrast);
+  return docsMutedTextForSurfaces(foreground, [background]);
 }
 
 /**
@@ -158,7 +156,6 @@ export function docsMutedTextFor(
 export function docsMutedTextForSurfaces(
   foreground: string,
   backgrounds: readonly string[],
-  minContrast = MIN_CONTRAST,
 ): string | null {
   if (backgrounds.length === 0) return null;
   const flats = backgrounds.map((background) => flatten(foreground, background));
@@ -170,7 +167,7 @@ export function docsMutedTextForSurfaces(
       : worst,
   );
   const clearsEverySurface = (candidate: Rgb) =>
-    resolved.every(({ bg }) => contrastRatio(candidate, bg) >= minContrast);
+    resolved.every(({ bg }) => contrastRatio(candidate, bg) >= MIN_CONTRAST);
   const { base, bg } = limiting;
 
   // Already too faint to be body text: there is nothing to quieten, so borrow
@@ -198,14 +195,13 @@ export function docsMutedTextForSurfaces(
 export function docsStatusColorFor(
   color: string,
   backgrounds: readonly string[],
-  minContrast = MIN_CONTRAST,
 ): string | null {
   if (backgrounds.length === 0) return null;
   const flats = backgrounds.map((background) => flatten(color, background));
   if (flats.some((flat) => flat === null)) return null;
   const resolved = flats as Array<{ base: Rgb; bg: Rgb }>;
   const clearsEverySurface = (candidate: Rgb) =>
-    resolved.every(({ bg }) => contrastRatio(candidate, bg) >= minContrast);
+    resolved.every(({ bg }) => contrastRatio(candidate, bg) >= MIN_CONTRAST);
   const limiting = resolved.reduce((worst, candidate) =>
     contrastRatio(candidate.base, candidate.bg) < contrastRatio(worst.base, worst.bg)
       ? candidate

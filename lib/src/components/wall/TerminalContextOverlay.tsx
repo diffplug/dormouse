@@ -40,7 +40,7 @@ export function TerminalContextOverlay({ context, title, tool, preview = false, 
       // Dismissal returns the ring to the source alone while the exit plays.
       return context.closing ? null : { sourceId: context.id, element, side: next.side };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `place` reads exactly these inputs
+    // `place` reads exactly these inputs
   }, [lath, context.id, context.closing, manual, multiPane, cursorSide, wall.x, wall.y, wall.width, wall.height, source.x, source.y, source.width, source.height]);
   useLayoutEffect(() => () => lath.setContextPlacer(null), [lath]);
   const onChange = useCallback((side: ContextSide) => {

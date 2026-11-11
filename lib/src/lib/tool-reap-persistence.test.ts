@@ -21,7 +21,7 @@ import type { PersistedPane, PersistedSession } from './session-types';
 import { readPersistedSession } from './session-types';
 import { disposeSession } from './terminal-registry';
 import { registry } from './terminal-store';
-import { getToolReap, isToolReaped, markToolReaped, resetToolReaps } from './tool-reap-store';
+import { takeToolReap, isToolReaped, markToolReaped, resetToolReaps } from './tool-reap-store';
 
 const toolParams = { surfaceType: 'tool', command: 'viewer --serve', toolRender: 'iframe', toolPort: 'announced' };
 
@@ -74,7 +74,7 @@ describe('restoring', () => {
     expect(spawned).toEqual(['shell']);
     expect(registry.get('tool')?.exited).toBe(true);
     expect(isToolReaped('tool')).toBe(true);
-    expect(getToolReap('tool')).toEqual({ payload: null, cwd: '/repo', alert: reapedPane.alert });
+    expect(takeToolReap('tool')).toEqual({ payload: null, cwd: '/repo', alert: reapedPane.alert });
   });
 
   it('keeps a reaped Tool through a live resume, which would drop a pane with no PTY as stale', () => {

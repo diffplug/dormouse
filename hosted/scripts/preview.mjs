@@ -239,7 +239,8 @@ export const originsOf = (configs) =>
  * Worker's secrets file, and emits the origins: `url` (the account's, for the
  * environment link) and `origins` (all of them as JSON, for the smoke).
  */
-export async function prepare(env = process.env) {
+export async function prepare() {
+  const env = process.env;
   const bases = await readConfigs();
   const name = previewName(env.PR_NUMBER, bases.account.name);
   // Every config and secret validates before any resource is created.

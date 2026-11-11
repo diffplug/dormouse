@@ -32,6 +32,6 @@ export function useStorySelection(id: string, apply: (terminal: Terminal) => voi
       setSelection(id, null);
       setHintToken(id, null);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `apply` is rebuilt every render; the story names what it reads.
+    // `apply` is rebuilt every render; the story names what it reads.
   }, [id, ...deps]);
 }

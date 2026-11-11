@@ -426,7 +426,7 @@ export function Wall({
         ...(retainsLivePage(meta?.params) ? { livePage: true } : {}),
       };
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorDisplayMetadata` is the store read
+    // `doorDisplayMetadata` is the store read
     [doors, lath, doorDisplayMetadata],
   );
   const confirmKillRef = useRef(confirmKill);

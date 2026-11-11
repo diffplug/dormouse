@@ -5,23 +5,24 @@ import { WorkspaceActiveContext, ZoomedIdContext } from './wall-context';
 
 /**
  * Whether a Surface is actually on screen (`lib/src/lib/surface-sight.ts`): its
- * window — or VS Code webview — is shown, its Workspace is the visible one, its
- * leaf is not **parked** (mounted but out of the tree,
- * docs/specs/tiling-engine.md → "Parked leaves"), and, given its leaf `id`, no
- * other leaf is zoomed over it. Callers gate streaming work on it so a hidden
- * pane stops consuming resources while its daemon/session stays alive.
+ * window — or VS Code webview — is shown, its Workspace is the visible one,
+ * and its leaf is not **parked** (mounted but out of the tree,
+ * docs/specs/tiling-engine.md → "Parked leaves"). Callers gate streaming work
+ * on it so a hidden pane stops consuming resources while its daemon/session
+ * stays alive. It ignores zoom, for chrome that stays visible in the zoom
+ * margin.
  *
  * Pass the pane's `parked` prop; omitting it means "never parked", which is right for
- * any surface rendered outside LathHost. Omitting `id` ignores zoom: chrome
- * that stays visible in the zoom margin passes none.
+ * any surface rendered outside LathHost.
  */
-export function useSurfaceVisibility(parked = false, id?: string): boolean {
-  return isSeenObserved(useSurfaceSight(parked, id));
+export function useSurfaceVisibility(parked = false): boolean {
+  return isSeenObserved(useSurfaceSight(parked));
 }
 
 /** What `useSurfaceVisibility` judges by, as observed, for a caller that
- *  records why (the browser controller's debug ring). Keeps its identity
- *  until an input changes. */
+ *  records why (the browser controller's debug ring); given the leaf `id`,
+ *  also whether another leaf is zoomed over it. Keeps its identity until an
+ *  input changes. */
 export function useSurfaceSight(parked = false, id?: string): SurfaceSightObserved {
   const [docVisible, setDocVisible] = useState<boolean>(() => document.visibilityState !== 'hidden');
   const workspaceActive = useContext(WorkspaceActiveContext);

@@ -7,7 +7,8 @@ import { selectionBand, type CopyEditorSide } from '../lib/copy-editor-placement
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
 import { setSelection } from '../lib/mouse-selection';
-import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
+import { SCENARIO_SHELL_PROMPT } from '../lib/platform';
+import { flattenScenario } from './fake-scenarios';
 import { getTerminalInstance, getTerminalOverlayDims, refitSession } from '../lib/terminal-registry';
 import { requireElement, settleTerminals } from './settle-terminals';
 
