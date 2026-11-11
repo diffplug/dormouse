@@ -527,6 +527,22 @@ describe('LathHost — pane props contract', () => {
     act(() => leafDiv('a')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
     expect(onLeafFocused).toHaveBeenCalledWith('a');
   });
+
+  it('leaves focus in a text field of ours alone, but adopts the terminal input', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const { onLeafFocused } = mount(store);
+    const editor = document.createElement('input');
+    const terminalInput = document.createElement('textarea');
+    terminalInput.className = 'xterm-helper-textarea';
+    leafDiv('b')!.append(editor, terminalInput);
+
+    act(() => editor.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+    expect(onLeafFocused).not.toHaveBeenCalled();
+    act(() => terminalInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+    expect(onLeafFocused).toHaveBeenCalledWith('b');
+    editor.remove();
+    terminalInput.remove();
+  });
 });
 
 describe('LathHost — empty tree', () => {

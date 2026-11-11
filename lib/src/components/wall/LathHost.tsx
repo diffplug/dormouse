@@ -28,6 +28,7 @@ import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
 import { shieldFrames } from '../../lib/frame-shield';
+import { isEditableTarget, isTerminalInputProxy } from '../../lib/dom';
 import { subscribeDragCancel } from '../../lib/drag-cancel';
 import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
@@ -258,7 +259,13 @@ const LathLeaf = memo(function LathLeaf({
       className="lath-leaf"
       style={style}
       ref={registerEl}
-      onFocusCapture={() => onLeafFocused?.(id)}
+      onFocusCapture={(event) => {
+        // A text field of ours (a rename or URL editor) is focused by a gesture
+        // that already chose what to select; adopting it would hand focus to
+        // the pane body and blur the editor shut.
+        if (isEditableTarget(event.target) && !isTerminalInputProxy(event.target)) return;
+        onLeafFocused?.(id);
+      }}
     >
       <LathLeafContent
         id={id}
