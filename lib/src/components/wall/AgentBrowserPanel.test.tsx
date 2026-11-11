@@ -316,6 +316,8 @@ describe('AgentBrowserPanel render mode controller', () => {
     const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
+    // The pane's own click opens it: only then is a new tab followed.
+    getAgentBrowserSurfaceController('ab-panel')!.send({ type: 'input_mouse', eventType: 'mousePressed', x: 1, y: 1, button: 'left', buttons: 1, clickCount: 1, modifiers: 0 });
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -366,6 +368,8 @@ describe('AgentBrowserPanel render mode controller', () => {
     const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
+    // The pane's own click opens it: only then is a new tab followed.
+    getAgentBrowserSurfaceController('ab-panel')!.send({ type: 'input_mouse', eventType: 'mousePressed', x: 1, y: 1, button: 'left', buttons: 1, clickCount: 1, modifiers: 0 });
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -490,7 +494,7 @@ describe('AgentBrowserPanel Playwright params', () => {
     // The pane sizes the host was asked to sync each stream's browser to.
     const synced = (port: number) => stream(port).sent.map((raw) => JSON.parse(raw))
       .filter((message) => message.type === 'sync').map(({ width, height, dpr }) => `${width}x${height}@${dpr}`);
-    const params = { surfaceType: 'browser', renderMode: 'playwright-screencast', session: 'app', cwd: '/first', stream: 4321, browserViewport: { mode: 'pane-sync' }, syncEngaged: true } as const;
+    const params = { surfaceType: 'browser', renderMode: 'playwright-screencast', session: 'app', cwd: '/first', stream: 4321, browserViewport: { mode: 'pane-sync' } } as const;
 
     await renderPanel(paneProps('pw-panel', params));
     await vi.waitFor(() => expect(synced(4321)).toContain('800x600@1'));
@@ -948,6 +952,15 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
       expect.objectContaining({ eventType: 'mouseWheel', x: 200, y: 100, deltaX: 3, deltaY: 40 }),
     ]);
     expect(wheel.defaultPrevented).toBe(true);
+  });
+
+  it('scales a wheel delta as it scales the pointer, on a screencast drawn smaller than its viewport', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    canvas.getBoundingClientRect = () => ({ width: 640, height: 360, left: 0, top: 0, right: 640, bottom: 360, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    await act(async () => {
+      canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 100, clientY: 50, deltaX: 3, deltaY: 40 }));
+    });
+    expect(sentMouse()).toEqual([expect.objectContaining({ eventType: 'mouseWheel', x: 200, y: 100, deltaX: 6, deltaY: 80 })]);
   });
 
   it('sends no keys to an unselected pane in passthrough', async () => {

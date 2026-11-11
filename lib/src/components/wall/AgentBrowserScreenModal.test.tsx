@@ -249,7 +249,6 @@ describe('AgentBrowserScreenModal', () => {
     const registration = registerStubScreen('browser-transient', {
       snapshot: {
         ...STUB_SCREEN,
-        state: 'SCALED',
         renderMode: 'agent-browser-screencast',
         syncEngaged: true,
       },

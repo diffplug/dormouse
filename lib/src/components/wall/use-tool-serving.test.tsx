@@ -440,7 +440,6 @@ describe('agent-browser retirement on command exit', () => {
       url: 'http://127.0.0.1:6006/',
       renderMode: 'agent-browser-screencast',
       session: 'dormouse.1.tool-1',
-      syncEngaged: true,
       binaryPath: '/opt/agent-browser',
     };
     const { state } = await run(params, [[]]);
@@ -459,7 +458,6 @@ describe('agent-browser retirement on command exit', () => {
     expect(state.params.url).toBeUndefined();
     expect(state.params.session).toBeUndefined();
     expect(state.params.renderMode).toBeUndefined();
-    expect(state.params.syncEngaged).toBeUndefined();
   });
 });
 

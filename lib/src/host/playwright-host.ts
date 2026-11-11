@@ -7,17 +7,24 @@
  * owns everything the providers share.
  */
 import { realpathSync } from 'node:fs';
+import path from 'node:path';
 import type { Browser, Page, CDPSession } from 'playwright-core';
-import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
+import { BROWSER_PROVIDERS, isDirectory, spawnAndCapture } from 'dor-lib-common';
 import { neutralBrowserCwd } from './browser-neutral-cwd';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
+import { settleAllWithin } from '../lib/settle-within';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
 import { measuredViewport, type ViewerSink, type ViewportSize } from './browser-viewer';
 import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
+// How long a multi-page browser's CLI tab selection is trusted when no page
+// opened or closed: each ask spawns playwright-cli, about a fifth of a core
+// at the refresh cadence, and this bounds how late an agent's own
+// `tab-select` shows.
+const SELECTION_REFRESH_MS = 5_000;
 const CONNECT_TIMEOUT_MS = 8_000;
 // Chrome sends the next screencast frame only once the last is acknowledged,
 // so pacing the acks caps the stream at ~20 frames a second.
@@ -29,6 +36,15 @@ const INPUT_BACKLOG = 256;
 // unbounded: it lasts as long as the page load, nothing waits on it past a
 // launch's own bounds, and ending it could take down the browser it started.
 const CLI_TIMEOUT_MS = 10_000;
+
+/** `file` as the registry spells it: real up to its nearest remaining ancestor. */
+function realpathBelow(file: string): string {
+  const at = path.resolve(file);
+  const real = realpathOrUndefined(at);
+  if (real !== undefined) return real;
+  const parent = path.dirname(at);
+  return parent === at ? at : path.join(realpathBelow(parent), path.basename(at));
+}
 
 function realpathOrUndefined(file: string): string | undefined {
   try {
@@ -69,6 +85,8 @@ type Viewer = Binding & {
   disposed: boolean;
   refreshing?: Promise<void>;
   refreshedAt?: number;
+  /** The CLI's last answer to which page is selected, and the pages it chose among. */
+  selection?: { at: number; pages: string };
   queue: Promise<void>;
   queued: number;
   headed: boolean;
@@ -85,9 +103,12 @@ const pageKey = (page: Page) => {
   if (key === undefined) pageKeys.set(page, key = `page-${++pageCount}`);
   return key;
 };
-const tabsOf = (v: Viewer) => Promise.all(pagesOf(v).map(async (page, index) => ({
-  tabId: String(index), url: page.url(), title: await page.title().catch(() => ''), active: page === v.page,
-})));
+// A page whose main thread is blocked never answers: its title is then blank.
+const tabsOf = async (v: Viewer) => {
+  const pages = pagesOf(v);
+  const titles = await settleAllWithin(pages.map(page => page.title()), CLI_TIMEOUT_MS, '');
+  return pages.map((page, index) => ({ tabId: String(index), url: page.url(), title: titles[index], active: page === v.page }));
+};
 const watching = (v: Viewer) => [...v.subscribers].some(s => !s.headed);
 export function createPlaywrightProvider(deps: { log?(text: string): void } = {}): BrowserProvider<Binding> {
   const viewers = new Map<string, Viewer>();
@@ -101,7 +122,9 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
   async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS, initialViewport?: BrowserViewportSetting) {
     const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
-      cwd: b.cwd,
+      // A removed project directory cannot be spawned in: its workspace
+      // scopes the same sessions, and with none the neutral directory does.
+      cwd: isDirectory(b.cwd) ? b.cwd : b.workspace ?? neutralBrowserCwd(),
       env: initialViewport?.mode === 'fixed' ? { ...(b.env ?? process.env), PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } : b.env,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
     });
@@ -146,6 +169,18 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     const match = /(?:^|\\n|\n)\s*-?\s*(\d+):?\s*\(current\)/.exec(text);
     return match ? Number(match[1]) : 0;
   }
+  /** The selected page's index. A lone page is the selected one; only a
+   *  choice needs the CLI spawn, and only once a page opens or closes, the host
+   *  selects a tab, or the last answer is `SELECTION_REFRESH_MS` old. */
+  async function selectedIndex(v: Viewer): Promise<number> {
+    const pages = pagesOf(v);
+    if (pages.length <= 1) return 0;
+    const keys = pages.map(pageKey).join();
+    const current = v.page ? pages.indexOf(v.page) : -1;
+    if (current >= 0 && v.selection?.pages === keys && Date.now() - v.selection.at < SELECTION_REFRESH_MS) return current;
+    v.selection = { at: Date.now(), pages: keys };
+    return activeIndex(v);
+  }
   async function refresh(v: Viewer, force = true) {
     if (v.disposed) return;
     if (v.refreshing) return v.refreshing;
@@ -156,8 +191,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   }
   async function refreshNow(v: Viewer) {
     try {
-      // A lone page is the selected one; only a choice needs the CLI spawn.
-      const index = pagesOf(v).length > 1 ? await activeIndex(v) : 0;
+      const index = await selectedIndex(v);
       const pages = pagesOf(v);
       if (v.disposed) return;
       // A headed window that closed can leave its browser running with none.
@@ -183,7 +217,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         // Modal And Render Swaps"). The screencast's own metadata is no
         // measure of the viewport (rationale).
         const takenAt = performance.now();
-        const measured = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })).then(measuredViewport, () => undefined);
+        const [measured] = await settleAllWithin([page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })).then(measuredViewport)], CLI_TIMEOUT_MS, undefined);
         if (measured) {
           const viewport = { width: measured.viewportWidth, height: measured.viewportHeight };
           if (v.page === page) v.viewport = viewport;
@@ -340,6 +374,23 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     if (!v.page) throw new Error('No playwright page is open');
     return { v, page: v.page };
   }
+  /** Refuse a close that would address another scope than the session's: the
+   *  binding's directory is gone, and the registry lists the session under a
+   *  removed workspace holding that directory, other than the one it now
+   *  resolves to (an ancestor's, or none). */
+  async function closable(b: Binding, timeoutMs?: number) {
+    if (isDirectory(b.cwd)) return;
+    const cwd = realpathBelow(b.cwd);
+    const list = await cli(b, ['list', '--all', '--json'], timeoutMs);
+    if (list.exitCode !== 0) throw new Error(list.stderr || 'Cannot discover playwright browsers');
+    const parsed = JSON.parse(list.stdout);
+    const servers: unknown = parsed.servers ?? parsed.data?.servers;
+    const removed = (Array.isArray(servers) ? servers : []).find(s =>
+      s.title === b.session && typeof s.workspaceDir === 'string' && s.workspaceDir && !isDirectory(s.workspaceDir)
+      && s.workspaceDir !== b.workspace && (cwd === s.workspaceDir || cwd.startsWith(s.workspaceDir + path.sep))
+      && typeof s.playwrightLib === 'string' && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
+    if (removed) throw new Error(`playwright session ${b.session} belongs to ${removed.workspaceDir}, which was removed; close it with playwright-cli`);
+  }
   const exited = (r: { exitCode: number; stderr: string }) => r.stderr.trim() || `playwright-cli exited ${r.exitCode}`;
   const live = (v: Viewer): LiveBrowser => ({ stream: v.instance, headed: v.headed });
 
@@ -367,7 +418,11 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     },
 
     // Finish the old CLI session before discovering the replacement endpoint.
-    stop: (b, timeoutMs) => cli(b, ['close'], timeoutMs),
+    async stop(b, timeoutMs) {
+      const end = Date.now() + timeoutMs;
+      await closable(b, timeoutMs);
+      return cli(b, ['close'], end - Date.now());
+    },
 
     async open(b, url, isHeaded, initialViewport) {
       const r = await cli(b, ['open', ...(url === undefined ? [] : [url]), '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null, initialViewport);
@@ -386,7 +441,9 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     },
 
     async close(b, timeoutMs) {
-      const r = await cli(b, ['close'], timeoutMs);
+      const end = Date.now() + timeoutMs;
+      await closable(b, timeoutMs);
+      const r = await cli(b, ['close'], end - Date.now());
       if (r.exitCode !== 0) throw new Error(exited(r));
     },
 
@@ -417,6 +474,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
           // The Playwright CLI names tabs by index.
           if (!/^\d+$/.test(act.tabId)) throw new Error('Unsupported tab operation');
           const r = await cli(b, [act.action === 'select' ? 'tab-select' : 'tab-close', act.tabId]);
+          v.selection = undefined;
           await refresh(v);
           return r.exitCode === 0 ? { ok: true } : { ok: false, error: exited(r) };
         }

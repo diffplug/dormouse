@@ -16,7 +16,6 @@ import {
   type RenderMode,
   type ScreenRegistration,
   type ScreenSnapshot,
-  type ScreenState,
 } from '../components/wall/agent-browser-screen';
 import { hostPathDisplay, loopbackPort } from '../components/wall/browser-url';
 import { setDevServerResolution } from '../components/wall/agent-browser-ports';
@@ -58,8 +57,6 @@ interface StoryArgs {
   renderMode: RenderMode;
   /** Whether an in-pane agent browser follows pane size or keeps a fixed size. */
   syncEngaged: boolean;
-  /** Live viewport match state, independent of the persisted resize intent. */
-  state: ScreenState;
   /** Active tab URL — also the source of the host+path text and loopback port. */
   url: string;
   /** Active tab HTML <title> (shown as the URL's tooltip). */
@@ -94,13 +91,10 @@ function BrowserChromeStory(args: StoryArgs) {
   }, [surfaceId, args.dirty]);
 
   const screenSnapshot: ScreenSnapshot = useMemo(() => ({
-    state: args.state,
     renderMode: args.renderMode,
     viewport: { w: 1280, h: 720, dpr: 1 },
-    paneCss: args.state === 'SYNCED' ? { w: 1280, h: 720 } : { w: 980, h: 560 },
-    displayDpr: 2,
     syncEngaged: args.syncEngaged,
-  }), [args.state, args.renderMode, args.syncEngaged]);
+  }), [args.renderMode, args.syncEngaged]);
 
   const chromeSnapshot: ChromeSnapshot = useMemo(() => ({
     url: args.url,
@@ -193,7 +187,6 @@ const meta: Meta<typeof BrowserChromeStory> = {
   argTypes: {
     renderMode: { control: 'inline-radio', options: ['agent-browser-screencast', 'agent-browser-popout', 'iframe'] },
     syncEngaged: { control: 'boolean' },
-    state: { control: 'radio', options: ['SYNCED', 'SCALED'] },
     url: { control: 'text' },
     htmlTitle: { control: 'text' },
     paneKey: { control: 'select', options: ['', 'default', 'storybook'] },
@@ -209,7 +202,6 @@ const meta: Meta<typeof BrowserChromeStory> = {
   args: {
     renderMode: 'agent-browser-screencast',
     syncEngaged: true,
-    state: 'SYNCED',
     url: 'http://localhost:5173/app',
     htmlTitle: 'Vite + React',
     paneKey: 'storybook',
@@ -247,13 +239,7 @@ export const Embed: Story = {
 /** Fixed viewport — robot + picture-in-picture, even if its dimensions happen
  *  to match the pane at this instant. */
 export const FixedSize: Story = {
-  args: { state: 'SYNCED', syncEngaged: false },
-};
-
-/** Resize is still engaged during a transient letterboxed frame, so the icon
- *  continues to describe intent rather than flickering to fixed-size. */
-export const ResizeTransient: Story = {
-  args: { state: 'SCALED', syncEngaged: true },
+  args: { syncEngaged: false },
 };
 
 /** No --key badge, no dev-server match — the bare host+path case. */

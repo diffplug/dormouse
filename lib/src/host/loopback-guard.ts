@@ -64,19 +64,3 @@ export function isOwnOrigin(originHeader: string | undefined, port: number): boo
   const origin = (originHeader ?? '').toLowerCase();
   return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
 }
-
-/**
- * True when the caller **named itself** as somebody else: an `Origin` is
- * present and is not this listener's own.
- *
- * Not the negation of {@link isOwnOrigin}, and the difference is the whole
- * point: an *absent* `Origin` is neither own nor foreign. Treating absence as
- * own would vouch for every navigation; treating it as foreign would penalize
- * the ordinary iframe case, which is precisely the one that carries no
- * `Origin`. Ask this where the question is "may this caller keep something of
- * mine alive", and {@link isOwnOrigin} where it is "may I speak for this
- * caller".
- */
-export function isForeignOrigin(originHeader: string | undefined, port: number): boolean {
-  return !!originHeader && !isOwnOrigin(originHeader, port);
-}

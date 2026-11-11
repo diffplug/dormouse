@@ -29,8 +29,9 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { BROWSER_PROVIDER_GUI, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
-import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { BROWSER_PROVIDER_GUI, hostBrowserProviders, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
+import { preferredBrowserProvider } from './wall/BrowserProviderSwitch';
+import { parseRenderMode, renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { isToolRender, toolOriginOf } from '../lib/platform/tool-types';
 import { acquireAgentBrowserSurfaceController, closeBrowserSurface, requestBrowserRenderMode } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
@@ -2212,8 +2213,8 @@ export function Wall({
         closeBrowserSurface(id, params);
         // The Tool's browser launches itself, in the Tool's own session.
         lath.store.updateParams(id, toolProvider
-          ? { toolRender: mode, ...toolBrowserLaunchParams(id, params ?? {}, url, toolProvider), syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}) }
-          : { toolRender: mode, renderMode: mode, url, session: undefined, launchSession: undefined, launchFallback: undefined, syncEngaged: false });
+          ? { toolRender: mode, ...toolBrowserLaunchParams(id, params ?? {}, url, toolProvider), ...(viewport ? { browserViewport: viewport } : {}) }
+          : { toolRender: mode, renderMode: mode, url, session: undefined, launchSession: undefined, launchFallback: undefined });
         return;
       }
 
@@ -2272,22 +2273,22 @@ export function Wall({
           session: undefined,
           ...(previousSession ? { launchSession: previousSession } : {}),
         };
-        swapBrowserRenderer(id, params, { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback });
+        swapBrowserRenderer(id, params, { surfaceType: 'browser', renderMode: mode, url, cwd, ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback });
         selectPane(id);
       }
     },
     onOpenBrowserPane: (id, url) => {
       // A new-tab request from the iframe shim → a new browser pane split next
       // to the source (docs/specs/dor-browser.md → "Iframe Shim"): an iframe,
-      // or an agent-browser pane for a page the iframe would refuse.
+      // or the remembered provider's screencast for a page the iframe would refuse.
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
-      const agentBrowser = !!iframeRefusal(url) && hostSupportsBrowser('agent-browser');
+      const providers = iframeRefusal(url) ? hostBrowserProviders() : [];
       createContentSurface({
         minimized: false,
         // A launch that fails takes its pane with it.
-        params: agentBrowser
-          ? { surfaceType: 'browser', renderMode: 'agent-browser-screencast', url, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+        params: providers.length
+          ? { surfaceType: 'browser', renderMode: renderModeFor(preferredBrowserProvider(providers), 'screencast'), url, launchFallback: 'close' satisfies LaunchFallback }
           : { surfaceType: 'browser', renderMode: 'iframe', url },
         reference,
         title: hostPathDisplay(url, true),
@@ -2308,6 +2309,12 @@ export function Wall({
       const fallback = launchFallbackFromParams(params);
       if (!fallback || lath.isDying(id) || isClosingSurface(id)) return;
       console.warn(`[dormouse] browser surface '${id}' could not launch:`, error);
+      // The fallback replaces the panel that would have said why, so the
+      // reason (a provider CLI that is not installed, say) shows here.
+      const reason = `The browser could not be opened (${error}).`;
+      // A pane that closes says it on another, the last selected if it lives.
+      const noticeId = fallback === 'close' ? [livePaneId(), ...nav.panes()].find(other => other && other !== id) : id;
+      if (noticeId) showShellSpawnNotice(noticeId, reason, 8000);
       if (fallback === 'close') {
         void closeSurfaceRef.current(id);
         return;
@@ -2316,7 +2323,7 @@ export function Wall({
       // renderer the swap replaced.
       if (fallback === 'embed') {
         void closeBrowserSurface(id, params);
-        lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false, launchSession: undefined, launchFallback: undefined });
+        lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', launchSession: undefined, launchFallback: undefined });
       } else {
         swapBrowserRenderer(id, params, fallback.restore);
       }
@@ -2325,7 +2332,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal, refocusAfterRename]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal, livePaneId, showShellSpawnNotice, refocusAfterRename]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
@@ -2359,7 +2366,7 @@ export function Wall({
     // terminal's directory is only what it reported, so the host's neutral one
     // serves (docs/specs/dor-browser.md -> "Pane Context Menu Connect").
     let params: Record<string, unknown> = {
-      surfaceType: 'browser', renderMode: mode, url: entry.url, syncEngaged: false, contextPortKey: key,
+      surfaceType: 'browser', renderMode: mode, url: entry.url, contextPortKey: key,
     };
     // A prepared browser that never became a Pane closes, at once on cancel.
     // Cancelling bumps the generation first, so `current()` sees it too.
@@ -2424,7 +2431,7 @@ export function Wall({
       preserveSource: true,
       // A launch that fails takes its pane with it. No cwd, as openContextPort.
       params: provider && hostSupportsBrowser(provider)
-        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, launchFallback: 'close' satisfies LaunchFallback }
         : { surfaceType: 'browser', renderMode: 'iframe', url: shownUrl },
       reference,
       title: hostPathDisplay(shownUrl, true),

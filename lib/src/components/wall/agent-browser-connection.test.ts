@@ -140,11 +140,35 @@ describe('viewer socket connection', () => {
     const { connection } = connect({ selectTab });
     await flush();
     const tab = (tabId: string, active: boolean, url = 'https://dormouse.sh/') => ({ tabId, title: 'Dormouse', url, active });
+    connection.send({ type: 'input_mouse', eventType: 'mousePressed' });
     socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', true)] }));
     socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', false), tab('t2', true)] }));
     expect(selectTab).not.toHaveBeenCalled();
     socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', false), tab('t2', true), tab('t3', false, 'https://other.example/')] }));
     expect(selectTab).toHaveBeenCalledExactlyOnceWith('t3');
+    connection.dispose();
+  });
+
+  it('leaves a newly opened inactive tab alone unless this viewer pressed or keyed in the last two seconds', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100_000);
+    const selectTab = vi.fn(async () => ({ ok: true }));
+    const { connection } = connect({ selectTab });
+    await flush();
+    const tab = (tabId: string, active: boolean) => ({ tabId, title: 'Dormouse', url: `https://dormouse.sh/${tabId}`, active });
+    socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', true)] }));
+    // An agent's command opened it: no input from this viewer.
+    socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', true), tab('t2', false)] }));
+    // A hover is not a press, and a press too long ago does not count.
+    connection.send({ type: 'input_mouse', eventType: 'mouseMoved' });
+    connection.send({ type: 'input_keyboard', eventType: 'keyDown' });
+    now.mockReturnValue(102_001);
+    socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', true), tab('t2', false), tab('t3', false)] }));
+    expect(selectTab).not.toHaveBeenCalled();
+    // The pane's own click opened it.
+    connection.send({ type: 'input_mouse', eventType: 'mousePressed' });
+    now.mockReturnValue(103_500);
+    socket().emitMessage(JSON.stringify({ type: 'tabs', tabs: [tab('t1', true), tab('t2', false), tab('t3', false), tab('t4', false)] }));
+    expect(selectTab).toHaveBeenCalledExactlyOnceWith('t4');
     connection.dispose();
   });
 
