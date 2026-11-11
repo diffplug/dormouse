@@ -1407,10 +1407,16 @@ export class AlertManager {
   }
 }
 
+/**
+ * Whether any realm could tell two states apart. Realms read only whether it
+ * rings, the episode, TODO, its detail, and `awaited`; the rest of `status`
+ * and `watchingEnabled` move on every detector and engagement edge, and
+ * publishing those cost an IPC message and every pane header a re-render with
+ * nothing to show, so they ride along on the next change that matters.
+ */
 function alertStatesEqual(a: AlertState, b: AlertState): boolean {
   if (
-    a.status !== b.status
-    || a.watchingEnabled !== b.watchingEnabled
+    (a.status === 'ALERT_RINGING') !== (b.status === 'ALERT_RINGING')
     || a.todo !== b.todo
     || a.awaited !== b.awaited
     || a.episode?.id !== b.episode?.id

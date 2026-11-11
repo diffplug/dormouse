@@ -316,7 +316,7 @@ describe('viewers', () => {
     expect(ringing('p2')).toBe(false);
   });
 
-  it('derives the command-exit arm from engagement, publishing each edge', () => {
+  it('derives the command-exit arm from engagement, publishing none of its edges', () => {
     const statuses: string[] = [];
     manager.onStateChange((id, state) => { if (id === PANE) statuses.push(state.status); });
     engage(manager, PANE);
@@ -327,7 +327,8 @@ describe('viewers', () => {
     expect(manager.getState(PANE).status).toBe('COMMAND_EXIT_ARMED');
     engage(manager, PANE);
     expect(manager.getState(PANE).status).toBe('WATCHING_DISABLED');
-    expect(statuses).toEqual(['WATCHING_DISABLED', 'COMMAND_EXIT_ARMED', 'WATCHING_DISABLED']);
+    // No realm reads the arm, so its edges send nothing.
+    expect(statuses).toEqual(['WATCHING_DISABLED']);
   });
 
   it('counts an acknowledgement as seeing the running command', () => {

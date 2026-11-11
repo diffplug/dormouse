@@ -34,7 +34,7 @@ Public `status` is a projection — first match wins:
 
 **Must identify each unresolved summons with an `episode` id and start time**. Opening the ring creates it; clearing ends it. A source joining an active ring joins its episode and never starts another delivery episode. **Never persist episodes.**
 
-`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await).
+`awaited`: a `dor await` is parked (Await). **Must send realms only changes to ringing, `episode`, `todo`, `notification`, or `awaited`** (rationale).
 
 **Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics):
 
@@ -498,7 +498,7 @@ Source of truth: grammars, parsing, sanitization limits, and `applyTerminalEvent
 Command-exit alerting consumes normalized semantic command events from `docs/specs/terminal-state.md` (`OSC 133`, `OSC 633`, or equivalent) and **must not parse raw OSC itself**.
 
 - A command start creates `commandExitWatch`; its seen lifecycle is the Foreground command machine (Completion events → State machines).
-- **Must derive armed, never store it**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
+- **Must derive armed, never store it**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`.
 - When the same command finishes — a prompt boundary with no finish event counts, with no exit code — or the PTY exits before a finish event, it rings only if it was seen. **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification: the summarized command and its exit code.
 - A different command start, Session destruction, or the host's own interrupt (a reap, restart, or preview retarget: `docs/specs/dor-tool.md` → Run end) clears the watch without ringing.

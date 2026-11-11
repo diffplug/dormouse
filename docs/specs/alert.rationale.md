@@ -10,6 +10,8 @@
 
 **Why the detector outranks the command-exit arm.** A watched command is by definition running, so a WATCHING Session is almost always also command-exit armed; ranking the arm first would mask the detector's busy/quiet states for the whole run, and the detector's state is the one derived from real output.
 
+**Why realms are sent only what they read.** The bell's tilt tiers were the last reader of the detector's states and `watchingEnabled` (removed 2026-09-20). Publishing each edge still cost an IPC message, a store invalidation, and a re-render of every pane header, four times per busy/quiet cycle of a watched agent, with nothing to show (2026-11-10).
+
 ## Engagement
 
 **Why three signals instead of one attention lease.** `attend()` used to acknowledge the Session, stand in for presence, and name the focus all at once, as a 15-second keystroke lease read once at completion time. Each merge failed on its own (audit, 2026-09-23): a user who pressed `Enter` and sat back watching a build had the pane they were staring at ring 15 seconds later; a Claude Code permission prompt arriving 8 seconds after the user submitted a prompt was dropped outright because the lease was still running, and nothing re-raised it after they walked away; a click that attended one pane armed another; and a browser Surface click created a manager entry that masked its local TODO. Presence belongs to a window, focus to a Wall, acknowledgement to a Session, so each is reported where it is known.

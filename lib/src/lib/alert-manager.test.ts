@@ -230,22 +230,21 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
   });
 
-  it('onStateChange fires when state transitions', () => {
+  it('publishes the ring but none of the detector transitions before it', () => {
     const id = 'test-notify';
+    runWatchedCommand(id);
     const states: string[] = [];
     manager.onStateChange((_id, state) => {
       if (_id === id) states.push(state.status);
     });
 
-    runWatchedCommand(id);
-
     driveToBusy(manager, id);
+    vi.advanceTimersByTime(cfg.alert.mightNeedAttention);
+    expect(manager.getState(id).status).toBe('MIGHT_NEED_ATTENTION');
+    expect(states).toEqual([]);
 
     settle();
-
-    expect(states).toContain('BUSY');
-    expect(states).toContain('MIGHT_NEED_ATTENTION');
-    expect(states).toContain('ALERT_RINGING');
+    expect(states).toEqual(['ALERT_RINGING']);
   });
 
   // --- Boolean TODO tests ---
@@ -998,7 +997,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).watchingEnabled).toBe(false);
   });
 
-  it('notifies subscribers when WATCHING turns off as a watched command finishes', () => {
+  it('publishes nothing when WATCHING turns off as a watched command finishes', () => {
     const id = 'rule-finish-notify';
     manager.setWatchedCommands(['claude']);
 
@@ -1014,8 +1013,8 @@ describe('AlertManager in isolation', () => {
     finishCommand(manager, id);
 
     expect(manager.getState(id).watchingEnabled).toBe(false);
-    // The off-transition must reach subscribers, not just live getState reads.
-    expect(watching).toContain(false);
+    // No realm reads it, so the off-transition is a live read only.
+    expect(watching).toEqual([]);
   });
 
   it('matches on the watch key, not the whole command line', () => {
