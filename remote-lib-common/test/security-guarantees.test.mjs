@@ -3,7 +3,11 @@
  * docs/specs/security-remote.md -> "Trust boundary", driven through
  * the full Client / Relay / Burrow flow of the harness actors — the real QR
  * grammar, the real IK handshakes, the real presence verifier, and the real
- * ACL conjunction.
+ * `BurrowAcl.authorize`. The Burrow is `SimBurrow`, a test-side copy of
+ * `BurrowRuntime`'s decisions around them (consume-before-verify, the access
+ * conjunction, the one confirmation attempt), so this proves the modules
+ * compose; the shipping Burrow's decisions are pinned by
+ * `lib/src/remote/burrow/burrow-runtime.test.ts`.
  *
  * The denial a Client is *sent* is deliberately uninformative: every ACL miss
  * is `pairing-required`. Which half failed is asserted on `misses`, the Burrow's
