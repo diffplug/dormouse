@@ -111,11 +111,12 @@ function release(controls: ScanControls | null, video: HTMLVideoElement | null):
 
 /**
  * How long a failed code must go unseen before the camera reading it again is
- * a deliberate re-scan: three times the decoder's 500 ms repeat
- * (`delayBetweenScanSuccess` in `@zxing/browser`), so a code held steadily in
- * view never counts as one.
+ * a deliberate re-scan. The decoder reports a code in view every 500 ms plus
+ * its decode time, and each missed frame adds another 500 ms plus decode
+ * (`delayBetweenScanSuccess` / `delayBetweenScanAttempts` in `@zxing/browser`),
+ * so this leaves room for a few misses before a code held in view counts as one.
  */
-export const RESCAN_GAP_MS = 1_500;
+export const RESCAN_GAP_MS = 3_000;
 
 export function ScanInvitation({
   busy,
