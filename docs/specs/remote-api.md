@@ -395,7 +395,7 @@ Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
 ### QoS hardening (phone-first, orthogonal to the stages above)
 
-* Terminal output is already coalesced burrow-side; the remote stream should add a per-session byte budget with tail-drop + resync (an implicit re-attach: repaint via resize) rather than unbounded buffering on a bad link.
+* Terminal output goes out one message per PTY read, uncoalesced, so a burst the direct path cannot drain ends the session; the remote stream should coalesce it and add a per-session byte budget with tail-drop + resync (an implicit re-attach: repaint via resize) rather than unbounded buffering on a bad link.
 * Detach on backgrounding: when the phone app/PWA loses visibility, the client detaches streams but keeps the control channel; reattach is one message.
 
 ### Open questions

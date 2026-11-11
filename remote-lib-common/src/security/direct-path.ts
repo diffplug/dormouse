@@ -91,10 +91,11 @@ export const MAX_DIRECT_SDP_LENGTH = 2000;
 export const MAX_DIRECT_PENDING_BYTES = 4 * 1024 * 1024;
 
 /**
- * How many channel frames either direction holds, whatever their size. Set above
- * where the ~1 KiB frames a PTY produces can reach it, so it stops only a peer
- * sending thousands of tiny ones; {@link MAX_DIRECT_PENDING_BYTES} is what
- * bounds real traffic. The relationship is pinned by
+ * How many channel frames either direction holds, whatever their size, so it
+ * stops a peer sending thousands of tiny ones. Terminal output is not coalesced:
+ * each PTY read, at most about 1 KiB, is its own frame, so a burst the link
+ * cannot drain can reach this as well as {@link MAX_DIRECT_PENDING_BYTES}. The
+ * relationship between the two is pinned by
  * `remote-lib-common/test/direct-path.test.mjs`.
  */
 export const MAX_DIRECT_PENDING_FRAMES = 8192;
