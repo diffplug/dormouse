@@ -77,6 +77,9 @@ export interface Surface {
   exitCode?: number;
   /** Running command label; `null` when idle or not a terminal Surface. */
   command: string | null;
+  /** The running command's line as the shell reported it, which
+   *  `dor list --command` matches; omitted when there is none. */
+  commandLine?: string;
   /** Target URL of a browser Surface; `null` for terminal Surfaces. */
   url: string | null;
   /** An alert is ringing. Browser Surfaces never ring. */
@@ -181,7 +184,6 @@ export interface ListWorkspacesResponse {
 export interface NewWorkspaceRequest {
   /** Defaults host-side to the next `Workspace N`. */
   name?: string;
-  window?: string;
 }
 
 export interface RenameWorkspaceRequest {
@@ -189,26 +191,22 @@ export interface RenameWorkspaceRequest {
   /** The name to keep; omitted with `auto`, which hands it back to auto-naming. */
   name?: string;
   auto?: true;
-  window?: string;
 }
 
 export interface CloseWorkspaceRequest {
   workspace: string;
   /** Close even though the Workspace holds touched or running Surfaces. */
   force: boolean;
-  window?: string;
 }
 
 /** Pin a Workspace right, or unpin it. */
 export interface PinWorkspaceRequest {
   workspace: string;
   pinned: boolean;
-  window?: string;
 }
 
 export interface SwitchWorkspaceRequest {
   workspace: string;
-  window?: string;
 }
 
 /** Move a Workspace: to another Window (`toWindow`, a label or `new` for a
@@ -221,7 +219,6 @@ export interface MoveWorkspaceRequest {
    *  document cannot leave its webview); the host refuses such a move unless
    *  the caller passed this. */
   dangerouslyDestroyIframePageState: boolean;
-  window?: string;
 }
 
 /** The answer every mutating Workspace verb gives: what it did, and the
@@ -574,6 +571,9 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   provider: BrowserAutomationProvider;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
+  /** The `--surface` handle the session was resolved from; routes the bind
+   *  to the Workspace holding it. */
+  surface?: string;
   session: string;
   /** The directory the command ran in. */
   cwd?: string;
@@ -583,7 +583,6 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   /** agent-browser only: the stream port `dor agent-browser` read itself after the
    * command; the Surface streams from it instead of asking the host. */
   wsPort?: number;
-  minimized?: boolean;
   initialViewport?: BrowserViewportSetting;
 }
 
@@ -698,6 +697,8 @@ export interface CliHost {
   homedir(): string;
   /** This platform's `path.resolve` of `path` against `base`. */
   resolvePath(base: string, path: string): string;
+  /** Whether `path` is an existing directory. */
+  isDirectory(path: string): boolean;
   connect(endpoint: ControlEndpoint): ControlClient;
   /** Streams the files under `cwd` for `dor open`'s picker. */
   listFiles(cwd: string, options: { onFiles: (paths: string[]) => void; signal: AbortSignal; home?: string }): Promise<{ truncated: boolean }>;

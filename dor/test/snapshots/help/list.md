@@ -16,7 +16,7 @@ Text output prints one row per Surface: a * marks the focused Surface, then its 
 
 --port <number> filters to terminal Surfaces listening on that port. It implies the same opt-in port scan as --ports, includes port details in JSON, and shows port tags in text output.
 
-Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
+Filters are ANDed. --command is an exact match against the running command line reported by shell integration, which JSON rows carry as command_line (command is its short label). --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
 
 JSON output (--json) gives each row its id, has_terminal (a PTY), and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. A named Tool's row adds tool_name and tool_scope (project, user, or builtin), and a project or user Tool's adds tool_origin.file, the dormouse.yml that declares it. It adds top-level caller_surface_id and focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_id, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 

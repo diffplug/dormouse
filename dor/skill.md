@@ -217,11 +217,12 @@ A Window holds several Workspaces, each with its own surfaces. You almost never 
 
 ## Recipes
 
-**Run a dev server and show it to the user.** Keep the handle from `ensure` and open a browser against it; Dormouse finds the server's port:
+**Run a dev server and show it to the user.** Keep the handle from `ensure`, wait for the server to settle (`ensure` answers once the shell is up, before the server listens), and open a browser against it; Dormouse finds the server's port:
 
 ```sh
 $ dor ensure -- npm run dev
 created surface:3  "npm run dev"
+$ dor await surface:3 --until quiet
 $ dor agent-browser open surface:3
 ```
 
@@ -229,6 +230,7 @@ $ dor agent-browser open surface:3
 
 ```sh
 dor split -- codex                          # prints "created surface:N"
+dor await surface:N --until quiet           # split answers before codex is ready
 dor send surface:N --text "/review" --key enter
 dor await surface:N --until quiet && dor read surface:N
 ```

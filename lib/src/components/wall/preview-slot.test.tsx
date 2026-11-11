@@ -538,8 +538,8 @@ describe('dor open --preview', () => {
 
   it('keeps a slot whose command outlives its interrupt\'s grace, previewing beside it without holding the queue', async () => {
     await mountSlot({ slot: { holdInterrupt: true } });
-    // Only the host's state polls run on the test's clock.
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    // Only the host's state polls, and the clock they read, run on the test's clock.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     try {
       const respond = await request({ file: 'b.md', preview: true });
       await waitUntil(() => typed['surface:slot'].length === 1);
@@ -604,9 +604,9 @@ describe('a prompt after the interrupt\'s grace', () => {
 
   /** Preview b.md into a slot whose viewer is still running when the grace
    *  runs out: the slot is kept and b.md created beside it, whose command has
-   *  reported, freeing the launch queue. Only the host's state polls run on
-   *  the test's clock unless `clock` fakes more. */
-  async function outliveGrace(clock: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setInterval', 'clearInterval'] }) {
+   *  reported, freeing the launch queue. Only the host's state polls and the
+   *  clock they read run on the test's clock unless `clock` fakes more. */
+  async function outliveGrace(clock: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setInterval', 'clearInterval', 'Date'] }) {
     await mountSlot({ slot: { holdInterrupt: true } });
     vi.useFakeTimers(clock);
     const respond = await request({ file: 'b.md', preview: true });
@@ -650,7 +650,7 @@ describe('a prompt after the interrupt\'s grace', () => {
     shell('surface:a', null);
     shell('surface:slot', 'view /repo/a.md', { holdInterrupt: true });
     shell('surface:kept', 'view /repo/b.md');
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     const first = await request({ file: 'c.md', preview: true });
     const second = await request({ file: 'b.md', preview: true });
     expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'surface:slot' });

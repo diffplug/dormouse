@@ -285,6 +285,27 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('lists a running terminal with the command line its shell reported', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'getTerminalPaneStateSnapshot').mockReturnValue(new Map([['surface:a', createTerminalPaneState({
+      currentCommand: {
+        id: 'run-1', rawCommandLine: 'npm run dev --host', displayCommand: 'npm run dev', cwdAtStart: null, startedAt: 0, source: 'osc633_E',
+      },
+    })]]));
+    let response: { result?: { surfaces: Array<{ command: string | null; commandLine?: string }> } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: { method: SURFACE_CONTROL_METHODS.list, params: {}, respond: (r: typeof response) => { response = r; } },
+      }));
+    });
+    await flush();
+    expect(response?.result?.surfaces[0]?.command).toBe('npm run dev');
+    expect(response?.result?.surfaces[0]?.commandLine).toBe('npm run dev --host');
+  });
+
   it('cancels an ensure restart before a late prompt can relaunch its command', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
@@ -363,6 +384,67 @@ describe('Wall on the Lath engine', () => {
     });
     expect(respond).toHaveBeenCalledWith({ ok: false, error: "surface 'surface:a' restart was cancelled" });
     expect(writeSpy.mock.calls).toEqual([['surface:a', '\x03']]);
+  });
+
+  it('answers a second ensure for the same command with the Surface the first is still launching', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
+    const ensure = async () => {
+      let response: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.ensure,
+            params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:a' },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await waitUntil(() => response !== undefined);
+      return response!;
+    };
+    const first = await ensure();
+    expect(first.result?.status).toBe('created');
+    // The new shell is at its first prompt; the command has not been typed yet.
+    const second = await ensure();
+    expect(second.result?.status).toBe('existing');
+    expect(second.result?.surfaceId).toBe(first.result?.surfaceId);
+    expect(leafCount()).toBe(2);
+  });
+
+  it('fails an unintegrated ensure once its wall-clock ceiling passes, however few ticks ran', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(false);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
+    const respond = vi.fn();
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.ensure,
+            params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:a' },
+            respond,
+          },
+        }));
+      });
+      // A hidden webview's timers run about once a second: the clock moves on
+      // while the poll ticks only twice.
+      vi.setSystemTime(Date.now() + 8_000);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(respond).toHaveBeenCalledTimes(1);
+      expect(respond.mock.calls[0][0].ok).toBe(false);
+      expect(respond.mock.calls[0][0].error).toMatch(/requires OSC 633 shell integration/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('removes an unintegrated ensure split as soon as its client cancels', async () => {
@@ -861,6 +943,34 @@ describe('Wall on the Lath engine', () => {
     } finally {
       untouchedSpy.mockRestore();
     }
+  });
+
+  it('places an iframe from a minimized caller beside the focused Surface', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />);
+    });
+    await flush();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Minimize"]')!.click();
+    });
+    await flush();
+
+    let response: { ok: boolean; error?: string; result?: { status: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.iframe,
+          params: { url: 'http://localhost:5173/' },
+          surfaceId: 'surface:a',
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.error).toBeUndefined();
+    expect(response?.ok).toBe(true);
+    expect(container.querySelector('[data-lath-leaf="surface:b"]')).not.toBeNull();
   });
 
   it('validates a dor await and parks it on the host alert manager', async () => {
@@ -3357,6 +3467,23 @@ describe('Wall on the Lath engine', () => {
     expect(respond).toHaveBeenCalledWith({
       ok: true, result: { status: 'sent', surfaceId: 'surface:4', inputCount: 2 },
     });
+  });
+
+  it('refuses dor send to a Session whose shell exited, writing nothing', async () => {
+    registry.set('surface:4', { exited: true } as unknown as TerminalEntry);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:4']} />));
+      await flush();
+      const write = vi.spyOn(fake, 'writePty');
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', input: 'ls\r' }, respond,
+      } })));
+      expect(write).not.toHaveBeenCalled();
+      expect(respond).toHaveBeenCalledWith({ ok: false, error: "surface 'surface:4' has no running shell" });
+    } finally {
+      registry.delete('surface:4');
+    }
   });
 
   it('counts dor send as input, so a kill of the shell it reached confirms', async () => {

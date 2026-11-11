@@ -34,6 +34,7 @@ import {
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
 import { stripTerminalControls } from '../../lib/terminal-controls';
+import { registry } from '../../lib/terminal-store';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
@@ -164,7 +165,7 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
 
 /** Outcome of {@link EnsureBrowserSurface}: the fields the caller maps onto
  *  its response, or a failure message. `minimized` is the surface's current
- *  minimized state (the reused surface's, or the requested value for a fresh one). */
+ *  minimized state (the reused surface's; a fresh one is never minimized). */
 type EnsureBrowserSurfaceResult =
   | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; minimized: boolean }
   | { ok: false; message: string };
@@ -186,7 +187,6 @@ type EnsureBrowserSurface = (args: {
    *  must succeed without a visible reference (e.g. `dor agent-browser` from a minimized
    *  terminal refreshing an existing surface). */
   reference: () => ParseResult<DorSurface>;
-  minimized?: boolean;
   preserveSource?: boolean;
 }) => EnsureBrowserSurfaceResult;
 
@@ -231,7 +231,8 @@ function resolveSurfaceTarget(
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
   // drops it before dispatching (`requestForWall`), so an omitted target falls
-  // back to this Workspace's focused Surface.
+  // back to this Workspace's focused Surface. A held caller these surfaces
+  // omit (a minimized one, among visible panes) falls back the same way.
   const resolvedTarget = target ?? (callerSurfaceId !== undefined ? 'surface:self' : 'surface:focused');
   const classified = parseSurfaceTarget(resolvedTarget);
   if (classified.kind === 'invalid') return { ok: false, message: classified.message };
@@ -243,7 +244,7 @@ function resolveSurfaceTarget(
   if (classified.kind === 'title') {
     return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
   }
-  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
+  const fallback = !target ? (surfaces.find((surface) => surface.focused) ?? surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   const pending = classified.kind === 'id' ? pendingSurfaceRefusal(classified.id) : null;
   return { ok: false, message: pending ?? `surface '${resolvedTarget}' was not found` };
@@ -353,7 +354,9 @@ function waitForTerminalState(
   if (signal?.aborted) return Promise.resolve('aborted');
   if (predicate(getTerminalPaneState(id))) return Promise.resolve('ready');
   return new Promise((resolve) => {
-    let elapsed = 0;
+    // By the clock, not by ticks: a hidden webview's timers can be throttled
+    // to about one a second, which would stretch a tick count tenfold.
+    const deadline = Date.now() + timeoutMs;
     const finish = (outcome: WaitOutcome) => {
       clearInterval(timer);
       signal?.removeEventListener('abort', cancel);
@@ -363,7 +366,7 @@ function waitForTerminalState(
     const timer = setInterval(() => {
       if (predicate(getTerminalPaneState(id))) {
         finish('ready');
-      } else if ((elapsed += TERMINAL_STATE_POLL_MS) >= timeoutMs) {
+      } else if (Date.now() >= deadline) {
         finish('timeout');
       }
     }, TERMINAL_STATE_POLL_MS);
@@ -856,12 +859,24 @@ export function useDorControl({
    *  meanwhile would be acted on moments before it vanishes). */
   const isTargetable = useCallback((id: string) => !lath.isDying(id) && !isClosingSurface(id), [lath, isClosingSurface]);
 
+  /** The Surface `ensure` last created for each cwd and command. Its shell
+   *  reports nothing a concurrent `ensure` could match until the command is
+   *  typed, which waits for the first prompt and the next poll. */
+  const ensureLaunches = useRef(new Map<string, string>());
+
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
       ...lath.listPanes().map((panel) => panel.id),
       ...doorsRef.current.map((door) => door.id),
     ];
-    return ids.find((id) => isTargetable(id) && surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
+    const running = ids.find((id) => isTargetable(id) && surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath));
+    if (running) return running;
+    // Still on its way: no command of any kind has finished in that pane yet.
+    const key = `${cwdPath}\0${command}`;
+    const launched = ensureLaunches.current.get(key);
+    if (launched && ids.includes(launched) && isTargetable(launched) && getTerminalPaneState(launched).lastCommand === null) return launched;
+    ensureLaunches.current.delete(key);
+    return null;
   }, [lath, isTargetable]);
 
   /**
@@ -1006,7 +1021,6 @@ export function useDorControl({
     binaryPath,
     initialViewport,
     reference,
-    minimized = false,
     preserveSource,
   }) => {
     const refreshedParams = {
@@ -1041,7 +1055,7 @@ export function useDorControl({
     const target = reference();
     if (!target.ok) return { ok: false, message: target.message };
     const result = createContentSurface({
-      minimized,
+      minimized: false,
       params: {
         surfaceType: 'browser',
         renderMode: renderModeFor(provider, 'screencast'),
@@ -1063,7 +1077,7 @@ export function useDorControl({
       ok: true,
       status: result.value.status,
       surfaceId: result.value.id,
-      minimized,
+      minimized: false,
     };
   }, [createContentSurface, findBrowserSurface, updateSurfaceParams, lath]);
 
@@ -1966,7 +1980,8 @@ export function useDorControl({
       const existingId = findSurfaceIdRunningCommand(command, cwd);
       if (existingId) {
         const minimized = doorsRef.current.some((door) => door.id === existingId);
-        if (booleanParam(params.restart)) {
+        // A launch still on its way starts fresh already; only a running command restarts.
+        if (booleanParam(params.restart) && surfaceRunsCommand(getTerminalPaneState(existingId), command, cwd)) {
           const restarted = await restartSurfaceInPlace(existingId, command, cwd, detail.signal);
           if (!restarted.ok) {
             detail.respond({ ok: false, error: `surface '${existingId}' ${restarted.message}` });
@@ -2023,6 +2038,7 @@ export function useDorControl({
         detail.respond({ ok: false, error: result.message });
         return;
       }
+      ensureLaunches.current.set(`${cwd}\0${command}`, result.value.id);
       // ensure is only useful if the new shell reports OSC 633 — otherwise it
       // can never be matched or restarted. A non-cmd shell can still lack
       // integration (misconfigured, exotic); wait for the signal, and if it
@@ -2064,6 +2080,12 @@ export function useDorControl({
       }
       const target = requireTerminalSurface(params.surface, detail);
       if (!target) return;
+      // The host drops a write to a Session with no PTY: one that exited, a
+      // reaped Tool, or a Tool awaiting approval.
+      if (registry.get(target.id)?.exited || toolPendingFromParams(lath.getMeta(target.id)?.params)) {
+        detail.respond({ ok: false, error: `surface '${target.id}' has no running shell` });
+        return;
+      }
       // Input someone chose to send: an untouched shell it reaches is no longer
       // one a close may take without asking (docs/specs/layout.md → "Kill confirmation").
       markSessionTouched(target.id);
@@ -2521,7 +2543,6 @@ export function useDorControl({
         headed: status.headed,
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,
-        minimized: booleanParam(params.minimized),
         reference: () => resolvePlacement(resolveVisibleSurface),
         preserveSource: !!detail.helperParentId,
       });
