@@ -306,6 +306,17 @@ describe('MobileTerminalUi physical keyboard', () => {
     ]);
   });
 
+  it('sends Shift+Enter in its kitty form only while the program has kitty flags pushed', () => {
+    const onSendInput = vi.fn();
+    const kittyKeyboard = { flags: 1 };
+    vi.spyOn(registry, 'getTerminalInstance').mockReturnValue({ modes: {}, _core: { coreService: { kittyKeyboard } } } as unknown as Terminal);
+    renderUi({ onSendInput, sessions: [{ id: 'pane-a', title: 'claude', active: true, episode: null }] });
+    keydown(document.body, { key: 'Enter', shiftKey: true });
+    kittyKeyboard.flags = 0;
+    keydown(document.body, { key: 'Enter', shiftKey: true });
+    expect(onSendInput.mock.calls).toEqual([['\x1b[13;2u'], ['\r']]);
+  });
+
   it('leaves named keys, Command chords, and IME composition to the page', () => {
     const onSendInput = vi.fn();
     renderUi({ onSendInput });

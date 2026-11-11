@@ -231,6 +231,29 @@ describe('an established session', () => {
     await expect(hello).resolves.toEqual({ burrowId: 'b' });
   });
 
+  it('hands an attach its answer before an event read right behind it', async () => {
+    const { core, sent } = makeCore();
+    const { client, burrow } = await noiseSessionPair();
+    core.establish(ROUTE, client);
+    await flushMicrotasks();
+    const order: string[] = [];
+    const attached = core.attach('surface:1', 80, 24, {
+      onAttached: (result) => order.push(`answer ${result.modes.mouseTracking}`),
+      onData: () => order.push('data'),
+    });
+    const [request] = openReceipt(burrow, sent.at(-1)!.ciphertext) as Array<{ requestId: string }>;
+    const response = { requestId: request!.requestId, ok: true, result: { cols: 80, rows: 24, modes: { mouseTracking: 'any' } } };
+    const event = { subId: request!.requestId, event: 'terminal.data', data: { bytes: '' } };
+    // Both read before any microtask runs, as two frames off one socket read are.
+    for (const message of [response, event]) {
+      for (const ct of burrow.sendApp(utf8Encode(JSON.stringify(message)))) {
+        core.onFrame(ROUTE, 'transport', toBase64Url(ct));
+      }
+    }
+    await attached;
+    expect(order).toEqual(['answer any', 'data']);
+  });
+
   it('lets go of a session’s event subscriptions when it ends', async () => {
     const { core, sent } = makeCore();
     const first = await noiseSessionPair();

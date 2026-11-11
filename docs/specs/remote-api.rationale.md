@@ -64,6 +64,8 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 **Why a resize is a whole screen.** `SIGWINCH` makes full-screen TUIs repaint completely and shells redraw their prompt line, so the client's first screen arrives from the live stream alone and no snapshot transfer is needed. The same-size case has to be forced because xterm sends no `SIGWINCH` for a resize to the current size, leaving the client staring at an empty screen until the next output.
 
+**Why the modes cross beside the repaint.** A repaint redraws cells; it does not re-send mouse tracking, bracketed paste, application cursor keys, kitty keyboard flags, or the alternate screen, which a program sets once at startup. A phone attaching to a program already running, the usual reason to pick it up, otherwise reads every mode as off: the Mouse mode is unavailable over a mouse TUI, edge scrolling scrolls the phone's own buffer instead of sending wheel reports, and the composer's Send writes unbracketed text. They ride the attach answer rather than the stream so the stream stays what the owner's xterm rendered.
+
 ## Attachment invariants
 
 **Why an in-flight resolution is invalidated rather than allowed to finish.** The two resolve paths differ by orders of magnitude: a sibling window's pane is a round trip away, a local one settles on the next microtask. With one shared epoch the older, slower attach would land last and take the attachment.

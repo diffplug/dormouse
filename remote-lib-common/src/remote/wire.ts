@@ -1144,6 +1144,55 @@ export interface AttachParams {
 export interface TerminalAttachResult {
   cols: number;
   rows: number;
+  /** The modes the surface's program has set, as the owner's terminal holds them now. */
+  modes: TerminalModes;
+}
+
+/**
+ * The terminal modes a program sets, usually once at startup, and that the
+ * repaint an attach triggers never sends again. Each field names the sequence
+ * that sets it; a Client puts its own terminal into all of them, the defaults
+ * included, before the attachment's first `terminal.data`.
+ */
+export interface TerminalModes {
+  /** DECCKM, `CSI ? 1 h`. */
+  applicationCursorKeys: boolean;
+  /** DECNKM, `CSI ? 66 h`. */
+  applicationKeypad: boolean;
+  /** `CSI ? 2004 h`. */
+  bracketedPaste: boolean;
+  /** IRM, `CSI 4 h`. */
+  insert: boolean;
+  /** DECOM, `CSI ? 6 h`. */
+  origin: boolean;
+  /** `CSI ? 45 h`. */
+  reverseWraparound: boolean;
+  /** DECAWM, `CSI ? 7 h`; on by default. */
+  wraparound: boolean;
+  /** DECTCEM, `CSI ? 25 h`; on by default. */
+  showCursor: boolean;
+  /** `CSI ? 1004 h`. */
+  sendFocus: boolean;
+  /** `CSI ? 9 h`, `CSI ? 1000 h`, `CSI ? 1002 h`, and `CSI ? 1003 h` respectively. */
+  mouseTracking: 'none' | 'x10' | 'vt200' | 'drag' | 'any';
+  /** `CSI ? 1006 h` (`sgr`) and `CSI ? 1016 h` (`sgrPixels`). */
+  mouseEncoding: 'default' | 'sgr' | 'sgrPixels';
+  /** `CSI ? 9001 h`. */
+  win32Input: boolean;
+  /** `CSI ? 2031 h`. */
+  colorSchemeUpdates: boolean;
+  /** DECSCUSR's shape; `default` when the program set none. */
+  cursorStyle: 'default' | 'block' | 'underline' | 'bar';
+  /** DECSCUSR's blink, read only beside a `cursorStyle`. */
+  cursorBlink: boolean;
+  /** The alternate screen is showing, `CSI ? 1049 h`. */
+  alternateScreen: boolean;
+  /**
+   * Each screen's kitty keyboard flags as pushes (`CSI > flags u`), oldest
+   * first, the last in force; empty is no flags. `alternate` is empty unless
+   * the alternate screen is showing.
+   */
+  kittyKeyboard: { main: number[]; alternate: number[] };
 }
 
 export interface TerminalDataEvent {

@@ -10,6 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TerminalModes } from 'remote-lib-common';
 import { FakePtyAdapter, setPlatform, type PlatformAdapter } from '../../lib/platform';
 import { setTerminalActivity, clearTerminalActivity } from '../../lib/session-activity-store';
 import { createAlertEpisode } from '../../lib/alert-episode';
@@ -28,6 +29,7 @@ import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspac
 import { registerAgentBrowserScreen, type ScreenRegistration } from '../../components/wall/agent-browser-screen';
 import { installPeerSurfaceResponder } from './peer-surfaces';
 import { takeBackSize } from './take-back';
+import { FRESH_TERMINAL_MODES, FRESH_XTERM_MODES } from '../test-terminal-modes';
 
 interface Responder {
   (params: unknown): unknown[];
@@ -92,6 +94,7 @@ class ServicePlatform {
 /** A pane in this webview's registry, with a terminal that records resizes. */
 function registerSurface(surfaceId: string, cols = 80, rows = 24) {
   const terminal = {
+    ...FRESH_XTERM_MODES,
     cols,
     rows,
     resize: vi.fn((nextCols: number, nextRows: number) => {
@@ -140,7 +143,7 @@ describe('surface responder', () => {
     expect(platform.answer('surfaceOp', { surfaceId: 'helper', op: 'attach', cols: 100, rows: 30 })).toEqual([]);
     expect(terminal.resize).not.toHaveBeenCalled();
     registry.get('helper')!.helper = undefined;
-    expect(platform.answer('surfaceOp', { surfaceId: 'helper', op: 'resolve' })).toEqual([{ ptyId: 'helper', cols: 80, rows: 24 }]);
+    expect(platform.answer('surfaceOp', { surfaceId: 'helper', op: 'resolve' })).toEqual([{ ptyId: 'helper', cols: 80, rows: 24, modes: FRESH_TERMINAL_MODES }]);
   });
 
   it('resolves ownership without resizing the live xterm', () => {
@@ -148,7 +151,7 @@ describe('surface responder', () => {
 
     expect(platform.answer('surfaceOp', {
       surfaceId: 'surface:1', op: 'resolve', cols: 100, rows: 30,
-    })).toEqual([{ ptyId: 'surface:1', cols: 80, rows: 24 }]);
+    })).toEqual([{ ptyId: 'surface:1', cols: 80, rows: 24, modes: FRESH_TERMINAL_MODES }]);
     expect(terminal.resize).not.toHaveBeenCalled();
   });
 
@@ -162,7 +165,19 @@ describe('surface responder', () => {
     // Through the xterm, not the PTY: otherwise the owning pane's own view
     // drifts from the size the phone set.
     expect(terminal.resize).toHaveBeenCalledWith(100, 30);
-    expect(results).toEqual([{ ptyId: 'surface:1', cols: 100, rows: 30 }]);
+    expect(results).toEqual([{ ptyId: 'surface:1', cols: 100, rows: 30, modes: FRESH_TERMINAL_MODES }]);
+  });
+
+  it('answers an attach with the modes the pane\'s program set', () => {
+    const terminal = registerSurface('surface:1');
+    terminal.modes = { ...terminal.modes, mouseTrackingMode: 'drag', bracketedPasteMode: true };
+
+    const [result] = platform.answer('surfaceOp', {
+      surfaceId: 'surface:1', op: 'attach', cols: 80, rows: 24,
+    }) as Array<{ modes: TerminalModes }>;
+
+    expect(result!.modes.mouseTracking).toBe('drag');
+    expect(result!.modes.bracketedPaste).toBe(true);
   });
 
   it('treats a later resize exactly like the attach', () => {
@@ -174,14 +189,14 @@ describe('surface responder', () => {
     });
 
     expect(terminal.resize).toHaveBeenLastCalledWith(120, 40);
-    expect(results).toEqual([{ ptyId: 'surface:1', cols: 120, rows: 40 }]);
+    expect(results).toEqual([{ ptyId: 'surface:1', cols: 120, rows: 40, modes: FRESH_TERMINAL_MODES }]);
   });
 
   it('clamps a size the client asked for, and keeps the current one when it asks for none', () => {
     const terminal = registerSurface('surface:1', 80, 24);
 
     expect(platform.answer('surfaceOp', { surfaceId: 'surface:1', op: 'attach' })).toEqual([
-      { ptyId: 'surface:1', cols: 80, rows: 24 },
+      { ptyId: 'surface:1', cols: 80, rows: 24, modes: FRESH_TERMINAL_MODES },
     ]);
     expect(terminal.resize).not.toHaveBeenCalled();
 

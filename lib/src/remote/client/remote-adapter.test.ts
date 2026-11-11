@@ -7,10 +7,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
+import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry, type TerminalAttachResult } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient, type TerminalHandlers } from './remote-adapter';
 import type { PlatformAdapter, PtyDataDetail } from '../../lib/platform/types';
+import { FRESH_TERMINAL_MODES } from '../test-terminal-modes';
 
 interface AttachCall {
   surfaceId: string;
@@ -40,10 +41,10 @@ class FakeClient implements RemoteAdapterClient {
     cols: number,
     rows: number,
     handlers: TerminalHandlers,
-  ): Promise<{ subId: string; result: { cols: number; rows: number } }> {
+  ): Promise<{ subId: string; result: TerminalAttachResult }> {
     const subId = `attach-${++this.#attachCounter}`;
     this.attaches.push({ surfaceId, cols, rows, handlers, subId });
-    return { subId, result: { cols, rows } };
+    return { subId, result: { cols, rows, modes: FRESH_TERMINAL_MODES } };
   }
 
   async write(surfaceId: string, bytes: string): Promise<void> {
@@ -215,6 +216,22 @@ describe('RemotePtyAdapter attach / active pane', () => {
     // No `text` means the two projections are identical, so `textData` stays
     // omitted and `terminal-lifecycle`'s `textData ?? data` fallback is right.
     expect(data).toEqual([{ id: 's1', data: 'héllo ▲', textData: undefined }]);
+  });
+
+  it("puts the pane's xterm into the attach's modes, and nothing once closed", async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const data: PtyDataDetail[] = [];
+    adapter.onPtyData((d) => data.push(d));
+
+    await adapter.setActivePane('s1', 80, 24);
+    const { handlers } = client.lastAttach();
+    handlers.onAttached({ cols: 80, rows: 24, modes: { ...FRESH_TERMINAL_MODES, mouseTracking: 'any' } });
+    handlers.onClosed?.(0);
+    handlers.onAttached({ cols: 80, rows: 24, modes: { ...FRESH_TERMINAL_MODES, bracketedPaste: true } });
+
+    expect(data.map((d) => d.id)).toEqual(['s1']);
+    expect(data[0]!.data.includes('\x1b[?1003h')).toBe(true);
   });
 
   it('passes the text projection through, empty included', async () => {

@@ -568,7 +568,7 @@ describe('OneTimeClient: the direct path', () => {
     // Confirmed, offered, and still on the rendezvous: every call refuses.
     await expect(client.hello()).rejects.toThrow(/not direct/);
     await expect(client.watchDirectory(() => {})).rejects.toThrow(/not direct/);
-    await expect(client.attach('surface:1', 80, 24, { onData: () => {} })).rejects.toThrow(/not direct/);
+    await expect(client.attach('surface:1', 80, 24, { onAttached: () => {}, onData: () => {} })).rejects.toThrow(/not direct/);
     await expect(client.write('surface:1', 'ls\r')).rejects.toThrow(/not direct/);
     await expect(client.resize('surface:1', 80, 24)).rejects.toThrow(/not direct/);
     await expect(client.detach('surface:1')).rejects.toThrow(/not direct/);

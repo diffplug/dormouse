@@ -396,6 +396,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
             return;
         }
       },
+      undefined,
+      handlers.onAttached,
     );
   }
 
@@ -412,10 +414,26 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     return this.request(REMOTE_METHODS.surfaceDetach, { surfaceId });
   }
 
-  /** Correlated request on the established session; resolves with `result`. */
-  request<T = unknown>(method: string, params?: unknown, requestId: string = uuid()): Promise<T> {
+  /**
+   * Correlated request on the established session; resolves with `result`.
+   * `onAnswer` sees that result as the response is read, before any message
+   * read after it: a promise settles only once the messages decrypted beside
+   * the response have been dispatched.
+   */
+  request<T = unknown>(
+    method: string,
+    params?: unknown,
+    requestId: string = uuid(),
+    onAnswer?: (result: T) => void,
+  ): Promise<T> {
     const promise = new Promise<T>((resolve, reject) => {
-      this.#pending.set(requestId, { resolve: resolve as (r: unknown) => void, reject });
+      this.#pending.set(requestId, {
+        resolve: (result) => {
+          onAnswer?.(result as T);
+          resolve(result as T);
+        },
+        reject,
+      });
     });
     try {
       this.#sendApp({ requestId, method, params });
@@ -433,10 +451,12 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     onEvent: (event: RemoteEventMsg) => void,
     /** For a caller that names this stream before it is answered (`http.write`). */
     subId: string = uuid(),
+    /** {@link request}'s: the Burrow answers before it streams, and this keeps that order. */
+    onAnswer?: (result: T) => void,
   ): Promise<{ subId: string; result: T }> {
     this.#events.set(subId, onEvent);
     try {
-      const result = await this.request<T>(method, params, subId);
+      const result = await this.request<T>(method, params, subId, onAnswer);
       return { subId, result };
     } catch (error) {
       this.#events.delete(subId);

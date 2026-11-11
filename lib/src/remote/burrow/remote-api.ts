@@ -500,7 +500,7 @@ export class RemoteApiSession {
         );
         return;
       }
-      const result: TerminalAttachResult = { cols: size.cols, rows: size.rows };
+      const result: TerminalAttachResult = { cols: size.cols, rows: size.rows, modes: handle.modes };
       this.#ok(request, result);
       this.#onAttach?.(params.surfaceId);
       streaming = true;
@@ -605,7 +605,7 @@ export class RemoteApiSession {
           this.#fail(request, `surface is no longer attached: ${params.surfaceId}`);
           return;
         }
-        this.#ok(request, { cols: size.cols, rows: size.rows } satisfies TerminalAttachResult);
+        this.#ok(request, { cols: size.cols, rows: size.rows } satisfies Pick<TerminalAttachResult, 'cols' | 'rows'>);
       },
       (error) => {
         if (this.#disposed) return;

@@ -97,6 +97,7 @@ import type { DirectPathPolicy, DirectPeering } from '../../remote/direct/direct
 import { PASSKEY_QUERY_RETRY_MS, PASSKEY_QUERY_SPACING_MS } from '../../remote/burrow/passkey-sync';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
+import { FRESH_TERMINAL_MODES } from '../../remote/test-terminal-modes';
 import {
   createTestAuthenticator,
   flushUntil,
@@ -2759,6 +2760,7 @@ describe('one-time connection', () => {
             ptyId: 'pty-1',
             cols: 51,
             rows: 14,
+            modes: FRESH_TERMINAL_MODES,
             resize: async (cols, rows) => ({ cols, rows }),
             release: () => void released.push(hold),
           };

@@ -71,6 +71,7 @@ import { clearSizeHold, getSizeHolds } from '../../lib/size-hold-store';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installPeerSurfaceResponder } from '../burrow/peer-surfaces';
 import { takeBackSize } from '../burrow/take-back';
+import { FRESH_TERMINAL_MODES, FRESH_XTERM_MODES } from '../test-terminal-modes';
 
 const ORIGIN = 'https://hosted.example';
 const START = 1_700_000_000_000;
@@ -100,6 +101,7 @@ class OnePaneProvider implements BurrowSurfaceProvider {
     ptyId: PTY_ID,
     cols: 80,
     rows: 24,
+    modes: FRESH_TERMINAL_MODES,
     resize: async (cols, rows) => ({ cols, rows }),
     release: () => {},
   };
@@ -249,9 +251,10 @@ describe('one-time connection, end to end', () => {
     expect(snapshots[0]).toEqual([ENTRY]);
     const echoed: string[] = [];
     const attached = await phone.attach(SURFACE_ID, 80, 24, {
+      onAttached: () => {},
       onData: (event) => void echoed.push(utf8Decode(fromBase64Url(event.bytes))),
     });
-    expect(attached.result).toEqual({ cols: 80, rows: 24 });
+    expect(attached.result).toEqual({ cols: 80, rows: 24, modes: FRESH_TERMINAL_MODES });
     await phone.write(SURFACE_ID, toBase64Url(utf8Encode('ls\r')));
     expect(provider.writes).toEqual([[PTY_ID, 'ls\r']]);
     await settleUntil(() => echoed.includes('ls\r'));
@@ -489,6 +492,7 @@ describe('size authority across a one-time connection, end to end', () => {
     listeners = new Map();
     commandSeq = 0;
     terminal = {
+      ...FRESH_XTERM_MODES,
       cols: 80,
       rows: 24,
       resize: vi.fn((cols: number, rows: number) => {
@@ -581,8 +585,8 @@ describe('size authority across a one-time connection, end to end', () => {
     expect((await result).ok).toBe(true);
     await settleUntil(() => oneTimeState()?.status === 'connected');
 
-    const attached = await phone.attach(SURFACE_ID, 51, 14, { onData: () => {} });
-    expect(attached.result).toEqual({ cols: 51, rows: 14 });
+    const attached = await phone.attach(SURFACE_ID, 51, 14, { onAttached: () => {}, onData: () => {} });
+    expect(attached.result).toEqual({ cols: 51, rows: 14, modes: FRESH_TERMINAL_MODES });
     return { phone, ended };
   }
 
@@ -642,7 +646,7 @@ describe('size authority across a one-time connection, end to end', () => {
   it('gives the pane back when the phone detaches, and when it attaches another', async () => {
     registry.set('surface:2', { terminal: { ...terminal, resize: vi.fn() } } as unknown as TerminalEntry);
     const { phone } = await attachedPhone();
-    await phone.attach('surface:2', 51, 14, { onData: () => {} });
+    await phone.attach('surface:2', 51, 14, { onAttached: () => {}, onData: () => {} });
     await settleUntil(() => getSizeHolds(SURFACE_ID).length === 0);
     expect(getSizeHolds('surface:2')).toMatchObject([{ label: PHONE_LABEL }]);
 

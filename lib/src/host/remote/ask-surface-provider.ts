@@ -128,6 +128,7 @@ export function createAskSurfaceProvider(
       let rows = owner.rows;
       return {
         ptyId: owner.ptyId,
+        modes: owner.modes,
         get cols() {
           return cols;
         },

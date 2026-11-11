@@ -6,7 +6,7 @@
  * into. The webview-backed provider itself is covered by `peer-surfaces.test.ts`.
  */
 
-import type { SurfaceCloseResult } from 'remote-lib-common';
+import type { SurfaceCloseResult, TerminalModes } from 'remote-lib-common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   REMOTE_EVENTS,
@@ -26,6 +26,7 @@ import type {
   SurfaceHold,
 } from './burrow-surface-provider';
 import { RemoteApiSession, type RemoteApiSessionOptions } from './remote-api';
+import { FRESH_TERMINAL_MODES } from '../test-terminal-modes';
 
 type SentPayload = RemoteResponse | RemoteEventMsg;
 
@@ -34,6 +35,8 @@ interface FakeSurface {
   ptyId: string;
   cols: number;
   rows: number;
+  /** What the owner's program set; fresh unless a case sets it. */
+  modes?: TerminalModes;
 }
 
 /**
@@ -178,6 +181,7 @@ class FakeProvider implements BurrowSurfaceProvider {
     return {
       release: () => void this.releases.push([surfaceId, hold]),
       ptyId: surface.ptyId,
+      modes: surface.modes ?? FRESH_TERMINAL_MODES,
       // Live, and pinned to this surface object rather than to the id it was
       // found under, so a swap behind the id cannot move the attachment.
       get cols() {
@@ -705,6 +709,20 @@ describe('RemoteApiSession surface.attach', () => {
     expect(decodeTerminalData(sent[1]!)).toBe('terminal-resize:100x30');
   });
 
+  it("answers with the modes the owner's program set, ahead of the repaint", async () => {
+    const provider = new FakeProvider();
+    const surface = provider.addSurface('surface:1', 'pty-1', 80, 24);
+    surface.modes = { ...FRESH_TERMINAL_MODES, mouseTracking: 'any', bracketedPaste: true };
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+
+    const result = (sent[0] as { result: { modes: TerminalModes } }).result;
+    expect(result.modes.mouseTracking).toBe('any');
+    expect(result.modes.bracketedPaste).toBe(true);
+    expect(sent[1]).toMatchObject({ subId: 'attach-1', event: REMOTE_EVENTS.terminalData });
+  });
+
   it('carries the text projection on terminal.data only when it differs', async () => {
     const provider = new FakeProvider();
     provider.addSurface('surface:1', 'pty-1', 80, 24);
@@ -745,7 +763,7 @@ describe('RemoteApiSession surface.attach', () => {
     await settle();
 
     expect(provider.handleResizes).toEqual([['pty-1', 120, 24]]);
-    expect(reply(sent, 'attach-1').result).toEqual({ cols: 120, rows: 24 });
+    expect(reply(sent, 'attach-1').result).toEqual({ cols: 120, rows: 24, modes: FRESH_TERMINAL_MODES });
   });
 
   it('requests owner-managed repaint and retains synchronous data at the same size', async () => {
