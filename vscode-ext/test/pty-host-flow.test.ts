@@ -4,7 +4,10 @@
  * over the pinned node-pty and the shared `pty-core`, takes the extension
  * host's word to pause and resume. Run in a VM context as `pty-host-wiring`
  * runs it, since the child loads node-pty from the built `dist` layout. The
- * flood is capped in bytes and every wait in time; written to run on Windows.
+ * flood is capped in bytes; written to run on Windows. The flood gets
+ * `START_MS` to start, since a cold `node` start under Windows Defender, right
+ * after a checkout, takes seconds; every later wait follows a command that
+ * should act at once, so its deadline is a stall's.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -31,10 +34,15 @@ for (let written = 0; written < ${FLOOD_CAP}; written += chunk.length) {
 }
 `;
 
-const until = async (predicate: () => boolean, what: string, ms = 10_000) => {
+/** How long the flood may take to start. */
+const START_MS = 60_000;
+/** How long a command may go without its effect. */
+const STALL_MS = 15_000;
+
+const until = async (predicate: () => boolean, what: string, ms = STALL_MS, detail = () => '') => {
   const deadline = Date.now() + ms;
   while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}; ${detail()}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };
@@ -98,24 +106,24 @@ async function quiet(host: ReturnType<typeof ptyHost>, id: string, quietMs = 400
       return false;
     }
     return Date.now() - since >= quietMs;
-  }, `${id} to fall quiet`);
+  }, `${id} to fall quiet once paused`, STALL_MS, () => `received ${last}`);
   return last;
 }
 
-describe('the VS Code pty host', { timeout: 30_000 }, () => {
+describe('the VS Code pty host', { timeout: 150_000 }, () => {
   it('stops reading a PTY it is told to pause, and reads it again when told to resume', async () => {
     const host = ptyHost();
     host.flood('flood');
-    await until(() => host.received('flood') > 100_000, 'the flood to start');
+    await until(() => host.received('flood') > 100_000, 'the flood to start', START_MS, () => `received ${host.received('flood')}`);
     host.send({ type: 'pause', id: 'flood' });
     const paused = await quiet(host, 'flood');
     expect(paused).toBeLessThan(FLOOD_CAP);
     host.send({ type: 'resume', id: 'flood' });
-    await until(() => host.received('flood') > paused, 'the flood to resume');
+    await until(() => host.received('flood') > paused, 'the flood to resume', STALL_MS, () => `received ${host.received('flood')}, paused at ${paused}`);
     host.send({ type: 'pause', id: 'flood' });
     await quiet(host, 'flood');
     // A stop still ends a paused PTY, and its exit is still reported.
     host.send({ type: 'kill', id: 'flood' });
-    await until(() => host.exited('flood'), 'the exit');
+    await until(() => host.exited('flood'), 'the exit after a kill', STALL_MS, () => `received ${host.received('flood')}`);
   });
 });
