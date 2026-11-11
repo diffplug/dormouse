@@ -201,6 +201,34 @@ describe('serveSequence reaping options', () => {
   });
 });
 
+describe('serveSequence runtime re-key', () => {
+  test('writes a key the parser reads back unchanged, beside a port or alone', () => {
+    const key = ['/repo/a.md', 'preview'];
+    assert.deepEqual(parseToolAnnounce(content(serveSequence({ port: 6006, key })))?.key, key);
+    assert.deepEqual(parseToolAnnounce(content(serveSequence({ key: ['x'] }))), { port: null, name: null, key: ['x'], dehydrate: false, persist: null });
+    const most = Array.from({ length: 8 }, (_, i) => String(i));
+    assert.deepEqual(parseToolAnnounce(content(serveSequence({ port: 1, key: most })))?.key, most);
+    const longest = ['é'.repeat(512)];
+    assert.deepEqual(parseToolAnnounce(content(serveSequence({ port: 1, key: longest })))?.key, longest);
+  });
+
+  test('refuses a key the parser would drop or rewrite', () => {
+    const refused = [
+      'a', [], Array.from({ length: 9 }, (_, i) => String(i)), [1], ['ok', null], [''], ['   '],
+      ['a'.repeat(513)], ['a\x07b'], ['a\u009bb'], ['a  b'], [' a'], ['a\nb'],
+    ];
+    for (const key of refused) assert.throws(() => serveSequence({ port: 1, key }), RangeError, JSON.stringify(key));
+  });
+
+  test('an announcement without a key is unchanged byte for byte', () => {
+    assert.equal(
+      serveSequence({ port: 6006, path: '/x', dehydrate: true, persist: 'never' }),
+      '\x1b]367;serve;{"port":6006,"path":"/x","dehydrate":true,"persist":"never","v":1}\x07',
+    );
+    assert.equal(serveSequence({ dehydrate: true }), '\x1b]367;serve;{"dehydrate":true,"v":1}\x07');
+  });
+});
+
 test('navigation is additive to legacy open and cannot be a preview', () => {
   for (const disposition of ['current', 'other']) {
     const value = { path: '/repo/a.md', preview: false, disposition, fragment: '日本語' };
