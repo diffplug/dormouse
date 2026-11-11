@@ -245,6 +245,8 @@ function cdCommand(row, dir) {
 }
 
 // ── A pane ────────────────────────────────────────────────────────────────
+const COLS = 200;
+const ROWS = 50;
 let paneCount = 0;
 /** Every PTY the suite spawned: `{ id, pid, exited, exit }`. */
 const SPAWNED = [];
@@ -263,6 +265,34 @@ const NO_PROMPT = new Map();
 function noPrompt(t, row, error) {
   if (!NO_PROMPT.has(row.name)) NO_PROMPT.set(row.name, `"${t.fullName ?? t.name}": ${error.message.slice(0, 300)}`);
   throw error;
+}
+
+/** Move `cursor` ({ row, col, wrap }) over `text` as a `cols` x `rows`
+ *  terminal would: printed characters (one column each), CR, LF, BS, TAB and
+ *  the CSI cursor moves; every other escape moves nothing. Rough, but enough
+ *  for a cursor position query to get xterm.js's answer. */
+function trackCursor(cursor, text, cols, rows) {
+  const tokens = /\x1b\[([0-9;?>=]*)[ -\/]*([@-~])|\x1b[()][0-9A-Za-z]|\x1b.|([\r\n\b\t])|[\x00-\x1f\x7f]|([^\x00-\x1f\x7f]+)/gs;
+  for (let match; (match = tokens.exec(text));) {
+    const [, params, final, control, printed] = match;
+    if (final) {
+      const [a = 0, b = 0] = params.replace(/[?>=]/g, '').split(';').map(Number);
+      const moves = { H: [a || 1, b || 1], f: [a || 1, b || 1], A: [cursor.row - (a || 1), cursor.col], B: [cursor.row + (a || 1), cursor.col],
+        C: [cursor.row, cursor.col + (a || 1)], D: [cursor.row, cursor.col - (a || 1)], G: [cursor.row, a || 1], d: [a || 1, cursor.col] };
+      if (moves[final]) [cursor.row, cursor.col, cursor.wrap] = [...moves[final], false];
+    } else if (control === '\r') [cursor.col, cursor.wrap] = [1, false];
+    else if (control === '\n') cursor.row += 1;
+    else if (control === '\b') [cursor.col, cursor.wrap] = [cursor.col - 1, false];
+    else if (control === '\t') cursor.col = Math.min(cols, (Math.floor((cursor.col - 1) / 8) + 1) * 8 + 1);
+    else if (printed) {
+      for (const _ of printed) {
+        if (cursor.wrap) [cursor.row, cursor.col, cursor.wrap] = [cursor.row + 1, 1, false];
+        if (cursor.col >= cols) cursor.wrap = true; else cursor.col += 1;
+      }
+    }
+    cursor.row = Math.min(rows, Math.max(1, cursor.row));
+    cursor.col = Math.min(cols, Math.max(1, cursor.col));
+  }
 }
 
 const stripEscapes = (text) => text.replace(/\x1b\[[0-9;?>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>]/g, '');
@@ -309,6 +339,12 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
   let promptFrom = 0;
   let chunkFrom = 0;
   let answeredTo = 0;
+  // Answered from the tracked cursor, not a fixed 1;1: PSReadLine checks its
+  // rendering against the answer, and a constant one makes a line that wraps a
+  // few rows read as a scrolled screen, so it redraws the prompt (A, P, B)
+  // while the line is still being edited.
+  const cursor = { row: 1, col: 1, wrap: false };
+  let trackedTo = 0;
   const mgr = create((event, data) => {
     if (event === 'data' && data.id === id) {
       chunkFrom = pane.raw.length;
@@ -351,10 +387,15 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
       queries.lastIndex = answeredTo;
       for (let match; (match = queries.exec(pane.visible));) {
         answeredTo = queries.lastIndex;
-        const reply = match[0].endsWith('c') ? '\x1b[?62;22c' : match[0].endsWith('n') ? '\x1b[1;1R' : '\x1bP>|xterm.js(6.1.0)\x1b\\';
+        trackCursor(cursor, pane.visible.slice(trackedTo, match.index), COLS, ROWS);
+        trackedTo = Math.max(trackedTo, answeredTo);
+        const reply = match[0].endsWith('c') ? '\x1b[?62;22c' : match[0].endsWith('n') ? `\x1b[${cursor.row};${cursor.col}R` : '\x1bP>|xterm.js(6.1.0)\x1b\\';
         mgr.write(id, reply);
       }
       answeredTo = Math.max(answeredTo, pane.visible.length - 6);
+      // Up to any escape sequence the chunk ends inside.
+      const end = pane.visible.length - (/\x1b[[()]?[0-9;?>= -\/]*$/.exec(pane.visible.slice(trackedTo))?.[0].length ?? 0);
+      if (end > trackedTo) { trackCursor(cursor, pane.visible.slice(trackedTo, end), COLS, ROWS); trackedTo = end; }
     },
   });
   // Stop through pty-core, as the host does, and join the exits: a ConPTY
@@ -442,7 +483,7 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
   };
   pane.hasPty = () => mgr.hasPty(id);
 
-  const spawnOptions = { cwd, shell: located.path, args: located.args, cols: 200, rows: 50 };
+  const spawnOptions = { cwd, shell: located.path, args: located.args, cols: COLS, rows: ROWS };
   // HOME is where POSIX shells, fish and pwsh look for the user's files; Git
   // Bash reads it too. Windows PowerShell and WSL do not (see the profile case).
   spawnOptions.env = !WIN || row.msys ? { HOME: home, ...env } : env;
