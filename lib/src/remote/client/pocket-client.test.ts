@@ -26,6 +26,7 @@ import {
   RELAY_PING_INTERVAL_MS,
   RELAY_PONG,
   SETUP_TOKEN_INVALID_ERROR,
+  WS_CLOSE_TRY_AGAIN_LATER,
   formatPairingInvitationUrl,
   fromBase64Url,
   generateNoiseKeyPair,
@@ -658,6 +659,24 @@ describe('connecting, end to end', () => {
 
     expect(burrowGone).toBe(1);
     expect(harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('reads the Relay closing a socket it stopped reading as burrow loss, still paired and signed in', async () => {
+    // The Relay closes a socket whose unsent backlog passed its bound
+    // (`docs/specs/relay.md` -> "Routing"); the phone must come back with a
+    // fresh connect, never a sign-in or a pairing.
+    const harness = await makeE2eHarness();
+    await harness.pairAndApprove(await harness.mintInvitation());
+    await harness.client.connect(harness.burrowId);
+    let burrowGone = 0;
+    harness.client.setOnBurrowGone(() => burrowGone++);
+
+    harness.clientSocket().closeWith(WS_CLOSE_TRY_AGAIN_LATER);
+
+    expect(burrowGone).toBe(1);
+    expect(harness.client.connectedBurrowId).toBeNull();
+    expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
   });
 });
 
