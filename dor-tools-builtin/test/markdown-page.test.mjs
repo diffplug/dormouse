@@ -315,6 +315,29 @@ test('visiting source mode and returning without an edit leaves the document sav
   } });
 });
 
+test('a plain click follows a relative link, and a drag selecting its text does not', { timeout: 30_000 }, async () => {
+  await open('See [the design notes](design.md).\n', { act: async (w, posts) => {
+    const link = w.document.querySelector('.prose a[href]');
+    const text = w.document.createTreeWalker(link, w.NodeFilter.SHOW_TEXT).nextNode();
+    const select = (start, end) => {
+      const range = w.document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, end);
+      w.getSelection().removeAllRanges();
+      w.getSelection().addRange(range);
+    };
+    const opens = () => posts.filter(post => post.url === 'open').map(post => post.body.href);
+    select(4, 10);
+    link.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+    await settle();
+    assert.deepEqual(opens(), []);
+    select(4, 4);
+    link.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+    await settle();
+    assert.deepEqual(opens(), ['design.md']);
+  } });
+});
+
 // What the rich editor writes must never hold indented code, which decides a
 // document under the parse bound, nor look like it could to the scan, which
 // decides one past it, or a document it saved would reopen as source.
