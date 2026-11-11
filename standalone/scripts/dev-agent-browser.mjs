@@ -84,6 +84,21 @@ function broadcast(event, data) {
   for (const client of sseClients) sendSse(client, event, data);
 }
 
+// PTYs the page killed. Rust's `pty_kill` forgets the id's owner, so every
+// later line it routes by that id goes to no window, the exit pty-core reports
+// for a killed PTY included, until a spawn mints the id again (`route` in
+// standalone/src-tauri/src/routing.rs).
+const killedPtys = new Set();
+const OWNER_ROUTED = new Set([
+  'pty:data', 'terminal:semanticEvents', 'terminal:toolEvents', 'terminal:clipboardOffer',
+  'pty:marked', 'pty:replay', 'pty:exit', 'terminal:clientInput',
+]);
+
+function routesToNoWindow(event, data) {
+  if (typeof data?.id !== 'string' || !killedPtys.has(data.id) || typeof data.forWindow === 'string') return false;
+  return OWNER_ROUTED.has(event) || event.startsWith('alert:');
+}
+
 function writeSidecar(event, data = {}) {
   sidecar?.stdin?.write(`${JSON.stringify({ event, data })}\n`);
 }
@@ -114,7 +129,10 @@ function requestSidecar(event, data, responseEvent, pick, timeoutMs = 10000) {
 const HARNESS_WINDOW = 'main';
 
 const fireAndForget = {
-  pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
+  pty_spawn: ({ id, options }) => {
+    killedPtys.delete(id);
+    writeSidecar('pty:spawn', { id, options });
+  },
   // `userInput` and `launch` ride the write, as `pty_write` in src-tauri/src/lib.rs carries them.
   pty_write: ({ id, data, paced, userInput, launch }) => writeSidecar('pty:input', {
     id, data, paced, ...(userInput === true ? { userInput: true } : {}), ...(launch === true ? { launch: true } : {}),
@@ -122,7 +140,10 @@ const fireAndForget = {
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_ack: ({ id, chars }) => writeSidecar('pty:ack', { id, chars }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
-  pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
+  pty_kill: ({ id }) => {
+    killedPtys.add(id);
+    writeSidecar('pty:kill', { id });
+  },
   pty_request_init: ({ requestId } = {}) => writeSidecar('pty:requestInit', { requestId }),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
   // The Burrow's whole bridge rides one passthrough, exactly as it does
@@ -364,6 +385,7 @@ function startSidecar() {
         return;
       }
     }
+    if (routesToNoWindow(event, data)) return;
     broadcast('sidecar', { event, data });
   });
   createInterface({ input: sidecar.stderr }).on('line', (line) => console.error(`[sidecar] ${line}`));
