@@ -32,9 +32,9 @@
  *      `data:`/`blob:`, a nonce or hash, VS Code's `cspSource`, or loopback;
  *      and each declares `default-src` plus the directives that do not fall
  *      back to it (`NO_FALLBACK`).
- *   5. Tauri. The builder registers exactly the shell and updater plugins; no
- *      Rust network client; no HTTP/WebSocket/upload/opener plugin or HTTP
- *      client crate in `[dependencies]`; `updater:` permissions only in
+ *   5. Tauri. The builder registers exactly the single-instance, shell and
+ *      updater plugins; no Rust network client; no HTTP/WebSocket/upload/
+ *      opener plugin or HTTP client crate in `[dependencies]`; `updater:` permissions only in
  *      `main-only.json`; no capability with a `remote` scope; no
  *      `withGlobalTauri`. The updater's endpoint and key are pinned by
  *      `standalone/scripts/updater-trust-root.test.mjs`.
@@ -711,7 +711,7 @@ if (tauriConf.app?.withGlobalTauri) {
 {
   const rel = 'standalone/src-tauri/src/lib.rs';
   const plugins = [...stripComments(readRepoFile(rel)).matchAll(/\.plugin\(\s*([\w:]+)/g)].map((m) => m[1].split('::')[0]).sort();
-  const expected = ['tauri_plugin_shell', 'tauri_plugin_updater'];
+  const expected = ['tauri_plugin_shell', 'tauri_plugin_single_instance', 'tauri_plugin_updater'];
   if (JSON.stringify(plugins) !== JSON.stringify(expected)) {
     problems.push(`${rel}: registers plugins ${JSON.stringify(plugins)}; exactly ${JSON.stringify(expected)} are allowed.`);
   }

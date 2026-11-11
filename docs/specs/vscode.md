@@ -67,7 +67,7 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 
 ### Capturing agent recovery
 
-**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture.
+**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, else a per-window `globalStorageUri` subdirectory keyed at activation; never in `workspaceState`** (rationale). If neither directory exists, skip capture.
 
 Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`.
 

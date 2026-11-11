@@ -106,6 +106,9 @@ export function createTeardownFlow(options: {
   function enter(next: "confirming" | "committed"): void {
     phase = next;
     holder = claim;
+    // A quit's question may open in a window that is minimized or behind
+    // another, while every other window waits on it with no way to answer.
+    if (next === "confirming" && options.kind === "quit") void invoke("quit_raise").catch(() => {});
   }
 
   function stopEditorWait(): void {

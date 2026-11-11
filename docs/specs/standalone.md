@@ -24,6 +24,8 @@ flowchart LR
 
 **Must display fatal bootstrap errors with a reload action**, for both Tauri and the browser harness, instead of leaving a blank window.
 
+**On Windows and Linux a second launch must raise `main` and exit before `setup`**; on macOS LaunchServices raises the app, and only `open -n` or the bare binary starts another (rationale).
+
 Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry the step order and why.
 
 ## Rust ↔ sidecar bridge
@@ -132,7 +134,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 ### Workspace registry
 
-**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list on every change, and the union is broadcast as `dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
+**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its ids and names on every change.
 
 - **Must mint numbered ids only in Rust**, `workspace:<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`; at boot `boot_reserve_ids`, the Surface block in the same write) so a create mints synchronously; an id never renumbers and never collides across windows. Window labels and Surface ids (`surface_reserve_ids`; `docs/specs/transport.md` → "Surface ids") come off app-wide counters of their own.
 - **Must persist the Workspace and window counters as the Surface counter persists** (`docs/specs/transport.md` → "Surface ids"), all three high-water marks in `<state root>/ids.json`. **Must hand out a window label even when the write fails**, from memory (rationale).
@@ -187,17 +189,17 @@ Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `Win
 
 ### Per-window close
 
-**Closing a window with siblings alive ends that window alone**; only the last window's close is the quit, and on macOS too.
+**Closing a window with siblings alive, not closing, ends that window alone**; only the last window's close is the quit, on macOS too.
 
 1. Rust prevents the close and emits `dormouse://window-close-requested`.
-2. The webview acks; a watchdog closes the window anyway if that listener is dead.
+2. The webview acks; failing that, a watchdog destroys the window, **keeping its snapshot**.
 3. It asks when any of *its own* Workspaces' closes would (`docs/specs/reopen.md` → "Workspaces and windows"), and hands Rust a reopen record when it asked nothing.
 4. It removes its snapshot, kills its PTYs, and calls back `close_window`.
 
 - **Must attempt to remove the blob, geometry and temp sibling included, before killing this Window's PTYs** (`docs/specs/transport.md` → "The governing rule"). A removal failure is logged and the close proceeds.
 - **It runs no agent-recovery capture**: nothing resumes; Reopen rebuilds.
 - **It confirms on a pending download as well**: the download lives in this webview, so nothing else can install it (`docs/specs/auto-update.md`).
-- **Must refuse every later save for a closing label, geometry included, for the process lifetime**, whichever path ends the close, the webview's or the ack timeout's; no label is reused within a process.
+- **Must refuse every later save for a label whose close removed its snapshot, geometry included, for the process lifetime**; no label is reused within a process.
 
 **The ack and confirm gates are one shared flow with the quit** (`createTeardownFlow` in `standalone/src/teardown-flow.ts`): a quit votes and waits its turn in the walk, a close tears down at once.
 
@@ -280,7 +282,7 @@ Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arri
 
 ### Dragging a Workspace between windows
 
-**A pointer captured on a strip tab keeps delivering `pointermove` and `pointerup` outside the window**, so the gesture stays the webview's and Rust is only asked which window is under the cursor (`window_at_cursor`; rationale). **The release transfers there, or tears out when the cursor is over no window or over this window outside its own strip.**
+**A pointer captured on a strip tab keeps delivering `pointermove` and `pointerup` outside the window**, so the gesture stays the webview's and Rust is only asked which window is under the cursor (`window_at_cursor`; rationale). **The release transfers there, or tears out with the cursor over no window or this window outside its strip, never a window's only Workspace.**
 
 **Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index** (`docs/specs/layout.md` → "Workspace tabs").
 
@@ -355,13 +357,13 @@ Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
 Source of truth: `QuitMachine` in `standalone/src-tauri/src/quit_state.rs`; `standalone/src/quit.ts` (the webview orchestrator).
 
-**Must intercept every quit trigger in Rust** and run the webview teardown before exiting (rationale).
+**Must intercept every quit trigger in Rust but Windows session end and POSIX signals**, and run the webview teardown first (rationale).
 
 **Every window votes before any window is torn down** (rationale); the walk then tears them down one at a time.
 
 - **A cancel is refused once the walk starts**, and **the walk tears `main` down last**.
 - **A window that leaves outside the flow is forgotten**, its vote never waited on. **A flow that runs out of windows exits.**
-- **A quit keeps every window's snapshot on disk** — the whole difference from a per-window close. A quit mid-transfer restores the Workspace at most once: from the target once it has published it, or from a source handed it back; a source torn down before its target adopts leaves it in no snapshot (§Arrival queue).
+- **A quit keeps every window's snapshot on disk.** A quit mid-transfer restores the Workspace at most once: from the target once it has published it, or from a source handed it back; a source torn down before its target adopts leaves it in no snapshot (§Arrival queue).
 
 ### Trigger interception
 
@@ -375,7 +377,7 @@ Every trigger funnels into `request_quit(app)`:
 | `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` once the cleanup gate clears (macOS; rationale) |
 | the `quit_restart` command | the update notice (`docs/specs/auto-update.md`), `dor app restart` | `request_quit` with the restart intent (§Restart) |
 
-**Never refuse an OS terminate**; that aborts the whole logout (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
+**Never refuse an OS terminate** (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
 
 Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
@@ -393,7 +395,7 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 
 | Phase | State | Budget |
 |---|---|---|
-| 1 — ack | some window has not acked | short; a listener is dead ⇒ log and `app.exit(0)` |
+| 1 — ack | some window has not acked | **past §UI watchdog's threshold**, like the close's (rationale); then log and `app.exit(0)` |
 | 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
 | 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 

@@ -3,7 +3,7 @@ import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/b
 import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
 import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
-import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
+import { installWorkspaceRegistry } from "./workspace-registry";
 import type {
   IframeProxyResult,
   OpenPort,
@@ -71,7 +71,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private unlistenHost: (() => void) | null = null;
   private unlistenReconnect: (() => void) | null = null;
   private unlistenRegistry: (() => void) | null = null;
-  private onRegistrySnapshot: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
   private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
@@ -127,11 +126,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.installConsoleForwarder();
     this.unlistenRegistry = await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
-      // Through the one host subscription above, not a second one.
-      onSnapshot: (handler) => {
-        this.onRegistrySnapshot = handler;
-        return () => { this.onRegistrySnapshot = null; };
-      },
     }, this.windowSlot.read());
     // Started, not awaited — see TauriAdapter.
     this.recoveryReady = claimRecoveryCommands(
@@ -334,10 +328,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   readonly managedVoice = managedVoicePortForBuild((cmd, args) => this.host.invoke(cmd, args));
 
   private handleHostEvent(event: string, data: unknown): void {
-    if (event === "dormouse://workspaces") {
-      this.onRegistrySnapshot?.(data as WorkspaceRegistrySnapshot);
-      return;
-    }
     if (this.alerts.onEvent(event, data)) return;
     if (event === "voice:status") {
       this.managedVoice?.receiveStatus(data);

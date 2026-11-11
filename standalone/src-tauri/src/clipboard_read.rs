@@ -9,7 +9,7 @@
 
 use std::fs::{DirBuilder, File, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -98,6 +98,27 @@ pub fn write_drop_file(name: &str, write: impl FnOnce(&mut File) -> std::io::Res
     Some(path.to_string_lossy().into_owned())
 }
 
+/// Remove the drop directories under `temp_dir` older than `DROP_TTL`: the
+/// in-process timer dies with the app, so a quit, crash or restart inside it
+/// leaves its image behind, and Windows never clears its temp directory. Serves
+/// the sidecar's drops too, which share the prefix.
+pub fn sweep_stale_drops(temp_dir: &Path, now: SystemTime) {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else { return };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with("dormouse-drops-") {
+            continue;
+        }
+        // Not followed through a link: only a real directory of ours qualifies.
+        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else { continue };
+        let stale = meta.modified().ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age >= DROP_TTL);
+        if meta.is_dir() && stale {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 fn schedule_cleanup(path: PathBuf) {
     std::thread::spawn(move || {
         std::thread::sleep(DROP_TTL);
@@ -111,6 +132,27 @@ fn schedule_cleanup(path: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_sweep_removes_only_stale_drop_directories() {
+        let root = std::env::temp_dir().join(format!("dormouse-sweep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for name in ["dormouse-drops-1-0", "unrelated"] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+            std::fs::write(root.join(name).join("clipboard.bmp"), b"image").unwrap();
+        }
+        // An empty one, from a write that failed halfway.
+        std::fs::create_dir_all(root.join("dormouse-drops-2-0")).unwrap();
+        // Not yet past its lifetime: a paste the user may still be using.
+        sweep_stale_drops(&root, SystemTime::now());
+        assert!(root.join("dormouse-drops-1-0").exists());
+        let later = SystemTime::now() + DROP_TTL + Duration::from_secs(1);
+        sweep_stale_drops(&root, later);
+        assert!(!root.join("dormouse-drops-1-0").exists());
+        assert!(!root.join("dormouse-drops-2-0").exists());
+        assert!(root.join("unrelated").join("clipboard.bmp").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn file_references_decode_as_the_sidecar_parses_them() {
