@@ -370,6 +370,54 @@ describe('IframePanel', () => {
     expect(chrome().chrome().url).toBe('http://example.test/app');
   });
 
+  describe('a page moving through its own history', () => {
+    const render = async (id: string) => {
+      const { platform } = installBrowserHost();
+      platform.createIframeProxyUrl = vi.fn<CreateIframeProxyUrl>(async (url) => ({ ok: true as const, url: url.replace('http://example.test', PROXY) }));
+      await renderPanel(stubActions(), paneProps(id), vi.fn());
+      const chrome = () => getAgentBrowserScreenController(id)!;
+      const report = async (path: string, extra: Record<string, unknown>) => act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: PROXY + path, ...extra } }));
+      });
+      const url = () => chrome().chrome().url.replace('http://example.test', '');
+      const back = async () => act(async () => chrome().chromeActions.back());
+      const forward = async () => act(async () => chrome().chromeActions.forward());
+      await report('/app', { loaded: true });
+      return { report, url, back, forward };
+    };
+
+    it('replaces the current entry on a replaceState report', async () => {
+      const { report, url, back } = await render('iframe-replace');
+      await report('/a', { nav: 'push' });
+      await report('/a?page=2', { nav: 'replace' });
+      expect(url()).toBe('/a?page=2');
+      await back();
+      expect(url()).toBe('/app');
+      await back();
+      expect(url()).toBe('/app');
+    });
+
+    it('moves to the entry a popstate names and keeps Forward', async () => {
+      const { report, url, back, forward } = await render('iframe-traverse');
+      await report('/a', { nav: 'push' });
+      await report('/b', { nav: 'push' });
+      await report('/a', { nav: 'traverse' });
+      expect(url()).toBe('/a');
+      await forward();
+      expect(url()).toBe('/b');
+      await back();
+      await back();
+      expect(url()).toBe('/app');
+    });
+
+    it('keeps the latest 50 entries', async () => {
+      const { report, url, back } = await render('iframe-cap');
+      for (let i = 1; i <= 50; i++) await report(`/p${i}`, { nav: 'push' });
+      for (let i = 0; i < 50; i++) await back();
+      expect(url()).toBe('/p1');
+    });
+  });
+
   it('reloads a raw frame even when its URL is unchanged', async () => {
     const original = await renderPanel(stubActions(), paneProps('iframe-raw-reload'));
     await act(async () => getAgentBrowserScreenController('iframe-raw-reload')!.chromeActions.reload());
