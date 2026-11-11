@@ -221,7 +221,7 @@ async function pickTool(context: DorCommandContext, flags: ToolFlags, placing: b
   if (listing instanceof Error) return listing;
   if (listing.tools.length === 0) {
     printToolList(context, listing, flags);
-    writeStdout(context, 'Declare a Tool in either file; dor skill shows how.\n');
+    writeStdout(context, 'Declare a Tool in either file; dor skill tools shows how.\n');
     return undefined;
   }
   // The launch prints the chosen Tool's own warnings.

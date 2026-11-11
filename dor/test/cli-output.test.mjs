@@ -17,6 +17,8 @@ const updateSnapshots = process.env.UPDATE_SNAPSHOTS === '1';
 
 // The markdown the prebuild codegen inlines into the CLI; `dor skill` must print it verbatim.
 const skillMarkdown = await readFile(join(__dirname, '..', 'skill.md'), 'utf8');
+// Likewise each topic: `dor skill <topic>` prints `dor/skill-<topic>.md`.
+const skillToolsMarkdown = await readFile(join(__dirname, '..', 'skill-tools.md'), 'utf8');
 
 // Run against a throwaway directory, cleaned up after. The skill --install
 // tests pass it to the CLI as its PWD; the agent-browser PATH-resolution test
@@ -670,6 +672,39 @@ test('skill --json wraps the markdown', async () => {
   assert.equal(result.exitCode, 0);
   assert.equal(result.stderr, '');
   assert.equal(JSON.parse(result.stdout).markdown, skillMarkdown);
+});
+
+test('skill tools prints the bundled Tools guide verbatim', async () => {
+  const result = await runCli(['skill', 'tools']);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, skillToolsMarkdown);
+});
+
+test('skill tools --json wraps the guide', async () => {
+  const result = await runCli(['skill', 'tools', '--json']);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.equal(JSON.parse(result.stdout).markdown, skillToolsMarkdown);
+});
+
+test('skill refuses an unknown topic, naming the known ones', async () => {
+  // `constructor` too: a topic is an own entry, never an inherited property.
+  for (const topic of ['tool', 'constructor']) {
+    const result = await runCli(['skill', topic]);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, new RegExp(`unknown skill topic '${topic}' \\(known: tools\\)`));
+  }
+});
+
+test('skill --install takes no topic', async () => {
+  await withTempDir('dor-skill-', async (dir) => {
+    const result = await runCli(['skill', '--install', 'tools'], { env: { PWD: dir } });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /--install takes no topic/);
+    assert.equal(existsSync(join(dir, 'AGENTS.md')), false);
+  });
 });
 
 test('skill --install creates AGENTS.md when neither file exists', async () => {

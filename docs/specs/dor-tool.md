@@ -249,7 +249,7 @@ Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpen
 **Must open a fuzzy Tool picker for `dor tool` with neither a name nor `--` when stdin and stdout are TTYs and `--json` is absent**, offering what `dor tool --list` lists from the same directory, in its order until a query ranks them. The chosen Tool launches as `dor tool <name>` with the invocation's flags, placed by [Take-over](#take-over) as a typed one is; a cancel prints nothing and exits 1.
 
 - **Must launch a chosen `shadowed` user Tool as `--global` would.**
-- **Must print the listing and a pointer to `dor skill` when no Tool is declared**, never an empty picker.
+- **Must print the listing and a pointer to `dor skill tools` when no Tool is declared**, never an empty picker.
 - **Must print what `dor tool --list` prints, exiting 0, without a TTY or with `--json`**, unless a flag only a launch reads asks for one, which fails for want of a target.
 - **Must preserve the query and highlighted Tool across terminal resizes.**
 

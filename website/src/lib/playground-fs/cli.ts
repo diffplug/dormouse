@@ -9,6 +9,7 @@ import type { CliHost, CliResult, ControlClient, PickerTerminal } from "dor/comm
 import { readBuildStamp } from "dormouse-lib/lib/build-info";
 import changelog from "../../data/changelog.json";
 import SKILL_MARKDOWN from "../../../../dor/skill.md?raw";
+import SKILL_TOOLS_MARKDOWN from "../../../../dor/skill-tools.md?raw";
 import { HOME, normalizePath, type VirtualFs } from "./vfs";
 
 export const UNSUPPORTED = "UNSUPPORTED IN PLAYGROUND";
@@ -39,6 +40,7 @@ function playgroundHost(fs: VirtualFs): CliHost {
     // The build Settings → About names; unstamped (tests), the latest release.
     versionMetadata: readBuildStamp() ?? { version: changelog.releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 },
     skillMarkdown: SKILL_MARKDOWN,
+    skillTopics: { tools: SKILL_TOOLS_MARKDOWN },
   };
 }
 

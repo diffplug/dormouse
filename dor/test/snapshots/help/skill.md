@@ -4,10 +4,12 @@ Invocation: `dor skill --help`
 
 ```text
 USAGE
-  dor skill [--install] [--json]
+  dor skill [--install] [--json] [<topic>]
   dor skill --help
 
 Prints the Dormouse agent skill — instructions that teach a coding agent to drive Dormouse through the dor CLI: run background processes in visible panes, open browser surfaces, and launch and coordinate sub-agents. The text ships inside the CLI, so it always matches the Dormouse that staged it.
+
+A topic prints a further guide instead. `dor skill tools` teaches an agent to write or change a Dor Tool: where its declaration and source live, the OSC 367 sequences it writes, and how to reload and inspect it.
 
 --install instead writes a marker-delimited bootstrap stub into the project's agent instructions file. The stub is the detection rule — if DORMOUSE_SURFACE_ID is set, run `dor skill` and follow it — plus two loud, mandatory directives (use `dor ensure` for long-running processes, `dor agent-browser` for browsers) that must land before an agent would think to run `dor skill`. It stays otherwise fact-free, so a committed stub does not go stale.
 
@@ -28,5 +30,8 @@ FLAGS
      [--json]     Print JSON output.
   -h  --help      Print help information and exit
       --          All subsequent inputs should be interpreted as arguments
+
+ARGUMENTS
+  [topic]  Guide to print instead: tools.
 
 ```

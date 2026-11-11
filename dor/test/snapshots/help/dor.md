@@ -12,7 +12,7 @@ USAGE
   dor tool --list [--global] [--cwd path] [--json]
   dor open [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
   dor version [--json]
-  dor skill [--install] [--json]
+  dor skill [--install] [--json] [<topic>]
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]
   dor read <surface> [--json] [--lines count] [--scrollback] [--workspace ref]
   dor await <surface> --until condition [--json] [--timeout seconds] [--workspace ref]

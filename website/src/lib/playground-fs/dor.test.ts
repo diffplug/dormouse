@@ -83,6 +83,7 @@ describe("playground dor's other commands", () => {
   it("prints version and skill from the playground's host", async () => {
     expect((await ran(["--version"])).text).toMatch(/^dor \d+\.\d+\.\d+ \[playground\]\r\n$/);
     expect(JSON.parse((await ran(["skill", "--json"])).text).markdown).toContain("dor ensure");
+    expect(JSON.parse((await ran(["skill", "tools", "--json"])).text).markdown).toContain("# Writing and changing Dor Tools");
   });
 
   it("runs the real CLI's commands over the page", async () => {
