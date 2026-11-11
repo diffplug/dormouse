@@ -152,8 +152,10 @@ function stubGh(dir, seed) {
     if (command === 'issue' && sub === 'list') {
       const want = { open: 'OPEN', closed: 'CLOSED' }[opt('--state') ?? 'open'];
       const label = opt('--label');
+      const phrase = (String(opt('--search')).match(/in:title "([^"]+)"/) ?? [])[1]?.toLowerCase();
       const fields = opt('--json').split(',');
-      const listed = issues.filter((i) => (!want || i.state === want) && (!label || i.labels.includes(label)))
+      const listed = issues.filter((i) => (!want || i.state === want) && (!label || i.labels.includes(label))
+        && (!phrase || i.title.toLowerCase().includes(phrase)))
         .map((i) => Object.fromEntries(fields.map((f) => [f, i[f]]))).slice(0, Number(opt('--limit') ?? 30));
       const jq = opt('--jq');
       process.stdout.write(jq === null ? JSON.stringify(listed) : execFileSync('jq', ['-r', jq], { input: JSON.stringify(listed), encoding: 'utf8' }));
@@ -457,6 +459,23 @@ test('a ledger or disclosure list that fills its read fails rather than read sho
   assert.equal(second.read.status, 0, second.read.stderr);
   assert.notEqual(second.published.status, 0);
   assert.match(second.published.stderr, /disclosure list filled its 1000-issue read/);
+});
+
+// The per-run reports share the tracker and are never deleted, so the cap has
+// to count only the ledger issues the reads keep.
+test('a thousand per-run reports do not fill the ledger reads', (t) => {
+  const { dir, env } = fixture(t);
+  const report = (number) => ({ number, title: `[security-audit] FAIL on 2026-10-01 at abcdef${number % 10}`, body: '', labels: [],
+    state: 'OPEN', stateReason: '', createdAt: SEEDED_AT, closedAt: null, comments: [] });
+  const ledger = { number: 1001, title: '[audit-finding 0123456789ab] WARNING: old', body: '', labels: [],
+    state: 'OPEN', stateReason: '', createdAt: SEEDED_AT, closedAt: null, comments: [] };
+  stubGh(dir, { embargo: [...Array.from({ length: 1000 }, (_, i) => report(i + 1)), ledger] });
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+  const { listed, embargoed, read } = runReporting(dir, env);
+  for (const step of [listed, embargoed, read]) assert.equal(step.status, 0, step.stdout + step.stderr);
+  const snapshot = readFileSync(join(dir, 'audit-ledger-snapshot.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(snapshot.map((row) => row.number), [1001]);
 });
 
 // The private issue carries what did not pass; the PASS ledger stays in the

@@ -193,8 +193,9 @@ jobs:
           export GH_CONFIG_DIR GH_HOST=github.com
           # `--limit 1000`, not `gh`'s default of 30, which once left an
           # older open finding unreconciled; a list that fills it may have
-          # left one out, so it fails rather than read short.
-          OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 \
+          # left one out, so it fails rather than read short. The title search
+          # keeps the per-run reports, which accumulate, out of that count.
+          OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 --search 'in:title "audit-finding"' \
                    --json number,title \
                    --jq 'if length >= 1000 then error("the findings ledger filled its 1000-issue read") else
                          .[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)" end') ||
@@ -527,8 +528,9 @@ jobs:
             fail no-report "No findings ledger was composed."
           # `--limit 1000`, not `gh`'s default of 30, which once left an
           # older open finding unreconciled; a list that fills it may have
-          # left one out, so it fails rather than read short.
-          OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 \
+          # left one out, so it fails rather than read short. The title search
+          # keeps the per-run reports, which accumulate, out of that count.
+          OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 --search 'in:title "audit-finding"' \
                    --json number,title \
                    --jq 'if length >= 1000 then error("the findings ledger filled its 1000-issue read") else
                          .[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)" end') ||
@@ -611,8 +613,9 @@ jobs:
           export GH_CONFIG_DIR GH_HOST=github.com
           # `--limit 1000`, not `gh`'s default of 30, which once left an
           # older open finding unreconciled; a list that fills it may have
-          # left one out, so it fails rather than read short.
-          SNAPSHOT=$(gh issue list --repo "$EMBARGO_REPO" --state all --limit 1000 \
+          # left one out, so it fails rather than read short. The title search
+          # keeps the per-run reports, which accumulate, out of that count.
+          SNAPSHOT=$(gh issue list --repo "$EMBARGO_REPO" --state all --limit 1000 --search 'in:title "audit-finding"' \
                        --json number,title,state,stateReason,createdAt,closedAt,body,comments \
                        --jq 'if length >= 1000 then error("the findings ledger filled its 1000-issue read") else
                        .[] | select(.title | startswith("[audit-finding ")) | {
