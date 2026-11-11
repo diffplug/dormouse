@@ -4105,6 +4105,18 @@ fn quit_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
     guard(&state.machine).ack(window.label());
 }
 
+// This window is asking the user about a quit. Bring it forward: the trigger
+// may have come from another window, the Dock or the OS, and every other window
+// shows only a waiting notice, so a minimized or buried asker looks like a hang.
+#[tauri::command]
+fn quit_raise(window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    if guard(&state.machine).phase != quit_state::QuitPhase::Voting {
+        return;
+    }
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
 // This window is ready to be torn down: its confirmation is done. The last vote
 // starts the walk.
 #[tauri::command]
@@ -5105,6 +5117,7 @@ pub fn run() {
             alert_command,
             kill_sidecar_now,
             quit_ack,
+            quit_raise,
             quit_vote,
             quit_progress,
             quit_cancel,
