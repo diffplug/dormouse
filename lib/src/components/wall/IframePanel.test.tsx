@@ -11,6 +11,7 @@ import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
 import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
+import { rememberBrowserProvider } from './BrowserProviderSwitch';
 import { confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 import { resetToolDirty } from '../../lib/tool-dirty-store';
 import type { BurrowLink } from '../../lib/platform/types';
@@ -585,7 +586,7 @@ describe('iframe failures offer a way out', () => {
       expect(banner()?.textContent).toContain('Dormouse can’t follow this page');
 
       await act(async () => { button('Open in agent-browser')!.click(); });
-      expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-uninstrumented', 'agent-browser-screencast');
+      expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-uninstrumented', 'agent-browser-screencast', { mode: 'pane-sync' });
 
       const resolved = vi.mocked(platform.createIframeProxyUrl).mock.calls.length;
       await act(async () => { button('Reload')!.click(); });
@@ -674,7 +675,27 @@ describe('iframe failures offer a way out', () => {
     expect(container.textContent).toContain('Can’t frame this URL — the embedded view frames http:// pages only.');
     expect(container.textContent).toContain('dor agent-browser open https://example.com/');
     await act(async () => { button('Open in agent-browser')!.click(); });
-    expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-https', 'agent-browser-screencast');
+    expect(onSwapRenderMode).toHaveBeenCalledWith('iframe-https', 'agent-browser-screencast', { mode: 'pane-sync' });
+
+    // The remembered provider is the one offered.
+    rememberBrowserProvider('playwright');
+    try {
+      await act(async () => { root.render(<></>); });
+      await act(async () => {
+        root.render(
+          <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+            <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+              <IframePanel id="iframe-https-pw" title="t" params={{ url: 'https://example.com/' }} />
+            </WallActionsContext.Provider>
+          </PaneWriteContext.Provider>,
+        );
+      });
+      expect(container.textContent).toContain('dor playwright open https://example.com/');
+      await act(async () => { button('Open in playwright')!.click(); });
+      expect(onSwapRenderMode).toHaveBeenLastCalledWith('iframe-https-pw', 'playwright-screencast', { mode: 'pane-sync' });
+    } finally {
+      rememberBrowserProvider('agent-browser');
+    }
 
     // A host that cannot launch one keeps only the command.
     proxyPlatform({ ok: false, reason: 'scheme' }, false);

@@ -266,7 +266,7 @@ The proxy instruments any `http://` upstream it fronts, loopback and remote alik
 | `surface.iframe` (`dor iframe`) | refused before any pane opens, naming `dor agent-browser open <url>` |
 | Display modal | iframe option disabled |
 | Render swap to `iframe`, tool or not | refused, judged on the page on screen (chrome URL, then `params.url`) |
-| New-tab request from a framed page | `agent-browser-screencast` where supported, closed on a failed launch; otherwise the iframe refusal |
+| New-tab request from a framed page | the remembered provider's screencast where one is hosted, closed on a failed launch; otherwise the iframe refusal |
 | A pane already holding one | `scheme` panel error |
 
 Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing headers, which `docs/specs/security-local.md` -> "Loopback Listeners" owns:
@@ -302,7 +302,7 @@ An upstream is local when every address it resolved to at mint is on this machin
 
 - **A non-local upstream gets a grant only when every pinned address off this machine is private (`PRIVATE_RANGES`: RFC 1918, `100.64.0.0/10`, `fc00::/7`) and inside the network policy's `allowed`** (`docs/specs/remote-network.md` -> "Policy"), under every level, read again at every mint and lease reuse; otherwise it is refused `external`. **Never front a public address**, whatever `allowed` holds (rationale). A policy the host cannot read allows none (`docs/specs/security-local.md` -> "Browser panes").
 - **Each host reads the stored policy itself**: the sidecar from its Burrow service, a VS Code window from its service or, with none, from `globalState`. The request carries no allowance.
-- The `external` warning names the page's origin. **Where every refused address lies in a prefix of this machine's interfaces (`listNetworkInterfaces`), it offers to allow those prefixes**, adding them through `setNetworkPolicy` from the service's latest answer, the level left alone; a public address, or one on no interface's prefix, gets no such offer. It also offers Open in agent-browser, Open in browser, and Cancel (back one entry, else close the pane), and says what allowing a network lets its pages reach (`ALLOWED_NETWORK_REACH`).
+- The `external` warning names the page's origin. **Where every refused address lies in a prefix of this machine's interfaces (`listNetworkInterfaces`), it offers to allow those prefixes**, adding them through `setNetworkPolicy` from the service's latest answer, the level left alone; a public address, or one on no interface's prefix, gets no such offer. It also offers Open in the remembered provider's screencast, Open in browser, and Cancel (back one entry, else close the pane), and says what allowing a network lets its pages reach (`ALLOWED_NETWORK_REACH`).
 - **Must re-ask the host when `allowed` changes**, from any window or Settings — a framed pane on a removal, a refused one on an addition — so a removal closes an open preview whose grant it no longer covers.
 - A page off this machine gets a preview only: cookies stay stripped and `https://` stays refused.
 

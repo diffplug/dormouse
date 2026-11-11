@@ -29,8 +29,9 @@ const RemotePairingModalHost = lazy(() =>
   })),
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { BROWSER_PROVIDER_GUI, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
-import { parseRenderMode, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { BROWSER_PROVIDER_GUI, hostBrowserProviders, hostSupportsBrowser, providerUnavailable } from './wall/browser-automation';
+import { preferredBrowserProvider } from './wall/BrowserProviderSwitch';
+import { parseRenderMode, renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { isToolRender, toolOriginOf } from '../lib/platform/tool-types';
 import { acquireAgentBrowserSurfaceController, closeBrowserSurface, requestBrowserRenderMode } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
@@ -2256,15 +2257,15 @@ export function Wall({
     onOpenBrowserPane: (id, url) => {
       // A new-tab request from the iframe shim → a new browser pane split next
       // to the source (docs/specs/dor-browser.md → "Iframe Shim"): an iframe,
-      // or an agent-browser pane for a page the iframe would refuse.
+      // or the remembered provider's screencast for a page the iframe would refuse.
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
-      const agentBrowser = !!iframeRefusal(url) && hostSupportsBrowser('agent-browser');
+      const providers = iframeRefusal(url) ? hostBrowserProviders() : [];
       createContentSurface({
         minimized: false,
         // A launch that fails takes its pane with it.
-        params: agentBrowser
-          ? { surfaceType: 'browser', renderMode: 'agent-browser-screencast', url, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+        params: providers.length
+          ? { surfaceType: 'browser', renderMode: renderModeFor(preferredBrowserProvider(providers), 'screencast'), url, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
           : { surfaceType: 'browser', renderMode: 'iframe', url },
         reference,
         title: hostPathDisplay(url, true),
