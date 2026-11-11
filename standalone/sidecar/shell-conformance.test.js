@@ -117,11 +117,15 @@ const HOST_LANG = process.env.LANG;
 // `prompt` is how a pane without them shows it is ready for input.
 const PWSH_PROMPT = /(?:PS [^\r\n]*|DMPROMPT)> /;
 const SHELLS = [
-  { name: 'zsh', platforms: ['darwin', 'linux'], family: 'posix', integrated: true, find: (offered) => byName(offered, 'zsh') },
+  // Debian's /etc/zsh/zshrc runs compinit, which on GitHub's image stops to ask
+  // about its group-writable fpath directories; a user's own .zshenv opts out
+  // the way that file says to. The case that needs compinit sets none.
+  { name: 'zsh', platforms: ['darwin', 'linux'], family: 'posix', integrated: true, home: { '.zshenv': 'skip_global_compinit=1\n' }, find: (offered) => byName(offered, 'zsh') },
   { name: 'bash', platforms: ['darwin', 'linux'], family: 'posix', integrated: true, find: (offered) => byName(offered, 'bash') },
   // No shipped script: fish >= 4 emits OSC 133 and OSC 7 itself
   // (docs/specs/terminal-state.md), so an older fish reports nothing.
-  { name: 'fish', platforms: ['darwin', 'linux'], family: 'fish', integrated: true, prompt: /@[^\r\n]*[>#] /, find: (offered) => byName(offered, 'fish'),
+  // Earlier fish 4 releases mark a prompt's start (A) and not its end (B).
+  { name: 'fish', platforms: ['darwin', 'linux'], family: 'fish', integrated: true, prompt: /@[^\r\n]*[>#] /, promptMayLackB: true, find: (offered) => byName(offered, 'fish'),
     unreported: (shell) => {
       const version = spawnSync(shell.path, ['--version'], { encoding: 'utf8' }).stdout?.match(/(\d+)\.\d+/);
       return version && Number(version[1]) < 4 ? `${version[0]} predates fish's own OSC 133 (fish 4)` : null;
@@ -178,7 +182,11 @@ function missingShells(required, located) {
 
 test(GUARD_TEST, { timeout: 60_000 }, async () => {
   const located = await LOCATED;
-  console.error(`shell-conformance on ${PLATFORM}: ${SHELLS.map(({ name }) => `${name}=${located.get(name)?.path ?? 'NOT INSTALLED'}`).join(', ')}`);
+  const version = (shell) => (WIN ? '' : ` (${spawnSync(shell.path, ['--version'], { encoding: 'utf8', timeout: 10_000 }).stdout?.split('\n')[0].trim()})`);
+  console.error(`shell-conformance on ${PLATFORM}: ${SHELLS.map(({ name }) => {
+    const shell = located.get(name);
+    return `${name}=${shell ? shell.path + version(shell) : 'NOT INSTALLED'}`;
+  }).join(', ')}`);
   const missing = missingShells(REQUIRED, located);
   assert.deepEqual(missing, [], `DORMOUSE_REQUIRE_SHELLS names shells this ${PLATFORM} leg does not have: ${missing.join(', ')}`);
 });
@@ -271,10 +279,15 @@ function noPrompt(t, row, error) {
   throw error;
 }
 
-/** A fresh home, its files written from `{ relative: contents }`. */
-function freshHome(files = {}) {
+const stripEscapes = (text) => text.replace(/\x1b\[[0-9;?>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>]/g, '');
+
+/** A fresh home, its files written from `{ relative: contents }`, each after
+ *  the row's own defaults for that file (`row.home`). */
+function freshHome(row, files = {}) {
   const home = fs.mkdtempSync(path.join(SCRATCH, 'home-'));
-  for (const [relative, contents] of Object.entries(files)) {
+  const merged = { ...files };
+  for (const [relative, defaults] of Object.entries(row?.home ?? {})) merged[relative] = defaults + (merged[relative] ?? '');
+  for (const [relative, contents] of Object.entries(merged)) {
     fs.mkdirSync(path.dirname(path.join(home, relative)), { recursive: true });
     fs.writeFileSync(path.join(home, relative), contents);
   }
@@ -285,7 +298,7 @@ function freshHome(files = {}) {
  * Spawn `row`'s shell as a pane through pty-core, feeding its output to the
  * owner's parse and answering the queries xterm.js would. Killed after the test.
  */
-function openPane(t, row, located, { home = freshHome(), cwd = home } = {}) {
+function openPane(t, row, located, { home = freshHome(row), cwd = home } = {}) {
   const id = `surface:conformance-${++paneCount}`;
   const spawned = [];
   const ptyModule = {
@@ -305,11 +318,20 @@ function openPane(t, row, located, { home = freshHome(), cwd = home } = {}) {
     prompts: 0, exit: null, acks: [],
   };
   let promptOpen = false;
+  let promptFrom = 0;
+  let chunkFrom = 0;
   let answeredTo = 0;
   const mgr = create((event, data) => {
     if (event === 'data' && data.id === id) {
+      chunkFrom = pane.raw.length;
       pane.raw += data.data;
       stream.write(data.data);
+      // A shell that marks no prompt end is ready once its prompt text
+      // follows the A.
+      if (promptOpen && row.promptMayLackB && row.prompt.test(stripEscapes(pane.raw.slice(promptFrom)))) {
+        promptOpen = false;
+        pane.prompts += 1;
+      }
     } else if (event === 'exit' && data.id === id) {
       pane.exit = data;
     } else if (event === 'gracefulKillDone') {
@@ -326,7 +348,8 @@ function openPane(t, row, located, { home = freshHome(), cwd = home } = {}) {
         pane.semantic.push(event);
         pane.state = reduceTerminalState(pane.state, event);
         // A prompt is ready at the B that closes an A (as shell-integration.test.js reads bash).
-        if (event.type === 'promptStart') promptOpen = true;
+        if (event.type === 'promptStart') { promptOpen = true; promptFrom = chunkFrom; }
+        if (event.type === 'promptEnd') pane.sawPromptEnd = true;
         if (event.type === 'promptEnd' && promptOpen) { promptOpen = false; pane.prompts += 1; }
       }
       for (const reply of collectTerminalProtocolResponses(events)) mgr.write(id, reply);
@@ -374,7 +397,7 @@ function openPane(t, row, located, { home = freshHome(), cwd = home } = {}) {
     waiters.add(check);
     check();
   });
-  pane.text = () => pane.raw.replace(/\x1b\[[0-9;?>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>]/g, '');
+  pane.text = () => stripEscapes(pane.raw);
   pane.pid = () => spawned.at(-1)?.pid;
   pane.write = (data) => mgr.write(id, data);
   /** Ready for input: the first prompt the shell reports, else its prompt text.
@@ -442,8 +465,12 @@ function shellCase(name, applies, body, { timeout = 60_000, reads = false } = {}
   }
 }
 
+/** Whether `pid` still runs. A zombie has ended: its reaper may be a
+ *  container's init that never reaps. */
 const alive = (pid) => {
-  try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+  try { process.kill(pid, 0); } catch (error) { return error.code === 'EPERM'; }
+  if (PLATFORM !== 'linux') return true;
+  try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '')[0] !== 'Z'; } catch { return false; }
 };
 const envValue = (env, key) => {
   const found = Object.keys(env).find((name) => (WIN ? name.toUpperCase() === key.toUpperCase() : name === key));
@@ -495,7 +522,7 @@ if (!WIN) DOTFILES.pwsh = [{ files: { '.config/powershell/Microsoft.PowerShell_p
 
 shellCase('the user\'s dotfiles load', (row) => DOTFILES[row.name], async (t, row, located) => {
   for (const [index, fixture] of DOTFILES[row.name].entries()) {
-    const pane = openPane(t, row, located, { home: freshHome(fixture.files) });
+    const pane = openPane(t, row, located, { home: freshHome(row, fixture.files) });
     const env = await pane.env();
     for (const key of fixture.loaded) assert.equal(env[key], '1', `${row.name} fixture ${index}: ${key} did not load`);
     for (const key of fixture.notLoaded ?? []) assert.equal(env[key], undefined, `${row.name} fixture ${index}: ${key} loaded`);
@@ -630,7 +657,9 @@ shellCase('prompt and command boundaries arrive in order', (row) => row.integrat
       const kinds = events.map((event) => event.type);
       const at = (kind) => kinds.indexOf(kind);
       const count = (kind) => kinds.filter((each) => each === kind).length;
-      assert.ok(kinds.includes('promptStart') && kinds.lastIndexOf('promptEnd') > kinds.lastIndexOf('promptStart'), `${row.name}: no prompt in ${kinds}`);
+      // A shell that has marked no prompt end on this pane is held to the A.
+      const promptEnds = pane.sawPromptEnd;
+      assert.ok(kinds.includes('promptStart') && (!promptEnds || kinds.lastIndexOf('promptEnd') > kinds.lastIndexOf('promptStart')), `${row.name}: no prompt in ${kinds}`);
       if (exitCode === null) {
         assert.equal(count('commandStart'), 0, `${row.name}: an empty line started a command: ${kinds}`);
         assert.equal(pane.state.lastCommand?.id, lastBefore?.id, `${row.name}: an empty line recorded a command`);
@@ -639,10 +668,10 @@ shellCase('prompt and command boundaries arrive in order', (row) => row.integrat
       assert.equal(count('commandStart'), 1, `${row.name}: ${kinds}`);
       assert.equal(count('commandFinish'), 1, `${row.name}: ${kinds}`);
       assert.ok(at('commandStart') < at('commandFinish') && at('commandFinish') < kinds.lastIndexOf('promptStart')
-        && kinds.lastIndexOf('promptStart') < kinds.lastIndexOf('promptEnd'), `${row.name}: out of order: ${kinds}`);
+        && (!promptEnds || kinds.lastIndexOf('promptStart') < kinds.lastIndexOf('promptEnd')), `${row.name}: out of order: ${kinds}`);
       assert.equal(events[at('commandFinish')].exitCode, exitCode, `${row.name}: exit code`);
       assert.equal(pane.state.lastCommand?.exitCode, exitCode);
-      assert.equal(pane.state.activity.kind, 'editing');
+      assert.equal(pane.state.activity.kind, promptEnds ? 'editing' : 'prompt');
     });
   }
 }, { reads: true });
