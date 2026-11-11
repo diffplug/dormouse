@@ -38,9 +38,9 @@
  * `env_missing_keys`, `json_query`, `serve_state`, `rollback_release`,
  * `cleanup` and the runtime resolution are in the installer body.
  *
- * Windows is not run: nothing in CI can run PowerShell, so its Serve reader
- * and gate — the same reading over the same text — are pinned textually by
- * `deploy-lint.mjs` instead.
+ * Windows is not run here: `installer-windows-rollback-test.ps1` runs its
+ * rollback functions on CI's Windows leg, and its Serve reader and gate — the
+ * same reading over the same text — are pinned textually by `deploy-lint.mjs`.
  */
 
 import { spawnSync } from 'node:child_process';

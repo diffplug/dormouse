@@ -525,6 +525,14 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      # The Windows installer's rollback functions, taken from the shipped file
+      # and run on Windows PowerShell 5.1 against a temporary install root, with
+      # Task Scheduler and process control stubbed.
+      - name: Windows installer rollback test
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\installer-windows-rollback-test.ps1
+
       - name: Windows browser host and shell tests
         run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/host/agent-browser-host.test.ts src/lib/shell-escape.test.ts
 
