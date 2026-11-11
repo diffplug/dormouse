@@ -1019,14 +1019,14 @@ export function withGuarantees(markdown, rows) {
  * spec): every domain prompt in `.github/audit/`, the specs its scope claims,
  * and each spec's audited sections, linked on GitHub.
  */
-export async function auditIndex(root = repoRoot) {
-  const files = (await readdir(join(root, AUDIT_DIR))).filter(isDomainPrompt).sort();
+export async function auditIndex() {
+  const files = (await readdir(join(repoRoot, AUDIT_DIR))).filter(isDomainPrompt).sort();
   const domains = await Promise.all(files.map(async (file) => {
     const prompt = `${AUDIT_DIR}/${file}`;
-    const claimed = scopeOf(proseLines(await readFile(join(root, prompt), 'utf8')));
+    const claimed = scopeOf(proseLines(await readFile(join(repoRoot, prompt), 'utf8')));
     if (!claimed?.length) throw new Error(`${prompt}: claims no spec under a **Scope line`);
     const specs = await Promise.all(claimed.map(async (path) => {
-      const sections = auditedSections(await readFile(join(root, path), 'utf8'), path).map(({ title, anchor, checks }) => ({
+      const sections = auditedSections(await readFile(join(repoRoot, path), 'utf8'), path).map(({ title, anchor, checks }) => ({
         title, url: `${REPO_BLOB_BASE}/${path}#${anchor}`, checks,
       }));
       return { path, url: `${REPO_BLOB_BASE}/${path}`, checks: sections.reduce((n, s) => n + s.checks, 0), sections };

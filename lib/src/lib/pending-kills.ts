@@ -231,8 +231,8 @@ export function pendingSurfaceRefusal(id: string): string | null {
 }
 
 /** How far through its countdown a kill is, 0 to 1. */
-export function pendingKillProgress(kill: PendingKill, now = Date.now()): number {
-  return Math.min(1, Math.max(0, 1 - timeLeft(kill, now) / PENDING_KILL_MS));
+export function pendingKillProgress(kill: PendingKill): number {
+  return Math.min(1, Math.max(0, 1 - timeLeft(kill, Date.now()) / PENDING_KILL_MS));
 }
 
 /** @internal */

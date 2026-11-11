@@ -30,10 +30,13 @@ export function stepZoom(zoom: number, dir: 1 | -1): number {
   return [...STEPS].reverse().find(s => s < zoom / 1.001) ?? MIN_ZOOM;
 }
 
-/** Keeps at least `margin` device pixels of the image inside the canvas. */
-export function clampView(view: View, w: number, h: number, viewW: number, viewH: number, margin = 48): View {
+/** Device pixels of the image `clampView` keeps inside the canvas. */
+const VIEW_MARGIN = 48;
+
+/** Keeps at least `VIEW_MARGIN` device pixels of the image inside the canvas. */
+export function clampView(view: View, w: number, h: number, viewW: number, viewH: number): View {
   const iw = w * view.zoom, ih = h * view.zoom;
-  const mx = Math.min(margin, iw), my = Math.min(margin, ih);
+  const mx = Math.min(VIEW_MARGIN, iw), my = Math.min(VIEW_MARGIN, ih);
   const x = Math.max(mx - iw, Math.min(viewW - mx, view.x)), y = Math.max(my - ih, Math.min(viewH - my, view.y));
   return x === view.x && y === view.y ? view : { ...view, x, y };
 }

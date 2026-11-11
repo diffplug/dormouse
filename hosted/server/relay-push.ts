@@ -119,7 +119,8 @@ export type Authorize = (endpoint: URL) => Promise<string>;
  * origin, so each origin's is signed once, on first use, and serves every
  * endpoint there.
  */
-export function vapidAuthorizations(push: PushConfig, nowMs = Date.now()): Authorize {
+export function vapidAuthorizations(push: PushConfig): Authorize {
+  const nowMs = Date.now();
   const byOrigin = new Map<string, Promise<string>>();
   return (endpoint) => {
     let authorization = byOrigin.get(endpoint.origin);
