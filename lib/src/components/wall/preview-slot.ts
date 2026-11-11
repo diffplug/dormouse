@@ -22,7 +22,7 @@ import type { LeafMeta } from './lath-wall-store';
 import { retireToolRun } from './use-tool-serving';
 import { clearHoldLapse } from '../../lib/tool-run-hold';
 
-/** The canonical path an `open` gave this Tool, or null for a named Tool. */
+/** The canonical path an `open` or a `$TARGET` gave this Tool, or null. */
 function toolTargetFromParams(params: unknown): string | null {
   return stringParam((params as { toolTarget?: unknown } | null | undefined)?.toolTarget) ?? null;
 }
@@ -56,7 +56,7 @@ export function decidePreviewSlot(launch: {
   fresh: boolean;
   callerId: string | undefined;
   tool: ResolvedTool;
-  /** The canonical path an `open` resolved. */
+  /** The canonical path the lookup resolved (`ToolLookupResult` `target`). */
   target: string | undefined;
   /** A pinned Tool with this launch's key; read only when the slot might
    *  otherwise answer. */

@@ -5,9 +5,13 @@ import { builtinHandler, fileViewerFormat, runsOwnScript } from 'dor-tools-built
 import { getPlatform } from '../../lib/platform';
 import { dispatchDorControlRequest } from '../../lib/platform/dor-control-dispatch';
 import { toolEditorView } from '../../lib/tool-editor';
-import { browserBindingFromParams } from './browser-surface';
+import { browserBindingFromParams, toolScopeFromParams } from './browser-surface';
+import type { ToolKeyScope } from '../../lib/platform/tool-types';
 
-export interface ToolLocation { target: string; handler?: string; cwd: string; position?: ToolViewPosition }
+/** `scope` picks the route that re-resolves `handler`: a project Tool by a
+ * named lookup under its project's grant, a user Tool or built-in through open
+ * dispatch. */
+export interface ToolLocation { target: string; handler?: string; scope: ToolKeyScope | 'project'; cwd: string; position?: ToolViewPosition }
 export interface ToolHistory { entries: readonly ToolLocation[]; index: number }
 export interface ToolViewRequest { token: string; position: ToolViewPosition }
 
@@ -51,7 +55,7 @@ export function linkOpenNeedsConfirmation(scope: unknown, name: unknown, target:
 
 export function toolLocation(params: Record<string, unknown>, cwd: string): ToolLocation | null {
   if (typeof params.toolTarget !== 'string') return null;
-  return { target: params.toolTarget, handler: toolHandlerName(params.toolScope, params.toolName), cwd };
+  return { target: params.toolTarget, handler: toolHandlerName(params.toolScope, params.toolName), scope: toolScopeFromParams(params) ?? 'project', cwd };
 }
 
 export function commitToolHistory(previous: ToolHistory | null, current: ToolLocation, next: ToolLocation, index?: number): ToolHistory {

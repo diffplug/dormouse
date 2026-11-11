@@ -72,9 +72,9 @@ export type ToolLookupResult =
       port: 'announced' | 'auto';
       key: string[] | null;
       warnings: string[];
-      /** The canonical absolute path an `open` lookup resolved; the preview
-       *  slot compares it (`docs/specs/dor-tool.md` -> Preview slot). Named
-       *  lookups leave it unset. */
+      /** The canonical absolute path the Surface records as its target: an
+       *  `open` lookup's file, or a named lookup's `$TARGET`; unset for a named
+       *  Tool that takes none (`docs/specs/dor-tool.md` -> Declaring tools). */
       target?: string;
     };
 

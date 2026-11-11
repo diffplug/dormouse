@@ -240,6 +240,58 @@ describe('createToolHost', () => {
       .toMatchObject({ status: 'error', message: 'no such file or folder: missing.md' });
   });
 
+  describe('a named lookup records its $TARGET as an open does', () => {
+    let doc = '';
+    beforeEach(async () => {
+      await mkdir(join(repo, 'docs'));
+      doc = join(repo, 'docs', 'a.md');
+      await writeFile(doc, 'hello');
+    });
+
+    it('returns a project Tool\'s canonical target from a relative path', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  view:\n    run: [viewer, $TARGET]\n');
+      const host = createToolHost({ stateDir, userConfigPath: userFile('absent.yml') });
+      await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+      expect(await host.handle({ op: 'lookup', name: 'view', cwd: join(repo, 'docs'), args: ['../docs/a.md'] }))
+        .toMatchObject({ status: 'ok', run: ['viewer', doc], target: doc });
+    });
+
+    it.skipIf(process.platform === 'win32')('returns a user Tool\'s canonical target through a symlink, the answer its open gives', async () => {
+      const path = userFile('user.yml');
+      await writeFile(path, 'tools:\n  view:\n    run: [viewer, $TARGET]\n');
+      await symlink(doc, join(repo, 'link.md'));
+      const host = createToolHost({ userConfigPath: path });
+      const named = await host.handle({ op: 'lookup', name: 'view', cwd: repo, args: ['link.md'], global: true });
+      expect(named).toMatchObject({ status: 'ok', scope: 'user', run: ['viewer', doc], target: doc });
+      expect(await host.handle({ op: 'open', target: 'link.md', cwd: repo, tool: 'view' })).toEqual(named);
+    });
+
+    it('returns the target of a Tool taking $TARGET only in its key', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  view:\n    run: [viewer, $ARGS]\n    prespawn_dedupe: [$TARGET]\n');
+      const host = createToolHost({ stateDir, userConfigPath: userFile('absent.yml') });
+      await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+      expect(await host.handle({ op: 'lookup', name: 'view', cwd: repo, args: ['docs/a.md'] }))
+        .toMatchObject({ status: 'ok', run: ['viewer', 'docs/a.md'], key: [doc], target: doc });
+    });
+
+    it('returns none for an $ARGS Tool given a path', async () => {
+      const path = userFile('user.yml');
+      await writeFile(path, 'tools:\n  view:\n    run: [viewer, $ARGS]\n');
+      const result = await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'view', cwd: repo, args: ['docs/a.md'], global: true });
+      expect(result).toMatchObject({ status: 'ok', run: ['viewer', 'docs/a.md'] });
+      expect(result.status === 'ok' && result.target).toBeUndefined();
+    });
+
+    it('returns an imported Tool\'s target', async () => {
+      const path = userFile('user.yml');
+      await mkdir(join(repo, 'user', 'lib'));
+      await writeFile(join(repo, 'user', 'lib', 'dormouse.yml'), 'tools:\n  view:\n    run: [viewer, $TARGET]\n');
+      await writeFile(path, 'tools:\n  view:\n    from: lib\n');
+      expect(await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'view', cwd: repo, args: ['docs/a.md'], global: true }))
+        .toMatchObject({ status: 'ok', scope: 'user', path: join(repo, 'user', 'lib', 'dormouse.yml'), target: doc });
+    });
+  });
+
   it('names the actual user path when --global has no config', async () => {
     const path = userFile('absent-user.yml');
     expect(await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'view', cwd: repo, global: true }))
