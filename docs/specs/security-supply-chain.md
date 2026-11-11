@@ -8,11 +8,11 @@
 
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
-| **Every dependency Dormouse puts on a user's machine, or Dormouse Hosted serves to their devices or runs for them, is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. |  | `.github/workflows/ci.yml`, `website/scripts/product-sections.test.js`, `website/scripts/dependency-workspaces.test.js`, `website/scripts/hosted-bundles.test.js` |
+| **Every npm and cargo dependency and the Node.js runtime Dormouse puts on a user's machine, or Dormouse Hosted serves to their devices or runs for them, is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. |  | `.github/workflows/ci.yml`, `website/scripts/product-sections.test.js`, `website/scripts/dependency-workspaces.test.js`, `website/scripts/hosted-bundles.test.js` |
 
 The runtime dependency surface is kept small: a dependency is added only when necessary, each change justified against its supply-chain risk.
 
-**Every dependency Dormouse *puts on a user's machine*, or Dormouse Hosted *serves to their devices or runs for them*, is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
+**Every npm and cargo dependency and the Node.js runtime Dormouse *puts on a user's machine*, or Dormouse Hosted *serves to their devices or runs for them*, is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories, none of which holds the web runtime the desktop installers bring (`docs/specs/security.md` -> "Known gaps"):
 
 - every npm dependency, direct and transitive, by section: Terminal, Built-in Tools, Relay, Hosted
 - every cargo dependency, direct and transitive
