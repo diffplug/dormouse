@@ -526,6 +526,7 @@ export function attachRouter(
     const removeProcessedListener = onProcessedPtyData((id, visibleData, textData) => {
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'pty:data', id, data: visibleData, textData } satisfies ExtensionMessage);
+      ptyManager.sentOutput(id, visibleData.length);
     });
     const onToolEvents = (id: string, events: TerminalProtocolEvent[]) => {
       if (ownedPtyIds.has(id)) post({ type: 'terminal:toolEvents', id, events } satisfies ExtensionMessage);
@@ -614,6 +615,10 @@ export function attachRouter(
         break;
       case 'pty:resize':
         ptyManager.resize(msg.id, msg.cols, msg.rows);
+        break;
+      // Only the owning webview's: another's could resume a PTY it never saw.
+      case 'pty:ack':
+        if (ownedPtyIds.has(msg.id)) ptyManager.acknowledgeOutput(msg.id, msg.chars);
         break;
       case 'pty:kill':
         release(msg.id);
@@ -837,6 +842,8 @@ export function attachRouter(
           })),
         };
         post(list);
+        // The replays re-deliver what this webview's acknowledgements were owed for.
+        ptyManager.resetOutputFlow([...reconnectable.keys()]);
         for (const [id] of reconnectable) {
           // The whole retained history, for a router that kept the PTY and for
           // one adopting it alike: an adoption that drained a buffer would
@@ -913,6 +920,8 @@ export function attachRouter(
       disconnectWebview?.();
       disconnectWebview = null;
       const toKill = killOnDispose ? [...ownedPtyIds] : [];
+      // The PTYs a view leaves running are owed nothing by anyone now.
+      if (!killOnDispose) ptyManager.resetOutputFlow([...ownedPtyIds]);
       for (const id of ownedPtyIds) {
         if (!killOnDispose) globalOwnedPtyIds.delete(id);
         if (killOnDispose) ownerPtyStreams.delete(id);

@@ -413,7 +413,9 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.ptyData.delete(handler);
   }
 
-  acknowledgePtyData(_id: string, _chars: number): void {}
+  acknowledgePtyData(id: string, chars: number): void {
+    this.vscode.postMessage({ type: 'pty:ack', id, chars });
+  }
 
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void {
     this.exitHandlers.add(handler);

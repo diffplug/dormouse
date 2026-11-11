@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PTY_HIGH_WATERMARK_CHARS, PTY_LOW_WATERMARK_CHARS } from '../../lib/src/lib/pty-flow';
 
 const mocks = vi.hoisted(() => ({ fork: vi.fn() }));
 vi.mock('child_process', () => ({ fork: mocks.fork }));
@@ -190,5 +191,55 @@ describe('PTY manager lifetime and buffers', () => {
     expect(manager.getPtyStatus('pane-new')).toEqual({ alive: true, exitCode: undefined });
     expect(manager.getScrollback('pane-new')).toBe('new');
     expect(replacement.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'spawn', id: 'pane-new' }));
+  });
+});
+
+// docs/specs/transport.md -> "Output flow control": counted here, where the
+// webview's share is posted; carried out in the child, where node-pty runs.
+describe('output flow control', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  const flowCalls = (child: FakeChild) => child.send.mock.calls
+    .map(([msg]) => msg)
+    .filter((msg) => msg.type === 'pause' || msg.type === 'resume' || msg.type === 'spawn' || msg.type === 'kill' || msg.type === 'interrupt')
+    .map((msg) => `${msg.type} ${msg.id ?? msg.ids}`);
+
+  it('pauses the child’s PTY once its webview owes past the high watermark, and resumes it as it acknowledges', async () => {
+    const { manager, child } = await startManager();
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS);
+    manager.sentOutput('pane-a', 1);
+    manager.sentOutput('pane-a', 1);
+    manager.acknowledgeOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 2 - PTY_LOW_WATERMARK_CHARS);
+    expect(flowCalls(child)).toEqual(['spawn pane-a', 'pause pane-a', 'resume pane-a']);
+  });
+
+  it('forgives and resumes at a respawn, a webview reset and the capture’s interrupt; forgets a killed PTY', async () => {
+    const { manager, child } = await startManager();
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    manager.spawn('pane-a');
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    manager.resetOutputFlow(['pane-a']);
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    void manager.interrupt(['pane-a']);
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    manager.kill('pane-a');
+    manager.acknowledgeOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    expect(flowCalls(child)).toEqual([
+      'spawn pane-a',
+      'pause pane-a', 'resume pane-a', 'spawn pane-a',
+      'pause pane-a', 'resume pane-a',
+      'pause pane-a', 'resume pane-a', 'interrupt pane-a',
+      'pause pane-a', 'kill pane-a',
+    ]);
+  });
+
+  it('never forks a child just to pause a PTY in one that is gone', async () => {
+    const { manager, child } = await startManager();
+    child.emit('exit', 1);
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    expect(mocks.fork).toHaveBeenCalledTimes(1);
   });
 });
