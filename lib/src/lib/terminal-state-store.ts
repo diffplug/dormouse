@@ -248,7 +248,9 @@ export function seedLaunchedCommand(id: string, command: string, cwdPath?: strin
  * (`docs/specs/terminal-state.md`).
  */
 export function recordTerminalOutput(id: string, output: string): void {
-  if (!output) return;
+  // An OSC-driven pane never reads a learned shape, and leaves that state only
+  // through `clearPaneScratch`, which drops the shape too.
+  if (!output || oscDrivenPanes.has(id)) return;
 
   let filter = promptAltScreenFilters.get(id);
   if (!filter) {

@@ -50,7 +50,7 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 **Why the shape is pre-seeded from replay.** On resume over a live PTY the shell will not re-emit its prompt, leaving the first command no shape to strip against — untitled until the next prompt. The replay ends at whatever was on screen: an idle prompt teaches a shape, anything else no-ops.
 
-**Why synthesis is scoped to `user_input` while shape learning is not.** Shape learning is harmless for every shell and useful the moment integration is lost, but synthesizing finish/start transitions for a shell that emits its own boundaries would fight the authentic ones.
+**Why synthesis is scoped to `user_input` while shape learning is not.** Shape learning is harmless for a shell without integration; an OSC-driven pane never reads a shape, so it learns none (about 15 µs per output chunk, measured 2026-11). Synthesizing finish/start transitions for a shell that emits its own boundaries would fight the authentic ones.
 
 **Why alt-screen spans are dropped.** Fullscreen TUIs (vim, lazygit, less) render into the alt buffer, so a `$` painted there is the program's, not the user's prompt. The previous stateless scan ran after truncation: once enough output displaced the enter marker, a TUI could falsely end the command. `keeps long chunked alternate-screen output out of the prompt heuristic` in `lib/src/lib/terminal-state-store.test.ts` reproduces that failure.
 
