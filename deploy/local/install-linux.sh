@@ -340,12 +340,13 @@ printf '%sDormouse selfhost Relay — Linux installer%s\n' "$C_BLD" "$C_OFF"
 # (production:true / dev:false), which would make every later pnpm command in
 # this checkout try `pnpm install --production` and strip the developer's
 # devDependencies — so the snapshot is restored unconditionally, even on a
-# failed install. The probe temporaries are here too so that a `die` anywhere
-# between staging and the switch cannot leak them.
+# failed install. The runtime-path file and the probe temporaries are here too
+# so that a `die` anywhere between building and the switch cannot leak them.
 TS_STATUS_JSON=""
 TS_PREFS_JSON=""
 WS_STATE="$REPO_ROOT/node_modules/.pnpm-workspace-state-v1.json"
 WS_STATE_BACKUP=""
+EXECPATH_FILE=""
 PROBE_STATE=""
 PROBE_LOG=""
 restore_workspace_state() {
@@ -357,7 +358,7 @@ restore_workspace_state() {
 }
 cleanup() {
   restore_workspace_state
-  rm -f "$TS_STATUS_JSON" "$TS_PREFS_JSON" "$PROBE_LOG"
+  rm -f "$TS_STATUS_JSON" "$TS_PREFS_JSON" "$EXECPATH_FILE" "$PROBE_LOG"
   [ -n "$PROBE_STATE" ] && rm -rf "$PROBE_STATE"
   return 0
 }
@@ -575,7 +576,6 @@ EXECPATH_FILE="$(mktemp_file execpath)"
 pnpm exec node -e 'require("fs").writeFileSync(process.argv[1], process.execPath)' "$EXECPATH_FILE" >/dev/null 2>&1 \
   || die "could not resolve the pinned Node runtime via pnpm exec."
 NODE_BIN="$(cat "$EXECPATH_FILE")"
-rm -f "$EXECPATH_FILE"
 [ -x "$NODE_BIN" ] || die "resolved Node runtime is not executable: $NODE_BIN"
 HTTP_NODE="$NODE_BIN"
 

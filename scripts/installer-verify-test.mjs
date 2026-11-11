@@ -35,8 +35,8 @@
  * `has_off_loopback`, `names_credential`, `serve_proxies_root`,
  * `check_tailscale_plaintext`, `atomic_symlink`, `cmd_rollback` and
  * `cmd_purge` are in the heredoc (the `manage` copy); `create_release_stage`,
- * `env_missing_keys`, `json_query`, `serve_state` and `rollback_release` are in
- * the installer body.
+ * `env_missing_keys`, `json_query`, `serve_state`, `rollback_release`,
+ * `cleanup` and the runtime resolution are in the installer body.
  *
  * Windows is not run: nothing in CI can run PowerShell, so its Serve reader
  * and gate — the same reading over the same text — are pinned textually by
@@ -451,9 +451,16 @@ export function run() {
           'atomic_symlink',
           'cmd_rollback',
           'rollback_release',
+          'restore_workspace_state',
+          'cleanup',
         ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
+        // The runtime resolution, up to the `die` a failed `pnpm exec` takes.
+        // macOS names BSD mktemp by path; point it at a stub any mktemp serves.
+        const execpath = text.match(/\nEXECPATH_FILE="\$\(.*\n.*\n.*\|\| die .*\n/);
+        if (!execpath) throw new Error('missing the EXECPATH_FILE runtime resolution');
+        helpers += `\nresolve_runtime() {\n${execpath[0].replace('/usr/bin/mktemp -t ', 'bsd_mktemp ')}}\n`;
         const parser = text.match(/while IFS= read -r line[^]*?done < "\$ENV_FILE"/);
         if (!parser) throw new Error('missing wrapper env parser');
         helpers += `\nload_runtime_env() {\n${parser[0]}\n}\n`;
@@ -559,6 +566,20 @@ export function run() {
         ['rollback_release: a restored release that restarts is healthy', restore('restarts', { restart: 0 }), 'healthy old'],
         ['rollback_release: a failed restart is reported, not waited out', restore('restartFails', { restart: 1 }), 'failed old'],
       );
+      // A `pnpm exec` that fails takes the `die` before the runtime-path file is
+      // read, so only the EXIT trap can remove it. `seen` lists what existed
+      // when pnpm ran, proving the file was made; the second field is what the
+      // trap left behind.
+      const leakDir = join(fixtureDir, `execpath-${platform}`);
+      allCases.push([
+        'cleanup: a failed pnpm exec leaves no runtime-path file',
+        `TMPDIR=${sq(join(leakDir, 'tmp'))}; SEEN=${sq(join(leakDir, 'seen'))}; mkdir -p "$TMPDIR"; ` +
+          'TS_STATUS_JSON=""; TS_PREFS_JSON=""; WS_STATE_BACKUP=""; EXECPATH_FILE=""; PROBE_STATE=""; PROBE_LOG=""; ' +
+          'mktemp_file() { mktemp "$TMPDIR/dormouse-$1.XXXXXX"; }; bsd_mktemp() { mktemp "$TMPDIR/$1.XXXXXX"; }; ' +
+          '( trap cleanup EXIT; pnpm() { ls "$TMPDIR" > "$SEEN"; return 1; }; die() { exit 1; }; resolve_runtime ) || true; ' +
+          'seen="$(cat "$SEEN")"; echo "[${seen%%.*}|$(ls -A "$TMPDIR")]"',
+        '[dormouse-execpath|]',
+      ]);
       if (platform === 'macOS') {
         allCases.push([
           'rollback_release: an unloaded agent is bootstrapped, not failed on kickstart',
