@@ -550,10 +550,16 @@ jobs:
         run: pnpm --filter dormouse-sidecar test
 
       # node-pty ships the Windows addon and ConPTY DLL as prebuilds, so the
-      # install above suffices. The Linux suite cannot exercise native close.
-      - name: Windows PTY shutdown tests
+      # install above suffices. The Linux suite cannot exercise native close,
+      # nor any Windows shell. The conformance suite writes the runner's own
+      # PowerShell profiles, which no environment variable moves.
+      - name: Windows PTY and shell tests
         if: runner.os == 'Windows'
-        run: pnpm exec node --test --test-force-exit standalone/sidecar/graceful-kill-windows.test.js standalone/sidecar/pty-host-wiring.test.js
+        timeout-minutes: 10
+        env:
+          DORMOUSE_REQUIRE_SHELLS: pwsh,powershell,cmd,git-bash
+          DORMOUSE_CONFORMANCE_WRITE_PROFILE: '1'
+        run: pnpm exec node --test --test-force-exit standalone/sidecar/graceful-kill-windows.test.js standalone/sidecar/pty-host-wiring.test.js standalone/sidecar/pty-core.test.js standalone/sidecar/shell-conformance.test.js
 
       # The package suites run on Linux, where these cases skip: `.cmd` shims
       # and UNC working directories, ACL-preserving saves, PATHEXT, and the WSL
