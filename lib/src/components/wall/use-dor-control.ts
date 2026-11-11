@@ -2490,6 +2490,19 @@ export function useDorControl({
         detail.respond({ ok: false, error: 'session is required' });
         return;
       }
+      // One browser, one Surface, across the window: a session another
+      // Workspace already shows is answered there, wherever the caller is
+      // (docs/specs/dor-browser.md → "Managed identity"). Only a Wall that
+      // does not show it hands it on, so two holders cannot pass it back and forth.
+      const walls = listWallHandles();
+      const self = walls.find((wall) => wall.workspaceId === answeringWorkspaceId);
+      if (!self?.browserSessions(provider).includes(session)) {
+        const holder = walls.find((wall) => wall !== self && wall.browserSessions(provider).includes(session));
+        if (holder) {
+          await holder.handleDorControl(detail);
+          return;
+        }
+      }
       // `binaryPath` names a program the host will spawn and is persisted into
       // the pane's params, so it is checked before it is stored rather than
       // only at the spawn (`lib/src/lib/agent-browser-binary.ts`).
