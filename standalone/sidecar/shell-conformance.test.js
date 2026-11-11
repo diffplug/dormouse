@@ -858,16 +858,19 @@ shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async
 
 // ── 7. A rehydrate payload ends with the first command ────────────────────
 // docs/specs/dor-tool.md -> Reaping. Every later prompt finds it already gone,
-// and saying so must leave nothing in the user's $Error.
+// and saying so must leave nothing in the user's $Error. On Windows WSLENV
+// stops naming it too, or `wsl` would hand the distro an empty one.
 shellCase('a rehydrate payload clears quietly', (row) => row.family === 'pwsh', async (t, row, located) => {
   const pane = openPane(t, row, located, { dehydrate: 'conformance' });
   await pane.run('$Error.Clear()');
   await pane.run('echo second');
   const out = path.join(SCRATCH, `${pane.id.replace(/\W/g, '-')}-dehydrate.json`);
-  await pane.run(`[IO.File]::WriteAllText('${out}', (@{ errors = ($Error | ForEach-Object { "$_" }) -join ' | '; payload = $env:DORMOUSE_DEHYDRATE } | ConvertTo-Json -Compress))`, 'the dump');
+  await pane.run(`[IO.File]::WriteAllText('${out}', (@{ errors = ($Error | ForEach-Object { "$_" }) -join ' | '; payload = $env:DORMOUSE_DEHYDRATE; wslenv = $env:WSLENV } | ConvertTo-Json -Compress))`, 'the dump');
   const seen = JSON.parse(fs.readFileSync(out, 'utf8'));
   assert.equal(seen.payload, null, `${row.name}: the payload outlived the first command`);
   assert.equal(seen.errors, '', `${row.name}: the user's $Error holds what the integration did`);
+  const forwarded = (seen.wslenv ?? '').split(':').filter((entry) => entry.split('/')[0].toUpperCase() === 'DORMOUSE_DEHYDRATE');
+  assert.deepEqual(forwarded, [], `${row.name}: WSLENV still forwards the payload: ${seen.wslenv}`);
 });
 
 // ── Last: nothing left running ────────────────────────────────────────────
