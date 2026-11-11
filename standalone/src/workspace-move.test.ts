@@ -421,9 +421,12 @@ describe("the source half", () => {
     const requestId = `handback-${WORKSPACE_ID}`;
     deliverList({ ptys: [{ id: "pane-a", alive: false, exitCode: 7 }], requestId });
     mocks.writes.length = 0;
+    // The replay rebuilt a command start its process never finished.
+    applyTerminalSemanticEvents("pane-a", [{ type: "commandStart", source: "osc633_boundaries" }]);
     deliverReplay({ id: "pane-a", data: "final-output", requestId });
     await transfer;
     expect(entry.exited).toBe(true);
+    expect(getTerminalPaneState("pane-a").currentCommand).toBeNull();
     expect(mocks.writes[0]).toContain("final-output");
     expect(mocks.writes[mocks.writes.length - 1]).toContain("Process exited with code 7");
     expect(platform.offPtyList).toHaveBeenCalled();

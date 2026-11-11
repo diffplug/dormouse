@@ -6,6 +6,7 @@ import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
 import { invoke } from "@tauri-apps/api/core";
 import { clearTerminalActivity, flushTerminal, releaseSession } from "dormouse-lib/lib/terminal-registry";
 import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
+import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
 import { restoreTransferredTerminalState, removeTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
@@ -371,6 +372,9 @@ function acceptHandBackReplay(workspaceId: WorkspaceId, ids: readonly string[]):
       if (exitCode !== undefined) {
         if (!entry.exited) entry.terminal.write(`\r\n[Process exited with code ${exitCode}]\r\n`);
         entry.exited = true;
+        // As a live exit does: the replay can rebuild a command start its
+        // process never finished, and that command must not read as running.
+        applyTerminalSemanticEvents(detail.id, [{ type: 'commandFinish', exitCode }]);
       }
     }
     if (wanted.size === 0) finish();
