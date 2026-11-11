@@ -19,6 +19,7 @@ import type { AlertEvents } from '../alert-protocol';
 import { bakedRelay } from '../relay-origin';
 import { createManagedVoiceHost, fileManagedVoiceStore } from '../managed-voice-host';
 import { alertedPty, createOwnerPtyStream, type OwnerPtyStream } from '../owner-pty';
+import { createPtyFlowControl, type PtyFlowControl } from '../pty-flow-host';
 import type {
   BurrowSurfaceProvider,
   PtySink,
@@ -51,6 +52,8 @@ export interface SidecarSurfaceBridgeOptions {
   mgr: SidecarPtyManager;
   /** The app's one manager (`createSidecarHost`), fed from the parse below. */
   alerts: AlertManager;
+  /** Told of every `pty:data` sent; absent, nothing is counted. */
+  flow?: Pick<PtyFlowControl, 'sent'>;
 }
 
 export interface SidecarSurfaceBridge {
@@ -190,7 +193,10 @@ export function createSidecarSurfaceBridge(
           console.error(`[burrow] response write failed for ${id}: ${String(error)}`);
         }
       },
-      onChunk: (chunk) => options.send('pty:data', { id, ...chunk }),
+      onChunk: (chunk) => {
+        options.send('pty:data', { id, ...chunk });
+        options.flow?.sent(id, chunk.data.length);
+      },
     });
     stream = { parsed, sinks: new Map() };
     streams.set(id, stream);
@@ -407,6 +413,10 @@ export interface SidecarHostPtyManager extends SidecarPtyManager {
   setParentWindow(ids: string[], parentWindow: string): void;
   kill(id: string): void;
   list(ids: unknown, forWindow: unknown, requestId: unknown, marks: unknown): void;
+  mark(ids: unknown, requestId: unknown): void;
+  /** Stop reading the PTY's output, and start again (`pty-flow-host.ts`). */
+  pause(id: string): void;
+  resume(id: string): void;
 }
 
 export interface SidecarHostOptions {
@@ -446,6 +456,9 @@ export interface SidecarHost {
   saveBeforeExit(): Promise<void>;
   /** The network policy's allowed networks, which bound a pane's iframe upstream off this machine. */
   allowedNetworks(): Promise<readonly string[]>;
+  /** Forgive what `ids`' renderers owe and resume them: the quit's capture
+   *  reads their output here, whether or not a window still parses it. */
+  resetPtyFlow(ids: readonly string[]): void;
   dispose(): void;
 }
 
@@ -502,7 +515,9 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     ? new FileBurrowStateStore(options.stateDir)
     : createEphemeralBurrowStateStore((message) => console.error(message));
 
-  const bridge = createSidecarSurfaceBridge({ send, mgr, alerts });
+  // Output flow control: what each PTY's window has not yet parsed.
+  const flow = createPtyFlowControl({ pause: (id) => mgr.pause(id), resume: (id) => mgr.resume(id) });
+  const bridge = createSidecarSurfaceBridge({ send, mgr, alerts, flow });
   const pty = alertedPty(alerts, mgr);
 
   // Read once, here: the Burrow and managed voice take the same baked pair.
@@ -561,6 +576,9 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           // A cold restore's persisted TODO rides the spawn.
           bridge.onPtySpawn(id);
           alertHost.respawn(id, alert);
+          // Whatever the id owed belonged to the generation this replaces,
+          // which stays live if the spawn fails.
+          flow.reset([id]);
           mgr.spawn(id, spawnOptions);
           // Rust's, never the webview's options: in the same tick as the
           // spawn, so ConPTY has it before the shell launches.
@@ -587,6 +605,12 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
         case 'pty:kill':
           if (isString(id)) alerts.remove(id);
           mgr.kill(id as string);
+          if (isString(id)) flow.forget(id);
+          return true;
+        // The renderer parsed this much of the id's live output, or Rust
+        // dropped it unshown (docs/specs/transport.md -> "Output flow control").
+        case 'pty:ack':
+          if (isString(id)) flow.acknowledge(id, detail.chars);
           return true;
         // A closed window's leftover PTYs: killed, their alert entries with
         // them. A kill and not the graceful stop, whose POSIX signal an
@@ -599,6 +623,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           for (const reaped of ids) {
             alerts.remove(reaped);
             mgr.kill(reaped);
+            flow.forget(reaped);
           }
           return true;
         }
@@ -606,9 +631,19 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
         // the list and every replay behind it back (docs/specs/standalone.md).
         // Their alert state follows, routed to each owner: a reloaded or
         // arriving window has no other way to learn it.
+        // The replay re-delivers what the asking window's acknowledgements
+        // were owed for, so they are forgiven; omitted ids are every PTY, as
+        // `list` reads them.
         case 'pty:requestInit':
+          flow.reset(Array.isArray(detail.ids) ? detail.ids.filter(isString) : undefined);
           mgr.list(detail.ids, detail.forWindow, detail.requestId, detail.marks);
           publish(detail.ids);
+          return true;
+        // A transfer's split point: the window consuming up to it stops being
+        // the route, so nothing after it is owed by that window.
+        case 'pty:mark':
+          if (Array.isArray(detail.ids)) flow.reset(detail.ids.filter(isString));
+          mgr.mark(detail.ids, detail.requestId);
           return true;
         case 'alert:command': {
           // Unstamped: there is no window to be a viewer of, or to answer.
@@ -654,6 +689,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     saveBeforeExit: () => service.saveRevocations(),
 
     allowedNetworks: () => service.allowedNetworks(),
+
+    resetPtyFlow: (ids) => flow.reset(ids),
 
     dispose() {
       for (const stop of stops) stop();

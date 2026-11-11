@@ -1582,6 +1582,18 @@ function pacedInputSegments(data) {
 }
 module.exports.pacedInputSegments = pacedInputSegments;
 
+/** Whether `pid` still runs. An unknown pid reads as running: ConPTY names its
+ *  shell's only once connected. EPERM is a process this one may not signal. */
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
 /**
  * Shared PTY manager — the single place where node-pty processes are managed.
  *
@@ -1610,7 +1622,7 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })), processAlive = isProcessAlive } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1792,6 +1804,8 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     });
 
     p.onExit(({ exitCode, signal }) => {
+      unpausable.add(p);
+      resumePty(p);
       session.exitCode = exitCode;
       // A generation replaced under the id never reports: once a reaped Tool
       // respawns, the killed shell's late exit would end the new Session
@@ -1908,6 +1922,56 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     return ptys.has(id);
   }
 
+  // Output flow control (docs/specs/transport.md -> "Output flow control"):
+  // the host pauses a PTY whose renderer has fallen behind, so the kernel
+  // buffer fills and the program's own writes block. Keyed by the PTY object,
+  // as `closingPtys` is: a spawn reusing the id starts unpaused.
+  const pausedPtys = new Map(); // pty.IPty -> its exit watch
+  // Exited or being stopped, so never paused again. node-pty never reads a
+  // paused socket to its end: on POSIX it destroys the socket, unread tail and
+  // all, 200 ms after the child exits; on Windows it reports no exit until the
+  // socket closes. A stop (kill, graceful stop, displacement) needs the same
+  // reading to finish its teardown, which is what an unpaused PTY does today.
+  const unpausable = new WeakSet();
+  // node-pty reports no exit while the socket is paused, so a paused PTY's own
+  // process is watched instead; well inside POSIX's 200 ms.
+  const PAUSED_EXIT_WATCH_MS = 25;
+
+  function pause(id) {
+    const p = ptys.get(id);
+    if (!p || pausedPtys.has(p) || unpausable.has(p)) return;
+    try {
+      p.pause();
+    } catch (error) {
+      console.error(`[pty-core] pausing ${id} failed:`, error.message);
+      return;
+    }
+    const watch = setInterval(() => {
+      if (processAlive(p.pid)) return;
+      unpausable.add(p);
+      resumePty(p);
+    }, PAUSED_EXIT_WATCH_MS);
+    watch.unref?.();
+    pausedPtys.set(p, watch);
+  }
+
+  function resume(id) {
+    const p = ptys.get(id);
+    if (p) resumePty(p);
+  }
+
+  function resumePty(p) {
+    const watch = pausedPtys.get(p);
+    if (watch === undefined) return;
+    clearInterval(watch);
+    pausedPtys.delete(p);
+    try {
+      p.resume();
+    } catch (error) {
+      console.error('[pty-core] resuming a PTY failed:', error.message);
+    }
+  }
+
   // ConPTY closes asynchronously. Calling the pinned addon's native kill twice
   // before onExit can crash the owner, so graceful shutdown and later cleanup
   // share a guard keyed by the PTY object (never by a reusable Session id).
@@ -1915,6 +1979,8 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   // On POSIX, node-pty's default SIGHUP: an interactive bash or zsh ignores
   // SIGTERM, and honours the hangup a closing terminal sends.
   function stopPty(p) {
+    unpausable.add(p);
+    resumePty(p);
     if (platform !== 'win32') {
       p.kill();
       return;
@@ -2189,7 +2255,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     send('shells', { shells: await detectAvailableShells(), requestId });
   }
 
-  return { spawn, setParentWindow, write, resize, hasPty, kill, killAll, list, context,
+  return { spawn, setParentWindow, write, resize, pause, resume, hasPty, kill, killAll, list, context,
     getHelperParentId: (id) => helpers.get(id)?.parentId,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };

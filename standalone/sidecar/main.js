@@ -179,11 +179,11 @@ function handleLine(line) {
     // shared host takes the same event for the Burrow and the alerts.
     if (event === 'burrow:windows' && Array.isArray(data?.labels)) retainIframeProxyOwners(data.labels.filter((label) => typeof label === 'string'));
     // The PTY lifecycle and I/O, the alerts and the Burrow. Offered every line
-    // before the switch below: the host owns the PTY commands the alerts must
-    // see, every alert, Burrow and managed-voice command, and the theme push.
+    // before the switch below: the host owns the PTY commands the alerts or
+    // the output flow control must see, every alert, Burrow and managed-voice
+    // command, and the theme push.
     if (host.handleCommand(event, data)) return;
     switch (event) {
-      case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
@@ -202,8 +202,10 @@ function handleLine(line) {
             liveIds: () => mgr.liveIds(),
             resize: (id, cols, rows) => mgr.resize(id, cols, rows),
             // One press, and the caller decides about any more: `mgr.interrupt`
-            // writes synchronously, so the ack is immediate.
-            interrupt: async (ids) => { mgr.interrupt(ids); },
+            // writes synchronously, so the ack is immediate. The capture reads
+            // what each agent prints here, so no window's backlog may hold
+            // its PTY paused (docs/specs/transport.md -> "Output flow control").
+            interrupt: async (ids) => { host.resetPtyFlow(ids); mgr.interrupt(ids); },
             silenceRun: (id) => host.alerts.silenceRun(id),
             receivedChars: (id) => mgr.receivedChars(id),
             outputSince: (id, mark) => mgr.outputSince(id, mark),
