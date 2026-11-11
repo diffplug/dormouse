@@ -417,6 +417,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
       }}
       onAuxClick={(event) => {
         if (event.button !== 1) return;
+        // A middle-click in the open rename editor is a paste (the primary
+        // selection on Linux), never the close verb.
+        if (event.target instanceof Element && event.target.closest('[data-workspace-rename-for]')) return;
         event.preventDefault();
         onRequestClose(id);
       }}

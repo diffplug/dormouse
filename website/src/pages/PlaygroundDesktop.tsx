@@ -20,7 +20,7 @@ import {
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
-import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
+import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
@@ -55,7 +55,7 @@ function PlaygroundDesktopExperience() {
   // The navbar picker used to theme this page as a side effect of its own
   // render-time restore. The picker now lives in the Settings dialog and only
   // mounts when opened, so the page restores its own theme.
-  useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
+  useRestoredTheme(DOCS_THEME_ID);
 
   const [WallModule, setWallModule] = useState<{
     WorkspaceWindow: React.ComponentType<any>;

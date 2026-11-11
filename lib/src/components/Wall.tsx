@@ -1131,9 +1131,10 @@ export function Wall({
 
   /**
    * Close every Surface in this Workspace, each through the same coordinator a
-   * manual close uses (helper guard → kill). Resolves null once the Wall is
-   * empty and safe to unmount, or the first refusal's message with the Workspace left as
-   * it was — the strip then reveals it so the refusal is visible.
+   * manual close uses (helper guard → kill), in order. Resolves null once the
+   * Wall is empty and safe to unmount, or the first refusal's message with the
+   * Workspace left open — Surfaces ahead of the refusing one already closed — and
+   * the strip then reveals it so the refusal is visible.
    */
   const closeAll = useCallback(async (editors: readonly string[] = []): Promise<string | null> => {
     closingWorkspaceRef.current = true;
@@ -2079,6 +2080,18 @@ export function Wall({
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
   }, [enterPassthrough, lath, nav, transferRefusal]);
 
+  /** An inline rename closing drops DOM focus on `<body>`, where passthrough
+   *  keys reach nothing; the selected pane's terminal takes it back, unless
+   *  the gesture that closed the editor focused something else. */
+  const refocusAfterRename = useCallback(() => {
+    if (modeRef.current !== 'passthrough') return;
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      focusSelected(true);
+    });
+  }, [focusSelected]);
+
   // --- Wall actions (for tab buttons) ---
 
   const wallActions: WallActions = useMemo(() => ({
@@ -2124,6 +2137,8 @@ export function Wall({
       acknowledgeSession(id);
     },
     onEnterPanel: (id: string) => {
+      // A parked (minimized) page can still take focus; it is no pane to enter.
+      if (!nav.hasPane(id)) return;
       setConfirmKill(null);
       enterPassthrough(id);
     },
@@ -2148,6 +2163,7 @@ export function Wall({
       const trimmed = value.trim();
       if (!trimmed) {
         setRenamingPaneId(null);
+        refocusAfterRename();
         return { accepted: false, reason: 'empty' as const };
       }
       const result = setTerminalUserTitle(id, trimmed);
@@ -2155,10 +2171,12 @@ export function Wall({
         lath.store.setTitle(id, trimmed);
       }
       setRenamingPaneId(null);
+      refocusAfterRename();
       return result;
     },
     onCancelRename: () => {
       setRenamingPaneId(null);
+      refocusAfterRename();
     },
     onSwapRenderMode: async (id, mode, viewport) => {
       if (transferRefusal(id)) return;
@@ -2307,7 +2325,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal, refocusAfterRename]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
@@ -2493,13 +2511,15 @@ export function Wall({
   // adoption): passthrough → enter the leaf if selection differs;
   // command → move selection onto it.
   const onLeafFocused = useCallback((id: string) => {
+    // A parked (minimized) leaf's page can still focus itself; it is no pane to select.
+    if (!nav.hasPane(id)) return;
     if (modeRef.current === 'passthrough') {
       // The embed moved DOM focus; no human gesture reached this Session.
       if (selectedIdRef.current !== id) enterPassthrough(id);
       return;
     }
     if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
-  }, [enterPassthrough, selectPane]);
+  }, [nav, enterPassthrough, selectPane]);
 
   // Stable so LathHost's sash-drag effect never re-subscribes on a Wall re-render.
   const onCommitResize = useCallback((splitPath: number[], boundary: number, deltaPx: number) => {

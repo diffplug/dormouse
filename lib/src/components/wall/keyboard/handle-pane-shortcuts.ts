@@ -2,7 +2,7 @@ import { acknowledgeSession, dismissSessionAlert, toggleSessionTodo } from '../.
 import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams } from '../browser-surface';
 import { isWorkspaceSelection } from '../wall-types';
-import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
+import { ARROW_OPPOSITES, commandKey, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
 /** Open the terminal context revealed from the pane header's bottom-left
  *  corner. Browser-surface panes carry no `data-pane-header-for`, so the lookup
@@ -33,8 +33,9 @@ export function handlePaneShortcuts(
   const printedSymbol = e.altKey && ['|', '%', '"', '>'].includes(e.key);
   if ((e.altKey && !printedSymbol) || ((e.metaKey || (e.ctrlKey && !printedSymbol)) && !isArrowKey(e.key))) return false;
   const sid = ctx.selectedIdRef.current;
+  const key = commandKey(e);
   // Reopen acts on the Window, so it answers whatever is selected.
-  if (e.key === 'u') {
+  if (key === 'u') {
     e.preventDefault();
     e.stopPropagation();
     ctx.reopenClosed();
@@ -42,7 +43,7 @@ export function handlePaneShortcuts(
   }
   // Workspace chrome never dispatches pane verbs.
   if (isWorkspaceSelection(ctx.selectedTypeRef.current)) {
-    if (!PANE_VERB_KEYS.has(e.key) && !(isArrowKey(e.key) && (e.metaKey || e.ctrlKey))) return false;
+    if (!PANE_VERB_KEYS.has(key) && !(isArrowKey(key) && (e.metaKey || e.ctrlKey))) return false;
     e.preventDefault();
     e.stopPropagation();
     return true;
@@ -50,7 +51,7 @@ export function handlePaneShortcuts(
 
   // Entering passthrough, from a pane or through its Door, is a human gesture
   // that acknowledges the Session (`docs/specs/alert.md` -> Engagement).
-  if (e.key === 'Enter' && sid) {
+  if (key === 'Enter' && sid) {
     e.preventDefault();
     e.stopPropagation();
     if (ctx.selectedTypeRef.current === 'door') {
@@ -64,26 +65,26 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if (e.key === '|' || e.key === '%') {
+  if (key === '|' || key === '%') {
     e.preventDefault();
     e.stopPropagation();
     ctx.wallActionsRef.current.onSplitH(sid, 'keyboard');
     return true;
   }
 
-  if (e.key === '-' || e.key === '"') {
+  if (key === '-' || key === '"') {
     e.preventDefault();
     e.stopPropagation();
     ctx.wallActionsRef.current.onSplitV(sid, 'keyboard');
     return true;
   }
 
-  if (isArrowKey(e.key) && (e.metaKey || e.ctrlKey)) {
+  if (isArrowKey(key) && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
     e.stopPropagation();
     if (!sid || ctx.selectedTypeRef.current !== 'pane') return true;
 
-    const dir = e.key;
+    const dir = key;
     const hist = navHistory.current;
     let targetId: string | null = null;
     if (hist && hist.at === sid && ARROW_OPPOSITES[dir] === hist.direction && ctx.nav.hasPane(hist.fromId)) {
@@ -106,14 +107,14 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if ((e.key === 'k' || e.key === 'x') && sid) {
+  if ((key === 'k' || key === 'x') && sid) {
     e.preventDefault();
     e.stopPropagation();
     ctx.requestKill(sid);
     return true;
   }
 
-  if (e.key === ',' && sid) {
+  if (key === ',' && sid) {
     e.preventDefault();
     e.stopPropagation();
     // Only a visible terminal or Tool header mounts the rename editor. Setting the
@@ -123,7 +124,7 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if ((e.key === 'm' || e.key === 'd') && sid) {
+  if ((key === 'm' || key === 'd') && sid) {
     e.preventDefault();
     e.stopPropagation();
     if (ctx.selectedTypeRef.current === 'door') {
@@ -135,14 +136,14 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if (e.key === 't' && sid && ctx.selectedTypeRef.current === 'pane') {
+  if (key === 't' && sid && ctx.selectedTypeRef.current === 'pane') {
     e.preventDefault();
     e.stopPropagation();
     toggleSessionTodo(sid);
     return true;
   }
 
-  if (e.key === 'a' && sid && ctx.selectedTypeRef.current === 'pane') {
+  if (key === 'a' && sid && ctx.selectedTypeRef.current === 'pane') {
     e.preventDefault();
     e.stopPropagation();
     dismissSessionAlert(sid);
@@ -150,14 +151,14 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if (e.key === 'z' && sid) {
+  if (key === 'z' && sid) {
     e.preventDefault();
     e.stopPropagation();
     ctx.wallActionsRef.current.onZoom(sid);
     return true;
   }
 
-  if (e.key === '>' && sid && ctx.selectedTypeRef.current === 'pane') {
+  if (key === '>' && sid && ctx.selectedTypeRef.current === 'pane') {
     e.preventDefault();
     e.stopPropagation();
     openHeaderContext(ctx, sid);

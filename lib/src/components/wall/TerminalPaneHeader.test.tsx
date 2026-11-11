@@ -151,6 +151,21 @@ describe('TerminalPaneHeader — inline rename', () => {
     expect(onFinishRename).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['Enter', (input: HTMLInputElement) => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))],
+    ['blur', (input: HTMLInputElement) => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))],
+  ] as const)('cancels on %s when nothing was typed, never pinning the derived label', (_how, close) => {
+    const onCancelRename = vi.fn();
+    const onFinishRename = vi.fn(() => ({ accepted: true as const }));
+    renderHeader(stubActions({ onCancelRename, onFinishRename }), 'term-1');
+
+    const input = renameInput();
+    act(() => { close(input); });
+
+    expect(onCancelRename).toHaveBeenCalled();
+    expect(onFinishRename).not.toHaveBeenCalled();
+  });
+
   it('warns in place when the submitted title is rejected', () => {
     const onFinishRename = vi.fn(() => ({ accepted: false as const, reason: 'reserved' as const }));
     renderHeader(stubActions({ onFinishRename }), 'term-1');

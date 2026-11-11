@@ -83,7 +83,10 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           <div className="mt-2 text-sm leading-relaxed text-foreground">
             {voice.notEntitled ? (
               <>{NO_PLAN_COPY} <HostedPlansLink from={HOSTED_REFS.settingsVoice} /></>
-            ) : 'Natural Voice is on.'}
+            ) : networkOff
+              // The speech group above already says Nowhere keeps it off.
+              ? 'Natural Voice is turned on for this computer.'
+              : 'Natural Voice is on.'}
           </div>
           <label className="mt-2 flex items-center gap-2">
             <span className={FIELD_LABEL}>Voice</span>

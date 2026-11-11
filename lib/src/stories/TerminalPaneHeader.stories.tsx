@@ -1,3 +1,4 @@
+import { userEvent } from 'storybook/test';
 import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
@@ -252,12 +253,14 @@ async function submitReservedRename() {
     `[data-renaming-input-for="${SESSION_ID}"]`,
     'rename input',
   );
-  input.value = '<idle>';
-  input.dispatchEvent(new KeyboardEvent('keydown', {
-    key: 'Enter',
-    bubbles: true,
-    cancelable: true,
-  }));
+  // Typed, not assigned: an editor nobody changed never submits, and React
+  // hears a change only from real input events. The selection is restated
+  // because `type` clicks first, which drops the select-all the editor applies
+  // on mount, and the name would be appended to the seed.
+  await userEvent.type(input, '<idle>{Enter}', {
+    initialSelectionStart: 0,
+    initialSelectionEnd: input.value.length,
+  });
   await requireElement('[data-testid="illegal-rename-warning"]', 'illegal-rename warning');
 }
 
