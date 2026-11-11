@@ -375,8 +375,25 @@ describe('BurrowsView actions', () => {
     const remove = [...rowFor('First laptop').querySelectorAll('button')].at(-1)!;
     expect(remove.disabled).toBe(false);
     act(() => remove.click());
+    // Remove sits beside Connect and cannot be undone from the phone.
+    expect(onForget).not.toHaveBeenCalled();
+    const confirm = container.querySelector('[role="group"]')!;
+    expect(confirm.textContent).toContain('Remove First laptop from this phone?');
+
+    act(() => [...confirm.querySelectorAll('button')].find((b) => b.textContent === 'Remove')!.click());
 
     expect(onForget).toHaveBeenCalledWith(offline[0]);
+  });
+
+  it('keeps the record when the Remove question is cancelled', () => {
+    const onForget = vi.fn();
+    renderBurrows({ onForget });
+
+    act(() => [...rowFor('Second laptop').querySelectorAll('button')].at(-1)!.click());
+    act(() => buttonNamed('Cancel')!.click());
+
+    expect(container.querySelector('[role="group"]')).toBeNull();
+    expect(onForget).not.toHaveBeenCalled();
   });
 
   it('disables Connect on an offline Burrow but not Pair again', () => {

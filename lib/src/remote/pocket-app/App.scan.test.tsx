@@ -767,6 +767,13 @@ describe('the Burrows list', () => {
     await click(container, 'Sign in with passkey');
 
     await click(container, 'Remove');
+    expect(fake.forgetBurrow).not.toHaveBeenCalled();
+    act(() =>
+      [...container.querySelector('[role="group"]')!.querySelectorAll('button')]
+        .find((b) => b.textContent === 'Remove')!
+        .click(),
+    );
+    await settle();
 
     expect(fake.forgetBurrow).toHaveBeenCalledWith('burrow-1');
     expect(container.textContent).toContain(BURROWS_EMPTY);
