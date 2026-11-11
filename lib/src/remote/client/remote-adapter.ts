@@ -277,7 +277,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   writePty(id: string, data: string): void {
     if (this.#attached?.surfaceId !== id) return; // Burrow only accepts the attached pane
     // The Burrow discards these anyway (remote-api.md -> "Terminal surfaces"), so
-    // don't spend the relay on them.
+    // don't spend the relay on them. By shape alone, so a modified F3 key
+    // (`CSI 1;<mod>R`, a cursor report byte for byte) is dropped too.
     if (inputIsReplayTerminalReport(data)) return;
     void this.#client.write(id, toBase64Url(utf8Encode(data))).catch(() => {});
   }
