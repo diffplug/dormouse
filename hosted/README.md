@@ -231,18 +231,26 @@ One Stripe account holds only Dormouse, because retries, customer emails, and th
 
 ## Move the Stripe API version
 
-The webhook accepts only events at the installed `stripe` SDK's pinned API version (`STRIPE_API_VERSION`, re-exported by `@pgstencil/stripe`), and the endpoint renders events at the version it was created with. The SDK moves that version in minor releases, so `hosted/server/tests/stripe-api-version.test.ts` pins the literal, and Renovate holds `stripe` and `@pgstencil/stripe` for approval on the dependency dashboard. A move is this procedure, never a routine update.
+The webhook accepts only events at the installed `stripe` SDK's pinned API version (`STRIPE_API_VERSION`, re-exported by `@pgstencil/stripe`), and the endpoint renders events at the version it was created with. The SDK moves that version in minor releases, so `hosted/server/tests/stripe-api-version.test.ts` pins the literal, `stripe` is held to its minor with a `~` range, and Renovate holds `stripe` and `@pgstencil/stripe` for approval on the dependency dashboard. A move is this procedure, never a routine update.
 
-**Not yet exercised end to end.** The steps as far as they are known, in the sandbox first, then live:
+**Exercised twice in the sandbox, 2026-11-10 and 2026-11-11** (stripe 22.6.2 at `2026-08-26.dahlia` to 23.1.0 at `2026-10-28.endive`, the second time with the released pgstencil 0.5.1: two local builds on one database behind a tunnel); not yet in live mode, nor on the Workers. In the sandbox first, then live:
 
-1. Move `@pgstencil/stripe` and `stripe` together, to releases that pin the same new API version, keeping `stripe`'s `~` range: every minor moves the version.
-2. Create a second webhook endpoint at the new version, with the same URL and events as "Webhook endpoint" above, while the old one stays enabled. Stripe delivers each event to every enabled endpoint.
-3. Deploy the Worker built against the new SDK with the new endpoint's signing secret as `STRIPE_WEBHOOK_SECRET`, changing the literal in `stripe-api-version.test.ts` in the same change.
-4. Confirm the new endpoint's deliveries succeed in Stripe's dashboard.
-5. Reconcile every owner, since the account cron's resync (`resyncBilling` in `hosted/server/billing.ts`) finds only owners holding a current subscription without access and so misses a cancellation or refund lost in the cut-over. From `hosted/`, with the migration role's `DATABASE_URL` and the five `STRIPE_*` bindings in the environment from your secret manager, run `pnpm billing:reconcile --dry-run`, then `pnpm billing:reconcile`; a live key also needs `--allow-live`. It prints one line per owner whose stored subscriptions changed, each one event the webhook never applied, and the counts, and exits non-zero if any owner failed.
-6. Disable the old endpoint.
+1. Move `@pgstencil/stripe` and `stripe` together, to releases that pin the same new API version, changing the literal in `stripe-api-version.test.ts` in the same change.
+2. Create a second webhook endpoint at the new version, with the events under "Webhook endpoint" above, while the old one stays enabled. Give its URL a query string naming the version (`/api/billing/webhook?endpoint=endive`; the route ignores it), because Stripe's event page merges the attempts of two endpoints that share a URL into one row. Stripe delivers each event to every enabled endpoint, and the Worker still on the old SDK answers the new endpoint's copies 400, which Stripe retries.
+3. Run `pnpm db:status` and `pnpm db:validate` from the new build against the database, then deploy the Worker built against the new SDK with the new endpoint's signing secret as `STRIPE_WEBHOOK_SECRET`. From here the old endpoint's copies get 400 and the new one's 200.
+4. Reconcile every owner at once, without waiting for Stripe: from `hosted/`, with the migration role's `DATABASE_URL` and the five `STRIPE_*` bindings in the environment from your secret manager, run `pnpm billing:reconcile --dry-run`, then `pnpm billing:reconcile`; a live key also needs `--allow-live`. It prints one line per owner whose stored subscriptions changed, each one event the webhook has not applied, and the counts, and exits non-zero if any owner failed. The account cron's resync (`resyncBilling` in `hosted/server/billing.ts`) finds only owners holding a current subscription without access, so it never repairs a cancellation or refund.
+5. Confirm the new endpoint's deliveries succeed in Stripe's dashboard.
+6. Run `pnpm billing:reconcile --dry-run` again. No owner changing is the proof that nothing was lost; then disable the old endpoint.
 
-pgstencil's `BILLING.md` -> "Moving to a new Stripe API version" answers two questions from its code, though no deployment has run it either: its events ledger applies each event once, whichever endpoint's copy lands first, and one signing secret suffices, since the new Worker answers 400 to the old endpoint's deliveries, which Stripe retries, so create the new endpoint well before the deploy and let the old one drain before disabling it. The first real move must still answer what the old endpoint's failing deliveries look like in Stripe's dashboard, and whether its retries alert anyone, until it is disabled.
+What the rehearsals established:
+
+- An event delivered to both endpoints is applied once: the copy that arrives second answers 200 and writes nothing.
+- An event that fails at both endpoints while nothing serves is repaired by step 4 at once. Left to Stripe, the new endpoint's retry repairs it too, but late: the sandbox retried once after about 14 seconds and next after about an hour.
+- The old endpoint's refused copies show as failed deliveries with a next retry until it is disabled, and stay pending on their events afterwards; nothing else alerts.
+- On the new version, against Stripe itself: Checkout, a withdrawal with its full refund, a dispute lost and a dispute won, and a portal session.
+- Rollback is open until step 6: this move added no migration (the new build's `db:validate` matched the old build's database and `db:migrate` found nothing pending) and Hosted stores no Stripe object, so the old build runs on the same database with the old endpoint's secret.
+
+Not covered: an event that had already failed at the old endpoint before the new one existed is retried only to the old endpoint, which the new Worker refuses, so only step 4 repairs it. Live mode's retry schedule differs from the sandbox's and is unobserved. A price change's move to its new Price and an account closure have not run at the new version.
 
 ## Change a price
 
