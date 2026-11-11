@@ -290,7 +290,7 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 
 **Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`**, for every MIME type, adding the validated ancestor policy separately; opted-in policies may still prevent framing or shim execution (rationale). **Never infer this opt-in from request headers.**
 
-**Must serve each grant from one dedicated `127.0.0.1:0` server, with no token in the path**: the origin is the grant boundary (rationale). A grant asked for without a lease has a sliding idle TTL and a hard cap. **Never refresh the TTL for a request the `Host` check refuses**, so a stranger cannot hold one open.
+**Must serve each grant from one dedicated `127.0.0.1:0` server, with no token in the path**: the origin is the grant boundary (rationale).
 
 Current limits: absolute-origin subresources (`http://localhost:5173/...`, `ws://localhost:5173/...`) bypass the proxy uninstrumented, acceptable for loopback; and the shim reclaims only Dormouse control messages, leaving ordinary keyboard and pointer interaction inside the frame.
 
@@ -312,9 +312,9 @@ Source of truth: `mintGrant`, `offMachineRefusal`, and `offOriginRedirect` in `l
 
 ### Iframe Proxy Leases
 
-**Must take every mounted `IframePanel`'s grant under a lease** it mints, held under an owner the host transport names (VS Code router, standalone window label), never the webview. A remote session's frame holds its own lease under that session, which no window's end releases, whose upstream is on this machine, and whose pages carry a socket shim (`docs/specs/remote-api.md` -> "Frames").
+**Must mint every grant under a lease**, refusing a request without one; each mounted `IframePanel` mints its own, held under an owner the host transport names (VS Code router, standalone window label), never the webview. A remote session's frame holds its own lease under that session, which no window's end releases, whose upstream is on this machine, and whose pages carry a socket shim (`docs/specs/remote-api.md` -> "Frames").
 
-- **Never give a leased grant an idle TTL or evict it.** It ends, with every connection and upgraded pipe, when its lease is released (unmount), its owner reinitializes or ends, or the lease moves to another upstream origin (rationale).
+- **Never give a grant an idle TTL or evict it.** It ends, with every connection and upgraded pipe, when its lease is released (unmount), its owner reinitializes or ends, or the lease moves to another upstream origin (rationale).
 - The same lease, upstream origin and embedder chain reuse the grant, so Reload, Back and Forward keep the page's origin and storage.
 - **Must bound leases by `MAX_IFRAME_LEASES`**; past it a new one is refused, never made room for.
 
