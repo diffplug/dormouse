@@ -37,6 +37,12 @@ export const PTY_INPUT_CEILING_CHARS = 2 * PTY_HIGH_WATERMARK_CHARS;
  * program with more than about 1 KB unread is held ~600 ms, then loses it.
  */
 export const PTY_PAUSED_PEEK_MS = 150;
+/**
+ * A PTY paused this long with no acknowledgement from its renderer meanwhile
+ * is forgiven and resumed, so a hung renderer, or a reset nobody wired, costs
+ * a high watermark of throughput per period instead of freezing the program.
+ */
+export const PTY_ACK_WATCHDOG_MS = 10_000;
 
 /**
  * The live-output dispatch every adapter shares: it calls each `onPtyData`

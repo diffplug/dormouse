@@ -47,15 +47,15 @@ Source of truth: `gracefulKill` in `standalone/sidecar/pty-core.js`.
 
 ### Output flow control
 
-The renderer acknowledges the live output it parsed; the host pauses a PTY its renderer has fallen behind on, so nothing between node-pty and xterm holds over twice the high watermark (rationale). **Must count UTF-16 code units of the `data` sent as `pty:data`**, the renderer's unit, so after the parse; scrollback, received counts, parse, and alerts sit before the pause.
+The renderer acknowledges the live output it parsed; the host pauses a PTY its renderer lags, so nothing between node-pty and xterm holds over twice the high watermark (rationale). **Must count UTF-16 code units of the `data` sent as `pty:data`**, the renderer's unit, so after the parse; scrollback, received counts, parse, and alerts sit before the pause.
 
 - **Must acknowledge every char of live `pty:data` exactly once**: from xterm's write callback once parsed, in batches; at once when no terminal took it or xterm refused it; never from a timer, nor a replay.
 - **Never leave parsing to timers while the page is hidden or they starve**: each arrival parses a slice (rationale).
 - **Standalone's Rust acknowledges each `pty:data` it drops** (mid-transfer, or no owner).
-- **Must pause a PTY whose unacknowledged output passes the high watermark, and resume it at or below the low one, which stays at or above one batch less one**, the most a renderer holds parsed but unsent.
-- **Must forgive what a renderer owes, and resume, when it can no longer pay or need not**: a `requestInit` (its ids; every one when it names none), a transfer mark, a spawn over the id, a VS Code view leaving its PTYs running, the recovery capture's interrupt. A kill drops the count. **Must clamp it at zero**, so a stale acknowledgement owes nothing.
+- **Must pause a PTY whose unacknowledged output passes the high watermark, and resume it at or below the low one, itself at least one batch less one**, the most a renderer holds parsed but unsent.
+- **Must forgive what a renderer owes, and resume, when it can no longer pay or need not**: a `requestInit` (its ids; every one when it names none), a transfer mark, a spawn over the id, a VS Code view leaving its PTYs running, the recovery capture's interrupt, a watchdog period paused with nothing acknowledged (rationale). A kill drops the count. **Must clamp it at zero**, so a stale acknowledgement owes nothing.
 - **Must resume a paused PTY once its process is gone, and before stopping it**, so node-pty reads its tail (rationale). **On macOS, must read a paused PTY once a peek, below twice the high watermark**: an exit over 1 KB unread loses it. **Must deliver input to a paused PTY**: POSIX's line discipline reaches the blocked program; ConPTY reads none while output is blocked, so on Windows input resumes the PTY for a grace, likewise below twice the high watermark (rationale).
-- **Only the local owning renderer exerts backpressure**: Pocket's and the fake adapter's `acknowledgePtyData` are no-ops. A PTY it pauses slows every viewer, Clients too.
+- **Only the local owning renderer exerts backpressure**: Pocket's and the fake adapter's `acknowledgePtyData` are no-ops. Its pauses slow every viewer, Clients too.
 
 Source of truth: `PtyDataDispatch` in `lib/src/lib/pty-flow.ts`; `parseOnArrival` in `lib/src/lib/parse-on-arrival.ts`; `createPtyFlowControl` in `lib/src/host/pty-flow-host.ts`; `pause` in `standalone/sidecar/pty-core.js`; `dropped_output_ack` in `standalone/src-tauri/src/lib.rs`.
 

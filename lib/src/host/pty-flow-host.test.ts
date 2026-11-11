@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  PTY_ACK_WATCHDOG_MS,
   PTY_HIGH_WATERMARK_CHARS,
   PTY_INPUT_CEILING_CHARS,
   PTY_INPUT_GRACE_MS,
@@ -232,3 +233,93 @@ describe('a paused PTY on macOS', () => {
   });
 });
 
+
+// A PTY never stays paused because its renderer stopped acknowledging
+// (docs/specs/transport.md -> "Output flow control").
+describe('a paused PTY nobody acknowledges', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const silence = () => vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  it('is forgiven and resumed once the watchdog period passes, logged once per episode', () => {
+    vi.useFakeTimers();
+    const warn = silence();
+    const { calls, flow } = flowWithCalls();
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS - 1);
+    expect(calls).toEqual(['pause a']);
+    vi.advanceTimersByTime(1);
+    expect(calls).toEqual(['pause a', 'resume a']);
+    expect(flow.unacknowledged('a')).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    // It runs to the high watermark again, and the watchdog re-arms for that pause.
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a', 'resume a']);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    // An acknowledgement ends the episode: the next firing is logged again.
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 2);
+    flow.acknowledge('a', 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('restarts its clock at any acknowledgement, so a slow renderer never trips it', () => {
+    vi.useFakeTimers();
+    silence();
+    const { calls, flow } = flowWithCalls();
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    for (let i = 0; i < 5; i++) {
+      vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS - 1);
+      flow.acknowledge('a', 1);
+    }
+    expect(calls).toEqual(['pause a']);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    expect(calls).toEqual(['pause a', 'resume a']);
+  });
+
+  it('is cancelled by a kill, and by every reset', () => {
+    vi.useFakeTimers();
+    const warn = silence();
+    const { calls, flow } = flowWithCalls();
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    flow.sent('b', PTY_HIGH_WATERMARK_CHARS + 1);
+    flow.forget('a');
+    flow.reset(['b']);
+    flow.sent('b', PTY_HIGH_WATERMARK_CHARS);
+    // A spawn over the killed id, paused halfway through the old period.
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS / 2);
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS - 1);
+    expect(calls).toEqual(['pause a', 'pause b', 'resume b', 'pause a']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('is held off by neither the macOS peeks nor the Windows input grace', () => {
+    vi.useFakeTimers();
+    silence();
+    const mac = flowWithCalls('darwin');
+    const win = flowWithCalls('win32');
+    for (const { flow } of [mac, win]) flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    let elapsed = 0;
+    while (elapsed + PTY_INPUT_GRACE_MS * 2 < PTY_ACK_WATCHDOG_MS) {
+      // Each peek reads a little and re-pauses; each input resumes for a grace
+      // that ends paused again, past the high watermark.
+      win.flow.input('a');
+      for (const { flow } of [mac, win]) flow.sent('a', 1024);
+      vi.advanceTimersByTime(PTY_INPUT_GRACE_MS * 2);
+      elapsed += PTY_INPUT_GRACE_MS * 2;
+    }
+    for (const { flow } of [mac, win]) expect(flow.unacknowledged('a')).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS - elapsed);
+    for (const { calls, flow } of [mac, win]) {
+      expect(flow.unacknowledged('a')).toBe(0);
+      expect(calls.at(-1)).toBe('resume a');
+    }
+  });
+});

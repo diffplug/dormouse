@@ -25,7 +25,18 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSidecarHost, type SidecarHost, type SidecarHostPtyManager } from 'dormouse-lib/host/remote/sidecar-entry';
 import { sliceSince } from 'dormouse-lib/host/replay-buffer';
-import { PTY_HIGH_WATERMARK_CHARS, PTY_LOW_WATERMARK_CHARS } from 'dormouse-lib/lib/pty-flow';
+import { PTY_ACK_WATCHDOG_MS, PTY_HIGH_WATERMARK_CHARS, PTY_LOW_WATERMARK_CHARS } from 'dormouse-lib/lib/pty-flow';
+
+/** The watchdog period the next `sidecar()` gets; the shipped one when unset. */
+const watchdog = vi.hoisted(() => ({ ms: undefined as number | undefined }));
+vi.mock('dormouse-lib/host/pty-flow-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('dormouse-lib/host/pty-flow-host')>();
+  return {
+    ...actual,
+    createPtyFlowControl: (...[target, options]: Parameters<typeof actual.createPtyFlowControl>) =>
+      actual.createPtyFlowControl(target, { ...options, watchdogMs: watchdog.ms ?? options?.watchdogMs }),
+  };
+});
 
 const sidecarRequire = createRequire(fileURLToPath(new URL('../sidecar/package.json', import.meta.url)));
 const { create } = sidecarRequire('./pty-core.js') as {
@@ -122,6 +133,7 @@ afterEach(() => {
     try { step(); } catch { /* best effort */ }
   }
   cleanup = [];
+  watchdog.ms = undefined;
   vi.restoreAllMocks();
 });
 
@@ -135,8 +147,9 @@ function sidecar() {
     if (!entry) ptys.set(id, entry = { forwarded: 0, head: '', tail: '', ts: 0 });
     return entry;
   };
-  // The Burrow's memory-only store says so once.
+  // The Burrow's memory-only store says so once, and the watchdog once a stall.
   vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
   // Wired as `sidecar/main.js` wires them: every pty-core event through the
   // host's tap first, and only non-data events forwarded raw.
   let host: SidecarHost | null = null;
@@ -160,10 +173,16 @@ function sidecar() {
     host!.onPtyEvent(event, data);
     if (event !== 'data') send(`pty:${event}`, data);
   }, nodePty, { replay: true, sliceSince });
-  // Which PTYs the host has paused, so a test knows it exercised one.
+  // Which PTYs the host has paused, so a test knows it exercised one, and when
+  // it first paused each.
   const pauses: string[] = [];
+  const firstPauseAt = new Map<string, number>();
   const pause = mgr.pause;
-  mgr.pause = (id) => { pauses.push(id); pause(id); };
+  mgr.pause = (id) => {
+    pauses.push(id);
+    if (!firstPauseAt.has(id)) firstPauseAt.set(id, Date.now());
+    pause(id);
+  };
   host = createSidecarHost({ send, mgr });
   const live = host;
   cleanup.push(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -190,6 +209,7 @@ function sidecar() {
     host: live,
     mgr,
     pauses,
+    firstPauseAt,
     /** How many times the host has paused `id`, peeks' re-pauses included. */
     pausesOf: (id: string) => pauses.filter((paused) => paused === id).length,
     pty,
@@ -232,18 +252,18 @@ async function running(side: Sidecar, id: string, started = () => side.written(i
 }
 
 /** Waits for `done`, failing only on a stall: the deadline restarts whenever
- *  `id`'s PTY forwards more or its program writes more. */
-async function progressUntil(side: Sidecar, id: string, done: () => boolean, phase: string): Promise<void> {
+ *  `id`'s PTY forwards, or its program writes, `step` more chars. */
+async function progressUntil(side: Sidecar, id: string, done: () => boolean, phase: string, step = 1): Promise<void> {
   let progress = Number.NaN;
   let deadline = 0;
   while (!done()) {
     const now = Date.now();
     const current = side.pty(id).forwarded + side.written(id);
-    if (current !== progress) {
+    if (!(current - progress < step)) {
       progress = current;
       deadline = now + STALL_MS;
     } else if (now > deadline) {
-      throw new Error(`${id} stalled ${phase}: nothing forwarded or written for ${STALL_MS} ms; ${side.describe(id)}`);
+      throw new Error(`${id} stalled ${phase}: under ${step} chars forwarded or written in ${STALL_MS} ms; ${side.describe(id)}`);
     }
     await sleep(20);
   }
@@ -283,6 +303,23 @@ describe('a flood nobody acknowledges', { timeout: CASE_MS }, () => {
     await sleep(500);
     expect(side.written('a') - before, side.describe('a')).toBeLessThan(TRICKLE);
     expect(before, side.describe('a')).toBeLessThan(FLOOD_CAP);
+    // All of it seen before the watchdog could resume the PTY.
+    expect(Date.now() - side.firstPauseAt.get('a')!, side.describe('a')).toBeLessThan(PTY_ACK_WATCHDOG_MS);
+  });
+
+  it('is resumed by the watchdog, a high watermark at a time, rather than stopping for good', async () => {
+    const period = 1_000;
+    watchdog.ms = period;
+    const side = sidecar();
+    side.flood('a');
+    await running(side, 'a');
+    // A step, not the macOS peeks' trickle, is progress here.
+    await progressUntil(side, 'a', () => side.pty('a').forwarded > 3 * PTY_HIGH_WATERMARK_CHARS, 'before three high watermarks went out', PTY_HIGH_WATERMARK_CHARS / 4);
+    // Paused for a period between steps, where unpaused it would have taken
+    // a fraction of one.
+    expect(Date.now() - side.firstPauseAt.get('a')!, side.describe('a')).toBeGreaterThanOrEqual(2 * period);
+    expect(side.written('a'), side.describe('a')).toBeGreaterThan(2 * PTY_HIGH_WATERMARK_CHARS);
+    expect(side.written('a'), side.describe('a')).toBeLessThan(FLOOD_CAP);
   });
 
   it('resumes as the window acknowledges', async () => {
@@ -310,6 +347,8 @@ describe('a flood nobody acknowledges', { timeout: CASE_MS }, () => {
   });
 
   it('leaves a second PTY flowing', async () => {
+    // The stuck PTY stays paused however long the free one takes.
+    watchdog.ms = 10 * 60_000;
     const side = sidecar();
     side.flood('stuck');
     await settled(side, 'stuck', PTY_HIGH_WATERMARK_CHARS);

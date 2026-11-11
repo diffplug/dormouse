@@ -7,6 +7,7 @@
  * the parse rather than in `pty-core`.
  */
 import {
+  PTY_ACK_WATCHDOG_MS,
   PTY_HIGH_WATERMARK_CHARS,
   PTY_INPUT_CEILING_CHARS,
   PTY_INPUT_GRACE_MS,
@@ -23,6 +24,8 @@ export interface PtyFlowTarget {
 export interface PtyFlowOptions {
   /** The platform of the process that owns node-pty; this one's by default. */
   platform?: string;
+  /** How long a paused PTY may go unacknowledged; `PTY_ACK_WATCHDOG_MS` by default. */
+  watchdogMs?: number;
 }
 
 export interface PtyFlowControl {
@@ -45,7 +48,10 @@ export interface PtyFlowControl {
   dispose(): void;
 }
 
-export function createPtyFlowControl(target: PtyFlowTarget, { platform = process.platform }: PtyFlowOptions = {}): PtyFlowControl {
+export function createPtyFlowControl(
+  target: PtyFlowTarget,
+  { platform = process.platform, watchdogMs = PTY_ACK_WATCHDOG_MS }: PtyFlowOptions = {},
+): PtyFlowControl {
   /** Sent and not yet acknowledged, per PTY; absent is nothing owed. */
   const owed = new Map<string, number>();
   const paused = new Set<string>();
@@ -62,15 +68,42 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
   const peekTimers = new Map<string, ReturnType<typeof setInterval>>();
   /** Paused PTYs resumed for one read, paused again by the read it delivers. */
   const peeking = new Set<string>();
+  // The clock runs from a pause until an acknowledgement. Only an
+  // acknowledgement restarts it, so neither a peek nor input's grace, which
+  // resume and re-pause the PTY, can hold it off.
+  const watchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+  /** PTYs the watchdog has resumed since their renderer last acknowledged. */
+  const reported = new Set<string>();
 
   const stopPeeks = (id: string) => {
     clearInterval(peekTimers.get(id));
     peekTimers.delete(id);
     peeking.delete(id);
   };
+  const stopWatchdog = (id: string) => {
+    clearTimeout(watchdogs.get(id));
+    watchdogs.delete(id);
+  };
+  const forgive = (id: string) => {
+    owed.delete(id);
+    endGrace(id);
+    resume(id);
+  };
+  const armWatchdog = (id: string) => {
+    if (watchdogs.has(id)) return;
+    const timer = setTimeout(() => {
+      watchdogs.delete(id);
+      if (!reported.has(id)) console.warn(`[pty-flow] ${id}: no acknowledgement for ${watchdogMs} ms while paused; resuming it`);
+      reported.add(id);
+      forgive(id);
+    }, watchdogMs);
+    (timer as { unref?: () => void }).unref?.();
+    watchdogs.set(id, timer);
+  };
   const pause = (id: string) => {
     paused.add(id);
     target.pause(id);
+    armWatchdog(id);
     if (!peeks || peekTimers.has(id)) return;
     const timer = setInterval(() => {
       if (!paused.has(id) || peeking.has(id) || (owed.get(id) ?? 0) >= PTY_INPUT_CEILING_CHARS) return;
@@ -124,7 +157,10 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
       const total = Math.max(0, before - chars);
       if (total === 0) owed.delete(id);
       else owed.set(id, total);
+      stopWatchdog(id);
+      reported.delete(id);
       if (total <= PTY_LOW_WATERMARK_CHARS) resume(id);
+      else if (paused.has(id)) armWatchdog(id);
     },
 
     input(id) {
@@ -140,9 +176,9 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
 
     reset(ids) {
       for (const id of ids ?? [...new Set([...owed.keys(), ...paused])]) {
-        owed.delete(id);
-        endGrace(id);
-        resume(id);
+        stopWatchdog(id);
+        reported.delete(id);
+        forgive(id);
       }
     },
 
@@ -151,6 +187,8 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
       paused.delete(id);
       endGrace(id);
       stopPeeks(id);
+      stopWatchdog(id);
+      reported.delete(id);
     },
 
     unacknowledged: (id) => owed.get(id) ?? 0,
@@ -158,6 +196,7 @@ export function createPtyFlowControl(target: PtyFlowTarget, { platform = process
     dispose() {
       for (const id of [...graces.keys()]) endGrace(id);
       for (const id of [...peekTimers.keys()]) stopPeeks(id);
+      for (const id of [...watchdogs.keys()]) stopWatchdog(id);
     },
   };
 }

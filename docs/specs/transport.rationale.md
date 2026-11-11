@@ -41,6 +41,8 @@ In a real webview (the browser-dev harness, its Chrome rendering with WebGL, sam
 
 **Why input resumes a paused PTY on Windows.** Probed on Windows 10.0.26300 (2026-11-11, node-pty 1.2.0-beta.18 with `conpty.dll`): a `node` child flooding its PTY, interrupted with `\x03`, with xterm's win32-input-mode records for Ctrl+C, or both. Never paused, each encoding ended it in 14–17 ms (node-pty's exit 62–65 ms, code `STATUS_CONTROL_C_EXIT`). Paused, it was alive 2.5 s later, with nothing read and nothing written: conhost takes no input while blocked writing output nobody reads. Resumed right after the interrupt, it ended in 16 ms, node-pty's exit at 64 ms, after 279,000–292,000 chars were read in between, so a 250 ms grace covers it and twice the high watermark leaves that read room while still bounding memory. On macOS the same interrupt reached a paused program at once.
 
+**Why a watchdog resumes a PTY nobody acknowledges.** The forgiveness list names only the resets someone foresaw, so a renderer that hangs, or goes by a path nobody listed, would otherwise hold its PTY paused for good, freezing the program and every Client's stream with it. Failing open costs one high watermark of throughput per watchdog period instead, and any acknowledgement, however slow, restarts the clock, so a live renderer never trips it.
+
 **Why every stop resumes.** node-pty finishes a kill by reading: on Windows the ConPTY worker is disposed on the next data event, and a paused socket never delivers one.
 
 ## Paced input
