@@ -54,15 +54,6 @@ interface Known {
 
 const KNOWN: readonly Known[] = [
   {
-    key: 'invariant: Engagement: user input opens the echo window',
-    seed: 22,
-    events: [{ k: 'key' }],
-    expected: 'the echo window Open after a keystroke',
-    got: "echo window shut after input on { k: 'key' }",
-    side: 'code',
-    why: "`onWrite` acknowledges before `streamEntry` creates the entry for `expectWork`, so the first keystroke on a Session that has emitted nothing opens no echo window, and its echo may count as output. Only before a generation's first output; one candidate chunk at most.",
-  },
-  {
     key: 'invariant: Pane Header: a helper never rings or holds',
     seed: 100_868,
     events: [{ k: 'present', viewer: 'V1', focus: 'S' }, { k: 'report', source: 'OSC 9' }, { k: 'leave', viewer: 'V1' }, { k: 'helper', on: true }, { k: 'wait', ms: 1_000 }],

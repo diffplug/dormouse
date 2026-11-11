@@ -410,9 +410,12 @@ export class AlertManager {
    * send` or a launch as much as a keystroke (`QuiesceDetector.expectWork`).
    */
   onWrite(id: string, data: string, { userInput = false }: { userInput?: boolean } = {}): void {
+    // Same reasoning as `onData`: the first keystroke can beat any output. The
+    // entry comes first, since acknowledging creates none and the echo window
+    // it opens must cover that keystroke's echo too.
+    const entry = inputCanStartWork(data, { userInput }) ? this.streamEntry(id) : null;
     if (userInput) this.acknowledge(id, { input: true });
-    // Same reasoning as `onData`: the first keystroke can beat any output.
-    if (inputCanStartWork(data, { userInput })) this.streamEntry(id)?.detector.expectWork();
+    entry?.detector.expectWork();
   }
 
   // --- WATCHING rule set ---

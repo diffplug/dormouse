@@ -397,6 +397,14 @@ describe('echo window', () => {
     handle.cancel();
   });
 
+  it('opens on the first keystroke into a Session that has printed nothing yet', () => {
+    press(manager, PANE);
+    vi.advanceTimersByTime(5);
+    manager.notifyFromProtocol(PANE, BELL);
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+  });
+
   it('counts output once the window has passed', () => {
     manager.setWatchedCommands(['claude']);
     runCommand(manager, PANE, 'claude');
