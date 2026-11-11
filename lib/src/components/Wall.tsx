@@ -2119,6 +2119,8 @@ export function Wall({
       acknowledgeSession(id);
     },
     onEnterPanel: (id: string) => {
+      // A parked (minimized) page can still take focus; it is no pane to enter.
+      if (!nav.hasPane(id)) return;
       setConfirmKill(null);
       enterPassthrough(id);
     },
@@ -2488,13 +2490,15 @@ export function Wall({
   // adoption): passthrough → enter the leaf if selection differs;
   // command → move selection onto it.
   const onLeafFocused = useCallback((id: string) => {
+    // A parked (minimized) leaf's page can still focus itself; it is no pane to select.
+    if (!nav.hasPane(id)) return;
     if (modeRef.current === 'passthrough') {
       // The embed moved DOM focus; no human gesture reached this Session.
       if (selectedIdRef.current !== id) enterPassthrough(id);
       return;
     }
     if (selectedTypeRef.current !== 'pane' || selectedIdRef.current !== id) selectPane(id);
-  }, [enterPassthrough, selectPane]);
+  }, [nav, enterPassthrough, selectPane]);
 
   // Stable so LathHost's sash-drag effect never re-subscribes on a Wall re-render.
   const onCommitResize = useCallback((splitPath: number[], boundary: number, deltaPx: number) => {
