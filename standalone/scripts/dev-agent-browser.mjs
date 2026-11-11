@@ -188,14 +188,8 @@ const invokeMap = {
       if (minted !== null) ids.workspace = Math.max(ids.workspace, minted + 1);
     }
     if (ids.workspace !== seeded) await saveIds().catch((error) => console.error(`[ids] ${error}`));
-    const next = JSON.stringify(entries ?? []);
-    if (next === registryEntries) return null;
-    registryEntries = next;
-    registryRevision += 1;
-    broadcast('sidecar', { event: 'dormouse://workspaces', data: registrySnapshot() });
     return null;
   },
-  workspace_registry: () => registrySnapshot(),
 };
 
 // The next Workspace and Surface numbers, persisted before any is handed out as
@@ -237,16 +231,6 @@ async function reserve(kind, count, floor = 0) {
   }
   const idFor = kind === 'surface' ? surfaceIdFor : workspaceIdFor;
   return Array.from({ length: n }, (_, i) => idFor(first + i));
-}
-let registryEntries = '[]';
-let registryRevision = 0;
-function registrySnapshot() {
-  const workspaces = JSON.parse(registryEntries).map((entry) => ({
-    id: entry.id,
-    name: entry.name,
-    active: Boolean(entry.active),
-  }));
-  return { revision: registryRevision, windows: [{ label: HARNESS_WINDOW, workspaces }] };
 }
 
 async function readJson(req) {

@@ -8,13 +8,7 @@ import {
 } from "dormouse-lib/lib/workspace-store";
 import { mintSurfaceId, resetSurfaceIdPool } from "dormouse-lib/lib/surface-ids";
 import type { PersistedSession, PersistedWindow } from "dormouse-lib/lib/session-types";
-import {
-  acceptRegistrySnapshot,
-  getRegistrySnapshot,
-  installWorkspaceRegistry,
-  resetWorkspaceRegistry,
-  type WorkspaceRegistrySnapshot,
-} from "./workspace-registry";
+import { installWorkspaceRegistry } from "./workspace-registry";
 
 function host(report?: () => Promise<unknown>) {
   const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>): Promise<unknown> => {
@@ -33,18 +27,11 @@ function host(report?: () => Promise<unknown>) {
         surfaces: Array.from({ length: Number(args?.surfaces) }, (_, i) => `surface:${first + i}`),
       };
     }
-    if (cmd === "workspace_registry") return { revision: 3, windows: [{ label: "main", workspaces: [] }] };
     if (cmd === "workspace_report") return report?.() ?? null;
     return null;
   });
-  let push: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
   return {
     invoke: invoke as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>,
-    onSnapshot: (handler: (snapshot: WorkspaceRegistrySnapshot) => void) => {
-      push = handler;
-      return () => { push = null; };
-    },
-    push: (snapshot: WorkspaceRegistrySnapshot) => push?.(snapshot),
     reports: () => invoke.mock.calls.filter(([cmd]) => cmd === "workspace_report").map(([, args]) => args?.entries),
   };
 }
@@ -53,7 +40,6 @@ describe("workspace registry", () => {
   let uninstall: (() => void) | null = null;
   beforeEach(() => {
     resetWorkspaces();
-    resetWorkspaceRegistry();
   });
   afterEach(() => {
     uninstall?.();
@@ -97,7 +83,7 @@ describe("workspace registry", () => {
     expect(generateWorkspaceId()).toBe("workspace:50");
     await Promise.resolve();
     // The boot report: the store as it stood at install.
-    expect(h.reports()).toEqual([[{ id: "workspace:1", name: "Workspace 1", active: true }]]);
+    expect(h.reports()).toEqual([[{ id: "workspace:1", name: "Workspace 1" }]]);
 
     const created = createWorkspace({ name: "build" });
     renameWorkspace(created.id, "docs");
@@ -106,21 +92,13 @@ describe("workspace registry", () => {
     // Three mutations in one task: one report, with the final state.
     expect(h.reports()).toHaveLength(2);
     expect(h.reports()[1]).toEqual([
-      { id: "workspace:1", name: "Workspace 1", active: false },
-      { id: "workspace:51", name: "docs", active: true },
+      { id: "workspace:1", name: "Workspace 1" },
+      { id: "workspace:51", name: "docs" },
     ]);
-  });
-
-  it("takes the host's snapshot at install and drops one older than it holds", async () => {
-    const h = host();
-    uninstall = await installWorkspaceRegistry(h, null);
-    expect(getRegistrySnapshot().revision).toBe(3);
-    h.push({ revision: 2, windows: [] });
-    expect(getRegistrySnapshot().revision).toBe(3);
-    h.push({ revision: 4, windows: [{ label: "ws-2", workspaces: [{ id: "workspace:9", name: "n", active: true }] }] });
-    expect(getRegistrySnapshot().windows[0].label).toBe("ws-2");
-    acceptRegistrySnapshot({ revision: 4, windows: [] });
-    expect(getRegistrySnapshot().windows).toEqual([]);
+    // A switch changes nothing the host routes by.
+    setActiveWorkspace("workspace:1");
+    await Promise.resolve();
+    expect(h.reports()).toHaveLength(2);
   });
 
   it('retries a failed report on the next store notification with the same final entries', async () => {

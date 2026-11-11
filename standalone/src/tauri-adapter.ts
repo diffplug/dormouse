@@ -47,7 +47,7 @@ import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { listenToWindow } from "./window-label";
-import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
+import { installWorkspaceRegistry } from "./workspace-registry";
 import { withTimeout } from "./with-timeout";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
@@ -286,8 +286,6 @@ export class TauriAdapter implements PlatformAdapter {
     // the block this reserves (docs/specs/standalone.md → "Workspace registry").
     this.unlistenFns.push(await installWorkspaceRegistry({
       invoke: (cmd, args) => rawInvoke(cmd, args),
-      onSnapshot: (handler) =>
-        listenToWindow<WorkspaceRegistrySnapshot>("dormouse://workspaces", (event) => handler(event.payload)),
     }, this.windowSlot.read()));
   }
 

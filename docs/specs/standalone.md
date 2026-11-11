@@ -132,7 +132,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 ### Workspace registry
 
-**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list on every change, and the union is broadcast as `dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
+**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list of ids and names on every change; only Rust reads the union.
 
 - **Must mint numbered ids only in Rust**, `workspace:<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`; at boot `boot_reserve_ids`, the Surface block in the same write) so a create mints synchronously; an id never renumbers and never collides across windows. Window labels and Surface ids (`surface_reserve_ids`; `docs/specs/transport.md` → "Surface ids") come off app-wide counters of their own.
 - **Must persist the Workspace and window counters as the Surface counter persists** (`docs/specs/transport.md` → "Surface ids"), all three high-water marks in `<state root>/ids.json`. **Must hand out a window label even when the write fails**, from memory (rationale).
