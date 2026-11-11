@@ -1001,8 +1001,8 @@ fn finish_window_close(app: &AppHandle, label: &str) {
 
 /// Kill the PTYs a window left behind, and drop their Sessions' alert entries
 /// with them: no window will ever show those Sessions again. A kill, not the
-/// graceful stop: an interactive shell ignores that one's POSIX signal, and
-/// nothing owns these PTYs to send another.
+/// graceful stop: no window is left to wait for that stop's acknowledgement,
+/// and one still tearing down owns its PTYs through `pty_graceful_kill`.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its

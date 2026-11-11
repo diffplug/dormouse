@@ -2118,14 +2118,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     if (requestId !== undefined) send('interruptDone', { requestId });
   }
 
-  /**
-   * Stop `ids` with the platform's shutdown request and wait for their exits.
-   *
-   * Always an explicit set, never a blanket kill: one window of several tears
-   * down alone, and killing a sibling's terminals is unrecoverable. The host
-   * names the window's own PTYs (`pty_graceful_kill` in
-   * standalone/src-tauri/src/lib.rs).
-   */
   /** How long the acknowledgement waits, after the deadline's SIGKILL, for a
    *  killed target's exit. node-pty reports one when its master socket closes,
    *  and on Linux a child still holding the PTY's slave keeps it open until
@@ -2134,6 +2126,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    *  24.04, node-pty 1.2.0-beta.18, 2026-11-10). Must stay above that fallback. */
   const SIGKILL_EXIT_WAIT_MS = 500;
 
+  /**
+   * Stop `ids` with the platform's shutdown request and wait for their exits.
+   *
+   * Always an explicit set, never a blanket kill: one window of several tears
+   * down alone, and killing a sibling's terminals is unrecoverable. The host
+   * names the window's own PTYs (`pty_graceful_kill` in
+   * standalone/src-tauri/src/lib.rs).
+   */
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));

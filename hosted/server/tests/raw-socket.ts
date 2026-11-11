@@ -14,8 +14,8 @@ const CLOSE = 0x8;
  * status and headers.
  *
  * Bare, because a WHATWG or `ws` socket fires `close` only once the server
- * drops TCP, and for a hibernatable socket the room closes from another
- * socket's event workerd drops it only when the Durable Object goes idle, about
+ * drops TCP. A hibernatable socket the room closes from another socket's
+ * event is dropped by workerd only when the Durable Object goes idle, about
  * ten seconds on. The room's contract is the close frame, which this reports
  * the moment it arrives.
  */
