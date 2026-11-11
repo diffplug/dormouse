@@ -186,6 +186,10 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: SpawnPtyOptions): void {
+    // A spawn over a live id stops the displaced generation: only the current
+    // one speaks for the id, so its pending output and exit never arrive.
+    this.activeTimers.get(id)?.forEach(clearTimeout);
+    this.activeTimers.delete(id);
     // A new generation starts its alert state over, from what a cold restore
     // persisted, as every host's spawn does.
     this.alertHost.respawn(id, options?.alert);

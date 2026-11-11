@@ -153,12 +153,7 @@ const DIFFERENCES: { [O in Owner]?: { [C in CaseId]?: { expect: unknown; why: st
   },
 };
 
-const KNOWN: Array<{ owner: Owner; case: CaseId; why: string }> = [
-  {
-    owner: "fake", case: "respawn",
-    why: "spawnPty over a live id replaces activeTimers without clearing the displaced scenario's timers, which still emit its output and exit under the id (fake-adapter.ts playScenario); pty-core stops the displaced PTY and drops both",
-  },
-];
+const KNOWN: Array<{ owner: Owner; case: CaseId; why: string }> = [];
 
 /** Register the lifecycle cases for `owner`, opening a fresh harness for every test. */
 export function ptyLifecycleContract(owner: Owner, open: () => OwnerHarness): void {

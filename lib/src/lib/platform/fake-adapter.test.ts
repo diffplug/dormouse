@@ -408,6 +408,19 @@ describe('FakePtyAdapter', () => {
     expect(exitEvents).toEqual([{ id: 't1', exitCode: 1 }]);
   });
 
+  it('a spawn over a live id drops the displaced scenario\'s output and exit', () => {
+    const { adapter, dataEvents, exitEvents } = createAdapter();
+    adapter.setDefaultScenario(exitScenario);
+    adapter.spawnPty('t1');
+    adapter.setDefaultScenario(twoChunkScenario);
+    adapter.spawnPty('t1');
+
+    vi.advanceTimersByTime(10000);
+
+    expect(dataEvents.map((event) => event.data)).toEqual(['first', 'second']);
+    expect(exitEvents).toEqual([]);
+  });
+
   it('scenario without exitCode does not fire onPtyExit', () => {
     const { adapter, exitEvents } = createAdapter();
     adapter.setDefaultScenario(twoChunkScenario);
