@@ -52,7 +52,9 @@ import {
   PAIRING_DENIAL_MESSAGES,
   PASSKEY_UNAVAILABLE_MESSAGE,
   PRESENCE_CHALLENGE_MISMATCH_MESSAGE,
+  POCKET_API_TIMEOUT_MS,
   PocketClient,
+  RELAY_NO_ANSWER_MESSAGE,
   SessionExpiredError,
   SessionSupersededError,
   SetupTokenInvalidError,
@@ -1876,6 +1878,22 @@ describe('the session across launches', () => {
 
     expect(relaunch(storage).client.sessionToken).toBeNull();
     expect(storage.getSession()).toBeNull();
+  });
+
+  it('fails a request the Relay never answers, rather than waiting on it', async () => {
+    // Pocket holds every control while a request is out.
+    const storage = memoryStorage();
+    storage.setSession(stored);
+    const timers = fakeTimers();
+    const stalled: typeof fetch = (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+    });
+    const { client } = makeClient({}, { storage, now: () => NOW, fetch: stalled, setTimer: timers.setTimer });
+
+    const listed = client.listBurrows();
+    timers.fireAt(POCKET_API_TIMEOUT_MS);
+
+    await expect(listed).rejects.toThrow(RELAY_NO_ANSWER_MESSAGE);
   });
 
   it('is cleared from storage by the session gate 401', async () => {
