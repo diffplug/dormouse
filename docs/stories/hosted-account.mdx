@@ -10,13 +10,9 @@ Follow the browser side of Hosted: arrive, sign in, connect another sign-in meth
 
 > `docs/specs/hosted.md` → “Identity and login”, “Interface”, and “Terms acceptance” are the references when changing these screens.
 
-## Arrive before launch
+## Arrive
 
-A signed-out visitor currently meets “Coming soon” and is redirected to Dormouse’s email signup. The same gate applies to an enrollment link opened without an existing login. This screen is part of the current journey, even though it interrupts enrollment.
-
-<Canvas of={SignIn.ComingSoon} />
-
-An invited tester can open `/login?signin` to reach sign-in. The server still limits production sign-in to its configured allowlist. The available provider buttons depend on the deployment; email sign-in is also available.
+A signed-out visitor meets the sign-in form. The available provider buttons depend on the deployment; email sign-in is also available.
 
 <Canvas of={SignIn.Providers} />
 
@@ -26,7 +22,7 @@ Enter an email address, send the code, then enter it on the same page. “I alre
 
 <Canvas of={SignIn.CodeEntry} />
 
-A rejected code leaves the form available to correct and retry. A refused pre-launch address currently receives the same generic failure message; the page does not explain the allowlist.
+A rejected code leaves the form available to correct and retry.
 
 <Canvas of={SignIn.CodeRejected} />
 

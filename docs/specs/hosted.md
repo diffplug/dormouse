@@ -37,15 +37,13 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. No merge, email adoption, unlink, or account-recovery interface exists.
 
-**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exceptions: `ADMIN_EMAIL` ("Entitlement") and `SIGN_IN_ALLOWLIST` (below).
-
-**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on any read but a provider callback or the CSRF challenge, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`, the page is `/checkout`, `/billing`, or `/closed`, or the account lookup failed. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
+**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: `ADMIN_EMAIL` ("Entitlement").
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
 **Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter. Cookie reads: `docs/specs/security-hosted.md` -> "Origin boundary".
 
-Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`; `prelaunchAuth` in `hosted/server/prelaunch.ts`.
+Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`.
 
 ## Interface
 
@@ -162,7 +160,7 @@ Errors are JSON `{ message }`; it needs no entitlement and works with billing cl
 - **Never answer a checkout URL for an account gone or under a hold younger than `CLOSING_HOLD_MINUTES`**: checked once it opened, the checkout is expired (409 `ACCOUNT_CLOSING`).
 - **Must end, and refund as closing does, a subscription the webhook finds current for an owner with no `"user"` row**, recorded unsettled on its closure first; a failed end fails the event.
 - **Must then refund what closing owes** (`docs/specs/pricing.md` -> "Checkout and entitlement"): a first payment while `purchaseStanding` counts the end a refund, a yearly or founding renewal paid within `REFUND_DAYS` of it. The closure is stamped settled once done, as a withdrawal is ("Billing").
-- **Must land a closed account on `/closed` on this origin**, signed out and without the pre-launch notice; a login there goes to `/account`. What it says: `docs/specs/pricing.md` -> "Checkout and entitlement".
+- **Must land a closed account on `/closed` on this origin**, signed out; a login there goes to `/account`. What it says: `docs/specs/pricing.md` -> "Checkout and entitlement".
 
 Source of truth: `closureRoutes`, `accountClosing`, and `endAfterClosure` in `hosted/server/closure.ts`; `CloseAccount` and `AccountClosed` in `hosted/src/Closure.tsx`.
 
@@ -315,8 +313,6 @@ sequenceDiagram
   end
 ```
 
-The pre-launch sign-in gate is "Identity and login".
-
 Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The verification link points to the account's `/enroll` page, with the user code in its fragment and voice purpose in its query. `redeemed` names the Burrow whose answer was lost; 409 names the account page at the abuse ceiling `MAX_BURROWS_PER_ACCOUNT` (`docs/specs/pricing.md` -> "Checkout and entitlement").
 
 - **Never write from begin.** The device code is 32 bytes, the bearer shape, which a Burrow holds opaque: its expiry in its leading bytes, then random bytes, then the tag `signEnrollDeviceCode` writes. The tag and the user code (`enrollUserCode`) are under `RELAY_ENROLL_SECRET` for remote enrollment, or that secret suffixed with `:voice` for managed voice (rationale). The confirmation digits are `enrollConfirmDigits` of the user code under `RELAY_ENROLL_SECRET`; the link carries the user code, never the digits.
@@ -418,6 +414,5 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 **Scope: hosted-launch** — in order:
 
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
-2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
+2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery. Revisit the fixed 24-hour login lifetime for daily voice use.
 3. Managed voice for every member: per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, and explicit text/redaction disclosure.
-4. Open sign-in: delete `hosted/server/prelaunch.ts` and the frontend's pre-launch notice.

@@ -22,7 +22,6 @@ import {
 } from "./oauth-server";
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../entitlement";
-import { PRELAUNCH_REFUSAL, SIGN_IN_ALLOWLIST } from "../prelaunch";
 import {
   CRON_SWEEP_CAP,
   SPEECH_SWEEP_CAP,
@@ -673,7 +672,15 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   };
   for (const sameSite of SAME_SITE)
     expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
-  await browser.email(SIGN_IN_ALLOWLIST[1]);
+  // A body past the adapter's cap is refused before anything parses it.
+  const oversized = await browser.post("email-otp/send-verification-otp", {
+    email: "member@example.test",
+    type: "sign-in",
+    padding: "x".repeat(16 * 1024),
+  });
+  expect(oversized.status).toBe(413);
+  // Production signs in any address.
+  await browser.email("member@example.test");
   // A same-site page carries the login cookie to the login reads; only the
   // account's own page may make them, and a refusal leaves the login alone.
   for (const sameSite of SAME_SITE)
@@ -701,83 +708,6 @@ test("same-site requests fail, the sibling Workers' included; production exclude
     'ALTER TABLE "session" DROP COLUMN "emailAuthenticated"',
   );
   expect((await browser.request("/api/ready")).status).toBe(503);
-});
-
-test("pre-launch, production signs in only the allowlist's verified emails", async ({
-  onTestFinished,
-}) => {
-  const f = await fixture(true, "github");
-  onTestFinished(f.close);
-  for (const address of SIGN_IN_ALLOWLIST) {
-    const listed = f.browser();
-    await listed.email(address.toUpperCase());
-    expect((await listed.session())!.user.email).toBe(address);
-  }
-  const stranger = f.browser();
-  const refused = await stranger.post("email-otp/send-verification-otp", {
-    email: "stranger@example.test",
-    type: "sign-in",
-  });
-  expect(refused.status).toBe(403);
-  expect(await refused.json()).toEqual({ message: PRELAUNCH_REFUSAL });
-  // A body past the adapter's cap is refused before the gate parses it.
-  const oversized = await stranger.post("email-otp/send-verification-otp", {
-    email: "stranger@example.test",
-    type: "sign-in",
-    padding: "x".repeat(16 * 1024),
-  });
-  expect(oversized.status).toBe(413);
-  expect(
-    (
-      await stranger.post("sign-in/email-otp", {
-        email: "stranger@example.test",
-        otp: "00000000",
-      })
-    ).status,
-  ).toBe(403);
-  expect(
-    await queryDatabase(f.database.url, 'SELECT 1 FROM "user" WHERE email = $1', [
-      "stranger@example.test",
-    ]),
-  ).toHaveLength(0);
-  // A provider login lands, then is deleted before its first use, as is one
-  // claiming a listed address unverified.
-  for (const profile of [
-    { email: "stranger@example.test" },
-    { email: ADMIN_EMAIL, verified: false },
-  ]) {
-    const browser = f.browser();
-    await browser.oauth("github", profile);
-    expect(await browser.session()).toBeNull();
-    expect(
-      (await browser.request("/api/voice")).status,
-    ).toBe(401);
-  }
-  const unlisted = () =>
-    queryDatabase(
-      f.database.url,
-      `SELECT 1 FROM "session" s JOIN "user" u ON u.id = s."userId"
-        WHERE NOT (u."emailVerified" AND u.email = ANY($1))`,
-      [SIGN_IN_ALLOWLIST],
-    );
-  // Every read the page could make takes the lookup first, not only the two
-  // the adapter serves today.
-  for (const [n, path] of ["/api/auth/list-sessions", "/api/auth/account-info"].entries()) {
-    const browser = f.browser(`203.0.113.${20 + n}`);
-    await browser.oauth("github", { email: "stranger@example.test" });
-    expect(await unlisted(), path).not.toHaveLength(0);
-    await browser.request(path);
-    expect(await unlisted(), path).toHaveLength(0);
-  }
-  // A connection an unlisted login starts (a POST, never looked up) completes
-  // on the open callback, attaching an identity its starter controls to its
-  // own unlisted account, and still leaves it signed out and unable to act.
-  const linking = f.browser("203.0.113.30");
-  await linking.oauth("github", { email: "stranger@example.test" });
-  await linking.oauth("github", { email: "second@example.test", subject: "67890" }, true);
-  expect(await linking.session()).toBeNull();
-  expect((await linking.request("/api/voice")).status).toBe(401);
-  expect(await unlisted()).toHaveLength(0);
 });
 
 test("the relay and voice are ready only while their own roles hold the grants their lookups need", async ({

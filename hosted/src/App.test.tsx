@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// @vitest-environment-options {"url":"https://hosted.example.test/login?signin"}
+// @vitest-environment-options {"url":"https://hosted.example.test/login"}
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +45,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   vi.resetAllMocks();
-  history.replaceState(null, "", "/login?signin");
+  history.replaceState(null, "", "/login");
   sessionStorage.clear();
   localStorage.clear();
   vi.mocked(api.getSession).mockResolvedValue(null);

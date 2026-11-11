@@ -14,8 +14,7 @@ import { workerApp } from "./worker-app";
  * terms acceptance, Natural Voice on or off, the Relay's account routes, the
  * admin's metrics, the frontend, billing, account closure, and the founders
  * row. The production and preview entries differ in their mail (`fetchAuth`'s
- * and `mail`), in `bindings`, in production's pre-launch gate around
- * `fetchAuth`, and in the preview's inbox routes (`configure`).
+ * and `mail`), in `bindings`, and in the preview's inbox routes (`configure`).
  */
 export function accountApp(
   fetchAuth: (
@@ -36,8 +35,7 @@ export function accountApp(
     routes(app) {
       configure?.(app);
       // The packed adapter's own cap, applied here too so nothing that wraps
-      // `fetchAuth` (production's pre-launch gate parses a POST's body) reads
-      // more than the adapter would accept.
+      // `fetchAuth` reads more than the adapter would accept.
       app.all("/api/auth/*", smallBody(16 * 1024), (c) =>
         c.req.method !== "POST" &&
         !openAuthRead(c.req.path) &&

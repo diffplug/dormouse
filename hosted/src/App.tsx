@@ -45,7 +45,7 @@ import {
   type Plan,
 } from "../server/policy-constants";
 import { useDocsThemedBody } from "dormouse-lib/site/docs-paint";
-import { HostedPage, SUBSCRIBE_URL, type View } from "./HostedPage";
+import { HostedPage, type View } from "./HostedPage";
 import type { BillingSummary } from "../server/billing-summary";
 import { forgetCheckout, type CheckoutIntent } from "./billing";
 import { takeEnrollment, type Enrollment } from "./enrollment";
@@ -56,11 +56,9 @@ import {
   keepRead,
   pageError,
   pendingEnd,
-  preLaunchNotice,
   reread,
   settle,
   type AccountState,
-  type Lookup,
   type Notice,
   type PageError,
   type Pending,
@@ -89,14 +87,6 @@ async function recordContinued() {
   await acceptTerms(version);
   sessionStorage.removeItem(CONTINUED_KEY);
 }
-
-// Pre-launch: a signed-out visitor is sent to Dormouse's email signup
-// instead of the sign-in form; `/login?signin` still opens it, as does a
-// failed provider callback's `?error`, which only a sign-in started there
-// reaches, so its message shows. Delete this, and its use below, at launch.
-const SUBSCRIBE_REDIRECT_MS = 4000;
-const SIGN_IN_PARAMS = new URLSearchParams(location.search);
-const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error");
 
 /** The address bar's path for each page past enrollment. */
 const VIEW_PATHS: Record<View, string> = { account: "/account", checkout: "/checkout", billing: "/billing", closed: "/closed" };
@@ -153,7 +143,6 @@ export function App({
     setEnrollingState(next);
   };
   const [loading, setLoading] = useState(true);
-  const [lookup, setLookup] = useState<Lookup>("pending");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState<PageError | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -178,13 +167,9 @@ export function App({
   // Undefined when a newer refresh superseded this one.
   const refresh = useCallback(async (): Promise<AccountState | undefined> => {
     const generation = ++refreshGeneration.current;
-    const failed = (error: unknown): never => {
-      if (generation === refreshGeneration.current) setLookup("failed");
-      throw error;
-    };
     const [current, providers] = await asRead(
       Promise.all([getSession(), getProviders()]),
-    ).catch(failed);
+    );
     // A failed list hides its section, never the account page.
     const watched = awaited.current?.pending.userCode;
     let confirmFailed: unknown = null;
@@ -208,7 +193,7 @@ export function App({
     };
     const [linked, voice, enrolled, registered, approval, plan] = current
       ? await Promise.all([
-          asRead(getAccounts()).catch(failed),
+          asRead(getAccounts()),
           getHostedVoice().catch(() => null),
           getComputers().catch(() => null),
           getPasskeys().catch(() => null),
@@ -221,7 +206,6 @@ export function App({
     if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
     setError(confirmFailed ? pageError(confirmFailed) : afterRead);
-    setLookup(current ? "signed-in" : "signed-out");
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
@@ -294,20 +278,6 @@ export function App({
     toWithdrawRef.current = false;
     document.getElementById("withdraw")?.scrollIntoView();
   }, [loading]);
-  // A failed lookup keeps its error and Retry on screen rather than sending
-  // a member who is signed in away during an outage, even once that error is
-  // cleared (a new enrollment link, Don't approve).
-  // Checkout asks for sign-in, so it never shows the notice, and a closed
-  // account stays on the page that confirms it.
-  const comingSoon = preLaunchNotice(lookup, SIGN_IN_OPEN || view !== "account");
-  useEffect(() => {
-    if (!comingSoon) return;
-    const timer = setTimeout(
-      () => location.assign(SUBSCRIBE_URL),
-      SUBSCRIBE_REDIRECT_MS,
-    );
-    return () => clearTimeout(timer);
-  }, [comingSoon]);
   useEffect(() => {
     // A link opened in the tab already on `/enroll` changes only the fragment:
     // take its code as the first load did, without reloading. Elsewhere a
@@ -545,7 +515,7 @@ export function App({
     turnOffDialog={turnOffDialog} computers={computers} passkeys={passkeys}
     enrolling={enrolling} noPlan={noPlan} loading={loading} busy={busy} error={error} notice={notice}
     email={email} code={code} enterCode={enterCode}
-    comingSoon={comingSoon} fresh={fresh} themeControl act={act} refresh={refresh} approve={approve}
+    fresh={fresh} themeControl act={act} refresh={refresh} approve={approve}
     signOut={signOut} clearEnrollment={clearEnrollment} turnOffVoice={turnOffVoice}
     removeOne={removeOne} removeKey={removeKey} submit={submit} setEmail={setEmail}
     setCode={setCode} setEnterCode={setEnterCode} changeEmail={changeEmail}
