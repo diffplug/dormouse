@@ -1352,7 +1352,7 @@ test('agent-browser --surface drives the session the host says the surface is bo
   // No `key`: a surface-addressed session is not necessarily a managed one.
   assert.deepEqual(client.requests[1], {
     method: 'browserSurface',
-    request: { provider: 'agent-browser', key: undefined, session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
+    request: { provider: 'agent-browser', key: undefined, surface: 'surface:3', session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
   });
 });
 

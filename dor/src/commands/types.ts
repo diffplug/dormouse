@@ -577,6 +577,9 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   provider: BrowserAutomationProvider;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
+  /** The `--surface` handle the session was resolved from; routes the bind
+   *  to the Workspace holding it. */
+  surface?: string;
   session: string;
   /** The directory the command ran in. */
   cwd?: string;

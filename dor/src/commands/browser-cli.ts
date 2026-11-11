@@ -510,7 +510,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       const blank = await run([...sessionArgs, ...navigation.blank], launchEnv);
       if (blank.exitCode !== 0) return fail(`Could not prepare the playwright viewport before navigation: ${blank.stderr.trim() || `playwright exited ${blank.exitCode}`}`);
       const preparedSurface = await client.browserSurface({
-        provider: d.provider, key: flags.key, session: binding.session, cwd: cwd ?? callerCwd,
+        provider: d.provider, key: flags.key, ...surfaceParam(flags.surface), session: binding.session, cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}), ...(fresh && initialViewport ? { initialViewport } : {}),
         ...workspaceParam(flags.workspace),
       });
@@ -553,6 +553,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       await client.browserSurface({
         provider: d.provider,
         key: flags.key,
+        ...surfaceParam(flags.surface),
         session: binding.session,
         cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}),
@@ -565,6 +566,12 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     }
   }
   return result;
+}
+
+/** A `--surface` handle rides the bind so the Workspace that holds that
+ *  Surface answers it and reuses its pane, as it answered the resolve. */
+function surfaceParam(surface: string | undefined): { surface?: string } {
+  return surface === undefined ? {} : { surface };
 }
 
 function parseEmbedSize(rest: string[]): ParseResult<{ setting?: BrowserViewportRequest['setting']; json: boolean }> {
