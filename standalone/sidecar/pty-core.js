@@ -334,22 +334,18 @@ function winPathToWslMount(winPath) {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
 }
 
-// The distribution a `wsl.exe -d <distro>` pane runs, the shape the picker emits.
-function wslDistroOf(shell, args) {
-  return shellStem(shell) === 'wsl' && Array.isArray(args) && args[0] === '-d'
-    && /^[A-Za-z0-9._-]+$/.test(args[1] || '') ? args[1] : undefined;
-}
-
 // A directory a Windows pane's shell reported, as a path Windows opens: a WSL
-// shell's `/mnt/c/x` is `C:\x` and its other paths are the distro's
-// `\\wsl.localhost\<distro>\...` share; Git Bash's MSYS `/c/x` is `C:\x`.
-// Every other path passes through.
-function hostDirectory(dir, { platform, shell, wslDistro }) {
+// shell's `/mnt/c/x` is `C:\x`, Git Bash's MSYS `/c/x` is `C:\x`. A WSL
+// shell's other paths are the distro's, which only its `\\wsl.localhost`
+// share reaches, and the resolver refuses every share: `DISTRO_ONLY`. Every
+// other path passes through.
+const DISTRO_ONLY = Symbol('distro-only');
+function hostDirectory(dir, { platform, shell }) {
   if (platform !== 'win32' || typeof dir !== 'string' || !/^\/(?!\/)/.test(dir)) return dir;
   const stem = shellStem(shell);
   const drive = (stem === 'wsl' ? /^\/mnt\/([a-z])(?:\/(.*))?$/i : stem === 'bash' ? /^\/([a-z])(?:\/(.*))?$/i : null)?.exec(dir);
   if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] || '').replace(/\//g, '\\')}`;
-  return stem === 'wsl' && wslDistro ? `\\\\wsl.localhost\\${wslDistro}${dir.replace(/\//g, '\\')}` : dir;
+  return stem === 'wsl' ? DISTRO_ONLY : dir;
 }
 
 // Enable OSC 633 shell integration for shells that support reliable injection,
@@ -1759,7 +1755,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       console.error(`[pty-core] spawn replaced a live PTY under ${id}; stopping the old one`);
       try { stopPty(displaced); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
     }
-    const session = { chunks: [], chars: 0, received: 0, shell: config.shell, wslDistro: wslDistroOf(config.shell, options?.args) };
+    const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
@@ -2028,7 +2024,9 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       } else if (request.op === 'openDirectory') {
         // The resolver is the only thing that touches the path: a `stat` or
         // `realpath` here would follow a link to a share and reach its host.
-        const nativePath = await canonicalDirectory(hostDirectory(request.path, { platform, shell: sessions.get(request.id)?.shell, wslDistro: sessions.get(request.id)?.wslDistro }));
+        const hostPath = hostDirectory(request.path, { platform, shell: sessions.get(request.id)?.shell });
+        if (hostPath === DISTRO_ONLY) throw new Error('Explorer opens only a WSL directory under /mnt');
+        const nativePath = await canonicalDirectory(hostPath);
         if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {
