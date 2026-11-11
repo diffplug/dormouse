@@ -186,6 +186,15 @@ export function applyTerminalSemanticEvents(
   notifyTerminalPaneStateListeners(id);
 }
 
+/** A host's live semantic events, which may still be in flight when the
+ *  webview tears a Session down (kill and removal share a turn): a Session no
+ *  longer registered takes none, or its state would come back as a ghost
+ *  every header and the quit count read. Replay and seeding apply before a
+ *  Session registers, so they call {@link applyTerminalSemanticEvents}. */
+export function applyLiveTerminalSemanticEvents(id: string, events: TerminalSemanticEvent[]): void {
+  if (registry.has(id)) applyTerminalSemanticEvents(id, events);
+}
+
 // Reads the cursor's full rendered logical line (`prompt + command`) from the
 // terminal buffer at submit time. The store strips the prompt off the front
 // using the learned prompt shape.

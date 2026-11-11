@@ -16,7 +16,7 @@ import { setDefaultShellOpts } from '../shell-defaults';
 import { setHostShown } from '../host-shown';
 import { embedderOrigins } from '../embedder-origins';
 import {
-  applyTerminalSemanticEvents,
+  applyLiveTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { markSessionTouched } from '../terminal-store';
 import { installSurfaceIdPool, maxSurfaceNumber } from '../surface-ids';
@@ -147,7 +147,7 @@ export class VSCodeAdapter implements PlatformAdapter {
       } else if (msg.type === 'terminal:toolEvents') {
         applyLiveToolEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:semanticEvents') {
-        applyTerminalSemanticEvents(msg.id, msg.events ?? []);
+        applyLiveTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:clipboardOffer') {
         if (typeof msg.text === 'string') offerProgramCopy(msg.id, msg.text);
       } else if (msg.type === 'terminal:clientInput') {

@@ -54,6 +54,7 @@ import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/termin
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
+  applyLiveTerminalSemanticEvents,
   applyTerminalSemanticEvents,
 } from "dormouse-lib/lib/terminal-state-store";
 import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
@@ -172,7 +173,7 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       listenToWindow<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
-        applyTerminalSemanticEvents(event.payload.id, event.payload.events);
+        applyLiveTerminalSemanticEvents(event.payload.id, event.payload.events);
       }),
 
       // An OSC 52 write, offered to the copy editor; never the clipboard.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { TerminalProtocolParser } from './terminal-protocol';
 import {
+  applyLiveTerminalSemanticEvents,
   applyTerminalSemanticEvents,
   countRunningSessions,
   fillTerminalProcessCwd,
@@ -16,6 +17,7 @@ import {
   setTerminalUserTitle,
 } from './terminal-state-store';
 import { DEFAULT_IDLE_TITLE, surfaceRunsCommand, UNNAMED_PANEL_TITLE } from './terminal-state';
+import { registry, type TerminalEntry } from './terminal-store';
 
 const PROMPT = 'user@host repo % ';
 
@@ -192,6 +194,19 @@ describe('terminal semantic state store command input fallback', () => {
     submit('pane', 'echo restored');
     recordTerminalOutput('pane', `\r\n${PROMPT}`);
     expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+
+  it('does not resurrect a torn-down pane when a live semantic event arrives late', () => {
+    const title = { type: 'title' as const, title: { title: 'vim', source: 'osc0' as const, updatedAt: 1 } };
+    applyLiveTerminalSemanticEvents('pane', [title]);
+    expect(getTerminalPaneStateSnapshot().has('pane')).toBe(false);
+    registry.set('pane', {} as TerminalEntry);
+    try {
+      applyLiveTerminalSemanticEvents('pane', [title]);
+      expect(getTerminalPaneState('pane').titleCandidates.osc0?.title).toBe('vim');
+    } finally {
+      registry.delete('pane');
+    }
   });
 
   it('does not resurrect a disposed pane when a late process CWD arrives', () => {

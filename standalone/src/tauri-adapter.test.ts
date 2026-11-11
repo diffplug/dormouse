@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 // The in-process session-flush handshake and drain wrappers on TauriAdapter are
 // pure webview-side logic — they never invoke Tauri — so we only need to stub the
@@ -19,6 +19,7 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
+import { registry, type TerminalEntry } from "dormouse-lib/lib/terminal-store";
 import { TauriAdapter } from "./tauri-adapter";
 import tauriConf from "../src-tauri/tauri.conf.json";
 
@@ -377,6 +378,9 @@ describe("TauriAdapter terminal stream", () => {
     const { adapter, deliver, invoke } = await listening();
     const alerts: AlertStateDetail[] = [];
     adapter.onAlertState((detail) => void alerts.push(detail));
+    // A live event reaches only a registered Session.
+    registry.set("sem-pty", {} as TerminalEntry);
+    onTestFinished(() => { registry.delete("sem-pty"); });
 
     deliver("terminal:semanticEvents", {
       id: "sem-pty",
