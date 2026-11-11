@@ -1,2 +1,5 @@
+# Cargo resolves no crate version published less than a day ago, matching the
+# pnpm and Renovate cooldown. Cargo honors this from Rust 1.100; earlier
+# toolchains ignore it. Pinned by scripts/supply-chain-config.test.mjs.
 [registry]
 global-min-publish-age = "1 day"
