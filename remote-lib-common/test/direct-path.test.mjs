@@ -258,8 +258,8 @@ test('a queue gives frames back in arrival order, and empties on take', () => {
  */
 test('the holding queue is bounded in bytes first', () => {
   assert.equal(MAX_DIRECT_PENDING_BYTES, 4 * 1024 * 1024);
-  // A PTY emits ~1 KiB chunks uncoalesced, one per channel frame, so at the
-  // frame size terminal traffic actually has the byte cap is reached first.
+  // The Burrow joins a burst's PTY reads into frames of kilobytes, so even at
+  // 1 KiB a frame the byte cap is reached first.
   assert.ok(
     MAX_DIRECT_PENDING_FRAMES * 1024 >= MAX_DIRECT_PENDING_BYTES,
     `${MAX_DIRECT_PENDING_FRAMES} frames of 1 KiB is under the ${MAX_DIRECT_PENDING_BYTES}-byte cap`,

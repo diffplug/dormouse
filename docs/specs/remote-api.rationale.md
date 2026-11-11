@@ -60,6 +60,8 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 **Why this surfaced with inline images.** Duplicate replies were always possible — xterm core answers DA1, DA2, DSR/CPR, and XTVERSION — but a program asks those once at startup, before a phone is usually attached. ImageAddon's kitty handler replies `APC G i=<n>;OK ST` on *every* transmit unless the sender passes `q>=1`, so with a phone attached each image displayed on the laptop echoed a second `OK` into the shell's input a relay latency later, as visible junk on the prompt line.
 
+**Why reads are joined.** A PTY whose reader keeps up hands over about a line per read, and each `terminal.data` costs a JSON encode, a ChaCha20-Poly1305 pass in JavaScript, and a relay or channel frame. Sent read by read, `seq 1 1000000` (7.9 MB) was 788,891 messages: about 4 s of Burrow CPU and 202 MB on the relayed wire; joined per macrotask, 10,000 messages, about 0.6 s and 16 MB (the real `RemoteApiSession` and Noise transport, each 10-character read its own macrotask, Node 24.22, 2026-11). Joining only neighbouring output and flushing before every other message keeps the order a Client saw read by read; encoding each read alone and joining the bytes keeps the byte stream identical, a split surrogate included.
+
 ## Attach is the resize
 
 **Why a resize is a whole screen.** `SIGWINCH` makes full-screen TUIs repaint completely and shells redraw their prompt line, so the client's first screen arrives from the live stream alone and no snapshot transfer is needed. The same-size case has to be forced because xterm sends no `SIGWINCH` for a resize to the current size, leaving the client staring at an empty screen until the next output.
@@ -104,7 +106,7 @@ A queued HTTP request has no Burrow exchange to cancel. Checking its abort only 
 
 **Why only this machine.** Frames exist for Dor Tools and local dev servers. A remote page has its framing and script protections stripped by the proxy, and fronting one from a phone would add a way to reach it with no consent the Burrow can read. Starting narrow can be loosened later; the reverse would break whoever came to rely on it. A name is no evidence: `localhost` is whatever the resolver says, and a grant connects only to what it pinned.
 
-**Why a window rather than the transport's own backpressure.** The session gives a sender no drain signal on either path, and the direct path's sender queue disposes the session on overflow (`MAX_DIRECT_PENDING_BYTES`) — a terminal burst the link cannot drain (`seq 1 1000000` is 600,000 reads of at most 1 KiB, each its own message, in 3.3 s on Node 24.22.2, 2026-11) reaches it, as would one page load of a multi-megabyte bundle. A window the Client acknowledges bounds the queue on both paths alike; encoded, it sits well under the direct path's bound.
+**Why a window rather than the transport's own backpressure.** The session gives a sender no drain signal on either path, and the direct path's sender queue disposes the session on overflow (`MAX_DIRECT_PENDING_BYTES`) — a terminal burst the link cannot drain (`seq 1 1000000` is 600,000 reads of at most 1 KiB in 3.3 s on Node 24.22.2, 2026-11, joined into messages of kilobytes) reaches it, as would one page load of a multi-megabyte bundle. A window the Client acknowledges bounds the queue on both paths alike; encoded, it sits well under the direct path's bound.
 
 ## Input authority and multiple viewers
 

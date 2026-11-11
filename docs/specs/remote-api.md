@@ -145,6 +145,8 @@ Replicated, not screencast: the client renders its own xterm from the same data 
 
 **One `terminal.data` never approaches the 1 MiB application-message cap**: the owner bounds what it feeds the parser, so **both** projections plus their framing stay inside `MAX_APP_MESSAGE_LENGTH` without a rechunker on this path ([terminal-escapes.md](./terminal-escapes.md) → "Parsing location"). **A message over the cap is dropped, not truncated**, so that bound is all that keeps a Client from losing a chunk mid-stream.
 
+**An attachment's reads may join into one `terminal.data`, never reorder**: bytes unchanged, ahead of anything sent later, one chunk or well under the cap (rationale).
+
 Source of truth: `TerminalDataEvent` in `remote-lib-common/src/remote/wire.ts`, `ProcessedPtyChunk` in `lib/src/lib/processed-pty-stream.ts`, `PtyDataDetail` in `lib/src/lib/platform/types.ts`.
 
 #### Attach is the resize
@@ -396,7 +398,7 @@ Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
 ### QoS hardening (phone-first, orthogonal to the stages above)
 
-* Terminal output goes out one message per PTY read, uncoalesced, so a burst the direct path cannot drain ends the session; the remote stream should coalesce it and add a per-session byte budget with tail-drop + resync (an implicit re-attach: repaint via resize) rather than unbounded buffering on a bad link.
+* A terminal burst the direct path cannot drain ends the session; the remote stream should add a per-session byte budget with tail-drop + resync (an implicit re-attach: repaint via resize) rather than unbounded buffering on a bad link.
 * Detach on backgrounding: when the phone app/PWA loses visibility, the client detaches streams but keeps the control channel; reattach is one message.
 
 ### Open questions
