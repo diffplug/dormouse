@@ -217,6 +217,17 @@ test('a timeout kills a hung child and resolves with a distinct error', async ()
   }
 });
 
+test('an abort kills a running child and resolves at once with a distinct error', async () => {
+  const controller = new AbortController();
+  const started = Date.now();
+  const pending = spawnAndCapture(node, ['-e', 'setTimeout(() => {}, 60000)'], { timeoutMs: 30000, signal: controller.signal });
+  setTimeout(() => controller.abort(), 100);
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'ABORT_ERR');
+  assert.ok(Date.now() - started < 5000);
+});
+
 test('a command that finishes inside its timeout resolves normally', async () => {
   const result = await spawnAndCapture(node, ['-e', 'process.stdout.write("done")'], { timeoutMs: 10000 });
   assert.deepEqual(result, { ok: true, exitCode: 0, stdout: 'done', stderr: '' });

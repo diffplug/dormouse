@@ -68,7 +68,7 @@ Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor
 
 **Must release captured stdout/stderr pipes when the result settles**, including the exit-grace fallback, without terminating descendants (rationale).
 
-**An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with `SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill. **On Windows it must end the whole tree**, since a `.cmd` shim's child is `cmd.exe` and the real CLI is its descendant.
+**An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with `SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill; an aborted `signal` does the same with `ABORT_ERR`. **On Windows it must end the whole tree**, since a `.cmd` shim's child is `cmd.exe` and the real CLI is its descendant.
 
 **Must run a `.cmd`/`.bat` shim's own target, never `cmd.exe`, in a UNC cwd** (a WSL caller's), since `cmd.exe` falls back to `%SystemRoot%` there; a shim of no known shape keeps `cmd.exe`.
 
