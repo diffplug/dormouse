@@ -122,7 +122,11 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 //     cancels the press would otherwise get none from the browser.
 //   - `location`: the proxied frame's current URL. The parent converts it back
 //     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
-//     honest.
+//     honest. `nav` says how it changed: `push` (a link, `pushState`, a
+//     fragment change, or a plain load), `replace` (`replaceState`, or a
+//     reload), or `traverse` (`popstate`, a load by history traversal, or a
+//     back-forward cache restore: the page moving through its own history). A
+//     load report also carries `loaded: true`.
 //   - `open-window`: an anchor with any target but `_self` (`_blank`, `_top`,
 //     `_parent`, a named frame) or a `window.open` the single-frame renderer
 //     can't honor; the parent offers it as a new pane instead.
@@ -172,10 +176,16 @@ export function iframeShim(embedderOrigin: string): string {
     if(t==='leader'||t==='pointerdown')post(t);
     else if(t==='open-window'&&typeof d.url==='string')post(t,{url:d.url});
   },true);
-  function postLocation(){post('location',{url:String(location.href)});}
+  function postLocation(nav){post('location',{url:String(location.href),nav:nav});}
   // The document's own load, flagged: the parent takes only these as proof
-  // that the document it just loaded carries the shim.
-  function postLoaded(){post('location',{url:String(location.href),loaded:true});post('theme-request');}
+  // that the document it just loaded carries the shim. A restore from the
+  // back-forward cache is a traversal whatever the original load was.
+  function loadNav(e){
+    if(e&&e.persisted)return 'traverse';
+    try{var n=performance.getEntriesByType('navigation')[0];if(n&&n.type==='back_forward')return 'traverse';if(n&&n.type==='reload')return 'replace';}catch(_e){}
+    return 'push';
+  }
+  function postLoaded(e){post('location',{url:String(location.href),loaded:true,nav:loadNav(e)});post('theme-request');}
   function anchorHref(e){
     var n=e&&e.target;
     while(n&&n.nodeType===1){
@@ -208,7 +218,7 @@ export function iframeShim(embedderOrigin: string): string {
     // happened. A real navigation re-reports via the next document's shim, so
     // nothing is lost if this frame is torn down before the tick fires.
     var href=String(a.href);
-    setTimeout(function(){if(!e.defaultPrevented)post('location',{url:href});},0);
+    setTimeout(function(){if(!e.defaultPrevented)post('location',{url:href,nav:'push'});},0);
   },true);
   // window.open is likewise single-frame-hostile; redirect it to a new pane.
   try{window.open=function(u){
@@ -216,14 +226,16 @@ export function iframeShim(embedderOrigin: string): string {
     post('open-window',{url:url});
     return null;
   };}catch(_e){}
-  addEventListener('popstate',postLocation,true);
-  addEventListener('hashchange',postLocation,true);
+  addEventListener('popstate',function(){postLocation('traverse');},true);
+  // A traversal fires popstate before hashchange, so this repeats the URL just
+  // reported, which the parent's current entry already holds.
+  addEventListener('hashchange',function(){postLocation('push');},true);
   addEventListener('pageshow',postLoaded,true);
   var H=history;
   if(H&&H.pushState&&H.replaceState){
     var p=H.pushState,r=H.replaceState;
-    H.pushState=function(){var v=p.apply(this,arguments);setTimeout(postLocation,0);return v;};
-    H.replaceState=function(){var v=r.apply(this,arguments);setTimeout(postLocation,0);return v;};
+    H.pushState=function(){var v=p.apply(this,arguments);setTimeout(function(){postLocation('push');},0);return v;};
+    H.replaceState=function(){var v=r.apply(this,arguments);setTimeout(function(){postLocation('replace');},0);return v;};
   }
   if(document.readyState==='loading')addEventListener('DOMContentLoaded',postLoaded,{once:true});
   else setTimeout(postLoaded,0);

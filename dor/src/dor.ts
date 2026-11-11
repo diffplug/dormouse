@@ -3,7 +3,7 @@
 import { runCli } from './cli.js';
 import type { PickerTerminal } from './commands/types.js';
 
-runCli(process.argv.slice(2), { env: process.env, readStdin, terminal: ttyTerminal() }).then(
+runCli(process.argv.slice(2), { env: process.env, readStdin, stdinIsTTY: process.stdin.isTTY === true, terminal: ttyTerminal() }).then(
   (result) => {
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);

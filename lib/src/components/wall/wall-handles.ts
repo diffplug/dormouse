@@ -35,6 +35,9 @@ export interface WallHandle {
   /** A brief notice on pane `id`, else the pane the user is on: the Window's
    *  answer to a verb with nothing to act on, or one it refused. */
   showNotice(text: string, id?: string): void;
+  /** Reveal member `id` with `warning` as its own refused close does: a Door
+   *  reattaches, and the warning shows in its terminal context. */
+  revealRefusal(id: string, warning: string): void;
   /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. Returns its new id. */
   reopenSurface(record: SurfaceReopenRecord, focus: boolean): string;
   /** This Workspace's record now, with no cwd probe. */
@@ -82,7 +85,9 @@ export interface WallHandle {
   /** Close every member Surface through the closure coordinator, one at a time.
    *  Resolves null once the Wall is empty, else the first refusal's message with
    *  the Workspace left open: members closed before the refusal stay closed, with
-   *  no reopen record. `editors` are the dirty Tools whose close was consented. */
+   *  no reopen record. Its callers refuse running helper work before calling it,
+   *  so only a refusal that arises mid-walk does that. `editors` are the dirty
+   *  Tools whose close was consented. */
   closeAll(editors?: readonly string[]): Promise<string | null>;
   handleDorControl(detail: DorControlRequest): void | Promise<void>;
 }
@@ -138,6 +143,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     focusSurface: () => {},
     showMoveNotice: () => {},
     showNotice: () => {},
+    revealRefusal: () => {},
     reopenSurface: () => { throw new Error('Reopen is unavailable'); },
     serializeNow: () => ({ version: PERSISTED_SESSION_VERSION, panes: [] }),
     serializeReported: () => ({ version: PERSISTED_SESSION_VERSION, panes: [] }),

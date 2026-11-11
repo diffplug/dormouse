@@ -19,4 +19,5 @@ export default [
   // (standalone/src/updater.ts), so it is a parameterized view of the
   // changelog rather than a page of its own.
   route("changelog/after/:version", "./pages/ChangelogAfter.tsx"),
+  route("*", "./pages/NotFound.tsx"),
 ] satisfies RouteConfig;

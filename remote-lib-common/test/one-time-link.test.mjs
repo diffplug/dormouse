@@ -100,7 +100,7 @@ test('the fragment is exactly 79 characters of four positional fields', () => {
 });
 
 test('a minted URL parses back to the same link', async () => {
-  const parsed = await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN, NOW);
+  const parsed = await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN);
   assert.deepEqual(parsed, LINK);
   // Round trip: the emitter and the parser cannot drift.
   assert.equal(formatOneTimeLinkUrl(ORIGIN, parsed), EXPECTED_URL);
@@ -154,17 +154,17 @@ test('a one-time prologue equals no pairing or connection prologue over the same
 
 // --- Expiry ------------------------------------------------------------------
 
-test('a link is live through its expiry second and dead one millisecond after', async () => {
+test('a link is live through its expiry second and dead one millisecond after', () => {
   assert.equal(oneTimeLinkExpired(LINK, EXPIRY * 1000), false);
   assert.equal(oneTimeLinkExpired(LINK, EXPIRY * 1000 + 1), true);
   assert.equal(oneTimeLinkExpired(LINK, NOW), false);
-  // The parser refuses on exactly the same rule.
-  assert.ok(await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000));
-  assert.equal(await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + 1), null);
-  // Parsed at the epoch, a dead link is still a link, which is how a caller
-  // tells "expired" from "not a link".
-  const dead = await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN, 0);
-  assert.equal(oneTimeLinkExpired(dead, EXPIRY * 1000 + 1), true);
+});
+
+// The phone's clock is not the one that wrote the expiry; the Burrow and the
+// room refuse a dead link on theirs.
+test('the parser never refuses a link on its expiry value, however far behind this clock', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: EXPIRY * 1000 + 60 * 60 * 1000 });
+  assert.deepEqual(await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN), LINK);
 });
 
 // --- The length cap --------------------------------------------------------
@@ -188,7 +188,7 @@ test('the longest origin a one-time link fits still mints and parses', async () 
   assert.equal(new URL(origin).origin, origin, 'the test origin must be one a URL normalizes to itself');
   const url = formatOneTimeLinkUrl(origin, LINK);
   assert.equal(url.length, ONE_TIME_LINK_MAX_LENGTH);
-  assert.ok(await parseOneTimeLinkUrl(url, origin, NOW));
+  assert.ok(await parseOneTimeLinkUrl(url, origin));
 });
 
 test('one character more is refused at mint time and by the parser', async () => {
@@ -197,8 +197,8 @@ test('one character more is refused at mint time and by the parser', async () =>
   assert.throws(() => formatOneTimeLinkUrl(origin, LINK), /257 characters/);
   const overLong = urlOf(FIELDS, origin);
   assert.equal(overLong.length, ONE_TIME_LINK_MAX_LENGTH + 1);
-  assert.equal(await parseOneTimeLinkUrl(overLong, origin, NOW), null);
-  assert.equal(await parseOneTimeLinkUrl('x'.repeat(1_000_000), ORIGIN, NOW), null);
+  assert.equal(await parseOneTimeLinkUrl(overLong, origin), null);
+  assert.equal(await parseOneTimeLinkUrl('x'.repeat(1_000_000), ORIGIN), null);
 });
 
 test('a build bakes only a bare link-scheme origin that fits a link', () => {
@@ -252,7 +252,7 @@ test('a build bakes no origin a pairing QR cannot carry', () => {
 
 test('the parser refuses anything that is not a string', async () => {
   for (const value of [undefined, null, 42, {}, [EXPECTED_URL], new URL(EXPECTED_URL)]) {
-    assert.equal(await parseOneTimeLinkUrl(value, ORIGIN, NOW), null);
+    assert.equal(await parseOneTimeLinkUrl(value, ORIGIN), null);
   }
 });
 
@@ -273,17 +273,17 @@ test('the parser refuses a URL that is not this app, over HTTPS, on the page pat
     ['the pairing prefix', `${ORIGIN}/connect/#pair?${fragment}`],
     ['a pairing URL', `${ORIGIN}/#pair?${fragment}`],
   ]) {
-    assert.equal(await parseOneTimeLinkUrl(text, ORIGIN, NOW), null, why);
+    assert.equal(await parseOneTimeLinkUrl(text, ORIGIN), null, why);
   }
 });
 
 test('plain HTTP is accepted on a loopback host, and nowhere else', async () => {
   for (const origin of ['http://localhost:8787', 'http://127.0.0.1:8787', 'http://[::1]:8787']) {
-    const parsed = await parseOneTimeLinkUrl(urlOf(FIELDS, origin), origin, NOW);
+    const parsed = await parseOneTimeLinkUrl(urlOf(FIELDS, origin), origin);
     assert.equal(parsed?.roomId, ROOM_ID, origin);
   }
   for (const origin of ['http://evil.localhost', 'http://127.0.0.1.evil.example', 'http://hosted.example']) {
-    assert.equal(await parseOneTimeLinkUrl(urlOf(FIELDS, origin), origin, NOW), null, origin);
+    assert.equal(await parseOneTimeLinkUrl(urlOf(FIELDS, origin), origin), null, origin);
   }
 });
 
@@ -296,16 +296,16 @@ test('the fragment is four fields, no more and no fewer', async () => {
   for (const fields of [three, five]) {
     const url = urlOf(fields);
     assert.equal(url.length, EXPECTED_URL.length, `${fields.length} fields`);
-    assert.equal(await parseOneTimeLinkUrl(url, ORIGIN, NOW), null, `${fields.length} fields`);
+    assert.equal(await parseOneTimeLinkUrl(url, ORIGIN), null, `${fields.length} fields`);
   }
   // And the ordinary short and long fragments, refused on length.
-  assert.equal(await parseOneTimeLinkUrl(urlOf(FIELDS.slice(0, 3)), ORIGIN, NOW), null);
-  assert.equal(await parseOneTimeLinkUrl(`${EXPECTED_URL}.x`, ORIGIN, NOW), null);
+  assert.equal(await parseOneTimeLinkUrl(urlOf(FIELDS.slice(0, 3)), ORIGIN), null);
+  assert.equal(await parseOneTimeLinkUrl(`${EXPECTED_URL}.x`, ORIGIN), null);
 });
 
 test('the version is a literal, never negotiated', async () => {
   for (const version of ['2', '0', 'v']) {
-    assert.equal(await parseOneTimeLinkUrl(urlWithField(0, version), ORIGIN, NOW), null);
+    assert.equal(await parseOneTimeLinkUrl(urlWithField(0, version), ORIGIN), null);
   }
 });
 
@@ -316,13 +316,13 @@ test('every field is canonical base64url at its exact length', async () => {
     ['a key with a slash', 3, `${EPH_PUB.slice(0, 42)}/`],
     ['a key with a tilde', 3, `${EPH_PUB.slice(0, 42)}~`],
   ]) {
-    assert.equal(await parseOneTimeLinkUrl(urlWithField(index, value), ORIGIN, NOW), null, why);
+    assert.equal(await parseOneTimeLinkUrl(urlWithField(index, value), ORIGIN), null, why);
   }
   // A character borrowed from the roomId and given to the key keeps the
   // fragment at 79 and is still refused: each field's length is its own rule.
   const borrowed = [FIELDS[0], ROOM_ID.slice(0, 21), FIELDS[2], `${EPH_PUB}A`];
   assert.equal(urlOf(borrowed).length, EXPECTED_URL.length);
-  assert.equal(await parseOneTimeLinkUrl(urlOf(borrowed), ORIGIN, NOW), null);
+  assert.equal(await parseOneTimeLinkUrl(urlOf(borrowed), ORIGIN), null);
 });
 
 test('the expiry is ten decimal digits inside a uint32', async () => {
@@ -331,20 +331,20 @@ test('the expiry is ten decimal digits inside a uint32', async () => {
     ['hex-ish', '17000003ab'],
     ['over uint32', '9999999999'],
   ]) {
-    assert.equal(await parseOneTimeLinkUrl(urlWithField(2, expiry), ORIGIN, NOW), null, why);
+    assert.equal(await parseOneTimeLinkUrl(urlWithField(2, expiry), ORIGIN), null, why);
   }
   // Nine digits with the tenth borrowed from the key: the key is then short.
   const nine = [FIELDS[0], FIELDS[1], '170000030', `${EPH_PUB}A`];
   assert.equal(urlOf(nine).length, EXPECTED_URL.length);
-  assert.equal(await parseOneTimeLinkUrl(urlOf(nine), ORIGIN, NOW), null);
+  assert.equal(await parseOneTimeLinkUrl(urlOf(nine), ORIGIN), null);
 });
 
 test('the key must decode canonically and import as X25519', async () => {
   // 43 characters always decode to 32 bytes, so the only decode failure left is
   // a final character carrying nonzero trailing bits.
   assert.throws(() => fromBase64Url(`${EPH_PUB.slice(0, 42)}a`), /trailing bits/);
-  assert.equal(await parseOneTimeLinkUrl(urlWithField(3, `${EPH_PUB.slice(0, 42)}a`), ORIGIN, NOW), null);
+  assert.equal(await parseOneTimeLinkUrl(urlWithField(3, `${EPH_PUB.slice(0, 42)}a`), ORIGIN), null);
   // The import is the last check; Node accepts every 32-byte value, so the
   // branch is proven with a suite that refuses it.
-  assert.equal(await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN, NOW, refusing), null);
+  assert.equal(await parseOneTimeLinkUrl(EXPECTED_URL, ORIGIN, refusing), null);
 });

@@ -139,6 +139,10 @@ Two consecutive ticks, not one, because an owner is disabled before its dialog i
 
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 
+**Why the data directory is local, and on Windows a folder of its own (2026-11).** Tauri's `app_data_dir` is Windows' Roaming profile, which a domain with roaming profiles or a redirected `AppData\Roaming` copies to every computer the person signs in to: the Burrow's bearer token and Noise private key with it, so two computers ran one `burrowId` and displaced each other. `app_local_data_dir` stays on the machine, but Tauri hands that directory itself to WebView2 as its user-data folder (`EBWebView`), and `restrict_to_owner` writes a protected one-entry DACL that spreads to children, so the lock goes on a `state` folder inside it instead. On macOS and Linux the two Tauri directories are one folder (`dirs` 7: `data_local_dir` is `data_dir` on both), so nothing moved there. Existing Windows state was not migrated: there were no users yet.
+
+**Why the recovery record sits under the state root.** So a dev run's record can never reach the installed app's.
+
 **Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including a separate Burrow store. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s enrollment lives. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
 
 ## Trigger interception

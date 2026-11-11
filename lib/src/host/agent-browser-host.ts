@@ -356,11 +356,13 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
    * session's daemon up: only a launch's own steps may start one
    * (docs/specs/dor-browser.md → "agent-browser"). A session in a socket
    * directory the host does not share has no state files here, so it is
-   * refused too.
+   * refused too. The CLI is killed at the capture's bound unless the caller
+   * names one: past its own 25 s action timeout, so only a wedged daemon or
+   * CLI reaches it, and its failure frees whatever waits on the call.
    */
   async function drive(b: ProviderBinding, args: string[], options?: { timeoutMs?: number }): Promise<CliResult> {
     if (!await liveDaemon(b)) throw new Error(`agent-browser session '${b.session}' is not running`);
-    return run(b, args, options);
+    return run(b, args, { timeoutMs: options?.timeoutMs ?? CAPTURE_TIMEOUT_MS });
   }
 
   /** The browser's CDP endpoint, as `get cdp-url` run `via` names it — only
