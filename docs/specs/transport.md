@@ -277,6 +277,16 @@ Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Re
 
 Source of truth: `sliceSince` in `lib/src/host/replay-buffer.ts`; `answerForIds` in `standalone/sidecar/pty-core.js`.
 
+## Port scan destinations
+
+**Must preserve each discovered listener's bind address and derive a wildcard's numeric loopback destination before filtering the socket table to the requested process trees.** A specific listener on that destination shadows the wildcard even when its process is outside Dormouse. Linux and WSL include unowned socket-table rows in this check without returning them as owned ports.
+
+- **Must try an IPv6 wildcard's IPv6 loopback first, then IPv4 loopback**, excluding a candidate shadowed by a specific listener and excluding the IPv4 fallback when a separate IPv4 wildcard owns it. An IPv6-only socket may refuse the fallback; selection does not prove reachability or reserve ownership after the scan.
+- **Must try only IPv4 loopback for an IPv4 wildcard.**
+- **Must report no destination when all candidates are shadowed**, retaining the listener in port listings but excluding it from browser URL selection.
+
+Source of truth: `OpenPort` in `lib/src/lib/platform/types.ts`; `getOpenPortsForPids` in `standalone/sidecar/pty-core.js`.
+
 ## Port scan deadlines
 
 **Never queue a port request behind another scan**, so each request's own budget holds (rationale).

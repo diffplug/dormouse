@@ -33,13 +33,32 @@ describe('servesLoopback', () => {
 });
 
 describe('listenerUrlsByPort', () => {
-  it.each(['127.0.0.1', '::1', '0.0.0.0', '::'])(
-    'prefers a loopback-servable bind (%s) → localhost, even beside a specific one',
-    (loopbackAddr) => {
+  it.each([['127.0.0.1', '127.0.0.1'], ['::1', '[::1]'], ['0.0.0.0', '127.0.0.1'], ['::', '[::1]']])(
+    'preserves the loopback address family (%s → %s), even beside a specific bind',
+    (loopbackAddr, host) => {
       const ports = [tcp({ address: '192.168.1.5', port: 5173 }), tcp({ address: loopbackAddr, port: 5173 })];
-      expect(listenerUrlsByPort(ports)).toEqual([{ port: 5173, host: 'localhost', url: 'http://localhost:5173/' }]);
+      expect(listenerUrlsByPort(ports)).toEqual([{ port: 5173, host, url: `http://${host}:5173/` }]);
     },
   );
+
+  it('uses the host-checked IPv4 fallback when an IPv6 wildcard is shadowed', () => {
+    const wildcard = { ...tcp({ address: '::', port: 5173 }), connectAddress: '127.0.0.1' };
+    expect(listenerUrlsByPort([wildcard])).toEqual([
+      { port: 5173, host: '127.0.0.1', url: 'http://127.0.0.1:5173/' },
+    ]);
+  });
+
+  it('does not offer a wildcard whose loopback destinations are all shadowed', () => {
+    const wildcard = { ...tcp({ address: '::', port: 5173 }), connectAddress: null };
+    expect(listenerUrlsByPort([wildcard])).toEqual([]);
+    expect(listenerUrlsByPort([wildcard, tcp({ address: '192.168.1.5', port: 5173 })])[0].host).toBe('192.168.1.5');
+  });
+
+  it('selects the same numeric loopback address regardless of scan order', () => {
+    const ports = [tcp({ address: '::1', port: 5173 }), tcp({ address: '127.0.0.1', port: 5173 })];
+    expect(listenerUrlsByPort(ports)).toEqual(listenerUrlsByPort([...ports].reverse()));
+    expect(listenerUrlsByPort(ports)[0].host).toBe('127.0.0.1');
+  });
 
   it('uses the specific bound address when no loopback bind exists', () => {
     expect(listenerUrlsByPort([tcp({ address: '192.168.1.5', port: 8080 })])).toEqual([
@@ -65,7 +84,7 @@ describe('listenerUrlsByPort', () => {
 
   it('emits one entry per port even across families (dedupe)', () => {
     const ports = [tcp({ address: '127.0.0.1', port: 5173 }), tcp({ address: '::1', port: 5173 })];
-    expect(listenerUrlsByPort(ports)).toEqual([{ port: 5173, host: 'localhost', url: 'http://localhost:5173/' }]);
+    expect(listenerUrlsByPort(ports)).toEqual([{ port: 5173, host: '127.0.0.1', url: 'http://127.0.0.1:5173/' }]);
   });
 
   it('sorts entries ascending by port', () => {

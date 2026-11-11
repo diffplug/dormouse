@@ -87,7 +87,9 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `resolveToolAp
 
 ## Serving
 
-A Tool frames a port from its Session's process-tree scan while its designated command is current, which `docs/specs/security-local.md` → Dor Tool configuration audits; an OSC announcement only selects among the discovered ports. **Must recheck Tool designation and the command run after asynchronous discovery and browser startup.**
+URL selection follows `docs/specs/dor-cli.md` → Browser Open Target Resolution.
+
+A Tool frames a port owned by its Session's process tree while its designated command runs; audit: `docs/specs/security-local.md` → Dor Tool configuration. OSC announcements select among discovered ports. **Must recheck Tool designation and command run after asynchronous discovery and browser startup.**
 
 | Policy | Selection |
 | --- | --- |
