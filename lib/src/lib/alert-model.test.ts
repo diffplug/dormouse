@@ -54,15 +54,6 @@ interface Known {
 
 const KNOWN: readonly Known[] = [
   {
-    key: 'soundness: Acked: Fresh -> Yes',
-    seed: 100_006,
-    events: [{ k: 'present', viewer: 'V1', focus: 'S' }, { k: 'report', source: 'OSC 9' }, { k: 'leave', viewer: 'V1' }, { k: 'click' }],
-    expected: 'Acknowledged moves Fresh -> Yes only on a verb while Ringing or Held',
-    got: "Fresh -> Yes on { k: 'click' }, the Hold Leaving",
-    side: 'spec',
-    why: 'Leaving still holds the completion: the Hold diagram draws a verb out of Leaving, and Clearing And TODO acknowledges a verb that drops a hold. The Acked label names Held alone.',
-  },
-  {
     key: 'invariant: Engagement: user input opens the echo window',
     seed: 22,
     events: [{ k: 'key' }],

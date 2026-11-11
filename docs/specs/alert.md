@@ -294,7 +294,7 @@ stateDiagram-v2
   state "Acknowledged" as Acked {
     state "Acknowledged" as Yes
     [*] --> Fresh
-    Fresh --> Yes: a verb while Ringing or Held
+    Fresh --> Yes: a verb while Ringing, Held, or Leaving
     Yes --> Fresh: work, ring, a command start, or three minutes
   }
 ```
@@ -520,7 +520,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | a rule stops covering the `watching` key | withdraws `watching` |
 
 - **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report within three minutes and before any work only updates an existing TODO (the Acknowledged machine in Completion events; rationale).
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report within three minutes and before any work only updates an existing TODO (the Acknowledged machine; rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.

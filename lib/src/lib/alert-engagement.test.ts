@@ -272,6 +272,19 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: true });
   });
 
+  it('counts a click while the holding viewer is leaving as answering the hold, so a follow-up report never summons', () => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    leave(manager);
+    manager.acknowledge(PANE, { input: false });
+
+    manager.notifyFromProtocol(PANE, { source: 'OSC 99', title: 'Claude Code', body: 'Claude is waiting for your input' });
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE).todo).toBe(true);
+  });
+
   it.each([
     ['report', 'quiet', 'bell', (id: string) => manager.notifyFromProtocol(id, PERMISSION)],
     ['exit', 'exit', 'exit', (id: string) => { runCommand(manager, id, 'pnpm build'); finishCommand(manager, id, 0, { promptStart: true }); }],

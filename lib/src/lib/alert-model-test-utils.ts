@@ -646,7 +646,8 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
   Acked: {
     accept: {
       'Acked: [*] --> Fresh': always,
-      'Acked: Fresh --> Yes: a verb while Ringing or Held': (s) => verb(s) && (s.pre.state.Ring === 'Ringing' || s.pre.state.Hold === 'Held'),
+      'Acked: Fresh --> Yes: a verb while Ringing, Held, or Leaving': (s) => verb(s)
+        && (s.pre.state.Ring === 'Ringing' || s.pre.state.Hold === 'Held' || s.pre.state.Hold === 'Leaving'),
       'Acked: Yes --> Fresh: work, ring, a command start, or three minutes': (s) => work(s) || ringOpened(s) || s.ev.k === 'start'
         || (time(s) && s.post.now >= s.pre.ackedUntil),
     },
