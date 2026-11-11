@@ -16,7 +16,8 @@ import { BROWSER_REQUEST_TIMEOUT_MS, VIEWER_TEXT_INPUT_MAX, viewerTextInputs, ty
 
 const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn(), workspace: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
-vi.mock('./playwright-install', () => ({
+vi.mock('./playwright-install', async importOriginal => ({
+  isInstallLibrary: (await importOriginal<typeof import('./playwright-install')>()).isInstallLibrary,
   resolvePlaywrightInstall: () => ({
     binary: '/tools/playwright-cli', libraryPath: process.cwd(),
     library: { chromium: { connect: mocks.connect } },

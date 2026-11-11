@@ -156,19 +156,29 @@ function Global:prompt() {
 	}
 
 	# Prompt start (A) and cwd (P). ProviderPath is the real filesystem path even
-	# when the current location is on a PSDrive. Unescaped is not unfiltered —
-	# see __dormouse_633_safe_cwd above for why Cwd= is reduced rather than escaped.
-	$cwd = (Get-Location).ProviderPath
-	$cwd = __dormouse_633_safe_cwd $cwd
+	# when the current location is on a PSDrive. Only a FileSystem location is a
+	# directory a new pane can start in: a registry or Env: location reports none.
+	# Unescaped is not unfiltered — see __dormouse_633_safe_cwd above for why Cwd=
+	# is reduced rather than escaped.
+	$location = Get-Location
+	$cwd = $null
+	if ($location.Provider.Name -eq 'FileSystem') {
+		$cwd = __dormouse_633_safe_cwd $location.ProviderPath
+	}
 	$result += __dormouse_633_osc 'A'
 	if ($cwd) {
 		$result += __dormouse_633_osc "P;Cwd=$cwd"
 	}
 
-	# The user's prompt text, then prompt-end / input-start (B). Note: $? is always
-	# $True here because Get-* and the assignments above clobbered it, so a prompt
-	# that colors itself off $? sees success regardless. $LASTEXITCODE survives
-	# (nothing reassigns it), so starship-style prompts are unaffected.
+	# The user's prompt text, then prompt-end / input-start (B). Get-* and the
+	# assignments above set $? to $True, and prompts such as starship and
+	# oh-my-posh read $? before $LASTEXITCODE to show a failed command, so put a
+	# failure back first: Write-Error with -ErrorAction Ignore sets $? to $False
+	# without printing anything or adding to $Error. Nothing here reassigns
+	# $LASTEXITCODE.
+	if (-not $succeeded) {
+		Write-Error 'failure' -ErrorAction Ignore
+	}
 	$result += $Global:__dormouse_633_original_prompt.Invoke()
 	$result += __dormouse_633_osc 'B'
 	return $result

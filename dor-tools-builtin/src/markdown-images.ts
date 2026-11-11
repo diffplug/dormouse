@@ -43,7 +43,9 @@ export async function renameImage(root: string, from: string[], to: string[]): P
   const canonicalDir = await localRealpath(dirname(source)).then(local => local.path, () => { throw new HttpError(404); });
   if (!isInsideRoot(root, canonicalDir)) throw new HttpError(404);
   const sourcePath = join(canonicalDir, basename(source));
-  const targetPath = join(canonicalDir, name);
+  // Through `under` like the source: on Windows a `:` would name a drive or
+  // an alternate data stream of another file.
+  const targetPath = under(canonicalDir, [name]);
   const stat = await lstat(sourcePath).catch(() => { throw new HttpError(404); });
   if (!stat.isFile()) throw new HttpError(404); // a symlink is not renamed through
   if (sourcePath === targetPath) return true;

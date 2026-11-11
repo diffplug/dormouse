@@ -9,6 +9,8 @@ import { createRecoveryStore, RECOVERY_MAX_AGE_MS } from './recovery-store';
  * where another host sharing the directory can persist a fresh one.
  */
 const afterRecordRead = vi.hoisted(() => ({ hook: null as null | (() => void) }));
+/** The next `failures` renames throw `code`, as a held Windows destination does. */
+const heldRename = vi.hoisted(() => ({ code: 'EPERM', failures: 0, calls: 0 }));
 vi.mock('node:fs', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:fs')>();
   const readFileSync = ((...args: Parameters<typeof real.readFileSync>) => {
@@ -20,7 +22,15 @@ vi.mock('node:fs', async (importOriginal) => {
     }
     return result;
   }) as typeof real.readFileSync;
-  return { ...real, readFileSync, default: { ...real, readFileSync } };
+  const renameSync = ((...args: Parameters<typeof real.renameSync>) => {
+    heldRename.calls += 1;
+    if (heldRename.failures > 0) {
+      heldRename.failures -= 1;
+      throw Object.assign(new Error(heldRename.code), { code: heldRename.code });
+    }
+    return real.renameSync(...args);
+  }) as typeof real.renameSync;
+  return { ...real, readFileSync, renameSync, default: { ...real, readFileSync, renameSync } };
 });
 
 let dir: string;
@@ -38,9 +48,11 @@ beforeEach(() => {
   dir = fs.mkdtempSync(join(tmpdir(), 'dormouse-recovery-'));
   messages.length = 0;
   afterRecordRead.hook = null;
+  Object.assign(heldRename, { code: 'EPERM', failures: 0, calls: 0 });
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -99,6 +111,29 @@ describe('recovery store', () => {
 
       expect(messages.some((message) => message.startsWith('error [recovery] write failed'))).toBe(true);
       expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    });
+
+    it('lands the record through a Windows destination held for a moment', () => {
+      vi.stubGlobal('process', { ...process, platform: 'win32' });
+      for (const code of ['EPERM', 'EBUSY']) {
+        Object.assign(heldRename, { code, failures: 2, calls: 0 });
+        const store = createRecoveryStore(dir, { log });
+        store.beginCapture();
+        store.record('a', `claude --resume ${code}`);
+        expect(heldRename.calls).toBe(3);
+        expect(read().commands).toEqual({ a: `claude --resume ${code}` });
+      }
+      expect(messages.some((message) => message.startsWith('error [recovery] write failed'))).toBe(false);
+    });
+
+    it('does not retry a rename failure off Windows', () => {
+      vi.stubGlobal('process', { ...process, platform: 'linux' });
+      Object.assign(heldRename, { failures: 1 });
+      const store = createRecoveryStore(dir, { log });
+      store.beginCapture();
+      store.record('a', 'claude --continue');
+      expect(heldRename.calls).toBe(1);
+      expect(messages.some((message) => message.startsWith('error [recovery] write failed'))).toBe(true);
     });
   });
 

@@ -170,6 +170,12 @@ test('image renames stay in their folder, keep an image name, and never replace 
   assert.ok((await readdir(join(docs, 'img'))).includes('Diagram.png'));
 });
 
+test('on Windows an image rename never names a drive or an alternate data stream', { skip: process.platform !== 'win32' }, async () => {
+  const viewer = await start();
+  assert.equal((await rename(viewer, 'img/a b.png', 'img/x:y.png')).status, 404);
+  assert.deepEqual(await readdir(join(docs, 'img')), ['a b.png']);
+});
+
 test('the Markdown editor has no route that replaces an image\'s bytes', async () => {
   const viewer = await start();
   assert.equal((await send(viewer, route(viewer, 'edit/img/a%20b.png'))).status, 404);

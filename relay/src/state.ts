@@ -1,7 +1,7 @@
 /** JSON-file state stores; `docs/specs/relay.md` → "State files" owns their schemas and invariants. */
 
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
 import {
@@ -17,6 +17,7 @@ import {
 } from 'remote-lib-common';
 import type { PushSubscriptionPayload } from 'remote-lib-common';
 
+import { replaceAtomically } from './atomic-write.js';
 import { secretEquals } from './secrets.js';
 import { isSetupPassword } from './setup-password.js';
 
@@ -174,9 +175,8 @@ abstract class JsonFileStore {
    */
   protected async writeAtomic(value: unknown): Promise<void> {
     await mkdir(this.#stateDir, { recursive: true, mode: 0o700 });
-    const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(tmp, this.#path);
+    const contents = `${JSON.stringify(value, null, 2)}\n`;
+    await replaceAtomically(this.#path, (tmp) => writeFile(tmp, contents, { encoding: 'utf8', mode: 0o600 }));
     this.#cached = null;
   }
 

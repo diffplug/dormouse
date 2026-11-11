@@ -147,6 +147,16 @@ function samePath(a: string, b: string): boolean {
   return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
+/** Whether a registry entry's `playwrightLib` names `install`'s library. It is
+ *  resolved the way `libraryPath` was, because Windows spells one directory
+ *  several ways (case, an 8.3 name) and the JavaScript realpath keeps the one it
+ *  was given. */
+export function isInstallLibrary(install: PlaywrightInstall, playwrightLib: unknown): boolean {
+  if (typeof playwrightLib !== 'string') return false;
+  const real = localRealpathOrUndefined(playwrightLib);
+  return real !== undefined && samePath(real, install.libraryPath);
+}
+
 export function playwrightWorkspace(cwd: string): string | undefined {
   // A removed directory is searched from its nearest remaining ancestor: a
   // workspace above it still scopes its sessions.

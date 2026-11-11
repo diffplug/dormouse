@@ -2602,6 +2602,29 @@ struct WindowGeometry {
     height: f64,
 }
 
+/// What `<label>.geometry.json` holds. A maximized window keeps the box it had
+/// before it was maximized, so restoring it down after a relaunch lands where
+/// it was rather than on a screen-sized normal window.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+struct SavedGeometry {
+    #[serde(flatten)]
+    rect: WindowGeometry,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    maximized: bool,
+}
+
+/// The file a flush writes. The platform reports only the maximized box while
+/// a window is maximized, so the box comes from the file the last flush of the
+/// window wrote, which is the last one it had while not maximized. With no
+/// such file the maximized box is all there is.
+fn geometry_to_save(live: WindowGeometry, maximized: bool, on_disk: Option<SavedGeometry>) -> SavedGeometry {
+    let rect = match on_disk {
+        Some(on_disk) if maximized => on_disk.rect,
+        _ => live,
+    };
+    SavedGeometry { rect, maximized }
+}
+
 /// Moves and resizes arrive per frame while a window is dragged; write at most
 /// one file per window per this interval.
 const GEOMETRY_DEBOUNCE_MS: u64 = 400;
@@ -2731,7 +2754,7 @@ fn write_open_window_geometry(windows: Option<&WindowState>, dir: &Path, label: 
     Ok(true)
 }
 
-fn read_geometry(dir: &Path, label: &str) -> Option<WindowGeometry> {
+fn read_geometry(dir: &Path, label: &str) -> Option<SavedGeometry> {
     let raw = std::fs::read_to_string(geometry_path(dir, label)).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -2759,8 +2782,34 @@ fn fit_geometry(saved: WindowGeometry, min: (f64, f64), monitors: &[WindowGeomet
     fit
 }
 
-/// Every connected display in logical coordinates, the primary first.
-fn monitor_rects(app: &AppHandle) -> Vec<WindowGeometry> {
+/// The physical box a saved box came from, on a platform whose displays each
+/// have their own logical space (Windows). The box was saved as physical ÷ the
+/// scale of the display it sat on, and `monitors` measures each display in
+/// its own scale, so the box scales back by the scale of the display it
+/// overlaps most there. `None` when it overlaps none.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn physical_box(saved: WindowGeometry, monitors: &[(WindowGeometry, f64)]) -> Option<CachedRect> {
+    let overlap = |m: &WindowGeometry| {
+        let w = (saved.x + saved.width).min(m.x + m.width) - saved.x.max(m.x);
+        let h = (saved.y + saved.height).min(m.y + m.height) - saved.y.max(m.y);
+        if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
+    };
+    let (_, scale) = monitors
+        .iter()
+        .map(|(m, scale)| (overlap(m) * scale * scale, *scale))
+        .filter(|(area, _)| *area > 0.0)
+        .max_by(|a, b| a.0.total_cmp(&b.0))?;
+    let physical = |v: f64| (v * scale).round();
+    Some(CachedRect {
+        origin: (physical(saved.x) as i32, physical(saved.y) as i32),
+        size: (physical(saved.width) as u32, physical(saved.height) as u32),
+        scale,
+    })
+}
+
+/// Every connected display in logical coordinates with its scale factor, the
+/// primary first.
+fn monitor_rects(app: &AppHandle) -> Vec<(WindowGeometry, f64)> {
     let primary = app.primary_monitor().ok().flatten();
     let mut monitors = app.available_monitors().unwrap_or_default();
     if let Some(primary) = &primary {
@@ -2772,12 +2821,13 @@ fn monitor_rects(app: &AppHandle) -> Vec<WindowGeometry> {
         .iter()
         .map(|m| {
             let scale = m.scale_factor();
-            WindowGeometry {
+            let rect = WindowGeometry {
                 x: f64::from(m.position().x) / scale,
                 y: f64::from(m.position().y) / scale,
                 width: f64::from(m.size().width) / scale,
                 height: f64::from(m.size().height) / scale,
-            }
+            };
+            (rect, scale)
         })
         .collect()
 }
@@ -2840,13 +2890,14 @@ fn note_geometry(app: &AppHandle, label: &str, origin: Option<(i32, i32)>, size:
             let Some(window) = app.get_webview_window(&label) else {
                 continue;
             };
-            // Both platform reads happen here, before the lock: this thread is
+            // Every platform read happens here, before the lock: this thread is
             // not the main one, so each of them parks on the event loop
             // (`GeometryState`). A minimized window reports a nonsense box on
             // some platforms; keep the last real one instead.
             if window.is_minimized().unwrap_or(false) {
                 continue;
             }
+            let maximized = window.is_maximized().unwrap_or(false);
             // Refreshed here, and only here: the drag hit test reads the cache
             // between flushes, and a `Moved` is what follows a window crossing
             // onto a display with a different scale factor.
@@ -2854,7 +2905,8 @@ fn note_geometry(app: &AppHandle, label: &str, origin: Option<(i32, i32)>, size:
             let Some(rect) = state.refresh_rect(&label, scale) else {
                 continue;
             };
-            let Ok(json) = serde_json::to_string(&rect.to_logical()) else {
+            let saved = geometry_to_save(rect.to_logical(), maximized, read_geometry(&dir, &label));
+            let Ok(json) = serde_json::to_string(&saved) else {
                 continue;
             };
             let windows = app.try_state::<WindowState>();
@@ -2888,11 +2940,34 @@ fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
         first.and_then(|w| w.min_height).unwrap_or(0.0),
     );
     let monitors = monitor_rects(app);
-    let saved_box = |label: &str| read_geometry(dir, label).map(|saved| fit_geometry(saved, min, &monitors));
+    let logical: Vec<WindowGeometry> = monitors.iter().map(|(rect, _)| *rect).collect();
+    let saved_box = |label: &str| {
+        read_geometry(dir, label).map(|saved| SavedGeometry { rect: fit_geometry(saved.rect, min, &logical), ..saved })
+    };
+    // Maximized after the box is in place, so restoring down returns to it.
     if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
-        if let Some(geometry) = saved_box(routing::MAIN_LABEL) {
-            let _ = window.set_position(tauri::LogicalPosition::new(geometry.x, geometry.y));
-            let _ = window.set_size(tauri::LogicalSize::new(geometry.width, geometry.height));
+        if let Some(saved) = saved_box(routing::MAIN_LABEL) {
+            let geometry = saved.rect;
+            // Windows scales a logical position by the display `main` is on
+            // now, not the one the box was saved on, so place it in physical
+            // pixels; a box on no display leaves it where the config put it.
+            // A later window needs none of this: tao's creation path tries the
+            // scale of each display.
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(rect) = physical_box(geometry, &monitors) {
+                    let _ = window.set_position(tauri::PhysicalPosition::new(rect.origin.0, rect.origin.1));
+                    let _ = window.set_size(tauri::PhysicalSize::new(rect.size.0, rect.size.1));
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = window.set_position(tauri::LogicalPosition::new(geometry.x, geometry.y));
+                let _ = window.set_size(tauri::LogicalSize::new(geometry.width, geometry.height));
+            }
+            if saved.maximized {
+                let _ = window.maximize();
+            }
         }
     }
     let mut opened = 1usize;
@@ -2906,9 +2981,15 @@ fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
         }
         // An unreadable snapshot still opens its window: the webview boots
         // fresh, which is a window the user can use rather than one they lost.
-        if let Err(err) = build_window(app, label, saved_box(label)) {
+        let saved = saved_box(label);
+        if let Err(err) = build_window(app, label, saved.map(|saved| saved.rect)) {
             append_log(format!("[window] {err}"));
             continue;
+        }
+        if saved.is_some_and(|saved| saved.maximized) {
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.maximize();
+            }
         }
         opened += 1;
     }
@@ -5239,6 +5320,29 @@ mod tests {
         assert_eq!(fit_geometry(on_above, min, &[]), on_above);
     }
 
+    /// Windows gives each display its own logical space, so `main`'s saved box
+    /// goes back to physical pixels by the scale of the display it was on, not
+    /// the primary's (§Boot and geometry).
+    #[test]
+    fn a_saved_box_returns_to_physical_pixels_by_its_own_displays_scale() {
+        use super::{physical_box, CachedRect, WindowGeometry as G};
+        // A 2880x1800 panel at 150% as primary, a 1920x1080 monitor at 100%
+        // to its right: physical x 2880..4800.
+        let monitors = [
+            (G { x: 0.0, y: 0.0, width: 1920.0, height: 1200.0 }, 1.5),
+            (G { x: 2880.0, y: 0.0, width: 1920.0, height: 1080.0 }, 1.0),
+        ];
+        // Saved on the secondary at physical (3400, 100).
+        let on_secondary = CachedRect { origin: (3400, 100), size: (1200, 800), scale: 1.0 };
+        assert_eq!(physical_box(on_secondary.to_logical(), &monitors), Some(on_secondary));
+        // Saved on the primary at physical (300, 150).
+        let on_primary = CachedRect { origin: (300, 150), size: (1500, 900), scale: 1.5 };
+        assert_eq!(physical_box(on_primary.to_logical(), &monitors), Some(on_primary));
+        // On no display: no position, so `main` stays where the config put it.
+        assert_eq!(physical_box(G { x: 9000.0, y: 0.0, width: 800.0, height: 600.0 }, &monitors), None);
+        assert_eq!(physical_box(on_secondary.to_logical(), &[]), None);
+    }
+
     // RAII guard so a failing assert doesn't leak the temp dir.
     struct TempDir(PathBuf);
     impl TempDir {
@@ -6919,6 +7023,40 @@ mod tests {
         let hit = super::routing::window_at(&[moved.hit_rect("ws-2", true)], &[], (4800.0, 1000.0), macos)
             .expect("the window on the 1x display is under the cursor");
         assert_eq!((hit.label.as_str(), hit.x, hit.y), ("ws-2", 700.0, 400.0));
+    }
+
+    /// A maximized window saves the box it had before it was maximized, and
+    /// the flag that maximizes it again at boot (§Boot and geometry).
+    #[test]
+    fn a_maximized_window_keeps_its_normal_box_and_its_flag() {
+        use super::{geometry_to_save, read_geometry, SavedGeometry, WindowGeometry as G};
+        let normal = G { x: 200.0, y: 100.0, width: 900.0, height: 600.0 };
+        let maximized_box = G { x: -8.0, y: -8.0, width: 1936.0, height: 1056.0 };
+
+        // Not maximized: the live box, flag off and left out of the file.
+        let saved = geometry_to_save(normal, false, None);
+        assert_eq!(saved, SavedGeometry { rect: normal, maximized: false });
+        let json = serde_json::to_string(&saved).unwrap();
+        assert!(!json.contains("maximized"));
+
+        // Maximized: the normal box the last write left, plus the flag, and it
+        // stays that box across later maximized writes.
+        let saved = geometry_to_save(maximized_box, true, Some(saved));
+        assert_eq!(saved, SavedGeometry { rect: normal, maximized: true });
+        let saved = geometry_to_save(maximized_box, true, Some(saved));
+        assert_eq!(saved, SavedGeometry { rect: normal, maximized: true });
+        // Restored down: the live box again, flag off.
+        let moved = G { x: 300.0, ..normal };
+        assert_eq!(geometry_to_save(moved, false, Some(saved)), SavedGeometry { rect: moved, maximized: false });
+        // Maximized with nothing written before: the maximized box is all there is.
+        assert_eq!(geometry_to_save(maximized_box, true, None), SavedGeometry { rect: maximized_box, maximized: true });
+
+        // Round trip through the file; one written without the flag reads as not maximized.
+        let dir = TempDir::new("geometry-maximized");
+        fs::write(super::geometry_path(dir.path(), "ws-2"), serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(read_geometry(dir.path(), "ws-2"), Some(saved));
+        fs::write(super::geometry_path(dir.path(), "ws-3"), r#"{"x":1,"y":2,"width":300,"height":400}"#).unwrap();
+        assert_eq!(read_geometry(dir.path(), "ws-3").map(|saved| saved.maximized), Some(false));
     }
 
     /// The debounce thread's own bookkeeping. The dirty set and the flush slot
