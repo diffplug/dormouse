@@ -509,10 +509,10 @@ jobs:
           }
           "::warning::Windows PowerShell still starts slowly; the shell tests below may time out"
 
-      # The syntax gate for the two shipped PowerShell scripts, which nothing
-      # else loads; both must run on Windows PowerShell 5.1, so its parser
-      # reads them. A parse does not check that a cmdlet exists:
-      # scripts/ps1-cmdlet-lint.mjs covers the installer's names.
+      # The syntax gate for the two shipped PowerShell scripts: both must run
+      # on Windows PowerShell 5.1, so its parser reads them whole. A parse does
+      # not check that a cmdlet exists: scripts/ps1-cmdlet-lint.mjs covers the
+      # installer's names, and the step below runs its rollback functions.
       - name: Parse the PowerShell scripts
         if: runner.os == 'Windows'
         shell: powershell
