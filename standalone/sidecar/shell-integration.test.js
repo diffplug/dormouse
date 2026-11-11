@@ -351,6 +351,15 @@ test('bash: with bash-preexec loaded, its hooks run and E is the submitted line'
     assert.match(printed, /\x1b\]633;D;7\x07/);
     const { printed: counted } = await bash.run('echo "preexecs=$__user_preexecs"');
     assert.match(counted, /preexecs=4/);
+    // A line HISTIGNORE keeps out leaves `history 1`, bash-preexec's $1, naming
+    // the line before. From the DEBUG trap E still reads as the line; from the
+    // PS0 hook (bash 5.3+) that $1 is all there is.
+    if (BASH_MAJOR * 100 + BASH_MINOR < 503) {
+      await bash.run("HISTIGNORE='cd /'");
+      await bash.run('cd / && echo hi');
+      const { commands } = await bash.run('cd /');
+      assert.deepEqual(commands, ['cd /'], `bash reported ${JSON.stringify(commands)} for "cd /"`);
+    }
   } finally {
     await bash.close();
   }

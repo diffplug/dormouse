@@ -140,10 +140,10 @@ __dormouse_633_command_line() {
   return 0
 }
 
-# The submitted line (E) and the command start (C).
+# The submitted line (E) and the command start (C); $1 the line, when the caller has it.
 __dormouse_633_start() {
   __dormouse_633_ran=1
-  __dormouse_633_command_line
+  if [ $# -gt 0 ]; then __dormouse_633_out=$1; else __dormouse_633_command_line; fi
   __dormouse_633_escape "$__dormouse_633_out"
   printf '\033]633;E;%s\007' "$__dormouse_633_out"
   printf '\033]633;C\007'
@@ -171,7 +171,15 @@ if [ -n "${bash_preexec_imported:-}${__bp_imported:-}" ]; then
   # and with the command's $?. Ours go first, so A precedes what the user's
   # precmd prints and C what their preexec prints.
   __dormouse_633_bp_precmd() { __dormouse_633_report "$?"; }
-  __dormouse_633_bp_preexec() { __dormouse_633_start; }
+  # From its DEBUG trap (bash < 5.3) $BASH_COMMAND is the line's first command,
+  # which our own history reading checks, so a line history kept out is never
+  # reported as the entry before it. From its PS0 hook (5.3+) no trap runs and
+  # $BASH_COMMAND is the statement executing here; only the line bash-preexec
+  # read from history, $1, is left.
+  __dormouse_633_bp_preexec() {
+    local trapped=$BASH_COMMAND
+    if [ "$trapped" = 'local trapped=$BASH_COMMAND' ]; then __dormouse_633_start "$1"; else __dormouse_633_start; fi
+  }
   precmd_functions=(__dormouse_633_bp_precmd "${precmd_functions[@]}")
   preexec_functions=(__dormouse_633_bp_preexec "${preexec_functions[@]}")
 else
