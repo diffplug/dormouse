@@ -36,7 +36,9 @@ interface ToolFlags {
 }
 
 // A named tool waits on the same shell-integration handshake `dor ensure` does,
-// plus a `dormouse.yml` read; both are bounded well under this.
+// plus a `dormouse.yml` read; both are bounded well under this. That bounds
+// this launch only: launches share one host queue, each held until its command
+// reports, so one queued behind others can outlast it.
 export const TOOL_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
