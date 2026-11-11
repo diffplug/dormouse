@@ -1104,8 +1104,11 @@ describe('the sidecar host', () => {
       try {
         windows.onPtyEvent('data', { id: 'pty-1', data: 'x'.repeat(PTY_HIGH_WATERMARK_CHARS + 1) });
         windows.handleCommand('pty:input', { id: 'pty-1', data: '\x03' });
+        // A paced slice `pty-core` writes later, the grace long gone, resumes it again.
+        windows.onPtyEvent('data', { id: 'pty-2', data: 'x'.repeat(PTY_HIGH_WATERMARK_CHARS + 1) });
+        windows.inputWritten('pty-2');
         expect(calls.filter(({ op }) => ['pause', 'resume', 'write'].includes(op)).map(({ op, args }) => `${op} ${String(args[0])}`))
-          .toEqual(['pause pty-1', 'resume pty-1', 'write pty-1']);
+          .toEqual(['pause pty-1', 'resume pty-1', 'write pty-1', 'pause pty-2', 'resume pty-2']);
       } finally {
         windows.dispose();
       }

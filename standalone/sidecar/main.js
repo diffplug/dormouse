@@ -87,8 +87,9 @@ const mgr = create((event, data) => {
   // `sliceSince` comes from the shared bundle above rather than living in
   // pty-core, so this host and the VS Code extension host read their replay
   // buffers through one implementation. Each helper decision pty-core makes
-  // reaches the alerts, which keep a helper inert (docs/specs/alert.md).
-}, nodePty, { replay: true, sliceSince, onHelper: (id, helper) => host.alerts.setHelper(id, helper), canonicalDirectory: canonicalLocalDirectory, resolveBinary: resolveBinaryPath });
+  // reaches the alerts, which keep a helper inert (docs/specs/alert.md), and
+  // each paced slice it writes reaches the flow control, as every write does.
+}, nodePty, { replay: true, sliceSince, onHelper: (id, helper) => host.alerts.setHelper(id, helper), onInputWritten: (id) => host.inputWritten(id), canonicalDirectory: canonicalLocalDirectory, resolveBinary: resolveBinaryPath });
 
 const host = createSidecarHost({
   send,

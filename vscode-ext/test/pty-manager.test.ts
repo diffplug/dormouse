@@ -249,6 +249,11 @@ describe('output flow control', () => {
     manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
     manager.write('pane-a', '\x03');
     expect(child.send.mock.calls.map(([msg]) => msg.type)).toEqual(['spawn', 'pause', 'resume', 'input']);
+    // A paced slice the child writes after the grace resumes it again.
+    manager.spawn('pane-b');
+    manager.sentOutput('pane-b', PTY_HIGH_WATERMARK_CHARS + 1);
+    child.emit('message', { type: 'inputWritten', id: 'pane-b' });
+    expect(child.send.mock.calls.map(([msg]) => `${msg.type} ${msg.id}`).slice(-3)).toEqual(['spawn pane-b', 'pause pane-b', 'resume pane-b']);
   });
 
   it('never forks a child just to pause a PTY in one that is gone', async () => {

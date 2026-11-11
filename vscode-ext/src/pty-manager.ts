@@ -274,6 +274,9 @@ function ensureChild(extensionPath: string): ChildProcess {
     } else if (msg.type === 'exit') {
       bufferExit(msg.id, msg.exitCode);
       for (const cb of callbackSet) cb.onExit(msg.id, msg.exitCode);
+    } else if (msg.type === 'inputWritten') {
+      // A queued slice of input written late, as a paced `dor send` writes.
+      outputFlow.input(msg.id);
     } else if (msg.type === 'error') {
       log.error(`PTY error for ${msg.id}:`, msg.message);
     } else if (msg.type === 'dor:controlRequest') {

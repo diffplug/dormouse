@@ -2597,6 +2597,20 @@ test('a paused PTY whose process has gone is resumed, so node-pty reads its tail
   mgr.killAll();
 });
 
+test('each slice of paced input is reported as it is written, not when it was asked for', async () => {
+  const pty = fakePtyModule();
+  const written = [];
+  const mgr = create(() => {}, pty.module, { onInputWritten: (id) => written.push([id, Date.now()]) });
+  mgr.spawn('a');
+  const asked = Date.now();
+  mgr.write('a', 'x'.repeat(600), { paced: true });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  // 600 bytes in runs of 256: three slices, 10 ms apart.
+  assert.equal(written.length, 3);
+  assert.ok(written[2][1] - asked >= 15, `the last slice reported ${written[2][1] - asked} ms after the write`);
+  mgr.killAll();
+});
+
 test('every stop resumes a paused PTY first, since node-pty finishes its teardown by reading', () => {
   const pty = fakePtyModule();
   const mgr = create(() => {}, pty.module, { platform: 'linux', processAlive: () => true });

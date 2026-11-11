@@ -39,6 +39,13 @@ test('the recovery capture forgives each target\'s flow-control debt before its 
   assert.match(source, /interrupt:\s*async\s*\(ids\)\s*=>\s*\{\s*host\.resetPtyFlow\(ids\);\s*mgr\.interrupt\(ids\);\s*\}/);
 });
 
+test('every queued input slice pty-core writes reaches the flow control', () => {
+  // Without it a long paced `dor send` outlives the Windows grace and lands
+  // after its PTY has paused again (docs/specs/transport.md -> "Output flow
+  // control").
+  assert.match(source, /onInputWritten:\s*\(id\)\s*=>\s*host\.inputWritten\(id\)/);
+});
+
 test('iframe leases are owned by the window Rust stamps, and end with it', () => {
   // docs/specs/dor-browser.md -> "Iframe Proxy Leases": without these a closed
   // window's grants would listen until quit.

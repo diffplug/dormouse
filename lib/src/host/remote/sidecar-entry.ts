@@ -459,6 +459,9 @@ export interface SidecarHost {
   /** Forgive what `ids`' renderers owe and resume them: the quit's capture
    *  reads their output here, whether or not a window still parses it. */
   resetPtyFlow(ids: readonly string[]): void;
+  /** `pty-core` wrote a slice of input it had queued, paced input's included:
+   *  told to the flow control as every write is. */
+  inputWritten(id: string): void;
   dispose(): void;
 }
 
@@ -700,6 +703,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     allowedNetworks: () => service.allowedNetworks(),
 
     resetPtyFlow: (ids) => flow.reset(ids),
+
+    inputWritten: (id) => flow.input(id),
 
     dispose() {
       for (const stop of stops) stop();

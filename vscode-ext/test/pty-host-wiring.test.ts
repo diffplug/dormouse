@@ -33,7 +33,15 @@ describe('pty-host wiring', () => {
     // Without them pty-core opens no context directory (pty-core.js ->
     // canonicalDirectory) and spawns no shell requested by bare name on Windows.
     expect(hostSource).toMatch(/\{\s*canonicalLocalDirectory,\s*resolveBinaryPath\s*\}\s*=\s*require\('\.\.\/\.\.\/lib\/src\/host\/local-directory'\)/);
-    expect(hostSource).toMatch(/nodePty,\s*\{\s*canonicalDirectory:\s*canonicalLocalDirectory,\s*resolveBinary:\s*resolveBinaryPath\s*\}/);
+    expect(hostSource).toMatch(/nodePty,\s*\{\s*canonicalDirectory:\s*canonicalLocalDirectory,\s*resolveBinary:\s*resolveBinaryPath,/);
+  });
+
+  it('tells the extension host of each queued input slice, which it hands its flow control', () => {
+    // Without it a long paced `dor send` outlives the grace on Windows and
+    // lands after its PTY has paused again (docs/specs/transport.md ->
+    // "Output flow control").
+    expect(hostSource).toMatch(/onInputWritten:\s*\(id\)\s*=>\s*process\.send\(\{\s*type:\s*'inputWritten',\s*id\s*\}\)/);
+    expect(managerSource).toMatch(/msg\.type === 'inputWritten'\)\s*\{[^}]*outputFlow\.input\(msg\.id\)/);
   });
 
   it('hands the graceful kill the ids the extension host names', () => {

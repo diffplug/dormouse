@@ -1618,11 +1618,16 @@ function isProcessAlive(pid) {
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
 //
+// `onInputWritten(id)` hears each slice of input `write` queued (paced, or
+// behind paced input) as it is written, which can be long after the call: on
+// Windows a paused PTY must be read for input to arrive, and the host's flow
+// control decides when.
+//
 // `canonicalDirectory(path)` validates a directory to open, injected for the
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })), processAlive = isProcessAlive } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })), processAlive = isProcessAlive, onInputWritten = () => {} } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1690,6 +1695,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         // no caller to catch it and would take down every PTY in the process.
         cancelInput(id);
         return;
+      }
+      try {
+        onInputWritten(id);
+      } catch (error) {
+        console.error(`[pty-core] onInputWritten failed for ${id}:`, error.message);
       }
       // Every write paces what follows it; only paced text settles a key. An
       // unpaced step drains in the same millisecond as the paced one before
