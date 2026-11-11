@@ -111,7 +111,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 - **The plan never grants team or enterprise capability** — org accounts, SSO, SCIM, BYOT, audit export.
 - **The Hosted Relay is part of the plan, never a second purchase.** The entitlement reads it from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
-- **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
+- **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
 ### Checkout
 
