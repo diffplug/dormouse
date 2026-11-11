@@ -140,8 +140,8 @@ export function oneTimeLinkPrologue(
 }
 
 /**
- * Whether a link is past its expiry at `nowMs`. The expiry second itself is
- * still live, and the parser refuses on exactly this rule.
+ * Whether a link is past its expiry at `nowMs`, on the clock that wrote it. The
+ * expiry second itself is still live.
  */
 export function oneTimeLinkExpired(link: Pick<OneTimeLink, 'expiry'>, nowMs: number): boolean {
   return link.expiry * 1000 < nowMs;
@@ -173,17 +173,16 @@ export function formatOneTimeLinkUrl(origin: string, link: OneTimeLink): string 
  *
  * **Returns the complete link or `null` — never a partial parse**, with
  * `parsePairingInvitationUrl`'s discipline: the length cap precedes URL
- * parsing, the structural checks precede the per-field alphabets, the expiry
- * precedes the key, and the X25519 import runs last. The URL around the
+ * parsing, the structural checks precede the per-field alphabets, the expiry's
+ * shape precedes the key, and the X25519 import runs last. The URL around the
  * fragment is {@link parseLinkFragment}'s, `appOrigin` compared exactly.
  *
- * A caller that must tell an expired link from a wrong one parses at `now = 0`
- * and asks {@link oneTimeLinkExpired}.
+ * **Never refuses on the expiry's value**: the phone's clock is not the one
+ * that wrote it, and the Burrow and the room refuse a dead link on theirs.
  */
 export async function parseOneTimeLinkUrl(
   text: unknown,
   appOrigin: string,
-  now: number = Date.now(),
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<OneTimeLink | null> {
   const fragment = parseLinkFragment(text, appOrigin, ONE_TIME_LINK_SHAPE);
@@ -196,9 +195,6 @@ export async function parseOneTimeLinkUrl(
   if (!EXPIRY_PATTERN.test(expiryText)) return null;
   const expiry = Number(expiryText);
   if (expiry > MAX_UINT32) return null;
-  // Advisory on the phone — the Burrow checks its own copy at the attempt — but
-  // a dead link should fail here rather than after the Connect tap.
-  if (oneTimeLinkExpired({ expiry }, now)) return null;
 
   let ephPub: Uint8Array;
   try {

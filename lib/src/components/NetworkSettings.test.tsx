@@ -36,7 +36,6 @@ import {
   NetworkUpdates,
   PATH_REFUSAL_LABEL,
   connectionsFor,
-  policyForLevel,
   type NetworkFacts,
 } from './NetworkSettings';
 import { pathRefusalSentence } from './remote-control-shared';
@@ -220,39 +219,6 @@ describe('connectionsFor', () => {
   });
 });
 
-describe('policyForLevel', () => {
-  const network = (policy: NetworkPolicy) => networkPolicyResult(policy, 'hosted', INTERFACES);
-
-  it('allows every LAN prefix, once, when Local networks is chosen with nothing allowed', () => {
-    expect(policyForLevel(network(nothingPolicy()), 'local')).toEqual({
-      level: 'local',
-      allowed: [LAN, 'fd00:1::/64', '10.1.0.0/16'],
-      autoUpdate: false,
-    });
-  });
-
-  // A browser pane allows a network under any level, so a list holding only a
-  // VPN or virtual range says nothing about which networks phones should use.
-  it('adds the LAN prefixes beside a list that holds none of them', () => {
-    const panes = { ...nothingPolicy(), allowed: ['100.64.0.0/10', '192.168.215.0/24'] };
-    expect(policyForLevel(network(panes), 'local').allowed)
-      .toEqual(['100.64.0.0/10', '192.168.215.0/24', LAN, 'fd00:1::/64', '10.1.0.0/16']);
-  });
-
-  it('keeps the networks already allowed once one LAN prefix is, and fills nothing for another level', () => {
-    const typed = { ...nothingPolicy(), allowed: ['10.8.0.0/24', '10.1.0.0/16'] };
-    expect(policyForLevel(network(typed), 'local').allowed).toEqual(['10.8.0.0/24', '10.1.0.0/16']);
-    expect(policyForLevel(network(nothingPolicy()), 'relay').allowed).toEqual([]);
-    expect(policyForLevel(network(nothingPolicy()), 'anywhere')).toEqual(ANYWHERE);
-    expect(policyForLevel(network(LOCAL), 'anywhere')).toEqual({ ...ANYWHERE, allowed: [LAN] });
-    expect(policyForLevel(network({ ...LOCAL, autoUpdate: true }), 'nothing')).toEqual({
-      level: 'nothing',
-      allowed: [LAN],
-      autoUpdate: true,
-    });
-  });
-});
-
 /** 10:42 on this machine's clock, whatever its zone. */
 const AT_10_42 = new Date(2026, 9, 1, 10, 42).getTime();
 const CLOCK_10_42 = new Date(AT_10_42).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -426,17 +392,32 @@ describe('Settings → Network', () => {
     expect(command).toHaveBeenCalledWith('setNetworkPolicy', { policy: { ...nothingPolicy(), allowed: ['100.64.0.0/10'] } });
   });
 
-  it('chooses Local networks from the Phones hint, allowing the LAN interfaces', async () => {
+  // An interface's name cannot tell a VPN from a LAN, so no switch turns on by itself.
+  it('chooses Local networks from the Phones hint, allowing no network until one is switched on', async () => {
     link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
     await render();
     expect(text()).toContain('Choose Local networks only or Anywhere to connect a phone.');
     await act(async () => button('Local networks only').click());
     expect(command).toHaveBeenCalledWith('setNetworkPolicy', {
-      policy: { level: 'local', allowed: [LAN, 'fd00:1::/64', '10.1.0.0/16'], autoUpdate: false },
+      policy: { level: 'local', allowed: [], autoUpdate: false },
     });
-    // The Phones section now holds the Remote control choices.
+    // The Phones section now holds the Remote control choices, and the panel
+    // says no phone can connect yet.
     await act(async () => {});
     expect(text()).toContain('One-time connection');
+    expect(text()).toContain('No network is allowed, so no phone can connect.');
+    expect(container.querySelector('[role="switch"][aria-label="Allow Local network en0 off"]')).not.toBeNull();
+  });
+
+  it('keeps the allowed networks as they are on every choice of level', async () => {
+    const panes = { ...nothingPolicy(), allowed: ['100.64.0.0/10'] };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(panes, 'hosted', INTERFACES) });
+    await render();
+    await act(async () => radio('Local networks only').click());
+    expect(command).toHaveBeenCalledWith('setNetworkPolicy', { policy: { ...panes, level: 'local' } });
+    await act(async () => {});
+    await act(async () => radio('Anywhere').click());
+    expect(command).toHaveBeenCalledWith('setNetworkPolicy', { policy: { ...panes, level: 'anywhere' } });
   });
 
   it('shows a refused change where it was made', async () => {

@@ -23,7 +23,7 @@ DORMOUSE_NODE_BINARY="$DORMOUSE_MAIN_CHECKOUT/standalone/src-tauri/binaries/node
 
 ## 3. Running the app
 
-- **Tauri (real thing, several windows):** `pnpm dev:standalone` from the repo root of the worktree. Dev builds use a separate state root (`<app_data_dir>/dev`), so dev and installed app never share snapshots.
+- **Tauri (real thing, several windows):** `pnpm dev:standalone` from the repo root of the worktree. Dev builds use a separate state root (`<data dir>/dev`, `dormouse_data_dir` in `standalone/src-tauri/src/lib.rs`), so dev and installed app never share snapshots.
 - **Browser harness (one window only):** inside Dormouse, `dor tool innerdogfood`; outside, `pnpm innerdogfood`. It prints the URL and an `agent-browser` command. The skill `.claude/skills/debug-standalone-agent-browser/SKILL.md` covers driving it. The harness simulates **one** window: transfer, tear-out, quit voting, and cross-window `dor` routing only run in Tauri. For a Tool, `docs/testing/dor-tool-qc.md` is a QC recipe against the harness with a real-process fixture.
 
 After changing sidecar, staged CLI, or bundled host sources, re-stage and restart either one; frontend edits hot-reload, and Tauri watches Rust.
