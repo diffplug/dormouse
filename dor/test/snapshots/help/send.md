@@ -19,6 +19,8 @@ Supported keys: enter, escape, esc, tab, backspace, delete, up, down, left, righ
 
 Sequence input is an ordered JSON array of {"text":"..."} and {"key":"..."} objects.
 
+A --text or --sequence value that starts with "-" must be joined to its flag (--text=-h); a value spanning lines must follow it as a separate argument.
+
 JSON output:
   {
     "status": "sent",

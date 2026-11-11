@@ -9,7 +9,7 @@
 - **Versioning**: versions shaped `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf336.0` ⇒ `@xterm/xterm@6.1.0-beta.336`, iteration 0). **Consumers must pin the exact core beta named by the tarball's peer dependency** — the addon bundles core internals (rationale); `scripts/xterm-lint.mjs` holds the `-sdfNNN` counter to it.
 - **Distribution**: a pnpm tarball-URL dependency on GitHub Release assets, never an npm registry (rationale). **Never replace a published asset**; the lockfile records a sha512 integrity hash, so cut a new iteration.
 - **Canopy's three pins move together** — the tarball URL, the pristine upstream addon, and core. Renovate ignores canopy's `@xterm/**` (it cannot follow the tarball URL); bump them with `node scripts/xterm-bump.mjs --canopy <forkVersion>`.
-- **Every pin must be exact, every addon's core peer must be `^<workspace-core-pin>`, and `lib` and `standalone` must pin the same set** — the `@xterm/*` packages share a repo but carry independent beta counters (rationale). `scripts/xterm-lint.mjs` owns the full check list in its header comment; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the newest coherent per-commit set for `lib` and `standalone`.
+- **Every pin must be exact, every addon's core peer must be `^<workspace-core-pin>`, and each `standalone` pin must equal `lib`'s** — the `@xterm/*` packages share a repo but carry independent beta counters (rationale). `scripts/xterm-lint.mjs` owns the full check list in its header comment; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the newest coherent per-commit set for `lib`, and for the subset `standalone` pins.
 
 Source of truth: `canopy/package.json`, `canopy/README.md` (bump flow and dev loop), `scripts/xterm-lint.mjs`, `scripts/xterm-bump.mjs`.
 

@@ -1406,6 +1406,7 @@ export function Wall({
           ? { exitCode: shellActivity.exitCode }
           : {}),
         command: terminalBacked ? (state.currentCommand?.displayCommand ?? null) : null,
+        ...(terminalBacked && state.currentCommand?.rawCommandLine ? { commandLine: state.currentCommand.rawCommandLine } : {}),
         url: hasBrowser(kind) ? browserUrlFromParams(source.params) : null,
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
@@ -1834,6 +1835,7 @@ export function Wall({
           browserViewport: resolved.viewport,
           toolPort: resolved.port,
           ...(key ? { toolKey: key } : {}),
+          ...(resolved.target !== undefined ? { toolTarget: resolved.target } : {}),
           toolOrigin: toolOriginOf(resolved),
         });
         // Hand the leaf its command only now. The approval marker stays in place
@@ -1918,6 +1920,9 @@ export function Wall({
       if ((meta.params?.launchSession && !meta.params?.session) || getAgentBrowserSurfaceController(id)?.snapshot().phase === 'launching') throw new Error('Wait for the browser to connect before moving this Surface');
       const params = { ...meta.params };
       delete params.toolPreview;
+      // A browser's `--key` names it within its Workspace; the destination may
+      // hold that key already. The Surface stays reachable by its id.
+      if (surfaceKindFromParams(params) === 'browser') delete params.key;
       return {
         meta: { ...meta, params },
         iframe: isIframeSurface(id), terminal: surfaceHasTerminal(id),

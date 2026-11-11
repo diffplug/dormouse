@@ -9,7 +9,7 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
-  callerWorkingDirectory,
+  launchDirectory,
   errorMessage,
   renderJson,
   requireControlClient,
@@ -152,6 +152,8 @@ JSON output:
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
   const client = requireControlClient(this.options, flags.restart === true ? RESTART_TIMEOUT_MS : ENSURE_TIMEOUT_MS);
   if (client instanceof Error) return client;
+  const cwd = launchDirectory(flags.cwd, this.options);
+  if (cwd instanceof Error) return cwd;
 
   try {
     const response = await client.ensureSurface({
@@ -159,7 +161,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
       minimized: flags.minimize === true,
       restart: flags.restart === true,
       surface: flags.surface,
-      cwd: callerWorkingDirectory(flags.cwd, this.options),
+      cwd,
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderEnsureResponse(response, flags.json === true));

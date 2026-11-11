@@ -34,7 +34,7 @@ It serves the relay at `http://localhost:8787` (or `PORT`) and the try Worker on
 
 ### Run against Stripe test mode
 
-The local entry uses StripeDev unless all five `STRIPE_*` bindings are in its environment, then real Stripe with the key's mode; it refuses a live key. Mail still lands in the local inbox. Use a sandbox's secret key and test-mode Prices.
+The local entry uses StripeDev unless all five `STRIPE_*` bindings are in its environment, then real Stripe with the key's mode; it refuses a live key. Mail still lands in the local inbox. Use a sandbox's secret key and test-mode Prices. StripeDev serves checkout and the notices but no invoices, refunds, disputes, or subscription reads, so a withdrawal, the closure of an account with a plan, or a price change never settles on it, and the local cron fails every run after one until the development database is reset: walk those here.
 
 `stripe listen` cannot carry billing's webhook: it forwards events at the account's default API version even with `--use-configured-webhooks`, and the Worker answers any version but the SDK's pinned `STRIPE_API_VERSION` with 400. Create an endpoint with `--api-version` set to the pinned version, the events under "Stripe setup", and a URL on a temporary tunnel, and use its signing secret as `STRIPE_WEBHOOK_SECRET`. The tunnel must reach only `POST /api/billing/webhook`, through a proxy that sends `Host: localhost:$PORT`, because the local origin holds login codes (`hosted/server/dev-host-guard.ts`) and refuses other hosts. That guard also refuses Stripe's cross-site return to `/billing`, so reopen the page by hand; a deployed origin has no such guard.
 
@@ -264,7 +264,7 @@ A list price change for existing monthly or yearly subscribers is one row in `do
    VALUES ('monthly-2027', 'monthly', 'price_old', 'price_new', 10, 12, '2027-03-01T00:00:00Z');
    ```
 
-   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so.
+   From then on, both Prices grant the plan. While any active subscription is on `fromPriceId`, each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so. A row whose `fromPriceId` no active subscription holds, a mistyped one included, is never checked and does nothing, silently: check it against a subscriber's Price in Stripe before inserting.
 3. On `effectiveAt`, in one reviewed release, point `STRIPE_PRICE_MONTHLY` (or `STRIPE_PRICE_YEARLY`) at the new Price and change the published price in `website/src/lib/hosted-pricing.ts`, so new checkouts sell it. Keep the row afterwards: it is what still recognizes the old Price for anyone not yet moved.
 
 Never edit a row once its notices have gone out; schedule a further change as a new row from the new Price.
@@ -277,7 +277,7 @@ When the account cron's billing pass fails, the Worker emails `support@dormouse.
 | --- | --- |
 | `paid outside Stripe`, `refund awaits the customer's action` | [Refund by hand](#refund-by-hand), before the deadline it names |
 | `refund not yet succeeded` | Nothing unless a deadline is near: Stripe is completing it, and the cron settles it. Near one, ask Stripe why |
-| `acknowledgement unsent`, `gave no billing email` | [Acknowledgement by hand](#acknowledgement-by-hand) |
+| `acknowledgement unsent`, `gave no billing email`, or the same `Notice` line (`withdrawal` or `purchase`) for days | [Acknowledgement by hand](#acknowledgement-by-hand) |
 | `Price change` | [Change a price](#change-a-price): fix or delete the row |
 | Anything else | Usually a Stripe, Postmark, or database outage, which the next runs clear. Past a day, the same line returns, and it is a bug to fix |
 
@@ -317,6 +317,12 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
    ```sql
    UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE "withdrawalId" = '<withdrawal id>' AND "sentAt" IS NULL;
    ```
+
+A purchase's confirmation is retried until sent too, with no overdue line, so one Postmark refuses (an address it holds inactive after a bounce or a spam complaint) fails every run, naming the notice. Send what the customer agreed to another way, then record it as sent by the notice id the error names:
+
+```sql
+UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE id = '<notice id>' AND kind = 'purchase' AND "sentAt" IS NULL;
+```
 
 ## Support runbooks
 

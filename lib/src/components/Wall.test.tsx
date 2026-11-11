@@ -46,6 +46,11 @@ import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '.
 import { setWindowLabel } from '../lib/workspace-store';
 import { installSurfaceIdPool, resetSurfaceIdPool } from '../lib/surface-ids';
 import { cfg } from '../cfg';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createToolHost } from '../host/tool-host';
+import { toolSemanticName } from './wall/tool-name';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -280,6 +285,27 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('lists a running terminal with the command line its shell reported', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'getTerminalPaneStateSnapshot').mockReturnValue(new Map([['surface:a', createTerminalPaneState({
+      currentCommand: {
+        id: 'run-1', rawCommandLine: 'npm run dev --host', displayCommand: 'npm run dev', cwdAtStart: null, startedAt: 0, source: 'osc633_E',
+      },
+    })]]));
+    let response: { result?: { surfaces: Array<{ command: string | null; commandLine?: string }> } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: { method: SURFACE_CONTROL_METHODS.list, params: {}, respond: (r: typeof response) => { response = r; } },
+      }));
+    });
+    await flush();
+    expect(response?.result?.surfaces[0]?.command).toBe('npm run dev');
+    expect(response?.result?.surfaces[0]?.commandLine).toBe('npm run dev --host');
+  });
+
   it('cancels an ensure restart before a late prompt can relaunch its command', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
@@ -358,6 +384,67 @@ describe('Wall on the Lath engine', () => {
     });
     expect(respond).toHaveBeenCalledWith({ ok: false, error: "surface 'surface:a' restart was cancelled" });
     expect(writeSpy.mock.calls).toEqual([['surface:a', '\x03']]);
+  });
+
+  it('answers a second ensure for the same command with the Surface the first is still launching', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
+    const ensure = async () => {
+      let response: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.ensure,
+            params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:a' },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await waitUntil(() => response !== undefined);
+      return response!;
+    };
+    const first = await ensure();
+    expect(first.result?.status).toBe('created');
+    // The new shell is at its first prompt; the command has not been typed yet.
+    const second = await ensure();
+    expect(second.result?.status).toBe('existing');
+    expect(second.result?.surfaceId).toBe(first.result?.surfaceId);
+    expect(leafCount()).toBe(2);
+  });
+
+  it('fails an unintegrated ensure once its wall-clock ceiling passes, however few ticks ran', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(false);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
+    const respond = vi.fn();
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.ensure,
+            params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:a' },
+            respond,
+          },
+        }));
+      });
+      // A hidden webview's timers run about once a second: the clock moves on
+      // while the poll ticks only twice.
+      vi.setSystemTime(Date.now() + 8_000);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(respond).toHaveBeenCalledTimes(1);
+      expect(respond.mock.calls[0][0].ok).toBe(false);
+      expect(respond.mock.calls[0][0].error).toMatch(/requires OSC 633 shell integration/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('removes an unintegrated ensure split as soon as its client cancels', async () => {
@@ -856,6 +943,34 @@ describe('Wall on the Lath engine', () => {
     } finally {
       untouchedSpy.mockRestore();
     }
+  });
+
+  it('places an iframe from a minimized caller beside the focused Surface', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />);
+    });
+    await flush();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Minimize"]')!.click();
+    });
+    await flush();
+
+    let response: { ok: boolean; error?: string; result?: { status: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.iframe,
+          params: { url: 'http://localhost:5173/' },
+          surfaceId: 'surface:a',
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.error).toBeUndefined();
+    expect(response?.ok).toBe(true);
+    expect(container.querySelector('[data-lath-leaf="surface:b"]')).not.toBeNull();
   });
 
   it('validates a dor await and parks it on the host alert manager', async () => {
@@ -3356,6 +3471,23 @@ describe('Wall on the Lath engine', () => {
     });
   });
 
+  it('refuses dor send to a Session whose shell exited, writing nothing', async () => {
+    registry.set('surface:4', { exited: true } as unknown as TerminalEntry);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:4']} />));
+      await flush();
+      const write = vi.spyOn(fake, 'writePty');
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', input: 'ls\r' }, respond,
+      } })));
+      expect(write).not.toHaveBeenCalled();
+      expect(respond).toHaveBeenCalledWith({ ok: false, error: "surface 'surface:4' has no running shell" });
+    } finally {
+      registry.delete('surface:4');
+    }
+  });
+
   it('counts dor send as input, so a kill of the shell it reached confirms', async () => {
     registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
     try {
@@ -5278,4 +5410,94 @@ it('starts a split in the invoking directory, inheriting its reference only with
     await flush();
     expect(pendingShellOpts.get(respond.mock.calls[0][0].result.surfaceId)?.cwd).toBe(expected);
   }
+});
+
+describe('a $TARGET Tool launched by name, through the real Tool host', () => {
+  let dir = '';
+  const launched: string[] = [];
+  /** Cancels every request a test left waiting on the shared launch queue. */
+  let requests: AbortController;
+
+  beforeEach(async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), 'dor-tool-target-')));
+    await mkdir(join(dir, 'user'));
+    await mkdir(join(dir, 'project'));
+    await writeFile(join(dir, 'user', 'dormouse.yml'), 'tools:\n  md:\n    run: [glow, $TARGET]\n    prespawn_dedupe: [$TARGET]\n');
+    await writeFile(join(dir, 'project', 'dormouse.yml'), 'tools:\n  pv:\n    run: [glow, $TARGET]\n');
+    await writeFile(join(dir, 'x.md'), '# x');
+    await writeFile(join(dir, 'project', 'y.md'), '# y');
+    const host = createToolHost({ userConfigPath: join(dir, 'user', 'dormouse.yml') });
+    Object.assign(fake, { toolControl: (request: ToolHostRequest) => host.handle(request) });
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    requests = new AbortController();
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
+    await flush();
+  });
+
+  afterEach(async () => {
+    await act(async () => { requests.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+    for (const id of launched.splice(0)) {
+      pendingShellOpts.delete(id);
+      act(() => terminalRegistry.removeTerminalPaneState(id));
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** Launch from no caller, so the Tool splits; its answer once given. */
+  async function launch(params: Record<string, unknown>): Promise<{ status: string; surfaceId: string; command: string }> {
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      requestId: crypto.randomUUID(), method: SURFACE_CONTROL_METHODS.tool, params: { cwd: dir, ...params }, signal: requests.signal, respond,
+    } })));
+    await waitUntil(() => respond.mock.calls.length > 0);
+    expect(respond.mock.calls[0][0]).toMatchObject({ ok: true });
+    const result = respond.mock.calls[0][0].result;
+    launched.push(result.surfaceId);
+    return result;
+  }
+
+  /** The command starts in `dir`, releasing the launch queue. */
+  const started = (id: string, command: string) => act(() => {
+    terminalRegistry.seedTerminalManualCwd(id, dir);
+    reportRunning(id, command);
+  });
+
+  async function savedParams(id: string): Promise<Record<string, unknown>> {
+    await act(async () => window.dispatchEvent(new Event('pagehide')));
+    await flush();
+    return (fake.getState() as { lathLayout: { leafMeta: Record<string, { params: Record<string, unknown> }> } }).lathLayout.leafMeta[id].params;
+  }
+
+  const identityOf = (params: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(params).filter(([name]) => browserSurface.TOOL_IDENTITY_PARAMS.has(name)));
+
+  it('records the canonical target, naming the Surface after its file and saving it, with the params `dor open --tool` gives', async () => {
+    const target = join(dir, 'x.md');
+    const named = await launch({ name: 'md', args: ['./x.md'] });
+    expect(named.status).toBe('created');
+    started(named.surfaceId, named.command);
+    const params = await savedParams(named.surfaceId);
+    expect(params).toMatchObject({ toolName: 'md', toolScope: 'user', toolTarget: target, toolKey: ['md', target] });
+    expect(toolSemanticName(params)).toBe('x.md');
+    expect((fake.getState() as PersistedSession).panes.find(pane => pane.id === named.surfaceId)?.tool?.target).toBe(target);
+
+    // The same Tool and file opened is the same Surface, and a fresh one has the same identity.
+    expect(await launch({ file: 'x.md', tool: 'md' })).toMatchObject({ status: 'existing', surfaceId: named.surfaceId });
+    const opened = await launch({ file: 'x.md', tool: 'md', fresh: true });
+    expect(opened.status).toBe('created');
+    started(opened.surfaceId, opened.command);
+    expect(identityOf(await savedParams(opened.surfaceId))).toEqual(identityOf(params));
+  });
+
+  it('records the target of a project Tool approved after its launch', async () => {
+    const target = join(dir, 'project', 'y.md');
+    const pending = await launch({ name: 'pv', args: ['y.md'], cwd: join(dir, 'project') });
+    expect(pending.status).toBe('pending');
+    const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
+    await act(async () => allow.click());
+    await waitUntil(() => pendingShellOpts.has(pending.surfaceId));
+    const command = pendingShellOpts.get(pending.surfaceId)!.command!;
+    started(pending.surfaceId, command);
+    expect(await savedParams(pending.surfaceId)).toMatchObject({ toolName: 'pv', toolTarget: target, toolArgv: ['glow', target] });
+  });
 });

@@ -24,7 +24,8 @@
  *      only place its base is recorded as a full version.
  *   2. Exact pins: every `@xterm/*` specifier is a bare version, no range
  *      operator — these are commit-coupled, a caret would let them drift.
- *   3. lib ≡ standalone: the two hand-maintained pin sets must be identical.
+ *   3. standalone ⊆ lib: standalone pins only what its test mocks, and each
+ *      pin must equal lib's, so a mock replaces the module lib's code loads.
  *   4. canopy fork lockstep: the `-sdf<NNN>.<M>` in the
  *      `@diffplug/xterm-addon-webgl-sdf` release-tarball URL must match
  *      canopy's `@xterm/xterm` pin `…-beta.<NNN>`, and the release tag and the
@@ -174,17 +175,16 @@ for (const { dir, rel, pins } of workspaces) {
   }
 }
 
-// --- Check 3: lib ≡ standalone -----------------------------------------------
+// --- Check 3: standalone ⊆ lib -----------------------------------------------
 const lib = workspaces.find((w) => w.dir === 'lib');
 const standalone = workspaces.find((w) => w.dir === 'standalone');
 if (lib && standalone) {
-  const names = [...new Set([...Object.keys(lib.pins), ...Object.keys(standalone.pins)])].sort();
-  for (const name of names) {
+  for (const name of Object.keys(standalone.pins).sort()) {
     if (lib.pins[name] !== standalone.pins[name]) {
       problems.push(
         `lib and standalone disagree on ${name}: ${lib.pins[name] ?? '(absent)'} vs ` +
-        `${standalone.pins[name] ?? '(absent)'} — standalone bundles dormouse-lib, ` +
-        'so the two must render through the same xterm',
+        `${standalone.pins[name]} — standalone's tests mock the modules lib's code ` +
+        'imports, so each pin must resolve to the same release',
       );
     }
   }
