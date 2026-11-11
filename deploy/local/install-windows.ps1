@@ -201,11 +201,14 @@ function Get-JsonValue {
 # replace an existing file atomically.
 # $NodeBin is used rather than .NET because File.Move(overwrite) does not exist
 # in the .NET Framework that Windows PowerShell 5.1 runs on.
+# -WarnOnFailure warns and returns instead of exiting, for a caller that reads
+# the pointer back and still has its own failure to report.
 function Set-ReleasePointer {
   param(
     [Parameter(Mandatory)][string]$ReleaseId,
     [Parameter(Mandatory)][string]$PointerPath,
-    [Parameter(Mandatory)][string]$NodeBin
+    [Parameter(Mandatory)][string]$NodeBin,
+    [switch]$WarnOnFailure
   )
   $script = @'
 const fs = require("fs");
@@ -217,7 +220,10 @@ fs.writeFileSync(tmp, value + "\n", { encoding: "utf8" });
 fs.renameSync(tmp, link);
 '@
   $r = Invoke-NodeScript -NodeBin $NodeBin -Script $script -Arguments @($ReleaseId, $PointerPath)
-  if ($r.ExitCode -ne 0) { Die "could not write the release pointer $PointerPath : $(Get-FailureTail $r)" }
+  if ($r.ExitCode -eq 0) { return }
+  $why = "could not write the release pointer $PointerPath : $(Get-FailureTail $r)"
+  if ($WarnOnFailure) { Write-Warn2 $why; return }
+  Die $why
 }
 
 function Get-ReleasePointer {
@@ -2245,7 +2251,21 @@ rem directly.
     }
     # $STAGED_NODE was verified executable and version/arch-matched earlier in
     # this run; the old release's runtime has not been checked at all.
-    Set-ReleasePointer -ReleaseId $OLD_RELEASE -PointerPath $CURRENT_POINTER -NodeBin $STAGED_NODE
+    # Every caller prints its own "update FAILED" once this returns, so a failed
+    # write must neither exit nor throw past here.
+    try {
+      Set-ReleasePointer -ReleaseId $OLD_RELEASE -PointerPath $CURRENT_POINTER -NodeBin $STAGED_NODE -WarnOnFailure
+    } catch {
+      Write-Warn2 "could not write the release pointer $CURRENT_POINTER : $($_.Exception.Message)"
+    }
+    # Prove the restore landed before touching `previous`, the way the forward
+    # switch proves `current` advanced: deleting it while `current` still names
+    # the rejected release would strip the only rollback pointer.
+    $restoredTo = Get-ReleasePointer -PointerPath $CURRENT_POINTER
+    if ($restoredTo -ne $OLD_RELEASE) {
+      Write-Warn2 "current was NOT restored to $OLD_RELEASE (names '$(if ($restoredTo) { $restoredTo } else { 'nothing' })'). Leaving previous.txt in place so rollback stays possible."
+      return $false
+    }
     # `previous` was set to $OLD_RELEASE when the switch happened, and `current`
     # now names it too. Leaving both pointing at one release would make
     # `manage verify` report a rollback target that does not exist and
