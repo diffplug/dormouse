@@ -272,6 +272,27 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: true });
   });
 
+  it.each([
+    ['report', 'quiet', 'bell', (id: string) => manager.notifyFromProtocol(id, PERMISSION)],
+    ['exit', 'exit', 'exit', (id: string) => { runCommand(manager, id, 'pnpm build'); finishCommand(manager, id, 0, { promptStart: true }); }],
+  ] as const)('lets an await arriving after a held %s consume it, keeping the TODO the hold set', async (_kind, until, cause, complete) => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    complete(PANE);
+
+    let outcome: AwaitOutcome | undefined;
+    void manager.awaitCompletion(PANE, { until, timeoutMs: 600_000 }).promise.then((value) => { outcome = value; });
+    await Promise.resolve();
+    expect(outcome?.kind).toBe('resolved');
+    expect(outcome?.kind === 'resolved' && outcome.cause).toBe(cause);
+    expect(manager.getState(PANE).todo).toBe(true);
+
+    // Consumed, so nothing is left to ring when the user goes idle.
+    goIdle(manager, PANE);
+    vi.advanceTimersByTime(5_000);
+    expect(ringing(PANE)).toBe(false);
+  });
+
   it('rings a held settle on idle though watched work resumed, without losing it', () => {
     engage(manager, PANE);
     watchedTurn(PANE);

@@ -713,19 +713,25 @@ export class AlertManager {
   }
 
   /**
-   * Consume the ring source an await arriving right now would resolve on, if
-   * any: only that source is withdrawn. Gated because the ring outlives the
-   * fact a source describes (`docs/specs/alert.md` -> Await, rationale): `exit`
-   * only with nothing running, `watching` only with no output since it joined,
-   * a report always.
+   * Consume the source an await arriving right now would resolve on, if any:
+   * from the ring, else from a hold, so a completion the user happened to be
+   * looking at answers a program the same as one nobody saw. Only that source
+   * is withdrawn. Gated because a latch outlives the fact a source describes
+   * (`docs/specs/alert.md` -> Await, rationale): `exit` only with nothing
+   * running, `watching` only with no output since it joined, a report always.
    */
   private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
-    if (until === 'quiet' && this.withdrawRingSource(entry, 'report')) return 'bell';
-    if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit')) return 'exit';
+    return this.consumeAwaitableSource(entry, 'ring', until)
+      ?? this.consumeAwaitableSource(entry, 'held', until);
+  }
+
+  private consumeAwaitableSource(entry: AlertEntry, latch: 'ring' | 'held', until: AwaitUntil): AwaitCause | null {
+    if (until === 'quiet' && this.withdrawRingSource(entry, 'report', latch)) return 'bell';
+    if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit', latch)) return 'exit';
     if (
       until === 'quiet'
-      && entry.ring?.watching?.workSince === false
-      && this.withdrawRingSource(entry, 'watching')
+      && entry[latch]?.watching?.workSince === false
+      && this.withdrawRingSource(entry, 'watching', latch)
     ) return 'quiet';
     return null;
   }
@@ -956,12 +962,12 @@ export class AlertManager {
   }
 
   /**
-   * An await answers one source, taking it off the ring. Never an
-   * acknowledgement: a ring left empty goes, leaving no TODO. Returns whether
-   * the source was there.
+   * An await answers one source, taking it off the ring or the hold. Never an
+   * acknowledgement: a ring left empty goes, leaving no TODO; a hold left
+   * empty goes, leaving the TODO it set. Returns whether the source was there.
    */
-  private withdrawRingSource(entry: AlertEntry, source: RingSource): boolean {
-    const ring = entry.ring;
+  private withdrawRingSource(entry: AlertEntry, source: RingSource, latch: 'ring' | 'held' = 'ring'): boolean {
+    const ring = entry[latch];
     if (ring === null) return false;
     let empty: boolean;
     if (source === 'watching') {
@@ -972,7 +978,7 @@ export class AlertManager {
       ring.sources = ring.sources.filter((candidate) => candidate !== source);
       empty = ring.sources.length === 0 && ring.watching === null;
     }
-    if (empty) entry.ring = null;
+    if (empty) entry[latch] = null;
     if (source === 'watching') this.answeredWatching(entry);
     return true;
   }

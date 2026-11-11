@@ -336,7 +336,7 @@ stateDiagram-v2
     [*] --> arrive
     arrive --> Failed: an invalid request or a helper Session — cancelled
     arrive --> Failed: the Session already removed — died
-    arrive --> Resolved: Ringing with a source it accepts — withdraw it
+    arrive --> Resolved: Ringing, else a hold, with a source it accepts — withdraw it
     arrive --> Parked: Seen or Unseen
     arrive --> Grace: NoCommand
     Grace --> Parked: a command start, or work under quiet
@@ -378,7 +378,7 @@ Is there anything to wait for?
 
 `idle` is a resolution, not a failure (rationale). Absent shell integration "is a command running" is unanswerable, so an `exit` await there falls back to the grace window and resolves `idle` rather than erroring.
 
-**Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only an `exit` source resolves it, and a ring without one leaves it parked.
+**Resolution must consume only the ring or held source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring, else mid-hold, resolves immediately; under `exit` only an `exit` source resolves it, and one without leaves it parked.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
 - **Must skip the `watching` source once work has resumed since it joined the ring** (`workSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
