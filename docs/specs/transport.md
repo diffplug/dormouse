@@ -54,7 +54,7 @@ The renderer acknowledges the live output it parsed; the host pauses a PTY its r
 - **Must pause a PTY whose unacknowledged output passes the high watermark, and resume it at or below the low one, which stays at or above one batch less one**, the most a renderer holds parsed but unsent.
 - **Must forgive what a renderer owes, and resume, when it can no longer pay or no longer needs to**: a `requestInit` (its ids; every one when it names none), a transfer mark, a spawn over the id, a VS Code view leaving its PTYs running, the recovery capture's interrupt. A kill drops the count. **Must clamp it at zero**, so a stale acknowledgement owes nothing.
 - **Must resume a paused PTY once its process is gone, and before stopping it**, so node-pty reads its tail and reports its exit (rationale). **Never hold input for a paused PTY**: an interrupt reaches the blocked program.
-- **Only the local owning renderer exerts backpressure**: Pocket's and the fake adapter's `acknowledgePtyData` are no-ops. The remote path is not flow-controlled: a Client's stream through the Burrow and Relay is unbounded (audit findings `relay-04`, `burrow-a-15`).
+- **Only the local owning renderer exerts backpressure**: Pocket's and the fake adapter's `acknowledgePtyData` are no-ops. A Client's stream through the Burrow and Relay is never paced by it.
 
 Source of truth: `PtyDataDispatch` in `lib/src/lib/pty-flow.ts`; `createPtyFlowControl` in `lib/src/host/pty-flow-host.ts`; `pause` in `standalone/sidecar/pty-core.js`; `dropped_output_ack` in `standalone/src-tauri/src/lib.rs`.
 
