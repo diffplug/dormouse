@@ -77,6 +77,9 @@ export interface Surface {
   exitCode?: number;
   /** Running command label; `null` when idle or not a terminal Surface. */
   command: string | null;
+  /** The running command's line as the shell reported it, which
+   *  `dor list --command` matches; omitted when there is none. */
+  commandLine?: string;
   /** Target URL of a browser Surface; `null` for terminal Surfaces. */
   url: string | null;
   /** An alert is ringing. Browser Surfaces never ring. */

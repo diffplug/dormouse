@@ -249,7 +249,7 @@ function applyListFilters(
     surfaces: response.surfaces.filter((surface) => (
       (flags.kind === undefined || surface.kind === flags.kind) &&
       (flags.view === undefined || surface.view === flags.view) &&
-      (flags.command === undefined || surface.command === flags.command) &&
+      (flags.command === undefined || surface.commandLine === flags.command) &&
       (cwd === undefined || cwdPathsEqual(surface.cwd, cwd)) &&
       (flags.port === undefined || (surface.ports ?? []).some((port) => port.port === flags.port))
     )),

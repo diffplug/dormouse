@@ -41,6 +41,7 @@ const fixtureSurfaces = [
     cwd: '/Users/me/projects/site',
     activity: 'running',
     command: 'pnpm dev',
+    commandLine: 'pnpm dev',
     url: null,
     ringing: false,
     todo: false,
@@ -1984,6 +1985,17 @@ test('list filters by kind, view, command, and cwd without port scanning', async
   assert.equal(payload.caller_surface_id, null);
   assert.equal(payload.focused_surface_id, 'surface:1');
   assert.equal(payload.surfaces[0].ports, undefined);
+});
+
+test('list --command matches the reported command line, not its summarized label', async () => {
+  const client = fixtureClient([
+    { ...fixtureSurfaces[0], command: 'npm run dev', commandLine: 'npm run dev --host' },
+    { ...fixtureSurfaces[1], command: 'npm run dev', commandLine: 'npm run dev' },
+  ]);
+  const ids = async command => JSON.parse((await runCli(['list', '--json', '--command', command], { client, env: listEnv })).stdout)
+    .surfaces.map(surface => surface.id);
+  assert.deepEqual(await ids('npm run dev --host'), ['surface:1']);
+  assert.deepEqual(await ids('npm run dev'), ['surface:2']);
 });
 
 test('list ports text output', async () => {

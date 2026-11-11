@@ -280,6 +280,27 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('lists a running terminal with the command line its shell reported', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'getTerminalPaneStateSnapshot').mockReturnValue(new Map([['surface:a', createTerminalPaneState({
+      currentCommand: {
+        id: 'run-1', rawCommandLine: 'npm run dev --host', displayCommand: 'npm run dev', cwdAtStart: null, startedAt: 0, source: 'osc633_E',
+      },
+    })]]));
+    let response: { result?: { surfaces: Array<{ command: string | null; commandLine?: string }> } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: { method: SURFACE_CONTROL_METHODS.list, params: {}, respond: (r: typeof response) => { response = r; } },
+      }));
+    });
+    await flush();
+    expect(response?.result?.surfaces[0]?.command).toBe('npm run dev');
+    expect(response?.result?.surfaces[0]?.commandLine).toBe('npm run dev --host');
+  });
+
   it('cancels an ensure restart before a late prompt can relaunch its command', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);

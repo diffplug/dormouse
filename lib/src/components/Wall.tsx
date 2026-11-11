@@ -1405,6 +1405,7 @@ export function Wall({
           ? { exitCode: shellActivity.exitCode }
           : {}),
         command: terminalBacked ? (state.currentCommand?.displayCommand ?? null) : null,
+        ...(terminalBacked && state.currentCommand?.rawCommandLine ? { commandLine: state.currentCommand.rawCommandLine } : {}),
         url: hasBrowser(kind) ? browserUrlFromParams(source.params) : null,
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
