@@ -1,6 +1,5 @@
 import { queryDatabase } from "pgstencil/postgres";
-import type { EmailMessage, EmailSender } from "pgstencil";
-import { escape } from "@pgstencil/auth/email";
+import { escapeHtml, type EmailMessage, type EmailSender } from "pgstencil/email";
 
 export interface InboxMessage extends EmailMessage {
   id: string;
@@ -50,12 +49,12 @@ function page(body: string) {
 }
 export function inboxPage(messages: InboxMessage[]) {
   return page(
-    `<h1>Preview inbox</h1><p>Public test inbox for this PR. Use disposable addresses. Nothing is sent to a real mailbox. Latest 100 messages from the last 24 hours.</p><nav><a href="/">Sign in</a> · <a href="/dev/emails">Refresh inbox</a></nav><ol>${messages.map((mail) => `<li><a href="/dev/emails/${mail.id}">${escape(mail.subject)}</a> — ${escape(mail.to.join(", "))} — ${escape(mail.capturedAt)}</li>`).join("")}</ol>`,
+    `<h1>Preview inbox</h1><p>Public test inbox for this PR. Use disposable addresses. Nothing is sent to a real mailbox. Latest 100 messages from the last 24 hours.</p><nav><a href="/">Sign in</a> · <a href="/dev/emails">Refresh inbox</a></nav><ol>${messages.map((mail) => `<li><a href="/dev/emails/${mail.id}">${escapeHtml(mail.subject)}</a> — ${escapeHtml(mail.to.join(", "))} — ${escapeHtml(mail.capturedAt)}</li>`).join("")}</ol>`,
   );
 }
 export function messagePage(mail: InboxMessage) {
   // Render escaped text only: never execute captured HTML or email links.
   return page(
-    `<a href="/dev/emails">Back to inbox</a><h1>${escape(mail.subject)}</h1><p>To ${escape(mail.to.join(", "))}</p><pre>${escape(mail.text)}</pre>`,
+    `<a href="/dev/emails">Back to inbox</a><h1>${escapeHtml(mail.subject)}</h1><p>To ${escapeHtml(mail.to.join(", "))}</p><pre>${escapeHtml(mail.text)}</pre>`,
   );
 }

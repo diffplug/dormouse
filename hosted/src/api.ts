@@ -148,7 +148,7 @@ async function refused(response: Response): Promise<Error> {
   } | null;
   return typeof body?.message === "string" ? new Error(body.message) : failed();
 }
-/** Null when the server says this account may not use the Hosted Relay. */
+/** Null when the server refuses this page the read: no login. */
 export async function getComputers(): Promise<Computer[] | null> {
   const response = await relay("/burrows");
   if (response.status === 401 || response.status === 403) return null;
@@ -169,7 +169,7 @@ export interface Passkey {
   /** The enrolled computer whose setup code registered it, or null once removed. */
   burrowId: string | null;
 }
-/** Null when the server says this account may not use the Hosted Relay. */
+/** Null when the server refuses this page the read: no login. */
 export async function getPasskeys(): Promise<Passkey[] | null> {
   const response = await relay("/passkeys");
   if (response.status === 401 || response.status === 403) return null;

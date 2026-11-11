@@ -34,7 +34,7 @@ It serves the relay at `http://localhost:8787` (or `PORT`) and the try Worker on
 
 ### Run against Stripe test mode
 
-The local entry uses StripeDev unless all five `STRIPE_*` bindings are in its environment, then real Stripe with the key's mode; it refuses a live key. Mail still lands in the local inbox. Use a sandbox's secret key and test-mode Prices.
+The local entry uses StripeDev unless all five `STRIPE_*` bindings are in its environment, then real Stripe with the key's mode; it refuses a live key. Mail still lands in the local inbox. Use a sandbox's secret key and test-mode Prices. StripeDev serves checkout and the notices but no invoices, refunds, disputes, or subscription reads, so a withdrawal, the closure of an account with a plan, or a price change never settles on it, and the local cron fails every run after one until the development database is reset: walk those here.
 
 `stripe listen` cannot carry billing's webhook: it forwards events at the account's default API version even with `--use-configured-webhooks`, and the Worker answers any version but the SDK's pinned `STRIPE_API_VERSION` with 400. Create an endpoint with `--api-version` set to the pinned version, the events under "Stripe setup", and a URL on a temporary tunnel, and use its signing secret as `STRIPE_WEBHOOK_SECRET`. The tunnel must reach only `POST /api/billing/webhook`, through a proxy that sends `Host: localhost:$PORT`, because the local origin holds login codes (`hosted/server/dev-host-guard.ts`) and refuses other hosts. That guard also refuses Stripe's cross-site return to `/billing`, so reopen the page by hand; a deployed origin has no such guard.
 
@@ -44,7 +44,7 @@ A test clock needs its customer from the start: after the first checkout creates
 
 `hosted/package.json` installs released `pgstencil`, `@pgstencil/auth`, and `@pgstencil/stripe` from npm. They share a version and Hosted declares their peer dependencies. Approved pgstencil releases are exempt from the pnpm and Renovate cooldowns because the release workflow requires a passing security audit, stages the archives, and requires a maintainer's 2FA approval before publishing.
 
-Run `pnpm install` and re-run Hosted's integration tests after an update. The production preflight reads `dist/provenance.json` from the installed packages and requires matching clean commits. `docs/specs/security-hosted.md` -> "Deployment boundary" owns the upstream audit check. For an unreleased change, pack pgstencil in a clean checkout and use a temporary pnpm override on a branch.
+Run `pnpm install` and re-run Hosted's integration tests after an update. A new migration source in a package goes into `hosted/pgstencil.json`, the list the `pgstencil` command behind `db:*` and `hosted/server/migrations.ts` both read. The production preflight reads `dist/provenance.json` from the installed packages and requires matching clean commits. `docs/specs/security-hosted.md` -> "Deployment boundary" owns the upstream audit check. For an unreleased change, pack pgstencil in a clean checkout and use a temporary pnpm override on a branch.
 
 ## Resource inventory
 
@@ -115,7 +115,7 @@ A PR touching Hosted runs its tests and builds; adding the `hosted-preview` labe
 
 Open `https://dormouse-hosted-pr-N.SUBDOMAIN.workers.dev/`, request a code for a disposable address, and read it at `/dev/emails`. The PR's one-time page is at `https://dormouse-try-pr-N.SUBDOMAIN.workers.dev/connect/`; its voice Worker has no ElevenLabs key, so speak never reaches ElevenLabs. This inbox is public to anyone with the URL. No real email or OAuth provider is contacted. A preview's Hyperdrive connects as its branch's owner role, so a preview never exercises the relay's and voice's restricted roles: a missing grant passes there, and `pnpm test:hosted`, which binds those Workers to their roles, is what catches it. The database stores messages across Worker restarts.
 
-New commits retain the URL and test accounts. Once a PR closes or loses the label, the next approved preview deploy of any PR deletes its four Workers, Hyperdrive, and Neon branch first. Migrations are append-only; to change an already-applied migration, delete the preview with `node hosted/scripts/preview.mjs cleanup`, given the preview environment's credentials and `PR_NUMBER`, then redeploy. Keep previews enabled until all live previews are removed. These credentials cannot be downloaded back from GitHub; retain independent copies in your password manager.
+New commits retain the URL and test accounts. Once a PR closes or loses the label, the next approved preview deploy of any PR deletes its four Workers, Hyperdrive, and Neon branch first. Migrations are append-only; to change an already-applied migration, delete the preview with `node hosted/scripts/preview.mjs cleanup`, given the preview environment's credentials and `PR_NUMBER`, then redeploy. A preview database also holds `hosted/server/preview-migrations/`, so inspect one with `db:status:preview` and `db:validate:preview`; the plain scripts report that file missing. Keep previews enabled until all live previews are removed. These credentials cannot be downloaded back from GitHub; retain independent copies in your password manager.
 
 ## Provision the production boundary
 
@@ -231,22 +231,26 @@ One Stripe account holds only Dormouse, because retries, customer emails, and th
 
 ## Move the Stripe API version
 
-The webhook accepts only events at the installed `stripe` SDK's pinned API version (`STRIPE_API_VERSION`, re-exported by `@pgstencil/stripe`), and the endpoint renders events at the version it was created with. The SDK moves that version in minor releases, so `hosted/server/tests/stripe-api-version.test.ts` pins the literal, and Renovate holds `stripe` and `@pgstencil/stripe` for approval on the dependency dashboard. A move is this procedure, never a routine update.
+The webhook accepts only events at the installed `stripe` SDK's pinned API version (`STRIPE_API_VERSION`, re-exported by `@pgstencil/stripe`), and the endpoint renders events at the version it was created with. The SDK moves that version in minor releases, so `hosted/server/tests/stripe-api-version.test.ts` pins the literal, `stripe` is held to its minor with a `~` range, and Renovate holds `stripe` and `@pgstencil/stripe` for approval on the dependency dashboard. A move is this procedure, never a routine update.
 
-**Not yet exercised end to end.** The steps as far as they are known, in the sandbox first, then live:
+**Exercised twice in the sandbox, 2026-11-10 and 2026-11-11** (stripe 22.6.2 at `2026-08-26.dahlia` to 23.1.0 at `2026-10-28.endive`, the second time with the released pgstencil 0.5.1: two local builds on one database behind a tunnel); not yet in live mode, nor on the Workers. In the sandbox first, then live:
 
-1. Move `@pgstencil/stripe` and `stripe` together, to releases that pin the same new API version.
-2. Create a second webhook endpoint at the new version, with the same URL and events as "Webhook endpoint" above, while the old one stays enabled. Stripe delivers each event to every enabled endpoint.
-3. Deploy the Worker built against the new SDK with the new endpoint's signing secret as `STRIPE_WEBHOOK_SECRET`, changing the literal in `stripe-api-version.test.ts` in the same change.
-4. Confirm the new endpoint's deliveries succeed in Stripe's dashboard.
-5. Reconcile every owner. The account cron reconciles at most 20 stale owners each run (`RESYNC_OWNERS` in `hosted/server/billing.ts`, every 10 minutes), and only those `reconcileStale` finds holding a current subscription without access, so it does not cover an event missed during the cut-over. No script does this yet.
-6. Disable the old endpoint.
+1. Move `@pgstencil/stripe` and `stripe` together, to releases that pin the same new API version, changing the literal in `stripe-api-version.test.ts` in the same change.
+2. Create a second webhook endpoint at the new version, with the events under "Webhook endpoint" above, while the old one stays enabled. Give its URL a query string naming the version (`/api/billing/webhook?endpoint=endive`; the route ignores it), because Stripe's event page merges the attempts of two endpoints that share a URL into one row. Stripe delivers each event to every enabled endpoint, and the Worker still on the old SDK answers the new endpoint's copies 400, which Stripe retries.
+3. Run `pnpm db:status` and `pnpm db:validate` from the new build against the database, then deploy the Worker built against the new SDK with the new endpoint's signing secret as `STRIPE_WEBHOOK_SECRET`. From here the old endpoint's copies get 400 and the new one's 200.
+4. Reconcile every owner at once, without waiting for Stripe: from `hosted/`, with the migration role's `DATABASE_URL` and the five `STRIPE_*` bindings in the environment from your secret manager, run `pnpm billing:reconcile --dry-run`, then `pnpm billing:reconcile`; a live key also needs `--allow-live`. It prints one line per owner whose stored subscriptions changed, each one event the webhook has not applied, and the counts, and exits non-zero if any owner failed. The account cron's resync (`resyncBilling` in `hosted/server/billing.ts`) finds only owners holding a current subscription without access, so it never repairs a cancellation or refund.
+5. Confirm the new endpoint's deliveries succeed in Stripe's dashboard.
+6. Run `pnpm billing:reconcile --dry-run` again. No owner changing is the proof that nothing was lost; then disable the old endpoint.
 
-Open questions the first real move must answer:
+What the rehearsals established:
 
-- Whether applying one event id twice across the cut-over, once from each endpoint, is harmless.
-- Whether the Worker should accept two signing secrets during the overlap, rather than refusing the old endpoint's deliveries from the deploy on.
-- What the old endpoint's failing deliveries look like in Stripe's dashboard, and whether its retries alert anyone, until it is disabled.
+- An event delivered to both endpoints is applied once: the copy that arrives second answers 200 and writes nothing.
+- An event that fails at both endpoints while nothing serves is repaired by step 4 at once. Left to Stripe, the new endpoint's retry repairs it too, but late: the sandbox retried once after about 14 seconds and next after about an hour.
+- The old endpoint's refused copies show as failed deliveries with a next retry until it is disabled, and stay pending on their events afterwards; nothing else alerts.
+- On the new version, against Stripe itself: Checkout, a withdrawal with its full refund, a dispute lost and a dispute won, and a portal session.
+- Rollback is open until step 6: this move added no migration (the new build's `db:validate` matched the old build's database and `db:migrate` found nothing pending) and Hosted stores no Stripe object, so the old build runs on the same database with the old endpoint's secret.
+
+Not covered: an event that had already failed at the old endpoint before the new one existed is retried only to the old endpoint, which the new Worker refuses, so only step 4 repairs it. Live mode's retry schedule differs from the sandbox's and is unobserved. A price change's move to its new Price and an account closure have not run at the new version.
 
 ## Change a price
 
@@ -260,7 +264,7 @@ A list price change for existing monthly or yearly subscribers is one row in `do
    VALUES ('monthly-2027', 'monthly', 'price_old', 'price_new', 10, 12, '2027-03-01T00:00:00Z');
    ```
 
-   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so.
+   From then on, both Prices grant the plan. While any active subscription is on `fromPriceId`, each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so. A row whose `fromPriceId` no active subscription holds, a mistyped one included, is never checked and does nothing, silently: check it against a subscriber's Price in Stripe before inserting.
 3. On `effectiveAt`, in one reviewed release, point `STRIPE_PRICE_MONTHLY` (or `STRIPE_PRICE_YEARLY`) at the new Price and change the published price in `website/src/lib/hosted-pricing.ts`, so new checkouts sell it. Keep the row afterwards: it is what still recognizes the old Price for anyone not yet moved.
 
 Never edit a row once its notices have gone out; schedule a further change as a new row from the new Price.
@@ -273,7 +277,7 @@ When the account cron's billing pass fails, the Worker emails `support@dormouse.
 | --- | --- |
 | `paid outside Stripe`, `refund awaits the customer's action` | [Refund by hand](#refund-by-hand), before the deadline it names |
 | `refund not yet succeeded` | Nothing unless a deadline is near: Stripe is completing it, and the cron settles it. Near one, ask Stripe why |
-| `acknowledgement unsent`, `gave no billing email` | [Acknowledgement by hand](#acknowledgement-by-hand) |
+| `acknowledgement unsent`, `gave no billing email`, or the same `Notice` line (`withdrawal` or `purchase`) for days | [Acknowledgement by hand](#acknowledgement-by-hand) |
 | `Price change` | [Change a price](#change-a-price): fix or delete the row |
 | Anything else | Usually a Stripe, Postmark, or database outage, which the next runs clear. Past a day, the same line returns, and it is a bug to fix |
 
@@ -313,6 +317,12 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
    ```sql
    UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE "withdrawalId" = '<withdrawal id>' AND "sentAt" IS NULL;
    ```
+
+A purchase's confirmation is retried until sent too, with no overdue line, so one Postmark refuses (an address it holds inactive after a bounce or a spam complaint) fails every run, naming the notice. Send what the customer agreed to another way, then record it as sent by the notice id the error names:
+
+```sql
+UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE id = '<notice id>' AND kind = 'purchase' AND "sentAt" IS NULL;
+```
 
 ## Support runbooks
 

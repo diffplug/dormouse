@@ -101,10 +101,10 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name and a `ref`, normalized as `checkoutRef` does; the owner is the login, its email only once verified (else Checkout asks), and Stripe returns to `/billing`. A checkout open for another plan is expired first (`replace`); a held subscription refuses another with 409.
 - **Must start a checkout only after agreement to `TERMS_VERSION` and to automatic renewal at the `price` the page showed, recorded in `dormouse_checkout_consents` before its URL is answered**; another version answers 409 `TERMS_CHANGED`, and a checkout whose Price `priceCatalog` does not price at `price` is refused (`expectPrice`) with 409 `PRICE_CHANGED`. `GET` shows the latest while a subscription is held.
 - **Never answer a checkout URL until Stripe holds its Price at the catalog's amount**, in USD, at the plan's interval, in this deployment's mode (`stripeHoldsPrice`, once per Price and isolate); the catalog's amounts are the published prices, not Stripe's. Otherwise, or when Stripe cannot say, the checkout is expired and the route answers 503 `CHECKOUT_UNAVAILABLE`.
-- **Must record with the consent what it was given to, derived on the server and never from the request**: `shownUsd`, the catalog's amount for its Price; `voiceDailyCap`, `VOICE_DAILY_CAP`; and `presentedText`, every statement the page makes for that plan and price (`presentedLines` in `hosted/server/disclosure.ts`, which the page renders). `termsVersion` names the terms' own text ("Terms acceptance").
+- **Must record with the consent what it was given to, derived on the server and never from the request**: `shownUsd`, the catalog's amount for its Price; `voiceDailyCap`, `VOICE_DAILY_CAP`; and `presentedText`, the page's disclosure lines for that plan and price (`presentedLines` in `hosted/server/disclosure.ts`, which the page renders). `termsVersion` names the terms' own text ("Terms acceptance").
 - **Must add or rename a founders-row name (`dormouse_founders`) only while `subscribedSql` holds on the founding Prices** (else 409) and `isFounderName` accepts it; leaving always works, a rename keeps `shownSince`. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must verify the webhook's signature over the raw body before any write** and answer 2xx only once `webhook()` has committed, any other failure 503, which Stripe retries. **Must move its accepted API version only by `hosted/README.md` -> "Move the Stripe API version"**, which a test pins (rationale).
-- **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: `billing.end` with reason `refund`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none, which is logged for the operator. **Never end a subscription for a refunded charge whose newest refund Stripe lists carries the metadata `KEEP_SUBSCRIPTION` = `true`**, the operator's correction (`hosted/README.md` -> "Refund by hand"), read from Stripe on every delivery since the event embeds no refunds; a lost dispute ignores it.
+- **Must end at once the subscription a fully refunded charge or a lost dispute's charge paid for**, found through its invoice, while it is the owner's current one: `billing.end` with reason `refund`, after the commit and on every delivery until ended. A partial refund ends nothing, nor does a charge for an earlier subscription or none; production keeps no log of either. **Never end a subscription for a refunded charge whose newest refund Stripe lists carries the metadata `KEEP_SUBSCRIPTION` = `true`**, the operator's correction (`hosted/README.md` -> "Refund by hand"), read from Stripe on every delivery since the event embeds no refunds; a lost dispute ignores it.
 - **Must offer the online withdrawal only from the held subscription while `withdrawalOffer` holds**, once per subscription; else withdraw answers 409 `WITHDRAWAL_CLOSED`. A withdrawal (`dormouse_withdrawals`) is recorded with its acknowledgement, a `withdrawal` notice, then settled: its subscription ended at once (reason `withdrawal`), every paid invoice payment refunded in full, stamped once done; the cron retries every unsettled one, however old, least recently tried first, and fails while one does (`hosted/README.md` -> "Refund by hand"). **Never stamp a withdrawal or closure settled while a payment it refunds was paid outside Stripe, or the refunds Stripe lists for it as `succeeded` fall short of it**, whatever a create answered. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must suspend, never end, on an open dispute**, by its current status read from Stripe, not the event (`dormouse_billing_disputes`, which outlives the account); closing in the account's favor restores it.
 - **Must offer founding at the last ladder step bought at while its purchases net of those ended within `REFUND_DAYS` are short of `FOUNDING_COHORT_SIZE`, else the next**, counting seats left the same way; an earlier step never reopens. Past the last step, founding checkout answers 409.
@@ -124,14 +124,14 @@ Each notice is a `dormouse_billing_notices` row, recorded before it is sent and 
 | `renewal` (yearly and founding, doubling as their annual reminder) | 30 days before the renewal | the subscription is `active` and renews then |
 | `annual` (monthly) | 30 days before each renewal ending a year since its start | the same |
 | `price_change` | 21 days before the first renewal on or after the change's `effectiveAt` | the same, on the old Price, over 8 days ahead |
-| `dispute_suspended` | a dispute opens a suspension | the dispute is open, for 30 days |
-| `dispute_restored` | it closes in the account's favor, no other open | 30 days |
+| `dispute_suspended` | a dispute opens a suspension | the owner subscribed and the dispute open, 30 days |
+| `dispute_restored` | it closes in the account's favor, no other open | the owner subscribed, 30 days |
 | `withdrawal` (its acknowledgement) | a withdrawal is recorded, in the same statement | until sent; the cron fails once one is a day overdue |
 | `purchase` (its confirmation) | a checkout completes, one per subscription | until sent |
 
 - **Must send every notice to the Stripe customer's email**, never the sign-in email, so a provider-only account gets them.
 - **Must record a dispute's or a purchase's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
-- **Must fill a purchase's notice from its checkout's consent** ("Billing"), never the current price or terms.
+- **Must fill a purchase's notice's plan, price, and terms version from its checkout's consent** ("Billing"); its other lines restate today's disclosure.
 - **A price change is an operator's `dormouse_price_changes` row** (`hosted/README.md`); both its Prices grant the plan once inserted. **Never act on one naming a founding Price or another plan's**, or whose Prices Stripe does not hold at its amounts, in USD, at the plan's interval.
 - **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must state in a renewal notice or annual reminder the price its renewal charges**: a price change's new Price once its notice for that renewal went, or can still go, at least 7 days ahead.
@@ -337,7 +337,7 @@ Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The v
 | `GET /api/relay/passkeys` | login cookie, same-origin fetch | 200 `{ passkeys }`, each with the enrolled Burrow whose setup token registered it, or none |
 | `DELETE /api/relay/passkeys/:credentialId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 
-Errors are the managed-voice cookie routes' ("Managed voice"), except that their 403 carries `NOT_ENTITLED_ERROR`.
+Errors are the managed-voice cookie routes' ("Managed voice"): the list and remove routes admit an account without a plan, and the two enrollment routes refuse it 403 `NOT_ENTITLED_ERROR`.
 
 - **Must refuse approval from a login older than `LOGIN_FRESH_AGE_MS`**, 403 `RECENT_LOGIN_REQUIRED`, failing closed when the login's `createdAt` is missing or unparsable; the voice routes require no recent login.
 - **Must count every approval attempt** against `RELAY_APPROVE_LIMIT` (10 a minute per account) before reading the body: 429 with `Retry-After` past it.
@@ -385,9 +385,9 @@ Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetri
 
 **Must isolate test stacks from development and concurrent runs, remove containers and volumes on teardown, and reap abandoned stacks only after their owner exits.**
 
-**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only.
+**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. **Never let a `db:*` script fall back to the development database**: each refuses an unset or empty `DATABASE_URL`.
 
-Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` in `hosted/package.json`; `hosted/scripts/test-databases.mjs`. Pinned by `hosted/server/tests/boundary.test.ts`.
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` and `db:*` in `hosted/package.json`; `hosted/pgstencil.json`; `hosted/scripts/test-databases.mjs`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/scripts/db-scripts.test.mjs`.
 
 ## PR previews
 

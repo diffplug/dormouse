@@ -1,0 +1,7 @@
+{
+  "migrations": [
+    "node_modules/@pgstencil/auth/better-auth-migrations",
+    "node_modules/@pgstencil/stripe/migrations",
+    "server/dormouse-migrations"
+  ]
+}

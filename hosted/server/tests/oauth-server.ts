@@ -1,13 +1,37 @@
 // Synced from pgstencil test fixtures for provider protocol parity.
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { createHash, createHmac, generateKeyPairSync, sign } from "node:crypto";
-import type { OAuthFetch } from "@pgstencil/auth/oauth-providers";
+import {
+  constants,
+  createHash,
+  createHmac,
+  generateKeyPairSync,
+  sign,
+} from "node:crypto";
 import type {
   Provider,
   OAuthSettings,
 } from "@pgstencil/auth/better-auth-oauth";
 
+/** A fetch-shaped OAuth client transport: a string URL and complete options. */
+type OAuthFetch = (
+  url: string,
+  options: {
+    body:
+      | ArrayBuffer
+      | null
+      | ReadableStream
+      | string
+      | Uint8Array
+      | undefined
+      | URLSearchParams;
+    duplex?: "half";
+    headers: Record<string, string>;
+    method: string;
+    redirect: "manual";
+    signal?: AbortSignal;
+  },
+) => Promise<Response>;
 export const allOAuthCredentials = {
   google: {
     clientId: "test-google-client",
@@ -45,7 +69,8 @@ const jwk = {
 export const endpointPaths: Record<string, string> = {
   "https://login.microsoftonline.com/common/oauth2/v2.0/token":
     "/microsoft/token",
-  "https://login.microsoftonline.com/common/discovery/v2.0/keys": "/keys",
+  "https://login.microsoftonline.com/common/discovery/v2.0/keys":
+    "/microsoft/keys",
   "https://appleid.apple.com/.well-known/openid-configuration":
     "/apple/discovery",
   "https://appleid.apple.com/auth/token": "/apple/token",
@@ -67,6 +92,8 @@ export interface GrantOptions {
   verified?: boolean;
   claims?: Record<string, unknown>;
   badSignature?: boolean;
+  /** Forge the ID token under another algorithm; HS256 is keyed with the public key. */
+  algorithm?: "HS256" | "none" | "PS256" | "RS512";
   missingIdToken?: boolean;
   tokenFailure?: boolean;
   profileFailure?: boolean;
@@ -125,6 +152,11 @@ export async function mockOAuthServer(
         });
       }
       if (url.pathname === "/keys") return json({ keys: [jwk] });
+      if (url.pathname === "/microsoft/keys") {
+        // Microsoft's real RSA signing keys omit the optional alg member.
+        const { alg: _alg, ...microsoftKey } = jwk;
+        return json({ keys: [microsoftKey] });
+      }
       if (url.pathname.endsWith("/token")) {
         const form = new URLSearchParams(body);
         const code = form.get("code") ?? "";
@@ -204,13 +236,39 @@ export async function mockOAuthServer(
               : {}),
             ...grant.options.claims,
           };
+          const algorithm = grant.options.algorithm ?? "RS256";
           const unsigned = [
             Buffer.from(
-              JSON.stringify({ alg: "RS256", kid: "test-key" }),
+              JSON.stringify({ alg: algorithm, kid: "test-key" }),
             ).toString("base64url"),
             Buffer.from(JSON.stringify(claims)).toString("base64url"),
           ].join(".");
-          response.id_token = `${unsigned}.${sign("RSA-SHA256", Buffer.from(unsigned), grant.options.badSignature ? otherKey().privateKey : key.privateKey).toString("base64url")}`;
+          const data = Buffer.from(unsigned);
+          const privateKey = grant.options.badSignature
+            ? otherKey().privateKey
+            : key.privateKey;
+          const signature =
+            algorithm === "none"
+              ? Buffer.alloc(0)
+              : algorithm === "HS256"
+                ? createHmac(
+                    "sha256",
+                    key.publicKey.export({ type: "spki", format: "pem" }),
+                  )
+                    .update(data)
+                    .digest()
+                : algorithm === "PS256"
+                  ? sign("sha256", data, {
+                      key: privateKey,
+                      padding: constants.RSA_PKCS1_PSS_PADDING,
+                      saltLength: 32,
+                    })
+                  : sign(
+                      algorithm === "RS512" ? "RSA-SHA512" : "RSA-SHA256",
+                      data,
+                      privateKey,
+                    );
+          response.id_token = `${unsigned}.${signature.toString("base64url")}`;
         }
         return json(response);
       }

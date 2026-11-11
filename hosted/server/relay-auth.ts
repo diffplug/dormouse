@@ -1,6 +1,6 @@
 // Rules: docs/specs/hosted.md -> "Relay".
 import type { Context, MiddlewareHandler } from "hono";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "./token-digest";
 import { withClient } from "pgstencil/postgres";
 import {
   NOT_ENTITLED_ERROR,

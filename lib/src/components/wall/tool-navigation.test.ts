@@ -4,7 +4,7 @@ import { directoryOf } from '../../lib/tool-open-requests';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { BrowserRequest } from '../../lib/platform/browser-automation';
 
-const location = (target: string, top = 0) => ({ target, cwd: '/repo', handler: 'builtin:file', position: { top } });
+const location = (target: string, top = 0) => ({ target, cwd: '/repo', handler: 'builtin:file', scope: 'builtin' as const, position: { top } });
 describe('Tool document history', () => {
   it('captures reading positions, traverses locally, and drops the forward branch on a new visit', () => {
     const a = location('/repo/a.md', 100), b = location('/repo/b.md', 200), c = location('/repo/c.png');

@@ -157,6 +157,9 @@ export function HostedPage({
   }, [enterCode]);
   // A lapsed account still sees, and may turn off, a Natural Voice left on.
   const voiceShown = !!hostedVoice && (hostedVoice.entitled || hostedVoice.on);
+  // And one without a plan still sees, and may remove, what it enrolled.
+  const shownComputers = computers && (!noPlan || computers.length > 0) ? computers : null;
+  const shownPasskeys = passkeys && (!noPlan || passkeys.length > 0) ? passkeys : null;
   const summary = billing !== null && billing !== "closed" ? billing : null;
   const founders = summary && (
     <FoundersOptIn billing={summary} defaultName={session?.user.name ?? ""} busy={busy} onSave={saveFounder} />
@@ -272,7 +275,7 @@ export function HostedPage({
                 {enrolling.code ? (
                   noPlan ? (
                     <>
-                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} foundingLapsed={summary?.foundingLapsed} />
+                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} founding={summary?.founding} foundingLapsed={summary?.foundingLapsed} />
                       {enrolling.purpose !== "voice" && (
                         <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
                           <SelfHostLine />
@@ -499,7 +502,7 @@ export function HostedPage({
                     </dialog>
                   </section>
                 )}
-                {computers && (
+                {shownComputers && (
                   <section aria-labelledby="computers" className={SECTION_CLASS}>
                     <h2 id="computers" className={HEADING_CLASS}>Computers</h2>
                     <p className={HELP_CLASS}>
@@ -507,14 +510,14 @@ export function HostedPage({
                       once paired by two digits typed at that computer. Remote control
                       is in admin-only testing.
                     </p>
-                    {computers.length === 0 && (
+                    {shownComputers.length === 0 && (
                       <p className={HELP_CLASS}>
                         No computers yet. To enroll one, open Dormouse on that
                         computer and go to Settings → Network → Phones →
                         Hosted Relay → Enroll remote control.
                       </p>
                     )}
-                    {computers.map((computer) => (
+                    {shownComputers.map((computer) => (
                       <div className={ROW_CLASS} key={computer.burrowId}>
                         <span className="min-w-0 wrap-anywhere">
                           {computer.label ?? "Computer"}
@@ -537,7 +540,7 @@ export function HostedPage({
                     ))}
                   </section>
                 )}
-                {passkeys && (
+                {shownPasskeys && (
                   <section aria-labelledby="passkeys" className={SECTION_CLASS}>
                     <h2 id="passkeys" className={HEADING_CLASS}>Passkeys</h2>
                     <p className={HELP_CLASS}>
@@ -546,10 +549,10 @@ export function HostedPage({
                       recognize: that phone can no longer sign in, and each of
                       your computers unpairs it the next time it is online.
                     </p>
-                    {passkeys.length === 0 && (
+                    {shownPasskeys.length === 0 && (
                       <p className={HELP_CLASS}>No passkeys yet.</p>
                     )}
-                    {passkeys.map((passkey) => (
+                    {shownPasskeys.map((passkey) => (
                       <div className={ROW_CLASS} key={passkey.credentialId}>
                         <span>
                           {passkey.label || "Unnamed passkey"}
@@ -588,11 +591,11 @@ export function HostedPage({
                 <section aria-labelledby="close" className={SECTION_CLASS}>
                   <CloseAccount billing={billing} fresh={!!fresh} busy={busy} onClose={closeAccount} />
                 </section>
-                {!(voiceShown && computers) && (
+                {!(voiceShown && shownComputers) && (
                   <p className={FOOTNOTE_CLASS}>
                     {voiceShown
                       ? "Remote control is"
-                      : computers
+                      : shownComputers
                         ? "Natural Voice is"
                         : "Natural Voice and remote control are"}{" "}
                     not available yet.
