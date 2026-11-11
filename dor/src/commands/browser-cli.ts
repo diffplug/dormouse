@@ -357,46 +357,39 @@ const BLOCKING_FORMS: readonly {
   blocks(args: string[], stdinIsTTY: boolean): boolean;
 }[] = [
   // A REPL only with no message and a terminal on stdin; piped input runs once.
-  { provider: 'agent-browser', command: 'chat', form: 'chat', blocks: (args, tty) => tty && !hasAgentBrowserPositional(args) },
+  // Read past options as the command itself is found, so the two never
+  // disagree; an unknown option leaves the message's position unknown.
+  { provider: 'agent-browser', command: 'chat', form: 'chat', blocks: (args, tty) => tty && firstPositional('agent-browser', args) === undefined },
   // An MCP stdio server: its replies are its stdout, and it serves until stdin closes.
   { provider: 'agent-browser', command: 'mcp', form: 'mcp', blocks: () => true },
   // `--port` makes the dashboard a blocking HTTP server whose URL is its output.
   { provider: 'playwright', command: 'show', form: 'show --port', blocks: (args) => args.some((arg) => arg === '--port' || arg.startsWith('--port=')) },
 ];
 
-function hasAgentBrowserPositional(args: string[]): boolean {
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i]!;
-    if (!arg.startsWith('-')) return true;
-    if (AGENT_BROWSER_VALUE_FLAGS.has(arg)) i += 1;
-  }
-  return false;
-}
-
-/** First command after known options; never mistake a flag value for a verb. */
-function nativeCommandIndex(provider: BrowserAutomationProvider, args: string[]): number | undefined {
-  if (provider === 'playwright') {
-    for (let i = 0; i < args.length; i += 1) {
-      const arg = args[i] ?? '';
-      if (!arg.startsWith('-')) return i;
-      const [name] = arg.split('=', 1);
-      if (PLAYWRIGHT_OPEN_VALUE_FLAGS.has(name)) { if (!arg.includes('=')) i += 1; continue; }
-      if (!PLAYWRIGHT_OPEN_BOOLEAN_FLAGS.has(name)) return undefined;
-    }
-    return undefined;
-  }
+/**
+ * The first positional of `args` after known options, never a flag's value:
+ * `undefined` when there is none, `null` when an unknown option leaves its
+ * position unknown. agent-browser's booleans may carry an explicit `true` or
+ * `false`; Playwright's never do.
+ */
+function firstPositional(provider: BrowserAutomationProvider, args: string[]): number | null | undefined {
+  const playwright = provider === 'playwright';
+  const valueFlags = playwright ? PLAYWRIGHT_OPEN_VALUE_FLAGS : AGENT_BROWSER_VALUE_FLAGS;
+  const booleanFlags = playwright ? PLAYWRIGHT_OPEN_BOOLEAN_FLAGS : AGENT_BROWSER_BOOLEAN_FLAGS;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] ?? '';
     if (!arg.startsWith('-')) return i;
     const [name] = arg.split('=', 1);
-    if (AGENT_BROWSER_VALUE_FLAGS.has(name)) { if (!arg.includes('=')) i += 1; continue; }
-    if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name)) {
-      if (args[i + 1] === 'true' || args[i + 1] === 'false') i += 1;
-      continue;
-    }
-    return undefined;
+    if (valueFlags.has(name)) { if (!arg.includes('=')) i += 1; continue; }
+    if (!booleanFlags.has(name)) return null;
+    if (!playwright && (args[i + 1] === 'true' || args[i + 1] === 'false')) i += 1;
   }
   return undefined;
+}
+
+/** First command after known options; never mistake a flag value for a verb. */
+function nativeCommandIndex(provider: BrowserAutomationProvider, args: string[]): number | undefined {
+  return firstPositional(provider, args) ?? undefined;
 }
 
 function nativeCommand(provider: BrowserAutomationProvider, args: string[]): string | undefined {

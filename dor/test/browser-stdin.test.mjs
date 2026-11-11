@@ -56,12 +56,19 @@ test('refuses exactly the native forms that wait on the terminal or never exit',
     { argv: ['agent-browser', 'chat'], tty: true, refused: 'run agent-browser chat directly' },
     { argv: ['agent-browser', '-q', 'chat', '--model', 'openai/gpt-4o'], tty: true, refused: 'run agent-browser chat directly' },
     { argv: ['agent-browser', 'chat', 'open example.com'], tty: true },
+    // An explicit boolean value is the flag's, never a message.
+    { argv: ['agent-browser', 'chat', '--headed', 'true'], tty: true, refused: 'run agent-browser chat directly' },
+    { argv: ['agent-browser', '--headed', 'false', 'chat', '-v', 'true'], tty: true, refused: 'run agent-browser chat directly' },
+    { argv: ['agent-browser', 'chat', '--headed', 'false', 'summarize this page'], tty: true },
+    // An option it does not know leaves the message's position unknown: passed through.
+    { argv: ['agent-browser', 'chat', '--unknown', 'value'], tty: true },
     { argv: ['agent-browser', 'chat'], tty: false },
     { argv: ['agent-browser', 'chat', '--help'], tty: true },
     { argv: ['agent-browser', 'mcp'], tty: false, refused: 'run agent-browser mcp directly' },
     { argv: ['playwright', 'show', '--port', '0'], tty: true, refused: 'run playwright-cli show --port directly' },
     { argv: ['playwright', 'show', '--port=0'], tty: false, refused: 'run playwright-cli show --port directly' },
     { argv: ['playwright', 'show'], tty: true },
+    { argv: ['playwright', '--headed', 'show', '--annotate', '--port', '0'], tty: false, refused: 'run playwright-cli show --port directly' },
   ];
   for (const { argv, tty, refused } of cases) {
     const calls = [];
