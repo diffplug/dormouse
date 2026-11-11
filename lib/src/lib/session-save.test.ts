@@ -28,7 +28,6 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
 
   return {
     init: async () => {},
-    shutdown: () => {},
     spawnPty: () => {},
     writePty: () => {},
     resizePty: () => {},

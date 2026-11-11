@@ -213,14 +213,12 @@ describe("TauriAdapter window persistence", () => {
 
     expect(adapter.getWindowState()).toEqual(windowBlob);
     expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("clear_session");
-    adapter.shutdown();
   });
 
   it("starts fresh on a blob an older build wrote", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify({ ...windowBlob, version: 1 }) : undefined));
     expect(adapter.getWindowState()).toBeNull();
-    adapter.shutdown();
     info.mockRestore();
   });
 
@@ -235,7 +233,6 @@ describe("TauriAdapter window persistence", () => {
     // Synchronous by the time the cold restore asks, which is what awaiting
     // `recoveryReady` before planning buys.
     expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
-    adapter.shutdown();
   });
 
   it("restores without recovery when the record cannot be read", async () => {
@@ -245,14 +242,12 @@ describe("TauriAdapter window persistence", () => {
       return undefined;
     });
     expect(adapter.getRecoveryCommands()).toEqual({});
-    adapter.shutdown();
   });
 
   it("asks for nothing when there are no saved panes", async () => {
     const { adapter, invoke } = await booted(() => undefined);
     expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("take_recovery_commands");
     expect(adapter.getRecoveryCommands()).toEqual({});
-    adapter.shutdown();
   });
 
   it("captures agent recovery and proceeds when the capture fails", async () => {
@@ -262,7 +257,6 @@ describe("TauriAdapter window persistence", () => {
     });
     await expect(adapter.captureAgentRecovery(1300)).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledWith("capture_agent_recovery", { timeout: 1300 });
-    adapter.shutdown();
   });
 });
 
@@ -346,13 +340,6 @@ describe("TauriAdapter remote host link", () => {
     adapter.burrow.notify();
     expect(sent()[0]).toMatchObject({ cmd: "notify" });
     expect(sent()[0]!.params).toBeUndefined();
-  });
-
-  it("rejects what is still in flight when the sidecar is killed", async () => {
-    const { adapter } = await bridged();
-    const pending = adapter.burrow.command("status");
-    adapter.shutdown();
-    await expect(pending).rejects.toThrow("burrow bridge closed");
   });
 });
 

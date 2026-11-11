@@ -302,7 +302,7 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 
 **One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types".
 
-**Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: nothing wires `shutdown()` to `beforeunload`, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
+**Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: no `beforeunload` handler kills a PTY, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
 
 **Nothing is deleted at boot but orphaned session temp files, what the arrival merge settles, and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types").
 

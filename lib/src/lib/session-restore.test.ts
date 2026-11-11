@@ -25,7 +25,6 @@ function createPlatform(
   return {
     getRecoveryCommands: vi.fn(() => recoveryCommands),
     init: async () => {},
-    shutdown: () => {},
     getAvailableShells: vi.fn(async () => []),
     spawnPty: vi.fn(),
     writePty: vi.fn(),

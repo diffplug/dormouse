@@ -96,7 +96,6 @@ export class TauriAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
-  private unlistenFns: Array<() => void> = [];
   private static STATE_KEY = 'dormouse.session';
   private sessionStore = new TauriSessionStore();
   private windowSlot = windowStateSlot(this.sessionStore, TauriAdapter.STATE_KEY, 'tauri-adapter');
@@ -155,7 +154,7 @@ export class TauriAdapter implements PlatformAdapter {
     // Registered together rather than one await after another: every `listen`
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.
-    this.unlistenFns.push(...(await Promise.all([
+    await Promise.all([
       // Already parsed by the sidecar, which owns the PTY: the pair arrives as
       // it is, and its events arrive as the two messages below
       // (docs/specs/terminal-escapes.md → "Parsing location").
@@ -275,7 +274,7 @@ export class TauriAdapter implements PlatformAdapter {
         listenToWindow<unknown>(name, (event) => void this.alerts.onEvent(name, event.payload))),
 
       listenToWindow<unknown>("voice:status", (event) => this.managedVoice?.receiveStatus(event.payload)),
-    ])));
+    ]);
     this.managedVoice?.refresh();
     // This realm is new, whether the window just opened or reloaded: the
     // engagement and awaits of the one before it are gone (same label).
@@ -284,11 +283,11 @@ export class TauriAdapter implements PlatformAdapter {
     await this.hydrateSessionStore();
     // Before restore too: a fresh Window mints its first Workspace id from
     // the block this reserves (docs/specs/standalone.md → "Workspace registry").
-    this.unlistenFns.push(await installWorkspaceRegistry({
+    await installWorkspaceRegistry({
       invoke: (cmd, args) => rawInvoke(cmd, args),
       onSnapshot: (handler) =>
         listenToWindow<WorkspaceRegistrySnapshot>("dormouse://workspaces", (event) => handler(event.payload)),
-    }, this.windowSlot.read()));
+    }, this.windowSlot.read());
   }
 
   // Seed the session cache from the Rust file store before restore reads it
@@ -312,17 +311,6 @@ export class TauriAdapter implements PlatformAdapter {
       this.windowSlot.read(),
       'tauri-adapter',
     ).then((commands) => { this.recoveryCommands = commands; });
-  }
-
-  shutdown(): void {
-    this.alerts.dispose();
-    for (const unlisten of this.unlistenFns) {
-      unlisten();
-    }
-    this.unlistenFns = [];
-    // Nothing will answer what is outstanding once this window stops
-    // listening. The sidecar stays: every window shares it.
-    this.burrowClient.dispose();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {

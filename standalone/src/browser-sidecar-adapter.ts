@@ -68,9 +68,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
-  private unlistenHost: (() => void) | null = null;
-  private unlistenReconnect: (() => void) | null = null;
-  private unlistenRegistry: (() => void) | null = null;
   private onRegistrySnapshot: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
   private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
@@ -112,12 +109,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     await this.host.init();
     // As TauriAdapter: a reloaded page's leases go before this page takes any.
     this.leaseOrder.reset = this.host.invoke("iframe_release_proxy", { lease: null }).catch(() => {});
-    this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
+    this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     // The SSE stream is the only way the alerts' events reach this adapter,
     // and whatever the sidecar sent while it was down is lost: `sync` has the
     // sidecar re-send this window's Sessions' state and both stores, and
     // managed voice asks for its status again.
-    this.unlistenReconnect = this.host.onReconnect(() => {
+    this.host.onReconnect(() => {
       this.alerts.sync();
       this.managedVoice?.refresh();
     });
@@ -125,7 +122,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alerts.hello();
     this.managedVoice?.refresh();
     this.installConsoleForwarder();
-    this.unlistenRegistry = await installWorkspaceRegistry({
+    await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
       // Through the one host subscription above, not a second one.
       onSnapshot: (handler) => {
@@ -139,19 +136,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       this.windowSlot.read(),
       'browser-sidecar',
     ).then((commands) => { this.recoveryCommands = commands; });
-  }
-
-  shutdown(): void {
-    this.alerts.dispose();
-    this.unlistenHost?.();
-    this.unlistenHost = null;
-    this.unlistenReconnect?.();
-    this.unlistenReconnect = null;
-    this.unlistenRegistry?.();
-    this.unlistenRegistry = null;
-    // The sidecar stays: every window shares it.
-    this.burrowClient.dispose();
-    this.host.close();
   }
 
   private sendBurrowCommand(command: BurrowCommand): void {

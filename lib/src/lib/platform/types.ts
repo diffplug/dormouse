@@ -220,7 +220,6 @@ export interface WritePtyOptions {
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
-  shutdown(): void;
 
   /**
    * Reach the Burrow service behind this host. Present exactly when a

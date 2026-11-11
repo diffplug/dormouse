@@ -269,13 +269,6 @@ export class VSCodeAdapter implements PlatformAdapter {
     }, maxSurfaceNumber(restored ? [restored] : []));
   }
 
-  shutdown(): void {
-    // The extension host handles PTY cleanup, but nothing there will answer a
-    // command or an await this webview is still holding once it goes away.
-    this.burrowClient.dispose();
-    this.alerts.dispose();
-  }
-
   /** The extension host owns shell selection here; the webview never lists shells. */
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
     return [];

@@ -594,15 +594,6 @@ describe('VSCodeAdapter remote host link', () => {
     expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify' });
   });
 
-  it('rejects what is still in flight when the webview shuts down', async () => {
-    // The extension host cleans up the PTYs, but nothing there will ever answer
-    // a command this webview is still holding.
-    const adapter = new VSCodeAdapter();
-    const pending = adapter.burrow.command('status');
-    adapter.shutdown();
-    await expect(pending).rejects.toThrow('burrow bridge closed');
-  });
-
   it('ignores an unauthenticated result, so framed content cannot settle a command', async () => {
     const adapter = new VSCodeAdapter();
     vi.useFakeTimers();

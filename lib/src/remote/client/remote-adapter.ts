@@ -110,10 +110,6 @@ export class RemotePtyAdapter implements PlatformAdapter {
     await this.#ensureDirectoryWatch();
   }
 
-  shutdown(): void {
-    void this.dispose();
-  }
-
   /** Detach the live surface and stop watching the directory. */
   async dispose(): Promise<void> {
     this.#disposed = true;
