@@ -15,7 +15,7 @@ import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import type { PersistedSession } from '../../lib/session-types';
 import type { ToolControlResult, ToolHostRequest } from '../../lib/platform/tool-types';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createToolHost } from '../../host/tool-host';
@@ -1637,9 +1637,18 @@ describe('Back to a project Tool, through the real Tool host', () => {
     expect(typed['surface:tool'].slice(-1)).toEqual([`view ${a}\r`]);
   });
 
-  it.each([
+  it.each<[string, () => Promise<void>, string]>([
     ['its project lost its grant', async () => { await useHost({ ungranted: true }); }, 'not approved'],
     ['its project file no longer declares it', async () => { await writeFile(join(project, 'dormouse.yml'), 'tools:\n  other:\n    run: [other]\n'); }, "no project Tool 'view'"],
+    // Still the project Tool, but with no target: it would otherwise be placed
+    // as an ordinary launch of `view <a>` in a new pane.
+    ['its Tool now takes $ARGS', async () => { await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view, $ARGS]\n'); }, "'view' no longer takes a file"],
+    ['its Tool now takes neither token', async () => { await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view]\n'); }, "'view' no longer takes a file"],
+    ...(process.platform === 'win32' ? [] : [['its document now resolves elsewhere', async () => {
+      await writeFile(join(project, 'c.md'), '# c');
+      await rm(a);
+      await symlink(join(project, 'c.md'), a);
+    }, 'a.md now resolves to'] as [string, () => Promise<void>, string]]),
   ])('fails on the source when %s, leaving its location and history', async (_, change, error) => {
     await change();
     const failed = await back();
@@ -1654,8 +1663,23 @@ describe('Back to a project Tool, through the real Tool host', () => {
     expect(params).not.toHaveProperty('toolPending');
     // The history is intact: once the project is back, so is Back.
     await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view, $TARGET]\n');
+    await rm(a);
+    await writeFile(a, '# a');
     await useHost();
     expect(await answer(await back())).toMatchObject({ status: 'retargeted' });
+    expect((await paramsOf('surface:tool'))?.toolTarget).toBe(a);
+  });
+
+  it.skipIf(process.platform === 'win32')('fails Forward through open dispatch when its document now resolves elsewhere', async () => {
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted' });
+    await writeFile(join(project, 'c.md'), '# c');
+    await rm(b);
+    await symlink(join(project, 'c.md'), b);
+    const failed = await request({ history: 'forward', disposition: 'current' }, 'surface:tool');
+    await waitUntil(() => failed.mock.calls.length > 0);
+    expect(failed.mock.calls[0][0]).toEqual({ ok: false, error: `${b} now resolves to ${join(project, 'c.md')}` });
+    expect(typed['surface:tool']).toHaveLength(4);
+    expect(leafCount()).toBe(2);
     expect((await paramsOf('surface:tool'))?.toolTarget).toBe(a);
   });
 });

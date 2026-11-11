@@ -1381,10 +1381,18 @@ export function useDorControl({
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
-              // A project file that no longer declares it falls through to user Tools.
-              if (projectEntry && lookup.scope !== undefined) {
-                detail.respond({ ok: false, error: `no project Tool '${toolName}' from ${cwd}` });
-                return;
+              // A traversal reopens the recorded document with its recorded
+              // handler or fails, before anything is interrupted or placed: never
+              // a user Tool a project file no longer declaring it falls through
+              // to, one that no longer takes a file, or another document.
+              if (historical) {
+                const mismatch = projectEntry && lookup.scope !== undefined ? `no project Tool '${toolName}' from ${cwd}`
+                  : lookup.target === undefined ? `'${lookup.name}' no longer takes a file`
+                  : lookup.target !== historical.target ? `${historical.target} now resolves to ${lookup.target}` : null;
+                if (mismatch) {
+                  detail.respond({ ok: false, error: mismatch });
+                  return;
+                }
               }
               toolRun = lookup.run;
               command = toolRunCommand(lookup.run);
