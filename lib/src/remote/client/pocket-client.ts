@@ -382,6 +382,17 @@ export const PRESENCE_CHALLENGE_MISMATCH_MESSAGE =
 export const BURROW_UNAVAILABLE_MESSAGE =
   'The computer did not answer. Check that it is awake and connected, then try again.';
 
+/**
+ * How long an account request may go unanswered before it fails. Pocket holds
+ * every control while one is out, so a request that stalls rather than fails
+ * (a captive portal, a dead cell) would otherwise hold them until the browser
+ * gave up on it.
+ */
+export const POCKET_API_TIMEOUT_MS = 15_000;
+
+export const RELAY_NO_ANSWER_MESSAGE =
+  'The Relay did not answer. Check this phone’s connection, then try again.';
+
 /** Fixed local-read recovery copy: browser errors can contain private details. */
 export const CONNECTION_RECORD_UNREADABLE_MESSAGE =
   'This browser could not read the saved pairing record. '
@@ -1388,11 +1399,22 @@ export class PocketClient {
 
   async #api<T>(route: string, body?: unknown, init?: ApiInit): Promise<T> {
     const method = init?.method ?? 'POST';
-    const response = await this.#fetch(`${this.#baseUrl}${route}`, {
-      method,
-      headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
-      ...(method === 'GET' || method === 'DELETE' ? {} : { body: JSON.stringify(body ?? {}) }),
-    });
+    const controller = new AbortController();
+    const cancelTimeout = this.#setTimer(
+      () => controller.abort(new Error(RELAY_NO_ANSWER_MESSAGE)),
+      POCKET_API_TIMEOUT_MS,
+    );
+    let response: Response;
+    try {
+      response = await this.#fetch(`${this.#baseUrl}${route}`, {
+        method,
+        headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+        ...(method === 'GET' || method === 'DELETE' ? {} : { body: JSON.stringify(body ?? {}) }),
+        signal: controller.signal,
+      });
+    } finally {
+      cancelTimeout();
+    }
     const parsed = (await response.json().catch(() => ({}))) as T & { error?: string };
     // Only the session gate's 401 means "sign in again" — a refused setup token
     // answers 401 too, and bouncing the user to sign-in for that would be a
@@ -1608,24 +1630,6 @@ function parseStoredSession(raw: string | null): PocketSession | null {
     // Unparseable is malformed.
   }
   return null;
-}
-
-/**
- * The legacy per-Burrow markers, removed once per page life.
- *
- * `dormouse-pocket:paired:*` was the local guess the pre-end-to-end Burrows view
- * offered a button from; the `KnownBurrowV1` records replaced it, and a marker
- * left behind is a claim about authorization that nothing checks. Best-effort,
- * like every other touch of this storage.
- */
-export function purgeLegacyPairedMarkers(): void {
-  // Collected before removing: mutating while enumerating by index skips keys.
-  const stale = keysWithPrefix('dormouse-pocket:paired:');
-  try {
-    for (const key of stale) globalThis.localStorage.removeItem(key);
-  } catch {
-    // Blocked or absent storage holds no markers to remove.
-  }
 }
 
 /**

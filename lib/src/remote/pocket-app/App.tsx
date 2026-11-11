@@ -14,7 +14,7 @@
  * `pocket-chrome.tsx` and docs/specs/theme.md.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   PocketClient,
@@ -212,6 +212,11 @@ export default function App({
   const [phase, setPhase] = useState<Phase>(() => ({
     at: client.sessionToken === null ? 'auth' : 'restoring',
   }));
+  /**
+   * The list's copy of the native-camera notice: a kept session skips the
+   * sign-in screen that carries it, and it is moot once a scan is opened here.
+   */
+  const [cameraNoticeOnList, setCameraNoticeOnList] = useState(arrivedByCamera);
   /**
    * The last failure. Unkeyed, because every screen that reports one owns its
    * whole viewport: whatever failed last is the only thing there is to say.
@@ -705,6 +710,7 @@ export default function App({
 
   const openScanner = () => {
     setError(null);
+    setCameraNoticeOnList(false);
     setPhase({ at: 'scan' });
   };
 
@@ -788,6 +794,7 @@ export default function App({
         <BurrowsView
           burrows={burrows}
           deployment={deployment}
+          arrivedByCamera={cameraNoticeOnList}
           busy={busy}
           error={error}
           isPushSubscribed={isPushOn}
@@ -1143,6 +1150,11 @@ export const FORGET_PHONE_BODY =
   + 'This can’t be undone: each Burrow must be paired again. '
   + 'Each Burrow still lists this phone until you revoke it there, in Settings → Network.';
 
+/** Remove sits beside Connect, and undoing it needs someone at the computer. */
+export const REMOVE_BURROW_BODY =
+  'This can’t be undone from this phone: the computer must show a new code to pair again. '
+  + 'It still lists this phone until you revoke it there, in Settings → Network.';
+
 const PUSH_ENABLE_LABEL = 'Enable push notifications';
 
 /** The one pitch, on the one card. */
@@ -1284,6 +1296,7 @@ function PushNotice({
 export function BurrowsView({
   burrows,
   deployment = 'self-host',
+  arrivedByCamera = false,
   busy,
   error,
   isPushSubscribed,
@@ -1302,6 +1315,8 @@ export function BurrowsView({
   burrows: BurrowView[];
   /** Who serves this Pocket, which names what a removed row was removed from. */
   deployment?: PocketDeployment;
+  /** This run was opened from a `#pair?` link the native camera followed. */
+  arrivedByCamera?: boolean;
   busy: string | null;
   error: string | null;
   /** True only where this device holds a Relay push row for that Burrow. */
@@ -1323,7 +1338,10 @@ export function BurrowsView({
   onForgetThisPhone: () => void;
 }): React.ReactElement {
   const [confirmingForget, setConfirmingForget] = useState(false);
+  /** The `burrowId` whose Remove is being asked about, if any. */
+  const [confirmingRemove, setConfirmingRemove] = useState<string | null>(null);
   const forgetTitleId = useId();
+  const removeTitleId = useId();
   const pushNotice = pushNoticeState({
     pairedBurrowIds: burrows.filter(isPushTarget).map((h) => h.burrowId),
     isPushSubscribed,
@@ -1382,44 +1400,85 @@ export function BurrowsView({
               : burrow.needsPairing
                 ? { label: busy === 'pair' ? '…' : 'Pair again', run: () => onScan() }
                 : { label: busy === 'connect' ? '…' : 'Connect', run: () => onConnect(burrow) };
+            const name = burrow.label || burrow.burrowId;
             return (
-              <div key={burrow.burrowId} className={clsx(PK.row, !burrow.online && PK.rowOffline)}>
-                <div className={PK.rowMain}>
-                  <div className={PK.rowTitle}>{burrow.label || burrow.burrowId}</div>
-                  <div className={PK.rowSecondary}>{status}</div>
-                </div>
-                <div className={PK.rowActions}>
-                  <button
-                    type="button"
-                    className={pkButton({ tone: 'primary', size: 'sm' })}
-                    // Pairing again starts at the scanner, which needs no relay
-                    // socket and no online Burrow — the code on the computer's
-                    // screen is what says whether it is there.
-                    disabled={busy !== null || (!burrow.online && !burrow.needsPairing && !burrow.removed)}
-                    onClick={action.run}
-                  >
-                    {action.label}
-                  </button>
-                  {/* Removal is local and always available: it is how a phone
-                      forgets a computer it will not see again, and it is what
-                      queues the delivery row's deletion. A removed row's
-                      Forget is this, so it is not offered twice. */}
-                  {burrow.removed ? null : (
+              <Fragment key={burrow.burrowId}>
+                <div className={clsx(PK.row, !burrow.online && PK.rowOffline)}>
+                  <div className={PK.rowMain}>
+                    <div className={PK.rowTitle}>{burrow.label || burrow.burrowId}</div>
+                    <div className={PK.rowSecondary}>{status}</div>
+                  </div>
+                  <div className={PK.rowActions}>
                     <button
                       type="button"
-                      className={pkButton({ tone: 'outline', size: 'sm' })}
+                      className={pkButton({ tone: 'primary', size: 'sm' })}
+                      // Enabled on an offline row too: `online` is only as fresh
+                      // as the last list read, and nothing re-reads it on its own.
+                      // The Relay answers a Connect to an offline Burrow at once,
+                      // and that answer re-reads the list.
                       disabled={busy !== null}
-                      aria-label={`Remove ${burrow.label || burrow.burrowId}`}
-                      onClick={() => onForget(burrow)}
+                      onClick={action.run}
                     >
-                      {busy === 'forget' ? '…' : 'Remove'}
+                      {action.label}
                     </button>
-                  )}
+                    {/* Removal is local and always available: it is how a phone
+                        forgets a computer it will not see again, and it is what
+                        queues the delivery row's deletion. A removed row's
+                        Forget is this, so it is not offered twice. It asks
+                        first, below the row rather than in Remove's place, so
+                        a second tap on the same spot cannot confirm it. */}
+                    {burrow.removed ? null : (
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'outline', size: 'sm' })}
+                        disabled={busy !== null}
+                        aria-label={`Remove ${name}`}
+                        onClick={() => setConfirmingRemove(burrow.burrowId)}
+                      >
+                        {busy === 'forget' ? '…' : 'Remove'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+                {confirmingRemove === burrow.burrowId && !burrow.removed ? (
+                  <div className={PK.notice} role="group" aria-labelledby={removeTitleId}>
+                    <div id={removeTitleId} className={PK.noticeTitle}>
+                      Remove {name} from this phone?
+                    </div>
+                    <p className={PK.noticeBody}>{REMOVE_BURROW_BODY}</p>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        className={pkButton({ tone: 'outline', size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={() => setConfirmingRemove(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className={pkButton({ size: 'sm' })}
+                        disabled={busy !== null}
+                        onClick={() => {
+                          setConfirmingRemove(null);
+                          onForget(burrow);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </Fragment>
             );
           })
         )}
+        {arrivedByCamera ? (
+          <div className={PK.notice}>
+            <div className={PK.noticeTitle}>{CAMERA_BOOTSTRAP_MESSAGE}</div>
+            <p className={PK.noticeBody}>The code your camera opened was not used.</p>
+          </div>
+        ) : null}
         <button
           type="button"
           className={pkButton({ tone: 'outline', block: true })}

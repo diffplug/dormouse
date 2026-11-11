@@ -23,7 +23,7 @@ Pocket is:
 
 **Scanning is the only way in** — no setup password, no typed credential; the code on the computer's screen is both account setup and pairing.
 
-**A QR the native camera opened is origin bootstrap only.** The `#pair?` fragment is erased before the first render, and on any later `hashchange`, parsed or not; nothing is retained, no call is made, the token is not spent, and the auth screen asks for a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned hash** — Camera opens Safari, a different partition. (rationale)
+**A QR the native camera opened is origin bootstrap only.** The `#pair?` fragment is erased before the first render, and on any later `hashchange`, parsed or not; nothing is retained, no call is made, the token is not spent, and the first screen asks for a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned hash** — Camera opens Safari, a different partition. (rationale)
 
 **Must parse scanned or pasted text with `parsePairingInvitationUrl`, never navigate** ([relay.md](./relay.md) owns the grammar; rationale). **Must keep invitations in memory only, clearing them on every terminal outcome.** **Must discard parses finishing after Cancel or teardown.**
 
@@ -66,7 +66,7 @@ flowchart TD
 
 **The pinned record picks a row's primary action.** The Burrows view lists the `KnownBurrowV1` records (no record, no row), stamped online from `GET /api/burrows`, offering Connect alone or **Pair again** alone. **Nothing asks the Burrow**: only an authenticated `pairing-required` outcome moves a row, dropping local authorization without discarding the pin (rationale).
 
-**A record of the signed-in account the Relay's list no longer names is removed**, marked only off a `GET /api/burrows` that succeeded; a listed offline Burrow, and another account's record, keep the offline row. **Must bind removal checks to the account that started the list read.** Its row reads `BURROW_REMOVED_COPY` for the deployment Pocket read (`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone, which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the list**, showing that copy instead where the Burrow is gone; a failed re-read keeps the original.
+**A record of the signed-in account the Relay's list no longer names is removed**, marked only off a `GET /api/burrows` that succeeded; a listed offline Burrow, and another account's record, keep the offline row. **Must bind removal checks to the account that started the list read.** Its row reads `BURROW_REMOVED_COPY` for the deployment Pocket read (`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone, which is Remove without its question. **Remove asks first**: only the computer can undo it. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the list**, showing that copy instead where the Burrow is gone; a failed re-read keeps the original.
 
 Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`; `App` in `lib/src/remote/pocket-app/App.tsx`; `takePairingHash` in `lib/src/remote/pocket-app/pair-link.ts`; `PocketClient` in `lib/src/remote/client/pocket-client.ts`; `RemotePtyAdapter` in `lib/src/remote/client/remote-adapter.ts`.
 

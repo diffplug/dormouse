@@ -15,7 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromBase64Url, INVITATION_CLOCK_SKEW_MS, toBase64Url, type PairingInvitation } from 'remote-lib-common';
 
-import { SCAN_REJECTED_MESSAGE, ScanInvitation, type ScanControls } from './ScanInvitation';
+import { RESCAN_GAP_MS, SCAN_REJECTED_MESSAGE, ScanInvitation, type ScanControls } from './ScanInvitation';
 import { buttonNamed, invitationUrl as sharedInvitationUrl, settle } from './app-test-utils';
 import { SETUP_CODE_DEAD_MESSAGE } from '../client/pocket-client';
 import { setNativeFieldValue } from '../../lib/dom';
@@ -292,6 +292,57 @@ describe('after a ceremony that failed without leaving this screen', () => {
     await settle();
 
     expect(camera.started).toBe(2);
+  });
+
+  /**
+   * A ceremony that failed on this screen, with the camera reopened on the same
+   * QR. The clock moves through the ceremony, as a passkey prompt or a stalled
+   * request would make it, with the camera off.
+   */
+  async function failedOnce() {
+    let clock = 1_000_000;
+    const now = () => clock;
+    const camera = fakeCamera();
+    const onScanned = vi.fn<(invitation: PairingInvitation) => void>();
+    render({ startScan: camera.startScan, onScanned, now });
+    await settle();
+    const { url } = await invitationUrl();
+    act(() => camera.read(url));
+    await settle();
+    expect(onScanned).toHaveBeenCalledOnce();
+    render({ startScan: camera.startScan, onScanned, now, busy: 'pair' });
+    await settle();
+    clock += 20_000;
+    render({ startScan: camera.startScan, onScanned, now });
+    await settle();
+    expect(camera.started).toBe(2);
+    const read = async (text: string, afterMs: number) => {
+      clock += afterMs;
+      act(() => camera.read(text));
+      await settle();
+    };
+    return { url, onScanned, read };
+  }
+
+  it('does not re-run a failed ceremony off the same code held in view', async () => {
+    // The decoder hands the code over again every half second it stays in view.
+    const { url, onScanned, read } = await failedOnce();
+    for (let i = 0; i < 10; i++) await read(url, 500);
+    expect(onScanned).toHaveBeenCalledOnce();
+
+    await read((await invitationUrl()).url, 500);
+    expect(onScanned).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a failed code once it was out of view and is aimed at again', async () => {
+    // A dismissed passkey prompt or a Relay that did not answer leaves the code
+    // good, and the failure tells the user to try again.
+    const { url, onScanned, read } = await failedOnce();
+    await read(url, 500);
+    expect(onScanned).toHaveBeenCalledOnce();
+
+    await read(url, RESCAN_GAP_MS + 500);
+    expect(onScanned).toHaveBeenCalledTimes(2);
   });
 });
 

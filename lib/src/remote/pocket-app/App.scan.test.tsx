@@ -721,6 +721,8 @@ describe('the Burrows list', () => {
     const note = container.querySelector(`[title="${TRANSPORT_PATH_LABELS.relay.title} ` +
       `${TRANSPORT_RELAY_CAUSES.declined}"]`);
     expect(note?.textContent).toBe(TRANSPORT_PATH_LABELS.relay.label);
+    // A phone shows no hover text, so the reason is on the screen as well.
+    expect(container.textContent).toContain(TRANSPORT_RELAY_CAUSES.declined);
 
     act(() => fake.onTransportPath?.('direct', null));
     await settle();
@@ -729,6 +731,7 @@ describe('the Burrows list', () => {
     expect(container.textContent).not.toContain(TRANSPORT_PATH_LABELS.relay.label);
     // Nothing left to explain: the hover text is the path alone.
     expect(container.querySelector(`[title="${TRANSPORT_PATH_LABELS.direct.title}"]`)).not.toBeNull();
+    expect(container.textContent).not.toContain(TRANSPORT_RELAY_CAUSES.declined);
   });
 
   /**
@@ -767,6 +770,13 @@ describe('the Burrows list', () => {
     await click(container, 'Sign in with passkey');
 
     await click(container, 'Remove');
+    expect(fake.forgetBurrow).not.toHaveBeenCalled();
+    act(() =>
+      [...container.querySelector('[role="group"]')!.querySelectorAll('button')]
+        .find((b) => b.textContent === 'Remove')!
+        .click(),
+    );
+    await settle();
 
     expect(fake.forgetBurrow).toHaveBeenCalledWith('burrow-1');
     expect(container.textContent).toContain(BURROWS_EMPTY);
@@ -992,6 +1002,24 @@ it('leads with the camera-bootstrap copy when the fragment brought us here', asy
   // Nothing was spent: the run has no token, and no Relay call was made.
   expect(fake.setup).not.toHaveBeenCalled();
   expect(fake.retireSetupToken).not.toHaveBeenCalled();
+});
+
+it('says the camera code went unused on the list a kept session lands on', async () => {
+  // A phone already paired with one computer is who scans a second.
+  fake.hasPriorUse = true;
+  fake.sessionToken = 'stored';
+  fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1')]);
+  fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: 'x', online: true }]);
+  await boot({ arrivedByCamera: true });
+
+  expect(rowFor(container, 'First laptop')).not.toBeNull();
+  expect(container.textContent).toContain(CAMERA_BOOTSTRAP_MESSAGE);
+
+  // Moot once the scan it asks for has been opened here.
+  await click(container, SCAN_LABEL);
+  await click(container, 'Cancel');
+  expect(rowFor(container, 'First laptop')).not.toBeNull();
+  expect(container.textContent).not.toContain(CAMERA_BOOTSTRAP_MESSAGE);
 });
 
 describe('the deployment read', () => {

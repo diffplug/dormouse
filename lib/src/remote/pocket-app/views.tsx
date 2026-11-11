@@ -187,12 +187,17 @@ export function ConnectionHeader({ title, transport, leading, trailing }: {
   trailing?: React.ReactNode;
 }): React.ReactElement {
   return (
-    <header className={PK.wallHeader}>
-      {leading}
-      <h1 className={PK.headerTitle}>{title}</h1>
-      <TransportIndicator transport={transport} />
-      {trailing}
-    </header>
+    <>
+      <header className={PK.wallHeader}>
+        {leading}
+        <h1 className={PK.headerTitle}>{title}</h1>
+        <TransportIndicator transport={transport} />
+        {trailing}
+      </header>
+      {transport.cause ? (
+        <p className={PK.headerCaption}>{TRANSPORT_RELAY_CAUSES[transport.cause]}</p>
+      ) : null}
+    </>
   );
 }
 

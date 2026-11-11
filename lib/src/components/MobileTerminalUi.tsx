@@ -1061,8 +1061,15 @@ export function MobileTerminalUi({
       commitGestureState(MOBILE_GESTURE_IDLE_STATE);
       return;
     }
+    // The composer covers the top of the panned terminal, and the rose and its
+    // confirmation are placed in the whole pane, so they would open beneath it.
+    // The press is still taken here, which keeps the composer's field focused.
+    if (composing) {
+      commitGestureState(MOBILE_GESTURE_IDLE_STATE);
+      return;
+    }
     commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
-  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, browserShown, touchMode, stopEdgeScroll]);
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, composing, interactive, browserShown, touchMode, stopEdgeScroll]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;

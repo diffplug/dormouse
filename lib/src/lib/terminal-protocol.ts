@@ -163,7 +163,8 @@ export class TerminalProtocolParser {
   private osc99Pending = new Map<string, Osc99PendingNotification>();
 
   /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
-  constructor(private readonly colorProvider?: TerminalColorProvider) {}
+  /** `localHost`: this machine's hostname, when known, so an OSC 7 naming it is local. */
+  constructor(private readonly colorProvider?: TerminalColorProvider, private readonly localHost?: string) {}
 
   /**
    * Whether a string control is streaming through to xterm.js right now, so a
@@ -318,7 +319,7 @@ export class TerminalProtocolParser {
   }
 
   private parseOsc(content: string): TerminalProtocolEvent[] | null {
-    if (content === '7' || content.startsWith('7;')) return parseOsc7(content);
+    if (content === '7' || content.startsWith('7;')) return parseOsc7(content, this.localHost);
     if (content === '9' || content.startsWith('9;')) return this.parseOsc9(content);
     if (content === '133' || content.startsWith('133;')) return parseOsc133(content);
     if (content === '633' || content.startsWith('633;')) return parseOsc633(content);
@@ -707,9 +708,9 @@ function findStringControlEnd(
   return { index, end: index, cancelled: true };
 }
 
-function parseOsc7(content: string): TerminalProtocolEvent[] {
+function parseOsc7(content: string, localHost: string | undefined): TerminalProtocolEvent[] {
   if (!content.startsWith('7;')) return [];
-  const cwd = cwdFromOsc7(content.slice(2));
+  const cwd = cwdFromOsc7(content.slice(2), undefined, localHost);
   return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
 }
 
