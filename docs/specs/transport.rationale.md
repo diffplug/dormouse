@@ -14,6 +14,18 @@ A second close before `onExit` crashed the Node process in the native test.
 
 **Why a buffer outlives its process.** Recovery capture runs before any kill (`docs/compatible-agents.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript, and a Workspace transfer replays an exited pane's since-mark tail.
 
+## Output flow control
+
+**Why.** xterm.js queues every write and parses it in 12 ms slices re-armed by a timer, and throws `write data discarded` once 50,000,000 chars wait unparsed (pinned 6.1.0-beta.337). With nothing pausing the PTY, a flood (`yes`, a runaway loop) or ordinary output into a window whose timers are throttled (a minimized standalone window on Windows or Linux, where `backgroundThrottling` is unsupported) queued without bound, then lost output and threw out of the adapter's listener once per chunk (audit finding `session-03`). The scheme is VS Code's own (`acknowledgeDataEvent`), with constants measured for this pipeline.
+
+**Why after the parse.** The renderer can only acknowledge what it receives, the parse's `data`, and the parse strips OSCs: a raw count in `pty-core` would never be paid back. VS Code's node-pty runs in the pty-host child while its parse and `pty:data` are the extension host's, so the count lives there and the pause crosses the IPC.
+
+**Why Rust acknowledges what it drops.** After a transfer mark Rust drops an id's output until the target's replay; a suppression no arrival claims fails open after `AWAITING_REPLAY_MAX` with no `requestInit` behind it, which would have left the PTY paused on output no window ever saw.
+
+**Why resume when the process is gone.** node-pty reports no exit while its socket is paused: on POSIX it destroys the socket, unread tail and all, 200 ms after the child exits; with `useConptyDll` on Windows it reports the exit only when the socket closes. Measured on macOS (same date): with everything read before the pause, a child writing a tail and exiting lost it unless resumed. With output still unread in the kernel when the child exits, macOS holds the exit about 610 ms and then discards that output, with the pid still alive throughout, so the watch cannot see it; only the renderer catching up within that window saves it. Unmeasured on Linux and Windows.
+
+**Why every stop resumes.** node-pty finishes a kill by reading: on Windows the ConPTY worker is disposed on the next data event, and a paused socket never delivers one.
+
 ## Paced input
 
 Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue #679).
