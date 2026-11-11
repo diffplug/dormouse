@@ -33,4 +33,4 @@ export const SCAN_LABEL = 'Scan a setup code';
  * paraphrase on either side rots without failing.
  */
 export const BURROW_IS_AN_APP =
-  'A Burrow is one Dormouse app — Standalone, or a VS Code window.';
+  'A Burrow is one Dormouse app — Standalone, or VS Code.';
