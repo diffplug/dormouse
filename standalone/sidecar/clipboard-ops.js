@@ -51,9 +51,15 @@ const MAC_FILE_PATHS_SCRIPT = [
   'return ""',
 ].join('\n');
 
+/** Lists the pasteboard's types without loading AppKit: about 70 ms against
+ *  the bridge's 180, and every text paste waits for the file-path read. */
+const MAC_CLIPBOARD_TYPES_SCRIPT = 'clipboard info';
+
 async function readFilePathsMac(runtime) {
   const exec = runtime.exec || execFileP;
   try {
+    const { stdout: types } = await exec('osascript', ['-e', MAC_CLIPBOARD_TYPES_SCRIPT], { maxBuffer: MAX_BUFFER });
+    if (!types.includes('class furl')) return [];
     const { stdout } = await exec('osascript', ['-e', MAC_FILE_PATHS_SCRIPT], { maxBuffer: MAX_BUFFER });
     return splitNonEmptyLines(stdout);
   } catch {
