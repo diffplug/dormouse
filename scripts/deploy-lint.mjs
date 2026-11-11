@@ -30,8 +30,8 @@
  *     these files and drives them, because each once matched the right string
  *     and returned the wrong answer.
  *   - Windows is checked at the same depth as the other two, which is worth
- *     stating plainly: nothing in CI can execute PowerShell here, so for that
- *     file this lint is the *only* automated signal that a control survives.
+ *     stating plainly: CI only parses that file, on its Windows leg, so for it
+ *     this lint is the *only* automated signal that a control survives.
  *
  * Adding an installer means adding it to INSTALLERS. A rule that genuinely does
  * not apply to a platform belongs in `skip` with a reason, not silently

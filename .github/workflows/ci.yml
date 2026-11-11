@@ -501,6 +501,22 @@ jobs:
           }
           "::warning::Windows PowerShell still starts slowly; the shell tests below may time out"
 
+      # The syntax gate for the two shipped PowerShell scripts, which nothing
+      # else loads; both must run on Windows PowerShell 5.1, so its parser
+      # reads them. A parse does not check that a cmdlet exists:
+      # scripts/ps1-cmdlet-lint.mjs covers the installer's names.
+      - name: Parse the PowerShell scripts
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($file in 'deploy/local/install-windows.ps1', 'standalone/sidecar/shell-integration/pwsh/shellIntegration.ps1') {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { "::error file=$file,line=$($e.Extent.StartLineNumber)::$($e.Message)"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
       - name: Windows browser host and shell tests
         run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/host/agent-browser-host.test.ts src/lib/shell-escape.test.ts
 
