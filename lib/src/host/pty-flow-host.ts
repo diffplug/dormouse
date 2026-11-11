@@ -69,12 +69,19 @@ export function createPtyFlowControl(
   const peekTimers = new Map<string, ReturnType<typeof setInterval>>();
   /** Paused PTYs resumed for one read, paused again by the read it delivers. */
   const peeking = new Set<string>();
-  // The clock runs from a pause until an acknowledgement. Only an
-  // acknowledgement restarts it, so neither a peek nor input's grace, which
-  // resume and re-pause the PTY, can hold it off.
+  // A PTY paused a watchdog period with no acknowledgement meanwhile is let
+  // one more high watermark through: every bound below sits that much higher.
+  // The count stays exact, since the renderer still pays for everything it
+  // was sent, and the allowance shrinks as its debt does. The clock runs from a
+  // pause until an acknowledgement; only an acknowledgement restarts it, so
+  // neither a peek nor input's grace, which resume and re-pause the PTY, can
+  // hold it off.
   const watchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Chars past each bound a silent renderer has been allowed; absent is none. */
+  const allowances = new Map<string, number>();
   /** PTYs the watchdog has resumed since their renderer last acknowledged. */
   const reported = new Set<string>();
+  const allowance = (id: string) => allowances.get(id) ?? 0;
 
   const stopPeeks = (id: string) => {
     clearInterval(peekTimers.get(id));
@@ -85,18 +92,15 @@ export function createPtyFlowControl(
     clearTimeout(watchdogs.get(id));
     watchdogs.delete(id);
   };
-  const forgive = (id: string) => {
-    owed.delete(id);
-    endGrace(id);
-    resume(id);
-  };
   const armWatchdog = (id: string) => {
     if (watchdogs.has(id)) return;
     const timer = setTimeout(() => {
       watchdogs.delete(id);
-      if (!reported.has(id)) console.warn(`[pty-flow] ${id}: no acknowledgement for ${watchdogMs} ms while paused; resuming it`);
+      if (!reported.has(id)) console.warn(`[pty-flow] ${id}: no acknowledgement for ${watchdogMs} ms while paused; letting it run`);
       reported.add(id);
-      forgive(id);
+      allowances.set(id, allowance(id) + PTY_HIGH_WATERMARK_CHARS);
+      endGrace(id);
+      resume(id);
     }, watchdogMs);
     (timer as { unref?: () => void }).unref?.();
     watchdogs.set(id, timer);
@@ -107,7 +111,7 @@ export function createPtyFlowControl(
     armWatchdog(id);
     if (!peeks || peekTimers.has(id)) return;
     const timer = setInterval(() => {
-      if (!paused.has(id) || peeking.has(id) || (owed.get(id) ?? 0) >= PTY_INPUT_CEILING_CHARS) return;
+      if (!paused.has(id) || peeking.has(id) || (owed.get(id) ?? 0) >= PTY_INPUT_CEILING_CHARS + allowance(id)) return;
       peeking.add(id);
       target.resume(id);
     }, PTY_PAUSED_PEEK_MS);
@@ -127,7 +131,7 @@ export function createPtyFlowControl(
     endGrace(id);
     const timer = setTimeout(() => {
       graces.delete(id);
-      if ((owed.get(id) ?? 0) > PTY_HIGH_WATERMARK_CHARS && !paused.has(id)) pause(id);
+      if ((owed.get(id) ?? 0) > PTY_HIGH_WATERMARK_CHARS + allowance(id) && !paused.has(id)) pause(id);
     }, PTY_INPUT_GRACE_MS);
     (timer as { unref?: () => void }).unref?.();
     graces.set(id, timer);
@@ -144,7 +148,7 @@ export function createPtyFlowControl(
       }
       if (paused.has(id)) return;
       // Input's grace holds the PTY open up to the ceiling, never past it.
-      const limit = graces.has(id) ? PTY_INPUT_CEILING_CHARS - 1 : PTY_HIGH_WATERMARK_CHARS;
+      const limit = allowance(id) + (graces.has(id) ? PTY_INPUT_CEILING_CHARS - 1 : PTY_HIGH_WATERMARK_CHARS);
       if (total <= limit) return;
       endGrace(id);
       pause(id);
@@ -158,9 +162,15 @@ export function createPtyFlowControl(
       const total = Math.max(0, before - chars);
       if (total === 0) owed.delete(id);
       else owed.set(id, total);
+      // Paid down by every acknowledgement, as the debt is, and gone once the
+      // renderer is back under the low watermark: a renderer that wakes is
+      // held to the usual bounds again once it has paid for what it was let.
+      const allowed = Math.min(allowance(id) - chars, total - PTY_LOW_WATERMARK_CHARS);
+      if (allowed > 0) allowances.set(id, allowed);
+      else allowances.delete(id);
       stopWatchdog(id);
       reported.delete(id);
-      if (total <= PTY_LOW_WATERMARK_CHARS) resume(id);
+      if (total <= PTY_LOW_WATERMARK_CHARS + allowance(id)) resume(id);
       else if (paused.has(id)) armWatchdog(id);
     },
 
@@ -169,7 +179,7 @@ export function createPtyFlowControl(
       if (paused.has(id)) {
         // At the ceiling the input still goes in, and arrives once the
         // renderer catches up: memory stays bounded however much is typed.
-        if ((owed.get(id) ?? 0) >= PTY_INPUT_CEILING_CHARS) return;
+        if ((owed.get(id) ?? 0) >= PTY_INPUT_CEILING_CHARS + allowance(id)) return;
         resume(id);
       } else if (!graces.has(id)) return;
       armGrace(id);
@@ -177,9 +187,12 @@ export function createPtyFlowControl(
 
     reset(ids) {
       for (const id of ids ?? [...new Set([...owed.keys(), ...paused])]) {
+        owed.delete(id);
+        allowances.delete(id);
         stopWatchdog(id);
         reported.delete(id);
-        forgive(id);
+        endGrace(id);
+        resume(id);
       }
     },
 
@@ -189,6 +202,7 @@ export function createPtyFlowControl(
       endGrace(id);
       stopPeeks(id);
       stopWatchdog(id);
+      allowances.delete(id);
       reported.delete(id);
     },
 

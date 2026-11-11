@@ -40,8 +40,9 @@ export const PTY_INPUT_CEILING_CHARS = 2 * PTY_HIGH_WATERMARK_CHARS;
 export const PTY_PAUSED_PEEK_MS = 150;
 /**
  * A PTY paused this long with no acknowledgement from its renderer meanwhile
- * is forgiven and resumed, so a hung renderer, or a reset nobody wired, costs
- * a high watermark of throughput per period instead of freezing the program.
+ * is let one more high watermark through, so a hung renderer, or a reset
+ * nobody wired, lets its backlog grow by a high watermark per period instead
+ * of freezing the program.
  */
 export const PTY_ACK_WATCHDOG_MS = 10_000;
 

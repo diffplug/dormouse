@@ -244,7 +244,7 @@ describe('a paused PTY nobody acknowledges', () => {
 
   const silence = () => vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-  it('is forgiven and resumed once the watchdog period passes, logged once per episode', () => {
+  it('is let one more high watermark through each period, its count exact, logged once per episode', () => {
     vi.useFakeTimers();
     const warn = silence();
     const { calls, flow } = flowWithCalls();
@@ -253,20 +253,94 @@ describe('a paused PTY nobody acknowledges', () => {
     expect(calls).toEqual(['pause a']);
     vi.advanceTimersByTime(1);
     expect(calls).toEqual(['pause a', 'resume a']);
-    expect(flow.unacknowledged('a')).toBe(0);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(flow.unacknowledged('a')).toBe(PTY_HIGH_WATERMARK_CHARS + 1);
 
-    // It runs to the high watermark again, and the watchdog re-arms for that pause.
-    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    // It pauses again a high watermark further on, and the watchdog re-arms.
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS - 1);
+    expect(calls).toEqual(['pause a', 'resume a']);
+    flow.sent('a', 1);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a']);
     vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS - 1);
     expect(calls).toEqual(['pause a', 'resume a', 'pause a', 'resume a']);
+    flow.sent('a', 1);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a', 'resume a', 'pause a']);
+    expect(flow.unacknowledged('a')).toBe(3 * PTY_HIGH_WATERMARK_CHARS + 1);
     expect(warn).toHaveBeenCalledTimes(1);
 
     // An acknowledgement ends the episode: the next firing is logged again.
-    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 2);
     flow.acknowledge('a', 1);
     vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds a renderer that catches up to the normal bounds again', () => {
+    vi.useFakeTimers();
+    silence();
+    const { calls, flow } = flowWithCalls();
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a']);
+
+    // The renderer wakes and pays for what it was sent before the watchdog:
+    // still a high watermark behind, it owes exactly that, and stays paused.
+    flow.acknowledge('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    expect(flow.unacknowledged('a')).toBe(PTY_HIGH_WATERMARK_CHARS);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a']);
+    flow.acknowledge('a', PTY_HIGH_WATERMARK_CHARS - PTY_LOW_WATERMARK_CHARS);
+    expect(calls).toEqual(['pause a', 'resume a', 'pause a', 'resume a']);
+    flow.acknowledge('a', PTY_LOW_WATERMARK_CHARS);
+    expect(flow.unacknowledged('a')).toBe(0);
+
+    // The next flood pauses at the high watermark, as if nothing had happened.
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS);
+    expect(calls).toHaveLength(4);
+    flow.sent('a', 1);
+    expect(calls.at(-1)).toBe('pause a');
+  });
+
+  it('pays the allowance down with every acknowledgement', () => {
+    vi.useFakeTimers();
+    silence();
+    const { calls, flow } = flowWithCalls();
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    expect(calls).toEqual(['pause a', 'resume a']);
+    // Let a high watermark further, it runs right up to that bound...
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS - 1);
+    expect(flow.unacknowledged('a')).toBe(2 * PTY_HIGH_WATERMARK_CHARS);
+    // ...which 1,000 chars paid lowers by 1,000, the debt with it.
+    flow.acknowledge('a', 1000);
+    expect(calls).toHaveLength(2);
+    flow.sent('a', 1);
+    expect(calls.at(-1)).toBe('pause a');
+  });
+
+  it('drops what is left of the allowance once the renderer is back under the low watermark', () => {
+    vi.useFakeTimers();
+    silence();
+    const { calls, flow } = flowWithCalls();
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    // Paid down to the low watermark with most of a high watermark unpaid.
+    flow.acknowledge('a', PTY_HIGH_WATERMARK_CHARS + 1 - PTY_LOW_WATERMARK_CHARS);
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS - PTY_LOW_WATERMARK_CHARS);
+    expect(calls).toEqual(['pause a', 'resume a']);
+    flow.sent('a', 1);
+    expect(calls.at(-1)).toBe('pause a');
+  });
+
+  it('never lets a late acknowledgement owe less than the renderer truly does', () => {
+    vi.useFakeTimers();
+    silence();
+    const { flow } = flowWithCalls();
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    flow.sent('a', 1000);
+    // Everything sent before the watchdog, paid late.
+    flow.acknowledge('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    expect(flow.unacknowledged('a')).toBe(1000);
   });
 
   it('restarts its clock at any acknowledgement, so a slow renderer never trips it', () => {
@@ -283,7 +357,7 @@ describe('a paused PTY nobody acknowledges', () => {
     expect(calls).toEqual(['pause a', 'resume a']);
   });
 
-  it('is cancelled by a kill, and by every reset', () => {
+  it('is cancelled by a kill, and by every reset, which drop the allowance too', () => {
     vi.useFakeTimers();
     const warn = silence();
     const { calls, flow } = flowWithCalls();
@@ -298,6 +372,43 @@ describe('a paused PTY nobody acknowledges', () => {
     vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS - 1);
     expect(calls).toEqual(['pause a', 'pause b', 'resume b', 'pause a']);
     expect(warn).not.toHaveBeenCalled();
+
+    // An allowance granted, then a reset or a kill: the next flood pauses at
+    // the high watermark.
+    vi.advanceTimersByTime(1);
+    flow.reset(['a']);
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    expect(calls.at(-1)).toBe('pause a');
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    flow.forget('a');
+    flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    expect(calls.at(-1)).toBe('pause a');
+    expect(calls.filter((call) => call === 'pause a')).toHaveLength(4);
+  });
+
+  it('keeps the macOS peeks and the Windows input grace a ceiling above the raised bound', () => {
+    vi.useFakeTimers();
+    silence();
+    const mac = flowWithCalls('darwin');
+    const win = flowWithCalls('win32');
+    for (const { flow } of [mac, win]) flow.sent('a', PTY_HIGH_WATERMARK_CHARS + 1);
+    vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS);
+    // Let a high watermark further, both pause past twice it.
+    for (const { calls, flow } of [mac, win]) {
+      flow.sent('a', PTY_HIGH_WATERMARK_CHARS);
+      expect(calls.at(-1)).toBe('pause a');
+    }
+    // Past the plain ceiling, a peek still reads...
+    vi.advanceTimersByTime(PTY_PAUSED_PEEK_MS);
+    expect(mac.calls.at(-1)).toBe('resume a');
+    // ...and input still resumes, up to the ceiling plus the allowance.
+    win.flow.input('a');
+    expect(win.calls.at(-1)).toBe('resume a');
+    win.flow.sent('a', PTY_HIGH_WATERMARK_CHARS - 2);
+    expect(win.calls.at(-1)).toBe('resume a');
+    win.flow.sent('a', 1);
+    expect(win.calls.at(-1)).toBe('pause a');
+    expect(win.flow.unacknowledged('a')).toBe(PTY_INPUT_CEILING_CHARS + PTY_HIGH_WATERMARK_CHARS);
   });
 
   it('is held off by neither the macOS peeks nor the Windows input grace', () => {
@@ -315,10 +426,10 @@ describe('a paused PTY nobody acknowledges', () => {
       vi.advanceTimersByTime(PTY_INPUT_GRACE_MS * 2);
       elapsed += PTY_INPUT_GRACE_MS * 2;
     }
-    for (const { flow } of [mac, win]) expect(flow.unacknowledged('a')).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS);
     vi.advanceTimersByTime(PTY_ACK_WATCHDOG_MS - elapsed);
+    // Let through: more output no longer pauses either.
     for (const { calls, flow } of [mac, win]) {
-      expect(flow.unacknowledged('a')).toBe(0);
+      flow.sent('a', 1024);
       expect(calls.at(-1)).toBe('resume a');
     }
   });
