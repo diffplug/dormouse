@@ -375,7 +375,7 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 - Right-click context-menu Paste, and routing Edit → Paste through §8.6's tiers.
 - A settings toggle to disable Ctrl+V interception on Windows and Linux.
 - A paste popup for previewing or transforming content before it is committed.
-- Paste content transformations (strip trailing whitespace, normalize line endings, convert smart quotes).
+- Paste content transformations (strip trailing whitespace, convert smart quotes).
 - Paste history.
 - Credential-shaped content detection and warnings.
 - Multi-line paste confirmation dialogs.
