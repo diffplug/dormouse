@@ -1,8 +1,7 @@
 // The text of each billing notice, apart from the database and mail that send
 // it, so `hosted/src/stories/Emails.stories.tsx` can show what a customer gets.
 // Rules: docs/specs/hosted.md -> "Billing notices".
-import { escape } from "@pgstencil/auth/email";
-import type { EmailMessage } from "pgstencil";
+import { escapeHtml, type EmailMessage } from "pgstencil/email";
 import { PLAN_NAMES, planInterval } from "../../website/src/lib/hosted-pricing";
 import {
   DIFFPLUG_POSTAL_ADDRESS,
@@ -169,8 +168,8 @@ export function noticeMessage(to: string, notice: Pending, plan: Plan | null, co
     html: `<html lang="en"><body>${paragraphs
       .map((block) =>
         typeof block === "string"
-          ? `<p>${escape(block)}</p>`
-          : `<dl>${block.map(([term, value]) => `<dt>${escape(term)}</dt><dd>${escape(value)}</dd>`).join("")}</dl>`,
+          ? `<p>${escapeHtml(block)}</p>`
+          : `<dl>${block.map(([term, value]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl>`,
       )
       .join("")}</body></html>`,
   };

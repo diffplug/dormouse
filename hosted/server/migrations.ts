@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { betterAuthMigrations } from "@pgstencil/auth/better-auth-migrations";
-import { billingMigrations } from "@pgstencil/stripe/migrations";
-export const migrations = [
-  betterAuthMigrations,
-  billingMigrations,
-  fileURLToPath(new URL("./dormouse-migrations/", import.meta.url)),
-];
+import { parseConfig } from "pgstencil/database";
+
+const config = new URL("../pgstencil.json", import.meta.url);
+/** Production's migration sources, in order: `hosted/pgstencil.json`'s, which the `pgstencil` CLI behind `pnpm db:*` applies. */
+export const migrations = parseConfig(
+  fileURLToPath(new URL(".", config)),
+  JSON.parse(readFileSync(config, "utf8")),
+).migrations;

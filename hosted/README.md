@@ -44,7 +44,7 @@ A test clock needs its customer from the start: after the first checkout creates
 
 `hosted/package.json` installs released `pgstencil`, `@pgstencil/auth`, and `@pgstencil/stripe` from npm. They share a version and Hosted declares their peer dependencies. Approved pgstencil releases are exempt from the pnpm and Renovate cooldowns because the release workflow requires a passing security audit, stages the archives, and requires a maintainer's 2FA approval before publishing.
 
-Run `pnpm install` and re-run Hosted's integration tests after an update. The production preflight reads `dist/provenance.json` from the installed packages and requires matching clean commits. `docs/specs/security-hosted.md` -> "Deployment boundary" owns the upstream audit check. For an unreleased change, pack pgstencil in a clean checkout and use a temporary pnpm override on a branch.
+Run `pnpm install` and re-run Hosted's integration tests after an update. A new migration source in a package goes into `hosted/pgstencil.json`, the list the `pgstencil` command behind `db:*` and `hosted/server/migrations.ts` both read. The production preflight reads `dist/provenance.json` from the installed packages and requires matching clean commits. `docs/specs/security-hosted.md` -> "Deployment boundary" owns the upstream audit check. For an unreleased change, pack pgstencil in a clean checkout and use a temporary pnpm override on a branch.
 
 ## Resource inventory
 
@@ -115,7 +115,7 @@ A PR touching Hosted runs its tests and builds; adding the `hosted-preview` labe
 
 Open `https://dormouse-hosted-pr-N.SUBDOMAIN.workers.dev/`, request a code for a disposable address, and read it at `/dev/emails`. The PR's one-time page is at `https://dormouse-try-pr-N.SUBDOMAIN.workers.dev/connect/`; its voice Worker has no ElevenLabs key, so speak never reaches ElevenLabs. This inbox is public to anyone with the URL. No real email or OAuth provider is contacted. A preview's Hyperdrive connects as its branch's owner role, so a preview never exercises the relay's and voice's restricted roles: a missing grant passes there, and `pnpm test:hosted`, which binds those Workers to their roles, is what catches it. The database stores messages across Worker restarts.
 
-New commits retain the URL and test accounts. Once a PR closes or loses the label, the next approved preview deploy of any PR deletes its four Workers, Hyperdrive, and Neon branch first. Migrations are append-only; to change an already-applied migration, delete the preview with `node hosted/scripts/preview.mjs cleanup`, given the preview environment's credentials and `PR_NUMBER`, then redeploy. Keep previews enabled until all live previews are removed. These credentials cannot be downloaded back from GitHub; retain independent copies in your password manager.
+New commits retain the URL and test accounts. Once a PR closes or loses the label, the next approved preview deploy of any PR deletes its four Workers, Hyperdrive, and Neon branch first. Migrations are append-only; to change an already-applied migration, delete the preview with `node hosted/scripts/preview.mjs cleanup`, given the preview environment's credentials and `PR_NUMBER`, then redeploy. A preview database also holds `hosted/server/preview-migrations/`, so inspect one with `db:status:preview` and `db:validate:preview`; the plain scripts report that file missing. Keep previews enabled until all live previews are removed. These credentials cannot be downloaded back from GitHub; retain independent copies in your password manager.
 
 ## Provision the production boundary
 
@@ -239,14 +239,10 @@ The webhook accepts only events at the installed `stripe` SDK's pinned API versi
 2. Create a second webhook endpoint at the new version, with the same URL and events as "Webhook endpoint" above, while the old one stays enabled. Stripe delivers each event to every enabled endpoint.
 3. Deploy the Worker built against the new SDK with the new endpoint's signing secret as `STRIPE_WEBHOOK_SECRET`, changing the literal in `stripe-api-version.test.ts` in the same change.
 4. Confirm the new endpoint's deliveries succeed in Stripe's dashboard.
-5. Reconcile every owner. The account cron reconciles at most 20 stale owners each run (`RESYNC_OWNERS` in `hosted/server/billing.ts`, every 10 minutes), and only those `reconcileStale` finds holding a current subscription without access, so it does not cover an event missed during the cut-over. No script does this yet.
+5. Reconcile every owner. The account cron reconciles at most 20 stale owners each run (`RESYNC_OWNERS` in `hosted/server/billing.ts`, every 10 minutes), and only those `reconcileStale` finds holding a current subscription without access, so it does not cover an event missed during the cut-over. `@pgstencil/stripe`'s `reconcileAll()` is that pass, reporting each owner it changed; no Hosted script runs it yet.
 6. Disable the old endpoint.
 
-Open questions the first real move must answer:
-
-- Whether applying one event id twice across the cut-over, once from each endpoint, is harmless.
-- Whether the Worker should accept two signing secrets during the overlap, rather than refusing the old endpoint's deliveries from the deploy on.
-- What the old endpoint's failing deliveries look like in Stripe's dashboard, and whether its retries alert anyone, until it is disabled.
+pgstencil's `BILLING.md` -> "Moving to a new Stripe API version" answers two questions from its code, though no deployment has run it either: its events ledger applies each event once, whichever endpoint's copy lands first, and one signing secret suffices, since the new Worker answers 400 to the old endpoint's deliveries, which Stripe retries, so create the new endpoint well before the deploy and let the old one drain before disabling it. The first real move must still answer what the old endpoint's failing deliveries look like in Stripe's dashboard, and whether its retries alert anyone, until it is disabled.
 
 ## Change a price
 

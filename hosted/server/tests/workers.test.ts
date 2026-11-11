@@ -1,6 +1,6 @@
 import { test, expect, vi } from "vitest";
 import { Hono } from "hono";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "../token-digest";
 import { signInEmail } from "../../src/stories/email-fixtures";
 import { fileURLToPath } from "node:url";
 import {
