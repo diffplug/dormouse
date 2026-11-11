@@ -21,6 +21,8 @@ const {
   withConnectAddresses,
   parseNetTcpConnections,
   parseNetstatListening,
+  parseWindowsPortScan,
+  WINDOWS_PORT_SCAN_SCRIPT,
   getListeningPortsForPids,
   shellHasWork,
   getOpenPortsForPids,
@@ -2141,6 +2143,15 @@ const WINDOWS_ENV = { SystemRoot: 'D:\\Win' };
 const POWERSHELL = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const NETSTAT = 'D:\\Win\\System32\\netstat.exe';
 
+/** What `WINDOWS_PORT_SCAN_SCRIPT` prints: each query's JSON behind its tag,
+ *  and no line for one that failed (`undefined`). */
+function windowsTables(processes, sockets) {
+  return [
+    processes === undefined ? null : `P${JSON.stringify(processes)}`,
+    sockets === undefined ? null : `S${JSON.stringify(sockets)}`,
+  ].filter((line) => line !== null).join('\r\n') + '\r\n';
+}
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () => {
   const execFile = (cmd, args) => {
     assert.equal(cmd, POWERSHELL);
@@ -2177,25 +2188,20 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
   const timeouts = [];
   const execFile = (cmd, args, options) => {
     timeouts.push(options.timeout);
-    const script = args.at(-1);
-    if (script.includes('ParentProcessId')) {
+    if (cmd === POWERSHELL) {
+      assert.equal(args.at(-1), WINDOWS_PORT_SCAN_SCRIPT);
       now += OPEN_PORT_TIMEOUT_MS;
-      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }]);
-    }
-    // The process table above already named every pid.
-    if (script.includes('Win32_Process')) assert.fail('second process query');
-    if (script.includes('Get-NetTCPConnection')) {
-      now += 1000;
-      throw new Error('cmdlet failed');
+      // The process table answered; the cmdlet printed nothing.
+      return windowsTables([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }], undefined);
     }
     assert.equal(cmd, NETSTAT);
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
   const result = await getOpenPortsForPids([{ pid: 4242 }], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
-  const budget = openPortScanTimeoutMs(1);
-  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
-  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
+  const budget = OPEN_PORT_TIMEOUT_MS + openPortScanTimeoutMs(1);
+  assert.deepEqual(timeouts, [budget, budget - OPEN_PORT_TIMEOUT_MS]);
+  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 500);
   assert.equal(result.get(4242)[0].processName, 'node.exe');
 });
 
@@ -2274,17 +2280,15 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
   const scripts = [];
   const execFile = (cmd, args) => {
     const script = args[args.length - 1];
-    if (cmd === POWERSHELL && script.includes('Win32_Process')) {
-      return JSON.stringify([
+    if (cmd === POWERSHELL) {
+      return windowsTables([
         [100, 1, 'bash.exe'], [101, 100, 'bash.exe'],
         // `node` exec'd through winpty: its MSYS parent's Windows process is gone.
         [300, 299, 'winpty.exe'], [301, 300, 'winpty-agent.exe'], [302, 301, 'node.exe'],
         [500, 1, 'powershell.exe'], [501, 500, 'wsl.exe'],
         [900, 1, 'node.exe'],
-      ].map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name })));
-    }
-    if (cmd === POWERSHELL && script.includes('Get-NetTCPConnection')) {
-      return JSON.stringify([{ LocalAddress: '::', LocalPort: 3000, OwningProcess: 302 }, { LocalAddress: '::', LocalPort: 9000, OwningProcess: 900 }]);
+      ].map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name })),
+      [{ LocalAddress: '::', LocalPort: 3000, OwningProcess: 302 }, { LocalAddress: '::', LocalPort: 9000, OwningProcess: 900 }]);
     }
     if (cmd === MSYS_PS) {
       return [
@@ -2323,19 +2327,35 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
   assert.match(scripts[0], /DORMOUSE_SURFACE_ID=\(surface:wsl\)/);
 });
 
-test('getOpenPortsForPids (win32) runs neither extra read for a shell that needs none', async () => {
+test('getOpenPortsForPids (win32) starts PowerShell once, and neither extra read for a shell that needs none', async () => {
   const spawns = [];
-  const execFile = (cmd, args) => {
+  const execFile = (cmd) => {
     spawns.push(cmd);
-    const script = args[args.length - 1];
-    if (script.includes('Win32_Process')) return JSON.stringify([{ ProcessId: 100, ParentProcessId: 1, Name: 'cmd.exe' }]);
-    if (script.includes('Get-NetTCPConnection')) return '[]';
+    if (cmd === POWERSHELL) {
+      return windowsTables([{ ProcessId: 100, ParentProcessId: 1, Name: 'cmd.exe' }, { ProcessId: 101, ParentProcessId: 100, Name: 'node.exe' }],
+        { LocalAddress: '127.0.0.1', LocalPort: 3000, OwningProcess: 101 });
+    }
     throw new Error(`unexpected spawn: ${cmd}`);
   };
-  await getOpenPortsForPids([{ pid: 100, shell: 'D:\\Win\\System32\\cmd.exe', surfaceId: 'surface:1' }], {
+  const ports = await getOpenPortsForPids([{ pid: 100, shell: 'D:\\Win\\System32\\cmd.exe', surfaceId: 'surface:1' }], {
     platform: 'win32', env: WINDOWS_ENV, execFile,
   });
-  assert.deepEqual(spawns, [POWERSHELL, POWERSHELL]);
+  assert.deepEqual(spawns, [POWERSHELL]);
+  assert.deepEqual(ports.get(100), [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 3000, pid: 101, processName: 'node.exe' }]);
+});
+
+test('parseWindowsPortScan keeps each answer when the other query failed', () => {
+  const processes = [{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }];
+  const socket = { LocalAddress: '::', LocalPort: 3000, OwningProcess: 4242 };
+  assert.deepEqual(parseWindowsPortScan(windowsTables(processes, socket)), {
+    pairs: [[4242, 1, 'node.exe']],
+    sockets: [{ protocol: 'tcp', family: 'IPv6', address: '::', port: 3000, pid: 4242 }],
+  });
+  assert.deepEqual(parseWindowsPortScan(windowsTables(undefined, [socket])).pairs, null);
+  assert.deepEqual(parseWindowsPortScan(windowsTables(processes, undefined)).sockets, null);
+  // A tag with nothing behind it, as a query whose pipeline was empty prints.
+  assert.deepEqual(parseWindowsPortScan('P\r\nS\r\n'), { pairs: null, sockets: null });
+  assert.deepEqual(parseWindowsPortScan(''), { pairs: null, sockets: null });
 });
 
 test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', async () => {
