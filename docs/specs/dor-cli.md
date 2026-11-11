@@ -321,7 +321,7 @@ Source of truth: `createDorControlServer` in `standalone/sidecar/dor-control-ser
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI).
 
-**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
+**The router answers `tool.list` (`dor tool --list` and its bare picker) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`.
 

@@ -2112,8 +2112,30 @@ test('tool prints dormouse.yml warnings to stderr, keeping --json parseable', as
   assert.deepEqual(JSON.parse(result.stdout).status, 'created');
 });
 
-test('tool with neither a name nor a command tail', async () => {
-  await snapshot('tool-missing-target', await runCli(['tool'], { client: fixtureClient() }));
+test('tool with neither a name nor a command tail, but a placement flag', async () => {
+  await snapshot('tool-missing-target', await runCli(['tool', '--minimize'], { client: fixtureClient() }));
+});
+
+test('bare tool without a terminal prints the listing --list prints', async () => {
+  for (const flags of [[], ['--json'], ['--global'], ['--global', '--json', '--cwd', 'sub']]) {
+    const bare = fixtureClient();
+    const listed = fixtureClient();
+    const env = { PWD: '/work/site' };
+    const result = await runCli(['tool', ...flags], { client: bare, env });
+    assert.equal(result.exitCode, 0, flags.join(' '));
+    assert.deepEqual(result, await runCli(['tool', '--list', ...flags], { client: listed, env }), flags.join(' '));
+    assert.deepEqual(bare.requests, listed.requests, flags.join(' '));
+  }
+});
+
+test('bare tool without a terminal refuses a placement flag', async () => {
+  for (const flag of [['--minimize'], ['--fresh'], ['--surface', 'surface:2'], ['--workspace', 'workspace:2']]) {
+    const client = fixtureClient();
+    const result = await runCli(['tool', ...flag], { client });
+    assert.equal(result.exitCode, 1, flag.join(' '));
+    assert.equal(result.stderr, 'Error: dor tool requires a tool name or -- <command...>\n', flag.join(' '));
+    assert.deepEqual(client.requests, [], flag.join(' '));
+  }
 });
 
 test('tool keeps escaped named arguments separate from anonymous commands', async () => {

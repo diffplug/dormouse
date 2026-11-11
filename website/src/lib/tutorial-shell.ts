@@ -1,5 +1,5 @@
 import { BOLD, CLEAR_LINE, PROMPT, RESET, fg, promptFor } from 'dormouse-lib/lib/ansi';
-import { shortPath } from 'dor/commands/open-picker';
+import { shortPath } from 'dor/commands/picker-core';
 import { POSIX_ESCAPABLE } from 'dormouse-lib/lib/posix-escape';
 import { HOME, type DirEntry, type VirtualFs } from './playground-fs/vfs';
 import { ALERT_PROGRAMS } from './alert-programs';
