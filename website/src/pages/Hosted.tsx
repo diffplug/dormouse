@@ -9,7 +9,7 @@
  *
  * See docs/specs/pricing.md -> The Hosted page.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckIcon,
   CloudArrowUpIcon,
@@ -19,9 +19,7 @@ import {
 import { type MetaArgs } from "react-router";
 import DocsLayout from "../components/DocsLayout";
 import { AnchoredHeading } from "../components/MarkdownDocument";
-import { NotifySignupForm } from "../components/NotifySignupForm";
 import {
-  ACCENT_BORDER_CLASS,
   ACCENT_TEXT_CLASS,
   ACTION_CLASS,
   BODY_TEXT_CLASS,
@@ -31,7 +29,6 @@ import {
   DASHED_ROW_CLASS,
   LINK_CLASS,
   MUTED_TEXT_CLASS,
-  PANEL_CLASS,
   SCROLL_MT_CLASS,
   SECTION_CLASS,
 } from "dormouse-lib/site/docs-tokens";
@@ -44,7 +41,6 @@ import {
   type Founders,
 } from "../lib/hosted-cohorts";
 import {
-  CHECKOUT_OPEN,
   FOUNDING_COHORT_SIZE,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
@@ -167,28 +163,18 @@ function Price({ tier }: { tier: Pick<Tier, "price" | "per" | "listPrice"> }) {
   );
 }
 
-/** What a buy button does: counts the click, then goes to `href` or, without one, opens the notice. */
-type Buy = { onBuy: (tier: Tier) => void; href: (tier: Tier) => string | null };
+/** What a buy button does: counts the click, then goes to `href`. */
+type Buy = { onBuy: (tier: Tier) => void; href: (tier: Tier) => string };
 
 /**
  * "Buy" plus what it buys on the label a screen reader reads, since it hears
- * the buttons out of their cards. A link once checkout is open.
+ * the buttons out of their cards.
  */
 function BuyButton({ tier, label, buy }: { tier: Tier; label: string; buy: Buy }) {
-  const href = buy.href(tier);
-  return href ? (
-    <a href={href} onClick={() => buy.onBuy(tier)} aria-label={`Buy ${tier.name}`} className={ACTION_CLASS}>
+  return (
+    <a href={buy.href(tier)} onClick={() => buy.onBuy(tier)} aria-label={`Buy ${tier.name}`} className={ACTION_CLASS}>
       {label}
     </a>
-  ) : (
-    <button
-      type="button"
-      onClick={() => buy.onBuy(tier)}
-      aria-label={`Buy ${tier.name}`}
-      className={ACTION_CLASS}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -380,71 +366,6 @@ function FoundingCard({ cohort, buy }: { cohort: Cohort; buy: Buy }) {
   );
 }
 
-/**
- * What a buy button does while checkout is closed (`CHECKOUT_OPEN`).
- *
- * Deliberately loud about being unfinished: the prices are real and the plan
- * is specified, but purchase is a later stage,
- * and a button that quietly did nothing would read as a bug.
- */
-function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
-  const panel = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    panel.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center"
-      onClick={onClose}
-    >
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="checkout-todo-title"
-        tabIndex={-1}
-        className={PANEL_CLASS}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <p className={`font-display text-sm tracking-wide ${ACCENT_TEXT_CLASS}`}>TODO</p>
-        <h2 id="checkout-todo-title" className="mt-1 font-display text-2xl">
-          Checkout is not wired up yet
-        </h2>
-        <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-          {tier.name} is priced and specified, but nothing here takes payment: purchase
-          is the next stage of work. You have not been
-          charged, and no seat has been taken.
-        </p>
-        <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-          Want to hear when it opens? Join Dormouse’s email list and I’ll tell you.
-        </p>
-        <div className="mt-4">
-          <NotifySignupForm
-            buttonLabel="Email me when it opens"
-            emailId="hosted-notify-email"
-            announcement="Dormouse Hosted checkout"
-            variant="docs"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className={`mt-6 inline-flex min-h-12 items-center rounded-md border px-5 py-3 font-display focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`}
-        >
-          Close
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function FaqEntry({ question, children }: { question: string; children: React.ReactNode }) {
   return (
     <div className="border-t border-[var(--color-text)]/15 pt-5">
@@ -456,17 +377,12 @@ function FaqEntry({ question, children }: { question: string; children: React.Re
 
 export default function Hosted() {
   const [cohort, setCohort] = useState<Cohort>({ seatsLeft: null, founders: null });
-  const [checkoutTodo, setCheckoutTodo] = useState<Tier | null>(null);
   // The visit's ref, which checkout carries on to Stripe.
   const [ref, setRef] = useState<HostedRef | "other" | null>(null);
-  const closeTodo = useCallback(() => setCheckoutTodo(null), []);
   const buy = useMemo<Buy>(
     () => ({
-      onBuy: (tier) => {
-        trackEvent({ name: "hosted plan clicked", plan: tier.id });
-        if (!CHECKOUT_OPEN) setCheckoutTodo(tier);
-      },
-      href: (tier) => (CHECKOUT_OPEN ? checkoutUrl(tier, ref) : null),
+      onBuy: (tier) => trackEvent({ name: "hosted plan clicked", plan: tier.id }),
+      href: (tier) => checkoutUrl(tier, ref),
     }),
     [ref],
   );
@@ -494,7 +410,7 @@ export default function Hosted() {
           page can quote them without running the counters. */}
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: pricingJsonLd(canonicalUrl(PAGE_PATH), CHECKOUT_OPEN) }}
+        dangerouslySetInnerHTML={{ __html: pricingJsonLd(canonicalUrl(PAGE_PATH)) }}
       />
 
       {/* The cards open the page: no heading of their own, but `#pricing`
@@ -668,8 +584,6 @@ export default function Hosted() {
           </FaqEntry>
         </div>
       </section>
-
-      {checkoutTodo ? <CheckoutTodo tier={checkoutTodo} onClose={closeTodo} /> : null}
     </DocsLayout>
   );
 }

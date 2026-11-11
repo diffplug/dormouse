@@ -565,10 +565,6 @@ function checkNoDimmedDocsText() {
         'The theme prompt\'s dismiss button — an icon affordance that comes to '
         + 'full strength on hover, not body copy.',
     },
-    [`${WEBSITE_SRC}/components/NotifySignupForm.tsx`]: {
-      'opacity-50': 'The `site` palette\'s muted label and placeholder.',
-      'text-[var(--color-text)]/70': 'The `site` palette\'s input text.',
-    },
   };
 
   const surfaces = docsSurfaces();

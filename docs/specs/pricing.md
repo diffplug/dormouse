@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop enrolls with Hosted for managed voice and the Hosted Relay, the account's subscription is the entitlement, and the account pages that sell, the checkout switch, and the founding card's live half are built, with billing closed until checkout opens; opening it, and everything else that takes money, is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop enrolls with Hosted for managed voice and the Hosted Relay, the account's subscription is the entitlement, and the buy buttons, the account pages that sell, and the founding card's live half are built; what remains is under [Future](#future).
 
 ## The Hosted page
 
@@ -13,7 +13,7 @@
 
 **Must give every non-navigation, non-policy link to the page a `?ref=` from `HOSTED_REFS`, one per link, ahead of its fragment, and strip it from the address bar on arrival**, so a copied link never carries it. `takeVisitRef` answers it, an unlisted value as `other`, and the page's pageview carries it (`docs/specs/website-docs.md` -> "Visit analytics"). Source of truth: `lib/src/lib/hosted-links.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`.
 
-**Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers are `PreOrder` until `CHECKOUT_OPEN`, then `InStock`.**
+**Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `InStock` `Offer` per paid plan at its current price, so an assistant fetching the page can quote it.
 
 **Every price on the site has one owner**, `website/src/lib/hosted-pricing.ts`; site code reads it rather than restating a number.
 
@@ -23,7 +23,7 @@
 
 Each paid card carries a 30-day refund beneath its buy button.
 
-- **While `CHECKOUT_OPEN` is false a buy button opens the closed-checkout notice; once true it links to the account origin's `/checkout?plan=`, carrying the visit's `ref`.** **Never render a buy button that silently does nothing.**
+- **A buy button links to the account origin's `/checkout?plan=`, carrying the visit's `ref`.**
 
 ### The founding card's live half
 
@@ -85,7 +85,7 @@ Source of truth: `withBilling`, `openCohort`, and `foundingLapsed` in `hosted/se
 
 **Scope: hosted-sales** — what remains, in staged order:
 
-1. **Opening checkout** ("Checkout"): `CHECKOUT_OPEN`.
+1. **The checkout survey** ("Checkout").
 2. **Managed voice for members**: one voice per Pane.
 3. **Transfer** ("Transfer").
 
@@ -93,7 +93,7 @@ Team and enterprise tiers are never sold through this page. A free hosted tier i
 
 ### Tiers
 
-What each plan grants once checkout can sell it; [Published prices](#published-prices) is the ladder as the page prints it today.
+What each plan grants; [Published prices](#published-prices) is the ladder as the page prints it today.
 
 - **Founding grants the Individual plan plus a founding badge**; monthly and yearly grant the plan alone.
 - **Must lock the founding base yearly price in USD while the subscription remains active**, excluding applicable taxes.
@@ -115,7 +115,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 ### Checkout
 
-The rest of "Checkout and entitlement", once checkout can sell:
+The rest of "Checkout and entitlement":
 
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
 

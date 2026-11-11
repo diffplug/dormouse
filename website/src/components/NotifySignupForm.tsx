@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ACCENT_BORDER_CLASS, ACTION_TEXT_CLASS, FIELD_CLASS, FIELD_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "dormouse-lib/site/docs-tokens";
+import { FIELD_CLASS } from "dormouse-lib/site/docs-tokens";
 import { sitePath } from "../lib/site-meta";
 import { SITE_LINK_CLASS } from "./site-tokens";
 
@@ -23,45 +23,27 @@ function refusal(answer: unknown): string {
   return Array.isArray(email) && typeof email[0] === "string" ? email[0] : "That didn’t go through. Please try again.";
 }
 
-/**
- * The two surfaces this form appears on, side by side rather than as a
- * `variant ===` test per class. `site` is the marketing pages, painted in the
- * brand caramel a reader cannot retheme; `docs` sits inside `DocsLayout` and
- * follows the reader's picked theme through the docs tokens.
- */
+/** The marketing pages' brand caramel, which a reader cannot retheme. */
 const PALETTE = {
-  site: {
-    accent: "text-[var(--color-caramel)]",
-    border: "border-[var(--color-caramel)]",
-    background: "bg-[var(--color-caramel)]/15 hover:bg-[var(--color-caramel)]/25",
-    muted: "opacity-50",
-    input: "text-[var(--color-text)]/70 placeholder:opacity-50 focus:border-[var(--color-caramel)]",
-    link: SITE_LINK_CLASS,
-  },
-  docs: {
-    accent: ACTION_TEXT_CLASS,
-    border: ACCENT_BORDER_CLASS,
-    background: "bg-[var(--docs-accent)]/10 hover:bg-[var(--docs-accent)]/20",
-    muted: MUTED_TEXT_CLASS,
-    input: FIELD_TEXT_CLASS,
-    link: LINK_CLASS,
-  },
+  accent: "text-[var(--color-caramel)]",
+  border: "border-[var(--color-caramel)]",
+  background: "bg-[var(--color-caramel)]/15 hover:bg-[var(--color-caramel)]/25",
+  muted: "opacity-50",
+  input: "text-[var(--color-text)]/70 placeholder:opacity-50 focus:border-[var(--color-caramel)]",
+  link: SITE_LINK_CLASS,
 } as const;
 
 export function NotifySignupForm({
   buttonLabel = "Notify me when Pocket ships",
   emailId = "notify-email",
   announcement = "the Dormouse launch",
-  variant = "site",
 }: {
   buttonLabel?: string;
   emailId?: string;
   announcement?: string;
-  variant?: keyof typeof PALETTE;
 }) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<Status>("idle");
-  const palette = PALETTE[variant];
   const storageKey = `${EMAIL_STORAGE_PREFIX}${emailId}`;
 
   useEffect(() => {
@@ -101,7 +83,7 @@ export function NotifySignupForm({
 
   if (status === "sent")
     return (
-      <p role="status" className={`text-base leading-snug ${palette.accent}`}>
+      <p role="status" className={`text-base leading-snug ${PALETTE.accent}`}>
         Check your inbox. Click the link we sent to {email} and you’re on the list.
       </p>
     );
@@ -117,7 +99,7 @@ export function NotifySignupForm({
         {Object.entries(HIDDEN_FIELDS).map(([name, value]) => (
           <input key={name} type="hidden" name={name} value={value} />
         ))}
-        <label htmlFor={emailId} className={`font-display text-sm ${palette.muted}`}>
+        <label htmlFor={emailId} className={`font-display text-sm ${PALETTE.muted}`}>
           Email
         </label>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
@@ -138,26 +120,26 @@ export function NotifySignupForm({
             placeholder="you@example.com"
             required
             autoComplete="email"
-            className={`${FIELD_CLASS} sm:flex-1 ${palette.input}`}
+            className={`${FIELD_CLASS} sm:flex-1 ${PALETTE.input}`}
           />
           <button
             type="submit"
             disabled={status === "sending"}
-            className={`min-h-12 inline-flex items-center justify-center rounded-md border px-6 py-3 text-base font-display transition sm:w-auto ${palette.border} ${palette.background} ${palette.accent}`}
+            className={`min-h-12 inline-flex items-center justify-center rounded-md border px-6 py-3 text-base font-display transition sm:w-auto ${PALETTE.border} ${PALETTE.background} ${PALETTE.accent}`}
           >
             {buttonLabel}
           </button>
         </div>
       </form>
       {typeof status === "object" && (
-        <p role="alert" className={`mt-3 text-base leading-snug ${palette.accent}`}>
+        <p role="alert" className={`mt-3 text-base leading-snug ${PALETTE.accent}`}>
           {status.error}
         </p>
       )}
-      <p className={`mt-3 text-base leading-snug ${palette.muted}`}>
+      <p className={`mt-3 text-base leading-snug ${PALETTE.muted}`}>
         This joins Dormouse’s email list, where I’ll announce {announcement}. You’ll get one email to
         confirm, and you can unsubscribe any time (
-        <a href={sitePath("/privacy")} className={palette.link}>
+        <a href={sitePath("/privacy")} className={PALETTE.link}>
           privacy policy
         </a>
         ).
