@@ -29,13 +29,13 @@ tools:
 - `viewport` takes a preset name or dimensions; an `iframe` Tool takes only `pane-sync`.
 - The comment directly above an entry is what `dor tool --list` shows the next agent. Say what the Tool is for and how an agent should use it.
 
-A Tool the user keeps across projects can live in its own clone, imported from the user file. `from` is that clone's directory, relative to the user file or absolute, and `tool` names the entry there when it differs. `$HERE` is then the clone, which needs no approval.
+A Tool kept across projects can live in a clone beside the user file, ideally a git submodule, imported from it. `from` is the clone's directory, relative to the user file or absolute; `tool` names its entry if different. `$HERE` is then the clone; imports need no approval.
 
 ```yaml
 tools:
-  # Notes board; its source is the clone in ~/src/notes-tool.
+  # Notes board; its source is the notes-tool clone beside this file.
   notes:
-    from: ../../src/notes-tool
+    from: notes-tool
 ```
 
 A project file runs nothing until the user approves it in Dormouse, and no `dor` command grants that. Once approved, edits to it need no new approval.
