@@ -3,7 +3,7 @@
  * `docs/specs/remote-api.md` → "The provider seam". Types only.
  */
 
-import type { SurfaceCloseParams, SurfaceCloseResult } from 'remote-lib-common';
+import type { SurfaceCloseParams, SurfaceCloseResult, TerminalModes } from 'remote-lib-common';
 import type { DirectoryEntry } from 'remote-lib-common';
 // The chunk a sink receives is the one the PTY owner's parser produced, so the
 // projection pair is defined beside that parse rather than restated here.
@@ -45,6 +45,8 @@ export interface SurfaceHandle {
   /** The size the surface stands at now — live for a local pane, last-reported for a peer's. */
   readonly cols: number;
   readonly rows: number;
+  /** The program's terminal modes as the owner held them when this handle resolved. */
+  readonly modes: TerminalModes;
   /**
    * Resize through the owner's live xterm under the hold this handle was
    * resolved with, and report what it settled at.

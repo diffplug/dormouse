@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { DirectoryEntry, SurfaceHold } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { silentAnswers, type AskAnswers } from './service-protocol';
+import { FRESH_TERMINAL_MODES } from '../../remote/test-terminal-modes';
 
 const entry = (surfaceId: string, title: string): DirectoryEntry => ({
   paneRef: surfaceId,
@@ -39,6 +40,18 @@ describe('createAskSurfaceProvider directory', () => {
 
     const entries = await provider.collectDirectory();
     expect(entries.map((e) => e.title)).toEqual(['local copy', 'only one']);
+  });
+});
+
+describe('createAskSurfaceProvider attach', () => {
+  it("hands the session the modes the owner's attach answer read", async () => {
+    const modes = { ...FRESH_TERMINAL_MODES, applicationCursorKeys: true };
+    const { provider } = createAskSurfaceProvider(
+      async () => [{ ptyId: 'pty-1', cols: 80, rows: 24, modes }],
+      inertPty,
+    );
+    const handle = await provider.resolveSurface('pane-1', { cols: 80, rows: 24 }, HOLD);
+    expect(handle!.modes.applicationCursorKeys).toBe(true);
   });
 });
 

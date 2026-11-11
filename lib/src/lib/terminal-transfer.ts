@@ -13,6 +13,19 @@ export interface DecPrivateModes {
   cursorBlink?: boolean;
 }
 
+interface XtermCore {
+  mouseStateService?: { activeEncoding?: string };
+  coreService?: { decPrivateModes: DecPrivateModes; kittyKeyboard: KittyKeyboardState };
+}
+
+/** The private xterm state behind the modes a running app sets beyond
+ * `terminal.modes`: mouse encoding, the DEC modes xterm keeps unlisted, and the
+ * kitty keyboard stacks. Pinned by the real-xterm round trips in
+ * terminal-transfer.test.ts and terminal-modes.test.ts. */
+export function xtermCore(terminal: Terminal): XtermCore | undefined {
+  return (terminal as unknown as { _core?: XtermCore })._core;
+}
+
 /** DECSCUSR's steady parameter for each style; the blinking one is one lower. */
 const STEADY_CURSOR = { block: 2, underline: 4, bar: 6 };
 
@@ -34,8 +47,7 @@ function kittyReplay(stack: number[], flags: number): string {
 /** The pinned serializer emits a fixed list of modes, so this replays what a
  * running app set beyond it (`docs/specs/transport.md` -> "Transferring a
  * Workspace"). Read xterm's resolved state, including resets, rather than infer
- * it from output chunks. These private accessors are pinned by real-xterm
- * round-trip tests in terminal-transfer.test.ts.
+ * it from output chunks.
  *
  * Everything precedes the serialized content except alternate-screen kitty
  * state, which needs that content to enter the screen. While the main screen is
@@ -46,12 +58,7 @@ function kittyReplay(stack: number[], flags: number): string {
  * extension off on the first push, and xterm then ignores the mode.
  */
 export function serializeTransferTerminal(terminal: Terminal, serialize: SerializeAddon): string {
-  const core = (terminal as unknown as {
-    _core?: {
-      mouseStateService?: { activeEncoding?: string };
-      coreService?: { decPrivateModes: DecPrivateModes; kittyKeyboard: KittyKeyboardState };
-    };
-  })._core;
+  const core = xtermCore(terminal);
   const content = serialize.serialize();
   if (!core?.coreService || !core.mouseStateService) return content;
   const { decPrivateModes, kittyKeyboard: kitty } = core.coreService;

@@ -149,7 +149,7 @@ Source of truth: `TerminalDataEvent` in `remote-lib-common/src/remote/wire.ts`, 
 
 #### Attach is the resize
 
-**Attach carries the client's dimensions, and there is no snapshot transfer** (rationale):
+**Attach carries the client's dimensions, returning the program's modes, never a snapshot** (rationale):
 
 1. Client attaches with `{ cols, rows }`.
 2. Burrow resizes through the owning xterm's resize path (last-attach-wins); the resulting `SIGWINCH` repaint is what fills the client's screen. (rationale)

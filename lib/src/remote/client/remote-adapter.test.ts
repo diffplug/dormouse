@@ -7,10 +7,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
+import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry, type TerminalAttachResult } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient, type TerminalHandlers } from './remote-adapter';
 import type { PlatformAdapter, PtyDataDetail } from '../../lib/platform/types';
+import { FRESH_TERMINAL_MODES } from '../test-terminal-modes';
 
 interface AttachCall {
   surfaceId: string;
@@ -40,10 +41,10 @@ class FakeClient implements RemoteAdapterClient {
     cols: number,
     rows: number,
     handlers: TerminalHandlers,
-  ): Promise<{ subId: string; result: { cols: number; rows: number } }> {
+  ): Promise<{ subId: string; result: TerminalAttachResult }> {
     const subId = `attach-${++this.#attachCounter}`;
     this.attaches.push({ surfaceId, cols, rows, handlers, subId });
-    return { subId, result: { cols, rows } };
+    return { subId, result: { cols, rows, modes: FRESH_TERMINAL_MODES } };
   }
 
   async write(surfaceId: string, bytes: string): Promise<void> {

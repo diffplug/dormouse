@@ -9,6 +9,7 @@ import type {
   TerminalHandlers,
 } from '../remote/client/remote-adapter';
 import { installRemoteAdapter } from '../remote/pocket-app/remote-wall';
+import { FRESH_TERMINAL_MODES } from '../remote/test-terminal-modes';
 import { disposeAllSessions, getTerminalInstance } from '../lib/terminal-registry';
 import { getPlatformOrNull, setPlatform, type PlatformAdapter } from '../lib/platform';
 import { settleTerminals } from './settle-terminals';
@@ -104,7 +105,7 @@ class FakeRemoteClient implements RemoteAdapterClient {
     const subId = `attach-${++this.#n}`;
     // Push after the pane's xterm (and its onPtyData handler) is mounted.
     queueMicrotask(() => handlers.onData({ bytes: SPLASH }));
-    return { subId, result: { cols, rows } };
+    return { subId, result: { cols, rows, modes: FRESH_TERMINAL_MODES } };
   }
 
   async write() {}

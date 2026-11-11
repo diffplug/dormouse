@@ -430,7 +430,7 @@ export const RULES = [
     // file that knows what a `DirectoryEntry` is has started to care what it is
     // carrying.
     pattern:
-      /\b(?:RemoteRequest|RemoteResponse|RemoteEventMsg|DirectoryEntry|DirectorySnapshot|TerminalDataEvent|TerminalClosedEvent|TerminalSemanticEvent|AttachParams|TerminalAttachResult|TerminalWriteParams|TerminalResizeParams|HelloParams|HelloResult|HelloCapabilities|SurfaceCloseParams|SurfaceCloseResult|REMOTE_METHODS|REMOTE_EVENTS|MAX_TERMINAL_DIMENSION|clampTerminalDimension|FRAME_METHODS|FRAME_EVENTS|DirectoryBrowser|FrameOpenParams|FrameOpenResult|HttpRequestParams|HttpResponseHead|WsOpenParams|WsMessageFragment)\b/g,
+      /\b(?:RemoteRequest|RemoteResponse|RemoteEventMsg|DirectoryEntry|DirectorySnapshot|TerminalDataEvent|TerminalClosedEvent|TerminalSemanticEvent|AttachParams|TerminalAttachResult|TerminalModes|TerminalWriteParams|TerminalResizeParams|HelloParams|HelloResult|HelloCapabilities|SurfaceCloseParams|SurfaceCloseResult|REMOTE_METHODS|REMOTE_EVENTS|MAX_TERMINAL_DIMENSION|clampTerminalDimension|FRAME_METHODS|FRAME_EVENTS|DirectoryBrowser|FrameOpenParams|FrameOpenResult|HttpRequestParams|HttpResponseHead|WsOpenParams|WsMessageFragment)\b/g,
     violationFile: 'relay/src/relay.ts',
     violation: "\nimport type { DirectoryEntry } from 'remote-lib-common';\n",
   },

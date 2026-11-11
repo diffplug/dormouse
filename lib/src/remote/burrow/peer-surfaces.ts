@@ -10,6 +10,7 @@ import {
   type DirectoryEntry,
   type SurfaceCloseParams,
   type SurfaceCloseResult,
+  type TerminalModes,
 } from 'remote-lib-common';
 import { answerClientClose, answerClientCloseOwner } from './client-close';
 import { subscribeAgentBrowserScreenPages } from '../../components/wall/agent-browser-screen';
@@ -26,6 +27,7 @@ import {
 } from '../../lib/size-hold-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
 import { isPendingKillSession } from '../../lib/pending-kills';
+import { readTerminalModes } from '../../lib/terminal-modes';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { subscribeToWorkspaces } from '../../lib/workspace-store';
 import { subscribeToWorkspaceSurfaces } from '../../lib/workspace-surfaces';
@@ -66,6 +68,8 @@ export interface PeerSurfaceResult {
   ptyId: string;
   cols: number;
   rows: number;
+  /** What an attach answers the Client with (`TerminalAttachResult.modes`). */
+  modes: TerminalModes;
 }
 
 /**
@@ -153,7 +157,7 @@ function driveOwnSurface({
     default:
       return [];
   }
-  return [{ ptyId: surfaceId, cols: term.cols, rows: term.rows }];
+  return [{ ptyId: surfaceId, cols: term.cols, rows: term.rows, modes: readTerminalModes(term) }];
 }
 
 /**
