@@ -509,3 +509,19 @@ jobs:
       - name: Windows PTY shutdown tests
         if: runner.os == 'Windows'
         run: pnpm exec node --test --test-force-exit standalone/sidecar/graceful-kill-windows.test.js standalone/sidecar/pty-host-wiring.test.js
+
+      # The package suites run on Linux, where these cases skip: `.cmd` shims
+      # and UNC working directories, ACL-preserving saves, PATHEXT, and the WSL
+      # caller. Only the Windows cases run here, by name; the tests import each
+      # package's `dist`.
+      - name: Windows package tests
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pnpm --filter dor-lib-common --filter dor-tools-builtin --filter dor run build
+          node --test --test-name-pattern="reads the target of agent-browser, npm cmd-shim and pnpm shims" --test-name-pattern="a \.cmd shim started in a UNC cwd" --test-name-pattern="on a case-insensitive volume" --test-name-pattern="Windows saves preserve" --test-name-pattern="a native replacement sharing failure" --test-name-pattern="already carries an extension as itself" --test-name-pattern="a WSL caller" dor-lib-common/test/spawn.test.mjs dor-lib-common/test/local-path.test.mjs dor-tools-builtin/test/editable-file.test.mjs dor-tools-builtin/test/atomic-save.test.mjs dor/test/cli-output.test.mjs dor/test/wsl-paths.test.mjs
+
+      # The macOS installer's `owner_only` meets a real BSD `stat` only here.
+      - name: Installer helper tests
+        if: runner.os == 'macOS'
+        run: node scripts/installer-verify-test.mjs
