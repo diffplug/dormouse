@@ -12,6 +12,7 @@ import { presentedLines } from "../server/disclosure";
 import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION, VOICE_DAILY_CAP, termsArchiveUrl } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { MODEL_WITHDRAWAL_FORM, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
+import { FOUNDING_LADDER, LIST_ANNUAL } from "../../website/src/lib/hosted-pricing";
 
 vi.mock("./api", async (original) => ({
   ...await original<typeof import("./api")>(),
@@ -283,6 +284,21 @@ describe("an account with no plan", () => {
     expect(noPlanShown()).toBe(true);
     expect(container.textContent).not.toContain("Founding price");
     expect(container.textContent).toContain("$100/year");
+  });
+
+  it("offers the price checkout charges: the server's open cohort, or yearly once founding closed", async () => {
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: { cohort: 1, seatsLeft: 3 } });
+    await mount(ENROLLMENT);
+    expect(noPlanShown()).toBe(true);
+    expect(container.textContent).toContain(`$${FOUNDING_LADDER[1]}/year`);
+
+    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: null });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await mount(ENROLLMENT);
+    expect(container.textContent).not.toContain("Founding price");
+    expect(container.textContent).toContain(`$${LIST_ANNUAL}/year`);
   });
 
   it("is told when the approval is refused for want of a plan", async () => {

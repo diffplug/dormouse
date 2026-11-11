@@ -275,7 +275,7 @@ export function HostedPage({
                 {enrolling.code ? (
                   noPlan ? (
                     <>
-                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} foundingLapsed={summary?.foundingLapsed} />
+                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} founding={summary?.founding} foundingLapsed={summary?.foundingLapsed} />
                       {enrolling.purpose !== "voice" && (
                         <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
                           <SelfHostLine />
