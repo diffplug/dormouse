@@ -128,6 +128,7 @@ import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertDelivery } from './wall/use-alert-delivery';
 import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
 import { useWindowFocused } from './wall/use-window-focused';
+import { watchParkedFocus } from './wall/parked-focus';
 import { useEngagementFocus } from './wall/use-engagement-focus';
 import {
   DialogKeyboardContext,
@@ -2085,18 +2086,33 @@ export function Wall({
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
   }, [enterPassthrough, lath, nav, transferRefusal]);
 
-  /** An inline rename or the last dialog closing drops DOM focus on `<body>`,
-   *  where passthrough keys reach nothing; the selected pane's terminal takes
-   *  it back, unless the gesture that closed it focused something else. */
+  /** DOM focus left on `<body>`, where passthrough keys reach nothing: the
+   *  selected pane's terminal takes it back, unless something else already
+   *  holds focus or a dialog holds the keyboard. */
+  const returnPassthroughFocus = useCallback(() => {
+    const active = document.activeElement;
+    if (modeRef.current !== 'passthrough' || !activeRef.current || dialogKeyboardActiveRef.current) return;
+    if (active && active !== document.body) return;
+    focusSelected(true);
+  }, [focusSelected]);
+
+  /** An inline rename or the last dialog closing drops DOM focus on `<body>`;
+   *  a frame later, once the gesture that closed it has focused whatever it
+   *  meant to, the terminal takes it back. */
   const refocusPassthroughTerminal = useCallback(() => {
     if (modeRef.current !== 'passthrough') return;
-    requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (!activeRef.current || (active && active !== document.body)) return;
-      focusSelected(true);
-    });
-  }, [focusSelected]);
+    requestAnimationFrame(returnPassthroughFocus);
+  }, [returnPassthroughFocus]);
   dialogsClosedRef.current = refocusPassthroughTerminal;
+
+  // A parked leaf's page can still focus itself and take every key; the visible
+  // Wall takes the keyboard back while it holds one, with no frame's wait,
+  // during which typed keys would reach `<body>` and be lost.
+  const hasParked = useSyncExternalStore(lath.store.subscribe, () => lath.store.getSnapshot().parked.size > 0);
+  useEffect(() => {
+    if (!active || !hasParked) return;
+    return watchParkedFocus((id) => lath.store.getSnapshot().parked.has(id), returnPassthroughFocus);
+  }, [active, hasParked, lath, returnPassthroughFocus]);
 
   // --- Wall actions (for tab buttons) ---
 
