@@ -264,7 +264,7 @@ A list price change for existing monthly or yearly subscribers is one row in `do
    VALUES ('monthly-2027', 'monthly', 'price_old', 'price_new', 10, 12, '2027-03-01T00:00:00Z');
    ```
 
-   From then on, both Prices grant the plan. Each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so.
+   From then on, both Prices grant the plan. While any active subscription is on `fromPriceId`, each run checks the row against Stripe and fails, sending no notice, until both Prices match their amounts and interval; the [billing alert](#billing-alert) says so. A row whose `fromPriceId` no active subscription holds, a mistyped one included, is never checked and does nothing, silently: check it against a subscriber's Price in Stripe before inserting.
 3. On `effectiveAt`, in one reviewed release, point `STRIPE_PRICE_MONTHLY` (or `STRIPE_PRICE_YEARLY`) at the new Price and change the published price in `website/src/lib/hosted-pricing.ts`, so new checkouts sell it. Keep the row afterwards: it is what still recognizes the old Price for anyone not yet moved.
 
 Never edit a row once its notices have gone out; schedule a further change as a new row from the new Price.
