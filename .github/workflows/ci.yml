@@ -396,8 +396,12 @@ jobs:
         run: pnpm install --frozen-lockfile --no-runtime
         working-directory: standalone
 
-      - name: TypeScript check
-        run: npx tsc --noEmit
+      # The frontend half of the release's `tauri build`: staging `dor` and the
+      # sidecar bundles (with their relay-origin and nothing-inlined
+      # assertions), `tsc -b`, which is the TypeScript check, and the Vite
+      # build. Run nowhere else before a release tag.
+      - name: Build
+        run: pnpm run build
         working-directory: standalone
 
       # `cargo test` rather than `cargo check`: the crate carries unit tests
