@@ -77,7 +77,7 @@ import { validToolFragment } from 'dor-tools-lib/osc';
 import { confirmToolEditorsClose } from '../../lib/tool-editor';
 import { confirmLinkOpen } from '../../lib/external-link-confirmation';
 import { directoryOf } from '../../lib/tool-open-requests';
-import { commitToolHistory, linkOpenNeedsConfirmation, hasToolView, toolHandlerName, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
+import { commitToolHistory, linkOpenNeedsConfirmation, hasToolView, toolHandlerName, toolHandlerScope, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
 
 import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
@@ -1257,8 +1257,12 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'cwd is required' });
           return;
         }
-        let toolName = stringParam(params.name)?.trim();
-        const openFile = historical?.target ?? stringParam(params.file);
+        // A project handler is reached by name from its lookup directory, under
+        // that project's grant: open dispatch reaches only user Tools, and would
+        // run a same-named one instead.
+        const projectEntry = historical?.scope === 'project' && historical.handler !== undefined ? historical : undefined;
+        let toolName = projectEntry?.handler ?? stringParam(params.name)?.trim();
+        const openFile = projectEntry ? undefined : historical?.target ?? stringParam(params.file);
         const opening = openFile !== undefined;
         if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
           detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
@@ -1268,7 +1272,7 @@ export function useDorControl({
         let toolRun: string | readonly string[];
         let key: string[] | null = null;
         let toolScope: ToolKeyScope | undefined;
-        const toolArgs = stringArrayParam(params.args) ?? [];
+        const toolArgs = projectEntry ? [projectEntry.target] : stringArrayParam(params.args) ?? [];
         let warnings: string[] = [];
         let render: ToolRender = 'iframe';
         let viewport: BrowserViewportSetting | undefined;
@@ -1377,6 +1381,11 @@ export function useDorControl({
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
+              // A project file that no longer declares it falls through to user Tools.
+              if (projectEntry && lookup.scope !== undefined) {
+                detail.respond({ ok: false, error: `no project Tool '${toolName}' from ${cwd}` });
+                return;
+              }
               toolRun = lookup.run;
               command = toolRunCommand(lookup.run);
               toolScope = lookup.scope;
@@ -1404,6 +1413,12 @@ export function useDorControl({
               });
               return;
             case 'untrusted': {
+              // Only a project history entry gets here from a navigation, which
+              // fails rather than turn its Surface into an approval.
+              if (documentLink) {
+                detail.respond({ ok: false, error: `the Tools in ${lookup.path} are not approved` });
+                return;
+              }
               const pendingCommand = toolRunCommand(lookup.run);
               // The config lint runs before the trust gate, and the `pending`
               // answer below is the only one the first run of a tool ever sees
@@ -1613,7 +1628,7 @@ export function useDorControl({
           current.position = await toolView(id, source).catch(() => undefined);
           if (unavailable() || sourceChanged()) return true;
           const nextHistory = commitToolHistory(history, current,
-            { target, cwd, handler: toolHandlerName(toolScope, toolName), position: targetPosition }, historyIndex);
+            { target, cwd, handler: toolHandlerName(toolScope, toolName), scope: toolHandlerScope(toolScope), position: targetPosition }, historyIndex);
           if (sameDocument) {
             // An anchor is a view change: never ask to discard edits or
             // reload the page, even through Back/Forward.

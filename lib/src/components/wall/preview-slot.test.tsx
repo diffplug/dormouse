@@ -14,7 +14,11 @@ import * as browserController from './agent-browser-surface-controller';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import type { PersistedSession } from '../../lib/session-types';
-import type { ToolControlResult } from '../../lib/platform/tool-types';
+import type { ToolControlResult, ToolHostRequest } from '../../lib/platform/tool-types';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createToolHost } from '../../host/tool-host';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
@@ -1562,12 +1566,96 @@ it('holds no other launch while asking to discard edits, and focuses a destinati
   expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
 });
 
-it('Back resolves the original handler in its original lookup directory', async () => {
+it.each([
+  { scope: 'user', name: 'viewer', handler: 'viewer' },
+  { scope: 'builtin', name: 'file', handler: 'builtin:file' },
+])('Back resolves the original $scope handler through open dispatch in its original lookup directory', async ({ scope, name, handler }) => {
   const host = installHost();
-  await mountWall([{ id: 'surface:slot', params: viewerParams('docs/a.md', { toolPreview: undefined }) }]);
+  await mountWall([{ id: 'surface:slot', params: viewerParams('docs/a.md', { toolPreview: undefined, toolScope: scope, toolName: name }) }]);
   shell('surface:a', null); shell('surface:slot', 'view /repo/docs/a.md');
   await answer(await request({ file: '/repo/docs/b.md', disposition: 'current' }, 'surface:slot'));
   expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', cwd: '/repo/docs' }));
   await answer(await request({ history: 'back', disposition: 'current' }, 'surface:slot'));
-  expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', target: '/repo/docs/a.md', cwd: '/repo', tool: 'viewer' }));
+  expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', target: '/repo/docs/a.md', cwd: '/repo', tool: handler }));
+});
+
+describe('Back to a project Tool, through the real Tool host', () => {
+  let dir = '';
+  let project = '';
+  let a = '';
+  let b = '';
+  /** A host reading the fixture's user file; granted the project unless `ungranted`. */
+  async function useHost(options: { ungranted?: boolean } = {}) {
+    const host = createToolHost({ userConfigPath: join(dir, 'user', 'dormouse.yml') });
+    if (!options.ungranted) await host.handle({ op: 'trust', kind: 'folder', projectRoot: project });
+    const toolControl = vi.fn((request: ToolHostRequest) => host.handle(request));
+    Object.assign(fake, { toolControl });
+    return toolControl;
+  }
+
+  beforeEach(async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), 'dor-tool-back-')));
+    project = join(dir, 'project');
+    a = join(project, 'a.md');
+    b = join(project, 'b.md');
+    await mkdir(join(dir, 'user'));
+    await mkdir(project);
+    // The user file declares a same-named Tool, which Back must never run.
+    await writeFile(join(dir, 'user', 'dormouse.yml'), "tools:\n  view:\n    run: [userview, $TARGET]\nopen:\n  - {match: '*.md', tool: view}\n");
+    await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view, $TARGET]\n');
+    await writeFile(a, '# a');
+    await writeFile(b, '# b');
+    await useHost();
+    await mountWall([{ id: 'surface:tool', params: {
+      surfaceType: 'tool', command: `view ${a}`, toolArgv: ['view', a], cwd: project, toolName: 'view',
+      toolRender: 'iframe', toolPort: 'announced', toolTarget: a, toolOrigin: { file: join(project, 'dormouse.yml') },
+    } }]);
+    shell('surface:a', null);
+    shell('surface:tool', `view ${a}`);
+    // A link in the project Tool's document goes through open dispatch.
+    expect(await answer(await request({ file: b, disposition: 'current' }, 'surface:tool'))).toMatchObject({ status: 'retargeted' });
+    expect(typed['surface:tool']).toEqual(['\x03', `userview ${b}\r`]);
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const back = () => request({ history: 'back', disposition: 'current' }, 'surface:tool');
+
+  it('re-runs the project Tool by name from its lookup directory, never the same-named user Tool', async () => {
+    const toolControl = await useHost();
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted', surfaceId: 'surface:tool' });
+    expect(toolControl).toHaveBeenCalledWith({ op: 'lookup', name: 'view', cwd: project, args: [a], global: false });
+    expect(typed['surface:tool'].slice(2)).toEqual(['\x03', `view ${a}\r`]);
+    const params = await paramsOf('surface:tool');
+    expect(params).toMatchObject({ toolName: 'view', toolTarget: a, toolArgv: ['view', a] });
+    expect(params).not.toHaveProperty('toolScope');
+    // The entry Back revisited keeps its scope for the next traversal.
+    expect(await answer(await request({ history: 'forward', disposition: 'current' }, 'surface:tool'))).toMatchObject({ status: 'retargeted' });
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted' });
+    expect(typed['surface:tool'].slice(-1)).toEqual([`view ${a}\r`]);
+  });
+
+  it.each([
+    ['its project lost its grant', async () => { await useHost({ ungranted: true }); }, 'not approved'],
+    ['its project file no longer declares it', async () => { await writeFile(join(project, 'dormouse.yml'), 'tools:\n  other:\n    run: [other]\n'); }, "no project Tool 'view'"],
+  ])('fails on the source when %s, leaving its location and history', async (_, change, error) => {
+    await change();
+    const failed = await back();
+    await waitUntil(() => failed.mock.calls.length > 0);
+    expect(failed.mock.calls[0][0]).toMatchObject({ ok: false, error: expect.stringContaining(error) });
+    expect(typed['surface:tool']).toHaveLength(2);
+    expect(leafCount()).toBe(2);
+    expect(container.textContent).not.toContain('Always allow');
+    await waitUntil(() => !!container.querySelector('[data-lath-leaf="surface:tool"] [role="alert"]')?.textContent?.includes(error));
+    const params = await paramsOf('surface:tool');
+    expect(params).toMatchObject({ toolTarget: b });
+    expect(params).not.toHaveProperty('toolPending');
+    // The history is intact: once the project is back, so is Back.
+    await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view, $TARGET]\n');
+    await useHost();
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted' });
+    expect((await paramsOf('surface:tool'))?.toolTarget).toBe(a);
+  });
 });
