@@ -9,14 +9,17 @@ import type { OpenPort } from '../../lib/platform/types';
 /** One openable dev-server URL for a distinct listening port. */
 export type PortUrlEntry = { port: number; host: string; url: string; processName?: string };
 
-// Loopback and wildcard binds can serve a loopback URL; URL selection below
-// preserves the address family and honors the host's wildcard collision check.
+/** Whether a bind can answer on loopback: a loopback or wildcard address. */
 export function servesLoopback(address: string): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '0.0.0.0' || address === '::';
 }
 
+/** A wildcard's same-family loopback, for a host that sent no `connectAddress`. */
+const WILDCARD_LOOPBACK: Partial<Record<string, string>> = { '0.0.0.0': '127.0.0.1', '::': '::1' };
+
 /** One numeric URL per port: prefer loopback, then IPv4, then address order.
  * Never substitute localhost: DNS may select another process's listener.
+ * A wildcard uses the host's `connectAddress`; null (all shadowed) is skipped.
  */
 export function listenerUrlsByPort(ports: OpenPort[]): PortUrlEntry[] {
   const tcpPorts = ports.filter((entry) => entry.protocol === 'tcp' && entry.connectAddress !== null);
@@ -30,8 +33,7 @@ export function listenerUrlsByPort(ports: OpenPort[]): PortUrlEntry[] {
       return a.address < b.address ? -1 : a.address > b.address ? 1 : 0;
     })[0];
     const address = selectedListener.connectAddress
-      ?? (selectedListener.address === '0.0.0.0' ? '127.0.0.1'
-        : selectedListener.address === '::' ? '::1' : selectedListener.address);
+      ?? WILDCARD_LOOPBACK[selectedListener.address] ?? selectedListener.address;
     const host = address.includes(':') ? `[${address}]` : address;
     const processName = selectedListener.processName
       ?? portListeners.find((entry) => entry.processName !== undefined)?.processName;

@@ -1811,7 +1811,7 @@ test('parseHexIpv6 decodes and compresses', () => {
   assert.equal(parseHexIpv6('00000000000000000000000001000000'), '::1'); // loopback
 });
 
-test('parseProcNetTcp keeps only LISTEN rows owned by tracked inodes', () => {
+test('parseProcNetTcp keeps only LISTEN rows, with their owning pid', () => {
   const content = [
     '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
     '   0: 0100007F:1538 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 55501 1 ffff 100',
@@ -1827,12 +1827,14 @@ test('parseProcNetTcp keeps only LISTEN rows owned by tracked inodes', () => {
   ]);
 });
 
-test('parseProcNetTcp ignores rows whose inode is not tracked', () => {
+test('parseProcNetTcp leaves the pid of an untracked inode undefined', () => {
   const content = [
     'header',
     '   0: 0100007F:1538 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000  0 77777 1 ffff 100',
   ].join('\n');
-  assert.deepEqual(parseProcNetTcp(content, 'IPv4', new Map()), []);
+  assert.deepEqual(parseProcNetTcp(content, 'IPv4', new Map()), [
+    { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5432, pid: undefined },
+  ]);
 });
 
 test('parseLsofListening parses *, IPv4, and bracketed IPv6 names', () => {
@@ -1858,27 +1860,26 @@ test('parseLsofListening parses *, IPv4, and bracketed IPv6 names', () => {
   ]);
 });
 
-test('parseNetTcpConnections filters by owning pid and detects family', () => {
+test('parseNetTcpConnections keeps the owning pid and detects family', () => {
   const json = JSON.stringify([
     { LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 },
-    { LocalAddress: '::', LocalPort: 8080, OwningProcess: 4242 },
-    { LocalAddress: '0.0.0.0', LocalPort: 9999, OwningProcess: 1 }, // not ours
+    { LocalAddress: '::', LocalPort: 8080, OwningProcess: 1 },
   ]);
-  const ports = parseNetTcpConnections(json, new Set([4242]));
+  const ports = parseNetTcpConnections(json);
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242 },
-    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242 },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 1 },
   ]);
 });
 
 test('parseNetTcpConnections accepts a single (non-array) JSON object', () => {
   const json = JSON.stringify({ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 });
-  const ports = parseNetTcpConnections(json, new Set([4242]));
+  const ports = parseNetTcpConnections(json);
   assert.equal(ports.length, 1);
   assert.equal(ports[0].port, 3000);
 });
 
-test('parseNetstatListening parses LISTENING TCP rows for tracked pids', () => {
+test('parseNetstatListening parses LISTENING TCP rows', () => {
   const output = [
     'Active Connections',
     '  Proto  Local Address          Foreign Address        State           PID',
@@ -1887,10 +1888,11 @@ test('parseNetstatListening parses LISTENING TCP rows for tracked pids', () => {
     '  TCP    127.0.0.1:54000        127.0.0.1:5432         ESTABLISHED     4242',
     '  TCP    0.0.0.0:9999           0.0.0.0:0              LISTENING       1',
   ].join('\n');
-  const ports = parseNetstatListening(output, new Set([4242]));
+  const ports = parseNetstatListening(output);
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242 },
     { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242 },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 9999, pid: 1 },
   ]);
 });
 
