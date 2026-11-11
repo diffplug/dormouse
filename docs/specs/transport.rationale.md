@@ -37,6 +37,8 @@ In a real webview (the browser-dev harness, its Chrome rendering with WebGL, sam
 
 **Why resume when the process is gone.** node-pty reports no exit while its socket is paused: on POSIX it destroys the socket, unread tail and all, 200 ms after the child exits; with `useConptyDll` on Windows it reports the exit only when the socket closes. Measured on macOS (same date): with everything read before the pause, a child writing a tail and exiting lost it unless resumed. With output still unread in the kernel when the child exits, macOS holds the exit about 610 ms and then discards that output, with the pid still alive throughout, so the watch cannot see it; only the renderer catching up within that window saves it. Unmeasured on Linux and Windows.
 
+**Why input resumes a paused PTY on Windows.** Probed on Windows 10.0.26300 (2026-11-11, node-pty 1.2.0-beta.18 with `conpty.dll`): a `node` child flooding its PTY, interrupted with `\x03`, with xterm's win32-input-mode records for Ctrl+C, or both. Never paused, each encoding ended it in 14–17 ms (node-pty's exit 62–65 ms, code `STATUS_CONTROL_C_EXIT`). Paused, it was alive 2.5 s later, with nothing read and nothing written: conhost takes no input while blocked writing output nobody reads. Resumed right after the interrupt, it ended in 16 ms, node-pty's exit at 64 ms, after 279,000–292,000 chars were read in between, so a 250 ms grace covers it and twice the high watermark leaves that read room while still bounding memory. On macOS the same interrupt reached a paused program at once.
+
 **Why every stop resumes.** node-pty finishes a kill by reading: on Windows the ConPTY worker is disposed on the next data event, and a paused socket never delivers one.
 
 ## Paced input

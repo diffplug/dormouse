@@ -517,6 +517,8 @@ export function getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort
 }
 
 export function write(id: string, data: string, options: WritePtyOptions = {}): void {
+  // On Windows a paused PTY must be read for its input to arrive.
+  outputFlow.input(id);
   sendToChild({ type: 'input', id, data, paced: options.paced });
 }
 

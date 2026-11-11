@@ -1085,6 +1085,32 @@ describe('the sidecar host', () => {
       expect(flowCalls()).toEqual(['pause pty-1', 'pause pty-2', 'resume pty-1', 'resume pty-2', 'list undefined']);
     });
 
+    it('on Windows, lets any write through to a paused PTY by resuming it first', () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      let windows: SidecarHost;
+      try {
+        windows = createSidecarHost({
+          send: (event, data) => void out.push({ event, data }),
+          mgr: {
+            spawn: record('spawn'), setParentWindow: record('setParentWindow'), write: record('write'),
+            resize: record('resize'), kill: record('kill'), list: record('list'), mark: record('mark'),
+            pause: record('pause'), resume: record('resume'), hasPty: () => true,
+          },
+        });
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+      }
+      try {
+        windows.onPtyEvent('data', { id: 'pty-1', data: 'x'.repeat(PTY_HIGH_WATERMARK_CHARS + 1) });
+        windows.handleCommand('pty:input', { id: 'pty-1', data: '\x03' });
+        expect(calls.filter(({ op }) => ['pause', 'resume', 'write'].includes(op)).map(({ op, args }) => `${op} ${String(args[0])}`))
+          .toEqual(['pause pty-1', 'resume pty-1', 'write pty-1']);
+      } finally {
+        windows.dispose();
+      }
+    });
+
     it('drops a killed or reaped PTY’s count without resuming it', () => {
       flood();
       flood('pty-2');

@@ -24,6 +24,14 @@ export const PTY_HIGH_WATERMARK_CHARS = 2_097_152;
  * would never resume.
  */
 export const PTY_LOW_WATERMARK_CHARS = 1_048_576;
+/**
+ * On Windows, input written to a paused PTY resumes it until no input has
+ * been written for this long; then it pauses again if still past the high
+ * watermark. ConPTY delivered an interrupt 16 ms after the resume.
+ */
+export const PTY_INPUT_GRACE_MS = 250;
+/** Input never resumes a PTY owing this many chars or more. */
+export const PTY_INPUT_CEILING_CHARS = 2 * PTY_HIGH_WATERMARK_CHARS;
 
 /**
  * The live-output dispatch every adapter shares: it calls each `onPtyData`

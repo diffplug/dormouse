@@ -236,6 +236,21 @@ describe('output flow control', () => {
     ]);
   });
 
+  it('on Windows, resumes a paused PTY before writing input to it', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    let started: Awaited<ReturnType<typeof startManager>>;
+    try {
+      started = await startManager();
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+    const { manager, child } = started;
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    manager.write('pane-a', '\x03');
+    expect(child.send.mock.calls.map(([msg]) => msg.type)).toEqual(['spawn', 'pause', 'resume', 'input']);
+  });
+
   it('never forks a child just to pause a PTY in one that is gone', async () => {
     const { manager, child } = await startManager();
     child.emit('exit', 1);

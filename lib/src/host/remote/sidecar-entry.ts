@@ -515,10 +515,19 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     ? new FileBurrowStateStore(options.stateDir)
     : createEphemeralBurrowStateStore((message) => console.error(message));
 
-  // Output flow control: what each PTY's window has not yet parsed.
+  // Output flow control: what each PTY's window has not yet parsed. Every
+  // write tells it first, a window's or a Client's alike: on Windows a paused
+  // PTY must be read for its input to arrive.
   const flow = createPtyFlowControl({ pause: (id) => mgr.pause(id), resume: (id) => mgr.resume(id) });
-  const bridge = createSidecarSurfaceBridge({ send, mgr, alerts, flow });
-  const pty = alertedPty(alerts, mgr);
+  const writer: SidecarHostPtyManager = {
+    ...mgr,
+    write(id, data, options) {
+      flow.input(id);
+      mgr.write(id, data, options);
+    },
+  };
+  const bridge = createSidecarSurfaceBridge({ send, mgr: writer, alerts, flow });
+  const pty = alertedPty(alerts, writer);
 
   // Read once, here: the Burrow and managed voice take the same baked pair.
   const relay = bakedRelay();
