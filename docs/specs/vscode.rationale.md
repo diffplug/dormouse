@@ -79,8 +79,6 @@
 
 **Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
 
-**Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.
-
 ## The direct path
 
 macOS library validation decides which process may load the addon. Run under VS Code's main `Code` binary (`ELECTRON_RUN_AS_NODE=1`), `dlopen` of `node_datachannel.node` fails with "mapping process and mapped file (non-platform) have different Team IDs". Under `Code Helper (Plugin)` — the binary extension hosts run in, entitled `com.apple.security.cs.disable-library-validation` — the same file loads and two in-process peers complete a data-channel round trip, both from the installed package and from the staged `dist/node_modules` tree (measured on VS Code with Electron 42.10.0, macOS arm64, 2026-09).

@@ -8,11 +8,13 @@
  */
 
 import { hostname } from 'node:os';
+import WebSocket from 'ws';
 import { enrollVerificationUrl, SELF_HOST_DEVICE_CODE_REFUSAL } from './hosted-enrollment-url';
 import {
   API_ROUTES,
   BurrowAcl,
   MAX_PENDING_PAIRINGS,
+  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   knownPairingDeviceLabel,
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
@@ -159,10 +161,10 @@ export interface BurrowServiceOptions {
    */
   relay: RelayBuild;
   /**
-   * Opens the relay socket and the one-time rendezvous alike. **Must send no
-   * `Origin` header** — the rendezvous refuses one, so that no browser page can
-   * mint a room — which Node's global `WebSocket` (the default) and `ws` both
-   * already do. Reached only through the service's transport guard, as is
+   * Opens the relay socket and the one-time rendezvous alike; defaults to
+   * {@link createRelaySocket}, which both hosts use. **Must send no `Origin`
+   * header** — the rendezvous refuses one, so that no browser page can mint a
+   * room. Reached only through the service's transport guard, as is
    * {@link BurrowServiceOptions.fetch}.
    */
   createWebSocket?: (url: string) => WebSocketLike;
@@ -190,6 +192,19 @@ export interface BurrowServiceOptions {
   /** This machine's interfaces, for `networkPolicy`; injected by the tests. */
   listInterfaces?: () => NetworkInterfaceInfo[];
 
+}
+
+/**
+ * The relay socket and the one-time rendezvous, in both hosts: `ws`, never
+ * Node's global `WebSocket`, because only `ws` takes a `maxPayload`. Without
+ * one a hostile Relay could make this process — the one holding every PTY —
+ * buffer a frame of any size before `BurrowRuntime` measures it; capped at the
+ * largest legal frame, an oversized one closes the socket unbuffered. `ws`
+ * sends no `Origin` header. Its optional native accelerators (`bufferutil`,
+ * `utf-8-validate`) are left unbundled; it falls back to its JS paths.
+ */
+function createRelaySocket(url: string): WebSocketLike {
+  return new WebSocket(url, { maxPayload: MAX_RELAY_TO_BURROW_FRAME_LENGTH }) as unknown as WebSocketLike;
 }
 
 /**
@@ -596,8 +611,7 @@ export class BurrowService {
     // disposed included (`#level`) — so a path that forgets its own check still
     // opens nothing. Each feature keeps its own check, for the error a person
     // reads.
-    const createWebSocket =
-      options.createWebSocket ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
+    const createWebSocket = options.createWebSocket ?? createRelaySocket;
     this.#createWebSocket = (url) => {
       this.#refuseNothing();
       return createWebSocket(url);

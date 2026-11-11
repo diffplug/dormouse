@@ -60,6 +60,7 @@ vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
 import {
   API_ROUTES,
   MAX_PENDING_PAIRINGS,
+  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   NOT_ENTITLED_ERROR,
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
@@ -2955,9 +2956,9 @@ describe('one-time connection', () => {
     expect(sent).toHaveLength(before);
   });
 
-  it('opens the rendezvous with no Origin header, over Node’s own WebSocket', async () => {
+  it('opens the rendezvous with no Origin header, over the default socket', async () => {
     // The Burrow route refuses any Origin, so that no browser page can mint a
-    // room; the default factory is the global the sidecar runs on.
+    // room; the default factory is the one both hosts run on.
     const { WebSocketServer } = await import('ws');
     const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
     await new Promise((resolve) => server.on('listening', resolve));
@@ -2974,6 +2975,29 @@ describe('one-time connection', () => {
       createHostedService(undefined, { relay: { origin, mode: 'hosted' }, createWebSocket: undefined });
       expect(await open()).toMatchObject({ status: 'waiting' });
       expect(upgrades).toEqual([{ url: ONE_TIME_WS_ROUTES.burrow, origin: undefined }]);
+    } finally {
+      service.dispose();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('closes the default socket on an oversized frame, before buffering it', async () => {
+    // Node's global WebSocket takes no `maxPayload`, so on it a hostile relay
+    // could make the process holding every PTY buffer a frame of any size.
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((resolve) => server.on('listening', resolve));
+    const { port } = server.address() as { port: number };
+    const closes: number[] = [];
+    server.on('connection', (socket) => {
+      socket.on('close', (code) => closes.push(code));
+      socket.send('x'.repeat(MAX_RELAY_TO_BURROW_FRAME_LENGTH + 1));
+    });
+    try {
+      const origin = `http://127.0.0.1:${port}`;
+      createHostedService(undefined, { relay: { origin, mode: 'hosted' }, createWebSocket: undefined });
+      void command('oneTimeOpen');
+      await vi.waitFor(() => expect(closes).toEqual([1009]));
     } finally {
       service.dispose();
       await new Promise((resolve) => server.close(resolve));

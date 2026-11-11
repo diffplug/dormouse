@@ -129,11 +129,7 @@ const OUTBOUND_SITES = {
   // --- guarded: the Burrow service ---
   'lib/src/host/remote/service.ts': {
     class: 'guarded:burrow-service',
-    reason: 'The choke point itself: wraps the injected (or global) socket factory, fetch, and direct-peer factory in the transport guard that refuses under Nothing, unread, and disposed.',
-  },
-  'vscode-ext/src/burrow.ts': {
-    class: 'guarded:burrow-service',
-    reason: 'createRelaySocket is the socket factory VS Code injects into BurrowService, which calls it only through its transport guard.',
+    reason: 'The choke point itself: wraps the injected (or its capped `ws`) socket factory, fetch, and direct-peer factory in the transport guard that refuses under Nothing, unread, and disposed.',
   },
   'lib/src/remote/burrow/burrow-fetch.ts': {
     class: 'guarded:burrow-service',
@@ -349,7 +345,6 @@ const REMOTE_LITERALS = {
 const GUARD_BUILDERS = new Set([
   'lib/src/host/remote/service.ts',
   'lib/src/host/managed-voice-host.ts',
-  'vscode-ext/src/burrow.ts',
 ]);
 
 /** The only file that may construct the Burrow's runtimes. */

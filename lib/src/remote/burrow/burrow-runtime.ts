@@ -101,14 +101,6 @@ import type { PendingPairing } from './pairing-approval';
 export type WebSocketLike = RemoteWebSocket;
 
 /**
- * Re-exported beside {@link WebSocketLike} on purpose: a burrow that constructs a
- * real socket must hand it this as `maxPayload`, and the burrows reach this file
- * by relative path without `remote-lib-common` on their own resolution path.
- * Two numbers here would be two bounds that could drift.
- */
-export { MAX_RELAY_TO_BURROW_FRAME_LENGTH } from 'remote-lib-common';
-
-/**
  * How many connection handshakes may be mid-flight across every client.
  *
  * Burrow-enforced and independent of the relay (`docs/specs/remote-security-model.md`
@@ -1271,9 +1263,9 @@ export class BurrowRuntime {
     // Measured before the parse, not after: every guard below reads a value
     // `JSON.parse` has already materialized, so without this a hostile relay
     // buys an unbounded string parse in the process that owns every PTY. The
-    // socket's own `maxPayload` is the same number where the implementation
-    // takes one (`vscode-ext/src/burrow.ts`); this is the bound that holds
-    // on every implementation.
+    // hosts' socket refuses the same number before buffering it
+    // (`createRelaySocket` in `lib/src/host/remote/service.ts`); this is the
+    // bound that holds on an injected socket too.
     if (typeof raw !== 'string' || raw.length > MAX_RELAY_TO_BURROW_FRAME_LENGTH) return;
     let frame: RelayToBurrowFrame;
     try {
