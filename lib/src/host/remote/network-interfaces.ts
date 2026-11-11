@@ -109,7 +109,15 @@ export function allowedAddressTest(cidrs: readonly string[]): (address: string) 
   };
 }
 
-const VPN_NAME = /^(utun|tun|wg|tailscale)/i;
+/**
+ * VPN and overlay interfaces: by their device names on macOS and Linux (L2TP's
+ * `ppp`, IKEv2's `ipsec`, TAP, ZeroTier's `zt`, NordVPN's `nordlynx`, Proton's
+ * `proton`), and anywhere in a Windows connection name, which the client or
+ * the tunnel chooses (OpenVPN's Wintun and TAP adapters, a WireGuard tunnel,
+ * ZeroTier One). A client Windows names like any Ethernet adapter still reads
+ * as a local network: only the label depends on this, never what is allowed.
+ */
+const VPN_NAME = /^(utun|tun|wg|tailscale|ppp|ipsec|tap|zt|nordlynx|proton)|wireguard|openvpn|wintun|zerotier|vpn/i;
 /**
  * Bridge, container, and VM interfaces: macOS's vmnet bridges (UTM, Parallels,
  * Apple's Virtualization), Parallels' older `vnic`, Linux's Docker, Podman,

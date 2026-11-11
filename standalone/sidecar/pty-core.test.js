@@ -1547,16 +1547,39 @@ test('resolveSpawnConfig quotes an apostrophe in the integration path for PowerS
   assert.deepEqual(pwsh('O\u2019Brien'), ['-NoExit', '-Command',
     ". 'C:\\Users\\O\u2019\u2019Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration\\pwsh\\shellIntegration.ps1'"]);
 
-  const wsl = resolveSpawnConfig(
-    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
-    runtime("C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration"),
-  ).shellArgs;
-  const detector = wsl[wsl.length - 1];
+  const detector = apostropheWslDetector();
   assert.ok(detector.includes(
     "exec bash --init-file '/mnt/c/Users/O'\\''Brien/AppData/Local/Dormouse Terminal/shell-integration/bash/shellIntegration.bash' -i;;",
   ), detector);
-  // The detector is one sh program, so it must still parse.
-  const parsed = spawnSync('sh', ['-n', '-c', detector], { encoding: 'utf8' });
+});
+
+function apostropheWslDetector() {
+  const wsl = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
+    {
+      platform: 'win32',
+      env: { USERPROFILE: 'C:\\Users\\tester', DORMOUSE_SHELL_INTEGRATION_DIR: "C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration" },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  ).shellArgs;
+  return wsl[wsl.length - 1];
+}
+
+// An `sh` to parse with: PATH's, else Git for Windows' copy, since Windows has
+// none of its own.
+const SH = (() => {
+  if (!spawnSync('sh', ['-c', ':']).error) return 'sh';
+  if (process.platform !== 'win32') return null;
+  const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean);
+  return roots.flatMap((root) => ['usr\\bin\\sh.exe', 'bin\\sh.exe'].map((rel) => path.win32.join(root, 'Git', rel)))
+    .find((candidate) => require('node:fs').existsSync(candidate)) ?? null;
+})();
+
+test('the WSL detector with an apostrophe in its path is still one sh program', {
+  skip: SH ? false : 'no sh on PATH or under Git for Windows',
+}, () => {
+  const parsed = spawnSync(SH, ['-n', '-c', apostropheWslDetector()], { encoding: 'utf8' });
   assert.equal(parsed.status, 0, parsed.stderr);
 });
 

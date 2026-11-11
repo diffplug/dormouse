@@ -232,7 +232,6 @@ export function registerStubScreen(
     snapshot: init.snapshot ?? STUB_SCREEN,
     actions: {
       engageSync: vi.fn(),
-      applyViewport: vi.fn(),
       applyViewportSetting: vi.fn(async () => {}),
       openModal: vi.fn(),
       setRenderMode: vi.fn(),

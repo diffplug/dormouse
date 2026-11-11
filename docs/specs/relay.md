@@ -193,6 +193,7 @@ Resource bounds:
 * **Client sockets are capped at `MAX_RELAY_CLIENT_SOCKETS`; the next is refused (1013), never admitted by evicting another.**
 * **An expired session's socket is closed** 1008 `unauthorized`. **Only a registered conn is routed or torn down**, so a frame buffered behind that close cannot open a ceremony.
 * **A half-open socket is closed by heartbeat**: unanswered within `RELAY_IDLE_TIMEOUT_MS`, three ping intervals, it is unregistered and closed 1001.
+* **A socket holding over `MAX_RELAY_SOCKET_BUFFERED_BYTES` unsent is unregistered and closed 1013 rather than sent more**, judged by its own buffered byte count, never a frame; self-host only, as a Workers socket reports none (rationale).
 
 **Must answer the text `RELAY_PING` with `RELAY_PONG`** on either socket kind, compared whole before any parse, never forwarded and never an `error`. **The Burrow and Pocket ping every `RELAY_PING_INTERVAL_MS` (30 s), and a ping still unanswered when the next is due ends the socket**; Pocket pauses while the page is hidden.
 

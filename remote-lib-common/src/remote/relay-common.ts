@@ -17,6 +17,7 @@ import {
   toBase64Url,
   utf8Decode,
 } from '../security/bytes.js';
+import { MAX_DIRECT_PENDING_BYTES } from '../security/direct-path.js';
 import { CEREMONY_FIELD_LIMIT } from '../security/e2e-ceremony.js';
 import { DEFAULT_PAIRING_TTL_MS } from '../security/pairing.js';
 import {
@@ -84,6 +85,18 @@ export const WS_CLOSE_UNAUTHORIZED_REASON = 'unauthorized';
 /** A socket closed for silence, not for anything it did. */
 export const WS_CLOSE_IDLE = 1001;
 export const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
+
+/**
+ * The most a Relay lets one socket hold unsent before it closes the socket
+ * rather than send it more: the direct path's sender bound, since both queue
+ * the same terminal stream for a peer that has stopped draining it. Without
+ * it a phone suspended mid-burst holds its pane's whole output in the Relay
+ * until the heartbeat notices, a minute or two later. Closed
+ * {@link WS_CLOSE_TRY_AGAIN_LATER}, which every peer treats as a dropped
+ * socket: the Burrow reconnects, a Client reports burrow loss.
+ */
+export const MAX_RELAY_SOCKET_BUFFERED_BYTES = MAX_DIRECT_PENDING_BYTES;
+export const WS_CLOSE_BACKLOGGED_REASON = 'not reading what is sent';
 
 /**
  * How long either Relay lets a relay socket go unheard from before it counts

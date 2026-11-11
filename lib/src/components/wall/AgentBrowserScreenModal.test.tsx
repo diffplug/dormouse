@@ -272,7 +272,7 @@ describe('AgentBrowserScreenModal', () => {
       .find((button) => button.textContent === 'Apply');
     act(() => apply?.click());
     expect(controller!.actions.engageSync).toHaveBeenCalledOnce();
-    expect(controller!.actions.applyViewport).not.toHaveBeenCalled();
+    expect(controller!.actions.applyViewportSetting).not.toHaveBeenCalled();
 
     registration.dispose();
   });

@@ -15,6 +15,8 @@ export default {
       "/privacy",
       "/subscribed",
       "/terms",
+      // The catch-all route, moved to dist/404.html by the postbuild step.
+      "/404",
       ...DOCS_PAGES.map((page) => page.path),
     ];
   },

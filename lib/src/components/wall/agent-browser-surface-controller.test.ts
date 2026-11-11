@@ -398,12 +398,12 @@ describe('sync-to-pane', () => {
     const screen = getAgentBrowserScreenController('id')!;
     const first = engagementAt(4321);
     expect(first).toEqual(expect.any(String));
-    screen.actions.applyViewport(1024, 768, 1);
+    void screen.actions.applyViewportSetting!({ mode: 'fixed', width: 1024, height: 768, dpr: 1 });
     expect(host.requests('viewport').at(-1)).toMatchObject({ endsSync: first });
     screen.actions.engageSync();
     const next = engagementAt(4321);
     expect(next).not.toBe(first);
-    screen.actions.applyViewport(800, 600, 1);
+    void screen.actions.applyViewportSetting!({ mode: 'fixed', width: 800, height: 600, dpr: 1 });
     expect(host.requests('viewport').at(-1)).toMatchObject({ endsSync: next });
   });
 
@@ -1915,7 +1915,7 @@ describe('Playwright provider', () => {
     controller.attachView(makeSink());
     await flushMicrotasks();
     const screen = getAgentBrowserScreenController('pw')!;
-    screen.actions.applyViewport(1024, 768, 2);
+    void screen.actions.applyViewportSetting!({ mode: 'fixed', width: 1024, height: 768, dpr: 2 });
     streamSocket(4321)!.emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true, viewportWidth: 1024, viewportHeight: 768, devicePixelRatio: 1 }));
     expect(screen.snapshot()?.viewport).toEqual({ w: 1024, h: 768, dpr: 1 });
   });

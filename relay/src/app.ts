@@ -107,7 +107,7 @@ import type {
 
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
 import { RelayHub } from './relay.js';
-import type { ClientConn, BurrowConn } from './relay.js';
+import type { ClientConn, BurrowConn, RelaySocket } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
 import {
@@ -480,6 +480,25 @@ export interface CreatedApp {
 interface PingableSocket {
   ping(): void;
   on(event: 'pong' | 'message', listener: () => void): void;
+}
+
+/**
+ * `ws` as the hub routes through it, with the buffered byte count of the `ws`
+ * socket beneath, which `WSContext` does not pass through.
+ */
+function relaySocket(ws: {
+  raw?: unknown;
+  send: (data: string) => void;
+  close: (code?: number, reason?: string) => void;
+}): RelaySocket {
+  const raw = ws.raw as { readonly bufferedAmount: number };
+  return {
+    send: (data) => ws.send(data),
+    close: (code, reason) => ws.close(code, reason),
+    get bufferedAmount() {
+      return raw.bufferedAmount;
+    },
+  };
 }
 
 export function createApp(config: AppConfig): CreatedApp {
@@ -1296,7 +1315,7 @@ export function createApp(config: AppConfig): CreatedApp {
         onOpen: (_evt, ws) => {
           // On every connect, so a flag set after this Burrow enrolled still
           // reaches it (relay.md).
-          conn = hub.registerBurrow(burrow.burrowId, ws, burrowPolicy);
+          conn = hub.registerBurrow(burrow.burrowId, relaySocket(ws), burrowPolicy);
           const registered = conn;
           unwatch = watchLiveness(ws, () => hub.unregisterBurrow(registered));
         },
@@ -1334,7 +1353,7 @@ export function createApp(config: AppConfig): CreatedApp {
           }
           // The session rides along so the sweep can re-check it: this gate
           // runs once and the socket outlives it by up to twelve hours.
-          const registered = hub.registerClient(ws, session);
+          const registered = hub.registerClient(relaySocket(ws), session);
           if (!registered) {
             ws.close(WS_CLOSE_TRY_AGAIN_LATER, 'too many client sockets');
             return;

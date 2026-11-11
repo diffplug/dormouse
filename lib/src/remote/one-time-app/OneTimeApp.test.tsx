@@ -279,13 +279,38 @@ describe('the gate', () => {
     }
   });
 
-  it('says an expired link expired, and builds no client', async () => {
-    const { url } = await linkUrl(Math.floor(Date.now() / 1000) - 1);
+  // The expiry is the computer's clock; this phone's may run an hour ahead of
+  // it. The room and the computer say when a link has expired.
+  it('offers Connect for a link this phone’s clock reads as expired, claiming no time left', async () => {
+    const { url, link } = await linkUrl(Math.floor(Date.now() / 1000) - 60 * 60);
     const scripted = scriptedClient();
     render(url, scripted.created);
-    await waitFor(shows(ONE_TIME_LINK_EXPIRED_MESSAGE));
-    expect(text()).toContain(ONE_TIME_NOT_CONNECTED_TITLE);
-    expect(scripted.created).not.toHaveBeenCalled();
+    await waitFor(shows(ONE_TIME_READY_TITLE));
+    expect(text()).not.toContain('Expires in');
+    expect(text()).not.toContain(ONE_TIME_LINK_EXPIRED_MESSAGE);
+    await click(container, ONE_TIME_CONNECT_LABEL);
+    expect(scripted.calls[0]!.link).toEqual(link);
+  });
+
+  it('stops the countdown at zero and leaves Connect live', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { url } = await linkUrl(Math.floor(Date.now() / 1000) + 2);
+      const scripted = scriptedClient();
+      render(url, scripted.created);
+      await waitFor(shows(ONE_TIME_READY_TITLE));
+      expect(text()).toMatch(/Expires in \d s\./);
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(text()).toContain(ONE_TIME_READY_TITLE);
+      expect(text()).not.toContain('Expires in');
+      expect(text()).not.toContain(ONE_TIME_LINK_EXPIRED_MESSAGE);
+      await click(container, ONE_TIME_CONNECT_LABEL);
+      expect(scripted.calls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('counts a live link down, to the minute and then the second', () => {
@@ -294,6 +319,8 @@ describe('the gate', () => {
     expect(expiresInText(60_000)).toBe('Expires in 1 min.');
     expect(expiresInText(59_000)).toBe('Expires in 59 s.');
     expect(expiresInText(1)).toBe('Expires in 1 s.');
+    expect(expiresInText(0)).toBeNull();
+    expect(expiresInText(-60_000)).toBeNull();
   });
 
   it('names the device coarsely, only ever from the closed set, never as Pocket', () => {

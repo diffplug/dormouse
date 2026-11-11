@@ -17,7 +17,7 @@ import { setWorkspaceTransferPending } from '../../lib/window-session-aggregator
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../../lib/labs-settings';
-import { getPendingKills } from '../../lib/pending-kills';
+import { _resetPendingKillsForTesting, finalizePendingKill, getPendingKills, pendingKillKey } from '../../lib/pending-kills';
 import * as helperTerminal from '../../lib/helper-terminal';
 import type { HelperTerminal } from '../../lib/helper-terminal';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
@@ -159,6 +159,30 @@ describe('closeWorkspaceWithSurfaces', () => {
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
     expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
   });
+
+  it('refuses running helper work before closing any member, saying so only to a gesture', async () => {
+    const [first] = ids();
+    createWorkspace({ id: 'workspace:2' });
+    const closeAll = vi.fn(async () => null);
+    const revealRefusal = vi.fn();
+    handleFor('workspace:2', { closeAll, revealRefusal, surfaceIds: () => ['surface:a', 'surface:b'] });
+    // Both members have a helper; only the second's is busy.
+    vi.spyOn(helperTerminal, 'getHelper').mockImplementation((id) => ({ id: `helper:${id}`, parentId: id }) as HelperTerminal);
+    let secondProbe: () => Promise<boolean> = async () => true;
+    vi.spyOn(helperTerminal, 'helperHasWork').mockImplementation((helper) =>
+      helper.parentId === 'surface:b' ? secondProbe() : Promise.resolve(false));
+
+    const refusal = 'A helper in this Workspace has running work. Stop it, then close the Workspace again.';
+    expect(await closeWorkspaceWithSurfaces('workspace:2', 'silent')).toBe(refusal);
+    expect(revealRefusal).not.toHaveBeenCalled();
+    // A helper that cannot be inspected refuses as a busy one does, and a
+    // gesture reveals the member whose helper refused.
+    secondProbe = async () => { throw new Error('no host'); };
+    expect(await closeWorkspaceWithSurfaces('workspace:2')).toBe(refusal);
+    expect(revealRefusal).toHaveBeenCalledExactlyOnceWith('surface:b', refusal);
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(ids()).toEqual([first, 'workspace:2']);
+  });
 });
 
 describe('requestWorkspaceClose', () => {
@@ -192,6 +216,29 @@ describe('requestWorkspaceClose', () => {
     await Promise.resolve();
     expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('workspace:2');
     expect(ids()).toEqual([first, 'workspace:2']);
+  });
+
+  it('restores a pending Workspace whose helper started work, closing no member', async () => {
+    const fake = new FakePtyAdapter();
+    Object.assign(fake, { offersLabs: true });
+    setPlatform(fake);
+    setDelayedKillSetting(true);
+    onTestFinished(() => { _resetLabsSettingsForTesting(); _resetPendingKillsForTesting(); });
+    createWorkspace({ id: 'workspace:2' });
+    const closeAll = vi.fn(async () => null);
+    handleFor('workspace:2', { closeAll, needsCloseConfirmation: () => true, surfaceIds: () => ['surface:a'] });
+    vi.spyOn(helperTerminal, 'getHelper').mockReturnValue({ id: 'surface:helper', parentId: 'surface:a' } as HelperTerminal);
+    // Idle when the close is pended, busy by the time its countdown ends.
+    vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValueOnce(false).mockResolvedValue(true);
+    requestWorkspaceClose('workspace:2');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getPendingKills().map((kill) => kill.id)).toEqual(['workspace:2']);
+    expect(ids()).not.toContain('workspace:2');
+
+    finalizePendingKill(pendingKillKey('workspace', 'workspace:2'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(ids()).toContain('workspace:2');
   });
 
   it('raises nothing when a newer question arrives while it probes helper work', async () => {

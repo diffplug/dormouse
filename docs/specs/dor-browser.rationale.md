@@ -48,6 +48,8 @@ Viewport preparation with agent-browser 0.27.0 (Windows, 2026-10-21): dropping `
 
 **Why a key numbers past sessions held elsewhere.** A key's session is `dormouse.<scope>.<name>`, and the key lookup searches only the answering Wall. A pane bound to that session which left for another Workspace keeps it, so the same command here bound a second pane to the same browser, and closing either closed the other's (review of #777, 2026-09). Playwright keys had minted a fresh UUID each, so this was new there; agent-browser keys always worked this way.
 
+**Why a bind for a session another Workspace shows is answered there (2026-11).** A raw `--session` names no key, so nothing above steered it, and the bind looked only in the caller's Wall: a session whose pane sat in another Workspace got a second pane in the caller's, and closing either closed the other's. The bind now hands the request to the Wall that shows the session, by the same Window-wide session list a key's reservation reads.
+
 ## Resource Policy
 
 **Why one notion of sight.** Four costs of a pane nobody sees — a screencast under a zoomed pane, one in a hidden VS Code webview, a popped-out pane's stream, a minimized iframe — were each found separately in the browser-stack review (static reading, 2026-09-23), and each had grown, or would have, its own idea of "hidden". Zoom raises one leaf over the tiled layout with the rest still mounted and unparked under it, showing only a half-header margin, so their screencasts and crisp loops kept running.

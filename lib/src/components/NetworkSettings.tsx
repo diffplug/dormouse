@@ -30,7 +30,6 @@ import {
 } from '../remote/burrow/network-policy-store';
 import {
   ALLOWED_NETWORK_REACH,
-  MAX_ALLOWED_NETWORKS,
   burrowUsesStun,
   checksForUpdates,
   holdsToAllowedNetworks,
@@ -96,20 +95,12 @@ function useSave() {
 }
 
 /**
- * The policy choosing `level` makes. **Local networks chosen with no prefix of
- * this machine's `lan` interfaces allowed first adds every one**, never a VPN
- * or virtual one, beside whatever the list holds; the service never fills them in.
+ * The change choosing `level` makes, or none when it is already the level. It
+ * keeps `allowed` as it is: Local networks allows no network until its switch
+ * is turned on, since an interface's name cannot tell a VPN from a LAN.
  */
-export function policyForLevel(network: NetworkPolicyResult, level: NetworkLevel): NetworkPolicy {
-  const { policy, interfaces } = network;
-  const lan = [...new Set(interfaces.filter((item) => item.kind === 'lan').flatMap((item) => item.prefixes))];
-  if (!holdsToAllowedNetworks(level) || lan.some((cidr) => policy.allowed.includes(cidr))) return { ...policy, level };
-  return { ...policy, level, allowed: [...policy.allowed, ...lan].slice(0, MAX_ALLOWED_NETWORKS) };
-}
-
-/** The change choosing `level` makes, or none when it is already the level. */
 const chooseLevel = (level: NetworkLevel): NetworkChange => (network) =>
-  network.policy.level === level ? null : policyForLevel(network, level);
+  network.policy.level === level ? null : { ...network.policy, level };
 
 interface LevelChoice {
   level: NetworkLevel;
