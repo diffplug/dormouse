@@ -32,8 +32,6 @@ set -euo pipefail
 
 LABEL="dormouse-relay"
 UNIT="$LABEL.service"
-# What UNIT was before the Relay rename; stopped once, never migrated.
-RETIRED_UNIT="dormouse-server.service"
 INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/dormouse-relay"
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-relay/logs"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -1663,15 +1661,6 @@ step "Starting the systemd user service"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping systemctl daemon-reload/enable/restart"
 else
-  # The pre-rename unit, if this machine ever ran one. It still holds $PORT and
-  # would race ours for it, so it is stopped before we start. Best-effort:
-  # absent is the ordinary case.
-  if systemctl --user cat "$RETIRED_UNIT" >/dev/null 2>&1; then
-    systemctl --user disable --now "$RETIRED_UNIT" >/dev/null 2>&1 || true
-    rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$RETIRED_UNIT"
-    detail "stopped the retired $RETIRED_UNIT"
-  fi
-
   # `current` has already moved, so every failure from here restores it.
   if ! systemctl --user daemon-reload; then
     rollback_release || true

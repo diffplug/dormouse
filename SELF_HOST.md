@@ -153,8 +153,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\local\install-windo
 ./deploy/local/install-linux.sh
 ```
 
-On a machine with a pre-rename install, the installer removes the retired `sh.dormouse.server` LaunchAgent / `dormouse-server.service` unit, since both bind the same port, but leaves the old install root and logs: say so, and let the user delete them.
-
 Read its printed steps with the user rather than summarizing. Its confirmations — a dirty worktree, a mismatched pnpm, repointing an already-claimed Serve root path — are the user's decisions, and it refuses to assume an answer with no terminal. Tailscale may open a browser consent flow the first time Serve requests a certificate; that one is the user's to click. A first install ends by pointing at `manage show-password`; do not run that yet.
 
 ## Checkpoint 3: verify

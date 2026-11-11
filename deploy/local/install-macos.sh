@@ -24,8 +24,6 @@ set -euo pipefail
 # macOS ships bash 3.2; nothing here may use bash 4+ syntax.
 
 LABEL="sh.dormouse.relay"
-# What LABEL was before the Relay rename; unloaded once, never migrated.
-RETIRED_LABEL="sh.dormouse.server"
 INSTALL_ROOT="$HOME/Library/Application Support/Dormouse Relay"
 LOG_DIR="$HOME/Library/Logs/Dormouse Relay"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -1421,14 +1419,6 @@ step "Loading the LaunchAgent"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping launchctl bootout/bootstrap/kickstart"
 else
-  # The pre-rename agent, if this machine ever ran one. It still holds $PORT and
-  # would race the new label for it, so it is unloaded before we bootstrap ours.
-  # Best-effort: absent is the ordinary case.
-  if launchctl bootout "gui/$UID/$RETIRED_LABEL" 2>/dev/null; then
-    detail "unloaded the retired $RETIRED_LABEL agent"
-  fi
-  rm -f "$HOME/Library/LaunchAgents/$RETIRED_LABEL.plist"
-
   BOOTOUT_OUT="$(launchctl bootout "gui/$UID/$LABEL" 2>&1)" && BOOTOUT_RC=0 || BOOTOUT_RC=$?
   if [ "$BOOTOUT_RC" != "0" ]; then
     case "$BOOTOUT_OUT" in
