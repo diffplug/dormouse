@@ -107,9 +107,7 @@
     "stage:dor-cli": "pnpm --filter dor build && node ../scripts/stage-dor-cli.mjs vscode-ext/dor-cli",
     "watch": "node ../scripts/build-workspace-deps.mjs && pnpm stage:dor-cli && node scripts/esbuild.mjs --watch",
     "package": "vsce package --no-dependencies --baseImagesUrl https://dormouse.sh/guide --out dormouse.vsix",
-    "dogfood": "node ../scripts/dogfood-vscode.mjs",
-    "publish:marketplace": "vsce publish --no-dependencies --baseImagesUrl https://dormouse.sh/guide",
-    "publish:openvsx": "ovsx publish --no-dependencies --baseImagesUrl https://dormouse.sh/guide"
+    "dogfood": "node ../scripts/dogfood-vscode.mjs"
   },
   "dependencies": {
     "node-datachannel": "0.33.6",
