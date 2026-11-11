@@ -181,7 +181,7 @@ Every break is a mark that a click cycles keep → space → none; a scope or fo
 - **Must follow its pane at most once a frame** (`docs/specs/layout.md` → "Position tracking").
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
 - **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
-- **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
+- **Esc**, a click outside the editor and any modal, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 - **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, even if its edges moved or reflow ran while the write was pending (rationale).
 - **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry.
 - **Must write through the adapter's native `writeClipboardText` where it has one, and never fall back from it** (rationale). **Pocket's adapter must have none**: its copies belong on the phone. Without one, the write takes the Clipboard API, and `execCommand('copy')` where that is missing or refuses (rationale).
@@ -338,13 +338,13 @@ Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle
 
 Neither `params` nor the URI is parsed at the PTY boundary.
 
-**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the full target in one of these states:
+**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the parsed target in one of these states:
 
 | State | Target | Dialog |
 |---|---|---|
 | **Openable** | `http:`, `https:`, `mailto:`, and `file:` | cancel plus an open action |
-| **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning that whichever app handles it gets the link; cancel plus an open action |
-| **Deceptive** | display text URL-shaped (a full URL, a dotted name, or `localhost`) but resolving to a different host than the target, compared after NFKC, without invisible characters, wrapping brackets or punctuation, a root dot, or a port, and with a non-ASCII name as its punycode; a `file:` target's own file name, or text naming no host, such as `12.5%` or `v1.2.3`, is not a host claim; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
+| **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning its handler gets the link; cancel plus an open action (standalone: **Blocked**, `tel:` excepted) |
+| **Deceptive** | display text URL-shaped (a full URL, a dotted name, or `localhost`) but resolving to a different host than the target, compared after NFKC, without invisible characters, wrapping brackets or punctuation, a root dot, or a port, and with a non-ASCII name as its punycode; any tail of a `file:` target's path, or text naming no host, such as `12.5%` or `v1.2.3`, is not a host claim; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
 | **Blocked** | malformed URIs, targets carrying a control or a character drawn as nothing or as a space it is not (`hasControlOrFormatCharacters`), browser-executable or opaque pseudo-schemes (`javascript:`, `vbscript:`, `data:`, `blob:`, `about:`), a Windows drive path the parser reads as a one-letter scheme (`c:/x.bat`), Windows handlers refused outright (`docs/specs/security-local.md` -> "Terminal output") | **Never silently dropped**: the dialog opens with the reason, close the only action |
 
 **Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **Must show the target, display text, and any error with those characters escaped** (`printableExact`), so the text read is the text there. **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
@@ -375,7 +375,7 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 - Right-click context-menu Paste, and routing Edit → Paste through §8.6's tiers.
 - A settings toggle to disable Ctrl+V interception on Windows and Linux.
 - A paste popup for previewing or transforming content before it is committed.
-- Paste content transformations (strip trailing whitespace, normalize line endings, convert smart quotes).
+- Paste content transformations (strip trailing whitespace, convert smart quotes).
 - Paste history.
 - Credential-shaped content detection and warnings.
 - Multi-line paste confirmation dialogs.

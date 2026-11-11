@@ -21,7 +21,6 @@ import {
   explainTerminalTitle,
   deriveSurfaceLabel,
   buildAppTitleResolver,
-  groupTerminalPanes,
   notificationDisplayTitle,
   reduceTerminalState,
   shortestUniqueCwdLabels,
@@ -189,8 +188,9 @@ describe('terminal command state reducer', () => {
       createId: () => 'cmd-2',
     });
 
+    // The shell's own name names no command.
     expect(state.currentCommand).toMatchObject({
-      displayCommand: 'zsh',
+      displayCommand: 'shell',
       source: 'osc133_boundaries',
     });
 
@@ -202,6 +202,18 @@ describe('terminal command state reducer', () => {
 
     state = reduceTerminalState(state, { type: 'promptStart' });
     expect(state.activity).toEqual({ kind: 'prompt' });
+  });
+
+  it('names a bare OSC 133 command by a title set since the last command finished, else shell', () => {
+    const start = (state: ReturnType<typeof createTerminalPaneState>) =>
+      reduceTerminalState(state, { type: 'commandStart', source: 'osc133_boundaries' }, { now: () => 9, createId: () => 'next' }).currentCommand?.displayCommand;
+    let state = createTerminalPaneState();
+    state = reduceTerminalState(state, { type: 'commandStart', source: 'osc133_boundaries' }, { now: () => 1, createId: () => 'vim' });
+    state = reduceTerminalState(state, { type: 'title', title: { title: 'README.md - VIM', source: 'osc2', updatedAt: 2 } });
+    state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 0, finishedAt: 3 });
+    expect(start(state)).toBe('shell');
+    expect(start(reduceTerminalState(state, { type: 'title', title: { title: 'make test', source: 'osc0', updatedAt: 4 } }))).toBe('make test');
+    expect(start(reduceTerminalState(state, { type: 'title', title: { title: 'C:\\WINDOWS\\system32\\cmd.exe', source: 'osc0', updatedAt: 4 } }))).toBe('shell');
   });
 
   it('stores latest title candidates by source channel', () => {
@@ -671,6 +683,15 @@ describe('header and grouping derivation', () => {
     expect(deriveHeader(pane, [pane])).toEqual({ primary: 'pnpm dev:website' });
   });
 
+  it('keeps a title that carries arguments, even when it ends in a shell\'s name', () => {
+    for (const title of ['vim ~/src/fish', 'user@host: ~/src/bash', 'ssh box /bin/zsh']) {
+      const pane = reduceTerminalState(runningPane('/repo/app', 'pnpm dev'), { type: 'title', title: { title, source: 'osc0', updatedAt: 2 } });
+      expect(deriveHeader(pane, [pane]).primary).toBe(title);
+    }
+    const pwsh = reduceTerminalState(runningPane('/repo/app', 'pnpm dev'), { type: 'title', title: { title: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', source: 'osc0', updatedAt: 2 } });
+    expect(deriveHeader(pwsh, [pwsh]).primary).toBe('pnpm dev');
+  });
+
   it('keeps the command when the title is a bare shell name', () => {
     const pane = reduceTerminalState(
       runningPane('/repo/app', 'pnpm dev:website'),
@@ -819,20 +840,6 @@ describe('header and grouping derivation', () => {
 
     expect(deriveHeader(local, [local, remote]).secondary).toBe('localhost:app');
     expect(deriveHeader(remote, [local, remote]).secondary).toBe('prod-box:app');
-  });
-
-  it('groups by directory, command, and status', () => {
-    const running = runningPane('/repo/app', 'npm run dev');
-    const idle = createTerminalPaneState({ cwd: cwdFromManualPath('/repo/api', 1)! });
-    const finished = reduceTerminalState(running, { type: 'commandFinish', exitCode: 0 }, { now: () => 2 });
-
-    expect(groupTerminalPanes([running, idle], 'directory').map((group) => group.label)).toEqual(['app', 'api']);
-    expect(groupTerminalPanes([running, idle], 'command').map((group) => group.label)).toEqual(['npm run dev', DEFAULT_IDLE_TITLE]);
-    expect(groupTerminalPanes([running, idle, finished], 'status').map((group) => group.key)).toEqual([
-      'running',
-      'unknown',
-      'finished',
-    ]);
   });
 });
 

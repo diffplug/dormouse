@@ -307,7 +307,9 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     for (const unsubscribe of unsubscribes) signal.addEventListener('abort', unsubscribe);
     window.addEventListener('mousedown', (ev) => {
       const target = ev.target as HTMLElement | null;
-      if (!target?.closest(`[data-copy-editor-for="${terminalId}"]`)) setSelection(terminalId, null);
+      // A modal over the pane (the copy-failure report) keeps the selection
+      // it asks the user to retry.
+      if (!target?.closest(`[data-copy-editor-for="${terminalId}"], [aria-modal="true"]`)) setSelection(terminalId, null);
     }, { capture: true, signal });
     return () => controller.abort();
   }, [recompute, subscribeLayoutFrames, terminalId]);

@@ -15,14 +15,14 @@ const INDEXLESS_SUBCOMMANDS = new Set(['config', 'remote']);
  * terminal-reported cwds. Either may be a repository the user has never
  * trusted, so every run leads with `UNTRUSTED_REPO_GIT_ARGS`.
  */
-export async function runGit(dir: string, args: string[]): Promise<string | null> {
+export async function runGit(dir: string, args: string[], timeoutMs?: number): Promise<string | null> {
   // The `PATH`-resolved file, never the bare name, which Windows looks up in
   // the host's working directory first (`docs/specs/security-local.md` ->
   // "Spawned programs").
   const git = resolveBinaryPath('git', process.env);
   const repository = git && await localGitRepository(dir, { index: !INDEXLESS_SUBCOMMANDS.has(args[0]) });
   if (!repository) return null;
-  const result = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, '-C', dir, ...args], { env: untrustedGitEnv(repository) });
+  const result = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, '-C', dir, ...args], { env: untrustedGitEnv(repository), timeoutMs });
   if (!result.ok || result.exitCode !== 0) return null;
   const out = result.stdout.trim();
   return out || null;

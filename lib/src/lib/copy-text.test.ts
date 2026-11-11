@@ -188,6 +188,17 @@ describe('copy-text formats', () => {
     expect(text(buf, span(0, 0, 1, 4), 'auto')).toBe('Hello\nWorld');
   });
 
+  it('keeps every break of output laid out in columns', () => {
+    const ls = [
+      '-rw-r--r--   1 ntwigg  staff   1234 Nov  9 10:00 a-rather-long-file-name.txt',
+      '-rw-r--r--   1 ntwigg  staff    873 Nov  9 10:01 another-long-file-name.md',
+      '-rw-r--r--   1 ntwigg  staff  20480 Nov  9 10:02 yet-another-file-name.ts',
+      'drwxr-xr-x  12 ntwigg  staff    384 Nov  9 10:03 some-directory-name',
+    ];
+    const buf = lines(ls, { cols: 120 });
+    expect(text(buf, span(0, 0, 3, ls[3].length - 1), 'auto')).toBe(ls.join('\n'));
+  });
+
   it('keeps list items on their own lines', () => {
     const buf = lines([
       '- the first item wraps because it is long enough to reach past the margin',
@@ -370,6 +381,15 @@ describe('copy-text multiClickSpan', () => {
     const soft = lines([url.slice(0, 30), url.slice(30)], { cols: 30, wrapped: [1] });
     expect(multiClickSpan(soft, { row: 1, col: 3 }, 2)).toEqual(span(0, 4, 1, 24));
     expect(multiClickSpan(soft, { row: 0, col: 1 }, 2)).toEqual(span(0, 0, 0, 2));
+  });
+
+  it('never grows a word across a break short of the pane’s margin', () => {
+    const log = lines([
+      'a1b2c3d4e Fix a thing',
+      '9f8e7d6c5 Standalone: close the updater races that leave a stale notice behind on quit (#1605)',
+      '1f7cbb418 Update the docs',
+    ], { cols: 120 });
+    expect(multiClickSpan(log, { row: 2, col: 2 }, 2)).toEqual(span(2, 0, 2, 8));
   });
 
   it('selects a triple-clicked logical line from its first text cell to its last', () => {

@@ -178,6 +178,12 @@ describe('classifyDisplayMatch', () => {
     expect(classifyDisplayMatch('file:///repo/notes.txt', 'github.com:443')).toBe('deceptive');
   });
 
+  it('keeps a file link plain when its text is one row of a link its program wrapped', () => {
+    expect(classifyDisplayMatch('file:///repo/src/components/CopyEditor.tsx', 'Editor.tsx')).toBe('plain');
+    expect(classifyDisplayMatch('file:///repo/README.md', 'ADME.md')).toBe('plain');
+    expect(classifyDisplayMatch('file:///repo/README.md', 'evil.example')).toBe('deceptive');
+  });
+
   it.each(['_app.tsx', '@types.d.ts', '-v1.md', '#notes.md', 'cafe\u0301.md', 'cafe\u0301.md:7'])(
     'keeps a file link plain when its text is the name as listed, even where normalizing would change it: %s',
     (name) => {

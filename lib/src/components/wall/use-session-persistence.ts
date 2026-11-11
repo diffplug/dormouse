@@ -4,6 +4,7 @@ import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { assemblePersistedSession, buildPersistedSession, cwdSurfaceIds, saveSession, type SaveOptions } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
+import { subscribeToSessionTouched } from '../../lib/terminal-store';
 import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
 import {
@@ -237,8 +238,8 @@ export function useSessionPersistence({
     const { markDirty, isDirty } = trackerRef.current;
 
     // Both PTY triggers are ownership-filtered over MEMBERS, panes and Doors
-    // alike: a minimized Session's `untouched` flip rides the pty echo of the
-    // keystroke, so filtering on visible panes would never persist it.
+    // alike: a minimized Session's output changes its record too, so
+    // filtering on visible panes would never persist it.
     const handlePtyData = (detail: { id: string }) => {
       if (ownsSurface(detail.id)) markDirty();
     };
@@ -276,10 +277,11 @@ export function useSessionPersistence({
     }) : () => {};
 
     // Content inputs mark dirty but never schedule — the heartbeat persists them
-    // (docs/specs/layout.md → "Session persistence"). An untouched flip has no
-    // store of its own to report it (the registry mutates silently), which is
-    // why the pty echo above is what marks it.
+    // (docs/specs/layout.md → "Session persistence").
     platform.onPtyData(handlePtyData);
+    // Except a Session's first input: until saved, a restore would bring it
+    // back untouched, to be closed or replaced unasked.
+    const unsubTouched = subscribeToSessionTouched((id) => { if (ownsSurface(id)) scheduleSessionSave(); });
     // Keyed like the PTY triggers: both stores are Window-global, so an
     // unfiltered listener would rebuild every idle Workspace's record — a
     // `getCwd` per pane — whenever any Workspace changed. A notification with no
@@ -318,6 +320,7 @@ export function useSessionPersistence({
       if (ownsHostFlush) platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
       platform.offPtyData(handlePtyData);
+      unsubTouched();
       unsubActivity();
       unsubPaneState();
       unsubscribeStore();

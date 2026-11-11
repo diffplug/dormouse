@@ -114,6 +114,10 @@ export interface RecoveryHost {
   /** Send exactly ONE `^C` to each id and resolve when the host has acked it.
    *  Every further press is this module's decision, never the host's. */
   interrupt(ids: string[]): Promise<void>;
+  /** The host's alerts forget this pane's run (`AlertManager.silenceRun`), as
+   *  for any interrupt the host makes itself: the end the press causes is no
+   *  news, and would otherwise ring and be saved as a TODO. */
+  silenceRun(id: string): void;
   /** Chars ever received for a pane, never decremented by a buffer trim. */
   receivedChars(id: string): number;
   /** Output received after a `receivedChars` mark, clamped to what is still held. */
@@ -253,6 +257,7 @@ export async function captureAgentRecovery(
 
   // One press to everything, then retry through the ask or quiet fallback gate.
   // `interrupt` is already bounded and always settles within its own timeout.
+  for (const id of liveIds) host.silenceRun(id);
   await host.interrupt(liveIds);
   // The clock the retry rules run on, taken *after* the ack rather than at
   // entry. `BLIND_SECOND_PRESS_MS` is a statement about the agent ("long enough

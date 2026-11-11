@@ -52,7 +52,7 @@ afterEach(() => {
   stop?.();
   speechQueue.clear();
   updateAlertSettings(DEFAULT_ALERT_SETTINGS);
-  platform.shutdown();
+  platform.reset();
   clearTerminalActivity();
   removeTerminalPaneState(PANE);
   vi.unstubAllGlobals();

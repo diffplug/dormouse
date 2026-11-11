@@ -53,9 +53,7 @@ import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
-import {
-  applyTerminalSemanticEvents,
-} from "dormouse-lib/lib/terminal-state-store";
+import { applyLiveTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
@@ -96,7 +94,6 @@ export class TauriAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
-  private unlistenFns: Array<() => void> = [];
   private static STATE_KEY = 'dormouse.session';
   private sessionStore = new TauriSessionStore();
   private windowSlot = windowStateSlot(this.sessionStore, TauriAdapter.STATE_KEY, 'tauri-adapter');
@@ -153,7 +150,7 @@ export class TauriAdapter implements PlatformAdapter {
     // Registered together rather than one await after another: every `listen`
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.
-    this.unlistenFns.push(...(await Promise.all([
+    await Promise.all([
       // Already parsed by the sidecar, which owns the PTY: the pair arrives as
       // it is, and its events arrive as the two messages below
       // (docs/specs/terminal-escapes.md → "Parsing location").
@@ -171,7 +168,7 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       listenToWindow<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
-        applyTerminalSemanticEvents(event.payload.id, event.payload.events);
+        applyLiveTerminalSemanticEvents(event.payload.id, event.payload.events);
       }),
 
       // An OSC 52 write, offered to the copy editor; never the clipboard.
@@ -259,7 +256,7 @@ export class TauriAdapter implements PlatformAdapter {
         listenToWindow<unknown>(name, (event) => void this.alerts.onEvent(name, event.payload))),
 
       listenToWindow<unknown>("voice:status", (event) => this.managedVoice?.receiveStatus(event.payload)),
-    ])));
+    ]);
     this.managedVoice?.refresh();
     // This realm is new, whether the window just opened or reloaded: the
     // engagement and awaits of the one before it are gone (same label).
@@ -268,9 +265,9 @@ export class TauriAdapter implements PlatformAdapter {
     await this.hydrateSessionStore();
     // Before restore too: a fresh Window mints its first Workspace id from
     // the block this reserves (docs/specs/standalone.md → "Workspace registry").
-    this.unlistenFns.push(await installWorkspaceRegistry({
+    await installWorkspaceRegistry({
       invoke: (cmd, args) => rawInvoke(cmd, args),
-    }, this.windowSlot.read()));
+    }, this.windowSlot.read());
   }
 
   // Seed the session cache from the Rust file store before restore reads it
@@ -294,17 +291,6 @@ export class TauriAdapter implements PlatformAdapter {
       this.windowSlot.read(),
       'tauri-adapter',
     ).then((commands) => { this.recoveryCommands = commands; });
-  }
-
-  shutdown(): void {
-    this.alerts.dispose();
-    for (const unlisten of this.unlistenFns) {
-      unlisten();
-    }
-    this.unlistenFns = [];
-    // Nothing will answer what is outstanding once this window stops
-    // listening. The sidecar stays: every window shares it.
-    this.burrowClient.dispose();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -489,12 +475,14 @@ export class TauriAdapter implements PlatformAdapter {
     }
   }
 
-  openExternal(uri: string): void {
+  // The shell plugin's `open` scope (`plugins.shell.open` in tauri.conf.json)
+  // admits only web, `mailto:`, and `tel:` links.
+  readonly opensOtherApps = false as const;
+
+  openExternal(uri: string): Promise<string | undefined> {
     const normalized = normalizeExternalUri(uri);
-    if (!normalized) return;
-    open(normalized).catch((err) =>
-      console.error("[tauri-adapter] openExternal failed:", err),
-    );
+    if (!normalized) return Promise.resolve("Dormouse does not open this link.");
+    return open(normalized).then(() => undefined, errMessage);
   }
 
   onFilesDropped(handler: (paths: string[]) => void): () => void {

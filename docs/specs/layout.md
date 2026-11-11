@@ -398,7 +398,7 @@ The snapshot stores its layout in the native Lath format (`docs/specs/tiling-eng
 
 Three save triggers, in ascending urgency:
 
-- Any Lath store commit schedules the save.
+- Any Lath store commit, or a Session's first input, schedules the save.
 - Content changes with no Lath commit only mark the session dirty; a heartbeat persists only when dirty, so an idle app stops writing.
 - PTY exit, `onRequestSessionFlush`, `pagehide`, unmount, and extension shutdown requests flush immediately and unconditionally — the net for any dirty-trigger gap (a program calling `chdir()` emits no event, so its persisted CWD may go stale until the next output — accepted).
 

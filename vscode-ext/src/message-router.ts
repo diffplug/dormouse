@@ -346,6 +346,12 @@ function subscribeProcessedPty(
   };
 }
 
+/** The host is about to interrupt this Session's run itself (the shutdown
+ *  capture): its end is no news. */
+export function silenceAlertRun(id: string): void {
+  alertManager.silenceRun(id);
+}
+
 export function getAlertStates() {
   return alertManager.getAllStates();
 }

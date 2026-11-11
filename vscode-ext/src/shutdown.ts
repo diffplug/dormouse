@@ -2,7 +2,7 @@ import type * as vscode from 'vscode';
 import { saveBurrowBeforeExit } from './burrow';
 import * as ptyManager from './pty-manager';
 import { closeBrowserSessions } from './agent-browser-host';
-import { flushAllSessions, getAlertStates } from './message-router';
+import { flushAllSessions, getAlertStates, silenceAlertRun } from './message-router';
 import { captureAgentRecoveryCommands, refreshSavedSessionStateFromPtys } from './session-state';
 import { log } from './log';
 
@@ -34,7 +34,7 @@ export async function shutdown(context: vscode.ExtensionContext): Promise<void> 
   const revocationsSaved = attempt('saving revocations', saveBurrowBeforeExit, 1000);
   // Recovery must precede persistence and kills: an agent's exit hint cannot be
   // reconstructed after its PTY is gone. Other steps only refresh existing state.
-  await attempt('capturing agent recovery commands', () => captureAgentRecoveryCommands(context, 1200));
+  await attempt('capturing agent recovery commands', () => captureAgentRecoveryCommands(context, silenceAlertRun, 1200));
   await browsersClosed;
   await revocationsSaved;
   await attempt('flushing sessions from webview', () => flushAllSessions(1000));

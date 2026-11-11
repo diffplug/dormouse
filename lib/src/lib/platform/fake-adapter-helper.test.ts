@@ -36,7 +36,7 @@ it('preserves one command echo when the helper resizes between PTY chunks', asyn
       terminal.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
     expect(text.match(/git status/g)).toHaveLength(1);
     expect(text.match(/On branch main/g)).toHaveLength(1);
-  } finally { terminal.dispose(); adapter.shutdown(); }
+  } finally { terminal.dispose(); adapter.reset(); }
 });
 
 it.each([false, true])('keeps both narrow helper prompts when startup waits for fit (yield before fit: %s)', async (yieldBeforeFit) => {
@@ -73,7 +73,7 @@ it.each([false, true])('keeps both narrow helper prompts when startup waits for 
     ]);
     expect(buffer.viewportY).toBe(buffer.baseY);
     expect(buffer.baseY).toBe(2);
-  } finally { terminal.dispose(); adapter.shutdown(); }
+  } finally { terminal.dispose(); adapter.reset(); }
 });
 
 it.each(['kill', 'reset'] as const)('discards a deferred helper prompt on %s', async (action) => {
@@ -90,7 +90,7 @@ it.each(['kill', 'reset'] as const)('discards a deferred helper prompt on %s', a
     adapter.resumeHelperStartup(ID);
     await Promise.resolve();
     expect(output).not.toHaveBeenCalled();
-  } finally { adapter.shutdown(); }
+  } finally { adapter.reset(); }
 });
 
 it('does not let a queued prompt release a replacement helper early', async () => {
@@ -106,12 +106,12 @@ it('does not let a queued prompt release a replacement helper early', async () =
     expect(output).not.toHaveBeenCalled();
     adapter.resumeHelperStartup(ID);
     expect(output).toHaveBeenCalledTimes(1);
-  } finally { adapter.shutdown(); }
+  } finally { adapter.reset(); }
 });
 
 it('refuses to open a directory, having no file manager', async () => {
   const adapter = new FakePtyAdapter();
   try {
     await expect(adapter.terminalContext({ op: 'openDirectory', id: ID, path: '/home/demo' })).rejects.toThrow('no file manager');
-  } finally { adapter.shutdown(); }
+  } finally { adapter.reset(); }
 });

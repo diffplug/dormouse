@@ -334,22 +334,18 @@ function winPathToWslMount(winPath) {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
 }
 
-// The distribution a `wsl.exe -d <distro>` pane runs, the shape the picker emits.
-function wslDistroOf(shell, args) {
-  return shellStem(shell) === 'wsl' && Array.isArray(args) && args[0] === '-d'
-    && /^[A-Za-z0-9._-]+$/.test(args[1] || '') ? args[1] : undefined;
-}
-
 // A directory a Windows pane's shell reported, as a path Windows opens: a WSL
-// shell's `/mnt/c/x` is `C:\x` and its other paths are the distro's
-// `\\wsl.localhost\<distro>\...` share; Git Bash's MSYS `/c/x` is `C:\x`.
-// Every other path passes through.
-function hostDirectory(dir, { platform, shell, wslDistro }) {
+// shell's `/mnt/c/x` is `C:\x`, Git Bash's MSYS `/c/x` is `C:\x`. A WSL
+// shell's other paths are the distro's, which only its `\\wsl.localhost`
+// share reaches, and the resolver refuses every share: `DISTRO_ONLY`. Every
+// other path passes through.
+const DISTRO_ONLY = Symbol('distro-only');
+function hostDirectory(dir, { platform, shell }) {
   if (platform !== 'win32' || typeof dir !== 'string' || !/^\/(?!\/)/.test(dir)) return dir;
   const stem = shellStem(shell);
   const drive = (stem === 'wsl' ? /^\/mnt\/([a-z])(?:\/(.*))?$/i : stem === 'bash' ? /^\/([a-z])(?:\/(.*))?$/i : null)?.exec(dir);
   if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] || '').replace(/\//g, '\\')}`;
-  return stem === 'wsl' && wslDistro ? `\\\\wsl.localhost\\${wslDistro}${dir.replace(/\//g, '\\')}` : dir;
+  return stem === 'wsl' ? DISTRO_ONLY : dir;
 }
 
 // Enable OSC 633 shell integration for shells that support reliable injection,
@@ -438,6 +434,24 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
   return { env, shellArgs };
 }
 
+/** The macOS system locale as a `LANG` value: `AppleLocale` (`en_US`,
+ *  `zh-Hans_CN`, `en_US@rg=gbzzzz`) as `xx_YY.UTF-8` when the system has that
+ *  locale, else `en_US.UTF-8`. `en_DE` names a region without a locale. */
+function macLang(appleLocale, fsModule = fs) {
+  const m = /^([a-z]{2,3})(?:-[A-Za-z]+)?_([A-Z]{2})(?![A-Za-z0-9])/.exec(appleLocale || '');
+  const name = m && `${m[1]}_${m[2]}.UTF-8`;
+  return name && directoryExists(`/usr/share/locale/${name}`, fsModule) ? name : 'en_US.UTF-8';
+}
+
+/** `defaults read -g AppleLocale`, or null. */
+function readAppleLocale() {
+  return new Promise((resolve) => {
+    execFile('defaults', ['read', '-g', 'AppleLocale'], { timeout: 5000 }, (err, stdout) => {
+      resolve(err ? null : String(stdout).trim() || null);
+    });
+  });
+}
+
 function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
   const platform = runtime.platform || process.platform;
@@ -488,6 +502,11 @@ function resolveSpawnConfig(options, runtime = {}) {
     COLORTERM: 'truecolor',
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
+  // A Finder or Dock launch inherits launchd's environment, which sets no
+  // locale: bash would then drop typed non-ASCII and `ls` print `?`.
+  if (platform === 'darwin' && !childEnv.LANG && !childEnv.LC_ALL && !childEnv.LC_CTYPE) {
+    childEnv.LANG = macLang(runtime.appleLocale, fsModule);
+  }
   const dehydrate = dehydrateEnv(options?.dehydrate);
   if (dehydrate !== null) childEnv.DORMOUSE_DEHYDRATE = dehydrate;
   // Every Windows pane, including PowerShell/cmd that later run wsl.
@@ -1589,10 +1608,13 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
+  // Read once, without blocking a spawn: one before it answers gets `en_US.UTF-8`.
+  let systemLocale = null;
+  readLocale().then((locale) => { systemLocale = locale; });
 
   const pty = ptyModule;
   const ptys = new Map(); // id -> pty.IPty
@@ -1685,7 +1707,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   function spawn(id, options) {
     let config;
     try {
-      config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform, resolveBinary });
+      config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform, resolveBinary, appleLocale: systemLocale });
     } catch (err) {
       failSpawn(id, err);
       return;
@@ -1733,7 +1755,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       console.error(`[pty-core] spawn replaced a live PTY under ${id}; stopping the old one`);
       try { stopPty(displaced); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
     }
-    const session = { chunks: [], chars: 0, received: 0, shell: config.shell, wslDistro: wslDistroOf(config.shell, options?.args) };
+    const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
@@ -1939,10 +1961,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    * (docs/specs/transport.md -> "Reconnection").
    */
   function list(ids, forWindow, requestId, marks) {
-    // Explicit marked requests may resume a naturally exited buffer. Ordinary
-    // discovery still lists only live PTYs, and kill removes the retained buffer.
+    // A window's own ids include a naturally exited buffer it still shows, so a
+    // reload resumes that pane rather than losing it (and the layout around
+    // it). Discovery with no ids lists only live PTYs; kill removes the buffer.
     const targets = Array.isArray(ids)
-      ? ids.filter((id) => ptys.has(id) || (replay && typeof marks?.[id] === 'number' && sessions.has(id)))
+      ? ids.filter((id) => ptys.has(id) || (replay && sessions.has(id)))
       : [...ptys.keys()];
     const result = targets.map((id) => ({
       id, alive: ptys.has(id), shell: sessions.get(id)?.shell,
@@ -2002,7 +2025,9 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       } else if (request.op === 'openDirectory') {
         // The resolver is the only thing that touches the path: a `stat` or
         // `realpath` here would follow a link to a share and reach its host.
-        const nativePath = await canonicalDirectory(hostDirectory(request.path, { platform, shell: sessions.get(request.id)?.shell, wslDistro: sessions.get(request.id)?.wslDistro }));
+        const hostPath = hostDirectory(request.path, { platform, shell: sessions.get(request.id)?.shell });
+        if (hostPath === DISTRO_ONLY) throw new Error('Explorer opens only a WSL directory under /mnt');
+        const nativePath = await canonicalDirectory(hostPath);
         if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {

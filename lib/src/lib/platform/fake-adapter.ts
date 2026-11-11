@@ -138,9 +138,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {}
-  shutdown(): void {
-    this.reset();
-  }
 
   setDefaultScenario(scenario: FakeScenario): void {
     this.defaultScenario = scenario;

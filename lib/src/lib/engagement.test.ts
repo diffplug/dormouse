@@ -21,7 +21,7 @@ beforeEach(() => {
 afterEach(() => {
   publishEngagementFocus(wall, null);
   release();
-  platform.shutdown();
+  platform.reset();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });

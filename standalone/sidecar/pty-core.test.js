@@ -55,6 +55,34 @@ test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
   assert.deepEqual(config.shellArgs, ['-l']);
 });
 
+test('resolveSpawnConfig gives a localeless macOS pane the system locale in UTF-8', () => {
+  const locales = new Set(['/usr/share/locale/zh_CN.UTF-8', '/usr/share/locale/en_US.UTF-8']);
+  const fsModule = {
+    statSync(p) {
+      if (!locales.has(p)) throw new Error('ENOENT');
+      return { isDirectory: () => true };
+    },
+  };
+  const lang = (env, appleLocale, platform = 'darwin') => resolveSpawnConfig(undefined, {
+    platform,
+    env: { SHELL: '/bin/bash', ...env },
+    appleLocale,
+    fsModule,
+    osModule: { homedir: () => '/Users/tester', tmpdir: () => '/tmp' },
+  }).env.LANG;
+
+  assert.equal(lang({}, 'zh-Hans_CN'), 'zh_CN.UTF-8');
+  assert.equal(lang({}, 'en_US@rg=gbzzzz'), 'en_US.UTF-8');
+  // A language and region the system has no locale for, or no answer yet.
+  assert.equal(lang({}, 'en_DE'), 'en_US.UTF-8');
+  assert.equal(lang({}, null), 'en_US.UTF-8');
+  // A locale the user set is theirs.
+  assert.equal(lang({ LANG: 'de_DE.UTF-8' }, 'zh-Hans_CN'), 'de_DE.UTF-8');
+  assert.equal(lang({ LC_ALL: 'C' }, 'zh-Hans_CN'), undefined);
+  assert.equal(lang({ LC_CTYPE: 'UTF-8' }, 'zh-Hans_CN'), undefined);
+  assert.equal(lang({}, 'zh-Hans_CN', 'linux'), undefined);
+});
+
 test('resolveSpawnConfig prepends dor CLI bin and injects surface id', () => {
   const config = resolveSpawnConfig(
     { surfaceId: 'pane-1' },
@@ -2657,7 +2685,7 @@ test('a mark is ordered in the stream and a since-mark replay is exactly the rem
   assert.equal(events.filter((entry) => entry.event === 'replay').at(-1).data.data, 'onetwothree');
 });
 
-test('marked requests recover exited buffers without reviving or discovering the PTY', () => {
+test('a window\'s own ids list and replay its exited buffers; discovery does not', () => {
   const events = [];
   const pty = fakePtyModule();
   const mgr = create((event, data) => events.push({ event, data }), pty.module, {
@@ -2678,6 +2706,11 @@ test('marked requests recover exited buffers without reviving or discovering the
   mgr.list(['a'], 'main', 'handback-1', { a: 6 });
   assert.deepEqual(events[0].data.ptys.map(({ id, alive, exitCode }) => ({ id, alive, exitCode })), [{ id: 'a', alive: false, exitCode: 7 }]);
   assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'after', forWindow: 'main', requestId: 'handback-1' } });
+  // A reload's boot names the window's ids with no marks: the whole buffer.
+  events.length = 0;
+  mgr.list(['a'], 'main', 'boot');
+  assert.deepEqual(events[0].data.ptys.map(({ id, alive, exitCode }) => ({ id, alive, exitCode })), [{ id: 'a', alive: false, exitCode: 7 }]);
+  assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'beforeafter', forWindow: 'main', requestId: 'boot' } });
   mgr.kill('a');
   events.length = 0;
   mgr.list(['a'], 'main', 'after-kill', { a: 6 });

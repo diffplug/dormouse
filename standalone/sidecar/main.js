@@ -204,6 +204,7 @@ function handleLine(line) {
             // One press, and the caller decides about any more: `mgr.interrupt`
             // writes synchronously, so the ack is immediate.
             interrupt: async (ids) => { mgr.interrupt(ids); },
+            silenceRun: (id) => host.alerts.silenceRun(id),
             receivedChars: (id) => mgr.receivedChars(id),
             outputSince: (id, mark) => mgr.outputSince(id, mark),
             onCommand: (id, command) => recovery.record(id, command),

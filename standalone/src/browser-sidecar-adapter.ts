@@ -45,7 +45,7 @@ import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
-import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
+import { applyLiveTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
@@ -68,9 +68,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
-  private unlistenHost: (() => void) | null = null;
-  private unlistenReconnect: (() => void) | null = null;
-  private unlistenRegistry: (() => void) | null = null;
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
   private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
@@ -111,12 +108,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     await this.host.init();
     // As TauriAdapter: a reloaded page's leases go before this page takes any.
     this.leaseOrder.reset = this.host.invoke("iframe_release_proxy", { lease: null }).catch(() => {});
-    this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
+    this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     // The SSE stream is the only way the alerts' events reach this adapter,
     // and whatever the sidecar sent while it was down is lost: `sync` has the
     // sidecar re-send this window's Sessions' state and both stores, and
     // managed voice asks for its status again.
-    this.unlistenReconnect = this.host.onReconnect(() => {
+    this.host.onReconnect(() => {
       this.alerts.sync();
       this.managedVoice?.refresh();
     });
@@ -124,7 +121,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alerts.hello();
     this.managedVoice?.refresh();
     this.installConsoleForwarder();
-    this.unlistenRegistry = await installWorkspaceRegistry({
+    await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
     }, this.windowSlot.read());
     // Started, not awaited — see TauriAdapter.
@@ -133,19 +130,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       this.windowSlot.read(),
       'browser-sidecar',
     ).then((commands) => { this.recoveryCommands = commands; });
-  }
-
-  shutdown(): void {
-    this.alerts.dispose();
-    this.unlistenHost?.();
-    this.unlistenHost = null;
-    this.unlistenReconnect?.();
-    this.unlistenReconnect = null;
-    this.unlistenRegistry?.();
-    this.unlistenRegistry = null;
-    // The sidecar stays: every window shares it.
-    this.burrowClient.dispose();
-    this.host.close();
   }
 
   private sendBurrowCommand(command: BurrowCommand): void {
@@ -341,7 +325,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       applyLiveToolEvents(payload.id, payload.events);
     } else if (event === "terminal:semanticEvents") {
       const { id, events } = data as { id: string; events: TerminalSemanticEvent[] };
-      applyTerminalSemanticEvents(id, events);
+      applyLiveTerminalSemanticEvents(id, events);
     } else if (event === "terminal:clipboardOffer") {
       const { id, text } = data as { id: string; text: string };
       offerProgramCopy(id, text);
