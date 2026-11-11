@@ -2192,16 +2192,37 @@ fn read_update_log() -> Result<String, String> {
 // so the frontend stays window-agnostic and a second window (`ws-2`, …) persists
 // to its own file without ever rewriting the first window's blob.
 
-fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+/// The folder Windows keeps Dormouse's state in, inside Tauri's local app-data
+/// directory. Tauri hands that directory itself to WebView2, which keeps its
+/// `EBWebView` profile there, and the owner-only lock on Dormouse's state must
+/// never reach WebView2's.
+const WINDOWS_STATE_DIR: &str = "state";
+
+/// Where all of Dormouse's own state lives, and the one place that answers it:
+/// the Burrow's files directly, and the state root below them. Tauri's local
+/// app-data directory, never Windows' Roaming profile, which a domain can copy
+/// to every computer the person signs in to, carrying the Burrow's identity
+/// with it. On macOS and Linux Tauri's app-data and local app-data directories
+/// are one folder.
+fn dormouse_data_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     app.path()
-        .app_data_dir()
-        .map_err(|e| format!("app_data_dir unavailable: {e}"))
+        .app_local_data_dir()
+        .map(|dir| data_dir_in(dir, cfg!(windows)))
+        .map_err(|e| format!("app_local_data_dir unavailable: {e}"))
+}
+
+fn data_dir_in(app_local_data: PathBuf, windows: bool) -> PathBuf {
+    if windows {
+        app_local_data.join(WINDOWS_STATE_DIR)
+    } else {
+        app_local_data
+    }
 }
 
 /// Per-build window and recovery state. The supported dev wrapper already uses
 /// a worktree-specific identifier; this subtree also protects raw `tauri dev`
 /// launches that retain the installed identifier. Burrow stores stay at the
-/// identifier's app-data root, not shared across different identifiers.
+/// data directory's root, not shared across different identifiers.
 fn state_root_from(app_data: PathBuf) -> PathBuf {
     if cfg!(debug_assertions) {
         app_data.join("dev")
@@ -2211,7 +2232,7 @@ fn state_root_from(app_data: PathBuf) -> PathBuf {
 }
 
 fn state_root(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(state_root_from(app_data_dir(app)?))
+    Ok(state_root_from(dormouse_data_dir(app)?))
 }
 
 fn sessions_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -4511,10 +4532,10 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
 // hands the sidecar a directory that exists; if it can't be made or locked, the
 // sidecar is told nothing and keeps that state in memory rather than not at all.
 fn burrow_state_dir(app: &AppHandle) -> Option<String> {
-    let dir = match app.path().app_data_dir() {
+    let dir = match dormouse_data_dir(app) {
         Ok(dir) => dir,
         Err(e) => {
-            append_log(format!("[sidecar] app_data_dir unavailable: {e}"));
+            append_log(format!("[sidecar] {e}"));
             return None;
         }
     };
@@ -5066,7 +5087,7 @@ pub fn run() {
             // file nothing will ever read or overwrite; one written before
             // Dormouse stopped storing transcripts carries one
             // (docs/specs/standalone.md §Persistence). Never fatal.
-            match app_data_dir(app.handle()) {
+            match dormouse_data_dir(app.handle()) {
                 Ok(dir) => {
                     for e in sweep_session_roots(&dir) {
                         append_log(format!("[session] {e}"));
@@ -5238,7 +5259,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        arrivals_path, discard_other_formats, find_node_binary, forget_arrival_on_disk, geometry_path,
+        arrivals_path, data_dir_in, discard_other_formats, dormouse_data_dir, find_node_binary, forget_arrival_on_disk, geometry_path,
         open_ports_many_timeout, read_arrivals_from,
         read_session_from, record_arrival_on_disk, record_workspace_id,
         resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
@@ -5246,9 +5267,10 @@ mod tests {
         sweep_orphan_session_temps, temp_write_path,
         write_session_to, JsonValue, OPEN_PORT_TIMEOUT_MS,
         OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
-        SESSION_VERSION, WINDOW_VERSION,
+        SESSION_VERSION, WINDOWS_STATE_DIR, WINDOW_VERSION,
     };
     use super::routing;
+    use tauri::Manager;
     use super::guard;
     use std::collections::HashSet;
     use std::fs;
@@ -7254,6 +7276,38 @@ mod tests {
                 .unwrap(),
             format!("main{SESSION_TEMP_SUFFIX}"),
         );
+    }
+
+    #[test]
+    fn windows_state_is_one_folder_of_the_local_app_dir_and_others_use_it_whole() {
+        let local = PathBuf::from("/local/sh.dormouse.standalone");
+        assert_eq!(data_dir_in(local.clone(), true), local.join(WINDOWS_STATE_DIR));
+        assert_eq!(data_dir_in(local.clone(), false), local);
+    }
+
+    /// The state directory is under FOLDERID_LocalAppData (Tauri's
+    /// `local_data_dir`), never Roaming, and never the folder WebView2's
+    /// `EBWebView` profile sits in, which the owner-only lock must not reach.
+    #[test]
+    #[cfg(windows)]
+    fn windows_state_dir_is_local_and_never_holds_webview2() {
+        let app = tauri::test::mock_app();
+        let path = app.path();
+        let state = dormouse_data_dir(app.handle()).unwrap();
+        let webview = path.app_local_data_dir().unwrap();
+        assert!(state.starts_with(path.local_data_dir().unwrap()));
+        assert!(!state.starts_with(path.data_dir().unwrap()));
+        assert_ne!(state, webview);
+        assert!(!webview.join("EBWebView").starts_with(&state));
+    }
+
+    /// On macOS and Linux the state directory is Tauri's app-data directory,
+    /// where it has always been.
+    #[test]
+    #[cfg(not(windows))]
+    fn unix_state_dir_is_the_app_data_dir() {
+        let app = tauri::test::mock_app();
+        assert_eq!(dormouse_data_dir(app.handle()).unwrap(), app.path().app_data_dir().unwrap());
     }
 
     /// Raw debug launches retain the production identifier; the dev wrapper

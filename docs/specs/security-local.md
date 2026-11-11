@@ -170,7 +170,7 @@ The exposure is traffic the user never chose, which under Nothing is none. `docs
 
 The attacker is another local account reading disk; what the remote stack leaves behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
-**Standalone's session store is owner-only before any bytes are written** — every window snapshot, its geometry sibling, and the arrival journal (`docs/specs/standalone.md` -> "Persistence", "Boot and geometry", "Arrival queue"), on every platform. The same helper locks the whole standalone app-data directory before the sidecar spawns.
+**Standalone's session store is owner-only before any bytes are written** — every window snapshot, its geometry sibling, and the arrival journal (`docs/specs/standalone.md` -> "Persistence", "Boot and geometry", "Arrival queue"), on every platform. The same helper locks the whole standalone data directory (`docs/specs/standalone.md` -> "Persistence") before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is persisted", "Retiring the transcripts already on disk"). A snapshot an older version left can carry a transcript until retired (rationale).
 

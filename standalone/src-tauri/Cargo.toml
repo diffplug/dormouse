@@ -56,6 +56,10 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSData"] }
 
+[dev-dependencies]
+# `tauri::test::mock_app`, so a test can ask Tauri where the state directory resolves.
+tauri = { version = "2", features = ["test"] }
+
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Re-exports the tao the app ships, for tests/objc_exception_unwinds.rs.
 tauri-runtime-wry = { version = "2", default-features = false }
