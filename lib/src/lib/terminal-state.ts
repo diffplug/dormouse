@@ -473,7 +473,12 @@ export function surfaceRunsCommand(
 }
 
 export function deriveFallbackCommandTitle(state?: TerminalPaneState | null): string {
-  return latestTerminalTitleCandidate(state)?.title.trim() || DEFAULT_COMMAND_TITLE;
+  const candidate = latestTerminalTitleCandidate(state);
+  // A title from before the last command finished is that command's, and a
+  // shell's own name or path names no command.
+  const finishedAt = state?.lastCommand?.finishedAt;
+  const fresh = candidate && (finishedAt === undefined || candidate.updatedAt > finishedAt);
+  return (fresh && meaningfulTerminalTitle(candidate.title)) || DEFAULT_COMMAND_TITLE;
 }
 
 export function resolveDisplayPrimary(

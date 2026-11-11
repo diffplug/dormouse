@@ -97,7 +97,7 @@ Source of truth: `applyShellIntegration` in `standalone/sidecar/pty-core.js`; th
 ### OSC-driven events
 
 - **`promptStart` and `promptEnd` clear the running command and any pending command line** (rationale).
-- **A `commandStart` with no pending command line** (a bare `OSC 133 ; C`) takes its `displayCommand` from the newest OSC 0/2/9 title candidate, else the literal `shell`.
+- **A `commandStart` with no pending command line** (a bare `OSC 133 ; C`) takes its `displayCommand` from the newest OSC 0/2/9 title candidate set since the last command finished, filtered as below, else the literal `shell`.
 - **`commandFinish` snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle`; with no `currentCommand` it only sets the activity**, never inventing a `lastCommand`.
 
 **Must tokenize without selecting a shell dialect, and read back exactly the `POSIX_ESCAPABLE` set that `shellEscapePosix` writes.** **Must derive the same suffix-free program name for headers, WATCHING keys, and terminal context**: `npm.cmd` and `C:\tools\claude.exe` become `npm` and `claude`; launcher variants in one directory cannot be watched separately. (rationale)

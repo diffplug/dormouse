@@ -188,8 +188,9 @@ describe('terminal command state reducer', () => {
       createId: () => 'cmd-2',
     });
 
+    // The shell's own name names no command.
     expect(state.currentCommand).toMatchObject({
-      displayCommand: 'zsh',
+      displayCommand: 'shell',
       source: 'osc133_boundaries',
     });
 
@@ -201,6 +202,18 @@ describe('terminal command state reducer', () => {
 
     state = reduceTerminalState(state, { type: 'promptStart' });
     expect(state.activity).toEqual({ kind: 'prompt' });
+  });
+
+  it('names a bare OSC 133 command by a title set since the last command finished, else shell', () => {
+    const start = (state: ReturnType<typeof createTerminalPaneState>) =>
+      reduceTerminalState(state, { type: 'commandStart', source: 'osc133_boundaries' }, { now: () => 9, createId: () => 'next' }).currentCommand?.displayCommand;
+    let state = createTerminalPaneState();
+    state = reduceTerminalState(state, { type: 'commandStart', source: 'osc133_boundaries' }, { now: () => 1, createId: () => 'vim' });
+    state = reduceTerminalState(state, { type: 'title', title: { title: 'README.md - VIM', source: 'osc2', updatedAt: 2 } });
+    state = reduceTerminalState(state, { type: 'commandFinish', exitCode: 0, finishedAt: 3 });
+    expect(start(state)).toBe('shell');
+    expect(start(reduceTerminalState(state, { type: 'title', title: { title: 'make test', source: 'osc0', updatedAt: 4 } }))).toBe('make test');
+    expect(start(reduceTerminalState(state, { type: 'title', title: { title: 'C:\\WINDOWS\\system32\\cmd.exe', source: 'osc0', updatedAt: 4 } }))).toBe('shell');
   });
 
   it('stores latest title candidates by source channel', () => {
