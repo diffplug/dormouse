@@ -12,15 +12,19 @@ const { fromMarkdown } = await dependency('mdast-util-from-markdown');
 const { toMarkdown } = await dependency('mdast-util-to-markdown');
 const { mdxJsx } = await dependency('micromark-extension-mdx-jsx');
 const { mdxJsxFromMarkdown, mdxJsxToMarkdown } = await dependency('mdast-util-mdx-jsx');
+const { highlightMarkToMarkdown } = await dependency('mdast-util-highlight-mark');
 const { markdownFormat } = await load('../viewer/markdown-format.ts');
 const parse = text => fromMarkdown(text, { extensions: [mdxJsx()], mdastExtensions: [mdxJsxFromMarkdown()] });
-const serialize = (tree, original) => toMarkdown(tree, { extensions: [mdxJsxToMarkdown()], ...markdownFormat(original) });
+const serialize = (tree, original) => toMarkdown(tree, { extensions: [mdxJsxToMarkdown(), highlightMarkToMarkdown], ...markdownFormat(original) });
 const roundtrip = text => serialize(parse(text), text);
 const semantic = tree => JSON.parse(JSON.stringify(tree, (key, value) => key === 'position' ? undefined : value));
 
 for (const source of [
   '## [Unreleased]\n\n## [1.3.0] - 2026-10-20\n',
-  'Use &lt;your relay&gt; here.\n',
+  'Use &lt;your relay> here.\n',
+  'Use `a` -> b when x > y and x &lt; z.\n',
+  'Set x = 1 and key=value, then a >= b.\n',
+  '+++\ntitle = "x"\n+++\n',
   '## Tight\nbody\n\n## Loose\n\nbody\n',
   '## First\n## Second\nbody\n',
 ]) {
@@ -30,7 +34,7 @@ for (const source of [
 }
 
 test('a real edit keeps surrounding labels, entities, and heading spacing', () => {
-  const source = '## [Unreleased]\nold &lt;your relay&gt;\n\n## [1.3.0] - 2026-10-20\n\nprevious\n';
+  const source = '## [Unreleased]\nold &lt;your relay>\n\n## [1.3.0] - 2026-10-20\n\nprevious\n';
   const tree = parse(source);
   tree.children[1].children[0].value = 'new <your relay>';
   const saved = serialize(tree, source);
@@ -38,7 +42,16 @@ test('a real edit keeps surrounding labels, entities, and heading spacing', () =
   assert.deepEqual(semantic(parse(saved)), semantic(tree));
 });
 
+test('saves an entity-encoded `>` as the literal character', () => {
+  assert.equal(roundtrip('Use &lt;your relay&gt; here.\n'), 'Use &lt;your relay> here.\n');
+});
+
 for (const source of [
+  'a \\== b\n',
+  'a \\=\\= b\n',
+  '\\=\n',
+  'Title\n\\=\n',
+  '\\\\= literal backslash\n',
   '\\[literal](url)\n',
   '\\[literal][ref]\n\n[ref]: /target\n',
   '\\[literal]\n\n[literal]: /target\n',

@@ -22,17 +22,26 @@ export function markdownFormat(markdown: string): Options {
   return {
     bullet,
     rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' : '-',
-    // A literal angle bracket must not turn into JSX when source mode imports
-    // the saved text again. Only text nodes use these entity escapes.
-    unsafe: [{ character: '<', inConstruct: 'phrasing' }, { character: '>', inConstruct: 'phrasing' }],
+    // A literal `<` must not turn into JSX when source mode imports the saved
+    // text again; a `>` cannot start JSX, so it stays literal. Only text nodes
+    // use this entity escape.
+    unsafe: [{ character: '<', inConstruct: 'phrasing' }],
     handlers: {
       root(node, _parent, state, info) {
         references = hasDefinition(node);
         return state.containerFlow(node, info);
       },
       text(node, _parent, state, info) {
-        const safe = state.safe(node.value, { ...info, encode: ['<', '>'] })
-          .replace(/\\[^]|&#x3([CE]);/g, (match, hex: string | undefined) => hex ? (hex === 'C' ? '&lt;' : '&gt;') : match);
+        const safe = state.safe(node.value, { ...info, encode: ['<'] })
+          .replace(/\\[^]|&#x3C;/g, (match, offset: number, value: string) => {
+            if (match === '&#x3C;') return '&lt;';
+            // MDXEditor's `==highlight==` syntax escapes every `=`. Only a pair
+            // can open a highlight, and only a line-start `=` a setext heading.
+            if (match !== '\\=') return match;
+            const before = info.before + value.slice(0, offset);
+            const next = value.slice(offset + 2) || info.after;
+            return /(^|[\r\n])[ \t]*$/.test(before) || before.endsWith('=') || /^\\?=/.test(next) ? match : '=';
+          });
         // Restore only simple, complete labels. Keep escapes inside link labels,
         // list items (task syntax), and documents with reference definitions.
         if (references || state.stack.some(kind => ['label', 'reference', 'listItem'].includes(kind))) return safe;
