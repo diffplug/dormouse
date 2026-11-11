@@ -88,6 +88,12 @@ export interface Surface {
   awaited: boolean;
   /** The Workspace's preview slot (`dor open --preview`); omitted otherwise. */
   preview?: boolean;
+  /** A named Tool's declared identity; omitted on other Surfaces and on an
+   *  anonymous `dor tool -- <command>`. */
+  toolName?: string;
+  toolScope?: 'project' | 'user' | 'builtin';
+  /** Where a project or user Tool is declared; a built-in has none. */
+  toolOrigin?: ToolOrigin;
   /** Listening ports opened by this terminal Surface. Present only when the
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
@@ -95,6 +101,13 @@ export interface Surface {
    *  listing, where rows from several Workspaces share one list — every row of
    *  one carries it ({@link GroupedSurface}). */
   workspaceId?: string;
+}
+
+/** The `dormouse.yml` that declared a Tool (`docs/specs/dor-tool.md` ->
+ *  Persistence and hosts). An object so later fields can join `file`. */
+export interface ToolOrigin {
+  /** Absolute path of the declaring file, as the host's lookup answered it. */
+  file: string;
 }
 
 /** A row of a cross-Workspace listing (`dor list --all`): every row says which
@@ -345,22 +358,37 @@ export interface ToolListRequest {
   global: boolean;
 }
 
-/** One declared Tool, as `dor tool --list` reports it. */
-export interface ToolListEntry {
+interface ToolListEntryBase {
   name: string;
   scope: 'project' | 'user';
-  run: string | string[];
-  render: 'iframe' | 'agent-browser-screencast' | 'playwright-screencast';
-  port: 'announced' | 'auto';
-  /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
-  keyed: boolean;
   /** The comment block directly above the entry, raw: control characters are
    *  escaped by whatever prints it. Null when there is none. Repo text: it
    *  describes, it never authorizes. */
   description: string | null;
   /** A user Tool hidden from `dor tool <name>` by a project Tool of that name. */
   shadowed: boolean;
+  /** A user Tool imported from another `dormouse.yml`: that file. */
+  from?: string;
 }
+
+/** One declared Tool, as `dor tool --list` reports it. */
+export interface ResolvedToolListEntry extends ToolListEntryBase {
+  run: string | string[];
+  render: 'iframe' | 'agent-browser-screencast' | 'playwright-screencast';
+  port: 'announced' | 'auto';
+  /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
+  keyed: boolean;
+  broken?: never;
+}
+
+/** A user-file import that did not resolve, so it has no command to report. */
+export interface BrokenToolListEntry extends ToolListEntryBase {
+  from: string;
+  /** Why, naming that file. */
+  broken: string;
+}
+
+export type ToolListEntry = ResolvedToolListEntry | BrokenToolListEntry;
 
 export interface ToolListResponse {
   /** The nearest project `dormouse.yml`, and whether the user has approved it;

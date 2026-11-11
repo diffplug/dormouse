@@ -11,6 +11,7 @@ import {
 
 const REPO = { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' as const };
 const USER = { path: '/home/me/.config/dormouse/tools.yml', dir: '/home/me/.config/dormouse', scope: 'user' as const };
+const IMPORTED = { ...REPO, scope: 'import' as const };
 
 function parse(text: string, opts: Parameters<typeof parseToolFile>[1] = REPO) {
   return parseToolFile(text, opts);
@@ -354,5 +355,67 @@ describe('folder rules and preview handlers', () => {
     expect(() => rules('{match: "*.md", tool: viewer, preview: missing}')).toThrow("open rule '*.md' needs a preview defined in this user file");
     expect(() => rules('{match: "*.md", tool: viewer, preview: shell}')).toThrow("open rule for 'shell' needs an argument-list run");
     expect(() => rules('{match: "*.md", tool: viewer, preview: 3}')).toThrow('needs a preview defined');
+  });
+});
+
+describe('imports', () => {
+  const IMPORTS = `tools:
+  # Local.
+  pridm:
+    from: pridm
+  mine:
+    run: [mine]
+  prs:
+    from: /opt/supertools
+    tool: pr-dashboard
+open:
+  - {match: "*.md", tool: prs, preview: pridm}
+`;
+
+  it('yields import entries unresolved, in file order beside declared ones', () => {
+    const file = parse(IMPORTS, USER);
+    expect([...file.imports.values()]).toEqual([
+      { name: 'pridm', from: 'pridm', tool: 'pridm', description: 'Local.' },
+      { name: 'prs', from: '/opt/supertools', tool: 'pr-dashboard', description: null },
+    ]);
+    expect([...file.tools.keys()]).toEqual(['mine']);
+    expect(file.names).toEqual(['pridm', 'mine', 'prs']);
+    // An import's run is checked once it resolves, not here.
+    expect(file.open).toEqual([{ match: '*.md', tool: 'prs', preview: 'pridm' }]);
+  });
+
+  it('is user-file only', () => {
+    expect(() => parse('tools:\n  pridm:\n    from: pridm\n')).toThrow("tools.pridm: 'from' imports a Tool only in the user file");
+    expect(() => parse('tools:\n  pridm:\n    from: pridm\n', IMPORTED)).toThrow("tools.pridm: 'from' imports a Tool only in the user file");
+  });
+
+  it('parses an imported file as a project file without the checkout lint', () => {
+    const text = 'tools:\n  solo:\n    run: [solo, $TARGET]\n    prespawn_dedupe: solo\nopen:\n  - {match: "*", tool: solo}\n';
+    expect(parse(text).warnings).toContain("/repo/dormouse.yml: tools.solo: prespawn_dedupe has no $HERE, so it dedupes across every checkout of this repo");
+    const file = parse(text, IMPORTED);
+    expect(file.open).toEqual([]);
+    expect(file.warnings).toEqual([
+      "/repo/dormouse.yml: tools.solo: prespawn_dedupe has no $TARGET, so different files reuse the first file's Tool",
+      '/repo/dormouse.yml: project open rules are ignored; configure associations in the user file',
+    ]);
+  });
+
+  it.each([
+    ['    from: pridm\n    run: [x]\n', "exactly one of 'run' or 'from'"],
+    ['    from: pridm\n    render: playwright-screencast\n', "an import takes only 'from' and 'tool', not 'render'"],
+    ['    from: pridm\n    colour: blue\n', "not 'colour'"],
+    ['    from: ""\n', "'from' must name a directory"],
+    ['    from: " "\n', "'from' must name a directory"],
+    ['    from:\n', "'from' must name a directory"],
+    ['    from: [a]\n', "'from' must name a directory"],
+    ['    from: ~/tools/pridm\n', "'from' takes no ~ or $; use a path relative to this file"],
+    ['    from: $HERE/pridm\n', "'from' takes no ~ or $"],
+    ['    from: "pr\\u001bidm"\n', 'from cannot contain'],
+    ['    from: "pr\\u200bidm"\n', 'from cannot contain'],
+    ['    from: pridm\n    tool: ""\n', "'tool' must be a Tool name"],
+    ['    from: pridm\n    tool: 3\n', "'tool' must be a Tool name"],
+    ['    from: pridm\n    tool: "a\\u0007b"\n', 'tool cannot contain'],
+  ])('rejects a malformed import: %j', (entry, message) => {
+    expect(() => parse(`tools:\n  pridm:\n${entry}`, USER)).toThrow(message);
   });
 });

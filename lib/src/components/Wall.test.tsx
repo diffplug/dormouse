@@ -1140,7 +1140,7 @@ describe('Wall on the Lath engine', () => {
       // `open` queued behind it.
       expect(leafCount()).toBe(2);
       expect(requests('launch')).toEqual([{
-        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://127.0.0.1:5173/', headed: true,
       }]);
       expect(requests('navigate')).toEqual([]);
     } finally {
@@ -1168,7 +1168,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
 
       expect(requests('launch')).toEqual([{
-        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://127.0.0.1:5173/', headed: true,
       }]);
     } finally {
       untouchedSpy.mockRestore();
@@ -1190,7 +1190,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => contextButton('Open in playwright screencast').click());
       await flush();
 
-      expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://localhost:5173/' }));
+      expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://127.0.0.1:5173/' }));
       expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open playwright');
       // No pane is created for a failed startup.
       expect(leafCount()).toBe(1);
@@ -2490,6 +2490,8 @@ describe('Wall on the Lath engine', () => {
       // drops it: reconnect.test.ts), and it ends with the run.
       const lath = engine.mock.results[0].value as lathWallEngine.LathWallEngine;
       expect(lath.getMeta(toolId!)?.params?.toolSharesCallerShell).toBe(status === 'takeover' ? true : undefined);
+      // Either placement keeps the user file that declared the Tool.
+      expect(lath.getMeta(toolId!)?.params?.toolOrigin).toEqual({ file: '/config/dormouse.yml' });
       if (status === 'takeover') {
         await act(async () => window.dispatchEvent(new Event('pagehide')));
         await flush();
@@ -2549,6 +2551,22 @@ describe('Wall on the Lath engine', () => {
       }
       expect(new Set(ids).size).toBe(3);
       expect(leafCount()).toBe(4);
+      // A project and a user Tool keep the file the host answered; a built-in
+      // keeps none, whatever path its answer carries.
+      const listed = await new Promise<Array<Record<string, unknown>>>(resolve => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.list, params: {}, respond: (response: { result: { surfaces: Array<Record<string, unknown>> } }) => resolve(response.result.surfaces),
+        } }));
+      });
+      expect(ids.map(id => {
+        const row = listed.find(surface => surface.id === id)!;
+        return [row.toolName, row.toolScope, row.toolOrigin];
+      })).toEqual([
+        ['file', 'project', { file: '/repo/dormouse.yml' }],
+        ['file', 'user', { file: '/repo/dormouse.yml' }],
+        ['file', 'builtin', undefined],
+      ]);
+      expect(listed.find(surface => surface.id === 'surface:a')).not.toHaveProperty('toolName');
 
       // Host resolution gives both spellings the same canonical document key.
       const reused = await requestTool({ file: './docs/../docs/readme.md' });
@@ -2587,6 +2605,7 @@ describe('Wall on the Lath engine', () => {
       return { ...common, status: 'ok', render: 'iframe', port: 'auto', key: null, warnings: [] };
     });
     Object.assign(fake, { toolControl });
+    const engine = vi.spyOn(lathWallEngine, 'createLathWallEngine');
     let id: string | undefined;
     try {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
@@ -2615,6 +2634,8 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-session-id="${id}"]`)).not.toBeNull();
       expect(container.querySelector('[role="alert"]')).toBeNull();
       expect(pendingShellOpts.get(id!)?.command).toBe('view /repo/file.md');
+      expect((engine.mock.results[0].value as lathWallEngine.LathWallEngine).getMeta(id!)?.params?.toolOrigin)
+        .toEqual({ file: '/repo/dormouse.yml' });
       act(() => {
         terminalRegistry.seedTerminalManualCwd(id!, '/repo');
         reportRunning(id!, 'view /repo/file.md');
@@ -4112,7 +4133,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector('[data-lath-leaf="surface:a"]')).not.toBeNull();
       expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
       expect(requests('launch')).toContainEqual(expect.objectContaining({
-        provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://localhost:5173/', headed: false,
+        provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://127.0.0.1:5173/', headed: false,
       }));
       expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).toBeNull();
       expect(focusOf('surface:a')).toBe('false');

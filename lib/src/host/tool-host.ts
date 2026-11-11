@@ -89,7 +89,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
         if (request.op === 'open-handlers') return { status: 'open-handlers', handlers: await listOpenHandlers(request, userPath) };
         if (request.op === 'list') return { status: 'list', listing: await listTools(request, { trust, userPath }) };
         const args = request.args ?? [];
-        const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
+        const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args, userPath });
         if (project?.status === 'ok') {
           // Only the user's browser presets: a malformed user Tool must not
           // fail a project Tool.
@@ -100,11 +100,13 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
 
         // A project miss falls through to the user's own Tools, which need no grant.
         const file = await readUserToolFile(userPath);
+        const broken = file?.broken.get(request.name);
+        if (broken) return { status: 'error', message: broken.message };
         const entry = file?.tools.get(request.name);
-        if (file && entry) return await resolveUserTool(file, userPath, entry, request.cwd, args,
+        if (file && entry) return await resolveUserTool(file, entry, request.cwd, args,
           request.global ? mergeBrowserConfig(file.browser) : await readBrowserConfig(request.cwd, userPath));
         if (project && (project.status !== 'no-file' || !file)) return project;
-        return { status: 'unknown-tool', projectRoot: dirname(userPath), path: userPath, names: [...(file?.tools.keys() ?? [])].sort() };
+        return { status: 'unknown-tool', projectRoot: dirname(userPath), path: userPath, names: [...(file?.names ?? [])].sort() };
       } catch (error) {
         return { status: 'error', message: error instanceof Error ? error.message : String(error) };
       }
@@ -115,7 +117,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
 /** Same bounded discovery and parsing as Tools, without their execution gate. */
 async function readBrowserConfig(cwd: string, userPath: string): Promise<BrowserViewportConfig> {
   const user = await readUserBrowserConfig(userPath);
-  const found = await findToolFile(cwd);
+  const found = await findToolFile(cwd, { userPath });
   const project = found ? parseBrowserSection(found.text, found.path) : undefined;
   return mergeBrowserConfig(user, project);
 }

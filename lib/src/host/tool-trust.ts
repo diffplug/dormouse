@@ -14,12 +14,13 @@ import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import { canonicalLocalDirectory } from 'dor-lib-common/local-path';
 import { writeJsonAtomic } from './atomic-json-file';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { resolveUpstreamUrl } from './git-upstream';
 import { resolveToolInput, type ToolInput } from './tool-input';
 
-const TOOL_FILE_NAME = 'dormouse.yml';
+export const TOOL_FILE_NAME = 'dormouse.yml';
 /**
  * Cap on a `dormouse.yml`. This read happens before the trust check —
  * deliberately, so the approval dialog can name the command — so both the file
@@ -189,18 +190,37 @@ export class MemoryToolTrustStore {
 
 export type ToolTrustStore = FileToolTrustStore | MemoryToolTrustStore;
 
+/** How a project walk runs. `userPath` is required so no caller can walk
+ *  without excluding the user file's directory. */
+export interface ProjectWalkOptions {
+  /** The user `dormouse.yml` path the host uses; its directory ends the walk. */
+  readonly userPath: string;
+  /** Test seam. */
+  readonly readTextFile?: (path: string) => Promise<string>;
+}
+
 /**
  * Walk up from `startDir` for the nearest `dormouse.yml`. Its directory is
  * `$HERE` — free, since the host knows where it found the file, and
  * more robust than shelling out to git (it works in a non-git directory).
+ *
+ * The walk ends, finding nothing, at the directory that holds the user file:
+ * that file is never a project file. The check precedes the read, since the
+ * project reader refuses the dotfiles symlink a user file may be, and compares
+ * canonical paths too, so a symlinked cwd or config directory still matches.
+ * It is the configured path's directory, not wherever a symlinked file's bytes
+ * live.
  */
 export async function findToolFile(
   startDir: string,
-  readTextFile: (path: string) => Promise<string> = readToolFile,
+  { userPath, readTextFile = readToolFile }: ProjectWalkOptions,
 ): Promise<{ path: string; dir: string; text: string } | null> {
+  const userDir = resolve(dirname(userPath));
+  const userDirs = new Set([userDir, await canonicalLocalDirectory(userDir) ?? userDir]);
   let dir = resolve(startDir);
   // Bounded by the filesystem root; `dirname('/') === '/'` is the terminator.
   for (;;) {
+    if (userDirs.has(dir) || userDirs.has(await canonicalLocalDirectory(dir) ?? dir)) return null;
     const path = join(dir, TOOL_FILE_NAME);
     try {
       const text = await readTextFile(path);
@@ -228,9 +248,9 @@ export async function findToolFile(
  *  oversized or malformed file. */
 export async function loadProjectToolFile(
   cwd: string,
-  readTextFile?: (path: string) => Promise<string>,
+  options: ProjectWalkOptions,
 ): Promise<{ path: string; dir: string; file: ToolFile } | null> {
-  const found = await findToolFile(cwd, readTextFile);
+  const found = await findToolFile(cwd, options);
   if (!found) return null;
   return { path: found.path, dir: found.dir, file: parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' }) };
 }
@@ -265,18 +285,17 @@ export async function lookupTool(
   name: string,
   cwd: string,
   trust: ToolTrustStore,
-  options: {
+  options: ProjectWalkOptions & {
     /** Invocation inputs for `$ARGS` / `$TARGET`; none by default. */
     args?: readonly string[];
-    /** Test seams. */
-    readTextFile?: (path: string) => Promise<string>;
+    /** Test seam. */
     resolveUpstream?: (dir: string) => Promise<string | null>;
-  } = {},
+  },
 ): Promise<ToolLookup> {
-  const { args = [], readTextFile, resolveUpstream = resolveUpstreamUrl } = options;
+  const { args = [], resolveUpstream = resolveUpstreamUrl } = options;
   let found;
   try {
-    found = await loadProjectToolFile(cwd, readTextFile);
+    found = await loadProjectToolFile(cwd, options);
   } catch (error) {
     // Oversized or malformed: report it, as the file's own problem.
     if (error instanceof ToolFileError) return { status: 'error', message: error.message };

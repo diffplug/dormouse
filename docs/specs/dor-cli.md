@@ -255,7 +255,7 @@ Source of truth: `dor/src/commands/reopen.ts`, `handleReopenControl` in `lib/src
 
 **Must resolve navigation targets CLI-side before forwarding to the browser provider.** Only the first target of a navigation verb is eligible. Skip known option values; an unknown option leaves the argv unchanged rather than guessing its arity. The provider descriptors and `resolveOpenTargetArgs` own recognized verbs and option arities.
 
-A Surface handle resolves through `surface.resolveOpen`, which runs the same host port scan as `dor list --ports` (visible panes **and** minimized doors) and groups listening records by distinct port, so several bindings of one dev server stay one candidate. Zero or several distinct ports fail, the latter listing the choices. **One port opens `http://localhost:<port>/` when a loopback or any-interface bind exists, otherwise the specific bound LAN/Tailnet address.** Only terminal Surfaces own ports, so a browser-Surface handle is rejected.
+`surface.resolveOpen` shares `dor list --ports`' scan, grouping bindings by port. Zero or multiple ports fail; multiple ports list the choices. **Must open discovered ports at numeric addresses**, preferring loopback over LAN/Tailnet and IPv4 over IPv6 within either group; never substitute `localhost` (rationale). **Must use host-selected wildcard destinations, omitting those reported as shadowed** (`docs/specs/transport.md` → Port scan destinations). Browser-Surface handles are rejected: only terminal Surfaces own ports.
 
 Source of truth: `dor/src/commands/open-target.ts`, `resolveOpenTargetArgs` in `dor/src/commands/browser-cli.ts`, `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`.
 
@@ -321,7 +321,7 @@ Source of truth: `createDorControlServer` in `standalone/sidecar/dor-control-ser
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI).
 
-**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
+**The router answers `tool.list` (`dor tool --list` and its bare picker) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`.
 

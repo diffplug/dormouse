@@ -20,7 +20,8 @@ import {
   writeStderr,
   writeStdout,
 } from './shared.js';
-import { printableExact, renderToolResponse } from './terminal-text.js';
+import { approvalTag, printableExact, renderToolResponse, toolRunText, toolTags } from './terminal-text.js';
+import { runToolPicker } from './tool-picker.js';
 
 interface ToolFlags {
   readonly list?: boolean;
@@ -41,10 +42,21 @@ export const TOOL_TIMEOUT_MS = 20_000;
 const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
 const BOOLEAN_FLAGS = new Set(['--list', '--json', '--minimize', '--fresh', '--global']);
 
+/** stricli's usage line, which the help replaces with one per form. */
+const STRICLI_USAGE = '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>';
+const LAUNCH_FLAGS = '[--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]';
+const USAGE = [
+  `  dor tool ${LAUNCH_FLAGS} <name> [args...]`,
+  '  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...',
+  `  dor tool ${LAUNCH_FLAGS}`,
+  '  dor tool --list [--global] [--cwd path] [--json]',
+].map(line => `${line}\n`).join('');
+
 /**
- * `dor tool` takes a registered name with inputs, or a nameless `--` command tail.
- * stricli cannot express that, so the shape is checked before it parses — the
- * same pre-parse contract `dor ensure` uses.
+ * `dor tool` takes a registered name with inputs, a nameless `--` command tail,
+ * or nothing, which picks or lists a Tool. stricli cannot express that, so the
+ * shape is checked before it parses — the same pre-parse contract `dor ensure`
+ * uses.
  */
 export function validateToolArgs(args: readonly string[]): ParseResult<void> {
   const delimiterIndex = args.indexOf('--');
@@ -57,12 +69,8 @@ export function validateToolArgs(args: readonly string[]): ParseResult<void> {
     return { ok: true, value: undefined };
   }
 
-  if (delimiterIndex === -1) {
-    if (positionals.length === 0) {
-      return { ok: false, message: 'dor tool requires a tool name or -- <command...>' };
-    }
-    return { ok: true, value: undefined };
-  }
+  // Bare, it picks or lists a Tool, and only `runToolCommand` knows which.
+  if (delimiterIndex === -1) return { ok: true, value: undefined };
 
   if (positionals.length > 0) return { ok: true, value: undefined };
   if (args.slice(0, delimiterIndex).includes('--global')) return { ok: false, message: '--global requires a named tool' };
@@ -86,20 +94,8 @@ export const toolCommand: Command = {
   name: 'tool',
   preParse: validateToolArgs,
   helpPatches: [
-    {
-      scope: 'root',
-      findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
-      ],
-    },
-    {
-      scope: 'command-usage',
-      findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
-      ],
-    },
+    { scope: 'root', findReplace: [STRICLI_USAGE, USAGE] },
+    { scope: 'command-usage', findReplace: [STRICLI_USAGE, USAGE] },
     {
       scope: 'command-detail',
       remove: ['\nARGUMENTS<TO-EOL><LS>name<TO-EOL>'],
@@ -124,7 +120,9 @@ Where the tool lands: typed alone at a prompt in a visible, integrated plain ter
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
---list runs nothing: it prints the Tools \`dor tool <name>\` would find from the working directory — the nearest project dormouse.yml and whether you have approved it, then the user file. Each Tool shows its command, render, port strategy, and whether it has a key, then the comment block directly above its entry, which is where a Tool is documented. A user Tool that a project Tool of the same name hides is marked shadowed. --global lists only user Tools.
+--list runs nothing: it prints the Tools \`dor tool <name>\` would find from the working directory — the nearest project dormouse.yml and whether you have approved it, then the user file. Each Tool shows its command, render, port strategy, and whether it has a key, then the comment block directly above its entry, which is where a Tool is documented. A user Tool that a project Tool of the same name hides is marked shadowed. A user Tool imported from another dormouse.yml shows that file, and one that does not resolve is marked broken with the reason. --global lists only user Tools.
+
+Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --minimize, --fresh, --surface, or --workspace asks for a launch.
 
 Text output:
   created surface:3  "pnpm storybook"
@@ -185,24 +183,59 @@ JSON output:
 };
 
 async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest: string[]): Promise<void | Error> {
+  // A listing resolves like a launch but places nothing.
+  const placing = flags.minimize || flags.fresh || flags.surface !== undefined || flags.workspace !== undefined;
   if (flags.list === true) {
-    // It resolves like a launch but places nothing.
-    if (flags.minimize || flags.fresh || flags.surface !== undefined || flags.workspace !== undefined) {
-      return new Error('--list takes only --global, --cwd, and --json');
-    }
+    if (placing) return new Error('--list takes only --global, --cwd, and --json');
     return listTools(this, flags);
   }
+  if (!this.commandArgs.includes('--') && rest.length === 0) return pickTool(this, flags, placing);
   // `validateToolArgs` already accepted this argv, so the walk cannot fail.
   const head = headPositionals(this.commandArgs);
   const named = head.ok && head.value.length > 0;
   return dispatchToolSurface(this, {
     ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
+    ...launchPlacement(this, flags),
+  }, flags.json === true);
+}
+
+function launchPlacement(context: DorCommandContext, flags: ToolFlags) {
+  return {
     ...workspaceParam(flags.workspace),
     fresh: flags.fresh === true,
     minimized: flags.minimize === true,
     surface: flags.surface,
-    cwd: callerWorkingDirectory(flags.cwd, this.options),
-  }, flags.json === true);
+    cwd: callerWorkingDirectory(flags.cwd, context.options),
+  };
+}
+
+/** Bare `dor tool`: a person at a terminal picks a Tool to run; anything else
+ *  gets the listing. */
+async function pickTool(context: DorCommandContext, flags: ToolFlags, placing: boolean): Promise<void | Error> {
+  const { terminal } = context.options;
+  if (!terminal || flags.json === true) {
+    // A placement flag means the caller meant to launch something.
+    return placing ? new Error('dor tool requires a tool name or -- <command...>') : listTools(context, flags);
+  }
+  const listing = await readToolList(context, flags);
+  if (listing instanceof Error) return listing;
+  if (listing.tools.length === 0) {
+    printToolList(context, listing, flags);
+    writeStdout(context, 'Declare a Tool in either file; dor skill shows how.\n');
+    return undefined;
+  }
+  // The launch prints the chosen Tool's own warnings.
+  const choice = await runToolPicker({ terminal, listing, home: context.options.env?.HOME ?? context.options.host.homedir() });
+  // A cancel runs nothing and prints nothing, but is not a success.
+  if (!choice) {
+    context.process.exitCode = 1;
+    return undefined;
+  }
+  return dispatchToolSurface(context, {
+    // A shadowed user Tool is the one chosen, so the project's must not run.
+    name: choice.name, args: [], global: flags.global === true || choice.shadowed,
+    ...launchPlacement(context, flags),
+  }, false);
 }
 
 /** The launch round trip `dor tool` and `dor open` share: one Tool request in,
@@ -226,17 +259,26 @@ export async function dispatchToolSurface(
 
 
 async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<void | Error> {
+  const listing = await readToolList(context, flags);
+  if (listing instanceof Error) return listing;
+  printToolList(context, listing, flags);
+  return undefined;
+}
+
+async function readToolList(context: DorCommandContext, flags: ToolFlags): Promise<ToolListResponse | Error> {
   const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);
   if (client instanceof Error) return client;
   try {
-    const listing = await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options), global: flags.global === true });
-    const { warnings, ...shown } = listing;
-    for (const warning of warnings) writeStderr(context, `${printableExact(warning)}\n`);
-    writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));
-    return undefined;
+    return await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options), global: flags.global === true });
   } catch (error) {
     return new Error(printableExact(errorMessage(error)));
   }
+}
+
+function printToolList(context: DorCommandContext, listing: ToolListResponse, flags: ToolFlags): void {
+  const { warnings, ...shown } = listing;
+  for (const warning of warnings) writeStderr(context, `${printableExact(warning)}\n`);
+  writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));
 }
 
 /** Grouped by file, each Tool's description indented beneath it. Every field is
@@ -244,17 +286,10 @@ async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<
  *  looked for a project, so it reports none. */
 function renderToolList(listing: ToolListResponse, global: boolean): string {
   const lines: string[] = [];
-  if (listing.project) lines.push(`project  ${printableExact(listing.project.path)}  [${listing.project.approved ? 'approved' : 'not approved'}]`);
+  if (listing.project) lines.push(`project  ${printableExact(listing.project.path)}  ${approvalTag(listing.project.approved)}`);
   else if (!global) lines.push('project  [no dormouse.yml found]');
   const tool = (entry: ToolListResponse['tools'][number]) => {
-    lines.push(`  ${[
-      printableExact(entry.name),
-      printableExact(JSON.stringify(entry.run)),
-      `[${entry.render}]`,
-      `[port ${entry.port}]`,
-      ...(entry.keyed ? ['[keyed]'] : []),
-      ...(entry.shadowed ? ['[shadowed]'] : []),
-    ].join('  ')}`);
+    lines.push(`  ${[printableExact(entry.name), toolRunText(entry), ...toolTags(entry)].join('  ')}`);
     for (const line of entry.description?.split('\n') ?? []) lines.push(line ? `      ${printableExact(line)}` : '');
   };
   listing.tools.filter(entry => entry.scope === 'project').forEach(tool);

@@ -26,11 +26,21 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 
 **Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` only when that value is absolute**, else `~/.config/dormouse/dormouse.yml`, on both local hosts. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
 
+**Never resolve the user file as a project file**: project discovery ends, finding none, at the configured user file's directory, matched lexically or canonically before reading there; a nearer `dormouse.yml` below it stays a project file.
+
 - **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$HERE` is the directory of the declaring `dormouse.yml` in either scope, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file or directory input (rationale).
 - **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, as well as on a trusted lookup.
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never a command to execute; future computed keys get fields of their own (rationale).
 - **Must reject an empty `prespawn_dedupe` list, and `$TARGET` in a `prespawn_dedupe` whose `run` is a shell-command string**, which takes no inputs.
-- **Must warn when a repo-local key omits `$HERE`, or a `$TARGET` run has a key without `$TARGET`**, still allowing intentional cross-checkout or cross-file dedupe.
+- **Must warn when a project file's key omits `$HERE` (never an imported one's), or a `$TARGET` run has a key without `$TARGET`**, still allowing intentional cross-checkout or cross-file dedupe.
+
+**May import one Tool into the user file from another `dormouse.yml`**: an entry takes exactly one of `run` or `from` (that file's directory, relative to the user file or absolute), plus an optional `tool` naming it there.
+
+- **Must reject `from` in a project file.** Reserved: project-file imports; see scope **dor-tools** under [Future](#future).
+- **Must reject import fields other than `from` and `tool`**, so nothing overrides, and a `from` with `~` or `$`, since nothing expands.
+- **Must read the imported file as a project file**, bounded, never a symlinked file or a UNC or device path, **and use only the named entry**: `$HERE` is its directory, and imports cannot chain.
+- **Must resolve an import as a user Tool under its local name, needing no grant**, its lookup path the imported file.
+- **Must fail a broken import (missing, unreadable, or malformed file or entry) only in its own lookup and the opens selecting it, without fallback**, naming both files; so does a rule selecting an import whose `run` is a string.
 
 **Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$HERE` within elements; a whole `$ARGS` element expands all input arguments; without `$ARGS` or `$TARGET` the inputs are appended. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for restarts. A cmd or PowerShell take-over caller or navigation source gets the Windows-portable form (`docs/specs/dor-cli.md` -> "Current Implemented Commands"): another Windows shell may be at its prompt.
 
@@ -38,7 +48,7 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 
 **Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. Reuse keeps live sizing (`docs/specs/dor-browser.md` → Viewport presets).
 
-Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`.
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## Identity and dedupe
 
@@ -77,7 +87,9 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `resolveToolAp
 
 ## Serving
 
-A Tool frames a port from its Session's process-tree scan while its designated command is current, which `docs/specs/security-local.md` → Dor Tool configuration audits; an OSC announcement only selects among the discovered ports. **Must recheck Tool designation and the command run after asynchronous discovery and browser startup.**
+URL selection follows `docs/specs/dor-cli.md` → Browser Open Target Resolution.
+
+A Tool frames a port owned by its Session's process tree while its designated command runs; audit: `docs/specs/security-local.md` → Dor Tool configuration. OSC announcements select among discovered ports. **Must recheck Tool designation and command run after asynchronous discovery and browser startup.**
 
 | Policy | Selection |
 | --- | --- |
@@ -192,7 +204,7 @@ flowchart TD
 
 **Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never routing them to a native editor (rationale). Generated help owns syntax and response types own shape.
 
-**Must answer `dor tool --list` from the files `dor tool <name>` resolves from the same directory, executing nothing.** A project lists without a grant and reports whether it has one. Each entry carries the comment block directly above it as its description, and a user Tool hidden by a same-named project Tool is `shadowed`. A malformed file fails the listing as it fails lookup.
+**Must answer `dor tool --list` from the files `dor tool <name>` resolves from the same directory, executing nothing.** A project lists without a grant and reports whether it has one. Each entry carries the comment block directly above it as its description, and a user Tool hidden by a same-named project Tool is `shadowed`. A malformed file fails the listing as it fails lookup. Bare, `dor tool` picks or lists one ([Choosing a Tool](#choosing-a-tool)).
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `lib/src/host/tool-list.ts`; `ToolSurfaceResponse` / `ToolListResponse` in `dor/src/commands/types.ts`.
 
@@ -200,7 +212,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must accept exactly one existing local regular file or directory for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools); [Folders](#folders) owns directories.
 
-**Must select the first matching entry of the user file's ordered `open` list.** Every association names an argument-list Tool in that same user file or a built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list.** Every association names an argument-list Tool in that same user file, an import ([Declaring tools](#declaring-tools)), or a built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
 **Must use a matching rule's optional `preview` handler for a `--preview` request**, validated as `tool` is, and its `tool` otherwise; an explicit `--tool` overrides both.
 
@@ -233,6 +245,17 @@ Source of truth: `resolveOpenTool` in `lib/src/host/tool-open.ts`.
 - **Must preserve the query and selected file across terminal resizes.**
 
 Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpenHandlers` in `lib/src/host/tool-open.ts`.
+
+## Choosing a Tool
+
+**Must open a fuzzy Tool picker for `dor tool` with neither a name nor `--` when stdin and stdout are TTYs and `--json` is absent**, offering what `dor tool --list` lists from the same directory, in its order until a query ranks them. The chosen Tool launches as `dor tool <name>` with the invocation's flags, placed by [Take-over](#take-over) as a typed one is; a cancel prints nothing and exits 1.
+
+- **Must launch a chosen `shadowed` user Tool as `--global` would.**
+- **Must print the listing and a pointer to `dor skill` when no Tool is declared**, never an empty picker.
+- **Must print what `dor tool --list` prints, exiting 0, without a TTY or with `--json`**, unless a flag only a launch reads asks for one, which fails for want of a target.
+- **Must preserve the query and highlighted Tool across terminal resizes.**
+
+Source of truth: `runToolPicker` in `dor/src/commands/tool-picker.ts`; `toolCommand` in `dor/src/commands/tool.ts`.
 
 ## Document navigation
 
@@ -397,6 +420,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 **Must persist a preview slot's mark and an opened Tool's canonical target with its Tool metadata**, so a cold-restored slot is still the slot ([Preview slot](#preview-slot)); a persisted target containing terminal controls is rejected, as argv is.
 
+**Must persist a declared Tool's origin, the `dormouse.yml` that declared it, with its Tool metadata**, rejecting one that is not an absolute path or contains terminal controls, as the target is. It is the host lookup's answer, never the renderer's, a request's, or the Tool's; a retarget replaces it; built-in and anonymous Tools have none. `dor list --json` reports it with the Tool's name and scope.
+
 **Must retain resolved argv for argument-list Tools and re-quote it for the shell selected at cold restore** (rationale). Literal shell-string commands retain their saved text. Persisted argv containing terminal controls is rejected before any PTY restores.
 
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, never starting the command in a plain terminal with no serving behavior.
@@ -416,7 +441,7 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `cap
 **Scope: dor-tools** — remaining design, in implementation order.
 
 - **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into the title-candidates channel and `dor list`'s location column.
-- **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and `prespawn_port`. Pocket/remote browser view (rides the browser-surface staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). An in-pane terminal/browser strip (decide against the glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the terminal flash grates. `--has terminal` / `--has browser` *filter flags* for `dor list`, whose rows already carry the fields.
+- **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and `prespawn_port`. Project-file imports, which need a containment rule because a project grant covers only the project root. Pocket/remote browser view (rides the browser-surface staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). An in-pane terminal/browser strip (decide against the glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the terminal flash grates. `--has terminal` / `--has browser` *filter flags* for `dor list`, whose rows already carry the fields.
 
 **Scope: open-folder** — the [Preview slot](#preview-slot)'s speed within the open rules: opt-in retarget without restart, built-in viewer first.
 

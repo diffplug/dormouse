@@ -808,7 +808,7 @@ module.exports.OPEN_PORT_TIMEOUT_MS = OPEN_PORT_TIMEOUT_MS;
 // `standalone/src-tauri/src/lib.rs` — pinned by
 // `lib/src/lib/mirrored-constants.test.ts`. A batched scan's socket
 // enumeration is capped at `openPortScanTimeoutMs(terminals)`, not the
-// per-terminal cap, because its `lsof` argument grows with the batch.
+// per-terminal cap, because a batch can return more owned sockets.
 const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
 module.exports.OPEN_PORT_TIMEOUT_PER_ID_MS = OPEN_PORT_TIMEOUT_PER_ID_MS;
 
@@ -1006,8 +1006,8 @@ function compressIpv6(groups) {
 }
 
 /**
- * Parse a /proc/net/tcp or /proc/net/tcp6 table into listening-socket records,
- * keeping only rows whose socket inode is owned by one of `inodeToPid`.
+ * Parse a /proc/net/tcp or /proc/net/tcp6 table into listening-socket records;
+ * a row whose inode is not in `inodeToPid` keeps `pid` undefined.
  * State `0A` is TCP_LISTEN.
  */
 function parseProcNetTcp(content, family, inodeToPid) {
@@ -1019,7 +1019,6 @@ function parseProcNetTcp(content, family, inodeToPid) {
     if (tokens[3] !== '0A') continue; // TCP_LISTEN
     const inode = tokens[9];
     const pid = inodeToPid.get(inode);
-    if (pid === undefined) continue;
     const [hexIp, hexPort] = tokens[1].split(':');
     if (!hexPort) continue;
     ports.push({
@@ -1063,6 +1062,7 @@ function linuxListeningPorts(pids, runtime = {}) {
   // Attach process names from /proc/<pid>/comm, reading each pid at most once.
   const nameByPid = new Map();
   for (const entry of ports) {
+    if (entry.pid === undefined) continue;
     if (!nameByPid.has(entry.pid)) {
       let name;
       try { name = fsModule.readFileSync(`/proc/${entry.pid}/comm`, 'utf-8').trim(); } catch { /* gone */ }
@@ -1124,17 +1124,13 @@ function parseHostPort(token, wildcardFamily = 'IPv4') {
   return { address, port };
 }
 
-async function macListeningPorts(pids, runtime = {}) {
-  if (pids.length === 0) return [];
-  // lsof exits non-zero when ANY requested pid is gone (or has no matching
-  // files) and still prints the ones it did resolve — the same trap
-  // `getCwdsForPids` documents. A batched scan covers every descendant of
-  // every terminal, so a child exiting between `ps` and `lsof` would
-  // otherwise empty the whole Window's listing.
+async function macListeningPorts(runtime = {}) {
+  // Every visible listener, not just `-p` owned ones: an unrelated process may
+  // shadow a wildcard socket. Keep partial stdout on nonzero exit.
   const out = await runTextLenient(
     runtime,
     'lsof',
-    ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
+    ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcnt'],
     { timeout: runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS },
   );
   return parseLsofListening(out);
@@ -1149,14 +1145,13 @@ function normalizeJsonArray(parsed) {
 
 /**
  * Parse `Get-NetTCPConnection -State Listen | Select LocalAddress,LocalPort,
- * OwningProcess` JSON, keeping rows owned by a pid in `pidSet`.
+ * OwningProcess` JSON.
  */
-function parseNetTcpConnections(json, pidSet) {
+function parseNetTcpConnections(json) {
   const rows = normalizeJsonArray(JSON.parse(json));
   const ports = [];
   for (const row of rows) {
     const pid = Number(row.OwningProcess);
-    if (!pidSet.has(pid)) continue;
     const port = Number(row.LocalPort);
     if (!Number.isInteger(port)) continue;
     const address = String(row.LocalAddress);
@@ -1174,7 +1169,7 @@ function parseNetTcpConnections(json, pidSet) {
 module.exports.parseNetTcpConnections = parseNetTcpConnections;
 
 /** Parse `netstat -ano` LISTENING TCP rows (Windows fallback for older hosts). */
-function parseNetstatListening(output, pidSet) {
+function parseNetstatListening(output) {
   const ports = [];
   for (const line of output.split(/\r?\n/)) {
     const tokens = line.trim().split(/\s+/);
@@ -1182,7 +1177,6 @@ function parseNetstatListening(output, pidSet) {
     if (!/^TCP$/i.test(tokens[0])) continue;
     if (!/^LISTENING$/i.test(tokens[3])) continue;
     const pid = Number(tokens[4]);
-    if (!pidSet.has(pid)) continue;
     const parsed = parseHostPort(tokens[1]);
     if (!parsed) continue;
     ports.push({
@@ -1219,9 +1213,8 @@ function scanDeadline(runtime, budgetMs) {
   };
 }
 
-async function windowsListeningPorts(pids, runtime = {}, names) {
+async function windowsListeningPorts(runtime = {}, names) {
   const remaining = scanDeadline(runtime, runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
-  const pidSet = new Set(pids);
   let ports;
   try {
     const json = await runPowerShell(
@@ -1229,28 +1222,67 @@ async function windowsListeningPorts(pids, runtime = {}, names) {
       runtime,
       remaining(),
     );
-    ports = parseNetTcpConnections(json, pidSet);
+    ports = parseNetTcpConnections(json);
   } catch {
     try {
       const netstat = windowsSystemPath(runtime.env || process.env, 'System32', 'netstat.exe');
-      ports = parseNetstatListening(await runText(runtime, netstat, ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
+      ports = parseNetstatListening(await runText(runtime, netstat, ['-ano', '-p', 'TCP'], { timeout: remaining() }));
     } catch { return []; }
   }
   // Names come from the process-table read; a failed read leaves ports unnamed.
   return ports.map((port) => ({ ...port, processName: names?.get(port.pid) }));
 }
 
-/** `names` (pid -> process name) labels the Windows ports, whose socket table
- *  carries none; other platforms read names alongside their sockets. */
+/** Each platform scan returns every listener it can see, so wildcard
+ *  destinations are chosen before filtering to `pids`. `names` (pid -> process
+ *  name) labels the Windows ports, whose socket table carries none; other
+ *  platforms read names alongside their sockets. */
 async function getListeningPortsForPids(pids, runtime = {}, names) {
+  if (pids.length === 0) return [];
   const platform = runtime.platform || process.platform;
-  if (platform === 'linux') return linuxListeningPorts(pids, runtime);
-  if (platform === 'darwin') return macListeningPorts(pids, runtime);
-  if (platform === 'win32') return windowsListeningPorts(pids, runtime, names);
-  return [];
+  let visible;
+  if (platform === 'linux') visible = linuxListeningPorts(pids, runtime);
+  else if (platform === 'darwin') visible = await macListeningPorts(runtime);
+  else if (platform === 'win32') visible = await windowsListeningPorts(runtime, names);
+  else return [];
+  const owned = new Set(pids);
+  return withConnectAddresses(visible).filter((entry) => owned.has(entry.pid));
 }
 
 module.exports.getListeningPortsForPids = getListeningPortsForPids;
+
+/** Each wildcard's loopback candidates in order, with the bind addresses that
+ *  claim a candidate first (whoever owns them, the wildcard's own process
+ *  included). IPv4 is spelled mapped too: lsof and Windows print
+ *  `::ffff:127.0.0.1`, /proc compresses to `::ffff:7f00:1`. An IPv6 wildcard's
+ *  dual-stack IPv4 fallback must not cross into a separate IPv4 wildcard. */
+const IPV4_LOOPBACK_BINDS = ['127.0.0.1', '::ffff:127.0.0.1', '::ffff:7f00:1'];
+const WILDCARD_LOOPBACK_CANDIDATES = {
+  '0.0.0.0': [['127.0.0.1', IPV4_LOOPBACK_BINDS]],
+  '::': [['::1', ['::1']], ['127.0.0.1', [...IPV4_LOOPBACK_BINDS, '0.0.0.0']]],
+};
+
+/** Set `connectAddress` on each wildcard socket: its first loopback candidate
+ *  no other listener on the port claims, or null when all are claimed. Run it
+ *  over every visible listener, not only owned ones. An IPv6-only socket may
+ *  still refuse the IPv4 fallback; this is a scan-time choice, not a
+ *  reservation against later socket changes. */
+function withConnectAddresses(ports) {
+  const addressesByPort = new Map();
+  for (const { port, address } of ports) {
+    if (!addressesByPort.has(port)) addressesByPort.set(port, new Set());
+    addressesByPort.get(port).add(address);
+  }
+  return ports.map((entry) => {
+    const candidates = WILDCARD_LOOPBACK_CANDIDATES[entry.address];
+    if (!candidates) return entry;
+    const bound = addressesByPort.get(entry.port);
+    const free = candidates.find(([, claimedBy]) => !claimedBy.some((address) => bound.has(address)));
+    return { ...entry, connectAddress: free ? free[0] : null };
+  });
+}
+
+module.exports.withConnectAddresses = withConnectAddresses;
 
 /** De-duplicated by (family, address, port) and sorted by port, then address — the shape a
  *  caller reads a Surface's ports in. */
@@ -1349,10 +1381,10 @@ function parseWslPortScan(output) {
     const socket = /socket:\[(\d+)\]/.exec(line);
     if (socket && current !== undefined) inodeToPid.set(socket[1], current);
   }
-  return [
+  return withConnectAddresses([
     ...parseProcNetTcp(tables.tcp, 'IPv4', inodeToPid),
     ...parseProcNetTcp(tables.tcp6, 'IPv6', inodeToPid),
-  ].map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
+  ]).filter((port) => surfaceOf.has(port.pid)).map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
 }
 
 /** Listening ports inside every running distro for `surfaceIds`, inside the
