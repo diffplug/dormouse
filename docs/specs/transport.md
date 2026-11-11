@@ -45,6 +45,21 @@ Source of truth: `gracefulKill` in `standalone/sidecar/pty-core.js`.
 
 **Both Node-resident hosts (VS Code's extension host, standalone's sidecar) keep a bounded, in-memory-only scrollback per PTY that survives natural, signal-driven, and graceful exit; only an explicit kill (`kill` / `killAll`), a spawn reusing the id, or host-process exit releases it** (rationale). Each host's bound: `docs/specs/vscode.md` → Webview hosting, `docs/specs/standalone.md` → "Rust ↔ sidecar bridge". Stream positions follow Universal invariants.
 
+### Output flow control
+
+The renderer acknowledges the live output it parsed; the host pauses a PTY its renderer lags, so while it acknowledges, nothing between node-pty and xterm holds over twice the high watermark (rationale). **Must count UTF-16 code units of the `data` sent as `pty:data`**, so after the parse; scrollback, received counts, parse, and alerts sit before the pause.
+
+- **Must acknowledge every char of live `pty:data` exactly once**: from xterm's write callback once parsed, in batches; at once when no terminal took it or xterm refused it; never from a timer, nor a replay.
+- **Never leave parsing to timers while the page is hidden or they starve**: each arrival parses a slice (rationale).
+- **Standalone's Rust acknowledges each `pty:data` it drops** (mid-transfer or ownerless).
+- **Must pause a PTY whose unacknowledged output passes the high watermark, and resume it at or below the low one**.
+- **Must let a PTY paused a watchdog period unacknowledged one high watermark further**, every bound alike, its debt kept; acknowledgements pay the allowance off (rationale).
+- **Must forgive what a renderer owes, and resume, when it can no longer pay or need not**: a `requestInit` (its ids; every one when it names none), a transfer mark, a spawn over the id, a VS Code view leaving its PTYs running, the recovery capture's interrupt. A kill drops the count. **Must clamp it at zero**, so a stale acknowledgement owes nothing.
+- **Must resume a paused PTY once its process is gone, and before stopping it**, so node-pty reads its tail (rationale). **On macOS, must read a paused PTY once a peek, below twice the high watermark**: an exit over 1 KB unread keeps 1 KB. **Must deliver input to a paused PTY**: POSIX's line discipline reaches the blocked program; ConPTY reads none while output is blocked, so on Windows input resumes it for a grace, below the same ceiling (rationale).
+- **Only the local owning renderer exerts backpressure**: Pocket's and the fake adapter's `acknowledgePtyData` are no-ops. Its pauses slow every viewer, Clients too.
+
+Source of truth: `PtyDataDispatch` in `lib/src/lib/pty-flow.ts`; `parseOnArrival` in `lib/src/lib/parse-on-arrival.ts`; `createPtyFlowControl` in `lib/src/host/pty-flow-host.ts`; `pause` in `standalone/sidecar/pty-core.js`; `dropped_output_ack` in `standalone/src-tauri/src/lib.rs`.
+
 ### Paced input
 
 `writePty(id, data, { paced: true })` delivers input the way a person types it; every host carries the flag to `pty-core.write`. `surface.send` (`dor send`) is the only paced writer — every other write is one burst.
@@ -155,6 +170,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
 | Host → webview | `pty:openPortsMany` | `[]` for an id with no live PTY. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. |
+| Webview → host | `pty:ack` / `pty_ack` (standalone) | `{ id, chars }` ("Output flow control"). |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
 | Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, admitted `open` requests, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
 | Webview → host | `pty:input` / `pty_write` | `launch`: a command line the host types to run; the owner arms its OSC 367 `open` latch before writing (`docs/specs/dor-tool.md` → OSC 367). |

@@ -26,6 +26,7 @@ import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
 import { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from '../../lib/platform/managed-voice-types';
 import { openSequence } from 'dor-tools-lib/osc';
+import { PTY_HIGH_WATERMARK_CHARS, PTY_LOW_WATERMARK_CHARS } from '../../lib/pty-flow';
 
 // A stock Hosted build: the test runner bakes no define, which reads as self-host.
 vi.mock('../relay-origin', async (importOriginal) => {
@@ -761,6 +762,9 @@ describe('the sidecar host', () => {
         resize: record('resize', true),
         kill: record('kill'),
         list: record('list'),
+        mark: record('mark'),
+        pause: record('pause'),
+        resume: record('resume'),
         hasPty: () => true,
       },
     });
@@ -1031,6 +1035,94 @@ describe('the sidecar host', () => {
       saving.dispose();
       await rm(stateDir, { recursive: true, force: true });
     }
+  });
+
+  describe('output flow control', () => {
+    const flowCalls = () => calls
+      .filter(({ op }) => ['pause', 'resume', 'list', 'mark', 'spawn', 'kill'].includes(op))
+      .map(({ op, args }) => `${op} ${String(args[0])}`);
+    /** Past the high watermark in one chunk, through the real parse. */
+    const flood = (id = 'pty-1') => host.onPtyEvent('data', { id, data: 'x'.repeat(PTY_HIGH_WATERMARK_CHARS + 1) });
+
+    it('pauses a PTY whose window has not parsed past the high watermark, and resumes it as it acknowledges', () => {
+      flood();
+      flood('pty-2');
+      expect(flowCalls()).toEqual(['pause pty-1', 'pause pty-2']);
+      host.handleCommand('pty:ack', { id: 'pty-1', chars: PTY_HIGH_WATERMARK_CHARS + 1 - PTY_LOW_WATERMARK_CHARS - 1 });
+      expect(flowCalls()).toEqual(['pause pty-1', 'pause pty-2']);
+      host.handleCommand('pty:ack', { id: 'pty-1', chars: 1 });
+      expect(flowCalls()).toEqual(['pause pty-1', 'pause pty-2', 'resume pty-1']);
+    });
+
+    it('counts what reached the window as `pty:data`, after the parse strips its OSCs', () => {
+      host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;A\x07${'x'.repeat(PTY_HIGH_WATERMARK_CHARS)}` });
+      const sent = out.filter((line) => line.event === 'pty:data').map((line) => (line.data as { data: string }).data);
+      expect(sent.join('').length).toBe(PTY_HIGH_WATERMARK_CHARS);
+      expect(flowCalls()).toEqual([]);
+    });
+
+    it('forgives and resumes when the window re-asks, a transfer marks, a spawn replaces the PTY, or the quit captures', () => {
+      flood();
+      host.handleCommand('pty:requestInit', { ids: ['pty-1'], forWindow: 'main' });
+      flood();
+      host.handleCommand('pty:mark', { ids: ['pty-1'], requestId: 'mark-1' });
+      flood();
+      host.handleCommand('pty:spawn', { id: 'pty-1', options: {} });
+      flood();
+      host.resetPtyFlow(['pty-1']);
+      expect(flowCalls()).toEqual([
+        'pause pty-1', 'resume pty-1', 'list pty-1',
+        'pause pty-1', 'resume pty-1', 'mark pty-1',
+        'pause pty-1', 'resume pty-1', 'spawn pty-1',
+        'pause pty-1', 'resume pty-1',
+      ]);
+    });
+
+    it('forgives every PTY on a request that names none, as `list` reads it', () => {
+      flood();
+      flood('pty-2');
+      host.handleCommand('pty:requestInit', { requestId: 'boot' });
+      expect(flowCalls()).toEqual(['pause pty-1', 'pause pty-2', 'resume pty-1', 'resume pty-2', 'list undefined']);
+    });
+
+    it('on Windows, lets any write through to a paused PTY by resuming it first', () => {
+      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      let windows: SidecarHost;
+      try {
+        windows = createSidecarHost({
+          send: (event, data) => void out.push({ event, data }),
+          mgr: {
+            spawn: record('spawn'), setParentWindow: record('setParentWindow'), write: record('write'),
+            resize: record('resize'), kill: record('kill'), list: record('list'), mark: record('mark'),
+            pause: record('pause'), resume: record('resume'), hasPty: () => true,
+          },
+        });
+      } finally {
+        Object.defineProperty(process, 'platform', platform);
+      }
+      try {
+        windows.onPtyEvent('data', { id: 'pty-1', data: 'x'.repeat(PTY_HIGH_WATERMARK_CHARS + 1) });
+        windows.handleCommand('pty:input', { id: 'pty-1', data: '\x03' });
+        // A paced slice `pty-core` writes later, the grace long gone, resumes it again.
+        windows.onPtyEvent('data', { id: 'pty-2', data: 'x'.repeat(PTY_HIGH_WATERMARK_CHARS + 1) });
+        windows.inputWritten('pty-2');
+        expect(calls.filter(({ op }) => ['pause', 'resume', 'write'].includes(op)).map(({ op, args }) => `${op} ${String(args[0])}`))
+          .toEqual(['pause pty-1', 'resume pty-1', 'write pty-1', 'pause pty-2', 'resume pty-2']);
+      } finally {
+        windows.dispose();
+      }
+    });
+
+    it('drops a killed or reaped PTY’s count without resuming it', () => {
+      flood();
+      flood('pty-2');
+      host.handleCommand('pty:kill', { id: 'pty-1' });
+      host.handleCommand('pty:reap', { ids: ['pty-2'] });
+      host.handleCommand('pty:ack', { id: 'pty-1', chars: PTY_HIGH_WATERMARK_CHARS });
+      host.handleCommand('pty:requestInit', { ids: ['pty-1', 'pty-2'] });
+      expect(flowCalls()).toEqual(['pause pty-1', 'pause pty-2', 'kill pty-1', 'kill pty-2', 'list pty-1,pty-2']);
+    });
   });
 
   it('leaves every other command to main.js', () => {

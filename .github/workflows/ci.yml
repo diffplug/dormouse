@@ -561,6 +561,16 @@ jobs:
           DORMOUSE_CONFORMANCE_WRITE_PROFILE: '1'
         run: pnpm exec node --test --test-force-exit standalone/sidecar/graceful-kill-windows.test.js standalone/sidecar/pty-host-wiring.test.js standalone/sidecar/pty-core.test.js standalone/sidecar/shell-conformance.test.js
 
+      # Output flow control on real ConPTY: a paused PTY blocks its program,
+      # resumes for input, and still delivers its tail and exit. The package
+      # suites run these on Linux, which cannot show what ConPTY does.
+      - name: Windows PTY flow-control tests
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pnpm --dir standalone exec vitest run src/sidecar-flow-control.test.ts
+          pnpm --dir vscode-ext exec vitest run test/pty-host-flow.test.ts
+
       # The package suites run on Linux, where these cases skip: `.cmd` shims
       # and UNC working directories, ACL-preserving saves, PATHEXT, and the WSL
       # caller. Only the Windows cases run here, by name; the tests import each
