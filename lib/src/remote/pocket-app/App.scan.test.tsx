@@ -1001,6 +1001,24 @@ it('leads with the camera-bootstrap copy when the fragment brought us here', asy
   expect(fake.retireSetupToken).not.toHaveBeenCalled();
 });
 
+it('says the camera code went unused on the list a kept session lands on', async () => {
+  // A phone already paired with one computer is who scans a second.
+  fake.hasPriorUse = true;
+  fake.sessionToken = 'stored';
+  fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1')]);
+  fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: 'x', online: true }]);
+  await boot({ arrivedByCamera: true });
+
+  expect(rowFor(container, 'First laptop')).not.toBeNull();
+  expect(container.textContent).toContain(CAMERA_BOOTSTRAP_MESSAGE);
+
+  // Moot once the scan it asks for has been opened here.
+  await click(container, SCAN_LABEL);
+  await click(container, 'Cancel');
+  expect(rowFor(container, 'First laptop')).not.toBeNull();
+  expect(container.textContent).not.toContain(CAMERA_BOOTSTRAP_MESSAGE);
+});
+
 describe('the deployment read', () => {
   /** Hosted's Pocket must never build a peer before it knows it is Hosted's. */
   it('fails a Connect it has not completed, retryably, and reads again on the next', async () => {

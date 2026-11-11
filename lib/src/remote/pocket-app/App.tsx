@@ -213,6 +213,11 @@ export default function App({
     at: client.sessionToken === null ? 'auth' : 'restoring',
   }));
   /**
+   * The list's copy of the native-camera notice: a kept session skips the
+   * sign-in screen that carries it, and it is moot once a scan is opened here.
+   */
+  const [cameraNoticeOnList, setCameraNoticeOnList] = useState(arrivedByCamera);
+  /**
    * The last failure. Unkeyed, because every screen that reports one owns its
    * whole viewport: whatever failed last is the only thing there is to say.
    */
@@ -705,6 +710,7 @@ export default function App({
 
   const openScanner = () => {
     setError(null);
+    setCameraNoticeOnList(false);
     setPhase({ at: 'scan' });
   };
 
@@ -788,6 +794,7 @@ export default function App({
         <BurrowsView
           burrows={burrows}
           deployment={deployment}
+          arrivedByCamera={cameraNoticeOnList}
           busy={busy}
           error={error}
           isPushSubscribed={isPushOn}
@@ -1289,6 +1296,7 @@ function PushNotice({
 export function BurrowsView({
   burrows,
   deployment = 'self-host',
+  arrivedByCamera = false,
   busy,
   error,
   isPushSubscribed,
@@ -1307,6 +1315,8 @@ export function BurrowsView({
   burrows: BurrowView[];
   /** Who serves this Pocket, which names what a removed row was removed from. */
   deployment?: PocketDeployment;
+  /** This run was opened from a `#pair?` link the native camera followed. */
+  arrivedByCamera?: boolean;
   busy: string | null;
   error: string | null;
   /** True only where this device holds a Relay push row for that Burrow. */
@@ -1462,6 +1472,12 @@ export function BurrowsView({
             );
           })
         )}
+        {arrivedByCamera ? (
+          <div className={PK.notice}>
+            <div className={PK.noticeTitle}>{CAMERA_BOOTSTRAP_MESSAGE}</div>
+            <p className={PK.noticeBody}>The code your camera opened was not used.</p>
+          </div>
+        ) : null}
         <button
           type="button"
           className={pkButton({ tone: 'outline', block: true })}
