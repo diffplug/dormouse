@@ -465,7 +465,10 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
               >
                 Remove
               </button>}
-              name={owner ? `Part of ${owner.label} · ${owner.id}` : 'Added range · not connected now'}
+              // No interface lists it as its own, which says nothing about
+              // being connected: this compares strings, not ranges, and a
+              // typed supernet can hold a connected interface's range.
+              name={owner ? `Part of ${owner.label} · ${owner.id}` : 'Added range'}
               prefixes={[cidr]}
             />
           );

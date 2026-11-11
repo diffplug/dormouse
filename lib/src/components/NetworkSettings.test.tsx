@@ -529,6 +529,16 @@ describe('Settings → Network', () => {
     expect(sentPolicies()).toEqual([{ ...both, allowed: ['fd00:1::/64'] }]);
   });
 
+  it('never calls a typed range holding a connected interface not connected', async () => {
+    // The panel compares strings, not ranges: a supernet of en0's LAN has no
+    // owner here, though this machine is connected inside it.
+    const wide = { ...LOCAL, allowed: ['192.168.0.0/16'] };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(wide, 'hosted', [WIFI]) });
+    await render();
+    expect(text()).toContain('Added range192.168.0.0/16');
+    expect(text()).not.toContain('not connected now');
+  });
+
   it('turns off one of two interfaces on the same LAN', async () => {
     // A docked laptop: Wi-Fi and Ethernet report the same ranges.
     const wired: NetworkInterfaceInfo = { ...WIFI, id: 'en7' };
@@ -625,7 +635,7 @@ describe('Settings → Network', () => {
     expect(command).toHaveBeenCalledWith('setNetworkPolicy', {
       policy: { ...LOCAL, allowed: [LAN, '10.8.0.7/24'] },
     });
-    expect(text()).toContain('Added range · not connected now10.8.0.0/24');
+    expect(text()).toContain('Added range10.8.0.0/24');
     expect(text()).not.toContain('10.8.0.7');
     expect(input.value).toBe('');
   });
