@@ -46,7 +46,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const id of ['flow-batch', 'flow-throw', 'flow-replay']) disposeSession(id);
+  for (const id of ['flow-batch', 'flow-throw', 'flow-replay', 'flow-hidden']) disposeSession(id);
   platform.killPty('flow-gone');
   delete (platform as Partial<FakePtyAdapter>).acknowledgePtyData;
   vi.restoreAllMocks();
@@ -100,6 +100,15 @@ describe('a terminal acknowledging its output', () => {
       platform.offPtyData(later);
       error.mockRestore();
     }
+  });
+
+  it('parses on arrival while the page is hidden', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    const { terminal } = getOrCreateTerminal('flow-hidden');
+    const loop = vi.spyOn((terminal as unknown as { _core: { _writeBuffer: { _innerWrite(): void } } })._core._writeBuffer, '_innerWrite');
+    platform.sendOutput('flow-hidden', 'x');
+    await Promise.resolve();
+    expect(loop).toHaveBeenCalledTimes(1);
   });
 
   it('never counts a replay, only the live output after it', () => {

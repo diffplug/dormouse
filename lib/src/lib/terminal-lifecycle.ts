@@ -12,6 +12,7 @@ import { TerminalWebglRenderer } from './terminal-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import { isMacSelectAll } from './select-all';
+import { parseOnArrival } from './parse-on-arrival';
 import type { PtyDataHandler } from './platform/types';
 import type { HelperIdentity } from './terminal-context-types';
 import type { PersistedAlertState } from './session-types';
@@ -231,16 +232,17 @@ function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal;
 function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const platform = getPlatform();
   let reportedDiscard = false;
+  const write = parseOnArrival(terminal);
   const handleData: PtyDataHandler = (detail, claim) => {
     if (detail.id !== id) return;
     // The parser already told us which bytes are text; `textData` is omitted
     // when it would equal `data`.
     recordTerminalOutput(id, detail.textData ?? detail.data);
     // Acknowledged from the write callback, once xterm has parsed the chunk,
-    // so a throttled window acknowledges exactly as fast as it parses.
+    // so the host paces its PTY to the parse.
     const parsed = claim?.();
     try {
-      terminal.write(detail.data, parsed);
+      write(detail.data, parsed);
     } catch (error) {
       // xterm discards a chunk once 50M chars wait unparsed. The host's flow
       // control keeps it far below that; a host without it (Pocket) can reach
