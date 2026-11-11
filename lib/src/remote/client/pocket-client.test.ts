@@ -445,7 +445,7 @@ describe('connecting, end to end', () => {
     await harness.client.connect(harness.burrowId);
 
     const chunks: TerminalDataEvent[] = [];
-    await harness.client.attach('surface:1', 80, 24, { onData: (event) => chunks.push(event) });
+    await harness.client.attach('surface:1', 80, 24, { onAttached: () => {}, onData: (event) => chunks.push(event) });
 
     // The pair travels whole: splitting it here is what left Pocket feeding
     // image base64 to the prompt heuristic (docs/specs/remote-api.md).
@@ -978,7 +978,7 @@ describe('the direct path, end to end', () => {
 
     expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
     await run.harness.client.watchDirectory(() => {});
-    await run.harness.client.attach('surface:1', 80, 24, { onData: (e) => chunks.push(e) });
+    await run.harness.client.attach('surface:1', 80, 24, { onAttached: () => {}, onData: (e) => chunks.push(e) });
     await run.harness.client.write('surface:1', 'ls\n');
 
     // The relay carried none of it, in either direction.

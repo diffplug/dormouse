@@ -218,6 +218,22 @@ describe('RemotePtyAdapter attach / active pane', () => {
     expect(data).toEqual([{ id: 's1', data: 'héllo ▲', textData: undefined }]);
   });
 
+  it("puts the pane's xterm into the attach's modes, and nothing once closed", async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const data: PtyDataDetail[] = [];
+    adapter.onPtyData((d) => data.push(d));
+
+    await adapter.setActivePane('s1', 80, 24);
+    const { handlers } = client.lastAttach();
+    handlers.onAttached({ cols: 80, rows: 24, modes: { ...FRESH_TERMINAL_MODES, mouseTracking: 'any' } });
+    handlers.onClosed?.(0);
+    handlers.onAttached({ cols: 80, rows: 24, modes: { ...FRESH_TERMINAL_MODES, bracketedPaste: true } });
+
+    expect(data.map((d) => d.id)).toEqual(['s1']);
+    expect(data[0]!.data.includes('\x1b[?1003h')).toBe(true);
+  });
+
   it('passes the text projection through, empty included', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);

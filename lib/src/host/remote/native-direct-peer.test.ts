@@ -289,7 +289,7 @@ describe('the direct path over the native addon', () => {
 
       expect(await harness.client.hello()).toMatchObject({ protocolVersion: 1 });
       await harness.client.watchDirectory(() => {});
-      await harness.client.attach('surface:1', 80, 24, { onData: (e) => chunks.push(e) });
+      await harness.client.attach('surface:1', 80, 24, { onAttached: () => {}, onData: (e) => chunks.push(e) });
       await harness.client.write('surface:1', 'ls\n');
 
       // Requests, answers, and the burrow→client stream all crossed the channel;

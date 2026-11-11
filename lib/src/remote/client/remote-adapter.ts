@@ -16,10 +16,13 @@ import {
 } from 'remote-lib-common';
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
 import type { PlatformAdapter, PtyDataDetail, OpenPort } from '../../lib/platform/types';
+import { terminalModesReplay } from '../../lib/terminal-modes';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 
 /** Terminal stream callbacks for {@link RemoteAdapterClient.attach}. */
 export interface TerminalHandlers {
+  /** The attach's answer, before the first of its events. */
+  onAttached(result: TerminalAttachResult): void;
   /** One `terminal.data` payload: the renderer projection, and the text one
    *  when it differs. Passed whole rather than as bytes so the pair cannot be
    *  split here (`docs/specs/remote-api.md` → "Terminal surfaces"). */
@@ -228,6 +231,11 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
     let closed = false;
     const handlers: TerminalHandlers = {
+      // The program set its modes before this attach, and the repaint that
+      // follows will not set them again: the pane's xterm takes them first.
+      onAttached: ({ modes }) => {
+        if (!closed) this.#emit({ id, data: terminalModesReplay(modes) });
+      },
       onData: (event) => { if (!closed) this.#emitData(id, event); },
       onClosed: (exitCode) => {
         closed = true;
@@ -325,7 +333,12 @@ export class RemotePtyAdapter implements PlatformAdapter {
       console.warn('[pocket] discarding malformed terminal data');
       return;
     }
-    for (const handler of this.#dataHandlers) handler({ id, data, textData });
+    this.#emit({ id, data, textData });
+  }
+
+  #emit(detail: PtyDataDetail): void {
+    if (this.#disposed) return;
+    for (const handler of this.#dataHandlers) handler(detail);
   }
 
   #emitExit(id: string, exitCode?: number): void {
