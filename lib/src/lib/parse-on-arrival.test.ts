@@ -149,6 +149,23 @@ describe('a visible page', () => {
     expect(screen()).toContain('abcde');
   });
 
+  it('takes over from timers its host wakes once a second', async () => {
+    // One chunk per slice, so a backlog stands between wakes.
+    let clock = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => (clock += 20));
+    const start = Date.now();
+    const chunk = `${'x'.repeat(10)}\r\n`;
+    for (let tick = 1; tick <= 30; tick++) {
+      vi.setSystemTime(start + tick * 100);
+      // Each wake finishes a write, so no arrival waits a whole second.
+      if (tick % 10 === 0) vi.runOnlyPendingTimers();
+      await arrive(chunk);
+    }
+    expect(slices.count).toBeGreaterThan(0);
+    // The three wakes alone would have parsed three chunks.
+    expect(acked / chunk.length).toBeGreaterThan(20);
+  });
+
   it('never parses on arrival while its timers keep up', async () => {
     vi.useRealTimers();
     const done = new Promise<void>((resolve) => {

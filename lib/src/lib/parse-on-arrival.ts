@@ -4,8 +4,11 @@ import { hostShown } from './host-shown';
 
 /** How long written output may wait with no write finishing, while more
  *  arrives, before arrivals parse it: xterm's timers are starved, as in a
- *  window its host throttles without reporting it hidden. */
-export const PARSE_STARVED_MS = 1_000;
+ *  window its host throttles without reporting it hidden. Well under a
+ *  second, since a once-a-second timer finishes a write at each wake; well
+ *  over a frame, since parsing on arrival in a healthy visible window costs
+ *  it frames. */
+export const PARSE_STARVED_MS = 250;
 
 /**
  * Returns a write for `terminal` that keeps output parsing when xterm's timers
