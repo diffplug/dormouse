@@ -11,6 +11,7 @@ import {
   type StringControlKind,
 } from './terminal-controls';
 import {
+  boundedCwdValue,
   cwdFromOsc1337,
   cwdFromOsc633,
   cwdFromOsc7,
@@ -328,7 +329,7 @@ export class TerminalProtocolParser {
     const remoteHost = '1337;RemoteHost=';
     if (content.startsWith(remoteHost)) {
       const value = content.slice(remoteHost.length);
-      this.remoteHost = value.slice(value.lastIndexOf('@') + 1);
+      this.remoteHost = boundedCwdValue(value.slice(value.lastIndexOf('@') + 1));
       return [];
     }
     const prefix = '1337;CurrentDir=';
