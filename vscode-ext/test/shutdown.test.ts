@@ -1,11 +1,11 @@
 import type * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const calls = vi.hoisted(() => ({
-  browser: vi.fn(), capture: vi.fn(), flush: vi.fn(), refresh: vi.fn(), graceful: vi.fn(), kill: vi.fn(), error: vi.fn(),
+  browser: vi.fn(), capture: vi.fn(), silence: vi.fn(), flush: vi.fn(), refresh: vi.fn(), graceful: vi.fn(), kill: vi.fn(), error: vi.fn(),
 }));
 vi.mock('../src/agent-browser-host', () => ({ closeBrowserSessions: calls.browser }));
 vi.mock('../src/session-state', () => ({ captureAgentRecoveryCommands: calls.capture, refreshSavedSessionStateFromPtys: calls.refresh }));
-vi.mock('../src/message-router', () => ({ flushAllSessions: calls.flush, getAlertStates: () => new Map() }));
+vi.mock('../src/message-router', () => ({ flushAllSessions: calls.flush, getAlertStates: () => new Map(), silenceAlertRun: calls.silence }));
 vi.mock('../src/pty-manager', () => ({ gracefulKillLive: calls.graceful, killAll: calls.kill }));
 vi.mock('../src/log', () => ({ log: { info: vi.fn(), error: calls.error } }));
 import { shutdown } from '../src/shutdown';
@@ -23,6 +23,8 @@ describe('extension shutdown', () => {
     const done = shutdown(context);
     expect(calls.browser).toHaveBeenCalledOnce();
     expect(calls.capture).toHaveBeenCalledOnce();
+    // The capture's interrupts reach the alerts as the host's own.
+    expect(calls.capture.mock.calls[0][1]).toBe(calls.silence);
     expect(calls.flush).not.toHaveBeenCalled();
     finishCapture();
     await done;

@@ -28,6 +28,8 @@ test('recovery capture and the record take are answered from pty-core marks', ()
   assert.match(source, /outputSince:\s*\(id,\s*mark\)\s*=>\s*mgr\.outputSince\(id,\s*mark\)/);
   // Widens each target before its first press (recovery-capture.ts -> RECOVERY_SIZE).
   assert.match(source, /resize:\s*\(id,\s*cols,\s*rows\)\s*=>\s*mgr\.resize\(id,\s*cols,\s*rows\)/);
+  // The capture's ^C ends each run; the alerts must hear it as the host's own.
+  assert.match(source, /silenceRun:\s*\(id\)\s*=>\s*host\.alerts\.silenceRun\(id\)/);
 });
 
 test('iframe leases are owned by the window Rust stamps, and end with it', () => {

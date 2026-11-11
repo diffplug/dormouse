@@ -145,6 +145,7 @@ function recoveryStore(context: vscode.ExtensionContext): RecoveryStore {
  */
 export async function captureAgentRecoveryCommands(
   context: vscode.ExtensionContext,
+  silenceRun: (id: string) => void,
   maxWaitMs = DEFAULT_RECOVERY_WAIT_MS,
 ): Promise<void> {
   const recovery = recoveryStore(context);
@@ -156,6 +157,7 @@ export async function captureAgentRecoveryCommands(
     liveIds: ptyManager.liveIds,
     resize: (id, cols, rows) => ptyManager.resize(id, cols, rows),
     interrupt: (ids) => ptyManager.interrupt(ids),
+    silenceRun,
     receivedChars: (id) => ptyManager.getScrollbackReceived(id),
     outputSince: (id, mark) => ptyManager.getScrollbackSince(id, mark),
     onCommand: (id, command) => recovery.record(id, command),
