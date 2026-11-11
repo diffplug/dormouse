@@ -18,6 +18,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ALERT_EVENTS } from "dormouse-lib/host/alert-protocol";
 import type { AlertStateDetail, PlatformAdapter, PtyDataDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
+import { PTY_ACK_BATCH_CHARS } from "dormouse-lib/lib/pty-flow";
 import { BrowserSidecarAdapter } from "./browser-sidecar-adapter";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
 import { TauriAdapter } from "./tauri-adapter";
@@ -150,7 +151,24 @@ describe.each([
       { id: "t1", data: "pre\x1b]1337;File=inline=1:AAAA\x07post", textData: "prepost" },
       { id: "t1", data: "\x1b]11;?\x07" },
     ]);
+    // No answer to the query went back; only each chunk's acknowledgement,
+    // at once, since no terminal took it.
+    expect(sent()).toEqual([
+      ["pty_ack", { id: "t1", chars: seen[0].data.length }],
+      ["pty_ack", { id: "t1", chars: seen[1].data.length }],
+    ]);
+  });
+
+  // docs/specs/transport.md -> "Output flow control".
+  it("acknowledges a terminal's chunk once it is parsed, a batch per message", async () => {
+    const { adapter, deliver, sent } = await open();
+    const parsed: Array<() => void> = [];
+    adapter.onPtyData((_detail, claim) => void parsed.push(claim!()));
+    deliver("pty:data", { id: "t1", data: "x".repeat(PTY_ACK_BATCH_CHARS - 1) });
+    deliver("pty:data", { id: "t1", data: "yz" });
     expect(sent()).toEqual([]);
+    for (const done of parsed) done();
+    expect(sent()).toEqual([["pty_ack", { id: "t1", chars: PTY_ACK_BATCH_CHARS + 1 }]]);
   });
 
   // A page in a browser pane can `postMessage` this window, and in VS Code the

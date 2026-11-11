@@ -277,7 +277,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   onPtyData(handler: PtyDataHandler): void { this.ptyData.add(handler); }
   offPtyData(handler: PtyDataHandler): void { this.ptyData.delete(handler); }
-  acknowledgePtyData(_id: string, _chars: number): void {}
+  acknowledgePtyData(id: string, chars: number): void { this.host.send("pty_ack", { id, chars }); }
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.add(handler); }
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.delete(handler); }
   requestInit(requestId?: string): void {

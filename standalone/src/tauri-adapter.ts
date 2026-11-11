@@ -498,7 +498,11 @@ export class TauriAdapter implements PlatformAdapter {
     this.ptyData.delete(handler);
   }
 
-  acknowledgePtyData(_id: string, _chars: number): void {}
+  /** One `pty_ack` per batch the dispatch collects; Rust forwards it as `pty:ack`
+   *  (docs/specs/transport.md -> "Output flow control"). */
+  acknowledgePtyData(id: string, chars: number): void {
+    invoke("pty_ack", { id, chars });
+  }
 
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void {
     this.exitHandlers.add(handler);

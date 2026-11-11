@@ -548,7 +548,13 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
 
     let mut delivered: Option<&str> = None;
     match &delivery {
-        Delivery::Nowhere => {}
+        Delivery::Nowhere => {
+            if let (Some(line), Some(sidecar)) =
+                (dropped_output_ack(event, &data), app.try_state::<SidecarState>())
+            {
+                send_to_sidecar(&sidecar, line);
+            }
+        }
         Delivery::Broadcast => {
             let _ = app.emit(event, &data);
         }
@@ -1525,6 +1531,30 @@ fn stamped_message(label: &str, event: &str, mut payload: JsonValue) -> String {
 fn pty_resize(state: tauri::State<'_, SidecarState>, id: String, cols: u16, rows: u16) {
     let msg = sidecar_line("pty:resize", serde_json::json!({ "id": id, "cols": cols, "rows": rows }));
     send_to_sidecar(&state, msg);
+}
+
+/// A window parsed `chars` of `id`'s live output (docs/specs/transport.md ->
+/// "Output flow control"); the sidecar decides whether that resumes the PTY.
+#[tauri::command]
+fn pty_ack(state: tauri::State<'_, SidecarState>, id: String, chars: u64) {
+    send_to_sidecar(&state, pty_ack_line(&id, chars));
+}
+
+fn pty_ack_line(id: &str, chars: u64) -> String {
+    sidecar_line("pty:ack", serde_json::json!({ "id": id, "chars": chars }))
+}
+
+/// A `pty:data` no window will parse — mid-transfer, or owned by none — is
+/// acknowledged here on its renderer's behalf: the sidecar counted it as sent,
+/// and nothing else would ever pay it back. Counted in UTF-16 code units, the
+/// unit the sidecar sent it in.
+fn dropped_output_ack(event: &str, data: &JsonValue) -> Option<String> {
+    if event != "pty:data" {
+        return None;
+    }
+    let id = data.get("id")?.as_str()?;
+    let chars = data.get("data")?.as_str()?.encode_utf16().count() as u64;
+    (chars > 0).then(|| pty_ack_line(id, chars))
 }
 
 // The webview's resolved terminal colors, so the sidecar's parser can answer
@@ -5136,6 +5166,7 @@ pub fn run() {
             pty_spawn,
             pty_write,
             pty_resize,
+            pty_ack,
             pty_theme_colors,
             pty_kill,
             pty_get_cwd,
@@ -5668,6 +5699,25 @@ mod tests {
         assert_eq!(
             parse_line(&super::pty_input_message("t1", "view\r", None, None, Some(true))),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "view\r", "launch": true } })
+        );
+    }
+
+    /// Output no window will parse is acknowledged on its behalf, in the
+    /// sidecar's own unit, a JS string's length: UTF-16 code units.
+    #[test]
+    fn dropped_output_is_acknowledged_in_utf16_code_units() {
+        let chunk = serde_json::json!({ "id": "t1", "data": "a😀é\r\n" });
+        assert_eq!(
+            parse_line(&super::dropped_output_ack("pty:data", &chunk).unwrap()),
+            serde_json::json!({ "event": "pty:ack", "data": { "id": "t1", "chars": 6 } })
+        );
+        // Only output owes anything, and only a nonempty chunk.
+        assert_eq!(super::dropped_output_ack("terminal:semanticEvents", &chunk), None);
+        assert_eq!(super::dropped_output_ack("pty:data", &serde_json::json!({ "id": "t1", "data": "" })), None);
+        assert_eq!(super::dropped_output_ack("pty:data", &serde_json::json!({ "data": "x" })), None);
+        assert_eq!(
+            parse_line(&super::pty_ack_line("t1", 5000)),
+            serde_json::json!({ "event": "pty:ack", "data": { "id": "t1", "chars": 5000 } })
         );
     }
 
