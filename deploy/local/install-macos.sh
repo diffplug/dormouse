@@ -1290,27 +1290,6 @@ if ((fs.statSync(file).mode & 0o777) !== 0o600) process.exit(1);
 ok "candidate generated its setup password in owner-only state"
 probe_cleanup
 
-# ----------------------------------------------------------- switch release --
-
-step "Switching to the new release"
-
-OLD_RELEASE=""
-if [ -L "$CURRENT_LINK" ]; then
-  OLD_RELEASE="$(readlink "$CURRENT_LINK")"
-fi
-
-if [ -n "$OLD_RELEASE" ]; then
-  atomic_symlink "$OLD_RELEASE" "$PREVIOUS_LINK" "$STAGE/runtime/node"
-  detail "previous -> $(basename "$OLD_RELEASE")"
-fi
-atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
-
-# Prove the switch actually landed: a silently unmoved `current` is exactly the
-# failure this step exists to prevent.
-SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
-[ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
-ok "current -> $RELEASE_ID"
-
 # ------------------------------------------------------------- launchagent --
 
 write_plist() {
@@ -1349,6 +1328,33 @@ PLIST_EOF
   chmod 0644 "$PLIST"
   plutil -lint "$PLIST" >/dev/null || die "generated plist failed plutil -lint: $PLIST"
 }
+
+# Before `current` moves, so a plist that fails its lint leaves the running
+# release untouched rather than switched with nothing to roll it back.
+step "Installing the LaunchAgent"
+write_plist
+ok "wrote and linted $PLIST"
+
+# ----------------------------------------------------------- switch release --
+
+step "Switching to the new release"
+
+OLD_RELEASE=""
+if [ -L "$CURRENT_LINK" ]; then
+  OLD_RELEASE="$(readlink "$CURRENT_LINK")"
+fi
+
+if [ -n "$OLD_RELEASE" ]; then
+  atomic_symlink "$OLD_RELEASE" "$PREVIOUS_LINK" "$STAGE/runtime/node"
+  detail "previous -> $(basename "$OLD_RELEASE")"
+fi
+atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
+
+# Prove the switch actually landed: a silently unmoved `current` is exactly the
+# failure this step exists to prevent.
+SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
+[ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
+ok "current -> $RELEASE_ID"
 
 rollback_release() {
   warn "restoring the previous release"
@@ -1392,6 +1398,12 @@ rollback_release() {
       warn "the previous release ($old_id) is healthy again."
       return 0
     fi
+    # kickstart cannot load an unloaded label, which is where a failed forward
+    # bootstrap leaves the agent, and launchd refuses a bootstrap while the
+    # outgoing agent is still exiting, so keep offering it until it loads.
+    if [ "$TEST_MODE" != "1" ] && ! launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1; then
+      launchctl bootstrap "gui/$UID" "$PLIST" >/dev/null 2>&1 || true
+    fi
     sleep 0.5
     j=$((j + 1))
   done
@@ -1403,10 +1415,7 @@ rollback_release() {
   return 1
 }
 
-step "Installing the LaunchAgent"
-write_plist
-ok "wrote and linted $PLIST"
-
+step "Loading the LaunchAgent"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping launchctl bootout/bootstrap/kickstart"
 else
@@ -1422,14 +1431,21 @@ else
   if [ "$BOOTOUT_RC" != "0" ]; then
     case "$BOOTOUT_OUT" in
       *"No such process"*|*"not find"*|*"not currently loaded"*) detail "no previously loaded agent (first install)" ;;
-      *) die "launchctl bootout failed unexpectedly (rc=$BOOTOUT_RC): $BOOTOUT_OUT" ;;
+      *) rollback_release || true; die "launchctl bootout failed unexpectedly (rc=$BOOTOUT_RC): $BOOTOUT_OUT" ;;
     esac
   else
     detail "unloaded the previous agent"
   fi
 
-  launchctl bootstrap "gui/$UID" "$PLIST" || die "launchctl bootstrap failed for $PLIST"
-  launchctl kickstart -k "gui/$UID/$LABEL" || die "launchctl kickstart failed for $LABEL"
+  # `current` has already moved, so every failure from here restores it.
+  if ! launchctl bootstrap "gui/$UID" "$PLIST"; then
+    rollback_release || true
+    die "launchctl bootstrap failed for $PLIST. Rollback was attempted."
+  fi
+  if ! launchctl kickstart -k "gui/$UID/$LABEL"; then
+    rollback_release || true
+    die "launchctl kickstart failed for $LABEL. Rollback was attempted."
+  fi
   ok "LaunchAgent bootstrapped into gui/$UID"
 fi
 

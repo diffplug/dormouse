@@ -1548,27 +1548,6 @@ fi
 ok "candidate generated its setup password in owner-only state"
 probe_cleanup
 
-# ----------------------------------------------------------- switch release --
-
-step "Switching to the new release"
-
-OLD_RELEASE=""
-if [ -L "$CURRENT_LINK" ]; then
-  OLD_RELEASE="$(readlink "$CURRENT_LINK")"
-fi
-
-if [ -n "$OLD_RELEASE" ]; then
-  atomic_symlink "$OLD_RELEASE" "$PREVIOUS_LINK" "$STAGE/runtime/node"
-  detail "previous -> $(basename "$OLD_RELEASE")"
-fi
-atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
-
-# Prove the switch actually landed: a silently unmoved `current` is exactly the
-# failure this step exists to prevent.
-SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
-[ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
-ok "current -> $RELEASE_ID"
-
 # ------------------------------------------------------------ systemd unit --
 
 write_unit() {
@@ -1602,6 +1581,33 @@ UNIT_EOF
       || die "the generated unit failed systemd-analyze verify: $UNIT_FILE"
   fi
 }
+
+# Before `current` moves, so a unit that fails verify leaves the running
+# release untouched rather than switched with nothing to roll it back.
+step "Installing the systemd user service"
+write_unit
+ok "wrote $UNIT_FILE"
+
+# ----------------------------------------------------------- switch release --
+
+step "Switching to the new release"
+
+OLD_RELEASE=""
+if [ -L "$CURRENT_LINK" ]; then
+  OLD_RELEASE="$(readlink "$CURRENT_LINK")"
+fi
+
+if [ -n "$OLD_RELEASE" ]; then
+  atomic_symlink "$OLD_RELEASE" "$PREVIOUS_LINK" "$STAGE/runtime/node"
+  detail "previous -> $(basename "$OLD_RELEASE")"
+fi
+atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
+
+# Prove the switch actually landed: a silently unmoved `current` is exactly the
+# failure this step exists to prevent.
+SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
+[ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
+ok "current -> $RELEASE_ID"
 
 rollback_release() {
   warn "restoring the previous release"
@@ -1652,10 +1658,7 @@ rollback_release() {
   return 1
 }
 
-step "Installing the systemd user service"
-write_unit
-ok "wrote $UNIT_FILE"
-
+step "Starting the systemd user service"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping systemctl daemon-reload/enable/restart"
 else
@@ -1668,9 +1671,19 @@ else
     detail "stopped the retired $RETIRED_UNIT"
   fi
 
-  systemctl --user daemon-reload || die "systemctl --user daemon-reload failed."
-  systemctl --user enable "$UNIT" >/dev/null 2>&1 || die "systemctl --user enable $UNIT failed."
-  systemctl --user restart "$UNIT" || die "systemctl --user restart $UNIT failed. Inspect: journalctl --user -u $UNIT -n 50"
+  # `current` has already moved, so every failure from here restores it.
+  if ! systemctl --user daemon-reload; then
+    rollback_release || true
+    die "systemctl --user daemon-reload failed. Rollback was attempted."
+  fi
+  if ! systemctl --user enable "$UNIT" >/dev/null 2>&1; then
+    rollback_release || true
+    die "systemctl --user enable $UNIT failed. Rollback was attempted."
+  fi
+  if ! systemctl --user restart "$UNIT"; then
+    rollback_release || true
+    die "systemctl --user restart $UNIT failed. Rollback was attempted. Inspect: journalctl --user -u $UNIT -n 50"
+  fi
   ok "unit enabled and started"
 
   if [ "$WANT_LINGER" = "1" ] && ! loginctl enable-linger "$USER" 2>/dev/null; then
