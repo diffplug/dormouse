@@ -68,7 +68,7 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
   const [repository, remote] = await Promise.all([
     localGitRepository(dir, { index: false }),
     // `runGit` asks `localGitRepository` itself, so this need not wait.
-    runGit(dir, ['config', '--get', 'remote.origin.url']),
+    runGit(dir, ['config', '--get', 'remote.origin.url'], LOOKUP_TIMEOUT_MS),
   ]);
   if (!repository) return null;
   const head = await readHead(repository.gitDir).catch(() => null);
@@ -78,11 +78,26 @@ export async function lookupGitDir(path: string): Promise<GitDirInfo | null> {
   return { repo, branch };
 }
 
+/** Each path's lookup until it settles. A caller asks again after a missed
+ *  deadline, and a lookup on a hung mount never returns: a fresh one per ask
+ *  would park another threadpool thread each time, so an ask joins the one
+ *  still running. */
+const running = new Map<string, Promise<GitDirInfo | null>>();
+
+function lookupOnce(path: string): Promise<GitDirInfo | null> {
+  let lookup = running.get(path);
+  if (!lookup) {
+    lookup = lookupGitDir(path).finally(() => running.delete(path));
+    running.set(path, lookup);
+  }
+  return lookup;
+}
+
 export async function gitInfo(paths: unknown): Promise<GitInfoResult> {
   if (!Array.isArray(paths)) return {};
   const wanted = [...new Set(paths.filter((path): path is string => typeof path === 'string'))].slice(0, MAX_PATHS);
   const answers = await settleAllWithin<GitDirInfo | null | typeof UNANSWERED>(
-    wanted.map(lookupGitDir), LOOKUP_TIMEOUT_MS, UNANSWERED);
+    wanted.map(lookupOnce), LOOKUP_TIMEOUT_MS, UNANSWERED);
   // A lookup that missed the deadline is unanswered, never "no repository":
   // leaving it out is what makes the caller ask again
   // (`lib/src/lib/platform/git-types.ts`).
