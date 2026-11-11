@@ -1378,6 +1378,16 @@ describe('agent-browser host requests', () => {
     }
   });
 
+  it('ends a call on a live daemon at a bound, so a wedged CLI cannot hold its browser', async () => {
+    const host = makeHost();
+    for (const op of [{ op: 'navigate', url: 'https://example.com/' }, { op: 'history', dir: 'back' }, { op: 'viewport', width: 800, height: 600, dpr: 1 }] as BrowserOp[]) {
+      spawnMock.mockReset();
+      enqueueSpawnResults([{}]);
+      expect(await ab(host, op, session)).toEqual({ ok: true });
+      expect(spawnMock.mock.calls[0][2]).toEqual({ cwd: neutralBrowserCwd(), timeoutMs: 30_000 });
+    }
+  });
+
   it('refuses any other request, including a field carrying options', async () => {
     const refused: unknown[] = [
       { op: 'navigate', url: '--executable-path=/tmp/evil' },
@@ -1504,7 +1514,7 @@ describe('agent-browser shell environment', () => {
       expect(await provider.find(binding)).toEqual({ stream: port });
       enqueueSpawnResults([{}]);
       await provider.act(binding, { op: 'history', dir: 'reload' });
-      expect(spawnMock.mock.calls[0][2]).toEqual({ cwd: neutralBrowserCwd(), env });
+      expect(spawnMock.mock.calls[0][2]).toEqual({ cwd: neutralBrowserCwd(), env, timeoutMs: 30_000 });
     } finally {
       await closeServer(server);
       await fsp.rm(dir, { recursive: true, force: true });

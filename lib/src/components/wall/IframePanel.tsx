@@ -113,13 +113,41 @@ function redirectHistory(history: IframeHistory, fromUrl: string | null, nextUrl
   return { entries: [...history.entries.slice(0, history.index), nextUrl], index: history.index };
 }
 
+/** The most entries a pane's Back and Forward keep; past it the oldest go. */
+const IFRAME_HISTORY_MAX_ENTRIES = 50;
+
 function appendHistory(history: IframeHistory, nextUrl: string): IframeHistory {
   const current = history.entries[history.index] ?? '';
   if (!nextUrl || sameUrl(current, nextUrl)) return history;
-  return {
-    entries: [...history.entries.slice(0, history.index + 1), nextUrl],
-    index: history.index + 1,
-  };
+  const entries = [...history.entries.slice(0, history.index + 1), nextUrl];
+  const dropped = Math.max(0, entries.length - IFRAME_HISTORY_MAX_ENTRIES);
+  return { entries: entries.slice(dropped), index: entries.length - 1 - dropped };
+}
+
+/** The page's `replaceState`: the current entry becomes `nextUrl`. */
+function replaceHistory(history: IframeHistory, nextUrl: string): IframeHistory {
+  const current = history.entries[history.index];
+  if (current === undefined) return appendHistory(history, nextUrl);
+  if (sameUrl(current, nextUrl)) return history;
+  const entries = [...history.entries];
+  entries[history.index] = nextUrl;
+  return { entries, index: history.index };
+}
+
+/** The page moved through its own history: onto the neighbouring entry it
+ *  names, else the current entry becomes it. Never an entry more. */
+function traverseHistory(history: IframeHistory, nextUrl: string): IframeHistory {
+  const { entries, index } = history;
+  const at = (i: number) => entries[i] !== undefined && sameUrl(entries[i], nextUrl);
+  if (at(index)) return history;
+  if (at(index - 1)) return { entries, index: index - 1 };
+  if (at(index + 1)) return { entries, index: index + 1 };
+  return replaceHistory(history, nextUrl);
+}
+
+/** How a `location` report's `nav` moves the history. */
+function historyStep(nav: unknown): (history: IframeHistory, nextUrl: string) => IframeHistory {
+  return nav === 'replace' ? replaceHistory : nav === 'traverse' ? traverseHistory : appendHistory;
 }
 
 function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, proxyOrigin: string): string | null {
@@ -196,10 +224,10 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // Show a URL in the frame chrome + history. `persist` writes it back to the
   // panel params (a real navigation we initiated); an observed frame URL does
   // not, since params stay the source/restore URL.
-  const applyFrameUrl = useCallback((nextUrl: string, persist: boolean) => {
+  const applyFrameUrl = useCallback((nextUrl: string, persist: boolean, step = appendHistory) => {
     if (!nextUrl) return;
     setLiveUrl(nextUrl);
-    setHistory((prev) => appendHistory(prev, nextUrl));
+    setHistory((prev) => step(prev, nextUrl));
     if (persist) paneWrite.updateParams(id, { url: nextUrl });
     paneWrite.setTitle(id, hostPathDisplay(nextUrl, true));
   }, [paneWrite, id]);
@@ -215,7 +243,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     paneWrite.setTitle(id, hostPathDisplay(nextUrl, true));
     setReloadNonce((n) => n + 1);
   }, [paneWrite, id]);
-  const observeFrameUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, false), [applyFrameUrl]);
+  const observeFrameUrl = useCallback((nextUrl: string, nav: unknown) => applyFrameUrl(nextUrl, false, historyStep(nav)), [applyFrameUrl]);
   // The first document a resolved frame reports is the entry it loaded, or
   // where the server redirected that entry: it takes the entry's place, so
   // Back does not land on the redirecting URL only to be sent on again.
@@ -359,7 +387,6 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   const remedy = BROWSER_PROVIDER_GUI[remedyProvider ?? 'agent-browser'];
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
-    applyViewport() {},
     openModal() { openAgentBrowserScreenModal(id); },
     // iframe is the current backend; every other offered mode swaps to an
     // automated browser. Wired only when the host can launch one — without it
@@ -453,7 +480,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     if (!proxyOrigin) return;
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== proxyOrigin) return;
-      const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown; from?: unknown } | null;
+      const data = e.data as { __dormouse?: unknown; url?: unknown; loaded?: unknown; nav?: unknown; from?: unknown } | null;
       if (data?.__dormouse === 'pointerdown' || data?.__dormouse === 'leader') {
         const frame = iframeRef.current;
         if (document.activeElement !== frame || e.source !== frame?.contentWindow) return;
@@ -490,7 +517,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
         if (data.loaded === true) lastShimReportRef.current = performance.now();
         setUninstrumented(false);
         if (firstLoad) observeFrameLoad(nextUrl);
-        else observeFrameUrl(nextUrl);
+        else observeFrameUrl(nextUrl, data.nav);
       }
     };
     window.addEventListener('message', onMessage);

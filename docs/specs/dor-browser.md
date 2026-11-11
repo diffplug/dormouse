@@ -320,7 +320,7 @@ Source of truth: `createIframeProxyUrl` and `releaseIframeProxyLease` in `lib/sr
 
 ### Iframe Shim
 
-**Must send only fixed shim message kinds to the app** — `leader`, `pointerdown`, `location`, `open-window`, `theme-request`; `location` carries `loaded: true` only on the document's own `pageshow`/`DOMContentLoaded` report. **Must relay only `leader`, `pointerdown`, and `open-window` from nested documents.** `open-window` intercepts nonempty anchor targets other than `_self`, except links with `download`, plus `window.open`. Theme delivery is `docs/specs/theme.md` → Tool iframe themes; `theme-request` stays in the outer document.
+**Must send only fixed shim message kinds to the app** — `leader`, `pointerdown`, `location`, `open-window`, `theme-request`; `location` always carries `nav`: `push`/`replace`/`traverse`, plus `loaded: true` on its document's load. **Must relay only `leader`, `pointerdown`, and `open-window` from nested documents.** `open-window` intercepts nonempty anchor targets other than `_self`, except links with `download`, plus `window.open`. Theme delivery is `docs/specs/theme.md` → Tool iframe themes; `theme-request` stays in the outer document.
 
 The proxy's redirect page also posts `navigate` ([Iframe External Origins](#iframe-external-origins)), which any proxied document can forge.
 

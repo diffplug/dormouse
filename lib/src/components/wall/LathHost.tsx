@@ -234,7 +234,7 @@ const LathLeaf = memo(function LathLeaf({
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
   onLeafFocused?: (id: string) => void;
 }) {
-  // A parked leaf paints nothing and takes no input, but KEEPS its rect: sizing it
+  // A parked leaf paints nothing and takes no pointer input, but KEEPS its rect: sizing it
   // to zero (or `display: none`) would report a 0×0 viewport to the guest document
   // and make it reflow on the way out and back. `opacity`/`boxShadow`/`pointerEvents`
   // are restated because `applyFrames` may have written them imperatively — React
