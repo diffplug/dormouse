@@ -3,24 +3,23 @@ import { isToolParams } from './browser-surface';
 import { becomeTerminalMeta, type LathWallEngine } from './lath-wall-engine';
 import { retireToolRun, toolLeaves } from './use-tool-serving';
 import type { DooredItem } from './wall-types';
-import { registry } from '../../lib/terminal-store';
 import { getTerminalPaneState, subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { isToolReaped, isToolStopping } from '../../lib/tool-reap-store';
 import { isReportedCommandLine } from '../../lib/osc-sanitize';
 import { clearHoldLapse, isHoldLapsed, isRunHeld, subscribeToRunHolds } from '../../lib/tool-run-hold';
 
 /**
- * Whether a Tool's designated run has ended with its Session alive
+ * Whether a Tool's designated run has ended
  * (`docs/specs/dor-tool.md` -> Run end): its shell is back at a prompt after a
  * finished run of the designated command — or after any command, once a host
- * replacement lapsed — and the host is not replacing that run. A Tool booting,
- * awaiting approval, or taking over its caller has finished no such run; a
- * reaped or stopping one has no live shell to return.
+ * replacement lapsed — and the host is not replacing that run. A Session that
+ * exited on its own ends its run too. A Tool booting, awaiting approval, or
+ * taking over its caller has finished no such run; a reaped or stopping one
+ * keeps its designation for the rehydrate.
  */
 export function toolRunEnded(id: string, params: unknown): boolean {
   if (!isToolParams(params) || params.toolPending !== undefined) return false;
   if (isToolReaped(id) || isToolStopping(id) || isRunHeld(id)) return false;
-  if (registry.get(id)?.exited) return false;
   const { currentCommand, lastCommand } = getTerminalPaneState(id);
   return currentCommand === null && lastCommand !== null && (isHoldLapsed(id) || isReportedCommandLine(lastCommand.rawCommandLine, params.command));
 }
