@@ -286,6 +286,14 @@ const OPEN_SETTLE_MS = 4_000;
 const DIAGNOSTICS_FIND_MS = 3_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** `work`, or a failure naming `what` once `ms` pass without it settling. */
+function within<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out`)), Math.max(0, ms));
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
 
 /** A Fixed viewport's size, its ratio only when one was asked for. */
 const fixedSize = ({ width, height, dpr }: { width: number; height: number; dpr?: number }): FixedSize =>
@@ -441,14 +449,21 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     // Their browser is going: whoever still views it asks again.
     for (const view of views.get(id) ?? []) view.close(1001, 'the browser was relaunched or closed');
     closedViews.delete(id);
-    await p.release?.(b);
+    await release({ p, b, id });
     return generation;
   }
 
+  /** Let go of what the provider holds for the browser, which a connection
+   *  that stopped answering must not turn into a wait without end. */
+  async function release({ p, b }: Bound, timeoutMs = CLOSE_TIMEOUT_MS): Promise<void> {
+    if (p.release) await within(p.release(b), timeoutMs, 'releasing the browser').catch(log);
+  }
+
   /** Release what the provider holds for the browser, then close its session. */
-  async function shut({ p, b }: Bound, timeoutMs = CLOSE_TIMEOUT_MS): Promise<void> {
-    await p.release?.(b);
-    await p.close(b, Math.max(0, timeoutMs));
+  async function shut(bound: Bound, timeoutMs = CLOSE_TIMEOUT_MS): Promise<void> {
+    const end = Date.now() + timeoutMs;
+    await release(bound, timeoutMs);
+    await bound.p.close(bound.b, Math.max(0, end - Date.now()));
   }
 
   // Browsers launched headed are real OS windows, so shutdown closes them.
@@ -509,13 +524,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         if (staged && initialViewport?.mode === 'fixed') {
           try {
             if (initialViewport.dpr !== undefined && !agentBrowser) {
-              const measured = measuredViewport(await p.evaluate(b, VIEWPORT_MEASURE_SCRIPT));
+              const measured = measuredViewport(await within(p.evaluate(b, VIEWPORT_MEASURE_SCRIPT), deadline - Date.now(), 'measuring the new browser'));
               if (!measured || Math.abs(measured.devicePixelRatio - initialViewport.dpr) > 0.001) {
                 throw new Error(`playwright cannot change DPR on an existing context (requested ${initialViewport.dpr}, effective ${measured?.devicePixelRatio ?? 'unknown'})`);
               }
             }
             if (agentBrowser) {
-              const sized = await p.act(b, { op: 'viewport', width: initialViewport.width, height: initialViewport.height, ...(initialViewport.dpr === undefined ? {} : { dpr: initialViewport.dpr }) });
+              const sized = await within(p.act(b, { op: 'viewport', width: initialViewport.width, height: initialViewport.height, ...(initialViewport.dpr === undefined ? {} : { dpr: initialViewport.dpr }) }), deadline - Date.now(), 'sizing the new browser');
               if (!sized.ok) throw new Error(sized.error ?? 'initial viewport could not be set');
             }
             // A close can arrive while initial sizing waits on the provider.

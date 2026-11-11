@@ -12,6 +12,7 @@ import { BROWSER_PROVIDERS, isDirectory, spawnAndCapture } from 'dor-lib-common'
 import { neutralBrowserCwd } from './browser-neutral-cwd';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
+import { settleAllWithin } from '../lib/settle-within';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
 import { measuredViewport, type ViewerSink, type ViewportSize } from './browser-viewer';
@@ -92,9 +93,12 @@ const pageKey = (page: Page) => {
   if (key === undefined) pageKeys.set(page, key = `page-${++pageCount}`);
   return key;
 };
-const tabsOf = (v: Viewer) => Promise.all(pagesOf(v).map(async (page, index) => ({
-  tabId: String(index), url: page.url(), title: await page.title().catch(() => ''), active: page === v.page,
-})));
+// A page whose main thread is blocked never answers: its title is then blank.
+const tabsOf = async (v: Viewer) => {
+  const pages = pagesOf(v);
+  const titles = await settleAllWithin(pages.map(page => page.title()), CLI_TIMEOUT_MS, '');
+  return pages.map((page, index) => ({ tabId: String(index), url: page.url(), title: titles[index], active: page === v.page }));
+};
 const watching = (v: Viewer) => [...v.subscribers].some(s => !s.headed);
 export function createPlaywrightProvider(deps: { log?(text: string): void } = {}): BrowserProvider<Binding> {
   const viewers = new Map<string, Viewer>();
@@ -202,7 +206,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         // Modal And Render Swaps"). The screencast's own metadata is no
         // measure of the viewport (rationale).
         const takenAt = performance.now();
-        const measured = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })).then(measuredViewport, () => undefined);
+        const [measured] = await settleAllWithin([page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })).then(measuredViewport)], CLI_TIMEOUT_MS, undefined);
         if (measured) {
           const viewport = { width: measured.viewportWidth, height: measured.viewportHeight };
           if (v.page === page) v.viewport = viewport;

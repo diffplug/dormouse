@@ -113,6 +113,24 @@ test('an explicit different DPR is refused before resizing', async () => {
   expect(cdp.send).not.toHaveBeenCalled();
 });
 
+test('a page that never answers its title or measurement holds a refresh only so long', async () => {
+  page.goto = vi.fn(async () => null);
+  expect((await pw({ op: 'attach' })).ok).toBe(true);
+  vi.useFakeTimers();
+  try {
+    page.title = () => new Promise(() => {});
+    page.evaluate = () => new Promise(() => {});
+    let navigated: unknown;
+    void pw({ op: 'navigate', url: 'http://localhost/next' }).then((r) => { navigated = r; });
+    // Two refreshes, before and after the navigation, each waiting out both bounds.
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(navigated).toMatchObject({ ok: true });
+    expect(page.goto).toHaveBeenCalledWith('http://localhost/next', { waitUntil: 'commit' });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test('closing during a CDP attachment releases it without capturing', async () => {
   let complete!: (value: typeof cdp) => void;
   attach.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
