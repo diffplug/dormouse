@@ -298,6 +298,12 @@ export function createDragController(deps: DragControllerDeps): DragController {
     },
     beginExternal(id, startX, startY) {
       if (drag) return;
+      // A zoomed leaf hides the layout a Door would drop into, so no drag starts,
+      // as for a pane; the Wall still clears its transient Door drag.
+      if (deps.getSnapshot().zoomedId !== null) {
+        deps.latestRef.current.onExternalDrop?.(null);
+        return;
+      }
       drag = {
         id, external: true, active: false, startX, startY,
         candidate: null, anchor: null, armTimer: null, lastX: startX, lastY: startY, rafId: null,

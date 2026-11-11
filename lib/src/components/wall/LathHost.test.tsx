@@ -1033,6 +1033,16 @@ describe('LathHost — pane / Door drag', () => {
     expect(shielded()).toBe(false);
   });
 
+  it('starts no Door drag while a leaf is zoomed, clearing the Wall\'s', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    act(() => store.setZoomed('a'));
+    const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door', startX: 100, startY: 700 } });
+    expect(onExternalDrop).toHaveBeenCalledWith(null);
+    act(() => moveTo(5, 300));
+    await flushFrame();
+    expect(overlayEl()).toBeNull();
+  });
+
   it('cancels an external drop moved off-wall before its pending frame', async () => {
     const store = seeded(leafTree('a'), [['a', leafMeta()]]);
     const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door', startX: 100, startY: 700 } });
