@@ -511,7 +511,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
   // error live here, above both views: a begin refused after the clear still
   // has somewhere to say so.
   const enrollAgain = useBusyAction();
-  const onEnrollAgain = () => void enrollAgain.run(() => reenrollBurrow(status.suggestedLabel));
+  const onEnrollAgain = () => void enrollAgain.run(() => reenrollBurrow(status.label ?? status.suggestedLabel));
   // Above both views because the log outlives an enrollment: a machine that
   // never enrolled still logs its one-time connections.
   const access = useAccessRecords(status.burrowId);

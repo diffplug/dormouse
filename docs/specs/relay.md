@@ -346,7 +346,7 @@ The **Remote control** choices are **One-time connection** (`docs/specs/one-time
 - **The offer's token never enters a webview**: `status` carries only whether there is one (`docs/specs/security-remote.md` -> "Credentials at rest"). **The click re-reads the file**, so an old card cannot reuse a spent offer; `enrollOffer` takes `{ label }` alone.
 - **The setup password is passed through, never held**, and cleared on success.
 - **"Set up a phone" mints only when its panel opens** and **reports which decision ended the code** (`docs/specs/remote-security-model.md` -> "Pairing"; rationale).
-- **A Hosted `removed` offers Enroll again**, which clears the enrollment and then begins a device-code enrollment.
+- **A Hosted `removed` offers Enroll again**, which clears the enrollment and then begins a device-code enrollment under its name.
 - **An enrolled Burrow lists its paired phones, each with Revoke, and any revocation not saved yet, with a way to save it again, beside its access log**, and re-reads them on every `access` event (`docs/specs/remote-security-model.md` -> "Revocation", "Access log").
 
 **Never expose pairing confirmation or one-time commands on `window.dormouseBurrow`**; its enrollment methods are the scripting seam.

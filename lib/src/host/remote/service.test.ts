@@ -609,6 +609,7 @@ describe('status', () => {
       connection: 'connected',
       pairedClients: 1,
       suggestedLabel: `${hostname()} (VS Code)`,
+      label: ENROLLMENT.label,
       offer: false,
       hostedEnrollment: null,
       accountOrigin: null,

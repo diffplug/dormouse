@@ -1037,6 +1037,7 @@ export class BurrowService {
       connection: this.#burrow?.status ?? 'stopped',
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
       suggestedLabel: suggestedBurrowLabel(this.#kind),
+      label: enrollment.label,
       offer: false,
       hostedEnrollment,
       accountOrigin,
