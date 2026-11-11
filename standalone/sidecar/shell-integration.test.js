@@ -292,6 +292,62 @@ test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line'
   }
 });
 
+// A DEBUG trap the profile set (a title setter, a timer) keeps running beside
+// ours, and the line still reports as itself.
+test('bash: a DEBUG trap from the profile still runs, and E is the submitted line', { timeout: 60_000 }, async () => {
+  const bash = interactiveBash('trap \'__user_trapped="$__user_trapped|$BASH_COMMAND"\' DEBUG\n');
+  try {
+    const { commands, starts } = await bash.run('echo seen');
+    assert.deepEqual(commands, ['echo seen']);
+    assert.equal(starts, 1);
+    const { printed } = await bash.run('echo "trapped=$__user_trapped"');
+    assert.match(printed, /trapped=[\s\S]*\|echo seen\|/);
+  } finally {
+    await bash.close();
+  }
+});
+
+// bash-preexec (Atuin, starship, other terminals' integrations) installs its
+// DEBUG trap and PROMPT_COMMAND at the first prompt, from an install string it
+// leaves in PROMPT_COMMAND, and runs the hooks registered in its arrays. This
+// stand-in keeps that shape: the integration must register there, so the
+// user's hooks run and E is the line, not bash-preexec's own function.
+const BASH_PREEXEC_STAND_IN = [
+  'bash_preexec_imported=defined',
+  '__sbp_ret() { return "$1"; }',
+  '__sbp_precmd() { local s=$? f; for f in "${precmd_functions[@]}"; do __sbp_ret "$s"; "$f"; done; }',
+  '__sbp_interactive() { __sbp_ready=1; }',
+  '__sbp_preexec() { [ -n "$__sbp_ready" ] || return; __sbp_ready=; local f; for f in "${preexec_functions[@]}"; do "$f" "line"; done; }',
+  // Like bash-preexec, keeps whatever else PROMPT_COMMAND holds between its two hooks.
+  '__sbp_install() {',
+  '  trap \'__sbp_preexec "$_"\' DEBUG',
+  '  local rest=${PROMPT_COMMAND//"$__sbp_install_string"/}',
+  '  PROMPT_COMMAND=__sbp_precmd${rest:+$\'\\n\'$rest}$\'\\n__sbp_interactive\'',
+  '  __sbp_precmd; __sbp_interactive',
+  '}',
+  '__sbp_install_string=$\'trap - DEBUG\\n__sbp_install\'',
+  'PROMPT_COMMAND=$__sbp_install_string',
+  'user_preexec() { __user_preexecs=$((${__user_preexecs:-0} + 1)); }',
+  'preexec_functions+=(user_preexec)',
+  '',
+].join('\n');
+test('bash: with bash-preexec loaded, its hooks run and E is the submitted line', { timeout: 60_000 }, async () => {
+  const bash = interactiveBash(BASH_PREEXEC_STAND_IN);
+  try {
+    for (const line of ['true', 'echo p && echo q']) {
+      const { commands, starts } = await bash.run(line);
+      assert.deepEqual(commands, [line], `bash reported ${JSON.stringify(commands)} for ${JSON.stringify(line)}`);
+      assert.equal(starts, 1);
+    }
+    const { printed } = await bash.run('(exit 7)');
+    assert.match(printed, /\x1b\]633;D;7\x07/);
+    const { printed: counted } = await bash.run('echo "preexecs=$__user_preexecs"');
+    assert.match(counted, /preexecs=4/);
+  } finally {
+    await bash.close();
+  }
+});
+
 // Setting ZDOTDIR in ~/.zshenv is how a user moves the rest of their zsh
 // dotfiles. The integration sources that .zshenv itself, so it must follow the
 // ZDOTDIR it leaves, or such a user's .zprofile and .zshrc never run. The
