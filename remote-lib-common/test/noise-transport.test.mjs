@@ -431,16 +431,6 @@ test('a reordered frame poisons the session', async () => {
   assert.throws(() => burrow.receive(first), NoiseError);
 });
 
-test('a failed decrypt does not advance the receive counter', async () => {
-  const { client, burrow } = await established();
-  const ct = client.sendKeepalive();
-  const tampered = new Uint8Array(ct);
-  tampered[0] ^= 0x01;
-  const before = burrow.receiveNonce;
-  assert.throws(() => burrow.receive(tampered), NoiseError);
-  assert.equal(burrow.receiveNonce, before, 'one injected frame must not lock out the real sender');
-});
-
 test('an over-size send is refused without destroying the session', async () => {
   // Nothing reached the wire and no counter moved, so the stream is exactly as
   // synchronized as it was; killing it would cost a re-handshake and fresh

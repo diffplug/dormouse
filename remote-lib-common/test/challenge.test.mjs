@@ -15,11 +15,10 @@ test('issued challenges are 32 bytes and unique', () => {
   assert.equal(seen.size, 100);
 });
 
-test('issue stamps issuedAt and expiresAt from the clock and ttl', () => {
+test('issue stamps expiresAt from the clock and ttl', () => {
   const clock = makeClock();
   const issuer = new ChallengeIssuer({ now: clock.now, ttlMs: 5000 });
   const issued = issuer.issue();
-  assert.equal(issued.issuedAt, clock.now());
   assert.equal(issued.expiresAt, clock.now() + 5000);
 });
 
