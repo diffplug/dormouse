@@ -60,6 +60,8 @@ export function PocketTerminalExperience({
   const [activePaneId, setActivePaneId] = useState(POCKET_TUTORIAL_PANE);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>("gestures");
   const [view, setView] = useState<MobileTerminalView>("terminal");
+  const tutorialShown = activePaneId === POCKET_TUTORIAL_PANE && view === "terminal";
+  const tutorialShownRef = useRef(tutorialShown);
   const sessionItems = useMobileWallSessionItems(POCKET_SESSIONS, activePaneId);
   const mouseStates = useSyncExternalStore(
     subscribeToMouseSelection,
@@ -167,7 +169,10 @@ export function PocketTerminalExperience({
               getTerminalTheme: terminalTheme.getTerminalTheme,
               subscribeToTerminalTheme: terminalTheme.onTerminalThemeChange,
             });
-            if (terminalId === POCKET_TUTORIAL_PANE) tutorialRunnerRef.current = runner;
+            if (terminalId === POCKET_TUTORIAL_PANE) {
+              runner.setShown(tutorialShownRef.current);
+              tutorialRunnerRef.current = runner;
+            }
             return runner;
           }
           if (name === "ascii-splash" || name === "splash") {
@@ -215,6 +220,11 @@ export function PocketTerminalExperience({
       adapterRef.current = null;
     };
   }, [getPocketTouchMode, handleNotifyPocket, handleOpenGithub, subscribeToPocketTouchMode, tryAutoStart]);
+
+  useEffect(() => {
+    tutorialShownRef.current = tutorialShown;
+    tutorialRunnerRef.current?.setShown(tutorialShown);
+  }, [tutorialShown]);
 
   // Every pane, not just the active one: `paneMouseOverride` is a function of
   // touch mode and that pane's own reporting, so a pane the user switched away

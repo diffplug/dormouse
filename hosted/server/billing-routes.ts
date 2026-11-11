@@ -542,8 +542,8 @@ export async function resyncDisputes(billing: Billing<Plan>): Promise<unknown[]>
  * subscription that `charge`, `owner`'s, paid for, now fully refunded other
  * than as a correction, or finally reversed, while it is the owner's current one. A charge for an
  * older subscription, one that names no subscription, or one already ended,
- * as on a redelivery once it has, ends nothing; the first two are logged for
- * the operator.
+ * as on a redelivery once it has, ends nothing; the first two are logged,
+ * though production Workers retain no logs.
  */
 async function endForRefund(billing: Billing<Plan>, owner: string, charge: Stripe.Charge) {
   const { subscription } = await billing.status(owner);

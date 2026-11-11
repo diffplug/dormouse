@@ -32,7 +32,8 @@ export function MarkdownNavigation({ follow, edit }: {
       if (isWebLink(href)) return;
       event.preventDefault(); event.stopImmediatePropagation();
       setMenu(null);
-      if (event.detail <= 1) follow(href, event.ctrlKey || event.metaKey ? 'other' : 'current');
+      // A drag inside the link ends in a click too: selecting its text is not following it.
+      if (event.detail <= 1 && document.getSelection()?.isCollapsed !== false) follow(href, event.ctrlKey || event.metaKey ? 'other' : 'current');
     };
     const doubleClick = (event: MouseEvent) => {
       const href = documentImage(event.target);

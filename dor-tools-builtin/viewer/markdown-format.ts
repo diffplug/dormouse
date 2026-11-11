@@ -18,28 +18,35 @@ export function markdownFormat(markdown: string): Options {
     headings.set(`${match[1].length}:${match[2].trim()}`, gap);
     if (gap) loose++; else tight++;
   }
-  let references = false;
   return {
     bullet,
     rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' : '-',
-    // A literal angle bracket must not turn into JSX when source mode imports
-    // the saved text again. Only text nodes use these entity escapes.
-    unsafe: [{ character: '<', inConstruct: 'phrasing' }, { character: '>', inConstruct: 'phrasing' }],
+    // A literal `<` must not turn into JSX when source mode imports the saved
+    // text again; a `>` cannot start JSX, so it stays literal. Only text nodes
+    // use this entity escape.
+    unsafe: [{ character: '<', inConstruct: 'phrasing' }],
     handlers: {
-      root(node, _parent, state, info) {
-        references = hasDefinition(node);
-        return state.containerFlow(node, info);
-      },
       text(node, _parent, state, info) {
-        const safe = state.safe(node.value, { ...info, encode: ['<', '>'] })
-          .replace(/\\[^]|&#x3([CE]);/g, (match, hex: string | undefined) => hex ? (hex === 'C' ? '&lt;' : '&gt;') : match);
-        // Restore only simple, complete labels. Keep escapes inside link labels,
-        // list items (task syntax), and documents with reference definitions.
-        if (references || state.stack.some(kind => ['label', 'reference', 'listItem'].includes(kind))) return safe;
-        return safe.replace(/\\(?:\\|\[([\w .-]+)\])/g, (escaped, label: string | undefined, offset: number) => {
+        const safe = state.safe(node.value, { ...info, encode: ['<'] })
+          .replace(/\\[^]|&#x3C;/g, (match, offset: number, value: string) => {
+            if (match === '&#x3C;') return '&lt;';
+            // MDXEditor's `==highlight==` syntax escapes every `=`. Only a pair
+            // can open a highlight, and only a line-start `=` a setext heading.
+            if (match !== '\\=') return match;
+            const before = info.before + value.slice(0, offset);
+            const next = value.slice(offset + 2) || info.after;
+            return /(^|[\r\n])[ \t]*$/.test(before) || before.endsWith('=') || /^\\?=/.test(next) ? match : '=';
+          });
+        // Restore only simple, complete labels. Keep escapes inside link labels
+        // and list items (task syntax).
+        if (state.stack.some(kind => ['label', 'reference', 'listItem'].includes(kind))) return safe;
+        return safe.replace(/\\(?:\\|\[(\^?[\w .-]+)\])/g, (escaped, label: string | undefined, offset: number) => {
           if (!label) return escaped; // A literal backslash is not an escape to remove.
           const after = safe.slice(offset + escaped.length) || info.after;
-          if (/^\s*[\[(:\]]/.test(after) || safe[offset - 1] === '!') return escaped;
+          // GitHub reads `[^label]` and `[^label]:` as a footnote and its note,
+          // which the editor keeps as text.
+          const hazard = label.startsWith('^') ? /^\s*[\[(\]]/ : /^\s*[\[(:\]]/;
+          if (hazard.test(after) || safe[offset - 1] === '!') return escaped;
           return `[${label}]`;
         });
       },
@@ -50,8 +57,4 @@ export function markdownFormat(markdown: string): Options {
       return headings.get(`${left.depth}:${text}`) ?? (tight > loose ? 0 : 1);
     }],
   };
-}
-
-function hasDefinition(node: { type: string; children?: { type: string }[] }): boolean {
-  return node.type === 'definition' || !!node.children?.some(hasDefinition);
 }

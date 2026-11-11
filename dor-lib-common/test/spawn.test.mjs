@@ -176,12 +176,12 @@ test('reads PATH by any spelling on Windows, and only by its own elsewhere', () 
   assert.equal(envValue({ Path: '/bin' }, 'PATH', false), undefined);
 });
 
-test('a .cmd shim started in a UNC cwd runs its target there, not in %SystemRoot%', { skip: windowsOnly }, async () => {
+test('a .cmd shim started in a UNC cwd runs its target there, not in %SystemRoot%', { skip: windowsOnly }, async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dor-unc-'));
   // The admin share is the UNC path every Windows machine has, as WSL's would be.
   const unc = `\\\\localhost\\${dir[0]}$${dir.slice(2)}`;
   try {
-    if (!existsSync(unc)) return;
+    if (!existsSync(unc)) return t.skip('no admin share');
     await mkdir(path.join(dir, 'node_modules', 'cwd-cli'), { recursive: true });
     await writeFile(path.join(dir, 'node_modules', 'cwd-cli', 'cli.js'), 'process.stdout.write(process.cwd() + "|" + process.argv.slice(2).join("|"))');
     const shim = path.join(dir, 'cwd-cli.cmd');
@@ -215,6 +215,17 @@ test('a timeout kills a hung child and resolves with a distinct error', async ()
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('an abort kills a running child and resolves at once with a distinct error', async () => {
+  const controller = new AbortController();
+  const started = Date.now();
+  const pending = spawnAndCapture(node, ['-e', 'setTimeout(() => {}, 60000)'], { timeoutMs: 30000, signal: controller.signal });
+  setTimeout(() => controller.abort(), 100);
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'ABORT_ERR');
+  assert.ok(Date.now() - started < 5000);
 });
 
 test('a command that finishes inside its timeout resolves normally', async () => {

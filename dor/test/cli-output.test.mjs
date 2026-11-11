@@ -41,6 +41,7 @@ const fixtureSurfaces = [
     cwd: '/Users/me/projects/site',
     activity: 'running',
     command: 'pnpm dev',
+    commandLine: 'pnpm dev',
     url: null,
     ringing: false,
     todo: false,
@@ -583,9 +584,23 @@ test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', 
   assert.equal(msysToWindowsCwd('/c/Users/me/site', 'linux'), '/c/Users/me/site');
 });
 
+/** A host on which every `--cwd` these fixtures name exists. */
+const anyDirectoryHost = { ...NODE_HOST, isDirectory: () => true };
+
+test('ensure and tool refuse a --cwd that names no directory, launching nothing', async () => {
+  const missing = join(tmpdir(), 'dor-no-such-directory');
+  for (const argv of [['ensure', '--cwd', missing, '--', 'npm', 'install'], ['tool', '--cwd', missing, '--', 'npm', 'install']]) {
+    const client = fixtureClient();
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 1, argv[0]);
+    assert.match(result.stderr, /dor-no-such-directory' does not exist/, argv[0]);
+    assert.deepEqual(client.requests, [], argv[0]);
+  }
+});
+
 test('ensure and tool accept --flag=value before --, as stricli does', async () => {
   const ensure = fixtureClient();
-  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' } });
+  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' }, host: anyDirectoryHost });
   assert.equal(ensured.exitCode, 0, ensured.stderr);
   assert.equal(smudgeWindowsPaths(ensure.requests[0].request.cwd), '/work/other');
   assert.equal(ensure.requests[0].request.surface, 'surface:3');
@@ -611,6 +626,7 @@ test('ensure json output', async () => {
     'ensure-json',
     await runCli(['ensure', '--json', '--minimize', '--cwd', '/Users/me/projects/site', '--', 'pnpm', 'dev'], {
       client: fixtureClient(),
+      host: anyDirectoryHost,
     }),
   );
 });
@@ -1309,6 +1325,14 @@ test('agent-browser close skips surface management', async () => {
   assert.equal(surfaceRequest(client), undefined);
 });
 
+test('agent-browser skills runs alone, without a stream probe or a surface', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', 'skills', 'get', 'core'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'skills', 'get', 'core']]);
+  assert.equal(surfaceRequest(client), undefined);
+});
+
 test('agent-browser without a control endpoint stays a pure passthrough', async () => {
   const ab = fakeAgentBrowser();
   const result = await runCli(['agent-browser', 'open', 'http://localhost:5173'], { execAgentBrowser: ab.exec });
@@ -1343,7 +1367,7 @@ test('agent-browser --surface drives the session the host says the surface is bo
   // No `key`: a surface-addressed session is not necessarily a managed one.
   assert.deepEqual(client.requests[1], {
     method: 'browserSurface',
-    request: { provider: 'agent-browser', key: undefined, session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
+    request: { provider: 'agent-browser', key: undefined, surface: 'surface:3', session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
   });
 });
 
@@ -1976,6 +2000,21 @@ test('list filters by kind, view, command, and cwd without port scanning', async
   assert.equal(payload.caller_surface_id, null);
   assert.equal(payload.focused_surface_id, 'surface:1');
   assert.equal(payload.surfaces[0].ports, undefined);
+});
+
+test('list --command matches the reported command line, not its summarized label', async () => {
+  const client = fixtureClient([
+    { ...fixtureSurfaces[0], command: 'npm run dev', commandLine: 'npm run dev --host' },
+    { ...fixtureSurfaces[1], command: 'npm run dev', commandLine: 'npm run dev' },
+  ]);
+  const ids = async command => JSON.parse((await runCli(['list', '--json', '--command', command], { client, env: listEnv })).stdout)
+    .surfaces.map(surface => surface.id);
+  assert.deepEqual(await ids('npm run dev --host'), ['surface:1']);
+  assert.deepEqual(await ids('npm run dev'), ['surface:2']);
+  // What a listing prints is what the filter takes back.
+  const listed = JSON.parse((await runCli(['list', '--json'], { client, env: listEnv })).stdout).surfaces;
+  assert.equal(listed[0].command_line, 'npm run dev --host');
+  assert.deepEqual(await ids(listed[0].command_line), ['surface:1']);
 });
 
 test('list ports text output', async () => {

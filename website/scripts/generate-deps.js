@@ -13,7 +13,7 @@ import {
   missingDependency,
   optionalSiblingsAtSameVersion,
 } from "./dependency-workspaces.js";
-import { assertHostedBundlesDisclosed } from "./hosted-bundles.js";
+import { assertHostedBundlesDisclosed, assertProductBundlesDisclosed } from "./hosted-bundles.js";
 import { excludedWorkspacePackages, productSections } from "./product-sections.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -395,6 +395,9 @@ const npmDepsBySection = Object.fromEntries(productSections.map(({ id }) => [
 // The Hosted walk skips optional peers, so check what Hosted actually bundles
 // against what is disclosed (docs/specs/security-supply-chain.md -> "Disclosure").
 await assertHostedBundlesDisclosed(npmDepsBySection, repoRoot);
+// The other walks read `dependencies` alone, so check what the Terminal and the
+// built-in Tools bundle too, a devDependency imported from shipped source included.
+await assertProductBundlesDisclosed(npmDepsBySection, repoRoot);
 
 // Manual overrides for Cargo crates whose published Cargo.toml omits author or
 // homepage metadata. Keyed by crate name. Cargo deprecated `authors`, so newer

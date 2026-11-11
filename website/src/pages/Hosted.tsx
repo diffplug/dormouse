@@ -314,7 +314,7 @@ function FreeCard() {
             <a href={sitePath("/self-host")} className={LINK_CLASS}>self-hosted Relay</a>
           </>,
           "Spoken alarms in your system voice",
-          "Zero network requests unless you enroll with a Relay",
+          "No network connection until you turn one on",
         ]}
       />
     </PlanCard>
@@ -373,7 +373,7 @@ function FoundingCard({ cohort, buy }: { cohort: Cohort; buy: Buy }) {
       <Includes
         items={[
           "Everything in Hosted",
-          "A founding badge and an optional avatar here",
+          "An optional place in the founders row here",
         ]}
       />
     </PlanCard>
@@ -596,7 +596,7 @@ export default function Hosted() {
           <a href={sitePath("/dor")} className={LINK_CLASS}>
             dor CLI
           </a>
-          , browser panes, the notepad, alerts with your system voice, the Relay itself,
+          , browser panes, alerts with your system voice, the Relay itself,
           and Pocket over a Relay you run.
         </p>
         <p className={`leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>
@@ -641,8 +641,8 @@ export default function Hosted() {
             active; taxes may change. A failed renewal gives you 30 days to restore
             payment and keep the price, but paid features pause until payment succeeds.
             A failure caused by us or a billing-provider migration does not forfeit the
-            lock. A lapsed founder re-subscribes at list. Founding badges are
-            cosmetic — in the app and on the credits page, never a capability.
+            lock. A lapsed founder re-subscribes at list. The founders row is
+            cosmetic, never a capability.
           </FaqEntry>
           <FaqEntry question="Who appears in the founders row?">
             Only founders who tick the box at checkout; it starts unticked, and you can
