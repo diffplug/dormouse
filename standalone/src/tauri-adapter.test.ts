@@ -135,7 +135,7 @@ describe("TauriAdapter external links", () => {
     const adapter = new TauriAdapter();
     vi.mocked(shellOpen).mockClear();
     for (const uri of ["ms-msdt:x", "search-ms:query=x", "javascript:alert(1)"]) {
-      await expect(adapter.openExternal(uri)).rejects.toThrow("Dormouse does not open this link.");
+      expect(await adapter.openExternal(uri)).toBe("Dormouse does not open this link.");
     }
     expect(shellOpen).not.toHaveBeenCalled();
     await adapter.openExternal("vscode://file/x.ts");
@@ -143,9 +143,12 @@ describe("TauriAdapter external links", () => {
     expect(vi.mocked(shellOpen).mock.calls).toEqual([["vscode://file/x.ts"], ["https://example.com/"]]);
   });
 
-  it("hands the shell's refusal back to the caller", async () => {
+  it("answers the shell's refusal rather than rejecting", async () => {
     vi.mocked(shellOpen).mockRejectedValueOnce(new Error("Scope not allowed"));
-    await expect(new TauriAdapter().openExternal("https://example.com/")).rejects.toThrow("Scope not allowed");
+    // Answered, never thrown: a caller that opens without waiting (a header's
+    // system-browser button) must leave no unhandled rejection behind.
+    expect(await new TauriAdapter().openExternal("https://example.com/")).toBe("Scope not allowed");
+    expect(await new TauriAdapter().openExternal("https://example.com/")).toBeUndefined();
   });
 
   it("admits IPv6-literal web links to the shell's open scope, and no other app's link", () => {

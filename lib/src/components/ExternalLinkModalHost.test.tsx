@@ -84,8 +84,8 @@ it('offers no open for another app\'s link on a host that cannot hand one over',
   expect(hasOpenButton()).toBe(true);
 });
 
-it('keeps the dialog open with the host\'s refusal when its opener rejects', async () => {
-  mocks.open.mockRejectedValue(new Error('Scope not allowed'));
+it('keeps the dialog open with the refusal its host\'s opener answers', async () => {
+  mocks.open.mockResolvedValue('Scope not allowed');
   act(() => requestExternalLinkConfirmation('https://trusted.example/'));
   await act(async () => button('Open URL').click());
   expect(alertText()).toBe('Scope not allowed');

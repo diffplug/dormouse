@@ -500,10 +500,10 @@ export class TauriAdapter implements PlatformAdapter {
   // admits only web, `mailto:`, and `tel:` links.
   readonly opensOtherApps = false as const;
 
-  openExternal(uri: string): Promise<void> {
+  openExternal(uri: string): Promise<string | undefined> {
     const normalized = normalizeExternalUri(uri);
-    if (!normalized) return Promise.reject(new Error("Dormouse does not open this link."));
-    return open(normalized);
+    if (!normalized) return Promise.resolve("Dormouse does not open this link.");
+    return open(normalized).then(() => undefined, errMessage);
   }
 
   onFilesDropped(handler: (paths: string[]) => void): () => void {

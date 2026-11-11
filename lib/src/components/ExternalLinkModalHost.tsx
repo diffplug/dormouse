@@ -80,9 +80,10 @@ function PendingLinkDialog({ request }: { request: PendingExternalLink }) {
       // A host that answers keeps the dialog until the opener has, so a refusal shows here.
       setError(undefined);
       setBusy(true);
-      opened.then(() => {
-        if (current()) clearExternalLinkConfirmation();
-      }, fail);
+      void opened.then((refusal) => {
+        if (refusal !== undefined) fail(refusal);
+        else if (current()) clearExternalLinkConfirmation();
+      });
       return;
     }
     if (typeof source === 'string') return setError(source);

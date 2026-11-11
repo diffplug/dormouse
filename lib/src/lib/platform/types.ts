@@ -355,9 +355,10 @@ export interface PlatformAdapter {
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 
   // Open a sanitized external URI. Implementations must revalidate because
-  // terminal output is untrusted. A returned promise rejects when the host's
-  // opener refuses the URI.
-  openExternal?(uri: string): void | Promise<void>;
+  // terminal output is untrusted. A host whose opener answers returns a
+  // promise of its refusal (`undefined` once opened) that never rejects, so a
+  // caller that does not wait for it leaves nothing unhandled.
+  openExternal?(uri: string): void | Promise<string | undefined>;
   // False on a host whose opener refuses a link another app handles (any
   // scheme but web and mail), so the link dialog offers no open for one.
   readonly opensOtherApps?: false;
