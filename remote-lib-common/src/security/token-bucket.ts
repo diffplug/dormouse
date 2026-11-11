@@ -3,8 +3,9 @@
  *
  * Refills in whole intervals and carries the remainder, so a clock read every
  * few hundred milliseconds cannot round its way to a faster sustained rate; a
- * rewinding clock costs refill, never correctness, and a forward jump refills
- * at most `capacity`. Rejected attempts allocate no per-caller state.
+ * rewinding clock mints nothing and costs at most one interval of refill, and a
+ * forward jump refills at most `capacity`. Rejected attempts allocate no
+ * per-caller state.
  */
 
 export interface TokenBucketOptions {
@@ -39,7 +40,11 @@ export class TokenBucket {
 
   /** Spend one token, returning `null` on success or the wait until the next one. */
   take(): number | null {
-    const elapsed = Math.max(0, this.#now() - this.#lastRefillAt);
+    const now = this.#now();
+    // A clock stepped back restarts the interval from here; left at the old
+    // mark, no token would arrive until the clock caught back up to it.
+    if (now < this.#lastRefillAt) this.#lastRefillAt = now;
+    const elapsed = now - this.#lastRefillAt;
     const refill = Math.floor(elapsed / this.#refillIntervalMs);
     if (refill > 0) {
       this.#tokens = Math.min(this.#capacity, this.#tokens + refill);
