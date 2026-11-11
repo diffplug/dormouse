@@ -189,12 +189,12 @@ export type LathWallEngine = {
   store: LathWallStore;
 
   // --- animation (docs/specs/tiling-engine.md → "Animation") ---
-  /** The headless motion core the HTML adapter drives from its rAF loop. Created
-   *  with a 0 duration under reduced motion, so the same code path snaps instantly. */
+  /** The headless motion core the HTML adapter drives from its rAF loop. Its
+   *  duration is 0 under reduced motion, so the same code path snaps instantly. */
   animator: LathAnimator;
   /** The kill-fade duration (ms) the Wall waits before committing `remove`. Equals
-   *  the animator duration (0 under reduced motion). */
-  exitMs: number;
+   *  the animator duration (0 under reduced motion), read now. */
+  readonly exitMs: number;
   /** Begin a leaf's exit fade (phase 1 of a kill); `shrinkTowardBottomRight` also
    *  collapses it toward its bottom-right corner (the last-pane kill). Idempotent. */
   markDying(id: string, opts?: { shrinkTowardBottomRight?: boolean }): void;
@@ -249,10 +249,11 @@ export function createLathWallEngine(
 ): LathWallEngine {
   const snapshot = (): LathWallSnapshot => store.getSnapshot();
 
-  // 0 when motion must be instant (reduced motion, or Storybook's animate=false),
+  // 0 when motion must be instant (reduced motion, or the Argos snapshot run's animate=false),
   // so entry/exit/tween all collapse to instant through the very same code path.
-  // Tests inject a fixed duration (or 0) via `opts`.
-  const durationMs =
+  // Tests inject a fixed duration (or 0) via `opts`. Read per motion, so an OS
+  // reduced-motion toggle applies at once, as it does to the ring.
+  const durationMs = (): number =>
     opts?.durationMs ?? (motionIsInstant() ? 0 : LATH_MOTION_MS);
   const animator = createAnimator({ durationMs, easing: LATH_EASING });
 
@@ -267,7 +268,7 @@ export function createLathWallEngine(
     store,
 
     animator,
-    exitMs: durationMs,
+    get exitMs() { return durationMs(); },
     markDying(id, markOpts) {
       // The animator owns dying state (idempotent per id); wake the tick loop, since
       // a fade starts no store commit and so fires no retarget effect.

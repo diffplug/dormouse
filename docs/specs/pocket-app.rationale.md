@@ -8,8 +8,6 @@
 
 ## The seam: the remote session is a platform adapter
 
-**Why the resume path is in the PTY core at all.** `requestInit`/`onPtyList` was built for VS Code webview reloads, where the host outlives the webview; a phone that backgrounds and returns is the same shape, so the remote adapter reuses it unchanged.
-
 **Why the `#pair?` fragment is erased before the first render.** An address bar, a history stack and a screenshot are no place for a live credential, and the fragment is a live setup token until it is spent.
 
 **Why a paste field feeds the same parser as the camera.** A pasted invitation is the same string checked the same way, and a desktop browser or the dev loop has no camera at all.

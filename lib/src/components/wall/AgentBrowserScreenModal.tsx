@@ -6,8 +6,8 @@
  *   - Render — swap the backend in place, preserving the target: each
  *     provider's screencast and popout (relaunch headed as a native OS
  *     window), or `iframe embed`. Each lists its agent/URL/feel trade-offs.
- *     Shown only when the controller wires `setRenderMode`, offering only the
- *     modes the controller declares in `renderModes`.
+ *     Offered only when the controller wires `setRenderMode`, listing only
+ *     the modes the controller declares in `renderModes`.
  *   - Resolution — the screencast viewport: *Resize with pane* (linked to the
  *     pane) or *Fixed* (a specific resolution chosen via a preset or Custom).
  *     Specific to screencast, so it nests under that option and greys out
@@ -76,7 +76,7 @@ export function AgentBrowserScreenModal({
   const hostCapable = controller.hostCapable;
 
   // Pre-select from intent, not the transient dimension comparison: while a
-  // resize is landing, sync stays engaged even though the live state is SCALED.
+  // resize is landing, sync stays engaged even though the sizes differ.
   const [initialSetting] = useState(() => controller.viewportSetting?.());
   const builtins = defaultBrowserViewportConfig();
   const initialPreset = matchingPreset(builtins, initialSetting);
@@ -135,11 +135,9 @@ export function AgentBrowserScreenModal({
   };
 
 
-  // Render backend (Path 1 + Pop-Out). The Render section only appears
-  // when the surface wires `setRenderMode` (the swap is wired); otherwise the
-  // modal is the plain screencast viewport modal it has always been.
+  // Render backend (Path 1 + Pop-Out). Only a surface that wires
+  // `setRenderMode` offers this modal.
   const currentMode: RenderMode = snapshot?.renderMode ?? 'agent-browser-screencast';
-  const canSwapRender = !!controller.actions.setRenderMode;
   const [renderMode, setRenderMode] = useState<RenderMode>(currentMode);
   // The controller declares what this Surface can take; a Tool never pops out.
   // The current mode always shows so it stays selected.
@@ -277,46 +275,41 @@ export function AgentBrowserScreenModal({
         <ModalCloseButton onClick={onClose} />
       </div>
 
-      {canSwapRender ? (
-        <div className="mt-4 flex flex-col gap-3">
-          {/* Screencast owns the robot capability glyph; its nested resolution
-              modes append the presentation glyph. */}
-          {offered(screencast) && (
-            <RenderOption
-              checked={renderMode === screencast}
-              onSelect={() => setRenderMode(screencast)}
-              icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
-              label={`${BROWSER_PROVIDER_GUI[provider].label} screencast`}
-              trailing={<BrowserProviderSwitch providers={providers} value={provider} onChange={chooseProvider} />}
-              features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
-            >
-              {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
-            </RenderOption>
-          )}
-          {offered(popout) && (
-            <RenderOption
-              checked={renderMode === popout}
-              onSelect={() => setRenderMode(popout)}
-              icon={<BrowserDisplayIcon mode={popoutDisplay} size={14} className="text-muted" />}
-              label={BROWSER_DISPLAY_LABEL[popoutDisplay]}
-              features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
-            />
-          )}
-          {offered('iframe') && (
-            <RenderOption
-              checked={renderMode === 'iframe'}
-              onSelect={() => setRenderMode('iframe')}
-              icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
-              label={BROWSER_DISPLAY_LABEL.iframe}
-              features={[[false, 'agents cannot read/write'], [false, 'http only'], [false, 'no logins/cookies'], [true, 'native human experience']]}
-              disabledReason={embedRefusal ?? undefined}
-            />
-          )}
-        </div>
-      ) : (
-        // No render swap wired: the legacy plain screencast resolution modal.
-        <div className="mt-4">{viewportControls}</div>
-      )}
+      <div className="mt-4 flex flex-col gap-3">
+        {/* Screencast owns the robot capability glyph; its nested resolution
+            modes append the presentation glyph. */}
+        {offered(screencast) && (
+          <RenderOption
+            checked={renderMode === screencast}
+            onSelect={() => setRenderMode(screencast)}
+            icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
+            label={`${BROWSER_PROVIDER_GUI[provider].label} screencast`}
+            trailing={<BrowserProviderSwitch providers={providers} value={provider} onChange={chooseProvider} />}
+            features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
+          >
+            {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
+          </RenderOption>
+        )}
+        {offered(popout) && (
+          <RenderOption
+            checked={renderMode === popout}
+            onSelect={() => setRenderMode(popout)}
+            icon={<BrowserDisplayIcon mode={popoutDisplay} size={14} className="text-muted" />}
+            label={BROWSER_DISPLAY_LABEL[popoutDisplay]}
+            features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
+          />
+        )}
+        {offered('iframe') && (
+          <RenderOption
+            checked={renderMode === 'iframe'}
+            onSelect={() => setRenderMode('iframe')}
+            icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
+            label={BROWSER_DISPLAY_LABEL.iframe}
+            features={[[false, 'agents cannot read/write'], [false, 'http only'], [false, 'no logins/cookies'], [true, 'native human experience']]}
+            disabledReason={embedRefusal ?? undefined}
+          />
+        )}
+      </div>
 
       {!hostCapable && !viewportDisabled && !switchingMode && (
         <p className="mt-3 text-xs text-muted">

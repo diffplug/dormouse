@@ -2,8 +2,7 @@ import { test, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Hono } from "hono";
-import { escape } from "@pgstencil/auth/email";
-import { EmailDev } from "pgstencil";
+import { EmailDev, escapeHtml } from "pgstencil";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
@@ -912,17 +911,23 @@ test("a dispute on a closed account still records, and a lost one still runs its
   f.paidInvoices.set("pi_du_closed", subscription.id);
   expect((await member.request("/api/account/close", { method: "POST", body: { close: true } })).status).toBe(204);
   await f.deliver();
-  const dispute = (status: string) => {
-    f.disputes.set("du_closed", { status, customer: session.customer as string, paymentIntent: "pi_du_closed" });
-    return f.send(f.event("charge.dispute.updated", { id: "du_closed", object: "dispute", charge: "ch_for_du_closed", status }));
+  const dispute = (status: string, id = "du_closed") => {
+    f.disputes.set(id, { status, customer: session.customer as string, paymentIntent: "pi_du_closed" });
+    return f.send(f.event("charge.dispute.updated", { id, object: "dispute", charge: "ch_for_du_closed", status }));
   };
   expect((await dispute("needs_response")).status).toBe(200);
   expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([{ userId: member.id }]);
+  // Nothing is paused for a closed account, so no mail says so.
+  expect(f.email.all().some((mail) => mail.subject.includes("payment dispute"))).toBe(false);
   expect((await dispute("lost")).status).toBe(200);
   expect(await f.sql(`SELECT "userId" FROM dormouse_billing_disputes`)).toEqual([]);
   // Closing already ended the subscription; the lost dispute ends nothing more.
   expect(f.cancels).toEqual([{ subscription: subscription.id }]);
   expect(await f.ended()).toEqual([{ subscription: subscription.id, reason: END_REASONS.closure }]);
+  // Nor is anything restored.
+  expect((await dispute("needs_response", "du_closed_won")).status).toBe(200);
+  expect((await dispute("won", "du_closed_won")).status).toBe(200);
+  expect(f.email.all().some((mail) => mail.subject.includes("access is restored"))).toBe(false);
 });
 
 test("a purchase ending otherwise counts as canceled, and one ending within the refund window as refunded", async ({
@@ -1486,6 +1491,146 @@ test("closing within the 30-day guarantee refunds that payment in full, once, an
   expect([await settled(yearlyMember.id), await settled(monthlyMember.id)]).toEqual([true, true]);
 });
 
+/** A fixture for closures cut off mid-way, with the probes their tests share. */
+const interrupted = async (onTestFinished: (fn: () => void | Promise<void>) => void) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
+  const close = (who: Awaited<ReturnType<typeof f.account>>) =>
+    who.request("/api/account/close", { method: "POST", body: { close: true } });
+  const closure = (userId: string) =>
+    f.sql<{ canceled: string[]; settled: boolean }>(
+      `SELECT "canceledSubscriptions" AS canceled, "settledAt" IS NOT NULL AS settled FROM dormouse_account_closures WHERE "userId" = $1`,
+      [userId],
+    );
+  const present = async (userId: string) => (await f.sql(`SELECT id FROM "user" WHERE id = $1`, [userId])).length === 1;
+  /** Every Stripe list of subscriptions after a cancel fails, retries included, as in an outage. */
+  const failListsAfterCancel = () => {
+    let canceled = false;
+    f.before.request = async (method, path) => {
+      if (method === "DELETE") canceled = true;
+      else if (canceled && path === "/v1/subscriptions") f.dev.failNext(path);
+    };
+  };
+  /** A member holding a founding subscription whose first payment is `intent`. */
+  const founder = async (intent: string) => {
+    const who = await f.account();
+    const { subscription } = await f.buy(who, "founding");
+    f.paidInvoices.set(intent, subscription.id);
+    return { who, subscription };
+  };
+  return { f, close, closure, present, failListsAfterCancel, founder };
+};
+
+test("a closure whose Stripe list fails after the cancel keeps the account and refunds on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, present, failListsAfterCancel, founder } = await interrupted(onTestFinished);
+  const listed = await founder("pi_listed");
+  failListsAfterCancel();
+  expect((await close(listed.who)).status).toBe(503);
+  f.before.request = null;
+  expect([await present(listed.who.id), f.refunds]).toEqual([true, []]);
+  expect((await close(listed.who)).status).toBe(204);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_listed", withdrawal: null, closure: listed.subscription.id }]);
+  expect(await closure(listed.who.id)).toEqual([{ canceled: [listed.subscription.id], settled: true }]);
+});
+
+test("a closure whose own write fails after the cancel refunds on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, present, founder } = await interrupted(onTestFinished);
+  const written = await founder("pi_written");
+  await f.sql(`CREATE SEQUENCE closure_write_failures`);
+  await f.sql(`CREATE FUNCTION fail_closure_write() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF nextval('closure_write_failures') = 1 THEN RAISE EXCEPTION 'closure write failed'; END IF; RETURN NEW; END $$`);
+  await f.sql(`CREATE TRIGGER fail_closure_write BEFORE INSERT ON dormouse_account_closures FOR EACH ROW EXECUTE FUNCTION fail_closure_write()`);
+  expect((await close(written.who)).status).toBe(503);
+  expect([await present(written.who.id), f.refunds]).toEqual([true, []]);
+  expect((await close(written.who)).status).toBe(204);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_written", withdrawal: null, closure: written.subscription.id }]);
+  expect(await closure(written.who.id)).toEqual([{ canceled: [written.subscription.id], settled: true }]);
+});
+
+test("a closure cut off after Stripe's cancel, before Hosted records it, refunds on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, present, founder } = await interrupted(onTestFinished);
+  const cut = await founder("pi_cut");
+  f.failing.lostCancels = true;
+  expect((await close(cut.who)).status).toBe(503);
+  f.failing.lostCancels = false;
+  expect([await present(cut.who.id), f.refunds]).toEqual([true, []]);
+  // Retried days later, it still ended during the attempt that named it.
+  f.time.advanceMilliseconds(10 * DAY_MS);
+  expect((await close(cut.who)).status).toBe(204);
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_cut", withdrawal: null, closure: cut.subscription.id }]);
+  expect(await closure(cut.who.id)).toEqual([{ canceled: [cut.subscription.id], settled: true }]);
+});
+
+test("a close that runs whole while another waits to record its cancel keeps that subscription, refunded once", async ({
+  onTestFinished,
+}) => {
+  const { f, close, closure, founder } = await interrupted(onTestFinished);
+  const twice = await founder("pi_twice");
+  // The first closure's record, the statement that also deletes the account,
+  // waits after its cancel until the gate opens, before it touches a row.
+  await f.sql(`CREATE TABLE closure_gate ()`);
+  await f.sql(`CREATE SEQUENCE closure_writes`);
+  await f.sql(`CREATE FUNCTION hold_closure_write() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF nextval('closure_writes') = 1 THEN
+        WHILE NOT EXISTS (SELECT FROM closure_gate) LOOP PERFORM pg_sleep(0.02); END LOOP;
+      END IF;
+      RETURN NULL;
+    END $$`);
+  for (const [name, on] of [
+    ["insert", `INSERT ON dormouse_account_closures`],
+    ["delete", `DELETE ON "user"`],
+  ])
+    await f.sql(`CREATE TRIGGER hold_closure_${name} BEFORE ${on} FOR EACH STATEMENT EXECUTE FUNCTION hold_closure_write()`);
+  const first = close(twice.who);
+  await vi.waitFor(async () => expect(await f.sql(`SELECT FROM pg_stat_activity WHERE wait_event = 'PgSleep'`)).toHaveLength(1), {
+    timeout: 10_000,
+  });
+  const second = await close(twice.who);
+  await f.sql(`INSERT INTO closure_gate DEFAULT VALUES`);
+  const answers = [second.status, (await first).status];
+  expect(f.refunds).toEqual([{ paymentIntent: "pi_twice", withdrawal: null, closure: twice.subscription.id }]);
+  expect(await closure(twice.who.id)).toEqual([{ canceled: [twice.subscription.id], settled: true }]);
+  expect(answers).toEqual([204, 204]);
+});
+
+test("an interrupted closure past the refund window refunds nothing on the retry", async ({ onTestFinished }) => {
+  const { f, close, closure, failListsAfterCancel } = await interrupted(onTestFinished);
+  const late = await f.account();
+  const { subscription: lateMonthly } = await f.buy(late, "monthly");
+  f.paidInvoices.set("pi_late", lateMonthly.id);
+  f.time.advanceMilliseconds(40 * DAY_MS);
+  failListsAfterCancel();
+  expect((await close(late)).status).toBe(503);
+  f.before.request = null;
+  expect((await close(late)).status).toBe(204);
+  expect(f.refunds).toEqual([]);
+  expect(await closure(late.id)).toEqual([{ canceled: [lateMonthly.id], settled: true }]);
+});
+
+test("a hold's subscription that lapsed long after its failed attempt is no closure's, and refunds nothing", async ({ onTestFinished }) => {
+  const { f, close, closure, present } = await interrupted(onTestFinished);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "monthly");
+  f.paidInvoices.set("pi_lapsed", subscription.id);
+  // Two days in, the close fails before Stripe acts on its cancel, retry included.
+  f.time.advanceMilliseconds(2 * DAY_MS);
+  f.failing.cancels = 2;
+  expect((await close(member)).status).toBe(503);
+  expect([await present(member.id), f.cancels]).toEqual([true, []]);
+  // The member stays and lets it lapse at its period end, 28 days after it started.
+  f.time.advanceMilliseconds(26 * DAY_MS);
+  f.dev.transition(subscription.id, "cancel");
+  await f.deliver();
+  // Closing days later owes nothing: the month was used.
+  f.time.advanceMilliseconds(4 * DAY_MS);
+  expect((await close(member)).status).toBe(204);
+  expect(f.refunds).toEqual([]);
+  expect(await closure(member.id)).toEqual([{ canceled: [], settled: true }]);
+});
+
 test("closing answers billing's refusal, such as a checkout still being created, and keeps the account", async ({
   onTestFinished,
 }) => {
@@ -1676,7 +1821,7 @@ test("a completed checkout emails what was agreed once, to the Stripe customer's
     DIFFPLUG_POSTAL_ADDRESS,
   ])
     expect(mail!.text, fact).toContain(fact);
-  expect(mail!.html).toContain(escape(MODEL_WITHDRAWAL_FORM));
+  expect(mail!.html).toContain(escapeHtml(MODEL_WITHDRAWAL_FORM));
   expect(mail!.text).not.toContain("signin@example.test");
 
   // Redelivered, or the same checkout in another event: nothing new.
@@ -1719,6 +1864,12 @@ test("a purchase's confirmation that fails to send never fails the webhook, and 
 
   // Later than any other notice's retry lasts, and with the subscription long past its period.
   f.time.advanceMilliseconds(60 * DAY_MS);
+  // A refused send names its notice in the alert.
+  const [{ id }] = await f.sql<{ id: string }>(`SELECT id FROM dormouse_billing_notices WHERE kind = 'purchase'`);
+  f.mailing.failures = 1;
+  const failure = await resyncBilling(f.setup, f.database.url, origin, f.mail).then(() => null, (error: unknown) => error);
+  expect(alertLines(failure).map((line) => line.text)).toEqual([`Notice ${id} (purchase): Postmark outage`]);
+  f.time.advanceMilliseconds(6 * 60 * 1000);
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
   expect(f.confirmations()).toHaveLength(1);
   expect(await unsent()).toEqual([]);
@@ -1906,6 +2057,30 @@ test("a renewal notice sent beside a price change's states the new price that re
     expect(await mailTo(account, "renews")).toContain(`for another year at $${LIST_ANNUAL} plus any applicable tax`);
 });
 
+test("a renewal notice due before its price change's notice states the new price that renewal charges", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  await f.sql(
+    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+    VALUES ('yearly-120', 'yearly', $1, $2, $3, $4, $5)`,
+    [f.setup.yearly, CHANGED_PRICES.yearly, LIST_ANNUAL, CHANGED_USD.yearly, f.time.now()],
+  );
+  // Inside the renewal notice's 30 days, outside the change's 21.
+  const renewsAt = new Date(subscription.items.data[0]!.current_period_end * 1000);
+  f.time.advanceMilliseconds(renewsAt.getTime() - f.time.now().getTime() - (RENEWAL_NOTICE_DAYS - 1) * DAY_MS);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+
+  expect(await f.sql(`SELECT kind FROM dormouse_billing_notices WHERE kind = 'price_change'`)).toHaveLength(0);
+  const [{ email }] = await f.sql<{ email: string }>(
+    `SELECT email FROM dormouse_billing_notices WHERE "userId" = $1 AND kind = 'renewal'`,
+    [member.id],
+  );
+  const renewal = f.email.all().find((mail) => mail.to.includes(email) && mail.subject.includes("renews"))!.text;
+  expect(renewal).toContain(`for another year at $${CHANGED_USD.yearly} plus any applicable tax`);
+});
+
 test("a dispute's suspension and restoration are each emailed once to the billing email, and the cron retries a failed send", async ({
   onTestFinished,
 }) => {
@@ -1999,14 +2174,14 @@ test("notices that keep failing go to the back, so they never starve a newer one
   const f = await fixture();
   onTestFinished(f.close);
   const resync = () => resyncBilling(f.setup, f.database.url, origin, f.mail).catch((error: unknown) => error);
-  // A full pass of notices to accounts Stripe holds no email for, then one it does.
-  await f.sql(
-    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt")
-    SELECT 'failing-' || n, 'nobody-' || n, 'dispute_restored', 'du_failing_' || n, $1 FROM generate_series(1, 50) n`,
-    [new Date(f.time.now().getTime() - DAY_MS)],
-  );
   const member = await f.account();
   const { session } = await f.buy(member, "monthly");
+  // A full pass of notices to accounts Stripe holds no email for, then one it does.
+  await f.sql(
+    `INSERT INTO dormouse_billing_notices (id, "userId", kind, "subscriptionId", "checkoutId", "createdAt")
+    SELECT 'failing-' || n, 'nobody-' || n, 'purchase', 'sub_failing_' || n, 'cs_failing_' || n, $1 FROM generate_series(1, 50) n`,
+    [new Date(f.time.now().getTime() - DAY_MS)],
+  );
   await f.sql(
     `INSERT INTO dormouse_billing_notices (id, "userId", kind, "disputeId", "createdAt") VALUES ('newer', $1, 'dispute_restored', 'du_newer', $2)`,
     [member.id, f.time.now()],

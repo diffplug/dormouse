@@ -120,14 +120,6 @@ describe('shell store', () => {
     expect(getShellsSnapshot().selected).toEqual(DEBIAN);
   });
 
-  it('restores a legacy path-only selection', () => {
-    localStorage.setItem(SELECTED_KEY, JSON.stringify(BASH.path));
-
-    seedShellStore(SHELLS);
-
-    expect(getShellsSnapshot().selected).toEqual(BASH);
-  });
-
   it('unpublishes the default shell when the store is emptied', () => {
     seedShellStore(SHELLS);
 

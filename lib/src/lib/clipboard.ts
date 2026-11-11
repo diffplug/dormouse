@@ -14,7 +14,11 @@ function defangPasteEscapes(text: string): string {
 function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
-  const payload = bracketed ? `\x1b[200~${defangPasteEscapes(text)}\x1b[201~` : text;
+  // Each line break as Enter's `\r`, as xterm's own paste (Edit → Paste) sends
+  // it: ConPTY reads a CRLF's LF as a second key, and a raw-mode program reads
+  // a bare LF as `^J`.
+  const lines = text.replace(/\r?\n/g, '\r');
+  const payload = bracketed ? `\x1b[200~${defangPasteEscapes(lines)}\x1b[201~` : lines;
   // Paste and file-drop input bypass xterm's onData handler, so they take the
   // keystroke path's write here: touched, acknowledged, then written.
   writeUserInput(terminalId, payload);
@@ -22,6 +26,7 @@ function writePasteToPty(terminalId: string, text: string): void {
 
 export const CONTROL_PATH_NOTICE = 'Nothing pasted: a file name has a control character';
 export const UNQUOTABLE_PATH_NOTICE = 'Nothing pasted: a file name has a character cmd or PowerShell would expand';
+export const CLIPBOARD_READ_NOTICE = 'Nothing pasted: the clipboard could not be read';
 
 /**
  * Shell-escape the given paths and type them at the terminal, joined by single
@@ -48,13 +53,15 @@ export function pasteFilePaths(terminalId: string, paths: string[]): void {
   writePasteToPty(terminalId, escaped.join(' ') + ' ');
 }
 
-export async function readTextFromClipboard(): Promise<string> {
+/** `onFailure` hears a native read that failed, which reads as empty. */
+export async function readTextFromClipboard(onFailure?: () => void): Promise<string> {
   // Prefer native reads; macOS WKWebView prompts on every navigator read.
   const platform = getPlatform();
   if (platform.readClipboardText) {
     try {
       return (await platform.readClipboardText()) ?? '';
     } catch {
+      onFailure?.();
       return '';
     }
   }
@@ -75,10 +82,13 @@ export async function doPaste(terminalId: string, suppliedText?: string): Promis
     return;
   }
   const platform = getPlatform();
+  // A read that failed is not an empty clipboard: when nothing pastes, say so.
+  let failed = false;
+  const fail = () => { failed = true; return null; };
 
   const [paths, text] = await Promise.all([
-    platform.readClipboardFilePaths().catch(() => null),
-    readTextFromClipboard(),
+    platform.readClipboardFilePaths().catch(fail),
+    readTextFromClipboard(fail),
   ]);
   if (paths && paths.length > 0) {
     pasteFilePaths(terminalId, paths);
@@ -89,8 +99,10 @@ export async function doPaste(terminalId: string, suppliedText?: string): Promis
     return;
   }
 
-  const imagePath = await platform.readClipboardImageAsFilePath().catch(() => null);
+  const imagePath = await platform.readClipboardImageAsFilePath().catch(fail);
   if (imagePath) {
     pasteFilePaths(terminalId, [imagePath]);
+  } else if (failed) {
+    wallHandleOwning(terminalId)?.showNotice(CLIPBOARD_READ_NOTICE, terminalId);
   }
 }

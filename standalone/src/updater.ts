@@ -525,6 +525,12 @@ export function _resetForTesting(): void {
 // teardown step, strictly *after* the final session save has landed. Exiting
 // the process is quit_proceed's job in Rust, which runs after this returns.
 
+/** Whether the user approved an update this webview holds, downloading or
+ *  downloaded: closing `main` throws either away. */
+export function hasApprovedUpdate(): boolean {
+  return approvedUpdate() !== null;
+}
+
 /** Whether an approved, downloaded update is waiting to install at quit. */
 export function hasPendingUpdate(): boolean {
   return pendingUpdate !== null;

@@ -1,6 +1,6 @@
 import { test, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "../token-digest";
 import { Hono } from "hono";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
@@ -42,7 +42,7 @@ import { FakeBurrow } from "../../../remote-lib-common/test/harness/fake-burrow.
 import { FakeClient } from "../../../remote-lib-common/test/harness/fake-client.mjs";
 import { openFrameSocket, until } from "../../../remote-lib-common/test/harness/frame-socket.mjs";
 import { e2eCases, socketCases } from "../../../remote-lib-common/test/harness/relay-parity.mjs";
-import { ADMIN_EMAIL } from "../entitlement";
+import { ADMIN_EMAIL, RENEWAL_GRACE } from "../entitlement";
 import { migrations } from "../migrations";
 import { relayAccountRoutes } from "../relay-account";
 import {
@@ -544,6 +544,54 @@ test("the sweep closes a Burrow removed (4001) or de-entitled (4002) behind its 
   await room.fire();
   expect((await kept.socket.closed).code).toBe(WS_CLOSE_BURROW_NOT_ENTITLED);
   expect(await room.onlineBurrows(owner.userId)).toEqual([]);
+});
+
+test("a renewal's gap keeps a subscriber's Burrow through the grace, and no failed, canceled, or disputed one", async ({
+  onTestFinished,
+}) => {
+  onTestFinished(closeAll);
+  const owner = await account();
+  // Entitled by an active subscription rather than the admin address.
+  await sql(`UPDATE "user" SET email = id || '@example.test' WHERE id = $1`, [owner.userId]);
+  await sql(`INSERT INTO pgstencil_billing.accounts (owner_id, email, created_at) VALUES ($1, 'm@example.test', now())`, [owner.userId]);
+  await sql(
+    `INSERT INTO pgstencil_billing.subscriptions (id, owner_id, price_id, status, period_end, cancel_at_period_end, updated_at)
+    VALUES ('sub_grace', $1, 'price_monthly', 'active', now() + interval '1 day', false, now())`,
+    [owner.userId],
+  );
+  const room = await owner.room();
+  /** The period ended `ago` (an SQL interval) before now, in `status`. */
+  const period = (status: string, ago: string) =>
+    sql(`UPDATE pgstencil_billing.subscriptions SET status = $1, period_end = now() - (${ago}) WHERE id = 'sub_grace'`, [status]);
+  const second = "interval '1 second'";
+
+  // One second past the period end, its renewal webhook not yet in: kept.
+  const renewing = await owner.driver.connectBurrow();
+  await period("active", second);
+  await room.fire();
+  expect(await room.onlineBurrows(owner.userId)).toContain(renewing.burrowId);
+  // Past the grace, with no renewal: closed, on the code that says why.
+  await period("active", `interval '${RENEWAL_GRACE}' + ${second}`);
+  await room.fire();
+  expect((await renewing.socket.closed).code).toBe(WS_CLOSE_BURROW_NOT_ENTITLED);
+  expect(await room.onlineBurrows(owner.userId)).not.toContain(renewing.burrowId);
+
+  // A failed renewal, a cancellation, and a dispute get no grace at all.
+  for (const lapse of [
+    () => period("past_due", second),
+    () => period("canceled", second),
+    async () => {
+      await period("active", second);
+      await sql(`INSERT INTO dormouse_billing_disputes ("disputeId", "userId") VALUES ('dp_grace', $1)`, [owner.userId]);
+    },
+  ]) {
+    await sql(`DELETE FROM dormouse_billing_disputes WHERE "userId" = $1`, [owner.userId]);
+    await sql(`UPDATE pgstencil_billing.subscriptions SET status = 'active', period_end = now() + interval '1 day' WHERE id = 'sub_grace'`);
+    const held = await owner.driver.connectBurrow();
+    await lapse();
+    await room.fire();
+    expect((await held.socket.closed).code).toBe(WS_CLOSE_BURROW_NOT_ENTITLED);
+  }
 });
 
 test("removing a passkey closes its sessions' Client sockets at once; the sweep closes one whose session went or lost the entitlement", async ({

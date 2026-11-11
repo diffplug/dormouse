@@ -888,7 +888,7 @@ describe('RemoteControlSection', () => {
       }
       if (cmd === 'beginHostedEnrollment') return hostedWaiting();
       return enrolledNow
-        ? enrolled({ ...hosted, connection: 'removed' })
+        ? enrolled({ ...hosted, connection: 'removed', label: 'Work laptop' })
         : { ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() };
     });
     platform = { burrow: link };
@@ -903,7 +903,8 @@ describe('RemoteControlSection', () => {
       .map(([cmd]) => cmd)
       .filter((cmd) => cmd === 'clearEnrollment' || cmd === 'beginHostedEnrollment');
     expect(order).toEqual(['clearEnrollment', 'beginHostedEnrollment']);
-    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'ned-mac' });
+    // Under the name it was enrolled with, not the suggestion.
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'Work laptop' });
     // The code is in view, not folded behind Persistent Relay.
     expect(codeShown()).toBe('47');
   });
@@ -1705,7 +1706,7 @@ describe('RemoteControlSection', () => {
     // The `SetupPhoneQr` / `SetupPhoneRedeemed` stories drive the section
     // through `makeStubBurrowLink` and nothing else, so a fixture that
     // stopped answering `setupQr` — or stopped firing the invitation event —
-    // would fail only in Chromatic. The states themselves are covered above, so
+    // would fail only in Argos. The states themselves are covered above, so
     // this pins the fixture rather than re-rendering them.
     const link = makeStubBurrowLink({
       status: enrolledStatus(),

@@ -1,18 +1,21 @@
 import { createRef, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
-import { $getNodeByKey, $getNearestNodeFromDOMNode, COMMAND_PRIORITY_HIGH, getNearestEditorFromDOMNode, type LexicalCommand, type LexicalEditor } from 'lexical';
+import {
+  $getNodeByKey, $getNearestNodeFromDOMNode, $isLineBreakNode, COMMAND_PRIORITY_HIGH, FOCUS_COMMAND, getNearestEditorFromDOMNode, HISTORIC_TAG, SKIP_DOM_SELECTION_TAG,
+  type LexicalCommand, type LexicalEditor,
+} from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
-  $isImageNode, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
+  $isImageNode, addExportVisitor$, addTableCellEditorChild$, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, initialMarkdownNormalize$, InsertCodeBlock, InsertTable, InsertThematicBreak,
-  linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
-  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
+  linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, markdownSourceEditorValue$, MDXEditor, muteChange$, NESTED_EDITOR_UPDATED_COMMAND, quotePlugin, realmPlugin,
+  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type LexicalVisitor, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { checked, documentSession, loadingState, request, stateLabel, textSource, type DocumentState } from './document-session';
+import { checked, documentSession, loadingState, request, stateLabel, textSource, type DocumentSource, type DocumentState } from './document-session';
 import { editableImage, handOffImageEdits, imageSources, imageUrl, ImagesPanel, localImagePath, pathRoute } from './images-panel';
 import { ImageResizeHandles } from './image-resize';
 import { commentsPlugin } from './markdown-comments';
@@ -80,23 +83,97 @@ function editLink(anchor: HTMLAnchorElement) {
   editor.focus();
   editor.update(() => { $getNearestNodeFromDOMNode(anchor)?.selectStart(); }, { onUpdate: () => realm?.pub(openLinkEditDialog$, undefined) });
 }
+/** Table cell editors holding text their table has not taken yet. MDXEditor
+ * edits each cell in its own editor and copies it into the document only on
+ * Tab, Enter, or blur, so until then `getMarkdown()` does not have it. */
+const pendingCells = new Set<LexicalEditor>();
+
+/** Hands each pending cell's text to its table, as leaving the cell would, so
+ * `getMarkdown()` has it. A cell mid-composition keeps its text, and stays
+ * pending: handing it off would cut the input method's conversion short. */
+function handOffCells() {
+  for (const cell of [...pendingCells]) {
+    if (cell.isComposing()) continue;
+    const focused = cell.getRootElement()?.contains(document.activeElement);
+    cell.dispatchCommand(NESTED_EDITOR_UPDATED_COMMAND, undefined);
+    pendingCells.delete(cell);
+    // The hand-off clears the table's active cell, as leaving it does; the
+    // user is still typing there, so it is made active again.
+    if (focused) cell.dispatchCommand(FOCUS_COMMAND, new FocusEvent('focus'));
+  }
+}
+
+/** Rendered in every table cell's editor: marks the cell pending on each edit
+ * of its contents, so the document reads unsaved at once. It finds the cell's
+ * editor through the DOM, beside which MDXEditor renders it. */
+function CellEdits() {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const element = ref.current?.parentElement?.querySelector('[data-lexical-editor]');
+    const cell = element ? getNearestEditorFromDOMNode(element) : null;
+    if (!cell || cell.getRootElement() !== element) return;
+    const stop = cell.registerUpdateListener(({ dirtyElements, dirtyLeaves, tags }) => {
+      // A selection or focus change dirties no node.
+      if (!dirtyElements.size && !dirtyLeaves.size) return;
+      // The table writing its own contents back in (an undo in the document)
+      // is not the user's edit, and leaves the cell matching its table.
+      if (tags.has(HISTORIC_TAG) && tags.has(SKIP_DOM_SELECTION_TAG)) {
+        if (pendingCells.delete(cell)) session.changed();
+        return;
+      }
+      pendingCells.add(cell);
+      session.changed();
+    });
+    return () => { stop(); pendingCells.delete(cell); };
+  }, []);
+  return <span ref={ref} hidden />;
+}
+
+/** The file's text as loaded, trimmed at the end as a save trims it, until a
+ * save replaces the file. MDXEditor's source mode otherwise shows the rich
+ * editor's export, which reformats the whole document. */
+let loadedText: string | null = null;
+
+/** The document's text, unless the file no longer opens rich: then the page
+ * reloads, and its `view` route serves the source editor, so MDXEditor never
+ * loads what a save would restructure. A Reload of a file changed on disk, or
+ * a change between `view` and the first load, reaches it. */
+const markdownSource: DocumentSource<string> = {
+  async load() {
+    const { text, version, name, editing } = await request('source');
+    if (editing !== 'rich') {
+      location.reload();
+      return new Promise(() => {});
+    }
+    return { content: text, version, name };
+  },
+  async save(text, version) {
+    const saved = await textSource.save(text, version);
+    loadedText = null;
+    return saved;
+  },
+};
+
 // The editor trims the document; saves end it with one newline, and the server
 // restores the file's line endings.
 const session = documentSession<string>({
   snapshot() {
+    handOffCells();
     const markdown = editorRef.current!.getMarkdown();
     return { content: markdown ? `${markdown}\n` : '', mark: markdown };
   },
-  holds: mark => editorRef.current?.getMarkdown() === mark,
+  holds: mark => !pendingCells.size && editorRef.current?.getMarkdown() === mark,
   apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
     uploadedWidths.clear();
-    flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
+    const markdown = text.replace(/\r\n?/g, '\n');
+    loadedText = markdown.trimEnd();
+    flushSync(() => root.render(<Page key={++loads} markdown={markdown} />));
   },
 }, {
   report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
-}, textSource, view);
+}, markdownSource, view);
 
 /** The document's source for the image node `key`, when it opens as an editable image. */
 function editablePath(editor: LexicalEditor, key: string): string | null {
@@ -163,9 +240,40 @@ function ImageChrome(props: ImageChromeProps) {
  * `upload` answered, until its insertion takes it. */
 const uploadedWidths = new Map<string, number>();
 
+/** MDXEditor saves every line break as a newline in text, which Markdown
+ * reads as a soft break, so a hard break would render as a space; this saves
+ * it as a break. Outranks MDXEditor's own. */
+const lineBreakVisitor: LexicalVisitor = {
+  priority: 1,
+  testLexicalNode: $isLineBreakNode,
+  visitLexicalNode({ lexicalNode, mdastParent, actions }) {
+    // Two in a row are MDXEditor's paragraph boundary inside a list item, and a
+    // break that ends its block would save as a literal backslash.
+    const paired = $isLineBreakNode(lexicalNode.getNextSibling()) || $isLineBreakNode(lexicalNode.getPreviousSibling());
+    actions.appendToParent(mdastParent, paired || lexicalNode.getNextSibling() === null ? { type: 'text', value: '\n' } : { type: 'break' });
+  },
+};
+
 const capture = realmPlugin({
   init(r) {
     realm = r;
+    r.pub(addExportVisitor$, lineBreakVisitor);
+    r.pub(addTableCellEditorChild$, CellEdits);
+    // While the document is clean, source mode shows the file itself, so a
+    // source edit saves the file plus that edit. Leaving it, the rich editor
+    // imports that text again; its reformatting is not an edit.
+    r.sub(viewMode$, mode => {
+      if (session.dirty()) return;
+      if (mode === 'source' && loadedText !== null) {
+        const muted = r.getValue(muteChange$);
+        r.pub(muteChange$, true);
+        try { r.pub(markdownSourceEditorValue$, loadedText); } finally { r.pub(muteChange$, muted); }
+        session.rebase();
+      } else if (mode === 'rich-text') {
+        // Joins the import's update, so it runs once that export has landed.
+        r.getValue(rootEditor$)?.update(() => {}, { onUpdate: () => session.rebase() });
+      }
+    });
     const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<ImageChromeProps>;
     if (toolbar !== ImageChrome) DefaultImageToolbar = toolbar;
     // Ahead of MDXEditor's own handler, which creates the node from the payload,

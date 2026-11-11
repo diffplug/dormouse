@@ -68,7 +68,7 @@ Source of truth: `WSL_CLI_ENV` in `standalone/sidecar/pty-core.js`, `dor/bin/dor
 
 **Must release captured stdout/stderr pipes when the result settles**, including the exit-grace fallback, without terminating descendants (rationale).
 
-**An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with `SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill. **On Windows it must end the whole tree**, since a `.cmd` shim's child is `cmd.exe` and the real CLI is its descendant.
+**An optional `timeoutMs` must kill the child and resolve `{ ok: false }` with `SPAWN_TIMEOUT_CODE`** (`ETIMEDOUT`), without waiting for the kill; an aborted `signal` likewise, with `ABORT_ERR`. **On Windows it must end the whole tree**, since a `.cmd` shim's child is `cmd.exe` and the real CLI is its descendant.
 
 **Must run a `.cmd`/`.bat` shim's own target, never `cmd.exe`, in a UNC cwd** (a WSL caller's), since `cmd.exe` falls back to `%SystemRoot%` there; a shim of no known shape keeps `cmd.exe`.
 
@@ -123,7 +123,7 @@ One extension host can hold multiple Dormouse webviews, so the request carries `
 
 ### Deadlines And Cancellation
 
-**Every valid request must preserve `host ceiling < client socket < server reaper`.** The client sends its own `timeoutMs` as a hint and the server reaps 10s above it. `dor await`'s host ceiling is at most 24h (`--timeout` takes 1–86400 whole seconds, the host's `MAX_AWAIT_TIMEOUT_MS`) and its socket deadline 5s later, so the server accepts hints up to 24h + 5s; an absent or nonsense hint (non-finite, ≤ 0, or above that) falls back to 65s, which clears the longest fixed client deadline (`dor ensure --restart` at 60s).
+**Every valid request must preserve `host ceiling < client socket < server reaper`**, except a `surface.tool` queued behind others. The client sends its own `timeoutMs` as a hint and the server reaps 10s above it. `dor await`'s host ceiling is at most 24h (`--timeout` takes 1–86400 whole seconds, the host's `MAX_AWAIT_TIMEOUT_MS`) and its socket deadline 5s later, so the server accepts hints up to 24h + 5s; an absent or nonsense hint (non-finite, ≤ 0, or above that) falls back to 65s, which clears the longest fixed client deadline (`dor ensure --restart` at 60s).
 
 **Must answer a malformed control request with an error before forwarding it, and keep serving later connections** (`standalone/sidecar/dor-control-server.test.js`).
 
@@ -255,7 +255,7 @@ Source of truth: `dor/src/commands/reopen.ts`, `handleReopenControl` in `lib/src
 
 **Must resolve navigation targets CLI-side before forwarding to the browser provider.** Only the first target of a navigation verb is eligible. Skip known option values; an unknown option leaves the argv unchanged rather than guessing its arity. The provider descriptors and `resolveOpenTargetArgs` own recognized verbs and option arities.
 
-A Surface handle resolves through `surface.resolveOpen`, which runs the same host port scan as `dor list --ports` (visible panes **and** minimized doors) and groups listening records by distinct port, so several bindings of one dev server stay one candidate. Zero or several distinct ports fail, the latter listing the choices. **One port opens `http://localhost:<port>/` when a loopback or any-interface bind exists, otherwise the specific bound LAN/Tailnet address.** Only terminal Surfaces own ports, so a browser-Surface handle is rejected.
+`surface.resolveOpen` shares `dor list --ports`' scan, grouping bindings by port. Zero or multiple ports fail; multiple ports list the choices. **Must open discovered ports at numeric addresses**, preferring loopback over LAN/Tailnet and IPv4 over IPv6 within either group; never substitute `localhost` (rationale). **Must use host-selected wildcard destinations, omitting those reported as shadowed** (`docs/specs/transport.md` → Port scan destinations). Browser-Surface handles are rejected: only terminal Surfaces own ports.
 
 Source of truth: `dor/src/commands/open-target.ts`, `resolveOpenTargetArgs` in `dor/src/commands/browser-cli.ts`, `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`.
 
@@ -277,7 +277,7 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 
 - **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except Dormouse-owned `dor-embed-size` and `dor-diagnostics`, forward arguments, stdout, stderr and exit status. **Must forward stdin only to the requested command**, never preparation or status probes.
 - **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.
-- **After a command that may bind succeeds, `surface.browser { provider, key?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a launch or close of the browser (rationale). A failure there adds a stderr warning without changing the command's success. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
+- **After a command that may bind succeeds, `surface.browser { provider, key?, surface?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**, routed by any `--surface`: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a launch or close of the browser (rationale). A failure there adds a stderr warning without changing the command's success. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle Model](#handle-model)), and the host applies two gates in order:
 
@@ -321,7 +321,7 @@ Source of truth: `createDorControlServer` in `standalone/sidecar/dor-control-ser
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI).
 
-**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
+**The router answers `tool.list` (`dor tool --list` and its bare picker) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`.
 

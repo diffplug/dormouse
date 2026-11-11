@@ -113,7 +113,6 @@ export {
   cwdFromProcessPath,
   buildAppTitleResolver,
   deriveHeader,
-  groupTerminalPanes,
   resolveDisplayPrimary,
   summarizeCommandLine,
   UNNAMED_PANEL_TITLE,

@@ -252,7 +252,18 @@ test('a Windows pane\'s reported directory reaches the host as a Windows path', 
     await manager.context({ op: 'openDirectory', id, path }, 'host');
     return asked.at(-1);
   };
-  assert.equal(await openedPath('wsl', '/home/me/app'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
+  // A distro's own directory is reachable only through its share, which the
+  // resolver refuses: the host says so and never asks.
+  const errors = [];
+  const refusing = create((event, data) => { if (event === 'context' && data.error) errors.push(data.error); }, {
+    spawn: () => ({ pid: 42, write() {}, resize() {}, kill() {}, onData() {}, onExit() {} }),
+  }, { platform: 'win32', canonicalDirectory: async (path) => { asked.push(path); return null; } });
+  refusing.spawn('wsl', { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] });
+  asked.length = 0;
+  await refusing.context({ op: 'openDirectory', id: 'wsl', path: '/home/me/app' }, 'host');
+  assert.deepEqual(errors, ['Explorer opens only a WSL directory under /mnt']);
+  assert.deepEqual(asked, []);
+  refusing.killAll();
   assert.equal(await openedPath('wsl', '/mnt/c/Users/me'), 'C:\\Users\\me');
   assert.equal(await openedPath('wsl', '/mnt/d'), 'D:\\');
   assert.equal(await openedPath('gitbash', '/c/Users/me'), 'C:\\Users\\me');

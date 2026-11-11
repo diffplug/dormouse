@@ -42,9 +42,6 @@ import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
 export const ONE_TIME_SERVING_KEY = 'dormouse.burrow.one-time-serving';
 
 export class VsCodeBurrowStateStore implements BurrowStateStore {
-  /** Writes here survive a restart (`BurrowStateStore.persistent`). */
-  readonly persistent = true;
-
   readonly #context: vscode.ExtensionContext;
   #enrollment: Promise<BurrowEnrollment | null> | null = null;
   #watch: vscode.Disposable | undefined;

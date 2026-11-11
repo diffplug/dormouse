@@ -60,7 +60,9 @@ export function ExternalLinkModal({
   const openableDecision = request.decision.status === 'openable' ? request.decision : null;
   const blockedDecision = request.decision.status === 'blocked' ? request.decision : null;
   // Terminal text, shown exactly: a blocked URL keeps whatever got it blocked.
-  const displayUri = printableExact(request.decision.displayUri || request.uri);
+  // An openable one shows what opens, which the parser may have respelled
+  // (a lookalike host as punycode, a `\` authority as `/`).
+  const displayUri = printableExact(openableDecision?.uri || request.decision.displayUri || request.uri);
   const verdict = request.verdict;
   const isDeceptive = verdict === 'deceptive';
   const buttonNoun = openableDecision ? pickOpenButtonNoun(openableDecision) : 'URL';

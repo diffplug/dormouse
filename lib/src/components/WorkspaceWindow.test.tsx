@@ -1226,6 +1226,16 @@ describe('Surface moves between Workspaces', () => {
     expect(getWallHandle('workspace:2')!.ownsSurface('frame')).toBe(true);
   });
 
+  it('drops a browser\'s key as it leaves its Workspace, keeping its session', async () => {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'workspace:2', activate: false });
+    const meta = browserLeafMeta('default', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:3000/', session: 'dormouse.workspace-1.default', key: 'default' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('web'), leafMeta: { web: meta } } }, 'workspace:2': { initialPaneIds: ['pane-x'] } }} /></>);
+    const prepared = getWallHandle(source)!.prepareSurfaceMove('web');
+    expect(prepared.meta.params?.key).toBeUndefined();
+    expect(prepared.meta.params?.session).toBe('dormouse.workspace-1.default');
+  });
+
   /** A source holding only a plain iframe, beside two terminal Workspaces. */
   async function iframeWalls() {
     const source = getActiveWorkspaceId();
@@ -1490,6 +1500,20 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'workspace:2', 'workspace:3']);
     expect(getActiveWorkspaceId()).toBe('workspace:2');
     expect(leafIdsIn('workspace:2')).toEqual(leaves);
+  });
+
+  it('selects the restored Workspace\'s tab', async () => {
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:3', activate: false });
+    const onEvent = vi.fn();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['surface:a']} onEvent={onEvent} /></>);
+    await act(async () => { requestWorkspaceClose('workspace:2'); });
+    await flush();
+    onEvent.mockClear();
+    await act(async () => { restorePendingKill(pendingKillKey('workspace', 'workspace:2')); });
+    await flush();
+    const selections = onEvent.mock.calls.map(([event]) => event).filter((event) => event.type === 'selectionChange');
+    expect(selections.at(-1)).toEqual({ type: 'selectionChange', id: 'workspace:2', kind: 'workspace' });
   });
 
   it('brings a pending Workspace back first when restoring a Surface pended inside it', async () => {

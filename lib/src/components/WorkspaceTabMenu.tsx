@@ -48,7 +48,8 @@ export function WorkspaceTabMenu({
 }: {
   menu: WorkspaceMenu;
   workspace: WorkspaceMeta;
-  /** The host's tear-out into a new window; absent on a host with one window. */
+  /** The host's tear-out into a new window; absent on a host with one window,
+   *  and for a window's only Workspace. */
   onMoveToNewWindow?: (id: WorkspaceId) => void;
 }) {
   const { id } = workspace;

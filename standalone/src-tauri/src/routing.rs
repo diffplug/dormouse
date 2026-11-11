@@ -487,14 +487,59 @@ pub fn quit_order(labels: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<Stri
     order
 }
 
-/// Whether `point` (physical, screen space) is inside a window's outer rect.
-pub fn rect_contains(origin: (i32, i32), size: (u32, u32), point: (f64, f64)) -> bool {
-    let (x, y) = origin;
-    let (w, h) = size;
-    point.0 >= f64::from(x)
-        && point.1 >= f64::from(y)
-        && point.0 < f64::from(x) + f64::from(w)
-        && point.1 < f64::from(y) + f64::from(h)
+/// Whether `point` is inside the box at `origin` of `size`, all in one space.
+fn rect_contains(origin: (f64, f64), size: (f64, f64), point: (f64, f64)) -> bool {
+    point.0 >= origin.0 && point.1 >= origin.1 && point.0 < origin.0 + size.0 && point.1 < origin.1 + size.1
+}
+
+/// How the platform scales the cursor and the windows' boxes it reports, which
+/// decides the space a hit test compares them in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CursorSpace {
+    /// One physical screen space for both (Windows; Linux on X11, whose GDK
+    /// scale is one for every display).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    Physical,
+    /// macOS: tao reports the cursor in points times the primary display's
+    /// scale, and each window's box in points times its own display's, so the
+    /// two meet only in points.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    PrimaryScaled(f64),
+}
+
+impl CursorSpace {
+    /// The cursor as tao reports it, in the space the boxes are compared in.
+    pub fn cursor(self, point: (f64, f64)) -> (f64, f64) {
+        match self {
+            CursorSpace::Physical => point,
+            CursorSpace::PrimaryScaled(primary) => (point.0 / primary, point.1 / primary),
+        }
+    }
+
+    /// The cursor in logical screen space, where a new window is placed: on
+    /// macOS in points; elsewhere through `window_scale`, the scale of the
+    /// window the drag left.
+    pub fn logical_cursor(self, point: (f64, f64), window_scale: f64) -> (f64, f64) {
+        match self {
+            CursorSpace::Physical => (point.0 / window_scale, point.1 / window_scale),
+            CursorSpace::PrimaryScaled(_) => self.cursor(point),
+        }
+    }
+
+    /// A window's outer box in that space, and the factor from it to the
+    /// window's logical client space.
+    fn rect(self, rect: &WindowRect) -> ((f64, f64), (f64, f64), f64) {
+        let origin = (f64::from(rect.origin.0), f64::from(rect.origin.1));
+        let size = (f64::from(rect.size.0), f64::from(rect.size.1));
+        match self {
+            CursorSpace::Physical => (origin, size, rect.scale),
+            CursorSpace::PrimaryScaled(_) => (
+                (origin.0 / rect.scale, origin.1 / rect.scale),
+                (size.0 / rect.scale, size.1 / rect.scale),
+                1.0,
+            ),
+        }
+    }
 }
 
 /// One window as the cursor hit test sees it.
@@ -515,27 +560,33 @@ pub struct CursorHit {
     pub y: f64,
 }
 
-/// The window under `point`, preferring the most recently focused of the
-/// windows containing it — Tauri exposes no z-order, and focus order is the
-/// closest stand-in (the hover caret makes a wrong guess visible before
-/// release).
+/// The window under `point`, the cursor as tao reports it in `space`,
+/// preferring the most recently focused of the windows containing it — Tauri
+/// exposes no z-order, and focus order is the closest stand-in (the hover caret
+/// makes a wrong guess visible before release).
 pub fn window_at(
     rects: &[WindowRect],
     focus_order: &[String],
     point: (f64, f64),
+    space: CursorSpace,
 ) -> Option<CursorHit> {
+    let point = space.cursor(point);
     let containing: Vec<&WindowRect> = rects
         .iter()
-        .filter(|rect| rect.hittable && rect_contains(rect.origin, rect.size, point))
+        .filter(|rect| {
+            let (origin, size, _) = space.rect(rect);
+            rect.hittable && rect_contains(origin, size, point)
+        })
         .collect();
     let best = focus_order
         .iter()
         .find_map(|label| containing.iter().find(|rect| &rect.label == label).copied())
         .or_else(|| containing.first().copied())?;
+    let (origin, _, scale) = space.rect(best);
     Some(CursorHit {
         label: best.label.clone(),
-        x: (point.0 - f64::from(best.origin.0)) / best.scale,
-        y: (point.1 - f64::from(best.origin.1)) / best.scale,
+        x: (point.0 - origin.0) / scale,
+        y: (point.1 - origin.1) / scale,
     })
 }
 
@@ -570,12 +621,12 @@ mod tests {
         crate::workspaces::report(
             &mut registry,
             "main",
-            vec![crate::workspaces::Entry { id: "workspace:2".into(), name: "Build".into(), active: true }],
+            vec![crate::workspaces::Entry { id: "workspace:2".into(), name: "Build".into() }],
         );
         crate::workspaces::report(
             &mut registry,
             "ws-2",
-            vec![crate::workspaces::Entry { id: "workspace:5".into(), name: "Docs".into(), active: true }],
+            vec![crate::workspaces::Entry { id: "workspace:5".into(), name: "Docs".into() }],
         );
         let view = state.view(&registry);
         let from_main = |params: JsonValue| json!({ "surfaceId": "a", "params": params });
@@ -1029,20 +1080,64 @@ mod tests {
             rect("ws-2", (0, 0), (800, 600), true),
             rect("ws-3", (0, 0), (800, 600), false),
         ];
-        let hit = window_at(&rects, &["ws-2".into(), "main".into()], (200.0, 100.0)).unwrap();
+        let hit = window_at(&rects, &["ws-2".into(), "main".into()], (200.0, 100.0), CursorSpace::Physical).unwrap();
         assert_eq!(hit.label, "ws-2");
         // Physical screen point -> the hit window's own logical client space.
         assert_eq!((hit.x, hit.y), (100.0, 50.0));
 
         // Nothing focused that contains the point: the first containing window.
-        let hit = window_at(&rects, &["ws-3".into()], (10.0, 10.0)).unwrap();
+        let hit = window_at(&rects, &["ws-3".into()], (10.0, 10.0), CursorSpace::Physical).unwrap();
         assert_eq!(hit.label, "main");
 
         // Outside every window.
-        assert_eq!(window_at(&rects, &[], (5000.0, 10.0)), None);
+        assert_eq!(window_at(&rects, &[], (5000.0, 10.0), CursorSpace::Physical), None);
 
         // A minimized window alone under the cursor is not a target.
         let only_minimized = vec![rect("ws-3", (0, 0), (800, 600), false)];
-        assert_eq!(window_at(&only_minimized, &[], (10.0, 10.0)), None);
+        assert_eq!(window_at(&only_minimized, &[], (10.0, 10.0), CursorSpace::Physical), None);
+    }
+
+    fn scaled(label: &str, origin: (i32, i32), size: (u32, u32), scale: f64) -> WindowRect {
+        WindowRect { label: label.to_string(), origin, size, scale, hittable: true }
+    }
+
+    #[test]
+    fn on_macos_the_hit_test_compares_mixed_scale_displays_in_points() {
+        // A Retina primary (2x) and a 1x external to its right: a window at
+        // (1700, 100) pt, 1400x900 pt, is reported at its own scale, the cursor
+        // at (2400, 500) pt at the primary's.
+        let external = [scaled("ws-2", (1700, 100), (1400, 900), 1.0)];
+        let hit = window_at(&external, &[], (4800.0, 1000.0), CursorSpace::PrimaryScaled(2.0)).unwrap();
+        assert_eq!((hit.label.as_str(), hit.x, hit.y), ("ws-2", 700.0, 400.0));
+        assert_eq!(window_at(&external, &[], (4800.0, 1000.0), CursorSpace::Physical), None, "the old comparison");
+
+        // The 1x external above the main display, so above y = 0: a window at
+        // (800, -1000) pt, 600x400 pt, under the cursor at (1000, -800) pt.
+        let above = [scaled("ws-3", (800, -1000), (600, 400), 1.0), scaled("main", (0, 0), (2940, 1912), 2.0)];
+        let hit = window_at(&above, &[], (2000.0, -1600.0), CursorSpace::PrimaryScaled(2.0)).unwrap();
+        assert_eq!((hit.label.as_str(), hit.x, hit.y), ("ws-3", 200.0, 200.0));
+        assert_eq!(CursorSpace::PrimaryScaled(2.0).logical_cursor((2000.0, -1600.0), 1.0), (1000.0, -800.0));
+        // A window on the primary still hits at its own place.
+        let hit = window_at(&above, &[], (400.0, 200.0), CursorSpace::PrimaryScaled(2.0)).unwrap();
+        assert_eq!((hit.label.as_str(), hit.x, hit.y), ("main", 200.0, 100.0));
+    }
+
+    #[test]
+    fn displays_of_one_scale_and_the_physical_space_answer_as_before() {
+        // Every window at the primary's scale: points and physical agree.
+        let rects = [scaled("main", (0, 0), (800, 600), 2.0), scaled("ws-2", (1000, 0), (800, 600), 2.0)];
+        for point in [(200.0, 100.0), (1100.0, 300.0), (5000.0, 10.0)] {
+            assert_eq!(
+                window_at(&rects, &[], point, CursorSpace::PrimaryScaled(2.0)),
+                window_at(&rects, &[], point, CursorSpace::Physical),
+            );
+        }
+        // Windows: one physical space, each window's own scale for its client.
+        let mixed = [scaled("ws-2", (1700, 100), (1400, 900), 1.0), scaled("main", (0, 0), (1600, 1000), 2.0)];
+        let hit = window_at(&mixed, &[], (2400.0, 500.0), CursorSpace::Physical).unwrap();
+        assert_eq!((hit.label.as_str(), hit.x, hit.y), ("ws-2", 700.0, 400.0));
+        let hit = window_at(&mixed, &[], (400.0, 200.0), CursorSpace::Physical).unwrap();
+        assert_eq!((hit.label.as_str(), hit.x, hit.y), ("main", 200.0, 100.0));
+        assert_eq!(CursorSpace::Physical.logical_cursor((400.0, 200.0), 2.0), (200.0, 100.0));
     }
 }

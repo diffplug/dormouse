@@ -62,6 +62,8 @@ Windows PowerShell 5.1 and PowerShell 7.6.7 (measured on Windows, 2026-10) remov
 
 ## Browser Open Target Resolution
 
+On macOS in November 2026, a Dormouse website Tool owned `*:5173` while an older pridm process owned `[::1]:5173`. Turning the website listener into `localhost:5173` sent Chromium to pridm. A port number identifies neither an address family nor the process a connection reaches; explicit loopback binds need their numeric address, and wildcard binds need the host to check competing listeners before discarding processes outside the requested tree.
+
 **Why the port, and not the hostname, picks `http`.** A public HTTPS site lives on 443 and is written without a port, whereas a bare `host:port` is overwhelmingly a dev or infra server — loopback, a LAN container, a Tailnet peer — and those speak `http`. The hostname carries no usable signal: `box.ts.net` is a private Tailnet peer and looks like any other domain, so the CLI does not try to classify it.
 
 **Why a purely numeric "host" is rejected explicitly.** `new URL` accepts `800:600` and packs it into a bogus IPv4 rather than failing, so a resolution-looking argument would silently navigate somewhere real instead of erroring.

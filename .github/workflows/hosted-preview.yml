@@ -153,7 +153,7 @@ jobs:
           # Use the plan default (5 minutes); Free rejects custom timeouts.
           suspend_timeout: 0
       - name: Apply and validate SQL migrations on this PR's database
-        run: pnpm --filter dormouse-hosted db:migrate --preview && pnpm --filter dormouse-hosted db:validate --preview
+        run: pnpm --filter dormouse-hosted db:migrate:preview && pnpm --filter dormouse-hosted db:validate:preview
         env:
           DATABASE_URL: ${{ steps.database.outputs.db_url }}
       - name: Deploy the try, relay, voice, and account Workers and Hyperdrive

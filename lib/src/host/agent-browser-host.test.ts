@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { existsSync, mkdtempSync, promises as fsp, statSync, utimesSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, promises as fsp, statSync, utimesSync, writeFileSync } from 'fs';
 import { createServer, type Server } from 'net';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -1508,6 +1508,32 @@ describe('agent-browser shell environment', () => {
     } finally {
       await closeServer(server);
       await fsp.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The CLI's own order: the override, then `$XDG_RUNTIME_DIR/agent-browser`,
+  // then the home directory, each under `namespaces/<name>/run` with a namespace.
+  it.each([
+    ['the runtime directory', { XDG_RUNTIME_DIR: '<root>/xdg' }, 'xdg/agent-browser'],
+    ['the override over the runtime directory', { AGENT_BROWSER_SOCKET_DIR: '<root>/override', XDG_RUNTIME_DIR: '<root>/xdg' }, 'override'],
+    ['the home directory for an empty runtime directory', { XDG_RUNTIME_DIR: '', HOME: '<root>/home', USERPROFILE: '<root>/home' }, 'home/.agent-browser'],
+    ['a namespace under the runtime directory', { XDG_RUNTIME_DIR: '<root>/xdg', AGENT_BROWSER_NAMESPACE: 'mine' }, 'xdg/agent-browser/namespaces/mine/run'],
+  ])('reads the daemon\'s state files from %s', async (_what, vars, under) => {
+    const root = mkdtempSync(join(tmpdir(), 'dor-ab-dir-'));
+    const env: Record<string, string> = { PATH: '/shell/bin', HOME: join(root, 'unused'), USERPROFILE: join(root, 'unused') };
+    for (const [key, value] of Object.entries(vars)) env[key] = value.replace('<root>', root);
+    const dir = join(root, under);
+    mkdirSync(dir, { recursive: true });
+    const { port, server } = await listen();
+    const provider = createAgentBrowserProvider();
+    const binding = provider.bind({ session: 'xdg-env', cwd: root, binaryPath: '/shell/bin/agent-browser', env });
+    writeFileSync(join(dir, 'xdg-env.pid'), String(process.pid));
+    writeFileSync(join(dir, 'xdg-env.stream'), String(port));
+    try {
+      expect(await provider.find(binding)).toEqual({ stream: port });
+    } finally {
+      await closeServer(server);
+      await fsp.rm(root, { recursive: true, force: true });
     }
   });
 });

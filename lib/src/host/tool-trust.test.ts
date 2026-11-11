@@ -13,12 +13,14 @@ import {
 
 /** No git in these fixtures; the folder grant is the only key unless stated. */
 const noUpstream = async () => null;
+/** A user file whose directory no fixture walk passes through. */
+const NO_USER = join(tmpdir(), 'dor-tool-trust-no-user', 'dormouse.yml');
 
 const YML = `
 tools:
   storybook:
     run: pnpm storybook
-    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+    prespawn_dedupe: [storybook, $HERE]
   once:
     run: echo hi
 `;
@@ -37,13 +39,13 @@ describe('findToolFile', () => {
     await writeFile(join(root, 'dormouse.yml'), YML);
     const nested = join(root, 'lib', 'src');
     await mkdir(nested, { recursive: true });
-    const found = await findToolFile(nested);
+    const found = await findToolFile(nested, { userPath: NO_USER });
     expect(found?.dir).toBe(root);
     expect(found?.text).toContain('storybook');
   });
 
   it('is null when no file exists up to the filesystem root', async () => {
-    expect(await findToolFile(root)).toBeNull();
+    expect(await findToolFile(root, { userPath: NO_USER })).toBeNull();
   });
 
   it('stops at the nearest file rather than the outermost', async () => {
@@ -51,7 +53,7 @@ describe('findToolFile', () => {
     const inner = join(root, 'inner');
     await mkdir(inner, { recursive: true });
     await writeFile(join(inner, 'dormouse.yml'), 'tools:\n  t:\n    run: x\n');
-    expect((await findToolFile(inner))?.dir).toBe(inner);
+    expect((await findToolFile(inner, { userPath: NO_USER }))?.dir).toBe(inner);
   });
 });
 
@@ -192,13 +194,13 @@ describe('lookupTool', () => {
   const write = (text = YML) => writeFile(join(root, 'dormouse.yml'), text);
 
   it('reports no-file when there is nothing to read', async () => {
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream }))
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream }))
       .toEqual({ status: 'no-file' });
   });
 
   it('asks for trust before running anything, naming the command', async () => {
     await write();
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream }))
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream }))
       .toMatchObject({
         status: 'untrusted',
         projectRoot: root,
@@ -219,10 +221,10 @@ tools:
     nonsense: 1
     prespawn_dedupe: [storybook]
 `);
-    const untrusted = await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });
+    const untrusted = await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream });
     const trust = new MemoryToolTrustStore();
     await trust.grant(folderGrantKey(root), 'folder');
-    const ok = await lookupTool('storybook', root, trust, { resolveUpstream: noUpstream });
+    const ok = await lookupTool('storybook', root, trust, { userPath: NO_USER, resolveUpstream: noUpstream });
 
     expect(untrusted.status).toBe('untrusted');
     expect(ok.status).toBe('ok');
@@ -234,7 +236,7 @@ tools:
   it('offers the upstream when git resolves one', async () => {
     await write();
     const upstream = async () => 'https://github.com/diffplug/dormouse';
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: upstream }))
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: upstream }))
       .toMatchObject({ status: 'untrusted', upstreamUrl: 'https://github.com/diffplug/dormouse' });
   });
 
@@ -243,14 +245,14 @@ tools:
     const trust = new MemoryToolTrustStore();
     await trust.grant(upstreamGrantKey('https://github.com/diffplug/dormouse'), 'upstream');
     const upstream = async () => 'https://github.com/diffplug/dormouse';
-    expect((await lookupTool('storybook', root, trust, { resolveUpstream: upstream })).status).toBe('ok');
+    expect((await lookupTool('storybook', root, trust, { userPath: NO_USER, resolveUpstream: upstream })).status).toBe('ok');
   });
 
   it('resolves once the folder is granted', async () => {
     await write();
     const trust = new MemoryToolTrustStore();
     await trust.grant(folderGrantKey(root), 'folder');
-    const result = await lookupTool('storybook', root, trust, { resolveUpstream: noUpstream });
+    const result = await lookupTool('storybook', root, trust, { userPath: NO_USER, resolveUpstream: noUpstream });
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.entry.run).toBe('pnpm storybook');
@@ -263,14 +265,14 @@ tools:
     await trust.grant(folderGrantKey(root), 'folder');
     // `resolveUpstreamUrl` is two `git` subprocesses on every named invocation.
     const upstream = vi.fn(async () => 'https://github.com/diffplug/dormouse');
-    expect((await lookupTool('storybook', root, trust, { resolveUpstream: upstream })).status).toBe('ok');
+    expect((await lookupTool('storybook', root, trust, { userPath: NO_USER, resolveUpstream: upstream })).status).toBe('ok');
     expect(upstream).not.toHaveBeenCalled();
   });
 
 
   it('reports an unknown tool with the names it does know, before any trust check', async () => {
     await write();
-    expect(await lookupTool('nope', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream })).toMatchObject({
+    expect(await lookupTool('nope', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream })).toMatchObject({
       status: 'unknown-tool',
       names: ['once', 'storybook'],
     });
@@ -280,13 +282,13 @@ tools:
     const persian = join(root, '\u067e\u0631\u0648\u0698\u0647\u200c\u0647\u0627');
     await mkdir(persian);
     await writeFile(join(persian, 'dormouse.yml'), YML);
-    expect(await lookupTool('storybook', persian, new MemoryToolTrustStore(), { resolveUpstream: noUpstream }))
+    expect(await lookupTool('storybook', persian, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream }))
       .toMatchObject({ status: 'untrusted', projectRoot: persian });
   });
 
   it('surfaces a parse error as an error rather than throwing', async () => {
     await write('tools:\n  t:\n    run: x\n    prespawn_dedupe: [$NOPE]\n');
-    const result = await lookupTool('t', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });
+    const result = await lookupTool('t', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream });
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/unknown substitution '\$NOPE'/);
@@ -298,7 +300,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
     // Read before the trust check, so its size is chosen by a repo nobody has
     // approved yet; parsing a huge one would OOM the host and take every PTY.
     await writeFile(join(root, 'dormouse.yml'), `# ${'x'.repeat(300_000)}\n`);
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore());
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER });
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     // Naming the check that fired is the assertion: a status alone is produced
@@ -309,7 +311,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
 
   it('still reads a normal file', async () => {
     await writeFile(join(root, 'dormouse.yml'), YML);
-    expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream })).status).toBe('untrusted');
+    expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream })).status).toBe('untrusted');
   });
 
   it('refuses a symlink instead of following it before trust', async (context) => {
@@ -324,7 +326,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
       throw error;
     }
 
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER, resolveUpstream: noUpstream });
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/must be a regular file, not a symbolic link$/);
@@ -335,7 +337,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
     // check standing. 100k four-byte characters: well under the cap by
     // `.length`, well over it by bytes. Counting code units would let it through.
     const oversized = `# ${'\u{1F600}'.repeat(100_000)}\n`;
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { readTextFile: async () => oversized, resolveUpstream: noUpstream });
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { userPath: NO_USER, readTextFile: async () => oversized, resolveUpstream: noUpstream });
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/after reading$/);

@@ -71,8 +71,11 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
    *  reported exactly once. */
   let outsideStrip = false;
   /** Set by the release of a completed drag and consumed by the one click that
-   *  follows it. */
+   *  follows it. That click goes to the capture element, which may have no
+   *  handler to consume it, so the latch also lapses one task after the release:
+   *  the browser dispatches the click in the same task as the `pointerup`. */
   let clickIsDragTail = false;
+  const expireDragTail = (): void => { setTimeout(() => { clickIsDragTail = false; }, 0); };
   /** The tab the press landed on; capture goes here once the drag activates. */
   let pressedOn: HTMLElement | null = null;
   let capturedBy: HTMLElement | null = null;
@@ -169,11 +172,14 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       );
     }
     end(false);
+    if (clickIsDragTail) expireDragTail();
   }
 
   function onPointerCancel(event: PointerEvent): void {
     if (event.pointerId !== pointerId) return;
     abandon();
+    // A cancelled pointer sends no click.
+    if (clickIsDragTail) expireDragTail();
   }
 
   function onKeyDown(event: KeyboardEvent): void {
@@ -181,6 +187,8 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
     event.preventDefault();
     event.stopPropagation();
     abandon();
+    // The button is still down: its click follows the later release.
+    if (clickIsDragTail) window.addEventListener('pointerup', expireDragTail, { once: true });
   }
 
   /** Put the order back and tell the host, so no drop caret is stranded. */

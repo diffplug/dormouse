@@ -170,6 +170,21 @@ async function snapshot(host: CohortHost, setup: BillingSetup, origin: string, p
 }
 
 /**
+ * Keeps `work` running past the end of the request that started it, and
+ * answers it: a Worker cancels a request's outstanding I/O when its client
+ * goes away. Node, the development server and tests, has no execution
+ * context.
+ */
+export function outliveRequest<T>(c: Context, work: Promise<T>): Promise<T> {
+  let ctx: { waitUntil(promise: Promise<unknown>): void } | undefined;
+  try {
+    ctx = c.executionCtx;
+  } catch {}
+  ctx?.waitUntil(work.catch(() => {}));
+  return work;
+}
+
+/**
  * The Hosted page's founders row and seat counter, which the site's Worker
  * forwards from `dormouse.sh/api/hosted/*`: public reads that resolve no
  * login, each answer reused for {@link COHORT_CACHE_MS} in this isolate.
@@ -180,23 +195,10 @@ export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, n
   let cached: { at: number; value: Promise<Snapshot> } | null = null;
   /** The last answer built, whose loaded pictures the next one keeps. */
   let last: Snapshot | undefined;
-  /**
-   * Keeps `work`, which later requests await too, running past the end of
-   * the request that started it: a Worker cancels a request's outstanding
-   * I/O when its client goes away, which would leave every waiter hanging.
-   * Node, the development server and tests, has no execution context.
-   */
-  const shared = <T>(c: Context, work: Promise<T>) => {
-    let ctx: { waitUntil(promise: Promise<unknown>): void } | undefined;
-    try {
-      ctx = c.executionCtx;
-    } catch {}
-    ctx?.waitUntil(work.catch(() => {}));
-    return work;
-  };
   const current = (c: Context, setup: BillingSetup) => {
     if (!cached || now() - cached.at >= COHORT_CACHE_MS) {
-      const value = shared(c, snapshot(host(c), setup, new URL(c.req.url).origin, last));
+      // Later requests await it too, so a cancel would leave them hanging.
+      const value = outliveRequest(c, snapshot(host(c), setup, new URL(c.req.url).origin, last));
       const entry = { at: now(), value };
       cached = entry;
       // A failure is never reused: the next request tries again.
@@ -223,7 +225,7 @@ export function cohortRoutes(app: Hono<any>, host: (c: Context) => CohortHost, n
     if (!entry) return c.json({ message: "Not found." }, 404);
     const avatar =
       entry.loaded ??
-      (await (entry.loading ??= shared(
+      (await (entry.loading ??= outliveRequest(
         c,
         loadAvatar(entry.source).then(
           (avatar) => {

@@ -9,6 +9,8 @@ import {
 describe('isNakedToolInvocation', () => {
   it('accepts a `dor tool` line typed on its own', () => {
     expect(isNakedToolInvocation('dor tool storybook')).toBe(true);
+    // Bare, it picks the Tool after the shell reported the line.
+    expect(isNakedToolInvocation('dor tool')).toBe(true);
     expect(isNakedToolInvocation('  dor tool storybook  ')).toBe(true);
     expect(isNakedToolInvocation('dor tool -- pnpm storybook')).toBe(true);
     expect(isNakedToolInvocation('dor tool --fresh storybook')).toBe(true);

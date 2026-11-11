@@ -1,7 +1,7 @@
 // Rules: docs/specs/hosted.md -> "Relay"; shared semantics docs/specs/relay.md -> "HTTP API".
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "./token-digest";
 import {
   API_ROUTES,
   BODY_TOO_LARGE_ERROR,

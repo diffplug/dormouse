@@ -13,7 +13,7 @@ The Relay is one Node process. No database. Every security primitive lives in `r
 * **Revocation is hand-editing a JSON file** ("State files"); no management UI. **Must re-check a connected Burrow's membership in `burrows.json`** every `BURROW_REVOCATION_SWEEP_MS`: a revoked Burrow's socket closes `WS_CLOSE_BURROW_REVOKED` (4001), its Clients get `burrow-gone`, and a later upgrade answers 401. Revoking a Client is the Burrow's own ACL (`docs/specs/remote-security-model.md` -> "Revocation"). **Must re-read `account.json` on that sweep and send every connected Burrow `passkeys-changed` when a row has gone**, as on its first read since starting, a file absent or unparsable changing nothing; each Burrow then revokes its pairings with that passkey (`docs/specs/remote-security-model.md` -> "Relay-named revocation").
 * **No resume protocol**: a dropped WebSocket is handled by reloading the page or reconnecting the Burrow.
 * **Everything transient is in memory** (challenges, sessions, presence nonces, routing); a Relay restart means everyone reconnects. **Transient stores must prune expired entries as they issue** (rationale).
-* **Must key every keyed transient store by whoever grew it**, each evicting its key's own oldest: setup tokens per minting Burrow (`MAX_TOKENS_PER_BURROW`), sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`); `MAX_SESSIONS` and `MAX_REAUTH_NONCE_SESSIONS` bound their totals. **The two challenge issuers are the accepted exception**: one flat `MAX_PENDING_CHALLENGES` map apiece, whose oldest entry a caller past that route's gate (sign-in has none) can evict, a live ceremony's included (`docs/specs/security.md` -> "Known gaps"; rationale).
+* **Must key every keyed transient store by whoever grew it**, each evicting its key's own oldest: setup tokens per minting Burrow (`MAX_TOKENS_PER_BURROW`), sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`); `MAX_REAUTH_NONCE_SESSIONS` bounds their total. **The two challenge issuers are the accepted exception**: one flat `MAX_PENDING_CHALLENGES` map apiece, whose oldest entry a caller past that route's gate (sign-in has none) can evict, a live ceremony's included (`docs/specs/security.md` -> "Known gaps"; rationale).
 
 ## Configuration
 
@@ -140,7 +140,7 @@ An enrolled Burrow mints a setup token over its own authenticated channel; the a
 | `v` | literal `1`, one character | E2E wire version; any other value is rejected, never negotiated |
 | `burrowId` | 16 bytes as 22-character unpadded base64url | relay destination |
 | `inviteId` | 16 bytes as 22-character unpadded base64url | single-use invitation held only in Burrow memory |
-| `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | advisory Client fail-fast; Burrow memory stays authoritative |
+| `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | phone fail-fast, `INVITATION_CLOCK_SKEW_MS` late; Burrow memory authoritative |
 | `setupToken` | 32 bytes as 43-character unpadded base64url | credential for `/api/setup/*` |
 | `ephPub` | 32-byte X25519 public key as 43-character unpadded base64url | one-use Burrow Noise responder key for this invitation |
 
@@ -271,7 +271,7 @@ Source of truth: `remote-lib-common/src/security/noise-transport.ts`.
 
 - **A self-host build sends nothing to `dormouse.sh` or any host under it unless the user clicks a link** (rationale). **Every Hosted-reaching host feature takes the nullable `hostedOrigin` or `hostedVoiceOrigin` and does nothing on `null`** (`docs/specs/one-time.md` -> "Service and hosts", `docs/specs/alert.md` -> "Managed voice"); the standalone webview never checks for updates (`docs/specs/auto-update.md` -> "How it works").
 - **The stock binary reaches only the default origin**, so self-hosting takes a source build whose `DORMOUSE_RELAY_ORIGIN` is exactly its Relay's `DORMOUSE_ORIGIN` (`SELF_HOST.md` -> "Prerequisites").
-- **Accepted origins**: a bare origin as `new URL` spells it, on `https:` or on loopback `http:` (`localhost`, `127.0.0.1`, `[::1]`), of at most `MAX_RELAY_ORIGIN_LENGTH`, the longest a one-time link fits. Anything else fails the build. **The pairing QR's fixed tail leaves a self-host origin 103 characters** ("Setup tokens and the pairing QR"): an origin of 104–167 characters builds and enrolls, then every "Set up a phone" fails.
+- **Accepted origins**: a bare origin as `new URL` spells it, on `https:` or on loopback `http:` (`localhost`, `127.0.0.1`, `[::1]`), of at most `MAX_RELAY_ORIGIN_LENGTH`, the longest both a pairing QR ("Setup tokens and the pairing QR") and a one-time link fit. Anything else fails the build.
 - **`DORMOUSE_RELAY_IS_HOSTED=1` counts a non-default origin as Hosted in a dev build only**. **Every other build is a release build and fails when the flag is set or the origin is loopback `http:`** (rationale). Unflagged, a loopback origin is a local self-host Relay.
 - **The retired `DORMOUSE_REMOTE_CONNECT_SRC` set non-blank fails the build.**
 - **Managed voice's origin is the constant `HOSTED_VOICE_ORIGIN`, never baked or overridden**, a loopback dev Hosted build included (rationale). **The account's origin is the constant `HOSTED_ACCOUNT_ORIGIN`, never baked and never requested**: the desktop opens it only on a user's click, in the browser. **The one-time page's origin is the constant `HOSTED_ONE_TIME_ORIGIN`, never baked and never requested**: the desktop only writes it into a link (`docs/specs/one-time.md` -> "Link"). Hosted's origins: `docs/specs/hosted.md` -> "Application boundary".
@@ -295,7 +295,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 * **Reads fail closed**: an error that says nothing about what the file holds answers neither empty nor stale, since an empty ACL silently de-pairs every device.
 * **The in-memory view advances only after the durable write lands.**
 * **Every mutation is serialized in call order**, so an older ACL snapshot cannot land last (rationale).
-* **A store that cannot persist still holds what it is given** in memory and reports `persistent: false`.
+* **A store that cannot persist still holds what it is given** in memory.
 * **The ACL is keyed per `burrowId`**: an enrollment onto a fresh one starts empty; a re-enrollment onto the same one keeps its paired devices.
 
 **Enrollment** (Settings, or the console hook, once):
@@ -317,7 +317,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 - **Must retain an enrollment whose save succeeded when startup fails**, reporting restart guidance, never removal advice.
 - **Never enable, disable, or clear managed voice through remote-control enrollment, startup, or Disconnect.** Managed-voice approval: `docs/specs/hosted.md` -> "Managed voice".
 
-**Relay socket policy**: one socket at a time, reconnected with backoff after any close except these, which latch a state, dispose the Burrow's sessions, and arm no timer until `start()` (an explicit `reconnect()` or a fresh start) (rationale):
+**Relay socket policy**: one socket at a time, reconnected with backoff after any close except these, which latch a state, dispose the Burrow's sessions, and arm no reconnect backoff before `start()` (an explicit `reconnect()` or fresh start) (rationale):
 
 | Close or probe answer | Latched state |
 | --- | --- |
@@ -325,8 +325,8 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 | `WS_CLOSE_BURROW_REVOKED` (4001); probe 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR` | `removed` |
 | `WS_CLOSE_BURROW_NOT_ENTITLED` (4002, Hosted only); probe 403 `NOT_ENTITLED_ERROR` | `not-entitled` |
 
-- **A socket that never opened is probed before its next backoff** with one `GET /api/push/devices` as the Burrow, a refused upgrade being only an error event. **Only a 2xx, 401, or 403 spends the failure streak's one probe** (rationale).
-- **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay nothing more**: no push, device list, setup code, or removed passkey.
+- **A socket that never opened is probed before its next backoff** with one Burrow `GET /api/push/devices`. **Only a 2xx, 401, or 403 spends the failure streak's one probe** (rationale).
+- **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay nothing more**: no push, device list, setup code, or removed passkey; a `not-entitled` one only re-probes, after 1 minute doubling to 30, reconnecting when entitled (rationale).
 
 **Security**: `BurrowAcl`, `ChallengeIssuer`, `verifyPresenceProof`, and the Noise responder for both ceremonies run in the service's process. **Must keep authorization in the Burrow process**; the expected two-digit code never leaves it (`docs/specs/remote-security-model.md` -> "Pairing").
 
@@ -346,7 +346,7 @@ The **Remote control** choices are **One-time connection** (`docs/specs/one-time
 - **The offer's token never enters a webview**: `status` carries only whether there is one (`docs/specs/security-remote.md` -> "Credentials at rest"). **The click re-reads the file**, so an old card cannot reuse a spent offer; `enrollOffer` takes `{ label }` alone.
 - **The setup password is passed through, never held**, and cleared on success.
 - **"Set up a phone" mints only when its panel opens** and **reports which decision ended the code** (`docs/specs/remote-security-model.md` -> "Pairing"; rationale).
-- **A Hosted `removed` offers Enroll again**, which clears the enrollment and then begins a device-code enrollment.
+- **A Hosted `removed` offers Enroll again**, which clears the enrollment and then begins a device-code enrollment under its name.
 - **An enrolled Burrow lists its paired phones, each with Revoke, and any revocation not saved yet, with a way to save it again, beside its access log**, and re-reads them on every `access` event (`docs/specs/remote-security-model.md` -> "Revocation", "Access log").
 
 **Never expose pairing confirmation or one-time commands on `window.dormouseBurrow`**; its enrollment methods are the scripting seam.
@@ -355,7 +355,7 @@ Source of truth: `lib/src/components/RemoteControlSection.tsx`; `lib/src/remote/
 
 ## Running it
 
-1. **Relay + Pocket**: `pnpm dev:relay` builds both, binds loopback, and prints the origin to use for the Burrow, enrollment, and Pocket; `PORT=3000 pnpm dev:relay` keeps it across restarts. A real phone needs `DORMOUSE_ORIGIN` set to a TLS origin. On localhost push is off ("Web Push") unless `DORMOUSE_VAPID_SUBJECT` supplies a contact. Its state is this worktree's (`DEV_STATE_DIR`) whatever the cwd, never the installed app's: a `DORMOUSE_STATE_DIR` equal to `DORMOUSE_RECOVERY_DIR`, which an older Dormouse leaks into its panes, reads as unset.
+1. **Relay + Pocket**: `pnpm dev:relay` builds both, binds loopback, and prints the origin to use for the Burrow, enrollment, and Pocket; `PORT=3000 pnpm dev:relay` keeps it across restarts. A real phone needs `DORMOUSE_ORIGIN` set to a TLS origin. On localhost push is off ("Web Push") unless `DORMOUSE_VAPID_SUBJECT` supplies a contact. Its state is this worktree's (`DEV_STATE_DIR`) whatever the cwd, unless `DORMOUSE_STATE_DIR` names another.
 2. **Burrow**: a dev build baked with that origin ("Relay origin"), e.g. `DORMOUSE_RELAY_ORIGIN=http://localhost:3000 pnpm dev:standalone`, enrolled with the `password` from the generated `setup-password.json`. `node relay/scripts/fake-burrow.mjs <origin>` is a headless stand-in that prints a pairing URL and auto-approves.
 3. **Phone**: open the Relay origin there, then set up a phone from the laptop (`docs/specs/pocket-app.md`).
 

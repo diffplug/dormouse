@@ -83,7 +83,8 @@ export function workspaceMetadataRefusal(id: WorkspaceId): string | null {
 /**
  * Close every member Surface through the closure coordinator, then drop the
  * Workspace itself. Resolves the first refusal's message with the Workspace left
- * as it was, or null once it is gone. Membership is cleared by the Wall's own
+ * open, members ahead of the refusing one already closed and recorded nowhere
+ * for reopen, or null once it is gone. Membership is cleared by the Wall's own
  * unmount.
  *
  * `mode` is `prompt` for a user gesture, `silent` for `dor workspace close`.
@@ -239,9 +240,12 @@ function pendWorkspace(id: WorkspaceId): void {
   const replacement = workspaces.length === 1 ? getActiveWorkspaceId() : null;
   const release = () => setHeld(held.filter(heldId => heldId !== id));
   const restore = (focus: boolean) => {
-    createWorkspace({ ...meta, activate: focus });
-    moveWorkspace(id, index);
-    release();
+    // Render its tab before selecting it, as `dropFromStrip` does.
+    flushSync(() => {
+      createWorkspace({ ...meta, activate: focus });
+      moveWorkspace(id, index);
+      release();
+    });
     // Back on the strip: its record is written again.
     void getWallHandle(id)?.flushPersistence();
     if (focus) getWallHandle(id)?.selectWorkspaceTab();

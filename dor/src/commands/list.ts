@@ -60,9 +60,9 @@ Text output prints one row per Surface: a * marks the focused Surface, then its 
 
 --port <number> filters to terminal Surfaces listening on that port. It implies the same opt-in port scan as --ports, includes port details in JSON, and shows port tags in text output.
 
-Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
+Filters are ANDed. --command is an exact match against the running command line reported by shell integration, which JSON rows carry as command_line (command is its short label). --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
 
-JSON output (--json) gives each row its id, has_terminal (a PTY), and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_id and focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_id, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+JSON output (--json) gives each row its id, has_terminal (a PTY), and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. A named Tool's row adds tool_name and tool_scope (project, user, or builtin), and a project or user Tool's adds tool_origin.file, the dormouse.yml that declares it. It adds top-level caller_surface_id and focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_id, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
 --workspace <ref> lists another Workspace instead, in this window or another: its id workspace:<n> or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
 
@@ -249,7 +249,7 @@ function applyListFilters(
     surfaces: response.surfaces.filter((surface) => (
       (flags.kind === undefined || surface.kind === flags.kind) &&
       (flags.view === undefined || surface.view === flags.view) &&
-      (flags.command === undefined || surface.command === flags.command) &&
+      (flags.command === undefined || surface.commandLine === flags.command) &&
       (cwd === undefined || cwdPathsEqual(surface.cwd, cwd)) &&
       (flags.port === undefined || (surface.ports ?? []).some((port) => port.port === flags.port))
     )),
@@ -428,11 +428,15 @@ function renderSurfaceJson(
     activity: surface.activity,
     ...(surface.exitCode !== undefined ? { exit_code: surface.exitCode } : {}),
     command: surface.command,
+    command_line: surface.commandLine ?? null,
     url: surface.url,
     ringing: surface.ringing,
     todo: surface.todo,
     awaited: surface.awaited,
     ...(surface.preview ? { preview: true } : {}),
+    ...(surface.toolName !== undefined ? { tool_name: surface.toolName } : {}),
+    ...(surface.toolScope !== undefined ? { tool_scope: surface.toolScope } : {}),
+    ...(surface.toolOrigin ? { tool_origin: { file: surface.toolOrigin.file } } : {}),
     ...(includePorts && hasTerminal(surface.kind)
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),

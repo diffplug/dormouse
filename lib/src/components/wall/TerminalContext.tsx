@@ -17,6 +17,15 @@ import { listenerUrlsByPort } from './port-url';
 import { hostBrowserProviders } from './browser-automation';
 import { ToolNavigationButtons } from './ToolNavigationButtons';
 
+/** Whether the host can open `cwd` in its file manager. On Windows a POSIX
+ *  directory opens only where it names a drive (WSL's `/mnt/c`, Git Bash's
+ *  `/c`): a distro's own directories are reachable only through its share,
+ *  which the host refuses. */
+export function canOpenDirectory(cwd: CwdState, windows: boolean): boolean {
+  if (cwd.isRemote) return false;
+  return !windows || cwd.pathKind !== 'posix' || /^\/(?:mnt\/)?[a-z](?:\/|$)/i.test(cwd.path);
+}
+
 /** `preview`: the Surface is its Workspace's preview slot, which the context
  *  offers to keep (`docs/specs/layout.md` -> Pane header). */
 export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & { title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
@@ -69,7 +78,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     runningCommand={tool && state.currentCommand ? state.currentCommand.rawCommandLine ?? '' : undefined} exited={!!helper && registry.get(helper.id)?.exited} warning={warning}
-    explorerLabel={IS_MAC ? 'Reveal in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
+    explorerLabel={IS_MAC ? 'Reveal in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && canOpenDirectory(cwd, IS_WINDOWS)}
     browserProviders={hostBrowserProviders()} canIframe={!!platform.createIframeProxyUrl}
     onClose={onClose} onCopyId={() => copy(id)} onCopyPath={() => copy(cwd?.path ?? '')}
     onExplore={async () => { if (platform.terminalContext && cwd) await platform.terminalContext({ op: 'openDirectory', id, path: cwd.path }); }}

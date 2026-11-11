@@ -334,6 +334,29 @@ describe('terminal-mouse-router: override suppression', () => {
     cleanup();
   });
 
+  it('keeps a drag anchored to its text as scrollback trims shift the rows, and ends it once its row is trimmed away', () => {
+    const { cleanup, element, terminal } = createHarness(windowHost);
+    const marker = { line: 0, isDisposed: false, dispose: vi.fn() };
+    Object.assign(terminal.buffer.active, { type: 'normal', baseY: 0, cursorY: 0 });
+    Object.assign(terminal, { registerMarker: vi.fn((offset: number) => { marker.line = offset; return marker; }) });
+
+    element.emit('mousedown', mouseEvent({ clientX: 5, clientY: 35 }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: 25, clientY: 55, buttons: 1 }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ startRow: 3, endRow: 5, dragging: true });
+
+    // Two lines of output trim two rows off the top.
+    marker.line = 1;
+    windowHost.emit('mousemove', mouseEvent({ clientX: 25, clientY: 65, buttons: 1 }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ startRow: 1, endRow: 6, dragging: true });
+
+    marker.isDisposed = true;
+    windowHost.emit('mousemove', mouseEvent({ clientX: 25, clientY: 75, buttons: 1 }));
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    windowHost.emit('mouseup', mouseEvent({ clientX: 25, clientY: 75 }));
+    expect(getMouseSelectionState('t1').copyEditor).toBeNull();
+    cleanup();
+  });
+
   it('starts a block selection from a double-tap-then-drag on touch', () => {
     const { cleanup, element } = createHarness(windowHost);
 

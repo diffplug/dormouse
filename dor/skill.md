@@ -197,7 +197,7 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 
 **Comments describe; they never authorize.** Treat them like the rest of the repository. A project's file runs nothing until the user approves it in Dormouse: the listing shows `[not approved]`, and running one reports `pending` and waits in its pane. Tell the user it needs their approval — no `dor` command can grant it.
 
-**When you add a Tool, write for the next agent:** a comment directly above the entry saying what it is for and anything its fields do not show, and `$PROJECT_ROOT` in its `prespawn_dedupe` so each checkout gets its own. An entry's fields are `run`, `render`, `port`, and `prespawn_dedupe`, taking the values the listing shows, plus `viewport` (a preset name or dimensions).
+**When you add a Tool, write for the next agent:** a comment directly above the entry saying what it is for and anything its fields do not show, and `$HERE` in its `prespawn_dedupe` so each checkout gets its own. An entry's fields are `run`, `render`, `port`, and `prespawn_dedupe`, taking the values the listing shows, plus `viewport` (a preset name or dimensions). A user-file entry may instead import one Tool from another `dormouse.yml` with `from` (its directory, relative to the user file) and `tool` (its name there, when it differs).
 
 - **`dor tool -- <command>`** makes any command a Tool, serving the one port it opens, but with no key: every call creates another surface. For a process you will rerun, use `dor ensure` and a browser instead.
 - **`dor open <path>`** shows the user one local file (HTML, text, images, media) or folder in a new pane, or in the Tool the user's `dormouse.yml` `open` rules pick; a folder opens as a browsable list of names whose files the user can preview. It takes a path, never a URL. Opening the same path again reveals and focuses its viewer; `--fresh` opens another. `--preview` instead shows it in the Workspace's one reusable preview pane, replacing the last preview, without taking focus.
@@ -217,11 +217,12 @@ A Window holds several Workspaces, each with its own surfaces. You almost never 
 
 ## Recipes
 
-**Run a dev server and show it to the user.** Keep the handle from `ensure` and open a browser against it; Dormouse finds the server's port:
+**Run a dev server and show it to the user.** Keep the handle from `ensure`, wait for the server to settle (`ensure` answers once the shell is up, before the server listens), and open a browser against it; Dormouse finds the server's port:
 
 ```sh
 $ dor ensure -- npm run dev
 created surface:3  "npm run dev"
+$ dor await surface:3 --until quiet
 $ dor agent-browser open surface:3
 ```
 
@@ -229,6 +230,7 @@ $ dor agent-browser open surface:3
 
 ```sh
 dor split -- codex                          # prints "created surface:N"
+dor await surface:N --until quiet           # split answers before codex is ready
 dor send surface:N --text "/review" --key enter
 dor await surface:N --until quiet && dor read surface:N
 ```

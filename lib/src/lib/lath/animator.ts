@@ -134,8 +134,10 @@ export interface LathAnimator {
   settledAt(now: number): boolean;
 }
 
-/** One leaf's motion segment: interpolate `from → to` over `[start, start+duration]`. */
-type Segment = { from: Frame; to: Frame; start: number };
+/** One leaf's motion segment: interpolate `from → to` over `[start, start+duration]`.
+ *  The duration is read when the segment starts, so a live reduced-motion change
+ *  applies from the next motion on. */
+type Segment = { from: Frame; to: Frame; start: number; duration: number };
 
 /** The entering rect: collapsed against `edge` of `to` (zero extent along that axis),
  *  so the leaf grows from that boundary. `'top-left'` collapses both dims. */
@@ -178,8 +180,9 @@ function framesClose(a: Frame, b: Frame): boolean {
   return rectsClose(a.rect, b.rect, 0.01) && Math.abs(a.opacity - b.opacity) < 0.01 && a.layer === b.layer;
 }
 
-export function createAnimator(opts: { durationMs: number; easing?: (t: number) => number }): LathAnimator {
-  const duration = opts.durationMs;
+export function createAnimator(opts: { durationMs: number | (() => number); easing?: (t: number) => number }): LathAnimator {
+  const { durationMs } = opts;
+  const currentDuration = typeof durationMs === 'number' ? () => durationMs : durationMs;
   const easing = opts.easing ?? LATH_EASING;
 
   // Live (tiled/entering) segments and exiting (dying) segments. A leaf is in at most
@@ -188,7 +191,7 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
   const dying = new Map<string, Segment>();
 
   const sample = (seg: Segment, now: number): Frame => {
-    const raw = duration <= 0 ? 1 : (now - seg.start) / duration;
+    const raw = seg.duration <= 0 ? 1 : (now - seg.start) / seg.duration;
     const clamped = raw < 0 ? 0 : raw > 1 ? 1 : raw;
     return lerpFrame(seg.from, seg.to, easing(clamped), clamped >= 1);
   };
@@ -207,6 +210,7 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
       // leaf's present position (interruptible by construction).
       const current = framesAt(now);
       const next = new Map<string, Segment>();
+      const duration = currentDuration();
 
       for (const [id, toRect] of targets) {
         // A dying leaf still in the tree stays dying (frozen/shrinking); do not
@@ -230,7 +234,7 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
         // Unchanged (or snapped) leaves start already-settled so `settledAt` and the
         // adapter's tick loop don't spin on frames that never move.
         const start = snap || framesClose(from, to) ? now - duration : now;
-        next.set(id, { from, to, start });
+        next.set(id, { from, to, start, duration });
       }
 
       // Drop dying leaves the tree no longer contains (their fade already ran). A Map
@@ -256,6 +260,7 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
         from: { rect: fromRect, opacity: cur.opacity, layer: Math.max(cur.layer, LATH_LAYER_DYING) },
         to: { rect: toRect, opacity: 0, layer: Math.max(cur.layer, LATH_LAYER_DYING) },
         start: now,
+        duration: currentDuration(),
       });
       anims.delete(id);
     },
@@ -265,8 +270,8 @@ export function createAnimator(opts: { durationMs: number; easing?: (t: number) 
     framesAt,
 
     settledAt(now) {
-      for (const seg of anims.values()) if (now < seg.start + duration) return false;
-      for (const seg of dying.values()) if (now < seg.start + duration) return false;
+      for (const seg of anims.values()) if (now < seg.start + seg.duration) return false;
+      for (const seg of dying.values()) if (now < seg.start + seg.duration) return false;
       return true;
     },
   };

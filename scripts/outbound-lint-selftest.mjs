@@ -271,6 +271,12 @@ const TAURI = [
     'tauri_plugin_http registered',
   ],
   [
+    'standalone/src-tauri/src/lib.rs',
+    replace('.plugin(tauri_plugin_single_instance::init(', '.plugin(tauri_plugin_other::init('),
+    'registers plugins',
+    'the single-instance plugin swapped for another',
+  ],
+  [
     'standalone/src-tauri/src/log_tail.rs',
     append('\n#[allow(dead_code)]\nfn __selftest() { let _ = std::net::TcpStream::connect("example.net:443"); }\n'),
     'names TcpStream',

@@ -102,14 +102,6 @@ export interface DerivedHeader {
   lastCommandFailed?: boolean;
 }
 
-export type TerminalGroupingMode = 'none' | 'directory' | 'command' | 'status';
-
-export interface TerminalGroup {
-  key: string;
-  label: string;
-  panes: TerminalPaneState[];
-}
-
 export interface TerminalNotificationTitleLike {
   source?: string;
   title?: string | null;
@@ -492,7 +484,12 @@ export function surfaceRunsCommand(
 }
 
 export function deriveFallbackCommandTitle(state?: TerminalPaneState | null): string {
-  return latestTerminalTitleCandidate(state)?.title.trim() || DEFAULT_COMMAND_TITLE;
+  const candidate = latestTerminalTitleCandidate(state);
+  // A title from before the last command finished is that command's, and a
+  // shell's own name or path names no command.
+  const finishedAt = state?.lastCommand?.finishedAt;
+  const fresh = candidate && (finishedAt === undefined || candidate.updatedAt > finishedAt);
+  return (fresh && meaningfulTerminalTitle(candidate.title)) || DEFAULT_COMMAND_TITLE;
 }
 
 export function resolveDisplayPrimary(
@@ -626,52 +623,6 @@ export function titleSourceLabel(source: TerminalTitleSource): string {
       return 'OSC 777';
     case 'user':
       return 'user';
-  }
-}
-
-export function groupTerminalPanes(
-  panes: TerminalPaneState[],
-  mode: TerminalGroupingMode,
-  options: DirectoryDisplayOptions = {},
-): TerminalGroup[] {
-  if (mode === 'none') {
-    return [{ key: 'all', label: 'All', panes }];
-  }
-
-  if (mode === 'directory') {
-    const cwds = panes.map(effectiveCwd).filter((cwd): cwd is CwdState => !!cwd);
-    const labels = shortestUniqueCwdLabels(cwds, options);
-    return groupBy(panes, (pane) => {
-      const cwd = effectiveCwd(pane);
-      if (!cwd) return { key: 'unknown', label: DEFAULT_DIRECTORY_LABEL };
-      const key = cwdIdentity(cwd);
-      return { key, label: labels.get(key) ?? cwdDisplay(cwd, options) };
-    });
-  }
-
-  if (mode === 'command') {
-    return groupBy(panes, (pane) => {
-      const label = pane.currentCommand?.displayCommand ?? idleLabel(pane);
-      return { key: label, label };
-    });
-  }
-
-  return groupBy(panes, (pane) => {
-    const status = statusBucket(pane.activity.kind);
-    return { key: status, label: status };
-  });
-}
-
-function statusBucket(kind: ShellActivity['kind']): 'unknown' | 'idle' | 'running' | 'finished' {
-  switch (kind) {
-    case 'running':
-      return 'running';
-    case 'finished':
-      return 'finished';
-    case 'unknown':
-      return 'unknown';
-    default:
-      return 'idle';
   }
 }
 
@@ -1468,12 +1419,6 @@ function isAppTitleFreshFor(pane: TerminalPaneState, command: CommandRun): boole
   return true;
 }
 
-function idleLabel(pane: TerminalPaneState): string {
-  const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
-  if (userTitle) return userTitle;
-  return DEFAULT_IDLE_TITLE;
-}
-
 const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
 
 // Under Windows ConPTY an OSC 0/2 title is frequently just the child process's
@@ -1493,7 +1438,11 @@ function isGenericProcessTitle(title: string): boolean {
   // Basename, not program name: the suffix is the evidence this test is looking
   // for, so stripping it would leave every `.exe` title indistinguishable.
   const basename = commandBasename(trimmed);
-  if (/\s/.test(basename)) return false; // carries arguments/description → meaningful
+  // Only a title that is one name or path can be bare. A path may hold spaces
+  // (`C:\Program Files\…\pwsh.exe`) but then starts as one; `vim ~/src/fish`
+  // has its space before the path and carries arguments.
+  const wholePath = /^(?:[A-Za-z]:[\\/]|\\\\|[/~])/.test(trimmed) || !/\s/.test(trimmed.split(/[\\/]/)[0]);
+  if (!wholePath || /\s/.test(basename)) return false; // carries arguments/description → meaningful
   if (WINDOWS_EXECUTABLE_SUFFIX.test(basename)) return true; // bare executable path
   return GENERIC_PROCESS_TITLE_NAMES.has(basename.toLowerCase()); // bare shell/interpreter name
 }
@@ -1540,23 +1489,6 @@ function findInRunTerminalTitle(pane: TerminalPaneState, command: CommandRun): T
  *  shell's cwd (`docs/specs/terminal-state.md`). */
 export function effectiveCwd(pane: TerminalPaneState): CwdState | null {
   return pane.currentCommand?.cwdAtStart ?? pane.cwd;
-}
-
-function groupBy(
-  panes: TerminalPaneState[],
-  keyForPane: (pane: TerminalPaneState) => { key: string; label: string },
-): TerminalGroup[] {
-  const groups = new Map<string, TerminalGroup>();
-  for (const pane of panes) {
-    const { key, label } = keyForPane(pane);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.panes.push(pane);
-    } else {
-      groups.set(key, { key, label, panes: [pane] });
-    }
-  }
-  return [...groups.values()];
 }
 
 function latestTerminalTitleCandidate(state: TerminalPaneState | null | undefined): TerminalTitle | null {

@@ -8,7 +8,17 @@
 
 const readline = require('readline');
 const nodePty = require('node-pty');
-const { create } = require('./pty-core');
+const { create, withoutAppImageEnv } = require('./pty-core');
+
+// Every program this process starts (a pane's shell, git, lsof, clipboard
+// helpers, a browser or its launch shell) is the system's, or the bundle's own
+// Node, which needs none of the AppImage launcher's variables: drop them once,
+// before anything spawns. This process's own libraries are already loaded.
+{
+  const scrubbed = withoutAppImageEnv(process.env);
+  for (const key of Object.keys(process.env)) if (!(key in scrubbed)) delete process.env[key];
+  Object.assign(process.env, scrubbed);
+}
 const clipboard = require('./clipboard-ops');
 const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
@@ -194,6 +204,7 @@ function handleLine(line) {
             // One press, and the caller decides about any more: `mgr.interrupt`
             // writes synchronously, so the ack is immediate.
             interrupt: async (ids) => { mgr.interrupt(ids); },
+            silenceRun: (id) => host.alerts.silenceRun(id),
             receivedChars: (id) => mgr.receivedChars(id),
             outputSince: (id, mark) => mgr.outputSince(id, mark),
             onCommand: (id, command) => recovery.record(id, command),

@@ -7,7 +7,8 @@
  */
 
 import type { BrowserViewportConfig, BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
-import type { OpenHandlersRequest, OpenHandlersResponse, ToolListRequest, ToolListResponse } from 'dor/commands/types';
+import { isRecord } from '../is-record';
+import type { OpenHandlersRequest, OpenHandlersResponse, ToolListRequest, ToolListResponse, ToolOrigin } from 'dor/commands/types';
 
 export type ToolHostRequest =
   /** `preview` selects a matching rule's `preview:` handler (`dor open --preview`). */
@@ -36,7 +37,7 @@ export const TOOL_RENDERS: readonly ToolRender[] = ['iframe', 'agent-browser-scr
 export const isToolRender = (value: unknown): value is ToolRender => (TOOL_RENDERS as readonly unknown[]).includes(value);
 
 /** Result of resolving a tool name. `ok` carries the rendered dedupe key: the
- *  host owns `$PROJECT_ROOT`, so the webview never sees a template.
+ *  host owns `$HERE`, so the webview never sees a template.
  *
  *  The `ok` and `untrusted` arms carry the parsed file's `warnings`, so a
  *  config lint reaches the caller on the path it hits first — an untrusted
@@ -71,11 +72,20 @@ export type ToolLookupResult =
       port: 'announced' | 'auto';
       key: string[] | null;
       warnings: string[];
-      /** The canonical absolute path an `open` lookup resolved; the preview
-       *  slot compares it (`docs/specs/dor-tool.md` -> Preview slot). Named
-       *  lookups leave it unset. */
+      /** The canonical absolute path the Surface records as its target: an
+       *  `open` lookup's file, or a named lookup's `$TARGET`; unset for a named
+       *  Tool that takes none (`docs/specs/dor-tool.md` -> Declaring tools). */
       target?: string;
     };
+
+/** A resolved Tool's origin: the `path` its lookup answered, unless a
+ *  built-in answered, which no `dormouse.yml` declares. */
+export function toolOriginOf(lookup: { scope?: ToolKeyScope; path: string }): ToolOrigin | undefined {
+  return lookup.scope === 'builtin' ? undefined : { file: lookup.path };
+}
+
+/** The shape every reader of an untrusted origin starts from. */
+export const isToolOrigin = (value: unknown): value is ToolOrigin => isRecord(value) && typeof value.file === 'string';
 
 export type ToolControlResult =
   | ToolLookupResult

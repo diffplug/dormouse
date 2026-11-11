@@ -126,7 +126,7 @@
       },
       "window-close-hover": {
         "role": "primary",
-        "displayName": "Window Close Hover (native OS red, the only literal)",
+        "displayName": "Window Close Hover (native OS red, a rostered literal)",
         "canonical": "#b92a1b",
         "tonalRamp": ["#3d0e09", "#5a160d", "#751c12", "#982618", "#b92a1b", "#cf493a", "#dd6e60", "#e89889"]
       }
@@ -197,7 +197,7 @@
       "name": "Window Close Button",
       "kind": "button",
       "refersTo": "chrome-button-window-close",
-      "description": "Windows/Linux native-style window close. The one place a literal hex (#b92a1b) is allowed in the system, because the platform convention is a hard red.",
+      "description": "Windows/Linux native-style window close. Its literal hex (#b92a1b) is one of the Fixed Exceptions DESIGN.md rosters, because the platform convention is a hard red.",
       "html": "<button class=\"ds-win-close\" aria-label=\"Close\"><svg viewBox=\"0 0 256 256\" width=\"12\" height=\"12\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31l-66.34 66.35a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z\"/></svg></button>",
       "css": ".ds-win-close { display: flex; align-items: center; justify-content: center; width: 44px; height: 20px; padding: 0; border: none; background: transparent; color: inherit; cursor: pointer; transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-win-close:hover { background: #b92a1b; color: #ffffff; }"
     },
@@ -224,14 +224,6 @@
       "description": "Tiny inline label inside pane headers and doors. The wider tracking (0.08em) is mandatory at this 10px size; without it the letters smear.",
       "html": "<span class=\"ds-todo-pill\">TODO</span>",
       "css": ".ds-todo-pill { display: inline-block; padding: 0 2px; font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.625rem; line-height: 1rem; font-weight: 600; letter-spacing: 0.08em; color: var(--vscode-editor-foreground, #d3af86); }"
-    },
-    {
-      "name": "Theme Picker Trigger",
-      "kind": "button",
-      "refersTo": "header-action-button-labeled",
-      "description": "The labeled chrome button used to open the theme picker. Inherits header fg; hovers with a 10% wash of currentColor so it works under any theme.",
-      "html": "<button class=\"ds-trigger\" aria-label=\"Theme\"><span>Kimbie Dark</span><svg viewBox=\"0 0 256 256\" width=\"10\" height=\"10\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80a8 8 0 0 1 11.32-11.32L128 164.69l74.34-74.35a8 8 0 0 1 11.32 11.32Z\"/></svg></button>",
-      "css": ".ds-trigger { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: none; border-radius: 4px; background: transparent; color: inherit; font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.625rem; font-weight: 500; cursor: pointer; transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-trigger:hover { background: color-mix(in srgb, currentColor 10%, transparent); } .ds-trigger:focus-visible { outline: 1px solid var(--color-focus-ring, #f9d181); outline-offset: 1px; }"
     }
   ],
   "narrative": {
@@ -246,7 +238,7 @@
       "Motion: short, exponential ease-out for layout transitions; sparing spring-overshoot reserved for celebratory state-resolution."
     ],
     "rules": [
-      { "name": "The Host-Theme-Only Rule", "body": "Never write a hex value or oklch() literal into theme.css or a component. Never use var(..., fallback) chains. Every color must resolve through --vscode-* or one of the body-published runtime picks. The one allowed exception is #b92a1b for native window-close hover.", "section": "colors" },
+      { "name": "The Host-Theme-Only Rule", "body": "Never write a hex value or oklch() literal into theme-colors.css, theme.css, or a component. Never use var(..., fallback) chains. Every color must resolve through --vscode-* or one of the body-published runtime picks (--color-door-*, --color-focus-ring, --color-alarm-vs-*). The only exceptions are the ones rostered under Fixed Exceptions in DESIGN.md, and adding one means adding it there.", "section": "colors" },
       { "name": "The Bg-Only Chrome Rule", "body": "Pane headers, doors, and the baseboard convey hierarchy through background shifts only. Do not add borders or shadows to 'make the hierarchy work.'", "section": "colors" },
       { "name": "The Active Header Doubles as Accent Rule", "body": "Animated emphasis (copy-confirm flash, active-pane selection ring) tints with header-active-bg/25. The accent is not separate from the focus signal; they are the same color, used at different opacities.", "section": "colors" },
       { "name": "The Two-Step Rule", "body": "Almost everything sits on text-xs or text-sm. If a new surface wants text-base or larger, the surface is probably wrong.", "section": "typography" },
@@ -266,13 +258,13 @@
       "Do use the spring-overshoot curve cubic-bezier(0.34, 1.56, 0.64, 1) only for state-resolution moments (TODO check, kill confirm, copy flash), and keep durations short (220-500ms)."
     ],
     "donts": [
-      "Don't write a hex color anywhere except #b92a1b for the windowClose hover. No exceptions. No oklch() literals either; even those bypass the host theme.",
-      "Don't add var(--vscode-*, #fallback) fallback chains in theme.css. The runtime host plus the resolver are responsible for providing the variable; a fallback hides a real bug.",
+      "Don't write a hex color outside the Fixed Exceptions roster in DESIGN.md, and adding one is an edit to that roster, not a local judgement call. No oklch() literals either; even those bypass the host theme.",
+      "Don't add var(--vscode-*, #fallback) fallback chains in theme-colors.css or theme.css. The runtime host plus the resolver are responsible for providing the variable; a fallback hides a real bug.",
       "Don't add borders or shadows to pane headers or doors to 'make the hierarchy work.' The hierarchy is header-active-bg vs. header-inactive-bg.",
       "Don't introduce a text-muted color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.",
       "Don't use rounded SaaS cards, gradient accents, gradient text, or glassmorphism. PRODUCT.md names these directly.",
       "Don't use hacker-aesthetic green-on-black, terminal-cliché Matrix tints, or any color that signals 'this is a programmer tool.' The user's theme decides what color this tool is.",
-      "Don't animate layout properties (width, height, top, left, padding). Pane transitions use clip-path and opacity deliberately so layout measurements stay valid mid-animation.",
+      "Don't animate layout properties (width, height, top, left, padding) with a CSS transition. Pane transitions use clip-path and opacity deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true intermediate geometry every frame (the Lath animator on the leaves; the rect-tween that carries the focus ring and the copy editor); a CSS transition: top/left/width/height does not qualify and stays banned.",
       "Don't add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit.",
       "Don't wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.",
       "Don't introduce a new pass-through --mt-* token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy, update theme-colors.css and design.tsx together, document the addition in docs/specs/theme.md, and update CONSUMED_VSCODE_KEYS in lib/src/lib/themes/convert.ts."

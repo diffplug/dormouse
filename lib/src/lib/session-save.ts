@@ -3,9 +3,10 @@ import { isBrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, isToolCommandArgv, PERSISTED_SESSION_VERSION, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
-import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
+import { getActivity, getInheritableCwd, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { isToolReaped } from './tool-reap-store';
+import { isToolOrigin } from './platform/tool-types';
 
 function previousPaneMap(previous: PersistedSession | null): Map<string, PersistedPane> {
   if (!previous) return new Map();
@@ -23,7 +24,7 @@ export interface SavePaneInput {
 export interface SaveOptions {
   alertDelivery?: AlertDeliveryOverrides;
   /** Re-read each terminal pane's cwd from the host. Defaults to true; `false`
-   *  keeps whatever the previous record held. */
+   *  keeps what the previous record held, else the reported local directory. */
   probeCwd?: boolean;
 }
 
@@ -79,7 +80,7 @@ export async function buildPersistedSession(
 
 /**
  * `buildPersistedSession` past its probe, synchronously: `cwds` null keeps each
- * terminal's previous cwd. A Surface move publishes both Workspaces with no
+ * terminal's previous cwd, else its reported local directory. A Surface move publishes both Workspaces with no
  * await between ownership change and publication.
  */
 export function assemblePersistedSession(
@@ -126,7 +127,11 @@ export function assemblePersistedSession(
     const terminalPane: PersistedPane = {
       id: pane.id,
       title: pane.title,
-      cwd: cwds?.[pane.id] ?? previousPane?.cwd ?? null,
+      // The probe answers nothing on Windows; the shell's own report then does.
+      // A save that skipped the probe keeps the previous record first: without
+      // shell integration the report is only the spawn directory.
+      cwd: (cwds ? cwds[pane.id] ?? getInheritableCwd(pane.id) ?? previousPane?.cwd
+        : previousPane?.cwd ?? getInheritableCwd(pane.id)) ?? null,
       untouched: isUntouched(pane.id),
       alert: liveAlert ?? previousPane?.alert ?? null,
     };
@@ -197,6 +202,7 @@ function toolMetadataFromParams(params: Record<string, unknown> | undefined): Pe
     render, port, ...(key ? { key } : {}), ...(isBrowserViewportSetting(params.browserViewport) ? { viewport: params.browserViewport } : {}),
     ...(params.toolPreview === true ? { preview: true as const } : {}),
     ...(typeof params.toolTarget === 'string' ? { target: params.toolTarget } : {}),
+    ...(isToolOrigin(params.toolOrigin) ? { origin: { file: params.toolOrigin.file } } : {}),
   };
 }
 

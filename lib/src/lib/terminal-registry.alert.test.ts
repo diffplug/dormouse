@@ -35,7 +35,7 @@ import {
   focusSession,
   registerSurfaceFocusHandle,
   getOrCreateTerminal,
-  getActivity,
+  getActivity as getRealmActivity,
   getLivePersistedAlertState,
   getActivitySnapshot,
   getTerminalShellKind,
@@ -52,6 +52,7 @@ import {
   toggleSessionTodo,
 } from './terminal-registry';
 import { createAlertEpisode } from './alert-episode';
+import type { AlertManager } from './alert-manager';
 import { doPaste, pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
 import { commandWatchKey } from './terminal-state';
@@ -117,6 +118,20 @@ type TestTerminalEntry = ReturnType<typeof getOrCreateTerminal> & {
 };
 
 const fakePlatform = (platformModule as PlatformModuleWithMock).__fakePlatform;
+
+/**
+ * A realm is sent only what it reads — whether the Session rings, never the
+ * detector's state — so the stories read `status` where it lives, the host's
+ * manager, and check the realm agrees on ringing.
+ */
+function getActivity(id: string): ReturnType<typeof getRealmActivity> {
+  const realm = getRealmActivity(id);
+  const host = (fakePlatform as unknown as { alertManager: AlertManager }).alertManager;
+  if (!host.has(id)) return realm;
+  const { status, watchingEnabled } = host.getState(id);
+  expect(realm.status === 'ALERT_RINGING').toBe(status === 'ALERT_RINGING');
+  return { ...realm, status, watchingEnabled };
+}
 
 function createContainer(): MockElement {
   return new MockElement();
@@ -494,6 +509,19 @@ describe('terminal-registry alert behavior', () => {
     // The host's own launch: the one run whose OSC 367 `open` it admits.
     expect(write).toHaveBeenCalledWith(id, 'pnpm storybook\r', { launch: true });
     write.mockRestore();
+  });
+
+  it('runs a restored tool command whose shell reports integration after the ensure window', async () => {
+    const id = 'restored-tool-slow-shell';
+    const received: string[] = [];
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+
+    restoreTerminal(id, { command: 'pnpm storybook', requireIntegration: true });
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(received).toEqual([]);
+    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(received).toEqual(['pnpm storybook\r']);
   });
 
   it.each(['restore', 'split'])('seeds the actual %s launch after a non-integrated shell prompt', async (launch) => {

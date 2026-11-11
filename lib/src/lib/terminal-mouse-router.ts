@@ -1,4 +1,4 @@
-import type { Terminal } from '@xterm/xterm';
+import type { IMarker, Terminal } from '@xterm/xterm';
 import {
   beginDrag,
   dragShape,
@@ -13,6 +13,7 @@ import {
 import { openCopyEditor } from './copy-editor';
 import { multiClickSpan, terminalCopyBuffer } from './copy-text';
 import { boundaryAt, dragCells, type PointerBoundary } from './drag-cells';
+import { markRow } from './selection-reflow';
 import { detectTokenInBuffer } from './smart-token';
 import type { TerminalOverlayDims } from './terminal-store';
 
@@ -97,9 +98,23 @@ export function attachTerminalMouseRouter({
   // they resolve to, which depend on the shape and on which edge is earlier.
   let dragAnchor: PointerBoundary | null = null;
   let dragHead: PointerBoundary | null = null;
+  // The anchor's row while a drag lasts: once scrollback is full, each new
+  // line trims one off the top and every absolute row shifts.
+  let anchorMarker: IMarker | null = null;
+  const releaseAnchor = () => {
+    anchorMarker?.dispose();
+    anchorMarker = null;
+  };
   const applyDrag = (altKey: boolean) => {
     const sel = getMouseSelectionState(id).selection;
     if (!dragAnchor || !dragHead || !sel?.dragging) return;
+    if (anchorMarker?.isDisposed) {
+      // The row the drag began on was trimmed away.
+      releaseAnchor();
+      setSelection(id, null);
+      return;
+    }
+    if (anchorMarker) dragAnchor = { ...dragAnchor, row: anchorMarker.line };
     const { anchor, head } = dragCells(dragAnchor, dragHead, dragShape(altKey, sel.blockLatched) === 'block', terminal.cols);
     updateDrag(id, { row: head.row, col: head.col, altKey, anchor });
   };
@@ -227,6 +242,8 @@ export function attachTerminalMouseRouter({
         blockLatched: pendingDrag.block,
       });
       dragAnchor = { row: pendingDrag.row, b: pendingDrag.b };
+      releaseAnchor();
+      if (terminal.buffer.active.type === 'normal') anchorMarker = markRow(terminal, pendingDrag.row);
       terminal.clearSelection();
       pendingDrag = null;
     }
@@ -267,6 +284,7 @@ export function attachTerminalMouseRouter({
       pendingDrag = null;
       return;
     }
+    releaseAnchor();
     if (!isDragging(id)) return;
     endDrag(id);
     setHintToken(id, null);
@@ -443,6 +461,7 @@ export function attachTerminalMouseRouter({
     if (activePointerId !== ev.pointerId) return;
     pendingDrag = null;
     activePointerId = null;
+    releaseAnchor();
     setSelection(id, null);
     setHintToken(id, null);
     consumePointerEvent(ev, true);
@@ -475,6 +494,7 @@ export function attachTerminalMouseRouter({
   window.addEventListener('keyup', onAltChange, true);
 
   return () => {
+    releaseAnchor();
     element.removeEventListener('mousedown', onMouseDown, true);
     element.removeEventListener('pointerdown', onPointerDown, true);
     mouseCaptureElement.removeEventListener('mousedown', onScreenMouseDown);

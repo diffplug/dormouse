@@ -10,10 +10,15 @@ import {
   checkImageSave, IMAGE_BOUND, IMAGE_CSP, IMAGES_ROUTE, isImage, PASTE_ATTEMPTS, PASTE_BOUND,
   PASTE_EXHAUSTED_MESSAGE, pastedImageExtension, pastedImageName, type SizeBound, VERSION_HEADER,
 } from './image-format.js';
+import { parse, postprocess, preprocess } from 'micromark';
 import { HttpError, parseJsonBody, pathSegments } from './viewer-http.js';
 import { markdownLink } from './markdown-links.js';
 
 export const TEXT_BOUND: SizeBound = { limit: 8 * 1024 * 1024, message: 'Text files are limited to 8 MiB.' };
+/** The longest Markdown text, in UTF-16 units, that `markdownEditing` parses:
+ * micromark's event parse took 336 ms and 332 MB of heap at 256 KiB, and ran
+ * out of a 4 GB heap at 8 MiB (Node 26, 2026-11-09). */
+export const MARKDOWN_PARSE_BOUND = 256 * 1024;
 /** A save whose revision is no longer the file's. */
 export const STALE_MESSAGE = 'The file changed on disk. Your edits are safe here; compare or reload before saving.';
 /** A save or read whose file is no longer at its path. */
@@ -118,6 +123,129 @@ const image = ({ bytes, version }: { bytes: Uint8Array; version: string }, type:
 const jsonBody = (request: EditorRequest, limit: number) =>
   parseJsonBody(request.contentType, limit, bound => request.body({ limit: bound, message: '' })) as Promise<Record<string, unknown> | null>;
 
+const LIST_MARKER = /^([-*+]|\d{1,9}[.)])(?=[ \t]|$)( *)/;
+const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const FENCE = /^(`{3,}|~{3,})/;
+// A heading, or a rule or setext underline: no paragraph continues past one,
+// so the next line may start a code block.
+const OPENS_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[-*_=][ \t]*)+$)/;
+// What may open an HTML block or comment (`<!--`, `<pre`, `<script`, any tag),
+// whose end and contents the scan does not model.
+const HTML_START = /^<[A-Za-z/!?]/;
+const blank = (line: string) => /^[ \t]*$/.test(line);
+
+/**
+ * Whether `text` has a line that could start an indented code block: four
+ * columns past the content of the list item enclosing it, where a block may
+ * start (the document's start, after a blank line, a heading, rule, or a
+ * fence's end), outside any fence. A necessary condition, not a detector: one
+ * linear pass, no parse, that errs toward a candidate wherever it is unsure (a
+ * tab in an indent, a blockquote, a marker that cannot start a list there, any
+ * HTML, an empty list item's later lines), because a missed block is a file
+ * rewritten on save. List-aware, so what the rich editor writes never passes.
+ * Only `markdownEditing` past `MARKDOWN_PARSE_BOUND` relies on it.
+ */
+export function mayHoldIndentedCode(text: string): boolean {
+  /** The content offsets of the list items enclosing the line, innermost last. */
+  const items: number[] = [];
+  let fence: { char: string; length: number; offset: number } | null = null;
+  let blockStart = true;
+  for (let start = 0; start <= text.length; ) {
+    const end = text.indexOf('\n', start);
+    const line = text.slice(start, end < 0 ? text.length : end).replace(/\r$/, '');
+    start = end < 0 ? text.length + 1 : end + 1;
+    if (blank(line)) { blockStart = true; continue; }
+    const lead = /^[ \t]*/.exec(line)![0];
+    const indent = lead.length;
+    const rest = line.slice(indent);
+    if (fence && indent < fence.offset) fence = null; // its list item ended
+    if (fence) {
+      // A closing fence is indented at most three columns.
+      const close = indent - fence.offset <= 3 && FENCE.exec(rest);
+      if (close && close[1][0] === fence.char && close[1].length >= fence.length && blank(rest.slice(close[1].length))) {
+        fence = null;
+        blockStart = true;
+      } else blockStart = false;
+      continue;
+    }
+    const closesItem = items.length > 0 && indent < items[items.length - 1];
+    while (items.length && indent < items[items.length - 1]) items.pop();
+    const offset = items.length ? items[items.length - 1] : 0;
+    if (blockStart && (lead.includes('\t') || indent - offset >= 4)) return true;
+    if (indent - offset >= 4) { blockStart = false; continue; } // a paragraph's continuation
+    if (rest.startsWith('>')) {
+      // No list or fence tracking inside a quote: any four-column indent after
+      // its markers, where a block may start, is a candidate.
+      let quoted = rest;
+      while (/^ {0,3}>/.test(quoted)) quoted = quoted.replace(/^ {0,3}> ?/, '');
+      const inner = /^[ \t]*/.exec(quoted)![0];
+      if (blank(quoted)) blockStart = true;
+      else if (blockStart && (inner.includes('\t') || inner.length >= 4)) return true;
+      else if (HTML_START.test(quoted.slice(inner.length))) return true;
+      else blockStart = OPENS_BLOCK.test(quoted) || FENCE.test(quoted.slice(inner.length));
+      continue;
+    }
+    if (THEMATIC_BREAK.test(rest)) { blockStart = true; continue; }
+    let content = rest;
+    const marker = LIST_MARKER.exec(rest);
+    // An ordered list not starting at 1, or an empty item, cannot interrupt a
+    // paragraph, so such a line there is the paragraph's text.
+    if (marker && (blockStart || closesItem || (marker[1].length === 1 || marker[1] === '1.' || marker[1] === '1)') && rest.length > marker[0].length)) {
+      content = rest.slice(marker[0].length);
+      // Past four spaces the item opens with indented code; a tab, unsure.
+      if (!blank(content) && (marker[2].length > 4 || content.startsWith('\t'))) return true;
+      // An empty item encloses nothing: a blank line after it ends it, so its
+      // later lines are measured against the enclosing item.
+      if (blank(content)) { blockStart = true; continue; }
+      // CommonMark: past four spaces the content starts one column after the marker.
+      items.push(indent + marker[1].length + (marker[2].length > 4 ? 1 : marker[2].length));
+      content = content.replace(/^ +/, '');
+    }
+    if (HTML_START.test(content)) return true;
+    const opening = FENCE.exec(content);
+    if (opening && !(opening[1][0] === '`' && content.slice(opening[1].length).includes('`'))) {
+      fence = { char: opening[1][0], length: opening[1].length, offset: items.length ? items[items.length - 1] : 0 };
+      blockStart = false;
+      continue;
+    }
+    blockStart = OPENS_BLOCK.test(content);
+  }
+  return false;
+}
+
+/** Whether CommonMark, with no extensions, reads an indented code block in
+ * `text`. MDXEditor's parser disables that construct and reads the block as
+ * Markdown, so a save would restructure it. */
+export function parsesIndentedCode(text: string): boolean {
+  const events = postprocess(parse().document().write(preprocess()(text, undefined, true)));
+  return events.some(([kind, token]) => kind === 'enter' && token.type === 'codeIndented');
+}
+
+/** Which editor a Markdown document opens in: the rich one, unless it holds an
+ * indented code block (`indented`), or is too long to parse and the scan finds
+ * a line that may start one (`large`), when it opens as source
+ * (docs/specs/dor-tools-builtin.md -> Markdown editor). */
+export function markdownEditing(text: string, findIndentedCode = parsesIndentedCode): 'rich' | 'indented' | 'large' {
+  if (text.length > MARKDOWN_PARSE_BOUND) return mayHoldIndentedCode(text) ? 'large' : 'rich';
+  if (lastDecided?.text === text && lastDecided.find === findIndentedCode) return lastDecided.editing;
+  const editing = findIndentedCode(text) ? 'indented' : 'rich';
+  lastDecided = { text, find: findIndentedCode, editing };
+  return editing;
+}
+
+/** The last parsed decision, for `view` and the `source` that follows it,
+ * which read the same file moments apart; keyed on the text, so a changed file
+ * is decided again. Holds at most one document of at most
+ * `MARKDOWN_PARSE_BOUND`, replaced by the next one parsed. */
+let lastDecided: { text: string; find: (text: string) => boolean; editing: 'rich' | 'indented' } | null = null;
+
+/** Whether `file` opens in the rich Markdown editor, decided on each page
+ * load; a file it cannot read opens there, to show why. */
+async function opensRich(store: EditorStore, file: StorePath): Promise<boolean> {
+  try { return markdownEditing((await readText(store, file)).text) === 'rich'; }
+  catch { return true; }
+}
+
 /** The routes of one editor over `file`, the document it opened (titled
  * `name`); null for a route it does not answer, which the caller may. */
 export function editorRoutes({ kind, file, name, store, onDirty, openLink }: {
@@ -191,9 +319,16 @@ export function editorRoutes({ kind, file, name, store, onDirty, openLink }: {
       return json(await save(() => saveText(store, file, text, version)));
     }
     if (route === 'view') {
-      return { body: (kind === 'image' ? imagePage : kind === 'markdown' ? markdownPage : editorPage)(name), type: 'text/html; charset=utf-8' };
+      const page = kind === 'image' ? imagePage : kind === 'markdown' && await opensRich(store, file) ? markdownPage : editorPage;
+      return { body: page(name), type: 'text/html; charset=utf-8' };
     }
-    if (route === 'source') return imageType ? image(await store.read(file, IMAGE_BOUND), imageType) : json({ ...await readText(store, file), name });
+    if (route === 'source') {
+      if (imageType) return image(await store.read(file, IMAGE_BOUND), imageType);
+      const read = await readText(store, file);
+      // A Markdown file's editor, decided again on every load: the rich page
+      // goes back through `view` when the file no longer opens there.
+      return json({ ...read, name, ...kind === 'markdown' && { editing: markdownEditing(read.text) } });
+    }
     return null;
   };
 }

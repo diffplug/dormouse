@@ -265,7 +265,7 @@ it('round-trips exact restore geometry across 100 seeded nested layouts', () => 
     for (const id of leaves(original)) {
       const path = findLeafPath(original, id)!;
       const parent = nodeAtPath(original, path.slice(0, -1))!;
-      if (parent.kind !== 'split' || parent.children.length === 2 && parent.children.every(child => child.node.kind === 'leaf')) continue;
+      if (parent.kind !== 'split') continue;
       const removed = remove(original, id);
       const restored = restore(removed.tree, removed.token!);
       expect(restored.tier).toBe('exact');

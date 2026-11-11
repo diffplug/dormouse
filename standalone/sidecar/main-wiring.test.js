@@ -28,6 +28,8 @@ test('recovery capture and the record take are answered from pty-core marks', ()
   assert.match(source, /outputSince:\s*\(id,\s*mark\)\s*=>\s*mgr\.outputSince\(id,\s*mark\)/);
   // Widens each target before its first press (recovery-capture.ts -> RECOVERY_SIZE).
   assert.match(source, /resize:\s*\(id,\s*cols,\s*rows\)\s*=>\s*mgr\.resize\(id,\s*cols,\s*rows\)/);
+  // The capture's ^C ends each run; the alerts must hear it as the host's own.
+  assert.match(source, /silenceRun:\s*\(id\)\s*=>\s*host\.alerts\.silenceRun\(id\)/);
 });
 
 test('iframe leases are owned by the window Rust stamps, and end with it', () => {
@@ -43,4 +45,12 @@ test('a Ctrl-C to the sidecar runs its shutdown instead of ending it at once', (
   // the sidecar, so Ctrl-C there signals both. Without the handler the control
   // socket file, the inner browsers, and the Burrow's last save are left behind.
   assert.match(source, /process\.on\('SIGINT',\s*shutdown\)/);
+});
+
+test('the AppImage launcher\'s environment is dropped before anything spawns', () => {
+  // Without it git, lsof, clipboard helpers, and a browser's launch shell load
+  // the bundle's libraries (pty-core.js -> withoutAppImageEnv).
+  const scrub = source.indexOf('withoutAppImageEnv(process.env)');
+  assert.ok(scrub > 0);
+  assert.ok(scrub < source.indexOf('createBrowserHost('), 'before the hosts are built');
 });

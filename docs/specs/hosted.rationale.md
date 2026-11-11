@@ -48,6 +48,10 @@ Three origins (decided 2026-09-30):
 - Sweep at deploy, not at close (decided 2026-10-21): a `pull_request` job runs the PR's own workflow file, so any job holding preview credentials needs the approval-gated `hosted-preview` environment, and a close-time cleanup there waited for approval nobody gave; ten merged PRs' previews leaked that way. A main-only cleanup environment would have needed a second copy of the credentials, and `pull_request_target` is banned (`docs/specs/security-ci.md` -> `S44`).
 - One owner-role Hyperdrive per PR (decided 2026-10-03): a Hyperdrive per role would triple each PR's Hyperdrives against a preview-account limit nobody has measured, and the grants are exercised where they can fail a PR, in `hosted/server/tests`, which binds the relay and voice Workers to their roles.
 
+## Entitlement
+
+An `active` subscription keeps entitling for `RENEWAL_GRACE` (15 minutes) past its period end because its renewal lands only when Stripe's next webhook does: `owner_access` grants an `active` row exactly until `period_end`, which moves only when `synchronize` reads the rolled-over subscription, and Stripe rolls the period at or after the old end. Without it every renewal read as not entitled for that gap, and the Relay's sweep closed a paying member's Burrows 4002, which latched them. A missed webhook waits for `resyncBilling`'s `reconcileStale`, on the account Worker's every-10-minutes Cron, so 15 minutes covers one missed run with five to spare. The grace never extends a failed renewal: `owner_access` gives a `past_due`, `unpaid`, `paused`, or `incomplete` row no `access_until`, a canceled or ended one leaves the view, and a dispute is refused beside it; Stripe charges a renewal invoice about an hour after the rollover, so a renewal cannot have failed inside the grace (2026-11-10). Ending access at a failed renewal is deliberate: losing connectivity is how a member learns to fix billing, and the founders' 30 days are a pricing grace (`docs/specs/pricing.md`), not an access one.
+
 ## Relay
 
 Caps (2026-09-30):
@@ -87,3 +91,13 @@ A `RelayRoom` that opened a Postgres connection through Hyperdrive could not be 
 ## Metrics
 
 Rows are kept forever because none describes anyone: a row holds a day, an event, a fixed label, and a count, never an identifier (`docs/specs/security-hosted.md` -> "Account boundary").
+
+## Account closure
+
+A closure cancels in Stripe before it records anything, so a failure after a cancel (the next Stripe call, the closure's own write, a cancel whose answer never arrived, or the Worker cancelling the request when the member's client went away) left the subscription ended, the account standing, and the retry seeing nothing current: it closed with no refund owed, stamped settled (2026-11). `end_reason = 'closure'` marks a cancel `billing.end` committed; the hold's `canceling` marks one Stripe made whose answer was lost, so `billing.end` committed nothing. While the `"user"` row stands only this account's own attempts write either: `endAfterClosure` runs once it is gone, and a withdrawal or refund records its own reason. A repeated settle refunds nothing twice: `refundInFull` refunds only what Stripe lists as unrefunded on the payment, under an idempotency key naming it.
+
+A failed attempt keeps a hold that names a subscription because it is the only trace of a lost cancel; its `startedAt` moves to `-infinity` so checkout opens again. A name is good only for its attempt: one whose cancel failed before Stripe acted keeps its subscription, which may lapse weeks later with no reason, and a later close counting it would refund a month fully used (a monthly plan lapsing 28 days in is inside `purchaseStanding`'s window). So `cancelingBy` bounds when a named cancel can have ended, the attempt's start plus the hold, and the next attempt drops a name whose subscription ended after it. Both sides read a clock outside the database: `ended_at` is Stripe's, `cancelingBy` the Worker's, with `STRIPE_CLOCK_SKEW_MINUTES` between them; the database's `now()` takes no part. Two racing closures merge their records because one starting after the other's cancel committed sees nothing current, and, recording first, it would leave the other's insert to fail on the primary key.
+
+## Billing
+
+The webhook refuses any event whose `api_version` differs from the installed `stripe` SDK's (`STRIPE_API_VERSION`, re-exported by `@pgstencil/stripe`), and production's endpoint renders events at the version it was created with. The SDK moves that version in minor releases, and every test builds its events from the same constant, so a routine bump passed the whole suite and would have refused every production webhook (2026-11, stripe 22.6.2 at `2026-08-26.dahlia`, a v23 update at `2026-10-28.endive` waiting). So a test pins the literal, Renovate holds both packages for approval, and a move is the endpoint procedure, not a dependency update.

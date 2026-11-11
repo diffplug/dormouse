@@ -20,7 +20,9 @@ import { builtinHandler } from 'dor-tools-builtin/file-viewer-format';
 import { IFRAME_ALLOW, IFRAME_SANDBOX } from '../../lib/iframe-policy';
 import { connectIframeTheme } from '../../lib/themes/iframe-theme';
 import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
-import { offeredRenderModes } from './browser-automation';
+import { BROWSER_PROVIDER_GUI, offeredRenderModes } from './browser-automation';
+import { preferredBrowserProvider } from './BrowserProviderSwitch';
+import { BROWSER_PROVIDER_IDS, renderModeFor } from 'dor-lib-common/browser-providers';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isRealBlur } from '../../lib/window-focus';
 import { changeNetworkPolicy, getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../../remote/burrow/network-policy-store';
@@ -106,6 +108,7 @@ function sameUrl(a: string, b: string): boolean {
  *  that is the current one, so Back does not land on it to redirect again. */
 function redirectHistory(history: IframeHistory, fromUrl: string | null, nextUrl: string): IframeHistory {
   const current = history.entries[history.index];
+  if (current !== undefined && sameUrl(current, nextUrl)) return history;
   if (current === undefined || fromUrl === null || !sameUrl(current, fromUrl)) return appendHistory(history, nextUrl);
   return { entries: [...history.entries.slice(0, history.index), nextUrl], index: history.index };
 }
@@ -213,6 +216,14 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     setReloadNonce((n) => n + 1);
   }, [paneWrite, id]);
   const observeFrameUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, false), [applyFrameUrl]);
+  // The first document a resolved frame reports is the entry it loaded, or
+  // where the server redirected that entry: it takes the entry's place, so
+  // Back does not land on the redirecting URL only to be sent on again.
+  const observeFrameLoad = useCallback((nextUrl: string) => {
+    setLiveUrl(nextUrl);
+    setHistory((prev) => redirectHistory(prev, prev.entries[prev.index] ?? null, nextUrl));
+    paneWrite.setTitle(id, hostPathDisplay(nextUrl, true));
+  }, [paneWrite, id]);
 
   const goToHistoryIndex = useCallback((nextIndex: number) => {
     const prev = historyRef.current;
@@ -341,14 +352,18 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // other registration site is `agent-browser-surface-controller.ts`.
   const renderModes = useMemo(() => offeredRenderModes(isTool, null), [isTool]);
   const swapCapable = renderModes.some((mode) => mode !== 'iframe');
-  const agentBrowserCapable = renderModes.includes('agent-browser-screencast');
+  // Where a page the embed cannot show opens instead: the remembered
+  // provider's screencast, among those this Surface can take.
+  const remedyProviders = BROWSER_PROVIDER_IDS.filter((provider) => renderModes.includes(renderModeFor(provider, 'screencast')));
+  const remedyProvider = remedyProviders.length ? preferredBrowserProvider(remedyProviders) : null;
+  const remedy = BROWSER_PROVIDER_GUI[remedyProvider ?? 'agent-browser'];
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
     applyViewport() {},
     openModal() { openAgentBrowserScreenModal(id); },
     // iframe is the current backend; every other offered mode swaps to an
     // automated browser. Wired only when the host can launch one — without it
-    // the modal hides its Render section, but the chrome (URL/nav) still shows.
+    // the header offers no Display modal, but the chrome (URL/nav) still shows.
     setRenderMode: swapCapable
       ? (mode, opts) => { if (mode !== 'iframe' && renderModes.includes(mode)) {
         if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);
@@ -357,7 +372,9 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       : undefined,
   }), [id, swapCapable, renderModes]);
   const setRenderMode = screenActions.setRenderMode;
-  const openInAgentBrowser = setRenderMode && agentBrowserCapable ? () => setRenderMode('agent-browser-screencast') : undefined;
+  // At the pane's size, as the Display modal preselects for an embed (`viewportSetting`).
+  const openInAgentBrowser = setRenderMode && remedyProvider
+    ? () => setRenderMode(renderModeFor(remedyProvider, 'screencast'), { viewport: { mode: 'pane-sync' } }) : undefined;
   // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
   // chrome action that replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
@@ -386,11 +403,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   useEffect(() => {
     const registration = registerAgentBrowserScreen(id, {
       snapshot: {
-        state: 'SYNCED',
         renderMode: 'iframe',
         viewport: { w: 0, h: 0, dpr: 1 },
-        paneCss: { w: 0, h: 0 },
-        displayDpr: 1,
         syncEngaged: false,
       },
       actions: screenActions,
@@ -472,14 +486,16 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
         if (!nextUrl) return;
         // Only a load report vouches for the document that just loaded: a
         // clicked link's report comes from the page being left.
+        const firstLoad = data.loaded === true && lastShimReportRef.current === Number.NEGATIVE_INFINITY;
         if (data.loaded === true) lastShimReportRef.current = performance.now();
         setUninstrumented(false);
-        observeFrameUrl(nextUrl);
+        if (firstLoad) observeFrameLoad(nextUrl);
+        else observeFrameUrl(nextUrl);
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, followRedirect]);
+  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, observeFrameLoad, followRedirect]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains
@@ -585,6 +601,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
             if (!await allowNetworks(resolution.offer!.prefixes)) setReloadNonce((n) => n + 1);
           } : undefined}
           onOpenInAgentBrowser={openInAgentBrowser}
+          remedyLabel={remedy.label}
           onOpenInBrowser={getPlatform().openExternal ? () => {
             getPlatform().openExternal?.(sourceUrl);
             cancelExternal();
@@ -592,7 +609,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
           onCancel={cancelExternal}
         />
       ) : (
-        <PanelMessage resolution={resolution} url={sourceUrl} onOpenInAgentBrowser={openInAgentBrowser} />
+        <PanelMessage resolution={resolution} url={sourceUrl} remedy={remedy} onOpenInAgentBrowser={openInAgentBrowser} />
       )}
       {uninstrumented && (
         <PopupButtonRow
@@ -605,7 +622,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
           </span>
           <button type="button" className={popupButton()} onClick={() => chromeActions.reload()}>Reload</button>
           {openInAgentBrowser && (
-            <button type="button" className={popupButton()} onClick={openInAgentBrowser}>Open in agent-browser</button>
+            <button type="button" className={popupButton()} onClick={openInAgentBrowser}>Open in {remedy.label}</button>
           )}
           <button type="button" className={popupButton()} aria-label="Dismiss" onClick={() => setUninstrumented(false)}>
             <XIcon size={12} weight="bold" />
@@ -616,7 +633,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
         <NewTabPrompt
           url={pendingOpenUrl}
           // Where the Wall will open it (`onOpenBrowserPane` decides the same way).
-          refusal={agentBrowserCapable ? iframeRefusal(pendingOpenUrl) : null}
+          refusal={remedyProvider ? iframeRefusal(pendingOpenUrl) : null}
+          remedyLabel={remedy.label}
           onOpen={() => {
             setPendingOpenUrl(null);
             actions.onOpenBrowserPane?.(id, pendingOpenUrl);
@@ -631,7 +649,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
 // What it asks is where the page is: a public address never frames, and a
 // private one frames once its network is allowed, which also lets it reach
 // this computer's own services — so the consent names the network, and says so.
-export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, onOpenInAgentBrowser, onOpenInBrowser, onCancel }: {
+export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, onOpenInAgentBrowser, remedyLabel = 'agent-browser', onOpenInBrowser, onCancel }: {
   origin: string;
   /** Some address it is on is public, so no network can be allowed for it. */
   publicAddress: boolean;
@@ -639,6 +657,8 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
   offer?: IframeNetworkOffer;
   onAllow?: () => Promise<void>;
   onOpenInAgentBrowser?: () => void;
+  /** The provider `onOpenInAgentBrowser` opens. */
+  remedyLabel?: string;
   onOpenInBrowser?: () => void;
   onCancel: () => void;
 }) {
@@ -669,7 +689,7 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
         )}
         {onOpenInAgentBrowser && (
           <button type="button" {...press(onOpenInAgentBrowser)} className={modalActionButton({ tone: 'primary' })}>
-            Open in agent-browser
+            Open in {remedyLabel}
           </button>
         )}
         {onOpenInBrowser && (
@@ -690,10 +710,11 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
   );
 }
 
-function NewTabPrompt({ url, refusal, onOpen, onCancel }: {
+function NewTabPrompt({ url, refusal, remedyLabel, onOpen, onCancel }: {
   url: string;
-  /** Why an iframe cannot show it, so it opens in agent-browser instead. */
+  /** Why an iframe cannot show it, so it opens in `remedyLabel` instead. */
   refusal: string | null;
+  remedyLabel: string;
   onOpen: () => void;
   onCancel: () => void;
 }) {
@@ -710,7 +731,7 @@ function NewTabPrompt({ url, refusal, onOpen, onCancel }: {
           onClick={(e) => { e.stopPropagation(); onOpen(); }}
           className={modalActionButton({ tone: 'primary' })}
         >
-          {refusal ? 'Open in agent-browser' : 'Open in new pane'}
+          {refusal ? `Open in ${remedyLabel}` : 'Open in new pane'}
         </button>
         <button
           type="button"
@@ -724,15 +745,17 @@ function NewTabPrompt({ url, refusal, onOpen, onCancel }: {
       <div className="text-xs text-muted/80">
         {refusal
           ? `It is an https:// page, and ${refusal}.`
-          : 'Pages that open many tabs work better in agent-browser — open the chip → Display.'}
+          : `Pages that open many tabs work better in ${remedyLabel} — open the chip → Display.`}
       </div>
     </div>
   );
 }
 
-function PanelMessage({ resolution, url, onOpenInAgentBrowser }: {
+function PanelMessage({ resolution, url, remedy, onOpenInAgentBrowser }: {
   resolution: Resolution;
   url: string;
+  /** The provider `onOpenInAgentBrowser` opens. */
+  remedy: { label: string; cli: string };
   onOpenInAgentBrowser?: () => void;
 }) {
   if (resolution.kind === 'resolving') {
@@ -749,7 +772,7 @@ function PanelMessage({ resolution, url, onOpenInAgentBrowser }: {
   // agent-browser is the remedy only where the URL itself is fine and the proxy
   // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
   // so pointing a refused scheme at it would be a dead end.
-  const command = <code className="rounded bg-app-bg px-1 py-0.5">dor agent-browser open {url}</code>;
+  const command = <code className="rounded bg-app-bg px-1 py-0.5">{remedy.cli} open {url}</code>;
   return (
     <PaneMessage className="text-muted" contentClassName="flex flex-col gap-2">
       <div>{messageFor(resolution)}</div>
@@ -763,12 +786,12 @@ function PanelMessage({ resolution, url, onOpenInAgentBrowser }: {
             onMouseDown={(e) => e.stopPropagation()}
             onClick={onOpenInAgentBrowser}
           >
-            Open in agent-browser
+            Open in {remedy.label}
           </button>
           <span>or run {command}</span>
         </div>
       ) : (
-        <div className="text-xs text-muted/80">Open it in agent-browser: {command}</div>
+        <div className="text-xs text-muted/80">Open it in {remedy.label}: {command}</div>
       )}
     </PaneMessage>
   );

@@ -183,11 +183,33 @@
       "allowedVersions": "!/^v6\\.4\\.0$/"
     },
     {
+      "description": "pnpm-workspace.yaml scopes one glob advisory's override to three consumers, and Renovate bumps each selector as its own dependency, so they land on different releases and install glob, minimatch and @isaacs/nonrecursive-glob-match twice. Move them in one PR",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["pnpm-workspace.yaml"],
+      "matchPackageNames": ["glob"],
+      "groupName": "glob overrides",
+      "groupSlug": "glob-overrides"
+    },
+    {
+      "description": "Monaco is held on a 0.58.0-dev prerelease only until a stable release vendors the DOMPurify fix (docs/specs/dor-tools-builtin.rationale.md, Editing files). Monaco publishes a -dev- build daily and each later nightly buys nothing, so propose only stable releases: the next one is the 0.58.0 the pin is waiting for",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["dor-tools-builtin/package.json"],
+      "matchPackageNames": ["monaco-editor"],
+      "allowedVersions": "!/-dev-/"
+    },
+    {
       "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (the addon's beta counter is offset from core's; canopy/README.md records the current correspondence). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
       "matchManagers": ["npm"],
       "matchFileNames": ["canopy/package.json"],
       "matchPackageNames": ["@xterm/**"],
       "enabled": false
+    },
+    {
+      "description": "The stripe SDK moves the Stripe API version the billing webhook accepts in minor releases, and production's endpoint renders events at the version it was created with, so every update of either package, patches included, is a deliberate endpoint move: approve it on the dependency dashboard only as part of hosted/README.md, Move the Stripe API version. Last, so no later rule lifts it; it also holds the pgstencil group, which @pgstencil/stripe moves with",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["hosted/package.json"],
+      "matchPackageNames": ["stripe", "@pgstencil/stripe"],
+      "dependencyDashboardApproval": true
     }
   ]
 }

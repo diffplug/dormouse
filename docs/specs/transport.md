@@ -33,8 +33,9 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 
 ### Graceful shutdown
 
-- **Must stop only the explicitly named live PTYs**: use SIGTERM on POSIX and ConPTY close on Windows, never a signal argument there (rationale).
-- **Must acknowledge after the targets exit and a final-output grace tick, or at the caller's timeout**, forwarding output received during the wait; an empty target set still gets the grace tick.
+- **Must stop only the explicitly named live PTYs**: use SIGHUP on POSIX and ConPTY close on Windows, never a signal argument there (rationale).
+- **Must SIGKILL a named POSIX PTY's own process still alive at the caller's timeout, then wait up to 500 ms for its exit** (rationale).
+- **Must acknowledge after the targets exit, or the timeout passes, and a final-output grace tick**, forwarding output received during the wait; an empty target set still gets the grace tick.
 - **Must allow cleanup to follow or overlap graceful shutdown without closing a Windows PTY twice.**
 - **Never promise shell-history or final-output flushing from Windows ConPTY close**; recovery capture precedes shutdown (`docs/compatible-agents.md` → Capture).
 
@@ -71,9 +72,9 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 
 **Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports, and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists.
 
-**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables, and a launching Claude Code session's markers (rationale).
+**Must strip another terminal's identity, and a launching Claude Code session's markers, from the inherited environment before setting Dormouse's** (rationale). **Must drop the AppImage launcher's variables and `$APPDIR` path entries before spawning** (rationale).
 
-Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`.
+Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` and `withoutAppImageEnv` in `standalone/sidecar/pty-core.js`.
 
 ### Reconnection protocol
 
@@ -123,7 +124,7 @@ A Workspace can move from one webview to another with its Sessions still running
 
 - **Release, never dispose, and only once the target has adopted the Workspace.** The source detaches its half of each Session and **never kills the PTY**. **Never reachable from a webview unmount** — a reload or a StrictMode double-mount would strand every PTY the window still owns (rationale). A move the target never took leaves the Workspace exactly as it was.
 - **Split at a mark stamped in the stream, then suppress until the replay.** The host routes an id's output to the source until its `pty:marked` line — behind every `pty:data` already sent, ahead of every later one — and drops it from there until the target's replay reaches it. The source serializes its buffer at the mark as the arrival's content; the target writes it, then the since-mark replay: no duplicate or lost bytes at the seam, and the source xterm's retained screen and scrollback survive beyond the host's bounded tail (output already trimmed from xterm is not recovered). **An id the host never marked is serialized anyway and replayed whole.** Suppression fails open after a bound (rationale); the message sequence and hand-back are `docs/specs/standalone.md` → "Arrival queue".
-- **Must include retained, naturally exited buffers in explicit marked requests**, with `alive: false` and their exit code, replaying their since-mark tail; ordinary discovery stays live-only.
+- **Must list retained, naturally exited buffers among named ids**, `alive: false` with their exit code, replaying since the mark or whole; discovery naming none stays live-only.
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names them, and a marked id replays only its output since the mark. **Omitted ids are not empty ids**: a computed set that came out empty is a no-op, never every PTY in the process.
 - **Must preserve an app's modes across a transfer**, beyond the serializer's: SGR mouse encodings, kitty flags and stack, win32-input-mode, color-scheme reports, cursor style (rationale). **May drop** inactive alternate-screen kitty state, tab stops, G0 charset, saved cursor.
 - What else travels: Tools `docs/specs/dor-tool.md` → Persistence and hosts, alerts `docs/specs/alert.md` → Live Workspace transfer, semantic state `docs/specs/terminal-state.md` → Core Model.
@@ -218,7 +219,7 @@ Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone);
 
 **The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code**, which still operates on a bare `PersistedSession` per Workspace (`docs/specs/standalone.md` → Persistence). **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session.
 
-**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **Must retain the latest request's options when coalescing queued saves.** **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
+**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **Must retain the latest request's options when coalescing queued saves.** **A pane persists the probe's cwd, else its reported local one (`getInheritableCwd`), else the previous record's; a save without the probe, the previous record's, else the reported one** (rationale). **A flush may say `probeCwd: false`**, skipping it — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
 
 **`PersistedSession.version` is 4 and `PersistedWindow.version` 2; a reader must discard any other version as a fresh start, never migrate it.** Every writer stamps both, pinned by `standalone/scripts/persisted-format.json`; the standalone Rust host's discard: `docs/specs/standalone.md` → Persistence.
 
@@ -232,7 +233,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 ### What is persisted
 
-**Must persist structure only, never scrollback or recovery commands.** The accepted shapes are `PersistedSession` / `PersistedWindow` in `lib/src/lib/session-types.ts`; their behavioral contracts are in Persisted session types.
+**Must persist structure only, never scrollback or recovery commands.**
 
 ### Retiring the transcripts already on disk
 
@@ -240,7 +241,6 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 - **Never parse a transcript-bearing blob**: it is of an older format (Persisted session types). Standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence); VS Code deletes such a `workspaceState` blob at activation (`discardUnreadableSessionState` in `vscode-ext/src/session-state.ts`), and a panel's first save overwrites its `setState` blob.
 - **Standalone sweeps orphaned session temp files at boot**, the only path that can retire a transcript a crash left in one, and **never touches a live snapshot**. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
-- **Debug standalone must atomically remove obsolete pane `scrollback` from recognized legacy-root snapshots**, preserving other fields and leaving malformed snapshots untouched. `scrub_legacy_session_transcripts` in `standalone/src-tauri/src/lib.rs`.
 
 ### The governing rule
 
@@ -266,15 +266,25 @@ Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Re
 ## Universal invariants
 
 - **A position in a pane's output is a received count, not a buffer length.** The bounded buffer evicts from the front, so its length goes flat while output keeps flowing (rationale). Anything marking a point in the stream, or watching a pane for growth, reads the monotonic received count and slices since it, clamped to what the buffer still holds.
-- **Never report the exit of a PTY replaced under its id**; a killed one still reports.
+- **Never report the exit of a PTY replaced under its id**; `pty-core` still reports a killed one.
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`; `error` reaches no webview (rationale).
 - **Teardown acks are correlated by request id, never by message type alone.** For `interrupt` and the graceful kill the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out call's ack still arrives afterwards (rationale).
-- **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op, so a caller whose computed set comes out empty never sends the blanket second press that destroys codex's hint.
+- **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op (rationale).
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
 - **Never run a synchronous subprocess on a PTY host's event loop** (the Tauri sidecar, VS Code's pty-host); `/proc` reads and small state files are exempt (rationale). Pinned by `standalone/sidecar/no-sync-subprocess.test.js`.
 - **Must discard a probe's answer for a PTY replaced or exited mid-probe.**
 
 Source of truth: `sliceSince` in `lib/src/host/replay-buffer.ts`; `answerForIds` in `standalone/sidecar/pty-core.js`.
+
+## Port scan destinations
+
+**Must preserve each discovered listener's bind address and derive a wildcard's numeric loopback destination before filtering the socket table to the requested process trees.** A specific listener on that destination shadows the wildcard even when its process is outside Dormouse. Linux and WSL include unowned socket-table rows in this check without returning them as owned ports.
+
+- **Must try an IPv6 wildcard's IPv6 loopback first, then IPv4 loopback**, excluding a candidate shadowed by a specific listener and excluding the IPv4 fallback when a separate IPv4 wildcard owns it. An IPv6-only socket may refuse the fallback; selection does not prove reachability or reserve ownership after the scan.
+- **Must try only IPv4 loopback for an IPv4 wildcard.**
+- **Must report no destination when all candidates are shadowed**, retaining the listener in port listings but excluding it from browser URL selection.
+
+Source of truth: `OpenPort` in `lib/src/lib/platform/types.ts`; `getOpenPortsForPids` in `standalone/sidecar/pty-core.js`.
 
 ## Port scan deadlines
 

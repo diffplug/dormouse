@@ -9,8 +9,8 @@ import {
   type BrowserDisplayMode,
   type RenderMode,
 } from './agent-browser-screen';
-import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
-import { isToolKeyScope, type ToolKeyScope, type ToolRender } from '../../lib/platform/tool-types';
+import type { BrowserBinding, Surface, SurfaceKind, ToolOrigin } from 'dor/commands/types';
+import { isToolKeyScope, isToolOrigin, type ToolKeyScope, type ToolRender } from '../../lib/platform/tool-types';
 import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
@@ -41,7 +41,6 @@ type BrowserParamsLike = {
   toolScope?: unknown;
   /** Tool only: the approval this Surface is waiting on before it runs. */
   toolPending?: unknown;
-  syncEngaged?: unknown;
   browserViewport?: unknown;
 };
 
@@ -81,12 +80,14 @@ export interface ToolIdentityParams {
   toolKey?: string[];
   browserViewport?: BrowserViewportSetting;
   toolTarget?: string;
+  /** The host lookup's answer, never the renderer's or the Tool's. */
+  toolOrigin?: ToolOrigin;
 }
 
 // Keyed by the interface, so an identity param added there fails to compile until it is listed here.
 const TOOL_IDENTITY_KEYS: Record<keyof ToolIdentityParams, true> = {
   command: true, toolArgv: true, toolName: true, toolScope: true, toolRender: true,
-  toolPort: true, toolKey: true, browserViewport: true, toolTarget: true,
+  toolPort: true, toolKey: true, browserViewport: true, toolTarget: true, toolOrigin: true,
 };
 export const TOOL_IDENTITY_PARAMS: ReadonlySet<string> = new Set(Object.keys(TOOL_IDENTITY_KEYS));
 
@@ -179,7 +180,7 @@ export function toolKeysEqual(paramsKey: unknown, key: readonly string[] | null)
  *
  * Two things depend on this, and both break without it. Scope-only keys are
  * legal — the spec calls the declared list "scope inside that namespace" — so
- * `docs` and `api` both declaring `[$PROJECT_ROOT]` must stay distinct. And a
+ * `docs` and `api` both declaring `[$HERE]` must stay distinct. And a
  * key that arrives at runtime over OSC 367 comes from process output: without a
  * namespace it could name another tool's key, and the next `dor tool <that
  * tool>` would adopt — and Ctrl+C and re-run — the announcing pane instead.
@@ -201,6 +202,17 @@ export function namespacedToolKey(
 export function toolScopeFromParams(params: unknown): ToolKeyScope | undefined {
   const scope = asParams(params).toolScope;
   return isToolKeyScope(scope) ? scope : undefined;
+}
+
+/** A named Tool's declared identity as `dor list` reports it: nothing for
+ *  another kind or an anonymous Tool, and no origin for a built-in. */
+export function toolListIdentity(params: unknown): Pick<Surface, 'toolName' | 'toolScope' | 'toolOrigin'> {
+  if (!isToolParams(params) || typeof params.toolName !== 'string') return {};
+  return {
+    toolName: params.toolName,
+    toolScope: toolScopeFromParams(params) ?? 'project',
+    ...(isToolOrigin(params.toolOrigin) ? { toolOrigin: { file: params.toolOrigin.file } } : {}),
+  };
 }
 
 /** Whether params mark the Workspace's preview slot (`docs/specs/dor-tool.md`
@@ -241,7 +253,7 @@ export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMod
   const p = asParams(params);
   return browserDisplayMode({
     renderMode: resolveRenderMode(p),
-    syncEngaged: p.syncEngaged === true || (isBrowserViewportSetting(p.browserViewport) && p.browserViewport.mode === 'pane-sync'),
+    syncEngaged: isBrowserViewportSetting(p.browserViewport) && p.browserViewport.mode === 'pane-sync',
   });
 }
 

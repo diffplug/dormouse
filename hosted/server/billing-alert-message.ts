@@ -1,8 +1,7 @@
 // The text of the billing alert, apart from the database and mail that send it,
 // so `hosted/src/stories/Emails.stories.tsx` can show it.
 // Rules: docs/specs/hosted.md -> "Billing alert".
-import { escape } from "@pgstencil/auth/email";
-import type { EmailMessage } from "pgstencil";
+import { escapeHtml, type EmailMessage } from "pgstencil/email";
 import { SUPPORT_EMAIL } from "../../website/src/lib/hosted-withdrawal";
 import { NOTICE_FROM } from "./notice-message";
 
@@ -33,8 +32,8 @@ export function alertMessage(lines: readonly AlertLine[], now: Date, recorded: b
     to: [SUPPORT_EMAIL],
     subject: overdue.length ? `Dormouse Hosted billing: ${overdue.length} overdue, cron failing` : "Dormouse Hosted billing: cron failing",
     text: [intro, ...sections.map(([title, items]) => `${title}:\n${items.map((item) => `- ${item}`).join("\n")}`), ...notes].join("\n\n"),
-    html: `<html lang="en"><body><p>${escape(intro)}</p>${sections
-      .map(([title, items]) => `<h2>${title}</h2><ul>${items.map((item) => `<li>${escape(item)}</li>`).join("")}</ul>`)
-      .join("")}${notes.map((note) => `<p>${escape(note)}</p>`).join("")}</body></html>`,
+    html: `<html lang="en"><body><p>${escapeHtml(intro)}</p>${sections
+      .map(([title, items]) => `<h2>${title}</h2><ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`)
+      .join("")}${notes.map((note) => `<p>${escapeHtml(note)}</p>`).join("")}</body></html>`,
   };
 }

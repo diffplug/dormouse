@@ -348,6 +348,12 @@ function subscribeProcessedPty(
   };
 }
 
+/** The host is about to interrupt this Session's run itself (the shutdown
+ *  capture): its end is no news. */
+export function silenceAlertRun(id: string): void {
+  alertManager.silenceRun(id);
+}
+
 export function getAlertStates() {
   return alertManager.getAllStates();
 }
@@ -799,7 +805,7 @@ export function attachRouter(
         // another window, and an empty list would have it cold-restore over
         // its own live PTYs. A brand-new webview owns nothing yet, so it is
         // listed none.
-        // Snapshot IDs owned before claiming so we can choose the right data source below
+        // Snapshot the IDs owned before claiming orphans, to re-serve them below
         const previouslyOwned = new Set(ownedPtyIds);
 
         const ptys = ptyManager.getBufferedPtys();

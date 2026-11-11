@@ -8,8 +8,8 @@ import type { ToolLookupResult } from '../lib/platform/tool-types';
 import { FOLDER_MATCH_SUFFIX, builtinHandler } from 'dor-tools-builtin/file-viewer-format';
 import { builtinOpenResult, noUserToolMessage, offerBuiltins } from '../lib/tool-open-builtin';
 import { resolveLocalToolTarget } from './tool-input';
-import type { OpenRule, ToolFile } from './tool-registry';
-import { readUserToolFile, resolveUserTool } from './tool-user-config';
+import type { OpenRule } from './tool-registry';
+import { readUserToolFile, resolveUserTool, type UserToolFile } from './tool-user-config';
 
 interface OpenRequest { target: string; cwd: string; tool?: string; preview?: boolean }
 
@@ -24,9 +24,17 @@ export async function resolveOpenTool(request: OpenRequest, path: string): Promi
   // parsed to get here — its lint warnings are the user's to see.
   const builtin = builtinOpenResult(request, name, target, directory, path, file ? [...file.warnings] : []);
   if (builtin) return builtin;
+  // Selected, a broken import fails the open: never another handler.
+  const broken = name && file?.broken.get(name);
+  if (broken) return { status: 'error', message: broken.message };
   const entry = name && file?.tools.get(name);
   if (!file || !entry) return { status: 'error', message: noUserToolMessage(request, path) };
-  const resolved = await resolveUserTool(file, path, entry, request.cwd, [target]);
+  // Only an import reaches here with a string run: the parser refuses a rule
+  // naming a declared one.
+  if (!request.tool && typeof entry.run === 'string') {
+    return { status: 'error', message: `${path}: open rule for '${entry.name}' needs an argument-list run to receive the path, and ${entry.path} declares a string` };
+  }
+  const resolved = await resolveUserTool(file, entry, request.cwd, [target]);
   return resolved.status === 'ok' ? { ...resolved, target } : resolved;
 }
 
@@ -46,7 +54,7 @@ export async function listOpenHandlers(request: OpenHandlersRequest, path: strin
  * kept even where it cannot open the target, so selecting it reports why.
  */
 async function openCandidates(
-  request: OpenRequest, file: ToolFile | null, target: string, directory: boolean,
+  request: OpenRequest, file: UserToolFile | null, target: string, directory: boolean,
 ): Promise<Omit<OpenHandler, 'description'>[]> {
   const rules = file?.open ?? [];
   const matched = await matchingOpenRules(rules, request.cwd, target, directory);
@@ -62,7 +70,7 @@ async function openCandidates(
   return [...candidates].map(([tool, reason]) => ({ tool, reason }));
 }
 
-function describeHandler(tool: string, target: string, file: ToolFile | null): string {
+function describeHandler(tool: string, target: string, file: UserToolFile | null): string {
   const builtin = builtinHandler('tool', tool);
   if (builtin) return builtin.describe(target);
   const run = file?.tools.get(tool)?.run;

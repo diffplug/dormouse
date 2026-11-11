@@ -176,6 +176,23 @@ describe("TutRunner snapshots", () => {
     }
   });
 
+  it("holds the Pocket background still while its Session is not shown", () => {
+    vi.useFakeTimers();
+    const { runner, lastFrame, dispose } = mountRunner([], { profile: POCKET_TUTORIAL_PROFILE });
+    try {
+      const original = lastFrame();
+      runner.setShown(false);
+      vi.advanceTimersByTime(10 * GESTURE_BACKGROUND_TICK_MS);
+      expect(lastFrame() === original).toBe(true);
+      runner.setShown(true);
+      vi.advanceTimersByTime(GESTURE_BACKGROUND_TICK_MS);
+      expect(lastFrame() === original).toBe(false);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("clears partial Pocket gesture progress when the tutorial is reset", () => {
     const { runner, sendKeys, state, dispose } = mountRunner([], { profile: POCKET_TUTORIAL_PROFILE });
     runner.handleGestureScroll(-1);

@@ -98,7 +98,7 @@ Source of truth: `applyShellIntegration` in `standalone/sidecar/pty-core.js`; th
 ### OSC-driven events
 
 - **`promptStart` and `promptEnd` clear the running command and any pending command line** (rationale).
-- **A `commandStart` with no pending command line** (a bare `OSC 133 ; C`) takes its `displayCommand` from the newest OSC 0/2/9 title candidate, else the literal `shell`.
+- **A `commandStart` with no pending command line** (a bare `OSC 133 ; C`) takes its `displayCommand` from the newest OSC 0/2/9 title candidate set since the last command finished, filtered as below, else the literal `shell`.
 - **`commandFinish` snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle`; with no `currentCommand` it only sets the activity**, never inventing a `lastCommand`.
 
 **Must tokenize without selecting a shell dialect, and read back exactly the `POSIX_ESCAPABLE` set that `shellEscapePosix` writes.** **Must derive the same suffix-free program name for headers, WATCHING keys, and terminal context**: `npm.cmd` and `C:\tools\claude.exe` become `npm` and `claude`; launcher variants in one directory cannot be watched separately. (rationale)
@@ -115,7 +115,7 @@ For shells without OSC 133/633 integration, the command is read off the screen r
 - **Submit.** On an Enter outside a bracketed paste — a CR or LF, or under win32-input-mode (every ConPTY pane, `docs/specs/terminal-escapes.md`) a key-down record for VK_RETURN without Ctrl — the command is split off the cursor's rendered logical line at the shape. **A non-empty result emits `commandLine` + `commandStart(source: "user_input")` immediately, and nothing further while it is current** — keystrokes into a running program are not submissions.
 - **The shape survives across commands and is pre-seeded from replay during resume**, including VS Code panel reopen; cold restore has no transcript to seed from. **Seeding is learn-only and fires no prompt transition.** (rationale)
 - **Must key fallback state, including learned prompt shapes, by the stable Session id** (`docs/specs/layout.md` → Session lifecycle and terminal registry).
-- **A returned prompt may synthesize the idle transition only when `currentCommand.source === "user_input"`**; prompt-looking output always refreshes the shape. (rationale)
+- **A returned prompt may synthesize the idle transition only when `currentCommand.source === "user_input"`**; prompt-looking output refreshes the shape until the pane is OSC-driven. (rationale)
 - **What counts as a returned prompt.** Judged over a bounded tail of `TerminalProtocolParseResult.textData`, never the raw chunk (rationale), **with alternate-screen output removed** (rationale). **Matching is anchored to a fixed set of prompt shapes; a custom prompt carrying neither a path/user signal (`/`, `~`, `@`, `:`) nor a recognized terminator must not match**, a false positive flipping a running command back to idle.
 - **Stripping runs in boundary mode** (`docs/compatible-agents.md` → "Detection"): **a genuine trailing newline must keep reading as no prompt, a trailing boundary must not**; both directions pinned by `lib/src/lib/terminal-state-store.test.ts` (rationale).
 - **Per-pane retirement.** **The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane.** The first authentic boundary (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` sourced `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**, after which no `user_input` event is synthesized, so injected shells never double-count. **The fallback's own synthesized prompt markers must not trigger promotion.** The flag is per-pane runtime state, **never persisted**; `isPaneOscDriven()` exposes it for `dor ensure --restart` (`docs/specs/dor-cli.md`; rationale).
@@ -165,10 +165,9 @@ Source of truth: `deriveHeader` / `deriveSurfaceLabel` / `resolveDisplayPrimary`
 
 ## Grouping
 
-- **Directory group keys use `cwdIdentity(cwd)`** (`host|pathKind|path`, no scheme), so remote hosts and Windows/POSIX path kinds stay distinct. Directory mode keys on `cwdAtStart ?? cwd`; command mode on the running command's `displayCommand`, else the idle label.
-- **`prompt` and `editing` collapse into one `idle` bucket**; **`finished` stays distinct** so a recently-completed pane can be filtered separately though its header label carries the same `<idle>` prefix.
+**Directory keys use `cwdIdentity(cwd)`** (`host|pathKind|path`, no scheme), so remote hosts and Windows/POSIX path kinds stay distinct.
 
-Source of truth: `groupTerminalPanes` / `TerminalGroupingMode` / `cwdIdentity` / `statusBucket` in `lib/src/lib/terminal-state.ts`.
+Source of truth: `cwdIdentity` in `lib/src/lib/terminal-state.ts`.
 
 ## Terminal context diagnostics
 

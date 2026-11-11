@@ -398,9 +398,14 @@ const INTEGRATION_TYPE_TIMEOUT_MS = 8_000;
 // command. The ensure handler kills the surface and errors in that case, so a
 // shell with no integration (e.g. cmd.exe) never half-runs an untrackable
 // command.
-function typeCommandWhenPromptReady(id: string, command: string, requireIntegration: boolean): void {
-  const timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS;
-  let elapsed = 0;
+function typeCommandWhenPromptReady(
+  id: string,
+  command: string,
+  requireIntegration: boolean,
+  timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS,
+): void {
+  // By the clock, as `dor`'s host waits are: throttled timers tick slower.
+  const deadline = Date.now() + timeoutMs;
   const timer = setInterval(() => {
     // A gone shell can't run anything. `exited` also covers a spawn that failed
     // outright (pty-core answers a spawn error with an exit), where the seeded
@@ -421,7 +426,7 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
     if (ready) {
       clearInterval(timer);
       type();
-    } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
+    } else if (Date.now() >= deadline) {
       clearInterval(timer);
       // Best effort for split; drop for ensure (the handler kills + errors).
       if (!requireIntegration) type();
@@ -553,7 +558,10 @@ function spawnEntryPty(id: string, entry: TerminalEntry, spawn: SpawnSeed): void
  *  keystrokes in. */
 function launchCommand(id: string, command: string, cwd: string | null | undefined, requireIntegration: boolean): void {
   seedLaunchedCommand(id, command, cwd ?? undefined);
-  typeCommandWhenPromptReady(id, command, requireIntegration);
+  // A restored or rehydrated Tool has no handler to drop it as `dor ensure`
+  // does: it waits for integration as long as its shell lives, since a
+  // restore spawns every shell at once and a slow profile can pass 8 s.
+  typeCommandWhenPromptReady(id, command, requireIntegration, requireIntegration ? Infinity : undefined);
 }
 
 // A cold restore never replays a transcript — scrollback is not persisted

@@ -10,7 +10,7 @@ Before the Display modal read the Surface's own render modes (2026-09), it offer
 
 YAML authors naturally collapse one-element lists to scalars. Overloading a scalar dedupe key as a command would make `prespawn_dedupe: storybook` execute instead of identify. Separate future fields avoid that ambiguity.
 
-A misspelled substitution such as `$PROJECTROOT` retained as a literal silently makes distinct checkouts share a key. Rejecting unknown substitutions exposes the typo before reuse can target another checkout.
+A misspelled substitution such as `$HEER` retained as a literal silently makes distinct checkouts share a key. Rejecting unknown substitutions exposes the typo before reuse can target another checkout.
 
 Argument-list commands let the renderer quote each value for the actual target shell. Keeping shell strings literal avoids needing a shell-template parser to distinguish an author-provided pipeline from punctuation in a filename. Canonical file targets make symlink aliases reuse the same document viewer.
 
@@ -20,7 +20,7 @@ A Session can keep running PowerShell after its user's default changes to Bash. 
 
 `pnpm storybook`, `pnpm run storybook`, and `pnpm storybook --quiet` are different command strings for the same intended tool. `dor ensure` already supplies exact-command/CWD identity. An explicit Tool key allows authors to choose their own scope without making the declaration of a short command name implicitly enable dedupe.
 
-A key list makes scope visible: `$PROJECT_ROOT` distinguishes worktrees without string-concatenation conventions. A runtime collision differs from a redundant spawn: both Surfaces may already hold edited documents, so merging or killing either can destroy work.
+A key list makes scope visible: `$HERE` distinguishes worktrees without string-concatenation conventions. A runtime collision differs from a redundant spawn: both Surfaces may already hold edited documents, so merging or killing either can destroy work.
 
 ## Trust
 

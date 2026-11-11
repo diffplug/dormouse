@@ -79,9 +79,10 @@ export interface WallHandle {
    *  a refused transfer from gutting the Workspace. An explicit verb, never an
    *  unmount effect (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`). */
   prepareWorkspaceTransfer(): Promise<PreparedWorkspaceTransfer>;
-  /** Close every member Surface through the closure coordinator. Resolves null
-   *  once the Wall is empty, else the first refusal's message with the Workspace
-   *  left as it was. `editors` are the dirty Tools whose close was consented. */
+  /** Close every member Surface through the closure coordinator, one at a time.
+   *  Resolves null once the Wall is empty, else the first refusal's message with
+   *  the Workspace left open: members closed before the refusal stay closed, with
+   *  no reopen record. `editors` are the dirty Tools whose close was consented. */
   closeAll(editors?: readonly string[]): Promise<string | null>;
   handleDorControl(detail: DorControlRequest): void | Promise<void>;
 }

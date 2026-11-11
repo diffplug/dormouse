@@ -32,9 +32,9 @@
  *      `data:`/`blob:`, a nonce or hash, VS Code's `cspSource`, or loopback;
  *      and each declares `default-src` plus the directives that do not fall
  *      back to it (`NO_FALLBACK`).
- *   5. Tauri. The builder registers exactly the shell and updater plugins; no
- *      Rust network client; no HTTP/WebSocket/upload/opener plugin or HTTP
- *      client crate in `[dependencies]`; `updater:` permissions only in
+ *   5. Tauri. The builder registers exactly the single-instance, shell and
+ *      updater plugins; no Rust network client; no HTTP/WebSocket/upload/
+ *      opener plugin or HTTP client crate in `[dependencies]`; `updater:` permissions only in
  *      `main-only.json`; no capability with a `remote` scope; no
  *      `withGlobalTauri`. The updater's endpoint and key are pinned by
  *      `standalone/scripts/updater-trust-root.test.mjs`.
@@ -129,11 +129,7 @@ const OUTBOUND_SITES = {
   // --- guarded: the Burrow service ---
   'lib/src/host/remote/service.ts': {
     class: 'guarded:burrow-service',
-    reason: 'The choke point itself: wraps the injected (or global) socket factory, fetch, and direct-peer factory in the transport guard that refuses under Nothing, unread, and disposed.',
-  },
-  'vscode-ext/src/burrow.ts': {
-    class: 'guarded:burrow-service',
-    reason: 'createRelaySocket is the socket factory VS Code injects into BurrowService, which calls it only through its transport guard.',
+    reason: 'The choke point itself: wraps the injected (or its capped `ws`) socket factory, fetch, and direct-peer factory in the transport guard that refuses under Nothing, unread, and disposed.',
   },
   'lib/src/remote/burrow/burrow-fetch.ts': {
     class: 'guarded:burrow-service',
@@ -349,7 +345,6 @@ const REMOTE_LITERALS = {
 const GUARD_BUILDERS = new Set([
   'lib/src/host/remote/service.ts',
   'lib/src/host/managed-voice-host.ts',
-  'vscode-ext/src/burrow.ts',
 ]);
 
 /** The only file that may construct the Burrow's runtimes. */
@@ -711,7 +706,7 @@ if (tauriConf.app?.withGlobalTauri) {
 {
   const rel = 'standalone/src-tauri/src/lib.rs';
   const plugins = [...stripComments(readRepoFile(rel)).matchAll(/\.plugin\(\s*([\w:]+)/g)].map((m) => m[1].split('::')[0]).sort();
-  const expected = ['tauri_plugin_shell', 'tauri_plugin_updater'];
+  const expected = ['tauri_plugin_shell', 'tauri_plugin_single_instance', 'tauri_plugin_updater'];
   if (JSON.stringify(plugins) !== JSON.stringify(expected)) {
     problems.push(`${rel}: registers plugins ${JSON.stringify(plugins)}; exactly ${JSON.stringify(expected)} are allowed.`);
   }

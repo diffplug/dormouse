@@ -1,6 +1,6 @@
 import { test, expect, vi } from "vitest";
 import { Hono } from "hono";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "../token-digest";
 import { signInEmail } from "../../src/stories/email-fixtures";
 import { fileURLToPath } from "node:url";
 import {
@@ -1441,7 +1441,8 @@ test("enrollment: only a recent admin login from this origin approves, and the B
   const refused = await other.approve(begun.userCode, digits);
   expect(refused.status).toBe(403);
   expect(await refused.json()).toEqual({ message: NOT_ENTITLED_ERROR });
-  expect((await other.request("/api/relay/burrows")).status).toBe(403);
+  // An account without a plan still lists its computers.
+  expect(await other.computers()).toEqual({ burrows: [] });
   await admin.email(ADMIN_EMAIL);
   // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
   for (const sameSite of SAME_SITE)
@@ -1489,6 +1490,7 @@ test("enrollment: only a recent admin login from this origin approves, and the B
     [foreign, (await other.session())!.user.id],
   );
   expect((await admin.remove(foreign)).status).toBe(404);
+  expect((await other.computers()).burrows.map(({ burrowId }) => burrowId)).toEqual([foreign]);
   expect(socket.socket!.closedWith()).toBeUndefined();
   expect((await admin.remove(burrowId)).status).toBe(204);
   // Its live relay socket closes as revoked, pushed from the account Worker.
@@ -1521,6 +1523,10 @@ test("enrollment: only a recent admin login from this origin approves, and the B
       [begun.userCode],
     ),
   ).toEqual([{ redeemedBurrowId: null, redeemedAt: null }]);
+
+  // An account without a plan removes its own computer.
+  expect((await other.remove(foreign)).status).toBe(204);
+  expect(await other.computers()).toEqual({ burrows: [] });
 });
 
 test("the approver's page reads its approval's mismatch or redemption once a poll found it, and only its own approval's", async ({
@@ -1635,8 +1641,8 @@ test("the account lists its passkeys with the computer that added each, and remo
   );
   expect(listed.passkeys).toHaveLength(2);
   expect(Math.abs(Date.parse(listed.passkeys[0].createdAt) - Date.now())).toBeLessThan(60_000);
-  // An account the Relay does not entitle sees none.
-  expect((await other.request("/api/relay/passkeys")).status).toBe(403);
+  // An account without a plan still lists its own.
+  expect(await other.passkeys()).toEqual({ passkeys: [expect.objectContaining({ credentialId: "foreign-key" })] });
 
   // Removing the computer keeps its passkey, unattributed.
   expect((await admin.remove(laptop)).status).toBe(204);

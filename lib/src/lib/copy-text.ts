@@ -271,15 +271,24 @@ function fillsAbove(buf: CopyBuffer, l: LineFacts): boolean {
 
 export type BreakKind = 'keep' | 'space' | 'none';
 
+/** Two or more spaces between text: a line laid out in columns. */
+const COLUMNS = /\S {2,}\S/;
+
+/** How far short of the pane's width a program's own wrap margin may sit. */
+const MARGIN_REACH = 8;
+
 /** Auto judges the break between rows `r` and `r + 1` in order:
  * 1. Delete a true soft wrap before inspecting the joined logical lines.
  * 2. Keep blanks, a change of quote depth, a new list item, code punctuation
  *    (`; { }` / `) } ]`), or indentation that differs from the current line's
  *    hanging indent — but for the one column a wrapper carries the space it
  *    broke at onto the row after a full one.
- * 3. Keep a break when the local longest line is under `minWrapWidth`, or
+ * 3. Keep a break when either line has an interior run of two or more
+ *    spaces: columns (`ls -l`, `ps`, a table) are laid out, never wrapped.
+ * 4. Keep a break when the local longest line is under `minWrapWidth`, or
  *    when the next first word would have fit within that width.
- * 4. Delete a margin split whose last word is token-shaped; otherwise space.
+ * 5. Delete a margin split whose last word is token-shaped and whose line
+ *    reaches within `MARGIN_REACH` of the pane's width; otherwise space.
  * `wrapWidth` reads at most `WIDTH_REACH` logical lines on each side within
  * the paragraph, not necessarily the whole paragraph. Its cache is reusable
  * only when that bounded walk would reach both paragraph boundaries.
@@ -299,6 +308,7 @@ export function autoBreak(buf: CopyBuffer, r: number): BreakKind {
   const hang = hangIndent(cur);
   const indent = indentOf(next);
   if (Math.abs(indent - hang) > 1) return 'keep';
+  if (COLUMNS.test(cur) || COLUMNS.test(next)) return 'keep';
   const width = wrapWidth(buf, r);
   // A wrapper that keeps the space it broke at carries it onto the row after a
   // full one: one column deeper than the line before, and the line after.
@@ -309,8 +319,10 @@ export function autoBreak(buf: CopyBuffer, r: number): BreakKind {
   if (width < minWrapWidth(buf) || cur.length + 1 + firstWord.length <= width) return 'keep';
   const lastWord = cur.slice(cur.lastIndexOf(' ') + 1);
   const tokenish = /[/\\#?=&]/.test(lastWord) || /^[A-Za-z0-9+_\-.]{16,}$/.test(lastWord);
-  // A token wider than the room left is split mid-token at the margin.
-  return cur.length >= width && tokenish && !carried ? 'none' : 'space';
+  // A token wider than the room left is split mid-token at the margin, which
+  // a program wraps to sits at the pane's edge less its own gutter.
+  const atMargin = cur.length >= width && cur.length >= buf.cols - MARGIN_REACH;
+  return atMargin && tokenish && !carried ? 'none' : 'space';
 }
 
 // ---------------------------------------------------------------------------

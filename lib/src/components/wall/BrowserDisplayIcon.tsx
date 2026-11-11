@@ -99,13 +99,16 @@ export const BROWSER_DISPLAY_SLOT_PX = 36;
 
 /** A browser header's Display trigger: its glyph is the Surface's display
  *  identity, and a press opens the Display modal (`docs/specs/dor-browser.md`
- *  -> "Display Modal And Render Swaps"). */
+ *  -> "Display Modal And Render Swaps"). Without `onOpen` (a Surface that can
+ *  swap to no other render, an embed on a host with no automated browser)
+ *  it only shows the glyph. */
 export function BrowserDisplayButton({ mode, onOpen }: { mode: BrowserDisplayMode | null; onOpen?: () => void }) {
   const label = mode ? `${BROWSER_DISPLAY_LABEL[mode]} — change display` : 'Change display';
   return (
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
+      disabled={!onOpen}
       aria-label={label}
       title={label}
       data-browser-display-trigger="true"

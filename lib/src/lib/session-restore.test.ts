@@ -25,7 +25,6 @@ function createPlatform(
   return {
     getRecoveryCommands: vi.fn(() => recoveryCommands),
     init: async () => {},
-    shutdown: () => {},
     getAvailableShells: vi.fn(async () => []),
     spawnPty: vi.fn(),
     writePty: vi.fn(),
@@ -377,15 +376,26 @@ it.each(['absent', 'corrupt'] as const)('preserves multiple Tool kinds through e
 it('restores the preview slot mark and open target from pane rows when its layout is unusable', () => {
   const restored = restoreSession(createPlatform({ version: 4, panes: [
     { id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view /repo/a.md',
-      tool: { render: 'iframe', port: 'announced', name: 'viewer', argv: ['view', '/repo/a.md'], preview: true, target: '/repo/a.md' } },
+      tool: { render: 'iframe', port: 'announced', name: 'viewer', argv: ['view', '/repo/a.md'], preview: true, target: '/repo/a.md',
+        origin: { file: '/config/dormouse.yml' } } },
   ] }));
-  expect(restored?.lathLayout?.leafMeta.slot.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+  expect(restored?.lathLayout?.leafMeta.slot.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md',
+    toolOrigin: { file: '/config/dormouse.yml' } });
+});
+
+it.each(['/repo/dormouse.yml', 'C:\\repo\\dormouse.yml'])('reads a saved Tool row with the absolute origin %s', file => {
+  const saved = { version: 4, panes: [{ id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view',
+    tool: { render: 'iframe', port: 'announced', origin: { file } } }] } as PersistedSession;
+  expect(restoreSession(createPlatform(saved))).not.toBeNull();
 });
 
 it.each([
   ['a control-bearing target', { target: '/repo/a\x1b.md' }],
   ['a non-string target', { target: 7 }],
   ['a false mark', { preview: false }],
+  ['a control-bearing origin', { origin: { file: '/repo/\x9bdormouse.yml' } }],
+  ['a relative origin', { origin: { file: 'repo/dormouse.yml' } }],
+  ['an origin without a file', { origin: {} }],
 ])('rejects a saved Tool row with %s before any terminal is restored', (_case, fields) => {
   const saved = { version: 4, panes: [{ id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view',
     tool: { render: 'iframe', port: 'announced', ...fields } }] } as unknown as PersistedSession;

@@ -15,8 +15,10 @@ import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/too
 import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
 import { parseBrowserConfig, parseViewportSelection, type BrowserConfigLayer } from './browser-config';
 
-/** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
-export type ToolScope = 'repo' | 'user';
+/** Where a tool file came from. `import` is a file a user-file import reads:
+ * parsed as a project file, minus the checkout lint, since its one clone
+ * resolves as a user Tool. */
+export type ToolScope = 'repo' | 'user' | 'import';
 
 
 /** How Dormouse learns which port to frame absent an announcement: `announced`
@@ -46,6 +48,20 @@ export interface ToolEntry {
   readonly description: string | null;
 }
 
+/** A user-file entry naming one Tool in another `dormouse.yml` rather than
+ * declaring a command (`docs/specs/dor-tool.md` -> Declaring tools). Parsing
+ * reads no file: `resolveToolImports` in `tool-user-config.ts` does. */
+export interface ToolImport {
+  /** Its name in the user file, which keys and dedupes it. */
+  readonly name: string;
+  /** The directory holding that file, as written: relative to the user file's. */
+  readonly from: string;
+  /** Its name in that file. */
+  readonly tool: string;
+  /** The comment block directly above the user-file entry; null when there is none. */
+  readonly description: string | null;
+}
+
 export interface OpenRule {
   readonly match: string;
   readonly tool: string;
@@ -57,9 +73,13 @@ export interface ToolFile {
   readonly browser?: BrowserConfigLayer;
   readonly open: readonly OpenRule[];
   readonly scope: ToolScope;
-  /** Absolute directory holding the file. `$PROJECT_ROOT` for a repo scope. */
+  /** Absolute directory holding the file: `$HERE`. */
   readonly dir: string;
   readonly tools: ReadonlyMap<string, ToolEntry>;
+  /** Imports, by name; only a user file has any. */
+  readonly imports: ReadonlyMap<string, ToolImport>;
+  /** Every declared and imported name, in file order. */
+  readonly names: readonly string[];
   /** Non-fatal lint output, already prefixed with the file path. */
   readonly warnings: readonly string[];
 }
@@ -124,10 +144,12 @@ export function parseBrowserSection(text: string, path: string): BrowserConfigLa
   return browserFromDocument(parseDocument(text, path).data, path);
 }
 
-/** Substitutions a `prespawn_dedupe` element may use. Closed set: an
+/** Substitutions a list `run` or `prespawn_dedupe` element may use. Closed set: an
  *  unrecognized `$NAME` is a parse error, never a literal, because a typo kept
  *  as a constant string dedupes across every worktree on the machine. */
-const SUBSTITUTIONS = ['$PROJECT_ROOT', '$CWD', '$TARGET'] as const;
+const SUBSTITUTIONS = ['$HERE', '$CWD', '$TARGET'] as const;
+
+const unknownSubstitution = (token: string) => `unknown substitution '${token}' (known: ${SUBSTITUTIONS.join(', ')})`;
 
 // `$` followed by an identifier. Matches the whole token so an unknown one can
 // be named in the error rather than silently surviving as text.
@@ -159,17 +181,12 @@ function readDedupeTemplate(value: unknown, where: string): string[] {
   });
 }
 
-/** Reject unknown `$NAME` tokens, and `$PROJECT_ROOT` outside a repo scope. */
-function validateSubstitutions(template: readonly string[], scope: ToolScope, where: string): void {
+/** Reject unknown `$NAME` tokens. */
+function validateSubstitutions(template: readonly string[], where: string): void {
   for (const element of template) {
     for (const token of element.match(SUBSTITUTION_TOKEN) ?? []) {
       if (!(SUBSTITUTIONS as readonly string[]).includes(token)) {
-        throw new ToolFileError(
-          `${where}: unknown substitution '${token}' (known: ${SUBSTITUTIONS.join(', ')})`,
-        );
-      }
-      if (token === '$PROJECT_ROOT' && scope !== 'repo') {
-        throw new ToolFileError(`${where}: $PROJECT_ROOT is only defined for a repo-local dormouse.yml`);
+        throw new ToolFileError(`${where}: ${unknownSubstitution(token)}`);
       }
     }
   }
@@ -177,7 +194,7 @@ function validateSubstitutions(template: readonly string[], scope: ToolScope, wh
 
 /**
  * Parse a tool file. `dir` is the absolute directory holding it and becomes
- * `$PROJECT_ROOT` for a repo scope. Throws `ToolFileError` with a
+ * `$HERE`, in every scope. Throws `ToolFileError` with a
  * `<path>: <problem>` message for anything malformed; lint-level problems come
  * back as `warnings`.
  */
@@ -189,7 +206,7 @@ export function parseToolFile(
   const { data: doc, document } = parseDocument(text, path);
   // An empty file is a valid file with no tools, not a broken one.
   if (doc === undefined) {
-    return { scope, dir, tools: new Map(), warnings: [], open: [] };
+    return { scope, dir, tools: new Map(), imports: new Map(), names: [], warnings: [], open: [] };
   }
   const browser = browserFromDocument(doc, path);
 
@@ -197,6 +214,7 @@ export function parseToolFile(
   if (!isRecord(toolsNode)) throw new ToolFileError(`${path}: 'tools' must be a mapping of name to entry`);
 
   const tools = new Map<string, ToolEntry>();
+  const imports = new Map<string, ToolImport>();
   const warnings: string[] = [];
   const descriptions = entryDescriptions(document);
 
@@ -206,6 +224,11 @@ export function parseToolFile(
     const where = `${path}: tools.${name}`;
     if (name.startsWith('builtin:')) throw new ToolFileError(`${where}: the 'builtin:' prefix is reserved`);
     if (!isRecord(rawEntry)) throw new ToolFileError(`${where}: entry must be a mapping`);
+
+    if (rawEntry.from !== undefined) {
+      imports.set(name, parseImportEntry(rawEntry, { name, where, scope, description: descriptions.get(name) ?? null }));
+      continue;
+    }
 
     for (const field of Object.keys(rawEntry)) {
       if (KNOWN_ENTRY_FIELDS.has(field)) continue;
@@ -226,7 +249,7 @@ export function parseToolFile(
         throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
       }
       if (run.some(hasControlOrFormatCharacters)) throw new ToolFileError(`${where}: run cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
-      validateSubstitutions(run.filter(arg => arg !== '$ARGS'), scope, where);
+      validateSubstitutions(run.filter(arg => arg !== '$ARGS'), where);
     } else if (typeof run !== 'string' || run.trim() === '') {
       throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string or argument list`);
     } else if (hasControlOrFormatCharacters(run.trim())) {
@@ -241,7 +264,7 @@ export function parseToolFile(
       if (dedupeTemplate.some(hasControlOrFormatCharacters)) {
         throw new ToolFileError(`${where}: prespawn_dedupe cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
       }
-      validateSubstitutions(dedupeTemplate, scope, where);
+      validateSubstitutions(dedupeTemplate, where);
       if (typeof run === 'string' && usesTarget(dedupeTemplate)) {
         throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);
       }
@@ -252,9 +275,9 @@ export function parseToolFile(
       // that declares the name, so a second worktree's tool would reveal the
       // first instead of starting. Warn, not error: a repo-declared
       // machine-wide singleton is unusual but legitimate.
-      if (scope === 'repo' && !dedupeTemplate.some((el) => el.includes('$PROJECT_ROOT'))) {
+      if (scope === 'repo' && !dedupeTemplate.some((el) => el.includes('$HERE'))) {
         warnings.push(
-          `${where}: prespawn_dedupe has no $PROJECT_ROOT, so it dedupes across every checkout of this repo`,
+          `${where}: prespawn_dedupe has no $HERE, so it dedupes across every checkout of this repo`,
         );
       }
     }
@@ -285,15 +308,44 @@ export function parseToolFile(
   }
 
   // Associations are user-only (`docs/specs/dor-tool.md` -> Opening local files).
-  if (scope === 'repo' && doc.open !== undefined) {
+  if (scope !== 'user' && doc.open !== undefined) {
     warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
   }
-  const open = scope === 'repo' ? [] : parseOpenRules(doc.open, tools, path);
-  return { scope, dir, tools, warnings, open, ...(browser ? { browser } : {}) };
+  const open = scope !== 'user' ? [] : parseOpenRules(doc.open, tools, imports, path);
+  return { scope, dir, tools, imports, names: Object.keys(toolsNode), warnings, open, ...(browser ? { browser } : {}) };
+}
+
+const IMPORT_FIELDS = ['from', 'tool'];
+
+/** An import has no overrides, so any other field is an error. Only in the
+ *  user file: that also keeps an imported file from importing in turn. */
+function parseImportEntry(
+  rawEntry: Record<string, unknown>,
+  { name, where, scope, description }: { name: string; where: string; scope: ToolScope; description: string | null },
+): ToolImport {
+  // Reserved: project-file imports (`docs/specs/dor-tool.md` -> Future).
+  if (scope !== 'user') throw new ToolFileError(`${where}: 'from' imports a Tool only in the user file`);
+  if (rawEntry.run !== undefined) throw new ToolFileError(`${where}: an entry takes exactly one of 'run' or 'from'`);
+  const extra = Object.keys(rawEntry).find(field => !IMPORT_FIELDS.includes(field));
+  if (extra !== undefined) {
+    throw new ToolFileError(`${where}: an import takes only ${IMPORT_FIELDS.map(field => `'${field}'`).join(' and ')}, not '${extra}'`);
+  }
+  const { from } = rawEntry;
+  const tool = rawEntry.tool === undefined ? name : rawEntry.tool;
+  if (typeof from !== 'string' || !from.trim()) throw new ToolFileError(`${where}: 'from' must name a directory`);
+  if (hasControlOrFormatCharacters(from)) throw new ToolFileError(`${where}: from cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
+  // Nothing expands: a path relative to this file says where the clone is.
+  if (from.startsWith('~') || from.includes('$')) {
+    throw new ToolFileError(`${where}: 'from' takes no ~ or $; use a path relative to this file`);
+  }
+  if (typeof tool !== 'string' || !tool) throw new ToolFileError(`${where}: 'tool' must be a Tool name`);
+  if (hasControlOrFormatCharacters(tool)) throw new ToolFileError(`${where}: tool cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
+  return { name, from, tool, description };
 }
 
 export interface SubstitutionContext {
-  readonly projectRoot: string | null;
+  /** The directory of the declaring `dormouse.yml`. */
+  readonly here: string;
   readonly cwd: string;
   /** The canonical local file, present only when the invocation resolved one. */
   readonly target?: string;
@@ -301,9 +353,9 @@ export interface SubstitutionContext {
 
 /**
  * Expand every `$NAME` in one template element. Closed set: an unknown token
- * throws rather than surviving as text (see `SUBSTITUTIONS`), and a token
- * whose value is absent from `context` throws so a caller assembling entries
- * by hand cannot produce a literal `$PROJECT_ROOT` in a key or a command.
+ * throws rather than surviving as text (see `SUBSTITUTIONS`), and `$TARGET`
+ * absent from `context` throws so a caller assembling entries by hand cannot
+ * produce a literal `$TARGET` in a key or a command.
  */
 export function substituteToolTokens(element: string, context: SubstitutionContext, toolName: string): string {
   return element.replace(SUBSTITUTION_TOKEN, (token) => {
@@ -312,22 +364,19 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
       if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file or folder argument`);
       return context.target;
     }
-    if (token === '$PROJECT_ROOT') {
-      if (context.projectRoot === null) {
-        throw new ToolFileError(`tool '${toolName}': $PROJECT_ROOT is not defined here`);
-      }
-      return context.projectRoot;
-    }
-    throw new ToolFileError(`tool '${toolName}': unknown substitution '${token}'`);
+    if (token === '$HERE') return context.here;
+    throw new ToolFileError(`tool '${toolName}': ${unknownSubstitution(token)}`);
   });
 }
 
 const OPEN_RULE_FIELDS = ['match', 'tool', 'preview'];
 
-/** A rule's `tool` and `preview` each name an argument-list Tool in this file
- * or the built-in handler for the rule's kind: a pattern ending in
+/** A rule's `tool` and `preview` each name an argument-list Tool in this file,
+ * an import, or the built-in handler for the rule's kind: a pattern ending in
  * `FOLDER_MATCH_SUFFIX` matches only directories (`docs/specs/dor-tool.md` -> Folders). */
-function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, path: string): OpenRule[] {
+function parseOpenRules(
+  node: unknown, tools: ReadonlyMap<string, ToolEntry>, imports: ReadonlyMap<string, ToolImport>, path: string,
+): OpenRule[] {
   if (node === undefined) return [];
   if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
   return node.map((rule: unknown) => {
@@ -347,6 +396,9 @@ function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, pa
         throw new ToolFileError(`${path}: open rule '${rule.match}' names ${name} as its ${field}, which opens ${folder ? 'files' : 'folders'}, `
           + (folder ? `but a pattern ending in ${FOLDER_MATCH_SUFFIX} matches only folders` : `but only a pattern ending in ${FOLDER_MATCH_SUFFIX} matches folders`));
       }
+      // An import's run is unknown until it resolves; `resolveOpenTool` checks
+      // it when a rule selects it, so a clone's update cannot fail this file.
+      if (typeof name === 'string' && imports.has(name)) return name;
       const entry = typeof name === 'string' ? tools.get(name) : undefined;
       if (!entry) throw new ToolFileError(`${path}: open rule '${rule.match}' needs a ${field} defined in this user file`);
       if (typeof entry.run === 'string') {

@@ -286,7 +286,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const openModal = vi.fn(() => { stillOwnsFocus(); modalControl.focus(); });
     const registration = registerAgentBrowserScreen('pane-popup-actions', {
       snapshot: SCREEN, chrome: CHROME, hostCapable: true,
-      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal, setRenderMode: vi.fn() },
       chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload },
     });
     try {
@@ -306,6 +306,25 @@ describe('SurfacePaneHeader — browser chrome', () => {
     } finally {
       registration.dispose();
       modalControl.remove();
+    }
+  });
+
+  it('offers no Display modal for an embed that can swap to no other render', () => {
+    const openModal = vi.fn();
+    // An embed on a host with no automated browser wires no `setRenderMode`.
+    const registration = registerAgentBrowserScreen('pane-embed-only', {
+      snapshot: { ...SCREEN, renderMode: 'iframe', syncEngaged: false }, chrome: CHROME,
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal },
+      chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() }, hostCapable: false,
+    });
+    try {
+      renderHeader(headerProps('pane-embed-only', 'Browser'), stubActions());
+      const trigger = container.querySelector<HTMLButtonElement>('[data-browser-display-trigger]')!;
+      expect(trigger.disabled).toBe(true);
+      act(() => { trigger.click(); });
+      expect(openModal).not.toHaveBeenCalled();
+    } finally {
+      registration.dispose();
     }
   });
 

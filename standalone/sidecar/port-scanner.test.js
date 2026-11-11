@@ -60,3 +60,34 @@ test('a real scan discovers a listener, yielding to the event loop where it spaw
     assert.ok(ports.get(process.pid)?.some((p) => p.port === server.address().port));
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
+
+// macOS permits an IPv6 loopback listener beside a dual-stack wildcard on
+// the same port. Reproduce the actual routing, not just synthetic lsof rows.
+test('a wildcard destination reaches its server when IPv6 localhost is shadowed', { skip: process.platform !== 'darwin' }, async () => {
+  const specific = net.createServer((socket) => socket.end('competitor'));
+  const wildcard = net.createServer((socket) => socket.end('intended'));
+  const listen = (server, host, port) => new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen({ host, port }, resolve);
+  });
+  try {
+    await listen(specific, '::1', 0);
+    const port = specific.address().port;
+    await listen(wildcard, '::', port);
+    const ports = (await getOpenPortsForPids([{ pid: process.pid }])).get(process.pid);
+    const destination = ports.find((entry) => entry.port === port && entry.address === '::');
+    assert.equal(destination?.connectAddress, '127.0.0.1');
+    const received = await new Promise((resolve, reject) => {
+      const socket = net.connect({ host: destination.connectAddress, port });
+      let data = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => { data += chunk; });
+      socket.on('end', () => resolve(data));
+      socket.on('error', reject);
+      socket.setTimeout(2000, () => socket.destroy(new Error('connection timed out')));
+    });
+    assert.equal(received, 'intended');
+  } finally {
+    await Promise.all([specific, wildcard].map((server) => new Promise((resolve) => server.close(resolve))));
+  }
+});

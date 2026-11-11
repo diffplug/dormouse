@@ -1,7 +1,7 @@
 // Rules: docs/specs/hosted.md -> "Managed voice" and "Metrics".
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "./token-digest";
 import { withClient } from "pgstencil/postgres";
 import { currentManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
 import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";

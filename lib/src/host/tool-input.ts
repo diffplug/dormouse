@@ -8,10 +8,13 @@ import { namesMachine } from '../lib/terminal-state';
 import { resolveDedupeKey, substituteToolTokens, ToolFileError, usesTarget, type ToolEntry } from './tool-registry';
 
 /** What one invocation's inputs resolved an entry to: the argv (or literal
- *  shell string) to run, and the rendered dedupe key. */
+ *  shell string) to run, the rendered dedupe key, and the canonical `$TARGET`
+ *  path when the entry takes one, which the launch records whichever verb made
+ *  it. */
 export interface ToolInput {
   readonly run: string | readonly string[];
   readonly key: string[] | null;
+  readonly target?: string;
 }
 
 /** A target is one existing regular file or directory on this host, spelled
@@ -72,7 +75,7 @@ function namesThisHost(host: string): boolean {
 
 export async function resolveToolInput(
   entry: Pick<ToolEntry, 'name' | 'run' | 'dedupeTemplate'>,
-  context: { cwd: string; projectRoot: string | null; args: readonly string[] },
+  context: { cwd: string; here: string; args: readonly string[] },
 ): Promise<ToolInput> {
   const { args } = context;
   if (args.some(arg => typeof arg !== 'string' || hasShellInputControls(arg))) {
@@ -93,5 +96,5 @@ export async function resolveToolInput(
   if (!runHasTarget && !runList.includes('$ARGS')) run.push(...args);
   if (run.some(hasShellInputControls)) throw new ToolFileError('tool arguments cannot contain terminal control characters');
   if (!run[0]?.trim()) throw new ToolFileError('tool argument list must name an executable');
-  return { run, key };
+  return { run, key, target };
 }

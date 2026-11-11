@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertHostedBundlesDisclosed, bundledReleases, hostedBundleEntries, hostedBundles, moduleScriptEntries, undisclosedReleases } from './hosted-bundles.js';
+import { assertHostedBundlesDisclosed, assertProductBundlesDisclosed, bundledReleases, hostedBundleEntries, hostedBundles, moduleScriptEntries, PRODUCT_BUNDLES, undisclosedReleases } from './hosted-bundles.js';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const committed = () => JSON.parse(readFileSync(resolve(import.meta.dirname, '../src/data/dependencies-npm.json'), 'utf-8'));
@@ -77,4 +77,12 @@ describe('Hosted bundle disclosure', () => {
     const withoutPg = Object.fromEntries(Object.entries(committed()).map(([id, rows]) => [id, rows.filter((row) => row.name !== 'pg')]));
     await expect(assertHostedBundlesDisclosed(withoutPg, repoRoot)).rejects.toThrow(/pg@[\d.]+ \(bundled from hosted\/server\/worker\.ts\)/);
   }, 30_000);
+
+  it('finds every release the Terminal and the built-in Tools bundle in the committed disclosure, and fails on one it drops', async () => {
+    await expect(assertProductBundlesDisclosed(committed(), repoRoot)).resolves.toBeUndefined();
+    // `ws` is a Terminal dependency the sidecar's browser host bundles.
+    const browserHost = PRODUCT_BUNDLES.filter((bundle) => bundle.entry === 'src/host/browser-host.ts');
+    const withoutWs = Object.fromEntries(Object.entries(committed()).map(([id, rows]) => [id, rows.filter((row) => row.name !== 'ws')]));
+    await expect(assertProductBundlesDisclosed(withoutWs, repoRoot, browserHost)).rejects.toThrow(/ws@[\d.]+ \(bundled from lib\/src\/host\/browser-host\.ts\)/);
+  }, 60_000);
 });

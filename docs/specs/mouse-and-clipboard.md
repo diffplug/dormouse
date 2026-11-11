@@ -181,7 +181,7 @@ Every break is a mark that a click cycles keep → space → none; a scope or fo
 - **Must follow its pane at most once a frame** (`docs/specs/layout.md` → "Position tracking").
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
 - **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
-- **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
+- **Esc**, a click outside the editor and any modal, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 - **Must confirm only after a successful clipboard write, and only for the selection copied**; the selection then clears, even if its edges moved or reflow ran while the write was pending (rationale).
 - **Must leave empty copies idle without writing.** **Must say a failed write failed**, keeping the selection for a retry.
 - **Must write through the adapter's native `writeClipboardText` where it has one, and never fall back from it** (rationale). **Pocket's adapter must have none**: its copies belong on the phone. Without one, the write takes the Clipboard API, and `execCommand('copy')` where that is missing or refuses (rationale).
@@ -283,19 +283,19 @@ Paste reads the clipboard in three tiers, preferred in order:
 
 1. **File references** (a Finder/Explorer Copy of a file). Each path is shell-escaped; the space-joined list is written to the PTY with a trailing space, so the next token starts cleanly.
 2. **Plain text.** The adapter's native `readClipboardText` where it has one, else `navigator.clipboard.readText()`. **Never reverse that order** (rationale). A non-empty string goes to the PTY (bracket-wrapped, §8.5).
-3. **Raw image data.** If file references and text are empty, save image bytes to a new temp directory and paste its path as tier 1. **Must use owner-only directory and owner-read/write file modes on Unix-like systems.** Windows storage limits: `docs/specs/security-local.md` -> "Browser panes". The file and directory are removed after about five minutes while the host remains running (rationale).
+3. **Raw image data.** If file references and text are empty, save image bytes to a new temp directory and paste its path as tier 1. **Must use owner-only directory and owner-read/write file modes on Unix-like systems.** Windows storage limits: `docs/specs/security-local.md` -> "Browser panes". Both are removed after about five minutes while the host runs, or at standalone's next start (rationale).
 
-Every tier empty ⇒ silent no-op.
+Every tier empty ⇒ silent no-op; **a failed native read must show a pane notice instead**.
 
 `standalone/sidecar/clipboard-ops.js` reads the clipboard for both hosts' Node side, and writes it for standalone's, by shelling out to each platform's clipboard tools. **Every spawn must pass `windowsHide`** (CREATE_NO_WINDOW; rationale).
 
-**The standalone/Tauri build on Windows reads and writes the Win32 clipboard directly in Rust**, dropping the subprocess, with the same temp-file cleanup for an image. Non-Windows Tauri stays on the sidecar path.
+**Standalone reads the clipboard in Rust on Windows (Win32, also writing it) and Linux (GTK)**, with the same image cleanup; macOS uses the sidecar.
 
 **Must refuse the whole file-reference paste or drop (tiers 1 and 3, and §8.7) when any path carries a C0, DEL, or C1 character** (`hasShellInputControls`), bracketed or not, and show a notice on the pane (rationale).
 
 **Path escaping (tiers 1 and 3, and §8.7). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals (rationale). Each terminal captures its `shellKind` at spawn, kept across a live reconnect (`docs/specs/transport.md` -> "Reconnection protocol") and a cold restore. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). **Must type the Windows-portable form into a cmd or PowerShell Session** (`docs/specs/dor-cli.md` -> "Current Implemented Commands"), whose prompt may hold another Windows shell (rationale), **refusing the whole paste or drop, with a notice on the pane, when a path has none**. The posix escaping rules and their parser limitations live at `shellEscapePath`.
 
-Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection, control refusal), `lib/src/lib/shell-escape.ts` (dispatch + posix rules, pinned by `lib/src/lib/shell-escape.test.ts`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quoteWindowsPortableArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read).
+Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection, control refusal), `lib/src/lib/shell-escape.ts` (dispatch + posix rules, pinned by `lib/src/lib/shell-escape.test.ts`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quoteWindowsPortableArg`), `standalone/src-tauri/src/clipboard_win.rs` and `standalone/src-tauri/src/clipboard_linux.rs` (native reads).
 
 ### 8.7 Drag-to-Paste
 
@@ -338,13 +338,13 @@ Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle
 
 Neither `params` nor the URI is parsed at the PTY boundary.
 
-**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the full target in one of these states:
+**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the parsed target in one of these states:
 
 | State | Target | Dialog |
 |---|---|---|
 | **Openable** | `http:`, `https:`, `mailto:`, and `file:` | cancel plus an open action |
-| **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning that whichever app handles it gets the link; cancel plus an open action |
-| **Deceptive** | display text URL-shaped (a full URL, a dotted name, or `localhost`) but resolving to a different host than the target, compared after NFKC, without invisible characters, wrapping brackets or punctuation, a root dot, or a port, and with a non-ASCII name as its punycode; a `file:` target's own file name, or text naming no host, such as `12.5%` or `v1.2.3`, is not a host claim; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
+| **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning its handler gets the link; cancel plus an open action (standalone: **Blocked**, `tel:` excepted) |
+| **Deceptive** | display text URL-shaped (a full URL, a dotted name, or `localhost`) but resolving to a different host than the target, compared after NFKC, without invisible characters, wrapping brackets or punctuation, a root dot, or a port, and with a non-ASCII name as its punycode; any tail of a `file:` target's path, or text naming no host, such as `12.5%` or `v1.2.3`, is not a host claim; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
 | **Blocked** | malformed URIs, targets carrying a control or a character drawn as nothing or as a space it is not (`hasControlOrFormatCharacters`), browser-executable or opaque pseudo-schemes (`javascript:`, `vbscript:`, `data:`, `blob:`, `about:`), a Windows drive path the parser reads as a one-letter scheme (`c:/x.bat`), Windows handlers refused outright (`docs/specs/security-local.md` -> "Terminal output") | **Never silently dropped**: the dialog opens with the reason, close the only action |
 
 **Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **Must show the target, display text, and any error with those characters escaped** (`printableExact`), so the text read is the text there. **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
@@ -375,7 +375,7 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 - Right-click context-menu Paste, and routing Edit → Paste through §8.6's tiers.
 - A settings toggle to disable Ctrl+V interception on Windows and Linux.
 - A paste popup for previewing or transforming content before it is committed.
-- Paste content transformations (strip trailing whitespace, normalize line endings, convert smart quotes).
+- Paste content transformations (strip trailing whitespace, convert smart quotes).
 - Paste history.
 - Credential-shaped content detection and warnings.
 - Multi-line paste confirmation dialogs.

@@ -3988,7 +3988,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -3997,7 +3997,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/drizzle",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -4006,7 +4006,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/kysely",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -4015,7 +4015,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -4024,7 +4024,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/mongodb",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -4033,7 +4033,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com/docs/adapters/prisma",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -4042,7 +4042,7 @@
       "author": "Bereket Engida",
       "homepage": "https://www.better-auth.com",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -4096,7 +4096,7 @@
       "author": "DiffPlug",
       "homepage": "https://github.com/diffplug/pgstencil#readme",
       "versions": [
-        "0.4.3"
+        "0.5.1"
       ]
     },
     {
@@ -4105,7 +4105,7 @@
       "author": "DiffPlug",
       "homepage": "https://github.com/diffplug/pgstencil#readme",
       "versions": [
-        "0.4.3"
+        "0.5.1"
       ]
     },
     {
@@ -4123,7 +4123,7 @@
       "author": "Bereket Engida",
       "homepage": "https://better-auth.com",
       "versions": [
-        "1.7.16"
+        "1.7.18"
       ]
     },
     {
@@ -4169,24 +4169,6 @@
       "homepage": "https://github.com/nanostores/nanostores",
       "versions": [
         "1.5.3"
-      ]
-    },
-    {
-      "name": "oauth4webapi",
-      "license": "MIT",
-      "author": "Filip Skokan <panva.ip@gmail.com>",
-      "homepage": "https://github.com/panva/oauth4webapi",
-      "versions": [
-        "3.8.8"
-      ]
-    },
-    {
-      "name": "openid-client",
-      "license": "MIT",
-      "author": "Filip Skokan <panva.ip@gmail.com>",
-      "homepage": "https://github.com/panva/openid-client",
-      "versions": [
-        "6.8.9"
       ]
     },
     {
@@ -4267,7 +4249,7 @@
       "author": "DiffPlug",
       "homepage": "https://github.com/diffplug/pgstencil#readme",
       "versions": [
-        "0.4.3"
+        "0.5.1"
       ]
     },
     {
@@ -4339,7 +4321,7 @@
       "author": "Stripe <support@stripe.com> (https://stripe.com/)",
       "homepage": "https://github.com/stripe/stripe-node",
       "versions": [
-        "22.6.2"
+        "23.1.0"
       ]
     },
     {

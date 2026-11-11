@@ -16,7 +16,6 @@ export const DEFAULT_CHALLENGE_TTL_MS = 2 * 60 * 1000;
 export interface IssuedChallenge {
   /** Base64url challenge bytes; also the handle used to consume it. */
   readonly challenge: string;
-  readonly issuedAt: number;
   readonly expiresAt: number;
 }
 
@@ -63,10 +62,9 @@ export class ChallengeIssuer {
     }
     const bytes = this.#crypto.getRandomValues(new Uint8Array(CHALLENGE_BYTE_LENGTH));
     const challenge = toBase64Url(bytes);
-    const issuedAt = this.#now();
-    const expiresAt = issuedAt + this.#ttlMs;
+    const expiresAt = this.#now() + this.#ttlMs;
     this.#pending.set(challenge, expiresAt);
-    return { challenge, issuedAt, expiresAt };
+    return { challenge, expiresAt };
   }
 
   /**

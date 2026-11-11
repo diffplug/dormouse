@@ -41,6 +41,7 @@ const fixtureSurfaces = [
     cwd: '/Users/me/projects/site',
     activity: 'running',
     command: 'pnpm dev',
+    commandLine: 'pnpm dev',
     url: null,
     ringing: false,
     todo: false,
@@ -171,12 +172,15 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       };
     },
     // An approved project and a user file; the user `storybook` is hidden by
-    // the project's. `--global` answers the user file alone, as the host does.
+    // the project's, `pridm` is imported, and `prs` an import that is broken.
+    // `--global` answers the user file alone, as the host does.
     async toolList(request) {
       this.requests.push({ method: 'toolList', request });
       const user = [
         { name: 'storybook', scope: 'user', run: 'npx storybook', render: 'iframe', port: 'auto', keyed: false, description: null, shadowed: !request.global },
         { name: 'md', scope: 'user', run: ['glow', '$TARGET'], render: 'iframe', port: 'announced', keyed: true, description: 'Render Markdown.', shadowed: false },
+        { name: 'pridm', scope: 'user', run: ['node', '$HERE/main.js'], render: 'iframe', port: 'auto', keyed: false, description: 'PR dashboard.', shadowed: false, from: '/home/me/.config/dormouse/pridm/dormouse.yml' },
+        { name: 'prs', scope: 'user', description: null, shadowed: false, from: '/home/me/.config/dormouse/supertools/dormouse.yml', broken: '/home/me/.config/dormouse/supertools/dormouse.yml: not found' },
       ];
       return {
         project: request.global ? null : { path: '/work/site/dormouse.yml', approved: true },
@@ -580,9 +584,23 @@ test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', 
   assert.equal(msysToWindowsCwd('/c/Users/me/site', 'linux'), '/c/Users/me/site');
 });
 
+/** A host on which every `--cwd` these fixtures name exists. */
+const anyDirectoryHost = { ...NODE_HOST, isDirectory: () => true };
+
+test('ensure and tool refuse a --cwd that names no directory, launching nothing', async () => {
+  const missing = join(tmpdir(), 'dor-no-such-directory');
+  for (const argv of [['ensure', '--cwd', missing, '--', 'npm', 'install'], ['tool', '--cwd', missing, '--', 'npm', 'install']]) {
+    const client = fixtureClient();
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 1, argv[0]);
+    assert.match(result.stderr, /dor-no-such-directory' does not exist/, argv[0]);
+    assert.deepEqual(client.requests, [], argv[0]);
+  }
+});
+
 test('ensure and tool accept --flag=value before --, as stricli does', async () => {
   const ensure = fixtureClient();
-  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' } });
+  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' }, host: anyDirectoryHost });
   assert.equal(ensured.exitCode, 0, ensured.stderr);
   assert.equal(smudgeWindowsPaths(ensure.requests[0].request.cwd), '/work/other');
   assert.equal(ensure.requests[0].request.surface, 'surface:3');
@@ -608,6 +626,7 @@ test('ensure json output', async () => {
     'ensure-json',
     await runCli(['ensure', '--json', '--minimize', '--cwd', '/Users/me/projects/site', '--', 'pnpm', 'dev'], {
       client: fixtureClient(),
+      host: anyDirectoryHost,
     }),
   );
 });
@@ -1306,6 +1325,14 @@ test('agent-browser close skips surface management', async () => {
   assert.equal(surfaceRequest(client), undefined);
 });
 
+test('agent-browser skills runs alone, without a stream probe or a surface', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', 'skills', 'get', 'core'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'skills', 'get', 'core']]);
+  assert.equal(surfaceRequest(client), undefined);
+});
+
 test('agent-browser without a control endpoint stays a pure passthrough', async () => {
   const ab = fakeAgentBrowser();
   const result = await runCli(['agent-browser', 'open', 'http://localhost:5173'], { execAgentBrowser: ab.exec });
@@ -1340,7 +1367,7 @@ test('agent-browser --surface drives the session the host says the surface is bo
   // No `key`: a surface-addressed session is not necessarily a managed one.
   assert.deepEqual(client.requests[1], {
     method: 'browserSurface',
-    request: { provider: 'agent-browser', key: undefined, session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
+    request: { provider: 'agent-browser', key: undefined, surface: 'surface:3', session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
   });
 });
 
@@ -1675,6 +1702,19 @@ test('list tags the preview slot in text and JSON only', async () => {
   assert.deepEqual(JSON.parse(json.stdout).surfaces.map((surface) => [surface.id, surface.preview]), [['surface:1', undefined], ['surface:2', true]]);
 });
 
+test('list reports a Tool\'s declared identity in JSON only, and nothing for a terminal', async () => {
+  const tool = { ...fixtureSurfaces[1], kind: 'tool', toolName: 'docs', toolScope: 'user', toolOrigin: { file: '/home/me/.config/dormouse/dormouse.yml' } };
+  const surfaces = [fixtureSurfaces[0], tool];
+  const text = await runCli(['list'], { client: fixtureClient(surfaces), env: listEnv });
+  assert.equal(text.stdout, (await runCli(['list'], { client: fixtureClient([fixtureSurfaces[0], { ...fixtureSurfaces[1], kind: 'tool' }]), env: listEnv })).stdout);
+  const rows = JSON.parse((await runCli(['list', '--json'], { client: fixtureClient(surfaces), env: listEnv })).stdout).surfaces;
+  assert.deepEqual(rows.map((row) => [row.tool_name, row.tool_scope, row.tool_origin]), [
+    [undefined, undefined, undefined],
+    ['docs', 'user', { file: '/home/me/.config/dormouse/dormouse.yml' }],
+  ]);
+  assert.equal(Object.keys(rows[0]).some((field) => field.startsWith('tool_')), false);
+});
+
 test('list --all groups every Workspace under a header', async () => {
   const client = fixtureClient();
   const result = await runCli(['list', '--all'], { client, env: listEnv });
@@ -1962,6 +2002,21 @@ test('list filters by kind, view, command, and cwd without port scanning', async
   assert.equal(payload.surfaces[0].ports, undefined);
 });
 
+test('list --command matches the reported command line, not its summarized label', async () => {
+  const client = fixtureClient([
+    { ...fixtureSurfaces[0], command: 'npm run dev', commandLine: 'npm run dev --host' },
+    { ...fixtureSurfaces[1], command: 'npm run dev', commandLine: 'npm run dev' },
+  ]);
+  const ids = async command => JSON.parse((await runCli(['list', '--json', '--command', command], { client, env: listEnv })).stdout)
+    .surfaces.map(surface => surface.id);
+  assert.deepEqual(await ids('npm run dev --host'), ['surface:1']);
+  assert.deepEqual(await ids('npm run dev'), ['surface:2']);
+  // What a listing prints is what the filter takes back.
+  const listed = JSON.parse((await runCli(['list', '--json'], { client, env: listEnv })).stdout).surfaces;
+  assert.equal(listed[0].command_line, 'npm run dev --host');
+  assert.deepEqual(await ids(listed[0].command_line), ['surface:1']);
+});
+
 test('list ports text output', async () => {
   const client = fixtureClient();
   const result = await runCli(['list', '--ports'], { client, env: listEnv });
@@ -2096,8 +2151,30 @@ test('tool prints dormouse.yml warnings to stderr, keeping --json parseable', as
   assert.deepEqual(JSON.parse(result.stdout).status, 'created');
 });
 
-test('tool with neither a name nor a command tail', async () => {
-  await snapshot('tool-missing-target', await runCli(['tool'], { client: fixtureClient() }));
+test('tool with neither a name nor a command tail, but a placement flag', async () => {
+  await snapshot('tool-missing-target', await runCli(['tool', '--minimize'], { client: fixtureClient() }));
+});
+
+test('bare tool without a terminal prints the listing --list prints', async () => {
+  for (const flags of [[], ['--json'], ['--global'], ['--global', '--json', '--cwd', 'sub']]) {
+    const bare = fixtureClient();
+    const listed = fixtureClient();
+    const env = { PWD: '/work/site' };
+    const result = await runCli(['tool', ...flags], { client: bare, env });
+    assert.equal(result.exitCode, 0, flags.join(' '));
+    assert.deepEqual(result, await runCli(['tool', '--list', ...flags], { client: listed, env }), flags.join(' '));
+    assert.deepEqual(bare.requests, listed.requests, flags.join(' '));
+  }
+});
+
+test('bare tool without a terminal refuses a placement flag', async () => {
+  for (const flag of [['--minimize'], ['--fresh'], ['--surface', 'surface:2'], ['--workspace', 'workspace:2']]) {
+    const client = fixtureClient();
+    const result = await runCli(['tool', ...flag], { client });
+    assert.equal(result.exitCode, 1, flag.join(' '));
+    assert.equal(result.stderr, 'Error: dor tool requires a tool name or -- <command...>\n', flag.join(' '));
+    assert.deepEqual(client.requests, [], flag.join(' '));
+  }
 });
 
 test('tool keeps escaped named arguments separate from anonymous commands', async () => {
@@ -2151,7 +2228,11 @@ test('tool --list escapes control and format characters in repo text, in every o
   const listing = {
     project: { path: '/work/s\u2067ite/dormouse.yml', approved: false },
     user: { path: '/home/me/.config/dormouse/dormouse.yml', found: false },
-    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext \u202eexe.txt \u00adsoft\u00a0nb\u3164fill\ufe0fsel\u{e0041}tag', shadowed: false }],
+    tools: [
+      { name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext \u202eexe.txt \u00adsoft\u00a0nb\u3164fill\ufe0fsel\u{e0041}tag', shadowed: false },
+      { name: 'imported', scope: 'user', run: ['x'], render: 'iframe', port: 'auto', keyed: false, description: null, shadowed: false, from: '/c/fr\u009dom/dormouse.yml' },
+      { name: 'broken', scope: 'user', description: null, shadowed: false, from: '/c/b\u202eroken/dormouse.yml', broken: '/c/b/dormouse.yml: tools.x\u001b[2J: bad' },
+    ],
     warnings: ['/work/site/dormouse.yml: tools.evil\u001b[2J\u200b: ignoring unknown field \'x\''],
   };
   const client = fixtureClient();
@@ -2164,6 +2245,9 @@ test('tool --list escapes control and format characters in repo text, in every o
   assert.match(text.stdout, /fine\\u001b\[2Jtext \\u202eexe\.txt/);
   assert.match(text.stdout, /s\\u2067ite/);
   assert.match(text.stdout, /\\u00adsoft\\u00a0nb\\u3164fill\\ufe0fsel\\udb40\\udc41tag/);
+  assert.match(text.stdout, /\[from \/c\/fr\\u009dom\/dormouse\.yml\]/);
+  assert.match(text.stdout, /\[from \/c\/b\\u202eroken\/dormouse\.yml\]/);
+  assert.match(text.stdout, /\[broken: \/c\/b\/dormouse\.yml: tools\.x\\u001b\[2J: bad\]/);
   const json = await runCli(['tool', '--list', '--json'], { client });
   assert.doesNotMatch(json.stdout, HIDDEN);
   assert.deepEqual(JSON.parse(json.stdout).tools, listing.tools);
@@ -2183,7 +2267,8 @@ test('tool and open escape control and format characters in the host answer, in 
 });
 
 test('list escapes control characters in Tool commands, titles, locations, and Workspace names', async () => {
-  const evil = { ...fixtureSurfaces[0], kind: 'tool', title: 'site\u009b31m', cwd: '/work/\u007fsite', command: 'run \u001b]52;c;x\u0007 \u0085' };
+  const evil = { ...fixtureSurfaces[0], kind: 'tool', title: 'site\u009b31m', cwd: '/work/\u007fsite', command: 'run \u001b]52;c;x\u0007 \u0085',
+    toolName: 'docs\u001b[2J', toolScope: 'project', toolOrigin: { file: '/work/\u009dsite/dormouse.yml' } };
   const client = fixtureClient([evil]);
   client.listWorkspaces = async () => ({ workspaces: [{ ...fixtureWorkspaces[0], name: 'ws\u009d' }], windowRef: 'window:1' });
   const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
@@ -2192,7 +2277,10 @@ test('list escapes control characters in Tool commands, titles, locations, and W
     assert.equal(result.exitCode, 0, argv.join(' '));
     assert.doesNotMatch(result.stdout, controls, argv.join(' '));
   }
-  assert.equal(JSON.parse((await runCli(['list', '--json'], { client })).stdout).surfaces[0].command, evil.command);
+  const row = JSON.parse((await runCli(['list', '--json'], { client })).stdout).surfaces[0];
+  assert.equal(row.command, evil.command);
+  assert.equal(row.tool_name, evil.toolName);
+  assert.deepEqual(row.tool_origin, evil.toolOrigin);
 });
 
 test('workspace verbs escape control characters in the Workspace name', async () => {

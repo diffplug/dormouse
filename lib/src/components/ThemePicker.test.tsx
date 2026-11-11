@@ -35,7 +35,7 @@ describe('ThemePicker', () => {
   // The panel's height contract — list shrinks, footer survives — is geometry,
   // which jsdom cannot see (no layout, no CSS). Asserting the class list here
   // would fail on any equivalent restyle and pass on real breakage, so it lives
-  // in `Modals/…`/`Components/ThemePicker` Chromatic stories instead
+  // in `Modals/…`/`Components/ThemePicker` Argos-snapshotted stories instead
   // (`OpenOnShortViewport`). `design.test.ts` pins the cap to its constants.
   it('shares the active theme preview between the closed trigger and its list entry', () => {
     act(() => root.render(<ThemePicker variant="row" />));

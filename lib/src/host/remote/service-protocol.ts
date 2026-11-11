@@ -181,6 +181,7 @@ export interface BurrowStatusEvent {
  * Whether `connection` is a Relay that no longer takes this Burrow (a
  * `BurrowStanding` latched, `docs/specs/relay.md` -> "Burrow side"), which the
  * Burrow asks for nothing more: no push, device list, setup code, or relay row.
+ * A `not-entitled` one asks only its standing, on a slow timer.
  */
 export function relayRefuses(connection: BurrowStatus): boolean {
   return connection === 'removed' || connection === 'not-entitled';
@@ -521,6 +522,8 @@ export interface BurrowConsoleStatus {
   pairedClients: number;
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
+  /** The name this machine enrolled under, which Enroll again keeps; absent while not enrolled. */
+  label?: string;
   /**
    * Whether the installer left an enrollment offer for `relayOrigin` on this
    * machine, while this self-host Burrow has not enrolled — the Settings

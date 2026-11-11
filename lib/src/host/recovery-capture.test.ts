@@ -67,6 +67,10 @@ class FakePtys implements RecoveryHost {
   get sincePress(): number { return this.time - (this.firstPressAt ?? this.time); }
   private firstPressAt: number | null = null;
 
+  /** Each silenced pane, with how many presses came before. */
+  readonly silenced: Array<{ id: string; pressesBefore: number }> = [];
+  silenceRun(id: string): void { this.silenced.push({ id, pressesBefore: this.presses.length }); }
+
   async interrupt(ids: string[]): Promise<void> {
     this.firstPressAt ??= this.time;
     this.calls.push(`^C ${ids.join(',')}`);
@@ -307,6 +311,12 @@ describe('captureAgentRecovery', () => {
     const size = `${RECOVERY_SIZE.cols}x${RECOVERY_SIZE.rows}`;
     expect(host.calls.slice(0, 3)).toEqual([`resize a ${size}`, `resize b ${size}`, '^C a,b']);
     expect(RECOVERY_SIZE.cols).toBeGreaterThanOrEqual(200);
+  });
+
+  it('silences every target\'s run before its first press, so the end it causes never rings', async () => {
+    const host = new FakePtys(['a', 'b']);
+    await captureAgentRecovery(host, { maxWaitMs: 100 });
+    expect(host.silenced).toEqual([{ id: 'a', pressesBefore: 0 }, { id: 'b', pressesBefore: 0 }]);
   });
 
   it('does not scan the repaint the widening provokes, while it keeps arriving', async () => {

@@ -106,7 +106,8 @@ const CLOSE_GRACE_MS = 250;
  * Windows, `treeKillCommand`) and the call resolves `{ ok: false }` with
  * `SPAWN_TIMEOUT_CODE`, without waiting for the kill. Past `maxOutputBytes` of
  * combined stdout/stderr it is killed the same way and resolves `{ ok: false }`
- * with `ENOBUFS` and none of the output, which may hold secrets.
+ * with `ENOBUFS` and none of the output, which may hold secrets. An aborted
+ * `signal` kills it the same way and resolves `{ ok: false }` with `ABORT_ERR`.
  *
  * `input` is written to the child's stdin, which is then closed; without it
  * stdin is ignored unless `stdin: inherit` forwards the caller's stream.
@@ -117,7 +118,7 @@ const CLOSE_GRACE_MS = 250;
 export function spawnAndCapture(
   binary: string,
   args: readonly string[],
-  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean; input?: string; stdin?: 'inherit' } = {},
+  options: { cwd?: string; timeoutMs?: number; signal?: AbortSignal; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean; input?: string; stdin?: 'inherit' } = {},
 ): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -154,6 +155,7 @@ export function spawnAndCapture(
       settled = true;
       if (graceTimer !== undefined) clearTimeout(graceTimer);
       if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
+      options.signal?.removeEventListener('abort', abort);
       // Capture is over. In the grace fallback a daemon still owns the write
       // ends: leaving our readers open retains both the caller's event loop and
       // the data listeners that keep accumulating ignored output.
@@ -171,6 +173,12 @@ export function spawnAndCapture(
       // Best effort: a failed tree kill still leaves the shell to end.
       taskkill.on('error', () => child.kill('SIGKILL'));
     };
+    function abort(): void {
+      settle(() => resolve({ ok: false, error: { code: 'ABORT_ERR', message: `${binary} was aborted` } }));
+      killChild();
+    }
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener('abort', abort);
     // Decode across pipe chunks so a split UTF-8 sequence stays one character.
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');

@@ -57,7 +57,7 @@ import * as net from 'net';
 import { networkInterfaces } from 'os';
 import { IFRAME_HTTP_ONLY, type IframeExternalRefusal, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import type { NetworkInterfaceInfo } from '../remote/network-policy';
-import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
+import { isLoopbackHost, isOwnOrigin } from './loopback-guard';
 import { allowedAddressTest, isPrivateAddress, listNetworkInterfaces } from './remote/network-interfaces';
 import { createSerialQueue } from './remote/serial-queue';
 import {
@@ -81,13 +81,6 @@ import {
   type ErrorPage,
 } from './iframe-proxy-rewrite';
 
-// An unleased grant's sliding idle TTL: every request refreshes it, so one
-// expires once nothing fetches through it. Lazy sweep on the next
-// createIframeProxyUrl. A leased grant has no TTL: its lease ends it.
-const GRANT_IDLE_TTL_MS = 5 * 60_000;
-const GRANT_SWEEP_MS = 60_000;
-// Backstop against unbounded unleased-server accumulation if sweeps never run.
-const MAX_GRANTS = 32;
 /** How many leases may be held at once. Past it a new lease is refused, never
  *  made room for: every lease is a view someone may be looking at. */
 export const MAX_IFRAME_LEASES = 128;
@@ -103,6 +96,10 @@ const HEAD_STREAM_CAP = 512 * 1024;
 // across chunks is still found. A longer `<body …>` split mid-tag is found by
 // the full-prefix instrumentation at the cap or the end instead.
 const MARKER_CARRY = 1024;
+// Both tags are optional, and a page that streams fragments often writes
+// neither: this long after its first bytes, instrument what has arrived and
+// pipe, as a browser would already be rendering it.
+const HEAD_WAIT_MS = 200;
 // Fetch destinations that load a document the shim goes into. Only their
 // requests ask for an identity body, so every other request keeps its
 // compression; a request without the header (an older engine) is treated as one.
@@ -157,9 +154,6 @@ interface Grant {
   port: number;
   proxyOrigin: string;
   server: http.Server;
-  lastUsed: number;
-  /** Held by a lease: no idle TTL, no eviction. */
-  leased: boolean;
   /** The addresses it connects to: minted, and reused, only while each one off
    *  this machine is private and inside an allowed network
    *  (docs/specs/dor-browser.md → "Iframe External Origins"). */
@@ -182,7 +176,6 @@ interface Grant {
 }
 
 const grants = new Map<number, Grant>();
-let lastSweep = 0;
 
 /** A live lease: its grant once minted, and its acquisitions, run one at a
  *  time so concurrent asks agree on one grant. Released is gone from
@@ -293,12 +286,9 @@ export async function createIframeProxyUrl(
     tunneled: opts?.tunneled === true,
   };
 
-  const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
-  if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
-  if (!lease) {
-    const minted = await mintGrant(upstream, embedderOrigins, false, resolve, access);
-    return 'port' in minted ? framedUrl(minted, upstream) : minted;
-  }
+  // Every grant is a view's, which its lease alone ends.
+  const lease = validLease(opts?.lease);
+  if (!lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
   const key = leaseKey(lease);
   let held = leases.get(key);
   if (!held) {
@@ -332,7 +322,7 @@ async function acquireLeased(
     closeGrant(lease.grant);
     lease.grant = undefined;
   }
-  const minted = await mintGrant(upstream, embedderOrigins, true, resolve, access);
+  const minted = await mintGrant(upstream, embedderOrigins, resolve, access);
   if (!('port' in minted)) return minted;
   if (released()) {
     closeGrant(minted);
@@ -454,7 +444,7 @@ export async function isUpstreamOnThisMachine(
 }
 
 async function mintGrant(
-  upstream: URL, embedderOrigins: string[] | null, leased: boolean, resolve: UpstreamResolver, access: MintAccess,
+  upstream: URL, embedderOrigins: string[] | null, resolve: UpstreamResolver, access: MintAccess,
 ): Promise<Grant | Refusal> {
   const pinned = await pinAddresses(upstream, resolve);
   if (!Array.isArray(pinned)) return pinned;
@@ -464,8 +454,6 @@ async function mintGrant(
   if (offMachine.length > 0 && access.tunneled) return OFF_MACHINE_REFUSED;
   const refusal = await offMachineRefusal(offMachine, access);
   if (refusal) return refusal;
-  const now = Date.now();
-  sweepGrants(now);
 
   const grant: Grant = {
     upstream,
@@ -473,8 +461,6 @@ async function mintGrant(
     port: 0,
     proxyOrigin: '',
     server: null as unknown as http.Server,
-    lastUsed: now,
-    leased,
     pinned,
     // A tunneled page is not at this port, so there is nothing of its to clear.
     fresh: !access.tunneled,
@@ -496,15 +482,10 @@ async function mintGrant(
   }
   grant.port = port;
   grant.proxyOrigin = `http://127.0.0.1:${port}`;
-  grant.lastUsed = Date.now();
   grants.set(port, grant);
-  // A bind yields: other creations may have committed since the first sweep.
-  // Sweep after insertion as well, so neither sequential nor concurrent calls
-  // leave more than MAX_GRANTS published listeners behind.
-  sweepGrants(Date.now());
   // The origin only: a path or query can carry a credential (`?token=`), and
   // the host log is offered for pasting into an issue.
-  log(`[iframe-proxy] ${upstream.origin} → ${grant.proxyOrigin}${leased ? ' (leased)' : ''}`);
+  log(`[iframe-proxy] ${upstream.origin} → ${grant.proxyOrigin}`);
   return grant;
 }
 
@@ -554,18 +535,10 @@ function isServiceWorkerScript(req: http.IncomingMessage): boolean {
 function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.ServerResponse): void {
   if (!isLoopbackHost(req.headers.host, grant.port)) {
     // DNS rebinding: a hostile domain re-pointed at 127.0.0.1 reaches this
-    // grant with its own name in Host. Refuse before touching lastUsed, so a
-    // stranger cannot hold a grant open past its idle TTL either.
+    // grant with its own name in Host.
     res.writeHead(421).end();
     return;
   }
-  // Refreshed for anyone but a caller that has *named itself* as foreign. The
-  // sliding TTL exists so a live frame keeps its grant, and a live frame's
-  // navigations and sub-resource loads carry no `Origin` at all — so "own
-  // origin only" would expire a grant the user is still looking at. What it
-  // must not do is let a page that says `Origin: https://evil.example` hold a
-  // closed pane's grant, and its upstream binding, open indefinitely.
-  if (!isForeignOrigin(req.headers.origin, grant.port)) grant.lastUsed = Date.now();
   // A worker outlives its grant in the browser's storage for this origin, and
   // would answer whichever later grant lands on this port, ahead of the proxy
   // and its Clear-Site-Data. A tunneled page is not at this port.
@@ -658,6 +631,13 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       res.destroy();
       return;
     }
+    // A fetch, script or EventSource sees what it would without the proxy, a
+    // failed connection: a page standing in for its body would read as a
+    // success, and an EventSource never reconnects after one.
+    if (!documentLoad) {
+      res.destroy();
+      return;
+    }
     const code = (err as { code?: string }).code;
     serveErrorPage(grant, res, code === 'ETIMEDOUT'
       ? timedOutPage(grant.upstream)
@@ -740,7 +720,7 @@ function decodedBody(response: http.IncomingMessage, encoding: string): Readable
 
 // Inject the shim into the <head> while streaming, without buffering the whole
 // document: accumulate only until the insertion point (</head>, else <body>,
-// else the cap), instrument that prefix, then pipe the rest through untouched.
+// else the cap or `HEAD_WAIT_MS`), instrument that prefix, then pipe the rest through untouched.
 // latin1 is byte-preserving, so searching/rewriting ASCII tags and re-encoding
 // can't corrupt multibyte bytes in <head> (e.g. an em-dash in <title>), in any
 // ASCII-compatible charset — which is why the upstream's `content-type`, charset
@@ -769,7 +749,19 @@ function streamHtml(
   let carry = '';
   let handled = false;
   let bomChecked = false;
+  let waiting: ReturnType<typeof setTimeout> | undefined;
   const prefix = () => Buffer.concat(pending).toString('latin1');
+  // Instrument the buffered prefix, then hand the remainder to a raw pipe
+  // (backpressure + end).
+  const instrumentAndPipe = () => {
+    clearTimeout(waiting);
+    if (handled || res.destroyed) return;
+    handled = true;
+    body.off('data', onData);
+    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
+    pending.length = 0;
+    body.pipe(res);
+  };
 
   // Each chunk is decoded and searched once, plus the carry, so a large head
   // costs linear rather than quadratic time.
@@ -792,24 +784,24 @@ function streamHtml(
     const scan = carry + chunk.toString('latin1');
     if (buffered <= HEAD_STREAM_CAP && !HEAD_MARKER.test(scan)) {
       carry = scan.slice(-MARKER_CARRY);
+      waiting ??= setTimeout(instrumentAndPipe, HEAD_WAIT_MS);
       return;
     }
-    // Found the insertion point (or hit the cap): instrument the buffered
-    // prefix, then hand the remainder to a raw pipe (backpressure + end).
-    handled = true;
-    body.off('data', onData);
-    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
-    pending.length = 0;
-    body.pipe(res);
+    // Found the insertion point (or hit the cap).
+    instrumentAndPipe();
   };
 
   body.on('data', onData);
   body.on('end', () => {
+    clearTimeout(waiting);
     if (handled) return; // the pipe ends `res`
     // Whole document arrived before any head marker — instrument and finish.
     res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
   });
-  body.on('error', () => { if (!res.writableEnded) res.destroy(); });
+  body.on('error', () => {
+    clearTimeout(waiting);
+    if (!res.writableEnded) res.destroy();
+  });
 }
 
 function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
@@ -871,7 +863,6 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
     socket.destroy();
     return;
   }
-  if (!isForeignOrigin(req.headers.origin, grant.port)) grant.lastUsed = Date.now();
   socket.on('error', () => {});
   const headers = upstreamRequestHeaders(grant, req);
 
@@ -925,23 +916,6 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
   upstreamReq.setTimeout(UPSTREAM_IDLE_TIMEOUT_MS, () => upstreamReq.destroy());
   socket.on('close', () => upstreamReq.destroy());
   upstreamReq.end();
-}
-
-/** Reclaim unleased grants: idle past the TTL, or the oldest past the cap. */
-function sweepGrants(now: number): void {
-  // Every grant bounds the unleased ones, so the throttle needs no filter.
-  if (now - lastSweep < GRANT_SWEEP_MS && grants.size < MAX_GRANTS) return;
-  const unleased = [...grants.values()].filter((grant) => !grant.leased);
-  if (now - lastSweep < GRANT_SWEEP_MS && unleased.length < MAX_GRANTS) return;
-  lastSweep = now;
-  let count = unleased.length;
-  for (const grant of unleased.sort((a, b) => a.lastUsed - b.lastUsed)) {
-    const expired = now - grant.lastUsed > GRANT_IDLE_TTL_MS;
-    if (!expired && count <= MAX_GRANTS) break;
-    count -= 1;
-    closeGrant(grant);
-    log(`[iframe-proxy] swept grant for ${grant.upstream.origin}`);
-  }
 }
 
 /**

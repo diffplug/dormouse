@@ -107,10 +107,24 @@ test('readClipboardFilePaths on mac parses osascript linefeed-separated output',
     exec: async (cmd, args) => {
       assert.equal(cmd, 'osascript');
       assert.equal(args[0], '-e');
+      if (args[1] === 'clipboard info') return { stdout: '«class furl», 37, «class utf8», 12\n' };
       return { stdout: '/Users/me/a.png\n/Users/me/b.jpg\n' };
     },
   });
   assert.deepEqual(paths, ['/Users/me/a.png', '/Users/me/b.jpg']);
+});
+
+test('readClipboardFilePaths on mac starts no AppKit read when the pasteboard holds no file URL', async () => {
+  const scripts = [];
+  const paths = await readClipboardFilePaths({
+    platform: 'darwin',
+    exec: async (cmd, args) => {
+      scripts.push(args[1]);
+      return { stdout: args[1] === 'clipboard info' ? '«class utf8», 170, «class ut16», 342\n' : '/Users/me/a.png\n' };
+    },
+  });
+  assert.deepEqual(paths, []);
+  assert.deepEqual(scripts, ['clipboard info']);
 });
 
 test('readClipboardFilePaths on mac returns [] when osascript fails', async () => {

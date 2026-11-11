@@ -84,6 +84,7 @@ import {
   openUrl,
   buildDebugReport,
   useUpdateState,
+  hasApprovedUpdate,
   hasPendingUpdate,
   installPendingUpdate,
   restartToUpdate,
@@ -141,6 +142,19 @@ describe('updater', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(readBannerState()).toEqual({ status: 'downloaded', version: update.version });
     expect(hasPendingUpdate()).toBe(true);
+  });
+
+  it('counts an approved update as held while its download is still running', async () => {
+    const update = makeUpdate();
+    update.download.mockImplementation(() => new Promise<void>(() => {}));
+    mocks.check.mockResolvedValueOnce(update);
+    checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hasApprovedUpdate()).toBe(false);
+    approveUpdate();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hasPendingUpdate()).toBe(false);
+    expect(hasApprovedUpdate()).toBe(true);
   });
 
   it('keeps a dismissal while an empty manual check reads the app version', async () => {

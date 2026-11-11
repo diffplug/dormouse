@@ -6,7 +6,7 @@ import { request } from 'node:http';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
 import { editorStore } from '../dist/editor-store.js';
-import { pasteImage } from '../dist/editor-routes.js';
+import { MARKDOWN_PARSE_BOUND, markdownEditing, mayHoldIndentedCode, parsesIndentedCode, pasteImage } from '../dist/editor-routes.js';
 import { resolveInside } from '../dist/viewer-server.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108020000009077' + '53de0000000c4944415408d763f8cfc000000301010018dd8db00000000049454e44ae426082', 'hex');
@@ -199,4 +199,99 @@ test('navigation emits a resolved open request without granting the destination 
     assert.deepEqual(opened.at(-1), { path: join(docs, 'img', 'a %#?.png'), preview: false, disposition, fragment: undefined });
   }
   assert.equal(opened.length, 4);
+});
+
+// The finding inputs: CommonMark indented code, which MDXEditor reads as Markdown.
+const INDENTED = [
+  'Run:\n\n    make install\n    make test\n\nDone.\n',
+  'Setup:\n\n    # install deps\n    npm install\n    - not a list\n    > not a quote\n\nDone.\n',
+];
+const RICH = [
+  '',
+  '- item\n\n    continuation paragraph\n',
+  '```sh\n    indented\n        more\n```\n',
+  '# Doc\n\n```js\nx\n```\n',
+];
+
+test('a Markdown file with an indented code block opens as source and saves exactly the edit', async () => {
+  for (const text of INDENTED) {
+    const viewer = await start('doc.md', text);
+    const page = (await send(viewer, viewer.path)).body.toString();
+    assert.match(page, /assets\/editor\.js/, text);
+    assert.doesNotMatch(page, /assets\/markdown\.js/, text);
+    const { version, editing } = JSON.parse((await send(viewer, route(viewer, 'source'))).body.toString());
+    // Decided again on every load, so the rich page can leave on a Reload.
+    assert.equal(editing, 'indented');
+    const edited = text.replace('Done.', 'Finished.');
+    assert.equal((await send(viewer, route(viewer, 'save'), { body: { text: edited, version } })).status, 200);
+    assert.equal(await readFile(join(docs, 'doc.md'), 'utf8'), edited);
+  }
+});
+
+test('a Markdown file with no indented code block opens rich', async () => {
+  for (const text of RICH) {
+    const viewer = await start('doc.md', text);
+    assert.match((await send(viewer, viewer.path)).body.toString(), /assets\/markdown\.js/, JSON.stringify(text));
+    assert.equal(JSON.parse((await send(viewer, route(viewer, 'source'))).body.toString()).editing, 'rich');
+  }
+});
+
+test('the scan finds every indented code block CommonMark does', () => {
+  for (const text of [
+    'Run:\n\n    make\n',
+    '    code at the start\n',
+    'Text\n\n\tcode after a tab\n',
+    '# Heading\n    code after a heading\n',
+    '- a\n- b\n\nAfter the list.\n\n    code\n',
+    '- a\n\n      code in the item\n',
+    '1. a\n\n       code in an ordered item\n',
+    '- a\n  - b\n\n        code in a nested item\n',
+    '> quote\n>\n>     code in a quote\n',
+    '- a\n  ```\n  x\n- b\n\nend\n\n    code after a fence its item ended\n',
+    '```\nx\n```\n    code after a fence\n',
+    '-     code after a marker\n',
+    // A closing fence indented four columns closes nothing.
+    '```\n    ```\n```\n\n    code\n',
+    // An empty item ends at the blank line after it.
+    '-\n\n    code\n',
+    // HTML blocks and comments, whose ends and contents the scan does not model.
+    'Text\n<!-- a\nb -->\n    code\n',
+    '<!--\n```\n-->\n\n    code\n',
+    '<pre>\n```\n</pre>\n\n    code\n',
+  ]) {
+    assert.equal(parsesIndentedCode(text), true, `fixture: ${JSON.stringify(text)}`);
+    assert.equal(mayHoldIndentedCode(text), true, JSON.stringify(text));
+  }
+});
+
+test('an open parses its text once, though view and source both decide it', () => {
+  const calls = [];
+  const spy = text => { calls.push(text); return parsesIndentedCode(text); };
+  const [indented, rich] = ['Open:\n\n    code\n', 'Open.\n'];
+  // As `view` then `source` ask about one file.
+  assert.deepEqual([markdownEditing(indented, spy), markdownEditing(indented, spy)], ['indented', 'indented']);
+  assert.deepEqual(calls, [indented]);
+  // Changed on disk between the two: decided again.
+  assert.equal(markdownEditing(rich, spy), 'rich');
+  // Two documents alternating each decide afresh, and correctly.
+  assert.deepEqual([markdownEditing(indented, spy), markdownEditing(rich, spy), markdownEditing(rich, spy)], ['indented', 'rich', 'rich']);
+  assert.deepEqual(calls, [indented, rich, indented, rich]);
+});
+
+test('micromark alone decides under the bound, and the scan past it', () => {
+  const calls = [];
+  const spy = text => { calls.push(text.length); return parsesIndentedCode(text); };
+  for (const text of INDENTED) assert.equal(markdownEditing(text, spy), 'indented');
+  for (const text of RICH) assert.equal(markdownEditing(text, spy), 'rich');
+  assert.equal(calls.length, INDENTED.length + RICH.length);
+  // The scan agrees on these, so each opens the same past the bound: a list
+  // item's continuation sits within the item, and a fence's lines are code.
+  for (const text of RICH) assert.equal(mayHoldIndentedCode(text), false, JSON.stringify(text));
+
+  calls.length = 0;
+  const prose = 'A paragraph of prose,\nwrapped over lines\n    and a lazy indented one.\n\n'.repeat(Math.ceil(300 * 1024 / 72));
+  assert.ok(prose.length > MARKDOWN_PARSE_BOUND);
+  assert.equal(markdownEditing(prose, spy), 'rich');
+  assert.equal(markdownEditing(`${prose}\n    code\n`, spy), 'large');
+  assert.deepEqual(calls, []);
 });

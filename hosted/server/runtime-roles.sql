@@ -11,11 +11,12 @@
 -- the code reads or writes. A grant some other role made is beyond a REVOKE
 -- here; hosted/server/tests/runtime-roles.test.ts pins the result.
 --
--- Applied as the migration role by `db:migrate`, after every migration, and
--- alone by `db:roles`: one transaction, idempotent. It creates a missing role
--- NOLOGIN, refuses one holding a role attribute or membership, and never
--- alters an existing one, so LOGIN and a password set out of band survive; it
--- then revokes everything either role holds and grants exactly the list.
+-- Applied as the migration role by `db:migrate` and `db:migrate:preview`,
+-- after every migration, and alone by `db:roles`: one transaction,
+-- idempotent. It creates a missing role NOLOGIN, refuses one holding a role
+-- attribute or membership, and never alters an existing one, so LOGIN and a
+-- password set out of band survive; it then revokes everything either role
+-- holds and grants exactly the list.
 -- Never put a password here.
 
 BEGIN;
@@ -63,12 +64,13 @@ GRANT USAGE ON SCHEMA public TO dormouse_relay, dormouse_voice;
 
 -- Both: the entitlement (hosted/server/entitlement.ts) reads the owner's
 -- address and its verification, until when @pgstencil/stripe's owner_access
--- view grants the owner access, and whether a payment dispute suspends them.
+-- view grants the owner access and in what status (an active one keeps a
+-- renewal grace), and whether a payment dispute suspends them.
 -- The view runs with its owner's privileges, so neither role reads the
 -- subscriptions table beneath it.
 GRANT SELECT (id, email, "emailVerified") ON "user" TO dormouse_relay, dormouse_voice;
 GRANT USAGE ON SCHEMA pgstencil_billing TO dormouse_relay, dormouse_voice;
-GRANT SELECT (owner_id, access_until)
+GRANT SELECT (owner_id, status, access_until)
   ON pgstencil_billing.owner_access TO dormouse_relay, dormouse_voice;
 GRANT SELECT ("userId") ON dormouse_billing_disputes TO dormouse_relay, dormouse_voice;
 

@@ -217,8 +217,9 @@ export interface BrowserCliDescriptor {
   paths: PathArgs;
   /** A test's stand-in for the spawn. */
   exec(options: CliOptions): BrowserExec | undefined;
-  /** The argv that reads the session's stream port once a command has
-   *  succeeded — the browser exists then, so asking starts none — under the
+  /** The argv that reads the session's stream port once a command that may
+   *  bind has succeeded — the browser exists then, so asking starts none
+   *  (verbs that never start one belong in `noBind`) — under the
    *  caller's own environment; the port it prints is handed over with the
    *  bind. Absent when the host reports the port. */
   streamStatus?(session: string, headed?: boolean): string[];
@@ -509,7 +510,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       const blank = await run([...sessionArgs, ...navigation.blank], launchEnv);
       if (blank.exitCode !== 0) return fail(`Could not prepare the playwright viewport before navigation: ${blank.stderr.trim() || `playwright exited ${blank.exitCode}`}`);
       const preparedSurface = await client.browserSurface({
-        provider: d.provider, key: flags.key, session: binding.session, cwd: cwd ?? callerCwd,
+        provider: d.provider, key: flags.key, ...surfaceParam(flags.surface), session: binding.session, cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}), ...(fresh && initialViewport ? { initialViewport } : {}),
         ...workspaceParam(flags.workspace),
       });
@@ -552,6 +553,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       await client.browserSurface({
         provider: d.provider,
         key: flags.key,
+        ...surfaceParam(flags.surface),
         session: binding.session,
         cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}),
@@ -564,6 +566,12 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
     }
   }
   return result;
+}
+
+/** A `--surface` handle rides the bind so the Workspace that holds that
+ *  Surface answers it and reuses its pane, as it answered the resolve. */
+function surfaceParam(surface: string | undefined): { surface?: string } {
+  return surface === undefined ? {} : { surface };
 }
 
 function parseEmbedSize(rest: string[]): ParseResult<{ setting?: BrowserViewportRequest['setting']; json: boolean }> {

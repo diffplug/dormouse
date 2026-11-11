@@ -61,6 +61,9 @@ export interface OpenPort {
   port: number;
   pid: number;
   processName?: string;
+  /** Numeric loopback destination for a wildcard bind, checked against the
+   * host's other listeners; null means every candidate is shadowed. */
+  connectAddress?: string | null;
 }
 
 /** Base scan budget. The macOS and Windows socket scans add a per-id allowance;
@@ -70,10 +73,9 @@ export const OPEN_PORT_TIMEOUT_MS = 3000;
 
 /**
  * What a batched scan (`getOpenPortsMany`) adds to `OPEN_PORT_TIMEOUT_MS` per
- * terminal it covers: the sidecar's socket scan lists every descendant of every
- * terminal in one `lsof`, so one terminal's budget cannot be the whole
- * Window's. Mirrored as `OPEN_PORT_TIMEOUT_PER_ID_MS` in
- * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
+ * terminal it covers: the sidecar shares one socket scan across the batch,
+ * whose owned-socket results grow with the Window. Mirrored as
+ * `OPEN_PORT_TIMEOUT_PER_ID_MS` in `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
  * pinned by `mirrored-constants.test.ts`.
  */
 export const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
@@ -182,7 +184,7 @@ export interface PtyDataDetail {
 /**
  * One host request for an immediate session save. `probeCwd: false` says the
  * answer must not re-read any cwd: after the PTYs are killed every probe answers
- * null and the record keeps its previous value anyway, so the round trips are
+ * null and the record keeps its previous value, so the round trips are
  * pure teardown budget (`docs/specs/standalone.md` → "Quit flow"). Absent probes.
  */
 export interface SessionFlushRequest {
@@ -218,7 +220,6 @@ export interface WritePtyOptions {
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
-  shutdown(): void;
 
   /**
    * Reach the Burrow service behind this host. Present exactly when a
@@ -242,6 +243,10 @@ export interface PlatformAdapter {
   spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
+  /** A host delivers no `onPtyExit` for a PTY this webview killed: VS Code
+   *  releases its ownership first and standalone routes the exit nowhere.
+   *  `FakePtyAdapter` reports one at once, which the website playground's
+   *  shells rely on to dispose themselves. */
   killPty(id: string): void;
 
   /**
@@ -350,8 +355,14 @@ export interface PlatformAdapter {
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 
   // Open a sanitized external URI. Implementations must revalidate because
-  // terminal output is untrusted.
-  openExternal?(uri: string): void;
+  // terminal output is untrusted. A host whose opener answers returns a
+  // promise of its refusal (`undefined` once opened) that never rejects, so a
+  // caller that does not wait for it leaves nothing unhandled.
+  openExternal?(uri: string): void | Promise<string | undefined>;
+  // False on a host whose opener refuses a link another app handles (every
+  // scheme but web, `mailto:`, and `tel:`), so the link dialog offers no open
+  // for one; `tel:` stays openable.
+  readonly opensOtherApps?: false;
 
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;

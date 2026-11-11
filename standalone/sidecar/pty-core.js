@@ -178,6 +178,41 @@ function withoutForeignTerminalEnv(env, platform) {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !foreign.test(key)));
 }
 
+// What the Linux AppImage's launcher adds to the app's environment (measured on
+// v1.3.0): the bundle's Python, GTK, and libraries, which break system programs
+// (`python3` fails to start; `curl` loads the bundle's older libnghttp2).
+const APPIMAGE_SET = ['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD', 'PYTHONHOME', 'GDK_PIXBUF_MODULE_FILE',
+  'GIO_MODULE_DIR', 'GI_TYPELIB_PATH', 'GTK_DATA_PREFIX', 'GTK_EXE_PREFIX', 'GTK_IM_MODULE_FILE', 'GTK_PATH'];
+const APPIMAGE_PATH_LISTS = ['PATH', 'LD_LIBRARY_PATH', 'PYTHONPATH', 'PERLLIB', 'QT_PLUGIN_PATH', 'XDG_DATA_DIRS',
+  'GSETTINGS_SCHEMA_DIR', 'GST_PLUGIN_SYSTEM_PATH', 'GST_PLUGIN_SYSTEM_PATH_1_0'];
+
+/** `env` without the AppImage launcher's additions, when it ran (`APPDIR` set):
+ *  its variables go, and its entries under `$APPDIR` leave the path lists. The
+ *  launcher overwrote any value the user had for the variables it sets, so
+ *  those are gone before the app starts; the two it sets to fixed values are
+ *  kept when they hold something else. A no-op anywhere else (VS Code). */
+function withoutAppImageEnv(env) {
+  if (!env.APPDIR) return env;
+  const norm = (entry) => entry.replace(/\/{2,}/g, '/').replace(/(.)\/$/, '$1');
+  const appDir = norm(env.APPDIR);
+  const next = { ...env };
+  for (const key of APPIMAGE_SET) delete next[key];
+  if (next.PYTHONDONTWRITEBYTECODE === '1') delete next.PYTHONDONTWRITEBYTECODE;
+  if (next.GTK_THEME === 'Adwaita:light' || next.GTK_THEME === 'Adwaita:dark') delete next.GTK_THEME;
+  for (const key of APPIMAGE_PATH_LISTS) {
+    if (next[key] === undefined) continue;
+    // An empty entry, such as the trailing `:` the launcher leaves, means the
+    // current directory in LD_LIBRARY_PATH: never keep one.
+    const kept = next[key].split(':').filter((entry) => {
+      const path = norm(entry);
+      return path !== '' && path !== appDir && !path.startsWith(`${appDir}/`);
+    });
+    if (kept.length) next[key] = kept.join(':');
+    else delete next[key];
+  }
+  return next;
+}
+
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
@@ -299,22 +334,18 @@ function winPathToWslMount(winPath) {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
 }
 
-// The distribution a `wsl.exe -d <distro>` pane runs, the shape the picker emits.
-function wslDistroOf(shell, args) {
-  return shellStem(shell) === 'wsl' && Array.isArray(args) && args[0] === '-d'
-    && /^[A-Za-z0-9._-]+$/.test(args[1] || '') ? args[1] : undefined;
-}
-
 // A directory a Windows pane's shell reported, as a path Windows opens: a WSL
-// shell's `/mnt/c/x` is `C:\x` and its other paths are the distro's
-// `\\wsl.localhost\<distro>\...` share; Git Bash's MSYS `/c/x` is `C:\x`.
-// Every other path passes through.
-function hostDirectory(dir, { platform, shell, wslDistro }) {
+// shell's `/mnt/c/x` is `C:\x`, Git Bash's MSYS `/c/x` is `C:\x`. A WSL
+// shell's other paths are the distro's, which only its `\\wsl.localhost`
+// share reaches, and the resolver refuses every share: `DISTRO_ONLY`. Every
+// other path passes through.
+const DISTRO_ONLY = Symbol('distro-only');
+function hostDirectory(dir, { platform, shell }) {
   if (platform !== 'win32' || typeof dir !== 'string' || !/^\/(?!\/)/.test(dir)) return dir;
   const stem = shellStem(shell);
   const drive = (stem === 'wsl' ? /^\/mnt\/([a-z])(?:\/(.*))?$/i : stem === 'bash' ? /^\/([a-z])(?:\/(.*))?$/i : null)?.exec(dir);
   if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] || '').replace(/\//g, '\\')}`;
-  return stem === 'wsl' && wslDistro ? `\\\\wsl.localhost\\${wslDistro}${dir.replace(/\//g, '\\')}` : dir;
+  return stem === 'wsl' ? DISTRO_ONLY : dir;
 }
 
 // Enable OSC 633 shell integration for shells that support reliable injection,
@@ -403,11 +434,30 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
   return { env, shellArgs };
 }
 
+/** The macOS system locale as a `LANG` value: `AppleLocale` (`en_US`,
+ *  `zh-Hans_CN`, `en_US@rg=gbzzzz`) as `xx_YY.UTF-8` when the system has that
+ *  locale, else `en_US.UTF-8`. `en_DE` names a region without a locale. */
+function macLang(appleLocale, fsModule = fs) {
+  const m = /^([a-z]{2,3})(?:-[A-Za-z]+)?_([A-Z]{2})(?![A-Za-z0-9])/.exec(appleLocale || '');
+  const name = m && `${m[1]}_${m[2]}.UTF-8`;
+  return name && directoryExists(`/usr/share/locale/${name}`, fsModule) ? name : 'en_US.UTF-8';
+}
+
+/** `defaults read -g AppleLocale`, or null. */
+function readAppleLocale() {
+  return new Promise((resolve) => {
+    execFile('defaults', ['read', '-g', 'AppleLocale'], { timeout: 5000 }, (err, stdout) => {
+      resolve(err ? null : String(stdout).trim() || null);
+    });
+  });
+}
+
 function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
   const platform = runtime.platform || process.platform;
   const env = {
-    ...(runtime.env || process.env),
+    // Before `DORMOUSE_CLI_BIN` goes on PATH, which may lie under `$APPDIR`.
+    ...withoutAppImageEnv(runtime.env || process.env),
     ...(options?.env || {}),
   };
   const osModule = runtime.osModule || os;
@@ -452,6 +502,11 @@ function resolveSpawnConfig(options, runtime = {}) {
     COLORTERM: 'truecolor',
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
+  // A Finder or Dock launch inherits launchd's environment, which sets no
+  // locale: bash would then drop typed non-ASCII and `ls` print `?`.
+  if (platform === 'darwin' && !childEnv.LANG && !childEnv.LC_ALL && !childEnv.LC_CTYPE) {
+    childEnv.LANG = macLang(runtime.appleLocale, fsModule);
+  }
   const dehydrate = dehydrateEnv(options?.dehydrate);
   if (dehydrate !== null) childEnv.DORMOUSE_DEHYDRATE = dehydrate;
   // Every Windows pane, including PowerShell/cmd that later run wsl.
@@ -474,6 +529,7 @@ module.exports.resolveSpawnConfig = resolveSpawnConfig;
 module.exports.DEHYDRATE_LIMIT = DEHYDRATE_LIMIT;
 module.exports.WSL_CLI_ENV = WSL_CLI_ENV;
 module.exports.withPrependedPath = withPrependedPath;
+module.exports.withoutAppImageEnv = withoutAppImageEnv;
 module.exports.canonicalizeWindowsCwd = canonicalizeWindowsCwd;
 
 // ── Subprocesses ───────────────────────────────────────────────────────────
@@ -771,7 +827,7 @@ module.exports.OPEN_PORT_TIMEOUT_MS = OPEN_PORT_TIMEOUT_MS;
 // `standalone/src-tauri/src/lib.rs` — pinned by
 // `lib/src/lib/mirrored-constants.test.ts`. A batched scan's socket
 // enumeration is capped at `openPortScanTimeoutMs(terminals)`, not the
-// per-terminal cap, because its `lsof` argument grows with the batch.
+// per-terminal cap, because a batch can return more owned sockets.
 const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
 module.exports.OPEN_PORT_TIMEOUT_PER_ID_MS = OPEN_PORT_TIMEOUT_PER_ID_MS;
 
@@ -969,8 +1025,8 @@ function compressIpv6(groups) {
 }
 
 /**
- * Parse a /proc/net/tcp or /proc/net/tcp6 table into listening-socket records,
- * keeping only rows whose socket inode is owned by one of `inodeToPid`.
+ * Parse a /proc/net/tcp or /proc/net/tcp6 table into listening-socket records;
+ * a row whose inode is not in `inodeToPid` keeps `pid` undefined.
  * State `0A` is TCP_LISTEN.
  */
 function parseProcNetTcp(content, family, inodeToPid) {
@@ -982,7 +1038,6 @@ function parseProcNetTcp(content, family, inodeToPid) {
     if (tokens[3] !== '0A') continue; // TCP_LISTEN
     const inode = tokens[9];
     const pid = inodeToPid.get(inode);
-    if (pid === undefined) continue;
     const [hexIp, hexPort] = tokens[1].split(':');
     if (!hexPort) continue;
     ports.push({
@@ -1026,6 +1081,7 @@ function linuxListeningPorts(pids, runtime = {}) {
   // Attach process names from /proc/<pid>/comm, reading each pid at most once.
   const nameByPid = new Map();
   for (const entry of ports) {
+    if (entry.pid === undefined) continue;
     if (!nameByPid.has(entry.pid)) {
       let name;
       try { name = fsModule.readFileSync(`/proc/${entry.pid}/comm`, 'utf-8').trim(); } catch { /* gone */ }
@@ -1087,17 +1143,13 @@ function parseHostPort(token, wildcardFamily = 'IPv4') {
   return { address, port };
 }
 
-async function macListeningPorts(pids, runtime = {}) {
-  if (pids.length === 0) return [];
-  // lsof exits non-zero when ANY requested pid is gone (or has no matching
-  // files) and still prints the ones it did resolve — the same trap
-  // `getCwdsForPids` documents. A batched scan covers every descendant of
-  // every terminal, so a child exiting between `ps` and `lsof` would
-  // otherwise empty the whole Window's listing.
+async function macListeningPorts(runtime = {}) {
+  // Every visible listener, not just `-p` owned ones: an unrelated process may
+  // shadow a wildcard socket. Keep partial stdout on nonzero exit.
   const out = await runTextLenient(
     runtime,
     'lsof',
-    ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
+    ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcnt'],
     { timeout: runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS },
   );
   return parseLsofListening(out);
@@ -1112,14 +1164,13 @@ function normalizeJsonArray(parsed) {
 
 /**
  * Parse `Get-NetTCPConnection -State Listen | Select LocalAddress,LocalPort,
- * OwningProcess` JSON, keeping rows owned by a pid in `pidSet`.
+ * OwningProcess` JSON.
  */
-function parseNetTcpConnections(json, pidSet) {
+function parseNetTcpConnections(json) {
   const rows = normalizeJsonArray(JSON.parse(json));
   const ports = [];
   for (const row of rows) {
     const pid = Number(row.OwningProcess);
-    if (!pidSet.has(pid)) continue;
     const port = Number(row.LocalPort);
     if (!Number.isInteger(port)) continue;
     const address = String(row.LocalAddress);
@@ -1137,7 +1188,7 @@ function parseNetTcpConnections(json, pidSet) {
 module.exports.parseNetTcpConnections = parseNetTcpConnections;
 
 /** Parse `netstat -ano` LISTENING TCP rows (Windows fallback for older hosts). */
-function parseNetstatListening(output, pidSet) {
+function parseNetstatListening(output) {
   const ports = [];
   for (const line of output.split(/\r?\n/)) {
     const tokens = line.trim().split(/\s+/);
@@ -1145,7 +1196,6 @@ function parseNetstatListening(output, pidSet) {
     if (!/^TCP$/i.test(tokens[0])) continue;
     if (!/^LISTENING$/i.test(tokens[3])) continue;
     const pid = Number(tokens[4]);
-    if (!pidSet.has(pid)) continue;
     const parsed = parseHostPort(tokens[1]);
     if (!parsed) continue;
     ports.push({
@@ -1182,9 +1232,8 @@ function scanDeadline(runtime, budgetMs) {
   };
 }
 
-async function windowsListeningPorts(pids, runtime = {}, names) {
+async function windowsListeningPorts(runtime = {}, names) {
   const remaining = scanDeadline(runtime, runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
-  const pidSet = new Set(pids);
   let ports;
   try {
     const json = await runPowerShell(
@@ -1192,28 +1241,67 @@ async function windowsListeningPorts(pids, runtime = {}, names) {
       runtime,
       remaining(),
     );
-    ports = parseNetTcpConnections(json, pidSet);
+    ports = parseNetTcpConnections(json);
   } catch {
     try {
       const netstat = windowsSystemPath(runtime.env || process.env, 'System32', 'netstat.exe');
-      ports = parseNetstatListening(await runText(runtime, netstat, ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
+      ports = parseNetstatListening(await runText(runtime, netstat, ['-ano', '-p', 'TCP'], { timeout: remaining() }));
     } catch { return []; }
   }
   // Names come from the process-table read; a failed read leaves ports unnamed.
   return ports.map((port) => ({ ...port, processName: names?.get(port.pid) }));
 }
 
-/** `names` (pid -> process name) labels the Windows ports, whose socket table
- *  carries none; other platforms read names alongside their sockets. */
+/** Each platform scan returns every listener it can see, so wildcard
+ *  destinations are chosen before filtering to `pids`. `names` (pid -> process
+ *  name) labels the Windows ports, whose socket table carries none; other
+ *  platforms read names alongside their sockets. */
 async function getListeningPortsForPids(pids, runtime = {}, names) {
+  if (pids.length === 0) return [];
   const platform = runtime.platform || process.platform;
-  if (platform === 'linux') return linuxListeningPorts(pids, runtime);
-  if (platform === 'darwin') return macListeningPorts(pids, runtime);
-  if (platform === 'win32') return windowsListeningPorts(pids, runtime, names);
-  return [];
+  let visible;
+  if (platform === 'linux') visible = linuxListeningPorts(pids, runtime);
+  else if (platform === 'darwin') visible = await macListeningPorts(runtime);
+  else if (platform === 'win32') visible = await windowsListeningPorts(runtime, names);
+  else return [];
+  const owned = new Set(pids);
+  return withConnectAddresses(visible).filter((entry) => owned.has(entry.pid));
 }
 
 module.exports.getListeningPortsForPids = getListeningPortsForPids;
+
+/** Each wildcard's loopback candidates in order, with the bind addresses that
+ *  claim a candidate first (whoever owns them, the wildcard's own process
+ *  included). IPv4 is spelled mapped too: lsof and Windows print
+ *  `::ffff:127.0.0.1`, /proc compresses to `::ffff:7f00:1`. An IPv6 wildcard's
+ *  dual-stack IPv4 fallback must not cross into a separate IPv4 wildcard. */
+const IPV4_LOOPBACK_BINDS = ['127.0.0.1', '::ffff:127.0.0.1', '::ffff:7f00:1'];
+const WILDCARD_LOOPBACK_CANDIDATES = {
+  '0.0.0.0': [['127.0.0.1', IPV4_LOOPBACK_BINDS]],
+  '::': [['::1', ['::1']], ['127.0.0.1', [...IPV4_LOOPBACK_BINDS, '0.0.0.0']]],
+};
+
+/** Set `connectAddress` on each wildcard socket: its first loopback candidate
+ *  no other listener on the port claims, or null when all are claimed. Run it
+ *  over every visible listener, not only owned ones. An IPv6-only socket may
+ *  still refuse the IPv4 fallback; this is a scan-time choice, not a
+ *  reservation against later socket changes. */
+function withConnectAddresses(ports) {
+  const addressesByPort = new Map();
+  for (const { port, address } of ports) {
+    if (!addressesByPort.has(port)) addressesByPort.set(port, new Set());
+    addressesByPort.get(port).add(address);
+  }
+  return ports.map((entry) => {
+    const candidates = WILDCARD_LOOPBACK_CANDIDATES[entry.address];
+    if (!candidates) return entry;
+    const bound = addressesByPort.get(entry.port);
+    const free = candidates.find(([, claimedBy]) => !claimedBy.some((address) => bound.has(address)));
+    return { ...entry, connectAddress: free ? free[0] : null };
+  });
+}
+
+module.exports.withConnectAddresses = withConnectAddresses;
 
 /** De-duplicated by (family, address, port) and sorted by port, then address — the shape a
  *  caller reads a Surface's ports in. */
@@ -1312,10 +1400,10 @@ function parseWslPortScan(output) {
     const socket = /socket:\[(\d+)\]/.exec(line);
     if (socket && current !== undefined) inodeToPid.set(socket[1], current);
   }
-  return [
+  return withConnectAddresses([
     ...parseProcNetTcp(tables.tcp, 'IPv4', inodeToPid),
     ...parseProcNetTcp(tables.tcp6, 'IPv6', inodeToPid),
-  ].map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
+  ]).filter((port) => surfaceOf.has(port.pid)).map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
 }
 
 /** Listening ports inside every running distro for `surfaceIds`, inside the
@@ -1520,10 +1608,13 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
+  // Read once, without blocking a spawn: one before it answers gets `en_US.UTF-8`.
+  let systemLocale = null;
+  readLocale().then((locale) => { systemLocale = locale; });
 
   const pty = ptyModule;
   const ptys = new Map(); // id -> pty.IPty
@@ -1616,7 +1707,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   function spawn(id, options) {
     let config;
     try {
-      config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform, resolveBinary });
+      config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform, resolveBinary, appleLocale: systemLocale });
     } catch (err) {
       failSpawn(id, err);
       return;
@@ -1656,16 +1747,15 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     // A spawn over a live generation — a cold restore that believed a host
     // silent through both list asks (`collectLivePtys`) — leaves the old shell
     // unreachable: nothing can write to it, and its output and exit no longer
-    // speak for the id. Stop it rather than leak it — with node-pty's default
-    // SIGHUP, not the graceful SIGTERM: an interactive bash ignores SIGTERM, and
-    // no later kill can reach a PTY that is no longer in `ptys`.
+    // speak for the id. Stop it rather than leak it: no later kill can reach a
+    // PTY that is no longer in `ptys`.
     const displaced = ptys.get(id);
     ptys.set(id, p);
     if (displaced) {
       console.error(`[pty-core] spawn replaced a live PTY under ${id}; stopping the old one`);
       try { stopPty(displaced); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
     }
-    const session = { chunks: [], chars: 0, received: 0, shell: config.shell, wslDistro: wslDistroOf(config.shell, options?.args) };
+    const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
@@ -1820,10 +1910,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   // before onExit can crash the owner, so graceful shutdown and later cleanup
   // share a guard keyed by the PTY object (never by a reusable Session id).
   const closingPtys = new WeakSet();
-  function stopPty(p, graceful = false) {
+  // On POSIX, node-pty's default SIGHUP: an interactive bash or zsh ignores
+  // SIGTERM, and honours the hangup a closing terminal sends.
+  function stopPty(p) {
     if (platform !== 'win32') {
-      if (graceful) p.kill('SIGTERM');
-      else p.kill();
+      p.kill();
       return;
     }
     if (closingPtys.has(p)) return;
@@ -1870,10 +1961,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    * (docs/specs/transport.md -> "Reconnection").
    */
   function list(ids, forWindow, requestId, marks) {
-    // Explicit marked requests may resume a naturally exited buffer. Ordinary
-    // discovery still lists only live PTYs, and kill removes the retained buffer.
+    // A window's own ids include a naturally exited buffer it still shows, so a
+    // reload resumes that pane rather than losing it (and the layout around
+    // it). Discovery with no ids lists only live PTYs; kill removes the buffer.
     const targets = Array.isArray(ids)
-      ? ids.filter((id) => ptys.has(id) || (replay && typeof marks?.[id] === 'number' && sessions.has(id)))
+      ? ids.filter((id) => ptys.has(id) || (replay && sessions.has(id)))
       : [...ptys.keys()];
     const result = targets.map((id) => ({
       id, alive: ptys.has(id), shell: sessions.get(id)?.shell,
@@ -1934,7 +2026,9 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       } else if (request.op === 'openDirectory') {
         // The resolver is the only thing that touches the path: a `stat` or
         // `realpath` here would follow a link to a share and reach its host.
-        const nativePath = await canonicalDirectory(hostDirectory(request.path, { platform, shell: sessions.get(request.id)?.shell, wslDistro: sessions.get(request.id)?.wslDistro }));
+        const hostPath = hostDirectory(request.path, { platform, shell: sessions.get(request.id)?.shell });
+        if (hostPath === DISTRO_ONLY) throw new Error('Explorer opens only a WSL directory under /mnt');
+        const nativePath = await canonicalDirectory(hostPath);
         if (!nativePath) throw new Error('Directory is unavailable');
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {
@@ -2030,6 +2124,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    * names the window's own PTYs (`pty_graceful_kill` in
    * standalone/src-tauri/src/lib.rs).
    */
+  /** How long the acknowledgement waits, after the deadline's SIGKILL, for a
+   *  killed target's exit. node-pty reports one when its master socket closes,
+   *  and on Linux a child still holding the PTY's slave keeps it open until
+   *  node-pty's own 200 ms fallback destroys the socket: the exit came 211 ms
+   *  after the SIGKILL with such a child, and 1 to 2 ms without one (Ubuntu
+   *  24.04, node-pty 1.2.0-beta.18, 2026-11-10). Must stay above that fallback. */
+  const SIGKILL_EXIT_WAIT_MS = 500;
+
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
@@ -2037,12 +2139,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
     if (targets.length === 0) { setTimeout(done, 50); return; }
-    for (const id of targets) {
+    // By object, not id: a spawn under the same id meanwhile is not this stop's.
+    const stopping = targets.map((id) => [id, ptys.get(id)]);
+    for (const [, p] of stopping) {
       try {
         // WindowsTerminal rejects signals (possibly in a deferred callback,
         // beyond this catch). kill() closes the ConPTY; the pinned addon can
         // terminate its shell immediately, so this is no flush guarantee.
-        stopPty(ptys.get(id), true);
+        stopPty(p);
       } catch { /* already dead */ }
     }
     // Resolve early once every target has exited (onExit removes it) instead
@@ -2052,8 +2156,29 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     const deadline = Date.now() + timeout;
     const tick = () => {
       if (!targets.some((id) => ptys.has(id))) setTimeout(done, 50);
-      else if (Date.now() >= deadline) done();
-      else setTimeout(tick, 50);
+      else if (Date.now() >= deadline) {
+        // A PTY whose own process outlives the hangup (a shell trapping it) is
+        // killed: the caller drops these ids next, and nothing could reach it
+        // after. Only that process: a descendant ignoring the hangup lives on.
+        let killed = false;
+        if (platform !== 'win32') {
+          for (const [id, p] of stopping) {
+            if (ptys.get(id) !== p) continue;
+            try { p.kill('SIGKILL'); killed = true; } catch { /* already dead */ }
+          }
+        }
+        if (!killed) { setTimeout(done, 50); return; }
+        // The killed targets' exits reach the host before the acknowledgement,
+        // then the usual grace tick. One still there at the cap is acknowledged
+        // anyway: the host gets the acknowledgement first, and the exit later,
+        // when node-pty reports it, if the id has not been dropped by then.
+        const cap = Date.now() + SIGKILL_EXIT_WAIT_MS;
+        const awaitExits = () => {
+          if (!stopping.some(([id, p]) => ptys.get(id) === p) || Date.now() >= cap) setTimeout(done, 50);
+          else setTimeout(awaitExits, 25);
+        };
+        setTimeout(awaitExits, 25);
+      } else setTimeout(tick, 50);
     };
     setTimeout(tick, 50);
   }

@@ -141,7 +141,7 @@ selftest.withMutationReporting(
 for (const [relative, mutate, expected, name] of [
   ['scripts/dor-tool-qc/server.mjs', replaceText("server.listen(0, '127.0.0.1', resolve)", 'server.listen(resolve)'), 'ALLOWED entry no longer binds a loopback listener', 'an ALLOWED file that no longer binds'],
   [LINT, replaceText("const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');", 'const LISTEN_RE = /(?!)/gs;'), 'has stopped looking', 'a bind pattern that matches nothing'],
-  [LINT, replaceText("call: 'terminal.listen(onInput',", "call: 'terminal.listen(noSuchCall',"), 'CHECK_4_EXCEPTIONS entry no longer matches', 'a CHECK_4_EXCEPTIONS call that no longer matches'],
+  [LINT, replaceText("call: 'terminal.listen(chunk',", "call: 'terminal.listen(noSuchCall',"), 'CHECK_4_EXCEPTIONS entry no longer matches', 'a CHECK_4_EXCEPTIONS call that no longer matches'],
 ]) {
   selftest.withMutationReporting(relative, mutate, expected, `${name}\n      planting it in ${relative} does not report "${expected}"`);
 }

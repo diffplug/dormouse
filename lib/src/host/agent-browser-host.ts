@@ -274,14 +274,23 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
   // daemon, and there is no CLI verb to stop it — so a `--headed`/headless
   // relaunch against a live daemon is silently ignored ("daemon already
   // running"), and pop-out/pop-in never actually switches mode. The daemon's pid
-  // lives in `$AGENT_BROWSER_SOCKET_DIR/<session>.pid` (default ~/.agent-browser);
+  // lives in `<state dir>/<session>.pid` (`agentBrowserStateDir`);
   // terminate it and wait for the process to exit so the next `open` spawns a
   // fresh daemon in the mode we ask for. Best-effort and cross-platform
   // (process.kill works on win/mac/linux).
+  /** Where the CLI keeps its sockets and state files, by its own rule (0.31.1)
+   *  read from its own environment: `AGENT_BROWSER_SOCKET_DIR`, else
+   *  `$XDG_RUNTIME_DIR/agent-browser` (set in every systemd login session),
+   *  else `~/.agent-browser`; under `namespaces/<name>/run` when
+   *  `AGENT_BROWSER_NAMESPACE` is set. An empty variable is unset. */
   function agentBrowserStateDir(b: ProviderBinding): string {
     const env = b.env ?? process.env;
     // The home `os.homedir()` reads, from the CLI's own environment.
-    return env[AGENT_BROWSER_SOCKET_DIR_ENV] || path.join((process.platform === 'win32' ? env.USERPROFILE : env.HOME) || os.homedir(), '.agent-browser');
+    const base = env[AGENT_BROWSER_SOCKET_DIR_ENV]
+      || (env.XDG_RUNTIME_DIR ? path.join(env.XDG_RUNTIME_DIR, 'agent-browser') : '')
+      || path.join((process.platform === 'win32' ? env.USERPROFILE : env.HOME) || os.homedir(), '.agent-browser');
+    const namespace = env.AGENT_BROWSER_NAMESPACE;
+    return namespace ? path.join(base, 'namespaces', namespace, 'run') : base;
   }
 
   // The daemon's state files beside its socket: `<session>.pid` and

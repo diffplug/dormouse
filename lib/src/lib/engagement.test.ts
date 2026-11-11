@@ -21,7 +21,7 @@ beforeEach(() => {
 afterEach(() => {
   publishEngagementFocus(wall, null);
   release();
-  platform.shutdown();
+  platform.reset();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -29,7 +29,12 @@ afterEach(() => {
 describe('engagement reporter', () => {
   it('holds a watched settle while the user only moves the mouse, and rings once they stop', () => {
     const states: string[] = [];
-    platform.onAlertState(({ id, status }) => { if (id === 'pane-a') states.push(status); });
+    let todo = false;
+    platform.onAlertState((state) => {
+      if (state.id !== 'pane-a') return;
+      states.push(state.status);
+      todo = state.todo;
+    });
     platform.alertSetWatchedCommands(['claude']);
     platform.setScenario('pane-a', { name: 'none', chunks: [] });
     platform.spawnPty('pane-a');
@@ -47,7 +52,8 @@ describe('engagement reporter', () => {
       vi.advanceTimersByTime(5_000);
       window.dispatchEvent(new Event('pointermove'));
     }
-    expect(states).toContain('BUSY');
+    // Held: a TODO at once, not a ring.
+    expect(todo).toBe(true);
     expect(states).not.toContain('ALERT_RINGING');
 
     vi.advanceTimersByTime(getAlertSettings().inactivityTimeoutMs);

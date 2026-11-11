@@ -1,6 +1,6 @@
 import { test, expect, vi } from "vitest";
 import { createDecipheriv, createECDH, hkdfSync, randomBytes, randomUUID } from "node:crypto";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "../token-digest";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase, withClient } from "pgstencil/postgres";

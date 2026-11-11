@@ -33,13 +33,13 @@ describe('Tool Workspace transfer', () => {
     expect(lath.getMeta('tool')!.params).toEqual(params);
   });
 
-  it('keeps a preview slot the slot, in the live binding and the durable record alike', () => {
-    const slot = { ...params, toolPreview: true, toolTarget: '/repo/a.md' };
-    const lath = engine(slot);
+  it('keeps a preview slot the slot, and a Tool its origin, in the live binding and the durable record alike', () => {
+    const identity = { toolPreview: true, toolTarget: '/repo/a.md', toolOrigin: { file: '/config/dormouse.yml' } };
+    const lath = engine({ ...params, ...identity });
     const plan: RestoredSession = { paneIds: ['tool'], lathLayout: lath.serializeLayout(), doors: [] };
-    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject(identity);
     restoreToolParams(plan, captureToolParams(lath, ['tool']));
-    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject(identity);
   });
 
   it('refuses while approval or browser startup still owns work in the source', () => {
