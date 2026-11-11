@@ -37,7 +37,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "remote-lib-common": "workspace:*",
-    "stripe": "^23.1.0"
+    "stripe": "~23.1.0"
   },
   "devDependencies": {
     "@hono/node-server": "^2.0.10",

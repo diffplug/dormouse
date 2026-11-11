@@ -379,7 +379,7 @@ importers:
         specifier: workspace:*
         version: link:../remote-lib-common
       stripe:
-        specifier: ^23.1.0
+        specifier: ~23.1.0
         version: 23.1.0(@types/node@24.19.2)
     devDependencies:
       '@hono/node-server':
