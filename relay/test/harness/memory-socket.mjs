@@ -85,6 +85,8 @@ export function recordingSocket() {
     sent: [],
     closeCode: null,
     closeReason: null,
+    /** What the socket reports as sent but not yet drained; a case raises it to stall the peer. */
+    bufferedAmount: 0,
     get closed() {
       return this.closeCode !== null;
     },

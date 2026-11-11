@@ -111,7 +111,7 @@ function BrowserChromeStory(args: StoryArgs) {
       chrome: chromeSnapshot,
       actions: {
         engageSync: () => console.log('[story] engageSync'),
-        applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
+        applyViewportSetting: async (setting) => console.log('[story] applyViewportSetting', setting),
         openModal: () => console.log('[story] openModal'),
         setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
       },

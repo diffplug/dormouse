@@ -26,6 +26,7 @@ import {
   RELAY_PING_INTERVAL_MS,
   RELAY_PONG,
   SETUP_TOKEN_INVALID_ERROR,
+  WS_CLOSE_TRY_AGAIN_LATER,
   formatPairingInvitationUrl,
   fromBase64Url,
   generateNoiseKeyPair,
@@ -270,6 +271,20 @@ describe('pairing, end to end', () => {
     // Both ends name the account the Relay answered at sign-in, never a constant.
     expect(record.accountId).toBe(ACCOUNT_ID);
     expect(harness.savedAcl[0]!.accountId).toBe(ACCOUNT_ID);
+  });
+
+  it('pairs every Burrow under its own static, so no Burrow trusts the key another approved', async () => {
+    // One browser profile, one passkey, two laptops.
+    const knownBurrows = memoryKnownBurrows();
+    const first = await makeE2eHarness({ knownBurrows });
+    const second = await makeE2eHarness({ knownBurrows, authenticator: first.authenticator });
+    expect((await first.pairAndApprove(await first.mintInvitation())).ok).toBe(true);
+    expect((await second.pairAndApprove(await second.mintInvitation())).ok).toBe(true);
+
+    const staticFor = (burrowId: string) => knownBurrows.records.get(burrowId)!.clientStaticKeyPair.publicKeyRaw;
+    expect(staticFor(first.burrowId)).not.toBe(staticFor(second.burrowId));
+    expect(first.savedAcl.map((record) => record.clientStaticPublicKey)).toEqual([staticFor(first.burrowId)]);
+    expect(second.savedAcl.map((record) => record.clientStaticPublicKey)).toEqual([staticFor(second.burrowId)]);
   });
 
   it("refuses an outcome naming another account than the session's, and stores nothing", async () => {
@@ -644,6 +659,24 @@ describe('connecting, end to end', () => {
 
     expect(burrowGone).toBe(1);
     expect(harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('reads the Relay closing a socket it stopped reading as burrow loss, still paired and signed in', async () => {
+    // The Relay closes a socket whose unsent backlog passed its bound
+    // (`docs/specs/relay.md` -> "Routing"); the phone must come back with a
+    // fresh connect, never a sign-in or a pairing.
+    const harness = await makeE2eHarness();
+    await harness.pairAndApprove(await harness.mintInvitation());
+    await harness.client.connect(harness.burrowId);
+    let burrowGone = 0;
+    harness.client.setOnBurrowGone(() => burrowGone++);
+
+    harness.clientSocket().closeWith(WS_CLOSE_TRY_AGAIN_LATER);
+
+    expect(burrowGone).toBe(1);
+    expect(harness.client.connectedBurrowId).toBeNull();
+    expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
   });
 });
 
@@ -1890,6 +1923,30 @@ describe('the session across launches', () => {
     const { client } = makeClient({}, { storage, now: () => NOW, fetch: stalled, setTimer: timers.setTimer });
 
     const listed = client.listBurrows();
+    timers.fireAt(POCKET_API_TIMEOUT_MS);
+
+    await expect(listed).rejects.toThrow(RELAY_NO_ANSWER_MESSAGE);
+  });
+
+  it('fails a request whose answer stalls after its headers', async () => {
+    const storage = memoryStorage();
+    storage.setSession(stored);
+    const timers = fakeTimers();
+    let reading = false;
+    const stalledBody: typeof fetch = async (_input, init) => ({
+      status: 200,
+      ok: true,
+      json: () => {
+        reading = true;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        });
+      },
+    }) as Response;
+    const { client } = makeClient({}, { storage, now: () => NOW, fetch: stalledBody, setTimer: timers.setTimer });
+
+    const listed = client.listBurrows();
+    await vi.waitFor(() => expect(reading).toBe(true));
     timers.fireAt(POCKET_API_TIMEOUT_MS);
 
     await expect(listed).rejects.toThrow(RELAY_NO_ANSWER_MESSAGE);

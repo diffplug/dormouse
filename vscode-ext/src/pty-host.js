@@ -10,7 +10,13 @@ const { canonicalLocalDirectory, resolveBinaryPath } = require('../../lib/src/ho
 
 const mgr = create((event, data) => {
   process.send({ type: event, ...data });
-}, nodePty, { canonicalDirectory: canonicalLocalDirectory, resolveBinary: resolveBinaryPath });
+}, nodePty, {
+  canonicalDirectory: canonicalLocalDirectory,
+  resolveBinary: resolveBinaryPath,
+  // Each queued slice of input, paced input's included, reaches the extension
+  // host's flow control, which on Windows resumes a paused PTY for it.
+  onInputWritten: (id) => process.send({ type: 'inputWritten', id }),
+});
 
 // The control token reaches this process through the fork env and stops here:
 // `pty-core` merges our own `process.env` into every shell it spawns, so leaving
@@ -36,6 +42,8 @@ process.on('message', (msg) => {
     case 'spawn':   mgr.spawn(msg.id, { cols: msg.cols, rows: msg.rows, cwd: msg.cwd, shell: msg.shell, args: msg.args, helper: msg.helper, dehydrate: msg.dehydrate, env: { ...msg.env, ...dorControlEnv } }); break;
     case 'input':   mgr.write(msg.id, msg.data, { paced: msg.paced === true }); break;
     case 'resize':  mgr.resize(msg.id, msg.cols, msg.rows, msg.repaint); break;
+    case 'pause':   mgr.pause(msg.id); break;
+    case 'resume':  mgr.resume(msg.id); break;
     case 'kill':    mgr.kill(msg.id); break;
     case 'killAll': mgr.killAll(); break;
     case 'interrupt': mgr.interrupt(msg.ids, msg.requestId); break;

@@ -35,6 +35,7 @@ function createPlatform(
     readClipboardImageAsFilePath: vi.fn(async () => null),
     onPtyData: vi.fn(),
     offPtyData: vi.fn(),
+    acknowledgePtyData: vi.fn(),
     onPtyExit: vi.fn(),
     offPtyExit: vi.fn(),
     requestInit: vi.fn(),

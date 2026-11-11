@@ -5,6 +5,7 @@
  */
 
 import {
+  MAX_APP_MESSAGE_LENGTH,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   clampTerminalDimension,
@@ -28,12 +29,20 @@ import {
 } from 'remote-lib-common';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { BurrowFrameHost } from './burrow-frame-host';
-import type { BurrowSurfaceProvider, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
+import type { BurrowSurfaceProvider, ProcessedPtyChunk, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
 import { clientErrorMessage } from '../../lib/errors';
 import { FrameTunnel, MAX_SURFACE_ID_LENGTH } from './frame-tunnel';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Burrow coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
+
+/**
+ * How many UTF-8 bytes, both projections counted, one `terminal.data` gathers
+ * before it goes at once instead of at the end of the macrotask. A small
+ * fraction of the application-message cap, so a batch stays a Noise message or
+ * two and nowhere near the cap that drops an over-long one.
+ */
+const TERMINAL_DATA_BATCH_BYTES = MAX_APP_MESSAGE_LENGTH / 32;
 
 interface Attachment {
   surfaceId: string;
@@ -46,6 +55,8 @@ interface Attachment {
   subId: string;
   /** Unsubscribes this attachment's PTY stream; nobody else holds it. */
   stopStream: () => void;
+  /** The output read but not yet sent. */
+  output: TerminalDataBatch;
 }
 
 export interface RemoteApiSessionOptions {
@@ -177,15 +188,25 @@ export class RemoteApiSession {
   // --- Responses ---
 
   #ok(request: RemoteRequest, result: unknown): void {
-    this.#send({ requestId: request.requestId, ok: true, result });
+    this.#post({ requestId: request.requestId, ok: true, result });
   }
 
   #fail(request: RemoteRequest, error: string): void {
-    this.#send({ requestId: request.requestId, ok: false, error });
+    this.#post({ requestId: request.requestId, ok: false, error });
   }
 
   #event(subId: string, event: string, data: unknown): void {
-    this.#send({ subId, event, data });
+    this.#post({ subId, event, data });
+  }
+
+  /**
+   * Batching only merges neighbouring `terminal.data`: output read before
+   * anything else this session sends goes ahead of it, as it did when every
+   * read was sent as it came.
+   */
+  #post(payload: RemoteResponse | RemoteEventMsg): void {
+    this.#attachment?.output.flush();
+    this.#send(payload);
   }
 
   #requireAttached(request: RemoteRequest, surfaceId: string): Attachment | null {
@@ -436,15 +457,9 @@ export class RemoteApiSession {
         pendingEvents.push({ event, data });
       }
     };
+    const output = new TerminalDataBatch((event) => emitOrBuffer(REMOTE_EVENTS.terminalData, event));
     const stream = this.#provider.streamPty(ptyId, {
-      onData: (chunk) => {
-        // Both projections cross, so the Client's text consumers see what the
-        // owner's do. `text` is omitted whenever the two are identical, which
-        // is every chunk carrying no string control.
-        const event: TerminalDataEvent = { bytes: toBase64Url(utf8Encode(chunk.data)) };
-        if (chunk.textData !== undefined) event.text = toBase64Url(utf8Encode(chunk.textData));
-        emitOrBuffer(REMOTE_EVENTS.terminalData, event);
-      },
+      onData: (chunk) => output.add(chunk),
       onExit: (exitCode) => {
         // Deliver the close to the client first, then drop the attachment so a
         // later write/resize for this surface fails safe with "not attached"
@@ -452,6 +467,7 @@ export class RemoteApiSession {
         // Teardown unsubscribes this stream mid-callback, which is safe — the
         // subscription is this attachment's alone, so nothing is left to fire —
         // and nulls #attachment so #requireAttached fails.
+        output.flush();
         emitOrBuffer(REMOTE_EVENTS.terminalClosed, { exitCode });
         if (attachment && this.#attachment === attachment) {
           this.#teardownAttachment();
@@ -476,6 +492,7 @@ export class RemoteApiSession {
       handle,
       subId,
       stopStream: stream.stop,
+      output,
     };
     this.#attachment = attachment;
     const installedAttachment = attachment;
@@ -621,6 +638,10 @@ export class RemoteApiSession {
   #teardownAttachment(): void {
     const attachment = this.#attachment;
     if (!attachment) return;
+    // What was read before the attachment ended is sent first; a disposed
+    // session has nothing left to send it on.
+    if (this.#disposed) attachment.output.discard();
+    else attachment.output.flush();
     attachment.stopStream();
     this.#attachment = null;
     this.#release(attachment.handle);
@@ -651,6 +672,82 @@ export class RemoteApiSession {
       console.warn('burrow: releasing a surface failed', error);
     }
   }
+}
+
+/**
+ * One attachment's PTY reads, gathered into one `terminal.data` per macrotask.
+ * A shell whose reader keeps up hands over about a line per read, and every
+ * message costs a JSON encode, an encryption, and a frame on the path, so a
+ * burst sent read by read costs the Burrow a core and the wire many times the
+ * output.
+ *
+ * Each chunk is encoded on its own and the bytes joined, so the Client gets
+ * exactly the byte stream it would have read by read. Both projections cross,
+ * so the Client's text consumers see what the owner's do; `text` stays omitted
+ * while every chunk's two projections are identical.
+ */
+class TerminalDataBatch {
+  readonly #emit: (event: TerminalDataEvent) => void;
+  #bytes: Uint8Array[] = [];
+  /** Per chunk, its text projection: the same array as its bytes where they are identical. */
+  #text: Uint8Array[] = [];
+  #bytesLength = 0;
+  #textLength = 0;
+  #carriesText = false;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(emit: (event: TerminalDataEvent) => void) {
+    this.#emit = emit;
+  }
+
+  add(chunk: ProcessedPtyChunk): void {
+    const bytes = utf8Encode(chunk.data);
+    const text = chunk.textData === undefined ? bytes : utf8Encode(chunk.textData);
+    const carriesText = this.#carriesText || chunk.textData !== undefined;
+    const size = this.#bytesLength + bytes.length + (carriesText ? this.#textLength + text.length : 0);
+    // Sent ahead rather than grown past the bound, so a message is either
+    // within it or one chunk alone, which the owner already keeps under the cap.
+    if (this.#bytes.length > 0 && size > TERMINAL_DATA_BATCH_BYTES) this.flush();
+    this.#bytes.push(bytes);
+    this.#text.push(text);
+    this.#bytesLength += bytes.length;
+    this.#textLength += text.length;
+    this.#carriesText ||= chunk.textData !== undefined;
+    const pending = this.#bytesLength + (this.#carriesText ? this.#textLength : 0);
+    if (pending >= TERMINAL_DATA_BATCH_BYTES) this.flush();
+    else this.#timer ??= setTimeout(() => this.flush(), 0);
+  }
+
+  /** Send what is gathered now: before anything ordered after it. */
+  flush(): void {
+    if (this.#bytes.length === 0) return;
+    const event: TerminalDataEvent = { bytes: toBase64Url(joinBytes(this.#bytes, this.#bytesLength)) };
+    if (this.#carriesText) event.text = toBase64Url(joinBytes(this.#text, this.#textLength));
+    // Emptied before the send, which may land back here.
+    this.discard();
+    this.#emit(event);
+  }
+
+  discard(): void {
+    if (this.#timer !== null) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#bytes = [];
+    this.#text = [];
+    this.#bytesLength = 0;
+    this.#textLength = 0;
+    this.#carriesText = false;
+  }
+}
+
+function joinBytes(parts: readonly Uint8Array[], length: number): Uint8Array {
+  if (parts.length === 1) return parts[0]!;
+  const out = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
 }
 
 /**

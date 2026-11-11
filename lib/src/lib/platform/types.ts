@@ -182,6 +182,16 @@ export interface PtyDataDetail {
 }
 
 /**
+ * Takes one live chunk for rendering. The handler that hands the chunk to
+ * xterm calls this and passes what it returns as the write callback, so the
+ * chunk is acknowledged once parsed (`PtyDataDispatch` in `lib/src/lib/pty-flow.ts`).
+ */
+export type PtyDataClaim = () => () => void;
+
+/** An `onPtyData` listener; `claim` is present for live output from a real dispatch. */
+export type PtyDataHandler = (detail: PtyDataDetail, claim?: PtyDataClaim) => void;
+
+/**
  * One host request for an immediate session save. `probeCwd: false` says the
  * answer must not re-read any cwd: after the PTYs are killed every probe answers
  * null and the record keeps its previous value, so the round trips are
@@ -405,9 +415,18 @@ export interface PlatformAdapter {
   // filesystem, which names every Workspace by directory.
   gitInfo?(paths: string[]): Promise<GitInfoResult>;
 
-  // PTY event listeners
-  onPtyData(handler: (detail: PtyDataDetail) => void): void;
-  offPtyData(handler: (detail: PtyDataDetail) => void): void;
+  // PTY event listeners. Every adapter dispatches live output through
+  // `PtyDataDispatch` (`lib/src/lib/pty-flow.ts`).
+  onPtyData(handler: PtyDataHandler): void;
+  offPtyData(handler: PtyDataHandler): void;
+  /**
+   * The renderer parsed `chars` UTF-16 code units of `id`'s live output, or
+   * dropped them unrendered (`docs/specs/transport.md` -> "Output flow
+   * control"). Only the adapter's own dispatch calls it. Required, so no
+   * adapter can forget it: a host that exerts no backpressure — Pocket, the
+   * fake — makes it a no-op.
+   */
+  acknowledgePtyData(id: string, chars: number): void;
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
 

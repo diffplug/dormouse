@@ -23,6 +23,9 @@ export class Terminal {
   modes = { mouseTrackingMode: 'none' as const, bracketedPasteMode: false };
   unicode = { activeVersion: '11' };
   buffer = { active: { getLine: () => undefined, baseY: 0, cursorY: 0, cursorX: 0, viewportY: 0 } };
+  /** The private write loop `xterm-write-slice.ts` reaches for. This mock never
+   *  parses, so a slice of it does nothing. */
+  _core = { _writeBuffer: { _innerWrite: (): void => {} }, _inputHandler: { _parseStack: { paused: false } } };
   private dataListeners = new Set<Listener<string>>();
   private resizeListeners = new Set<Listener<{ cols: number; rows: number }>>();
 

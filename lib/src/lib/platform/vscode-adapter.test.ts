@@ -41,6 +41,7 @@ import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-m
 import { VSCodeAdapter } from './vscode-adapter';
 import { MANAGED_VOICE_GLOBAL } from '../vscode-managed-voice-global';
 import { BROWSER_REQUEST_TIMEOUT_MS } from './browser-automation';
+import { PTY_ACK_BATCH_CHARS } from '../pty-flow';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
 const BURROW_TOKEN = 'test-host-message-token';
@@ -112,6 +113,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
     adapter.killPty('pane-1');
 
     expect(postMessage).toHaveBeenCalledWith({ type: 'pty:kill', id: 'pane-1' });
+  });
+
+  // docs/specs/transport.md -> "Output flow control".
+  it('acknowledges a chunk to the extension host once the terminal that took it has parsed it', () => {
+    const adapter = new VSCodeAdapter();
+    let parsed: (() => void) | undefined;
+    adapter.onPtyData((_detail, claim) => { parsed = claim!(); });
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:data', id: 'pane-1', data: 'x'.repeat(PTY_ACK_BATCH_CHARS) }));
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'pty:ack' }));
+    parsed!();
+    expect(postMessage).toHaveBeenCalledWith({ type: 'pty:ack', id: 'pane-1', chars: PTY_ACK_BATCH_CHARS });
   });
 
   it('pushes resolved theme colors to the extension host on init and on theme change', () => {

@@ -180,12 +180,12 @@ function makeRuntime(
   return runtime;
 }
 
-/** A phone as the page builds one, on the room's origin. */
-function makePhone(): OneTimeClient {
+/** A phone as the page builds one, on the room's origin, its clock `skewMs` ahead of the laptop's. */
+function makePhone(skewMs = 0): OneTimeClient {
   const phone = new OneTimeClient({
     wsOrigin: 'wss://hosted.example',
     createWebSocket: (url) => rendezvous.createClientSocket(url),
-    now: clock.now,
+    now: () => clock.now() + skewMs,
     setTimer: clock.setTimer,
     visibility: VISIBLE,
     createDirectPeer: () => network.createOfferer(),
@@ -195,7 +195,7 @@ function makePhone(): OneTimeClient {
 }
 
 /** Open the runtime and read its link back the way the phone page does. */
-const openLink = (): Promise<OneTimeLink> => openOneTimeLink(runtime, ORIGIN, clock.now);
+const openLink = (): Promise<OneTimeLink> => openOneTimeLink(runtime, ORIGIN);
 
 /** Tap Connect, and wait for the laptop's approval modal with the digits the phone shows. */
 async function tapConnect(phone: OneTimeClient, link: OneTimeLink): Promise<{
@@ -423,15 +423,27 @@ describe('one-time connection, end to end', () => {
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');
   });
 
-  it('says the link expired, whether the phone taps late or the laptop confirms late', async () => {
+  // The expiry is the laptop's clock; the phone's may run an hour ahead of it.
+  it('connects from a phone whose clock reads the link as an hour expired', async () => {
+    makeRuntime({ network: { opening: 'manual' } });
+    const link = await openLink();
+    const phone = makePhone(link.expiry * 1000 + 60 * 60 * 1000 - clock.now());
+    const { result, approval, shown } = await tapConnect(phone, link);
+    approval.approve(shown);
+    await settleUntil(() => network.offererChannel !== null);
+    network.openChannels();
+    expect(await result).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+  });
+
+  it('refuses a link the laptop has ended on the room’s word, and says expired when the laptop confirms late', async () => {
     makeRuntime();
     const late = await openLink();
     clock.advance(late.expiry * 1000 + 1 - clock.now());
+    // The phone tries; the laptop ended the link at its expiry and left the room.
     expect(await makePhone().connectOnce(late, PHONE_LABEL, () => {})).toEqual({
       ok: false,
-      message: ONE_TIME_LINK_EXPIRED_MESSAGE,
+      message: ONE_TIME_LINK_USED_MESSAGE,
     });
-    expect(rendezvous.room().client).toBeNull();
 
     makeRuntime();
     const link = await openLink();
@@ -560,7 +572,7 @@ describe('size authority across a one-time connection, end to end', () => {
   async function attachedPhone(): Promise<{ phone: OneTimeClient; ended: string[] }> {
     const waiting = (await command('oneTimeOpen')) as OneTimeState;
     if (waiting.status !== 'waiting') throw new Error(`expected waiting, got ${waiting.status}`);
-    const link = await parseOneTimeLinkUrl(waiting.url, ORIGIN, clock.now());
+    const link = await parseOneTimeLinkUrl(waiting.url, ORIGIN);
     if (!link) throw new Error('the phone could not read the link');
     const phone = makePhone();
     const ended: string[] = [];

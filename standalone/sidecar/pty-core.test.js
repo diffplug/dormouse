@@ -1547,16 +1547,39 @@ test('resolveSpawnConfig quotes an apostrophe in the integration path for PowerS
   assert.deepEqual(pwsh('O\u2019Brien'), ['-NoExit', '-Command',
     ". 'C:\\Users\\O\u2019\u2019Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration\\pwsh\\shellIntegration.ps1'"]);
 
-  const wsl = resolveSpawnConfig(
-    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
-    runtime("C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration"),
-  ).shellArgs;
-  const detector = wsl[wsl.length - 1];
+  const detector = apostropheWslDetector();
   assert.ok(detector.includes(
     "exec bash --init-file '/mnt/c/Users/O'\\''Brien/AppData/Local/Dormouse Terminal/shell-integration/bash/shellIntegration.bash' -i;;",
   ), detector);
-  // The detector is one sh program, so it must still parse.
-  const parsed = spawnSync('sh', ['-n', '-c', detector], { encoding: 'utf8' });
+});
+
+function apostropheWslDetector() {
+  const wsl = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
+    {
+      platform: 'win32',
+      env: { USERPROFILE: 'C:\\Users\\tester', DORMOUSE_SHELL_INTEGRATION_DIR: "C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration" },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  ).shellArgs;
+  return wsl[wsl.length - 1];
+}
+
+// An `sh` to parse with: PATH's, else Git for Windows' copy, since Windows has
+// none of its own.
+const SH = (() => {
+  if (!spawnSync('sh', ['-c', ':']).error) return 'sh';
+  if (process.platform !== 'win32') return null;
+  const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean);
+  return roots.flatMap((root) => ['usr\\bin\\sh.exe', 'bin\\sh.exe'].map((rel) => path.win32.join(root, 'Git', rel)))
+    .find((candidate) => require('node:fs').existsSync(candidate)) ?? null;
+})();
+
+test('the WSL detector with an apostrophe in its path is still one sh program', {
+  skip: SH ? false : 'no sh on PATH or under Git for Windows',
+}, () => {
+  const parsed = spawnSync(SH, ['-n', '-c', apostropheWslDetector()], { encoding: 'utf8' });
   assert.equal(parsed.status, 0, parsed.stderr);
 });
 
@@ -2539,9 +2562,12 @@ test('setParentWindow hands node-pty the HWND bytes and never lets a refusal esc
 function fakePtyModule() {
   const listeners = new Map();
   const killed = [];
+  /** Every pause, resume and kill, in order, as `[id, call]`. */
+  const calls = [];
   return {
     listeners,
     killed,
+    calls,
     module: {
       spawn(shell, args, opts) {
         const id = opts?.env?.DORMOUSE_SURFACE_ID;
@@ -2553,12 +2579,79 @@ function fakePtyModule() {
           onExit(handler) { handlers.exit = handler; },
           resize() {},
           write() {},
-          kill(signal) { killed.push([id, signal]); },
+          pause() { calls.push([id, 'pause']); },
+          resume() { calls.push([id, 'resume']); },
+          kill(signal) { killed.push([id, signal]); calls.push([id, 'kill']); },
         };
       },
     },
   };
 }
+
+// Output flow control (docs/specs/transport.md -> "Output flow control"): the
+// host decides; pty-core pauses the generation it names and makes sure a
+// paused one still exits and still stops.
+test('pause and resume reach the current generation once each', () => {
+  const pty = fakePtyModule();
+  const mgr = create(() => {}, pty.module, { processAlive: () => true });
+  mgr.spawn('a');
+  mgr.pause('a');
+  mgr.pause('a');
+  mgr.resume('a');
+  mgr.resume('a');
+  mgr.pause('gone');
+  assert.deepEqual(pty.calls, [['a', 'pause'], ['a', 'resume']]);
+  mgr.killAll();
+});
+
+test('a paused PTY whose process has gone is resumed, so node-pty reads its tail and reports the exit, and never paused again', async () => {
+  const pty = fakePtyModule();
+  let alive = true;
+  const mgr = create(() => {}, pty.module, { processAlive: () => alive });
+  mgr.spawn('a');
+  mgr.pause('a');
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(pty.calls, [['a', 'pause']]);
+  alive = false;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(pty.calls, [['a', 'pause'], ['a', 'resume']]);
+  mgr.pause('a');
+  assert.deepEqual(pty.calls, [['a', 'pause'], ['a', 'resume']]);
+  mgr.killAll();
+});
+
+test('each slice of paced input is reported as it is written, not when it was asked for', async () => {
+  const pty = fakePtyModule();
+  const written = [];
+  const mgr = create(() => {}, pty.module, { onInputWritten: (id) => written.push([id, Date.now()]) });
+  mgr.spawn('a');
+  const asked = Date.now();
+  mgr.write('a', 'x'.repeat(600), { paced: true });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  // 600 bytes in runs of 256: three slices, 10 ms apart.
+  assert.equal(written.length, 3);
+  assert.ok(written[2][1] - asked >= 15, `the last slice reported ${written[2][1] - asked} ms after the write`);
+  mgr.killAll();
+});
+
+test('every stop resumes a paused PTY first, since node-pty finishes its teardown by reading', () => {
+  const pty = fakePtyModule();
+  const mgr = create(() => {}, pty.module, { platform: 'linux', processAlive: () => true });
+  mgr.spawn('a');
+  mgr.pause('a');
+  mgr.kill('a');
+  // A spawn over a paused live generation stops the old one the same way;
+  // the new one starts unpaused.
+  mgr.spawn('b');
+  mgr.pause('b');
+  mgr.spawn('b');
+  mgr.pause('b');
+  assert.deepEqual(pty.calls, [
+    ['a', 'pause'], ['a', 'resume'], ['a', 'kill'],
+    ['b', 'pause'], ['b', 'resume'], ['b', 'kill'], ['b', 'pause'],
+  ]);
+  mgr.killAll();
+});
 
 test('list(ids) lists and replays only those ids, naming the window that asked', () => {
   const events = [];

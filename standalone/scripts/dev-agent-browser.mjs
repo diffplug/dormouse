@@ -120,6 +120,7 @@ const fireAndForget = {
     id, data, paced, ...(userInput === true ? { userInput: true } : {}), ...(launch === true ? { launch: true } : {}),
   }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
+  pty_ack: ({ id, chars }) => writeSidecar('pty:ack', { id, chars }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
   pty_request_init: ({ requestId } = {}) => writeSidecar('pty:requestInit', { requestId }),

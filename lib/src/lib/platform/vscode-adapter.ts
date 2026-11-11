@@ -3,7 +3,7 @@ import { BROWSER_REQUEST_TIMEOUT_MS, type BrowserRequest, type BrowserResult } f
 import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
+import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataHandler, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_TIMEOUT_MS, TERMINAL_CONTEXT_TIMEOUT_MS } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
@@ -26,6 +26,7 @@ import { HOST_MESSAGE_TOKEN_FIELD, isHostMessage, readHostMessageToken } from '.
 import { parseReplay } from './replay-parse';
 import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
+import { PtyDataDispatch } from '../pty-flow';
 
 /**
  * What `awaitHostReply` settles with when its caller's own deadline fired and
@@ -58,7 +59,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   // at webview boot — so a later same-document write can't move the goalposts.
   // Every `message` listener below checks it before reading anything else.
   private readonly hostMessageToken = readHostMessageToken();
-  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
+  private readonly ptyData = new PtyDataDispatch((id, chars) => this.acknowledgePtyData(id, chars));
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
@@ -126,9 +127,7 @@ export class VSCodeAdapter implements PlatformAdapter {
       if (!msg.type) return;
 
       if (msg.type === 'pty:data') {
-        for (const handler of this.dataHandlers) {
-          handler({ id: msg.id, data: msg.data, textData: msg.textData });
-        }
+        this.ptyData.deliver({ id: msg.id, data: msg.data, textData: msg.textData });
       } else if (msg.type === 'pty:exit') {
         for (const handler of this.exitHandlers) {
           handler({ id: msg.id, exitCode: msg.exitCode });
@@ -406,12 +405,16 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'iframe:releaseProxy', lease });
   }
 
-  onPtyData(handler: (detail: PtyDataDetail) => void): void {
-    this.dataHandlers.add(handler);
+  onPtyData(handler: PtyDataHandler): void {
+    this.ptyData.add(handler);
   }
 
-  offPtyData(handler: (detail: PtyDataDetail) => void): void {
-    this.dataHandlers.delete(handler);
+  offPtyData(handler: PtyDataHandler): void {
+    this.ptyData.delete(handler);
+  }
+
+  acknowledgePtyData(id: string, chars: number): void {
+    this.vscode.postMessage({ type: 'pty:ack', id, chars });
   }
 
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void {

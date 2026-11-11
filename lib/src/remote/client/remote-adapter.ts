@@ -15,7 +15,8 @@ import {
   type TerminalDataEvent,
 } from 'remote-lib-common';
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
-import type { PlatformAdapter, PtyDataDetail, OpenPort } from '../../lib/platform/types';
+import type { PlatformAdapter, PtyDataDetail, PtyDataHandler, OpenPort } from '../../lib/platform/types';
+import { PtyDataDispatch } from '../../lib/pty-flow';
 import { terminalModesReplay } from '../../lib/terminal-modes';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 
@@ -68,14 +69,13 @@ interface PendingAttach {
 
 const DEFAULT_SIZE: Size = { cols: 80, rows: 24 };
 
-type DataHandler = (detail: PtyDataDetail) => void;
 type ExitHandler = (detail: { id: string; exitCode: number }) => void;
 type DirectoryListener = (entries: DirectoryEntry[]) => void;
 
 export class RemotePtyAdapter implements PlatformAdapter {
   readonly #client: RemoteAdapterClient;
 
-  readonly #dataHandlers = new Set<DataHandler>();
+  readonly #ptyData = new PtyDataDispatch((id, chars) => this.acknowledgePtyData(id, chars));
   readonly #exitHandlers = new Set<ExitHandler>();
   readonly #directoryListeners = new Set<DirectoryListener>();
 
@@ -304,13 +304,20 @@ export class RemotePtyAdapter implements PlatformAdapter {
   spawnPty(): void {}
   killPty(): void {}
 
-  onPtyData(handler: DataHandler): void {
-    this.#dataHandlers.add(handler);
+  onPtyData(handler: PtyDataHandler): void {
+    this.#ptyData.add(handler);
   }
 
-  offPtyData(handler: DataHandler): void {
-    this.#dataHandlers.delete(handler);
+  offPtyData(handler: PtyDataHandler): void {
+    this.#ptyData.delete(handler);
   }
+
+  /**
+   * A no-op: a remote Client mirrors downstream of the Burrow and must never
+   * pause a PTY on the laptop (`docs/specs/transport.md` -> "Output flow
+   * control").
+   */
+  acknowledgePtyData(_id: string, _chars: number): void {}
 
   onPtyExit(handler: ExitHandler): void {
     this.#exitHandlers.add(handler);
@@ -338,7 +345,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   #emit(detail: PtyDataDetail): void {
     if (this.#disposed) return;
-    for (const handler of this.#dataHandlers) handler(detail);
+    this.#ptyData.deliver(detail);
   }
 
   #emitExit(id: string, exitCode?: number): void {

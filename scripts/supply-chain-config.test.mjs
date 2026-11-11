@@ -5,7 +5,7 @@ import { readRepoFile } from './lint-kit.mjs';
 
 // The mechanical bullets of docs/specs/security-supply-chain.md ->
 // "Bundled runtime" and "Cooldown and alerts", read off the files that carry
-// them, and the Stripe SDK's update gate (hosted/README.md -> "Move the
+// them, the Tauri crate's cargo cooldown, and the Stripe SDK's update gate (hosted/README.md -> "Move the
 // Stripe API version"). Each case below plants one violation in an in-memory copy and requires
 // `check` to report it, so a rule here that stops judging goes red.
 
@@ -16,6 +16,7 @@ const real = () => ({
   release: readRepoFile('.github/workflows/release.yml'),
   ci: readRepoFile('.github/workflows/ci.yml'),
   zizmor: readRepoFile('.github/zizmor-requirements.txt'),
+  cargo: readRepoFile('standalone/src-tauri/.cargo/config.toml'),
 });
 
 const PGSTENCIL = ['pgstencil', '@pgstencil/*'];
@@ -99,6 +100,11 @@ function check(files) {
   if (!alerts || !hasCooldown(alerts.minimumReleaseAge)) fail('Renovate vulnerabilityAlerts does not set a whole-day cooldown explicitly');
   if (alerts?.enabled !== true || !Array.isArray(alerts.schedule) || alerts.schedule.length !== 0) fail('Renovate vulnerabilityAlerts must be enabled without a schedule');
 
+  // The key must sit in the `[registry]` table for cargo to read it.
+  const registry = files.cargo.match(/^\[registry\]\s*\n((?:(?!\[).*\n?)*)/m)?.[1] ?? '';
+  const cargoAge = registry.match(/^global-min-publish-age\s*=\s*"([^"]*)"\s*$/m)?.[1];
+  if (!hasCooldown(cargoAge)) fail(`standalone/src-tauri/.cargo/config.toml registry.global-min-publish-age is ${cargoAge}, not whole days`);
+
   const pkg = JSON.parse(files.pkg);
   if (!/^\d+\.\d+\.\d+$/.test(pkg.devEngines?.runtime?.version ?? '') || pkg.devEngines?.runtime?.name !== 'node') {
     fail(`package.json devEngines.runtime is ${JSON.stringify(pkg.devEngines?.runtime)}, not an exact node version`);
@@ -140,6 +146,9 @@ for (const [name, mutate, expected] of [
   ['the pnpm cooldown shortened', text('workspace', 'minimumReleaseAge: 1440', 'minimumReleaseAge: 60'), 'minimumReleaseAge is 60'],
   ['the pnpm cooldown removed', text('workspace', 'minimumReleaseAge: 1440\n', ''), 'minimumReleaseAge is undefined'],
   ['another package exempted from the pnpm cooldown', text('workspace', '  - pgstencil\n', '  - pgstencil\n  - lodash\n'), 'also exempts lodash'],
+  ['the cargo cooldown shortened', text('cargo', '"1 day"', '"12 hours"'), 'global-min-publish-age is 12 hours'],
+  ['the cargo cooldown removed', text('cargo', 'global-min-publish-age = "1 day"\n', ''), 'global-min-publish-age is undefined'],
+  ['the cargo cooldown outside [registry]', text('cargo', '[registry]\n', '[registries.crates-io]\n'), 'global-min-publish-age is undefined'],
   ['a Renovate rule drops the cooldown for everything', json('renovate', (r) => r.packageRules.push({ matchManagers: ['npm'], minimumReleaseAge: null })), 'drops the cooldown'],
   ['a Renovate rule drops the cooldown for another package', json('renovate', (r) => r.packageRules.push({ matchManagers: ['npm'], matchPackageNames: ['pgstencil', 'left-pad'], minimumReleaseAge: null })), 'drops the cooldown'],
   ['cargo disabled in Renovate', json('renovate', (r) => { r.enabledManagers = r.enabledManagers.filter((m) => m !== 'cargo'); }), 'does not enable cargo'],

@@ -125,6 +125,9 @@ async function boot(): Promise<void> {
       setParentWindow: () => {},
       kill: () => {},
       list: () => {},
+      mark: () => {},
+      pause: () => {},
+      resume: () => {},
     },
     stateDir: dir,
   });

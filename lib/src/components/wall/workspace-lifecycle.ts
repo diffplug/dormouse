@@ -51,6 +51,9 @@ export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
 }
 
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
+/** Why a Workspace close kills nothing: a member's helper has running work,
+ *  or could not be inspected. */
+const HELPER_WORK_REFUSAL = 'A helper in this Workspace has running work. Stop it, then close the Workspace again.';
 const TRANSFERRING_REFUSAL = 'Workspace is transferring';
 
 /** Why a pinned Workspace stays open: only its Window's close takes it
@@ -83,9 +86,10 @@ export function workspaceMetadataRefusal(id: WorkspaceId): string | null {
 /**
  * Close every member Surface through the closure coordinator, then drop the
  * Workspace itself. Resolves the first refusal's message with the Workspace left
- * open, members ahead of the refusing one already closed and recorded nowhere
- * for reopen, or null once it is gone. Membership is cleared by the Wall's own
- * unmount.
+ * open, or null once it is gone. A helper with running work, or one that cannot
+ * be inspected, refuses before any member closes; only a refusal that arises
+ * during the close itself leaves the members ahead of it closed and recorded
+ * nowhere for reopen. Membership is cleared by the Wall's own unmount.
  *
  * `mode` is `prompt` for a user gesture, `silent` for `dor workspace close`.
  * `record: false` leaves no reopen record, for a close the user never made.
@@ -114,6 +118,18 @@ export async function closeWorkspaceWithSurfaces(
       // Commit visibility before collapse measures the Wall, even for an
       // untouched Workspace whose close skips the confirmation.
       flushSync(() => { setActiveWorkspace(id); handle.selectWorkspaceTab(); });
+    }
+    // Ahead of the Tool question too: nothing asked about can close anyway.
+    // Probed only where a helper exists, so a close with none still reaches
+    // the question, or `closeAll`, in the tick it was asked.
+    const members = handle.surfaceIds();
+    const busy = members.some(member => getHelper(member)) ? await busyHelperSource(members) : null;
+    if (busy !== null) {
+      if (mode === 'prompt') {
+        setActiveWorkspace(id);
+        handle.revealRefusal(busy, HELPER_WORK_REFUSAL);
+      }
+      return HELPER_WORK_REFUSAL;
     }
     // One question for every dirty Tool, before any Surface closes; a command
     // close refuses instead (`docs/specs/dor-tool.md` → Closing unsaved Tools).
@@ -178,7 +194,7 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     // Running helper work refuses a close outright; it is no pending kill.
-    const pend = isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds());
+    const pend = isDelayedKillEnabled() && await busyHelperSource(handle.surfaceIds()) === null;
     if (!isCurrent() || workspaceCloseRefusal(id)) return;
     if (pend) {
       pendWorkspace(id);
@@ -215,11 +231,14 @@ export function subscribeToHeldWorkspaces(listener: () => void): () => void {
   return () => { heldListeners.delete(listener); };
 }
 
-/** Whether any helper of these Surfaces still has work; a failed probe counts as busy. */
-async function helpersHaveWork(ids: readonly string[]): Promise<boolean> {
-  const helpers = ids.flatMap(id => getHelper(id) ?? []);
-  const busy = await Promise.all(helpers.map(helper => helperHasWork(helper).catch(() => true)));
-  return busy.includes(true);
+/** The first of these Surfaces whose helper still has work, or null; a failed
+ *  probe counts as busy. */
+async function busyHelperSource(ids: readonly string[]): Promise<string | null> {
+  const busy = await Promise.all(ids.map(id => {
+    const helper = getHelper(id);
+    return helper ? helperHasWork(helper).catch(() => true) : false;
+  }));
+  return ids[busy.indexOf(true)] ?? null;
 }
 
 /**
@@ -257,8 +276,14 @@ function pendWorkspace(id: WorkspaceId): void {
     restore,
     finalize: async (context) => {
       const handle = getWallHandle(id);
-      // Unsaved Tool edits are discarded: the pending kill was the decision.
-      const refusal = handle ? await handle.closeAll(handle.dirtyToolIds()) : null;
+      let refusal: string | null = null;
+      if (handle) {
+        // Helper work started during the countdown refuses before any member
+        // closes; teardown, which can join while this probes, closes anyway.
+        const busy = !context.teardown && await busyHelperSource(handle.surfaceIds()) !== null;
+        // Unsaved Tool edits are discarded: the pending kill was the decision.
+        refusal = busy && !context.teardown ? HELPER_WORK_REFUSAL : await handle.closeAll(handle.dirtyToolIds());
+      }
       // Work that refuses to close (a helper's) brings the Workspace back to
       // say so, except when the window is going anyway.
       if (refusal && !context.teardown) restore(false);

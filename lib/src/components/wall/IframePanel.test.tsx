@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
+import { runInNewContext } from 'node:vm';
+import { iframeShim } from '../../host/iframe-proxy-rewrite';
 import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
@@ -368,6 +370,78 @@ describe('IframePanel', () => {
     expect(chrome().chrome().url).toBe('http://example.test/docs/');
     await act(async () => chrome().chromeActions.back());
     expect(chrome().chrome().url).toBe('http://example.test/app');
+  });
+
+  describe('a page moving through its own history', () => {
+    const render = async (id: string) => {
+      const { platform } = installBrowserHost();
+      platform.createIframeProxyUrl = vi.fn<CreateIframeProxyUrl>(async (url) => ({ ok: true as const, url: url.replace('http://example.test', PROXY) }));
+      await renderPanel(stubActions(), paneProps(id), vi.fn());
+      const chrome = () => getAgentBrowserScreenController(id)!;
+      const report = async (path: string, extra: Record<string, unknown>) => act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'location', url: PROXY + path, ...extra } }));
+      });
+      const url = () => chrome().chrome().url.replace('http://example.test', '');
+      const back = async () => act(async () => chrome().chromeActions.back());
+      const forward = async () => act(async () => chrome().chromeActions.forward());
+      await report('/app', { loaded: true });
+      return { report, url, back, forward };
+    };
+
+    it('replaces the current entry on a replaceState report', async () => {
+      const { report, url, back } = await render('iframe-replace');
+      await report('/a', { nav: 'push' });
+      await report('/a?page=2', { nav: 'replace' });
+      expect(url()).toBe('/a?page=2');
+      await back();
+      expect(url()).toBe('/app');
+      await back();
+      expect(url()).toBe('/app');
+    });
+
+    // The page's own Back to an earlier document loads it anew; its shim's
+    // load report, run here as the shipped shim, says it was a traversal.
+    it('moves back when the page loads an earlier entry by traversal', async () => {
+      const { report, url, forward } = await render('iframe-traverse-load');
+      await report('/a', { nav: 'push' });
+      await act(async () => {
+        runInNewContext(iframeShim('http://app.test'), {
+          window: { parent: { postMessage(data: unknown, target: string) {
+            if (target === PROXY) window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data }));
+          } } },
+          location: { origin: PROXY, href: `${PROXY}/app` },
+          document: { readyState: 'complete', documentElement: null, body: null, hasFocus: () => false },
+          history: {},
+          performance: { getEntriesByType: () => [{ type: 'back_forward' }] },
+          addEventListener: () => {},
+          setTimeout: (run: () => void) => { run(); return 0; },
+          URL,
+        });
+      });
+      expect(url()).toBe('/app');
+      await forward();
+      expect(url()).toBe('/a');
+    });
+
+    it('moves to the entry a popstate names and keeps Forward', async () => {
+      const { report, url, back, forward } = await render('iframe-traverse');
+      await report('/a', { nav: 'push' });
+      await report('/b', { nav: 'push' });
+      await report('/a', { nav: 'traverse' });
+      expect(url()).toBe('/a');
+      await forward();
+      expect(url()).toBe('/b');
+      await back();
+      await back();
+      expect(url()).toBe('/app');
+    });
+
+    it('keeps the latest 50 entries', async () => {
+      const { report, url, back } = await render('iframe-cap');
+      for (let i = 1; i <= 50; i++) await report(`/p${i}`, { nav: 'push' });
+      for (let i = 0; i < 50; i++) await back();
+      expect(url()).toBe('/p1');
+    });
   });
 
   it('reloads a raw frame even when its URL is unchanged', async () => {

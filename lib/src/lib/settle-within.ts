@@ -26,3 +26,12 @@ export function settleAllWithin<T>(
     works.map((work) => Promise.race([work.catch(() => fallback), deadline])),
   ).finally(() => clearTimeout(timer));
 }
+
+/** `work`, or a failure naming `what` once `ms` pass without it settling. */
+export function within<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out`)), Math.max(0, ms));
+  });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}

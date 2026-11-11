@@ -53,8 +53,6 @@ export interface ScreenSnapshot {
 export interface ScreenActions {
   /** Follow the pane pixel-for-pixel (Dormouse-side behavior, not native). */
   engageSync(): void;
-  /** Issue native `set viewport <w> <h> <dpr>`. */
-  applyViewport(w: number, h: number, dpr: number): void;
   applyViewportSetting?(setting: BrowserViewportSetting): Promise<void>;
   /** Open the screen modal for this surface. */
   openModal(): void;

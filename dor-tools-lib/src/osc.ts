@@ -171,20 +171,27 @@ export interface ServeOptions {
   dehydrate?: boolean;
   /** `never` vetoes reaping this run. */
   persist?: 'respawn' | 'never';
+  /** Re-key this run's own Surface; never dedupes (`ToolAnnounce.key`). */
+  key?: string[];
 }
 
 /** The `serve` announcement a Tool writes once its server listens: the port to
- * frame and, optionally, the same-origin path to open on it, and whether the
- * host may stop it while idle. Throws on a value the host would ignore. */
-export function serveSequence({ port, path, dehydrate, persist }: ServeOptions): string {
+ * frame and, optionally, the same-origin path to open on it, whether the host
+ * may stop it while idle, and a runtime re-key. Throws on a value the host
+ * would ignore. */
+export function serveSequence({ port, path, dehydrate, persist, key }: ServeOptions): string {
   if (port !== undefined && readPort(port) === null) throw new RangeError(`not a TCP port: ${port}`);
   if (path !== undefined && (port === undefined || !validToolServePath(path))) throw new RangeError(`not a same-origin path: ${JSON.stringify(path)}`);
   if (dehydrate !== undefined && typeof dehydrate !== 'boolean') throw new TypeError('dehydrate must be a boolean');
   if (persist !== undefined && persist !== 'respawn' && persist !== 'never') throw new RangeError(`not a persist policy: ${JSON.stringify(persist)}`);
-  if (port === undefined && dehydrate !== true && persist === undefined) throw new RangeError('a serve announcement must state a port or how the Tool stops');
+  // The host drops a whole key on one bad element and cleans the rest, so only
+  // a key it reads back unchanged is written.
+  if (key !== undefined && readKey(key)?.every((element, i) => element === key[i]) !== true) throw new RangeError(`not a Tool key: ${JSON.stringify(key)}`);
+  if (port === undefined && dehydrate !== true && persist === undefined && key === undefined) throw new RangeError('a serve announcement must state a port, a key, or how the Tool stops');
   return sequence('serve', {
     ...(port !== undefined ? { port } : {}), ...(path !== undefined ? { path } : {}),
-    ...(dehydrate !== undefined ? { dehydrate } : {}), ...(persist !== undefined ? { persist } : {}), v: 1,
+    ...(dehydrate !== undefined ? { dehydrate } : {}), ...(persist !== undefined ? { persist } : {}),
+    ...(key !== undefined ? { key } : {}), v: 1,
   });
 }
 

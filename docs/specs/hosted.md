@@ -261,7 +261,7 @@ Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `pocketRoutes
 
 ## Relay sockets
 
-The relay Worker serves `GET /ws/burrow` and `GET /ws/client` at the self-host paths, token in `WS_TOKEN_PARAM`, and routes them by `docs/specs/relay.md` -> "Routing", every rule, through the same frame layer and bounds. Only the differences; `docs/specs/security-hosted.md` -> "Relay boundary" holds the checks.
+The relay Worker serves `GET /ws/burrow` and `GET /ws/client` at the self-host paths, token in `WS_TOKEN_PARAM`, and routes them by `docs/specs/relay.md` -> "Routing", every rule but the unsent-bytes bound, through the same frame layer and bounds. Only the differences; `docs/specs/security-hosted.md` -> "Relay boundary" holds the checks.
 
 | Route | Admitted | Refused |
 |---|---|---|
