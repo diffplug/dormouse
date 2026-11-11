@@ -45,10 +45,13 @@ export function markdownFormat(markdown: string): Options {
         // Restore only simple, complete labels. Keep escapes inside link labels,
         // list items (task syntax), and documents with reference definitions.
         if (references || state.stack.some(kind => ['label', 'reference', 'listItem'].includes(kind))) return safe;
-        return safe.replace(/\\(?:\\|\[([\w .-]+)\])/g, (escaped, label: string | undefined, offset: number) => {
+        return safe.replace(/\\(?:\\|\[(\^?[\w .-]+)\])/g, (escaped, label: string | undefined, offset: number) => {
           if (!label) return escaped; // A literal backslash is not an escape to remove.
           const after = safe.slice(offset + escaped.length) || info.after;
-          if (/^\s*[\[(:\]]/.test(after) || safe[offset - 1] === '!') return escaped;
+          // GitHub reads `[^label]` and `[^label]:` as a footnote and its note,
+          // which the editor keeps as text.
+          const hazard = label.startsWith('^') ? /^\s*[\[(\]]/ : /^\s*[\[(:\]]/;
+          if (hazard.test(after) || safe[offset - 1] === '!') return escaped;
           return `[${label}]`;
         });
       },

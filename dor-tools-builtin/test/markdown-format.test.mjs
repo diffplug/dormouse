@@ -27,6 +27,7 @@ for (const source of [
   '+++\ntitle = "x"\n+++\n',
   '## Tight\nbody\n\n## Loose\n\nbody\n',
   '## First\n## Second\nbody\n',
+  'Claim.[^1]\n\n[^1]: The source of the claim.\n',
 ]) {
   test(`preserves issue 1254 formatting: ${JSON.stringify(source)}`, () => {
     assert.equal(roundtrip(source), source);
