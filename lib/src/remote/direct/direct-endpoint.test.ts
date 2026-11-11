@@ -225,19 +225,6 @@ describe('DirectEndpoint', () => {
     expect(answering.answerer.sent.map((s) => s.t)).toEqual(['direct-decline']);
   });
 
-  it('declines rather than leaving the offerer to wait, when its channel is refused', async () => {
-    const run = pair({ channel: 'unordered', channelSide: 'answerer' });
-
-    await run.offerer.endpoint.offer();
-    await flushMicrotasks();
-
-    // The refusal reports from inside `answer()`, before there is any
-    // description to send — the offerer still has to hear about it.
-    expect(run.answerer.sent.map((s) => s.t)).toEqual(['direct-decline']);
-    // And the answerer's setup deadline, armed inside `answer()`, went with it.
-    expect(run.timers.live).toEqual([]);
-  });
-
   /**
    * A decline is a message on the relay, so it only means anything while there
    * is still a relay to send it on. A peer that put its own `direct-switch`

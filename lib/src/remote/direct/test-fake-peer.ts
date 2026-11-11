@@ -368,7 +368,8 @@ export class FakePeer implements DirectPeerLike {
   async setRemoteDescription(description: DirectSessionDescription): Promise<void> {
     this.remoteDescription = description;
     if (description.type === 'offer') {
-      // The answerer learns of the channel here, exactly as a real one does.
+      // Earlier than a real answerer, which hears of an in-band channel only
+      // once the offerer has applied the answer and the association is up.
       const channel = new FakeChannel(DIRECT_CHANNEL_LABEL, this.#defect);
       this.#network.registerChannel(this.#role, channel);
       this.#emit('datachannel', { channel });
