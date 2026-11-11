@@ -137,6 +137,8 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 **Why coalesce without queueing.** Independent callers (a Dev-Server Chip pass, a Tool-serving tick, `dor list --ports`, the terminal context panel) can land port requests in the same tick; one scan per microtask batch keeps that to one set of subprocesses. A queue behind the in-flight scan would make a request wait for two scans, past the per-request budget the formula grants. Budgeting the batch for its smallest request keeps each caller's own deadline true.
 
+**Why one PowerShell start.** Measured on Windows 11 with Windows PowerShell 5.1, 2026-11-10: the two queries as two starts in sequence took about 810 ms (500 + 315), as one start about 595 ms, and an empty start 155 ms, so the start dominates; one start also spawns one process where two concurrent starts would spawn two. WSL needs the process names to know which panes run `wsl.exe`, so its scan follows that start, as the socket scan once did.
+
 ## Universal invariants
 
 **Why no synchronous subprocess.** Measured on Windows, 2026-10-02: the installed 1.1.0 sidecar blocked its event loop for 1.7–2.3 seconds during PowerShell process/listener scans, and a real node-pty raw-echo probe measured 767–855 ms input delay during scans, versus 1 ms without. Tool discovery and dev-server chips request these in the background, so ordinary input waited behind decorative work; scheduling the request in webview idle time did not make the host's scan idle-safe, and batching limits subprocess work without keeping the loop free. The same blocking sat in helper busy checks (a Win32_Process scan), macOS cwd saves (`lsof` with no timeout) and WSL detection (`reg.exe`).

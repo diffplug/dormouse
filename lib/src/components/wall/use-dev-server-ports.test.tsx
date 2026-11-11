@@ -9,7 +9,7 @@
 import { act, useMemo, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PENDING_REFRESH_MS, useDevServerPortCorrelation } from './use-dev-server-ports';
+import { COMMAND_WAKE_STEPS, PENDING_REFRESH_MS, useDevServerPortCorrelation } from './use-dev-server-ports';
 import {
   getDevServerResolution,
   releaseDevServerPort,
@@ -177,10 +177,28 @@ describe('dev-server port correlation across Walls', () => {
     requestDevServerPort(PORT);
     await act(async () => { root.render(<Harness paneIds={['a1']} />); });
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60_000); });
+    const gaveUp = openPorts.mock.calls.length;
+
+    // A command that serves nothing costs a short back-off, not the whole one.
+    act(() => seedLaunchedCommand('a1', 'ls'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60_000); });
+    expect(openPorts.mock.calls.length - gaveUp).toBe(1 + COMMAND_WAKE_STEPS);
 
     openPorts.mockImplementation(async () => tcp(PORT));
     act(() => seedLaunchedCommand('a1', 'pnpm dev'));
     await settleScan();
     expect(getDevServerResolution(PORT)?.paneId).toBe('a1');
+  });
+
+  it('never cuts short a longer back-off when a command starts', async () => {
+    requestDevServerPort(PORT);
+    await act(async () => { root.render(<Harness paneIds={['a1']} />); });
+    await settleScan();
+    expect(openPorts).toHaveBeenCalledTimes(1);
+
+    act(() => seedLaunchedCommand('a1', 'ls'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60_000); });
+    // The command's own scan, then the back-off steps the opening wake had left.
+    expect(openPorts).toHaveBeenCalledTimes(2 + PENDING_REFRESH_MS.length - 1);
   });
 });
