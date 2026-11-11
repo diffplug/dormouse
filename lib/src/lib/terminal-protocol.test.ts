@@ -819,6 +819,29 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it('puts an OSC 1337 CurrentDir on the host its last RemoteHost names', () => {
+    const cwdOf = (parser: TerminalProtocolParser, data: string) => {
+      const result = parser.process(data);
+      expect(result.visibleData).toBe('');
+      const event = result.events.find((e) => e.kind === 'semantic' && e.event.type === 'cwd');
+      return event?.kind === 'semantic' && event.event.type === 'cwd' ? event.event.cwd : undefined;
+    };
+    // This machine, by its own or short name, stays a local directory.
+    for (const named of ['me@mac-mini', 'me@Mac-Mini.lan', 'mac-mini']) {
+      const local = cwdOf(new TerminalProtocolParser(undefined, 'mac-mini'), `\x1b]1337;RemoteHost=${named}\x07\x1b]1337;CurrentDir=/Users/me/app\x07`);
+      expect(local?.isRemote, named).toBe(false);
+      expect(local?.host, named).toBeUndefined();
+    }
+    // Another machine is remote, remembered across chunks until the next report.
+    const parser = new TerminalProtocolParser(undefined, 'mac-mini');
+    expect(cwdOf(parser, '\x1b]1337;RemoteHost=me@prod\x07')).toBeUndefined();
+    const remote = cwdOf(parser, '\x1b]1337;CurrentDir=/srv\x07');
+    expect(remote?.isRemote).toBe(true);
+    expect(remote?.host).toBe('prod');
+    expect(remote?.path).toBe('/srv');
+    expect(cwdOf(parser, '\x1b]1337;RemoteHost=me@mac-mini\x07\x1b]1337;CurrentDir=/repo\x07')?.isRemote).toBe(false);
+  });
+
   it('responds to iTerm2 extended device attribute queries', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process(`before\x1b[>qafter`);
