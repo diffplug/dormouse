@@ -184,7 +184,6 @@ export interface ListWorkspacesResponse {
 export interface NewWorkspaceRequest {
   /** Defaults host-side to the next `Workspace N`. */
   name?: string;
-  window?: string;
 }
 
 export interface RenameWorkspaceRequest {
@@ -192,26 +191,22 @@ export interface RenameWorkspaceRequest {
   /** The name to keep; omitted with `auto`, which hands it back to auto-naming. */
   name?: string;
   auto?: true;
-  window?: string;
 }
 
 export interface CloseWorkspaceRequest {
   workspace: string;
   /** Close even though the Workspace holds touched or running Surfaces. */
   force: boolean;
-  window?: string;
 }
 
 /** Pin a Workspace right, or unpin it. */
 export interface PinWorkspaceRequest {
   workspace: string;
   pinned: boolean;
-  window?: string;
 }
 
 export interface SwitchWorkspaceRequest {
   workspace: string;
-  window?: string;
 }
 
 /** Move a Workspace: to another Window (`toWindow`, a label or `new` for a
@@ -224,7 +219,6 @@ export interface MoveWorkspaceRequest {
    *  document cannot leave its webview); the host refuses such a move unless
    *  the caller passed this. */
   dangerouslyDestroyIframePageState: boolean;
-  window?: string;
 }
 
 /** The answer every mutating Workspace verb gives: what it did, and the
@@ -589,7 +583,6 @@ export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
   /** agent-browser only: the stream port `dor agent-browser` read itself after the
    * command; the Surface streams from it instead of asking the host. */
   wsPort?: number;
-  minimized?: boolean;
   initialViewport?: BrowserViewportSetting;
 }
 

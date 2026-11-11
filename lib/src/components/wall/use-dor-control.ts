@@ -165,7 +165,7 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
 
 /** Outcome of {@link EnsureBrowserSurface}: the fields the caller maps onto
  *  its response, or a failure message. `minimized` is the surface's current
- *  minimized state (the reused surface's, or the requested value for a fresh one). */
+ *  minimized state (the reused surface's; a fresh one is never minimized). */
 type EnsureBrowserSurfaceResult =
   | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; minimized: boolean }
   | { ok: false; message: string };
@@ -187,7 +187,6 @@ type EnsureBrowserSurface = (args: {
    *  must succeed without a visible reference (e.g. `dor agent-browser` from a minimized
    *  terminal refreshing an existing surface). */
   reference: () => ParseResult<DorSurface>;
-  minimized?: boolean;
   preserveSource?: boolean;
 }) => EnsureBrowserSurfaceResult;
 
@@ -1022,7 +1021,6 @@ export function useDorControl({
     binaryPath,
     initialViewport,
     reference,
-    minimized = false,
     preserveSource,
   }) => {
     const refreshedParams = {
@@ -1057,7 +1055,7 @@ export function useDorControl({
     const target = reference();
     if (!target.ok) return { ok: false, message: target.message };
     const result = createContentSurface({
-      minimized,
+      minimized: false,
       params: {
         surfaceType: 'browser',
         renderMode: renderModeFor(provider, 'screencast'),
@@ -1079,7 +1077,7 @@ export function useDorControl({
       ok: true,
       status: result.value.status,
       surfaceId: result.value.id,
-      minimized,
+      minimized: false,
     };
   }, [createContentSurface, findBrowserSurface, updateSurfaceParams, lath]);
 
@@ -2521,7 +2519,6 @@ export function useDorControl({
         headed: status.headed,
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,
-        minimized: booleanParam(params.minimized),
         reference: () => resolvePlacement(resolveVisibleSurface),
         preserveSource: !!detail.helperParentId,
       });
