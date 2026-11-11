@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   listen: vi.fn(),
   countRunningSessions: vi.fn(() => 0),
   hasPendingUpdate: vi.fn(() => false),
+  hasApprovedUpdate: vi.fn(() => false),
   installPendingUpdate: vi.fn(async () => {}),
   flushWindowSession: vi.fn(async () => {}),
   getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
@@ -38,6 +39,7 @@ vi.mock("dormouse-lib/lib/workspace-store", () => ({
 }));
 vi.mock("./updater", () => ({
   hasPendingUpdate: mocks.hasPendingUpdate,
+  hasApprovedUpdate: mocks.hasApprovedUpdate,
   installPendingUpdate: mocks.installPendingUpdate,
 }));
 
@@ -92,6 +94,7 @@ describe("one window, two teardown flows", () => {
     });
     mocks.countRunningSessions.mockReturnValue(1);
     mocks.hasPendingUpdate.mockReturnValue(false);
+    mocks.hasApprovedUpdate.mockReturnValue(false);
     mocks.invoke.mockResolvedValue(undefined);
     const adapter = fakeAdapter();
     initQuitFlow(adapter);
