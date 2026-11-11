@@ -84,7 +84,7 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 ### State machines
 
-**Must keep these diagrams the whole alert model**: every transition the code makes is an edge, so a change to one changes its diagram. They are one system: a machine's edges fire on what another emits, and Dispatch reads the states its questions name. An edge reads trigger, then — what it emits.
+**Must keep these diagrams the whole alert model**: every transition the code makes is an edge, so a change to one changes its diagram. They are one system: a machine's edges fire on what another emits; the overview below draws the main wires only. An edge reads trigger, then — what it emits.
 
 ```mermaid
 flowchart TD
