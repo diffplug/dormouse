@@ -1,9 +1,9 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { playwrightWorkspace, resolvePlaywrightInstall } from './playwright-install';
+import { isInstallLibrary, playwrightWorkspace, resolvePlaywrightInstall, type PlaywrightInstall } from './playwright-install';
 
 // Each layout is what npm, pnpm, or cmd-shim writes for `@playwright/cli`, whose
 // `bin` maps `playwright-cli` to `playwright-cli.js` at the package root.
@@ -259,4 +259,21 @@ test('a removed directory takes the workspace above it, and has none when it hel
   expect(playwrightWorkspace(sub)).toBe(project);
   rmSync(project, { recursive: true });
   expect(playwrightWorkspace(project)).toBeUndefined();
+});
+
+test('a registry entry names the install\'s library in any spelling Windows gives one directory', () => {
+  const library = path.join(root, 'node_modules', 'playwright-core');
+  mkdirSync(library, { recursive: true });
+  const install = { binary: path.join(root, 'playwright-cli'), libraryPath: library } as PlaywrightInstall;
+  expect(isInstallLibrary(install, library)).toBe(true);
+  expect(isInstallLibrary(install, undefined)).toBe(false);
+  expect(isInstallLibrary(install, path.join(root, 'node_modules', 'other'))).toBe(false);
+  // The registry's spelling and the native realpath behind `libraryPath` can
+  // differ in case (or by an 8.3 name) on Windows, where both name one folder.
+  vi.stubGlobal('process', { ...process, platform: 'win32' });
+  try {
+    expect(isInstallLibrary({ ...install, libraryPath: library.toUpperCase() }, library)).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

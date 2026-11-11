@@ -17,7 +17,7 @@ import { settleAllWithin } from '../lib/settle-within';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
 import { measuredViewport, type ViewerSink, type ViewportSize } from './browser-viewer';
-import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
+import { isInstallLibrary, resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall } from './playwright-install';
 
 const TAB_REFRESH_INTERVAL_MS = 750;
 // How long a multi-page browser's CLI tab selection is trusted when no page
@@ -326,8 +326,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
       const matches = servers.filter(s =>
         s.title === b.session
         && (s.workspaceDir || undefined) === b.workspace
-        && typeof s.playwrightLib === 'string'
-        && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
+        && isInstallLibrary(b.install, s.playwrightLib));
       if (matches.length > 1) throw new Error('Ambiguous playwright session');
       if (matches.length === 0) {
         throw new SessionNotOpenError('playwright session is not open or has no viewable endpoint', servers.some(s => s.title === b.session));
@@ -388,7 +387,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     const removed = (Array.isArray(servers) ? servers : []).find(s =>
       s.title === b.session && typeof s.workspaceDir === 'string' && s.workspaceDir && !isDirectory(s.workspaceDir)
       && s.workspaceDir !== b.workspace && (cwd === s.workspaceDir || cwd.startsWith(s.workspaceDir + path.sep))
-      && typeof s.playwrightLib === 'string' && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
+      && isInstallLibrary(b.install, s.playwrightLib));
     if (removed) throw new Error(`playwright session ${b.session} belongs to ${removed.workspaceDir}, which was removed; close it with playwright-cli`);
   }
   const exited = (r: { exitCode: number; stderr: string }) => r.stderr.trim() || `playwright-cli exited ${r.exitCode}`;
