@@ -316,6 +316,8 @@ describe('AgentBrowserPanel render mode controller', () => {
     const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
+    // The pane's own click opens it: only then is a new tab followed.
+    getAgentBrowserSurfaceController('ab-panel')!.send({ type: 'input_mouse', eventType: 'mousePressed', x: 1, y: 1, button: 'left', buttons: 1, clickCount: 1, modifiers: 0 });
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
@@ -366,6 +368,8 @@ describe('AgentBrowserPanel render mode controller', () => {
     const host = installBrowserHost();
 
     await renderPanel(paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 1111 }));
+    // The pane's own click opens it: only then is a new tab followed.
+    getAgentBrowserSurfaceController('ab-panel')!.send({ type: 'input_mouse', eventType: 'mousePressed', x: 1, y: 1, button: 'left', buttons: 1, clickCount: 1, modifiers: 0 });
 
     await act(async () => {
       WebSocketMock.instances.at(-1)?.emitMessage(JSON.stringify({
