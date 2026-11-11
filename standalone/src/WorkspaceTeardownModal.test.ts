@@ -56,7 +56,7 @@ describe("WorkspaceTeardownModal copy", () => {
       intent: { kind: "close-window", discardsUpdate: true },
     });
     expect(text).toContain("Confirm kill workspace");
-    expect(text).toContain("The downloaded update will be discarded.");
+    expect(text).toContain("The approved update will be discarded.");
   });
 
   it("says on every quit that agent sessions come back, and never on a window close", () => {

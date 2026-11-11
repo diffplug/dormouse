@@ -34,7 +34,7 @@ On launch the updater, in order:
 
 **Never intercept quit in the updater**: install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow; rationale). **Must install in `main`**, the window the quit walk tears down last and the only one holding `updater:default` (`standalone/src-tauri/capabilities/main-only.json`), so nothing another window could still be writing outlives the install.
 
-Only `main` checks, so only it can hold a download, which lives in its webview's memory: closing `main` discards an approved update, which its close confirmation says (`docs/specs/standalone.md` → "Per-window close"; rationale). **Never close the window from the install**: exiting is `quit_proceed`'s job, after it returns.
+Only `main` checks, so only it can hold a download, which lives in its webview's memory: closing `main` discards an approved update, downloading or downloaded, which its close confirmation says (`docs/specs/standalone.md` → "Per-window close"; rationale), except when its last Workspace moves away (`docs/specs/standalone.md` → "Transfer"). **Never close the window from the install**: exiting is `quit_proceed`'s job, after it returns.
 
 **Must skip `install()` in Vite dev mode**, dropping the pending update (rationale), so install is tested from a packaged app.
 
