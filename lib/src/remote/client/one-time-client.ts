@@ -19,6 +19,7 @@ import {
   DIRECT_ONLY_DEADLINE_MS,
   NoiseTransportSession,
   ONE_TIME_EXPIRY_GRACE_MS,
+  ONE_TIME_LINK_TTL_MS,
   RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
@@ -31,7 +32,6 @@ import {
   generateNoiseKeyPair,
   isOneTimeBurrowFrame,
   isOneTimeOutcomeV1,
-  oneTimeLinkExpired,
   oneTimeLinkPrologue,
   samplePairingCode,
   toBase64Url,
@@ -143,8 +143,6 @@ export class OneTimeClient implements RemoteAdapterClient {
 
   #phase: Phase = 'idle';
   #route: OneTimeRoute | null = null;
-  /** The link `connectOnce` was given, so a close can tell whether it had expired. */
-  #link: OneTimeLink | null = null;
   /**
    * Cancels the timer armed at the room's hard deadline, which bounds every
    * wait before the outcome — WebCrypto and the socket's open included.
@@ -229,14 +227,13 @@ export class OneTimeClient implements RemoteAdapterClient {
     });
     // Raced, never awaited alone: a failure with nothing waiting is not unhandled.
     this.#interrupted.catch(() => undefined);
-    // Advisory, like the parser's check — the Burrow holds its own copy — but a
-    // link that is already dead must not spend the room's one join.
-    if (oneTimeLinkExpired(link, this.#now())) return this.#finish(ONE_TIME_LINK_EXPIRED_MESSAGE);
+    // Never gated on the link's expiry: that is the computer's clock, not this
+    // phone's, and the room and the Burrow refuse a dead link on theirs.
     const route: OneTimeRoute = { kind: 'one-time', id: link.roomId };
     this.#route = route;
-    this.#link = link;
-    // The room's hard deadline: no answer can arrive after it.
-    const deadline = link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS;
+    // No room outlives its link's whole life and grace, so none can answer
+    // after that long from now, measured on this phone's clock.
+    const deadline = this.#now() + ONE_TIME_LINK_TTL_MS + ONE_TIME_EXPIRY_GRACE_MS;
     this.#cancelDeadline = this.#setTimer(
       () => this.#fail(ONE_TIME_LINK_EXPIRED_MESSAGE),
       Math.max(0, deadline - this.#now()),
@@ -449,10 +446,9 @@ export class OneTimeClient implements RemoteAdapterClient {
     ws.send(JSON.stringify(frame));
   }
 
-  /** {@link closeMessage}, for this client's phase and link, now. */
+  /** {@link closeMessage}, for this client's phase. */
   #closeMessage(code: number | undefined): string {
-    const link = this.#link;
-    return closeMessage(code, this.#phase, link !== null && oneTimeLinkExpired(link, this.#now()));
+    return closeMessage(code, this.#phase);
   }
 
   #onMessage(raw: unknown): void {
@@ -555,7 +551,7 @@ export class OneTimeClient implements RemoteAdapterClient {
  * What a room close before the switch reads as. The room is the only party
  * that knows which of its closes happened, so its code picks the copy.
  */
-function closeMessage(code: number | undefined, phase: Phase, linkExpired: boolean): string {
+function closeMessage(code: number | undefined, phase: Phase): string {
   switch (code) {
     case WS_CLOSE_ONE_TIME_TAKEN:
     case WS_CLOSE_ONE_TIME_UNAVAILABLE:
@@ -568,8 +564,8 @@ function closeMessage(code: number | undefined, phase: Phase, linkExpired: boole
       // how its own direct failure reaches this phone: its answering side gives
       // up before this one's deadline, then ends the connection.
       if (phase === 'connecting') return ONE_TIME_DIRECT_FAILED_MESSAGE;
-      // Before the outcome and past the expiry, the computer left because the
-      // link ran out.
-      return linkExpired ? ONE_TIME_LINK_EXPIRED_MESSAGE : ONE_TIME_ENDED_MESSAGE;
+      // Only the room's own codes say the link expired: this phone's clock is
+      // not the one that wrote the expiry.
+      return ONE_TIME_ENDED_MESSAGE;
   }
 }

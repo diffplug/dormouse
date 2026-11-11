@@ -13,7 +13,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   ONE_TIME_UNKNOWN_DEVICE_LABEL,
-  oneTimeLinkExpired,
   parseOneTimeLinkUrl,
   probeNoiseSupport,
   type OneTimeDeviceLabel,
@@ -23,7 +22,6 @@ import {
 import { hostedDirectPeer } from '../client/browser-direct-peer';
 import {
   ONE_TIME_ENDED_MESSAGE,
-  ONE_TIME_LINK_EXPIRED_MESSAGE,
   OneTimeClient,
 } from '../client/one-time-client';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
@@ -100,7 +98,9 @@ export function oneTimeDeviceLabel(
 }
 
 /** How long a live link has left, to the minute and then to the second. */
-export function expiresInText(remainingMs: number): string {
+export function expiresInText(remainingMs: number): string | null {
+  // Never a remaining time the phone's clock says is gone.
+  if (remainingMs <= 0) return null;
   const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
   return seconds >= 60 ? `Expires in ${Math.ceil(seconds / 60)} min.` : `Expires in ${seconds} s.`;
 }
@@ -173,12 +173,11 @@ export function OneTimeApp({
         if (live) setPhase({ at: 'unsupported' });
         return;
       }
-      // Parsed at the epoch, so an expired link is told apart from a wrong one.
-      const link = await parseOneTimeLinkUrl(linkUrl, location.origin, 0);
+      // Never refused on this phone's clock: the room and the computer say
+      // when a link has expired.
+      const link = await parseOneTimeLinkUrl(linkUrl, location.origin);
       if (!live) return;
-      if (link === null) setPhase({ at: 'invalid' });
-      else if (!oneTimeLinkExpired(link, Date.now())) setPhase({ at: 'ready', link });
-      else setPhase({ at: 'ended', message: ONE_TIME_LINK_EXPIRED_MESSAGE });
+      setPhase(link === null ? { at: 'invalid' } : { at: 'ready', link });
     })();
     return () => {
       live = false;
@@ -262,11 +261,6 @@ export function OneTimeApp({
   );
 
   const endNow = useCallback(() => end(ONE_TIME_ENDED_MESSAGE), [end]);
-  /** Before any tap there is no client to end: the link simply ran out on screen. */
-  const expireLink = useCallback(
-    () => setPhase({ at: 'ended', message: ONE_TIME_LINK_EXPIRED_MESSAGE }),
-    [],
-  );
 
   switch (phase.at) {
     case 'checking':
@@ -281,13 +275,7 @@ export function OneTimeApp({
     case 'invalid':
       return <OneTimeNotice title={ONE_TIME_INVALID_TITLE} message={ONE_TIME_INVALID_MESSAGE} />;
     case 'ready':
-      return (
-        <LiveReady
-          link={phase.link}
-          onConnect={() => void connect(phase.link)}
-          onExpired={expireLink}
-        />
-      );
+      return <LiveReady link={phase.link} onConnect={() => void connect(phase.link)} />;
     case 'code':
       return <OneTimeCode code={phase.code} onCancel={endNow} />;
     case 'connecting':
@@ -301,26 +289,19 @@ export function OneTimeApp({
   }
 }
 
-/** {@link OneTimeReady} with its clock: a link that runs out on screen ends there. */
-function LiveReady({
-  link,
-  onConnect,
-  onExpired,
-}: {
-  link: OneTimeLink;
-  onConnect: () => void;
-  onExpired: () => void;
-}): React.ReactElement {
+/**
+ * {@link OneTimeReady} with its clock. The countdown is a hint and stops at
+ * zero: the expiry is the computer's clock, not this phone's, so only the room
+ * or the computer ends a link, and Connect stays live.
+ */
+function LiveReady({ link, onConnect }: { link: OneTimeLink; onConnect: () => void }): React.ReactElement {
   const [now, setNow] = useState(() => Date.now());
-  const expired = oneTimeLinkExpired(link, now);
+  const counting = link.expiry * 1000 > now;
   useEffect(() => {
-    if (expired) {
-      onExpired();
-      return;
-    }
+    if (!counting) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [expired, onExpired]);
+  }, [counting]);
   return <OneTimeReady expiresInMs={link.expiry * 1000 - now} onConnect={onConnect} />;
 }
 
@@ -346,6 +327,7 @@ export function OneTimeReady({
   expiresInMs: number;
   onConnect: () => void;
 }): React.ReactElement {
+  const expiresIn = expiresInText(expiresInMs);
   return (
     <PocketScreen heading={ONE_TIME_HEADING}>
       <p className={PK.title}>{ONE_TIME_READY_TITLE}</p>
@@ -353,7 +335,7 @@ export function OneTimeReady({
       <button type="button" className={pkButton({ block: true })} onClick={onConnect}>
         {ONE_TIME_CONNECT_LABEL}
       </button>
-      <p className={clsx(PK.fieldLabel, 'text-center')}>{expiresInText(expiresInMs)}</p>
+      {expiresIn ? <p className={clsx(PK.fieldLabel, 'text-center')}>{expiresIn}</p> : null}
     </PocketScreen>
   );
 }

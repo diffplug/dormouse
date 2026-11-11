@@ -42,12 +42,12 @@ sequenceDiagram
 | --- | --- | --- |
 | `v` | literal `1`, one character | E2E wire version; any other value is rejected, never negotiated |
 | `roomId` | 16 bytes as 22-character unpadded base64url | the rendezvous room Hosted minted |
-| `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | the phone's fail-fast; the Burrow checks its own copy at the attempt |
+| `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | the Burrow and the room enforce it |
 | `ephPub` | 32-byte X25519 public key as 43-character unpadded base64url | the one-use Burrow Noise responder key for this link |
 
 - **`ONE_TIME_LINK_MAX_LENGTH = 256`, enforced at mint**, which bounds the origin (`docs/specs/relay.md` -> "Relay origin").
 - **One parser boundary.** `parseOneTimeLinkUrl` answers the complete link or `null`, never a partial parse: the URL around the fragment under `docs/specs/relay.md` -> "Setup tokens and the pairing QR", and the path exactly `ONE_TIME_PAGE_PATH` (`/connect/`).
-- **Must keep a link live through `expiry * 1000`, expiring the following millisecond** (`oneTimeLinkExpired`), and the parser refuses on that same rule.
+- **Must keep a link live through `expiry * 1000`, expiring the following millisecond** (`oneTimeLinkExpired`). **The phone never refuses a link on its own clock** (rationale): the parser checks the expiry's shape, and Connect outlives the countdown.
 - The prologue contract: `docs/specs/remote-security-model.md` -> "One-time connection".
 
 Which desktop release may carry a link version: `docs/specs/deploy.md` -> "Release checklist".
@@ -105,8 +105,8 @@ Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`
 
 **`OneTimeClient` is single-use: one `connectOnce`, one rendezvous socket, and at most one session**, on `ClientSessionCore`, direct or not at all. `connectOnce` is the phone's half of [Flow](#flow): at the switch it closes the rendezvous normally and resolves `{ok: true, burrowLabel}`; a decline, an abandoned attempt, or no switch by `DIRECT_ONLY_DEADLINE_MS` fails it.
 
-- **Never open a socket outside `connectOnce`**, which runs once per client and opens none for an expired link.
-- **Must end the handshake and the confirmation at the room's hard deadline**, WebCrypto and the socket's open included; the direct path runs on the direct deadline instead.
+- **Never open a socket outside `connectOnce`**, which runs once per client.
+- **Must end the handshake and the confirmation `ONE_TIME_LINK_TTL_MS + ONE_TIME_EXPIRY_GRACE_MS` after the tap, on the phone's clock**, WebCrypto and the socket's open included; the direct path runs on the direct deadline instead.
 - **Never import store, passkey, push, or worker code** (the static's rule: `docs/specs/remote-security-model.md` -> "One-time connection").
 - Every protocol-v1 method refuses until both directions are direct (Direct required: `docs/specs/remote-security-model.md` -> "One-time connection").
 - **Must drop what `isOneTimeBurrowFrame` refuses**, after the [length check](#wire-contract).
