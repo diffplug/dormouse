@@ -77,7 +77,7 @@ import { validToolFragment } from 'dor-tools-lib/osc';
 import { confirmToolEditorsClose } from '../../lib/tool-editor';
 import { confirmLinkOpen } from '../../lib/external-link-confirmation';
 import { directoryOf } from '../../lib/tool-open-requests';
-import { commitToolHistory, linkOpenNeedsConfirmation, hasToolView, toolHandlerName, toolHandlerScope, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
+import { commitToolHistory, linkOpenNeedsConfirmation, hasToolView, toolHistory, toolLocation, toolNavigationPending, toolView } from './tool-navigation';
 
 import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
@@ -1263,6 +1263,7 @@ export function useDorControl({
         const projectEntry = historical?.scope === 'project' && historical.handler !== undefined ? historical : undefined;
         let toolName = projectEntry?.handler ?? stringParam(params.name)?.trim();
         const openFile = projectEntry ? undefined : historical?.target ?? stringParam(params.file);
+        const toolArgs = projectEntry ? [projectEntry.target] : stringArrayParam(params.args) ?? [];
         const opening = openFile !== undefined;
         if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
           detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
@@ -1272,7 +1273,6 @@ export function useDorControl({
         let toolRun: string | readonly string[];
         let key: string[] | null = null;
         let toolScope: ToolKeyScope | undefined;
-        const toolArgs = projectEntry ? [projectEntry.target] : stringArrayParam(params.args) ?? [];
         let warnings: string[] = [];
         let render: ToolRender = 'iframe';
         let viewport: BrowserViewportSetting | undefined;
@@ -1627,8 +1627,9 @@ export function useDorControl({
           // navigates, only without a position to come back to.
           current.position = await toolView(id, source).catch(() => undefined);
           if (unavailable() || sourceChanged()) return true;
-          const nextHistory = commitToolHistory(history, current,
-            { target, cwd, handler: toolHandlerName(toolScope, toolName), scope: toolHandlerScope(toolScope), position: targetPosition }, historyIndex);
+          // The destination entry is rewritten from live params when the
+          // Surface leaves it; only its `cwd` outlives that.
+          const nextHistory = commitToolHistory(history, current, toolLocation(toolParams, cwd)!, historyIndex);
           if (sameDocument) {
             // An anchor is a view change: never ask to discard edits or
             // reload the page, even through Back/Forward.
