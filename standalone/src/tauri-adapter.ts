@@ -6,7 +6,7 @@ import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { IframeLeaseOrder } from '../../lib/src/lib/platform/iframe-lease-order';
 import { open } from "@tauri-apps/plugin-shell";
-import { coalesceCwds } from "./coalesce-cwds";
+import { coalesceCwds } from "dormouse-lib/lib/platform/coalesce-cwds";
 import { nativeClipboardWriter } from "./native-clipboard";
 import type {
   IframeProxyResult,

@@ -169,10 +169,10 @@ describe('FakePtyAdapter', () => {
     expect(exitEvents).toEqual([{ id: 't1', exitCode: 0 }]);
   });
 
-  it('killPty on non-spawned terminal fires exit without crashing', () => {
+  it('killPty on non-spawned terminal reports no exit', () => {
     const { adapter, exitEvents } = createAdapter();
     adapter.killPty('nope');
-    expect(exitEvents).toEqual([{ id: 'nope', exitCode: 0 }]);
+    expect(exitEvents).toEqual([]);
   });
 
   it('retains semantic state when its PTY exits', () => {
@@ -397,6 +397,30 @@ describe('FakePtyAdapter', () => {
     expect(exitEvents).toEqual([{ id: 't1', exitCode: 1 }]);
   });
 
+  it('a kill after the scenario exited reports nothing more', () => {
+    const { adapter, exitEvents } = createAdapter();
+    adapter.setDefaultScenario(exitScenario);
+    adapter.spawnPty('t1');
+    vi.advanceTimersByTime(150);
+
+    adapter.killPty('t1');
+
+    expect(exitEvents).toEqual([{ id: 't1', exitCode: 1 }]);
+  });
+
+  it('a spawn over a live id drops the displaced scenario\'s output and exit', () => {
+    const { adapter, dataEvents, exitEvents } = createAdapter();
+    adapter.setDefaultScenario(exitScenario);
+    adapter.spawnPty('t1');
+    adapter.setDefaultScenario(twoChunkScenario);
+    adapter.spawnPty('t1');
+
+    vi.advanceTimersByTime(10000);
+
+    expect(dataEvents.map((event) => event.data)).toEqual(['first', 'second']);
+    expect(exitEvents).toEqual([]);
+  });
+
   it('scenario without exitCode does not fire onPtyExit', () => {
     const { adapter, exitEvents } = createAdapter();
     adapter.setDefaultScenario(twoChunkScenario);
@@ -486,14 +510,12 @@ describe('FakePtyAdapter', () => {
     ]);
   });
 
-  it('re-killing a terminal fires exit again (no re-kill guard)', () => {
+  it('re-killing a terminal reports its exit once', () => {
     const { adapter, exitEvents } = createAdapter();
     adapter.spawnPty('t1');
     adapter.killPty('t1');
     adapter.killPty('t1');
 
-    // Both calls fire exit (killPty doesn't guard against re-kill),
-    // but echo is disabled after first kill
-    expect(exitEvents).toHaveLength(2);
+    expect(exitEvents).toEqual([{ id: 't1', exitCode: 0 }]);
   });
 });

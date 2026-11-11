@@ -153,20 +153,7 @@ const DIFFERENCES: { [O in Owner]?: { [C in CaseId]?: { expect: unknown; why: st
   },
 };
 
-const KNOWN: Array<{ owner: Owner; case: CaseId; why: string }> = [
-  {
-    owner: "fake", case: "kill-unknown",
-    why: "FakePtyAdapter.killPty calls every exit handler for any id, spawned or not (pinned by fake-adapter.test.ts \"killPty on non-spawned terminal fires exit\"); pty-core's kill of an unknown id stops nothing and reports nothing",
-  },
-  {
-    owner: "fake", case: "one-exit",
-    why: "after a scenario's exit, each killPty reports another exit 0 (pinned by fake-adapter.test.ts \"re-killing a terminal fires exit again\"); pty-core forgets an exited PTY, so a later kill reports nothing",
-  },
-  {
-    owner: "fake", case: "respawn",
-    why: "spawnPty over a live id replaces activeTimers without clearing the displaced scenario's timers, which still emit its output and exit under the id (fake-adapter.ts playScenario); pty-core stops the displaced PTY and drops both",
-  },
-];
+const KNOWN: Array<{ owner: Owner; case: CaseId; why: string }> = [];
 
 /** Register the lifecycle cases for `owner`, opening a fresh harness for every test. */
 export function ptyLifecycleContract(owner: Owner, open: () => OwnerHarness): void {

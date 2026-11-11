@@ -186,6 +186,10 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: SpawnPtyOptions): void {
+    // A spawn over a live id stops the displaced generation: only the current
+    // one speaks for the id, so its pending output and exit never arrive.
+    this.activeTimers.get(id)?.forEach(clearTimeout);
+    this.activeTimers.delete(id);
     // A new generation starts its alert state over, from what a cold restore
     // persisted, as every host's spawn does.
     this.alertHost.respawn(id, options?.alert);
@@ -292,6 +296,9 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
+    // Only a PTY that is running reports the exit its kill causes; an id with
+    // none stops nothing, and a host reports nothing for it.
+    const running = this.terminals.has(id);
     const timers = this.activeTimers.get(id);
     if (timers) {
       timers.forEach(clearTimeout);
@@ -306,6 +313,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     // The Session is over, so its alert state goes with it.
     this.alertManager.remove(id);
     this.helpers.delete(id);
+    if (!running) return;
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
     }
@@ -453,6 +461,9 @@ export class FakePtyAdapter implements PlatformAdapter {
     if (scenario.exitCode !== undefined) {
       const exitTimer = setTimeout(() => {
         if (!this.terminals.has(id)) return;
+        // The process is gone: a later kill of the id stops nothing and reports
+        // nothing, as a host that forgot the PTY on its exit does.
+        this.terminals.delete(id);
         this.activeTimers.delete(id);
         this.alertManager.onExit(id, scenario.exitCode ?? 0);
         for (const handler of this.exitHandlers) {

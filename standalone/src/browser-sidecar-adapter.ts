@@ -40,7 +40,7 @@ import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { managedVoicePortForBuild } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
-import { coalesceCwds } from "./coalesce-cwds";
+import { coalesceCwds } from "dormouse-lib/lib/platform/coalesce-cwds";
 import { nativeClipboardWriter } from "./native-clipboard";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";

@@ -519,12 +519,7 @@ const DIFFERENCES: { [I in Impl]?: { [C in CaseId | 'fail:*']?: Difference } } =
 // Known failures: an implementation breaking a rule, held as `it.fails` with
 // its evidence until the fix deletes the entry.
 
-const KNOWN: Array<{ impl: Impl; case: CaseId; why: string }> = [
-  {
-    impl: 'vscode', case: 'cwds-shared',
-    why: 'VSCodeAdapter.getCwds posts one pty:getCwds per call: two probes in one microtask cost two host round trips and two pty-host scans; only the standalone adapters coalesce (coalesceCwds)',
-  },
-];
+const KNOWN: Array<{ impl: Impl; case: CaseId; why: string }> = [];
 
 // ---------------------------------------------------------------------------
 

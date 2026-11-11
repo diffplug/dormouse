@@ -1,13 +1,13 @@
 /**
- * One `pty_get_cwds` for every Workspace asking at once.
+ * One host cwd request for every Workspace asking at once.
  *
  * A quit flush fans out to every Wall concurrently and each answers with its own
- * `getCwds`, so N Workspaces cost N sidecar round trips — and, on macOS, N `lsof`
- * spawns on the sidecar's only event loop, serialized inside the shutdown budget.
+ * `getCwds`, so N Workspaces cost N host round trips — and, on macOS, N `lsof`
+ * spawns on the PTY owner's only event loop, serialized inside the shutdown budget.
  * Batching is already the rule one layer down (`getCwdsForPids` in
  * `standalone/sidecar/pty-core.js`); this extends it across the callers.
  *
- * Shared by both standalone adapters, which differ only in how they invoke.
+ * Shared by every adapter offering `getCwds`, which differ only in how they invoke.
  */
 
 /** Ask the host for these ids' cwds. Answers a key per requested id. */

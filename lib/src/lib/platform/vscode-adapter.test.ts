@@ -706,6 +706,8 @@ describe('VSCodeAdapter cwd probes', () => {
     vi.useFakeTimers();
     const adapter = new VSCodeAdapter();
     const answer = adapter.getCwds(['pane-1', 'pane-2']);
+    // The request leaves once the microtask other saves may join has drained.
+    await Promise.resolve();
     expect(postMessage).toHaveBeenCalledTimes(1);
     const request = postMessage.mock.calls.at(-1)![0];
     expect(request).toMatchObject({ type: 'pty:getCwds', ids: ['pane-1', 'pane-2'] });
