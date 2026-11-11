@@ -457,6 +457,9 @@ export class FakePtyAdapter implements PlatformAdapter {
     if (scenario.exitCode !== undefined) {
       const exitTimer = setTimeout(() => {
         if (!this.terminals.has(id)) return;
+        // The process is gone: a later kill of the id stops nothing and reports
+        // nothing, as a host that forgot the PTY on its exit does.
+        this.terminals.delete(id);
         this.activeTimers.delete(id);
         this.alertManager.onExit(id, scenario.exitCode ?? 0);
         for (const handler of this.exitHandlers) {
