@@ -338,7 +338,7 @@ Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle
 
 Neither `params` nor the URI is parsed at the PTY boundary.
 
-**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the full target in one of these states:
+**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the parsed target in one of these states:
 
 | State | Target | Dialog |
 |---|---|---|

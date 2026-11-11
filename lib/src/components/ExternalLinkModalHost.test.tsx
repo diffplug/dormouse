@@ -101,6 +101,14 @@ it('shows an other-app link\'s own text only when it is a plain label, never the
   expect(title()).toBe('This link opens another app: vscode:');
 });
 
+it('shows the target as it opens, not as the program printed it', () => {
+  act(() => requestExternalLinkConfirmation('https://\u0430pple.com/login', 'Apple support'));
+  expect(document.body.textContent).toContain('https://xn--pple-43d.com/login');
+  act(() => clearExternalLinkConfirmation());
+  act(() => requestExternalLinkConfirmation('https://evil.example\\@google.com/', 'Google'));
+  expect(document.body.textContent).toContain('https://evil.example/@google.com/');
+});
+
 it('keeps the plain dialog for http, https, and mailto', () => {
   for (const uri of ['http://trusted.example/', 'https://trusted.example/', 'mailto:team@trusted.example']) {
     act(() => requestExternalLinkConfirmation(uri));
