@@ -1333,15 +1333,15 @@ function Get-ListeningRelease {
   return [string]$info.releaseId
 }
 
-# Stop the task AND everything it left behind, then start it again.
+# Stop the task AND everything it left behind, then start it again. A start
+# that fails, an unregistered task included, throws: a task that did not start
+# will not answer however long the caller waits for health.
 function Restart-DormouseTask {
   if (Get-Task) {
     try { Stop-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue } catch { }
   }
   [void](Stop-DormouseProcess)
-  if (Get-Task) {
-    Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-  }
+  Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction Stop
 }
 
 function Test-Health {
@@ -1898,13 +1898,19 @@ function Invoke-Rollback {
     [Console]::Error.WriteLine("current did not advance to $prev")
     return 1
   }
-  Restart-DormouseTask
+  try {
+    Restart-DormouseTask
+  } catch {
+    [Console]::Error.WriteLine("${C_RED}the release pointers were rolled back, but starting $TASK_PATH$LABEL failed: $($_.Exception.Message)$C_OFF")
+    [Console]::Error.WriteLine("inspect: Get-ScheduledTaskInfo -TaskPath '$TASK_PATH' -TaskName '$LABEL'")
+    return 1
+  }
   if (Wait-Health -Url "http://127.0.0.1:$PORT/api/hello" -Seconds 40 -ExpectedRelease $prev) {
     # A 200 says only that SOMETHING answers, and this is the one command whose
     # entire contract is which release serves. Every kill in Stop-DormouseProcess
-    # is best-effort and Start-ScheduledTask runs -ErrorAction SilentlyContinue,
-    # so a failed reap leaves the release being rolled AWAY FROM holding the port
-    # and answering -- reported as "rolled back and healthy" without this check.
+    # is best-effort, so a failed reap leaves the release being rolled AWAY FROM
+    # holding the port and answering -- reported as "rolled back and healthy"
+    # without this check.
     $serving = Get-ListeningRelease
     if ($serving -ne $prev) {
       Write-Host "${C_RED}port $PORT answers, but from '$(if ($serving) { $serving } else { 'an unidentifiable process' })' rather than the restored $prev -- check: manage verify$C_OFF"
@@ -2254,8 +2260,15 @@ rem directly.
         # Wait-Health below gets its 200 from the very release we just rejected
         # -- reporting "healthy again" for the wrong code.
         [void](Stop-DormouseProcess -Root $INSTALL_ROOT)
-        Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
       } catch { }
+      # A task that refused to start will not come back by waiting, so say so
+      # at once.
+      try {
+        Start-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction Stop
+      } catch {
+        Write-Warn2 "restarting $TASK_PATH$LABEL after the restore failed: $($_.Exception.Message). Inspect: Get-ScheduledTaskInfo -TaskPath '$TASK_PATH' -TaskName '$LABEL'"
+        return $false
+      }
     }
     if (Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 40) {
       # Same reason the forward path re-checks: a 200 does not say who answered.
