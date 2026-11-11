@@ -27,6 +27,23 @@ interface PersistedRecovery {
   commands: Record<string, string>;
 }
 
+/** `renameSync`, retried while Windows reports the destination held (a virus
+ *  scanner, a reader, a pending deletion): ten 10ms waits, still synchronous,
+ *  like the write it finishes. Throws the last failure. */
+function renameRetryingSync(from: string, to: string): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      const retryable = process.platform === 'win32' && (code === 'EPERM' || code === 'EBUSY');
+      if (attempt >= 11 || !retryable) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+}
+
 export interface RecoveryStore {
   /**
    * A teardown is about to capture. The FIRST call of a process replaces
@@ -74,7 +91,7 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
       // Unix mode applies before bytes are written and survives the rename.
       // Windows permissions come from the containing directory.
       fs.writeFileSync(tmp, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
-      fs.renameSync(tmp, file);
+      renameRetryingSync(tmp, file);
     } catch (err) {
       log.error(`[recovery] write failed: ${String(err)}`);
     } finally {
