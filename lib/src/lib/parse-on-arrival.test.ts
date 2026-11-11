@@ -20,6 +20,7 @@ vi.mock('./xterm-write-slice', async (importOriginal) => {
 });
 
 import { PARSE_STARVED_MS, parseOnArrival } from './parse-on-arrival';
+import { setHostShown } from './host-shown';
 
 /** A 1x1 PNG, for an iTerm2 inline image the real image addon decodes. */
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -57,6 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setHostShown(true);
   terminal.dispose();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -102,6 +104,18 @@ describe('a hidden page', () => {
 });
 
 describe('a visible page', () => {
+  it('parses and acknowledges a stream while its host says it is not shown', async () => {
+    setHostShown(false);
+    let sent = 0;
+    for (let i = 0; i < 50; i++) {
+      const line = `line ${i}\r\n`;
+      sent += line.length;
+      await arrive(line);
+    }
+    expect(acked).toBe(sent);
+    expect(screen()).toContain('line 49');
+  });
+
   it('takes over from starved timers, and hands back once the queue empties', async () => {
     // One chunk per slice, so the takeover is seen to last.
     let clock = 0;

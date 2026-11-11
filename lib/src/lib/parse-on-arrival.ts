@@ -1,5 +1,6 @@
 import type { Terminal } from '@xterm/xterm';
 import { xtermWriteSlice } from './xterm-write-slice';
+import { hostShown } from './host-shown';
 
 /** How long written output may wait with no write finishing, while more
  *  arrives, before arrivals parse it: xterm's timers are starved, as in a
@@ -8,7 +9,8 @@ export const PARSE_STARVED_MS = 1_000;
 
 /**
  * Returns a write for `terminal` that keeps output parsing when xterm's timers
- * cannot: while the page is hidden, or once written output is starved. Each
+ * cannot: while the page is hidden, or its host says it is not shown (a hidden
+ * VS Code view can stay `visible`), or once written output is starved. Each
  * arrival then runs one of xterm's own parse slices, in a microtask, so never
  * inside xterm's write loop and never more than a slice per arrival. A visible
  * page with an empty queue goes back to xterm's timers alone.
@@ -42,7 +44,7 @@ export function parseOnArrival(terminal: Terminal): (data: string, parsed?: () =
     }
     // Starvation persists until the queue empties: one slice resets the clock,
     // and xterm's timers are no healthier for it.
-    eager ||= document.hidden || now - progressAt >= PARSE_STARVED_MS;
+    eager ||= document.hidden || !hostShown() || now - progressAt >= PARSE_STARVED_MS;
     if (eager) queueMicrotask(runSlice);
   };
 }
