@@ -34,7 +34,7 @@ It serves the relay at `http://localhost:8787` (or `PORT`) and the try Worker on
 
 ### Run against Stripe test mode
 
-The local entry uses StripeDev unless all five `STRIPE_*` bindings are in its environment, then real Stripe with the key's mode; it refuses a live key. Mail still lands in the local inbox. Use a sandbox's secret key and test-mode Prices.
+The local entry uses StripeDev unless all five `STRIPE_*` bindings are in its environment, then real Stripe with the key's mode; it refuses a live key. Mail still lands in the local inbox. Use a sandbox's secret key and test-mode Prices. StripeDev serves checkout and the notices but no invoices, refunds, disputes, or subscription reads, so a withdrawal, the closure of an account with a plan, or a price change never settles on it, and the local cron fails every run after one until the development database is reset: walk those here.
 
 `stripe listen` cannot carry billing's webhook: it forwards events at the account's default API version even with `--use-configured-webhooks`, and the Worker answers any version but the SDK's pinned `STRIPE_API_VERSION` with 400. Create an endpoint with `--api-version` set to the pinned version, the events under "Stripe setup", and a URL on a temporary tunnel, and use its signing secret as `STRIPE_WEBHOOK_SECRET`. The tunnel must reach only `POST /api/billing/webhook`, through a proxy that sends `Host: localhost:$PORT`, because the local origin holds login codes (`hosted/server/dev-host-guard.ts`) and refuses other hosts. That guard also refuses Stripe's cross-site return to `/billing`, so reopen the page by hand; a deployed origin has no such guard.
 
