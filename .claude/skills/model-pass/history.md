@@ -51,7 +51,7 @@ The two columns are **not comparable**: the first wave took the core library, bo
 
 ### Follow-up, 2026-11-10: the findings left for a decision
 
-Sixteen `high` findings went to the maintainer one at a time, each as its own PR, and all 16 merged: the 15 the table above counts as left for a decision, and one an implementer had skipped. The other 280 open findings (251 left for a decision and 29 of the 30 implementer skips, which that table counts on separate rows) were sorted by the model under test into 13 classes, each with one default, so the maintainer accepted a table rather than answering 280 questions, and gave about ten product answers, asked one at a time.
+Sixteen `high` findings went to the maintainer one at a time, each as its own PR, and all 16 merged: the 15 the table above counts as left for a decision, and one an implementer had skipped. The table also counts 252 other findings left for a decision; by the time the rest were digested, one of them had been fixed, so the digest took the remaining 251 and 29 of the 30 implementer skips (the table counts skips on their own row): 280 findings, sorted by the model under test into 13 classes, each with one default, so the maintainer accepted a table rather than answering 280 questions, and gave about ten product answers, asked one at a time.
 
 | Class | Count | Default |
 |---|---|---|
