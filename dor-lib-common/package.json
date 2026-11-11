@@ -20,6 +20,10 @@
     "./local-path": {
       "types": "./dist/local-path.d.ts",
       "default": "./dist/local-path.js"
+    },
+    "./terminal-context": {
+      "types": "./dist/terminal-context.d.ts",
+      "default": "./dist/terminal-context.js"
     }
   },
   "scripts": {
