@@ -35,7 +35,8 @@
  * `has_off_loopback`, `names_credential`, `serve_proxies_root`,
  * `check_tailscale_plaintext`, `atomic_symlink`, `cmd_rollback` and
  * `cmd_purge` are in the heredoc (the `manage` copy); `create_release_stage`,
- * `env_missing_keys`, `json_query` and `serve_state` are in the installer body.
+ * `env_missing_keys`, `json_query`, `serve_state` and `rollback_release` are in
+ * the installer body.
  *
  * Windows is not run: nothing in CI can run PowerShell, so its Serve reader
  * and gate — the same reading over the same text — are pinned textually by
@@ -449,6 +450,7 @@ export function run() {
           'json_query',
           'atomic_symlink',
           'cmd_rollback',
+          'rollback_release',
         ]
           .map((name) => extractFunction(text, name))
           .join('\n\n');
@@ -535,6 +537,35 @@ export function run() {
         ['cmd_rollback: refuses a target with no runtime, links untouched', rollback('noRuntime', { targetRuntime: false, restart: 0 }), 'refused new'],
         ['cmd_rollback: a failed restart is a failure', rollback('restartFails', { targetRuntime: true, restart: 1 }), 'refused old'],
       );
+      // The install's own restore after a failed update: a restart the service
+      // manager refuses is reported at once, not waited out and then read as
+      // health. The restored release answers in every case, so only the restart
+      // decides. `loaded` is macOS's `launchctl print`: an unloaded agent is
+      // bootstrapped by the wait instead, which no kickstart failure may cut short.
+      const restoreRoot = sq(join(fixtureDir, `restore-${platform}`));
+      const restore = (name, { loaded = 0, restart }) =>
+        `ROOT=${restoreRoot}/${name}; STAGE="$ROOT/releases/new"; OLD_RELEASE="$ROOT/releases/old"; ` +
+        'CURRENT_LINK="$ROOT/current"; PREVIOUS_LINK="$ROOT/previous"; ' +
+        'TEST_MODE=0; LABEL=label; UNIT=unit; LOOPBACK_PORT=3100; PLIST=plist; LOG_DIR=logs; ' +
+        'mkdir -p "$OLD_RELEASE" "$STAGE/runtime"; ' +
+        `ln -s ${sq(process.execPath)} "$STAGE/runtime/node"; ` +
+        'ln -s "$STAGE" "$CURRENT_LINK"; ln -s "$OLD_RELEASE" "$PREVIOUS_LINK"; ' +
+        'warn() { :; }; sleep() { :; }; curl() { return 0; }; listening_release() { echo old; }; ' +
+        'service_healthy() { [ "$1" = old ]; }; systemctl() { return ' + restart + '; }; ' +
+        `launchctl() { case "$1" in print) return ${loaded} ;; kickstart) return ${restart} ;; *) return 0 ;; esac; }; ` +
+        'if rollback_release > /dev/null 2>&1; then r=healthy; else r=failed; fi; ' +
+        'echo "$r $(basename "$(readlink "$CURRENT_LINK")")"';
+      allCases.push(
+        ['rollback_release: a restored release that restarts is healthy', restore('restarts', { restart: 0 }), 'healthy old'],
+        ['rollback_release: a failed restart is reported, not waited out', restore('restartFails', { restart: 1 }), 'failed old'],
+      );
+      if (platform === 'macOS') {
+        allCases.push([
+          'rollback_release: an unloaded agent is bootstrapped, not failed on kickstart',
+          restore('unloaded', { loaded: 1, restart: 1 }),
+          'healthy old',
+        ]);
+      }
       // Both runners must spell a JSON boolean the way callers compare it.
       const tsStatus = join(fixtureDir, 'ts-status.json');
       writeFileSync(tsStatus, '{"CurrentTailnet":{"MagicDNSEnabled":true}}');

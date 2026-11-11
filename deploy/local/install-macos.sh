@@ -1383,8 +1383,13 @@ rollback_release() {
   # itself and call it healthy. Once `current` is back on $OLD_RELEASE there is
   # genuinely no previous release, and the state must say so.
   rm -f "$PREVIOUS_LINK"
-  if [ "$TEST_MODE" != "1" ]; then
-    launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1 || true
+  # A loaded agent that refuses a restart will not come back by waiting, so say
+  # so at once. An unloaded one is not restarted here: kickstart cannot load a
+  # label, and the wait below bootstraps it instead.
+  if [ "$TEST_MODE" != "1" ] && launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1 &&
+    ! launchctl kickstart -k "gui/$UID/$LABEL" >/dev/null 2>&1; then
+    warn "restarting $LABEL after the restore failed. Inspect: launchctl print gui/$UID/$LABEL"
+    return 1
   fi
   # A 200 does not say who answered: the rejected release's own process holding
   # the port would otherwise read as the previous release being healthy again.
