@@ -20,7 +20,7 @@ import { startAlertProgram } from "../lib/alert-programs";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
-import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
+import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type MobileGestureInputId = import("dormouse-lib/lib/mobile-gesture-menu").MobileGestureInputId;
@@ -46,7 +46,7 @@ export function PocketTerminalExperience({
   interactive: boolean;
   fillViewport?: boolean;
 }) {
-  useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
+  useRestoredTheme(DOCS_THEME_ID);
   useMobileFontSize(true);
   const [terminalReady, setTerminalReady] = useState(false);
   const adapterRef = useRef<FakePtyAdapter | null>(null);
