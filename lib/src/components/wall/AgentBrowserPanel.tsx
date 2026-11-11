@@ -126,8 +126,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
       requestRenderSwap: (mode, swapViewport) => {
-        // The iframe renderer is single-frame: only the active tab survives.
-        // Warn + require a typed confirm when other tabs would be closed.
+        // A swap to another provider keeps only the active tab. Warn + require
+        // a typed confirm when other tabs would be closed.
         if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap({ mode, viewport: swapViewport });
         else swapRenderMode(mode, swapViewport);
       },

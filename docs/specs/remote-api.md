@@ -156,7 +156,7 @@ Source of truth: `TerminalDataEvent` in `remote-lib-common/src/remote/wire.ts`, 
 3. **If the requested size equals the current size**, the Burrow requests an owner-managed **PTY-only** repaint, the xterm staying at the requested size.
 4. The reply carries the program's modes as the owner's terminal holds them (`TerminalModes`). **A Client must put its terminal into every one, the defaults included, before the attachment's first `terminal.data`**: the repaint never sends them again.
 
-Source of truth: `resize` in `standalone/sidecar/pty-core.js`, shared by both hosts.
+Source of truth: `resize` in `standalone/sidecar/pty-core.js`, shared by both hosts; `readTerminalModes` and `terminalModesReplay` in `lib/src/lib/terminal-modes.ts`.
 
 **Normal-screen history does not regenerate on resize** and is absent from the shipped protocol (see [Future](#future): in-flight replay, then semantic scrollback).
 

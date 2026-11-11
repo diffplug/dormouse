@@ -589,9 +589,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           mgr.kill(id as string);
           return true;
         // A closed window's leftover PTYs: killed, their alert entries with
-        // them. A kill and not the graceful stop, whose POSIX signal an
-        // interactive shell ignores: with the owner gone nothing could send a
-        // second one, and the shell would run on with no pane. Never
+        // them. A kill and not the graceful stop: with the owner gone, no
+        // window waits for that stop's acknowledgement. Never
         // `pty:gracefulKill`, which the quit flush sends while windows still
         // own their PTYs.
         case 'pty:reap': {
