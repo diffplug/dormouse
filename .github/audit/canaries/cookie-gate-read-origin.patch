@@ -4,10 +4,10 @@ Expect: hosted/server/account-gate.ts
 Source: reverses part of #1104 (the cookie read gate admitted a sibling page's `same-site` read that presents no `Origin`)
 
 diff --git a/hosted/server/account-gate.ts b/hosted/server/account-gate.ts
-index 8c7c5aa89..dc5d94aab 100644
+index 08c4012ae..443865158 100644
 --- a/hosted/server/account-gate.ts
 +++ b/hosted/server/account-gate.ts
-@@ -19,16 +19,18 @@ export const accountQuery = <Row extends Record<string, unknown>>(
+@@ -21,15 +21,17 @@ export const accountQuery = <Row extends Record<string, unknown>>(
  ) => queryDatabase<Row>(host.databaseUrl, text, values);
  
  /**
@@ -18,8 +18,7 @@ index 8c7c5aa89..dc5d94aab 100644
 + * `Sec-Fetch-Site: same-origin` or `same-site` — the relay and voice pages
 + * share the login cookie — and an `Origin`, if presented, is exactly
 + * `origin`. Another site's page, a typed URL, and a request without Fetch
-  * Metadata all fail. {@link cookieEntitled}'s in-process login lookup vouches
-  * for a request its gate admitted by carrying the header itself.
+  * Metadata all fail.
   */
  export function ownPageRead(request: Request, origin: string): boolean {
    const presented = request.headers.get("origin");
@@ -31,10 +30,10 @@ index 8c7c5aa89..dc5d94aab 100644
    );
  }
 diff --git a/hosted/server/tests/boundary.test.ts b/hosted/server/tests/boundary.test.ts
-index df2554cb6..cf3b8c36a 100644
+index 35348a914..5b79df1f5 100644
 --- a/hosted/server/tests/boundary.test.ts
 +++ b/hosted/server/tests/boundary.test.ts
-@@ -749,7 +749,7 @@ test("the cookie gate refuses a foreign Origin on every method, and a read the a
+@@ -809,7 +809,7 @@ test("the cookie gate refuses a foreign Origin on every method, and a read the a
      // Only a read may omit `Origin`, and only a read needs Fetch Metadata.
      expect((await send(own)).status, method).toBe(read ? 204 : 403);
      expect((await send({ origin })).status, method).toBe(read ? 403 : 204);

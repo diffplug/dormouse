@@ -175,7 +175,7 @@ Rotate the key yearly and on any suspected exposure, with a reminder in Bitwarde
 
 ### Runtime secrets in the Workers
 
-Auth, mail, and OAuth secrets live in the account Worker, the enrollment secret and the Web Push (VAPID) pair in the relay Worker, and the ElevenLabs key in the voice Worker, never GitHub. In your own terminal, from `hosted/`, authenticate Wrangler to the production account and use its hidden prompt, never a command-line value:
+Auth, mail, OAuth, and Stripe secrets live in the account Worker, the enrollment secret and the Web Push (VAPID) pair in the relay Worker, and the ElevenLabs key in the voice Worker, never GitHub. In your own terminal, from `hosted/`, authenticate Wrangler to the production account and use its hidden prompt, never a command-line value:
 
 ```sh
 pnpm exec wrangler secret put AUTH_SECRET
@@ -184,6 +184,8 @@ pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
 pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
 pnpm exec wrangler secret put MICROSOFT_CLIENT_SECRET
 pnpm exec wrangler secret put APPLE_CLIENT_SECRET
+pnpm exec wrangler secret put STRIPE_SECRET_KEY
+pnpm exec wrangler secret put STRIPE_WEBHOOK_SECRET
 pnpm exec wrangler secret put RELAY_ENROLL_SECRET --config wrangler.relay.jsonc
 pnpm exec wrangler secret put ELEVENLABS_API_KEY --config wrangler.voice.jsonc
 ```
@@ -213,21 +215,21 @@ rm vapid.json
 
 The public half is public (`GET /api/push/config` serves it); the private half signs every push. Both are required for a production deploy: preflight refuses a relay Worker missing either. Cloudflare exposes a secret's name, never its value, so preflight cannot tell whether the two match; the relay answers push off for a pair that does not, and the release's live verification fails unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket re-registers it, so rotate only on compromise. Previews derive their own pair and never need this one.
 
-Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, and the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` in `wrangler.jsonc` (`docs/specs/hosted.md` -> "Billing"). Set none of them before checkout opens. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it. Before opening checkout, turn on Stripe's customer emails for successful payments: the `/billing` confirmation tells a buyer Stripe sends each receipt. Turn on cancellation in the customer portal too: the confirmation sends a member to Manage billing to cancel. The account Worker emails purchase confirmations, withdrawal acknowledgements, subscription notices (renewal and annual reminders, price changes, dispute suspensions and restorations), and the [billing alert](#billing-alert) through the same Postmark server as sign-in codes, from `support@dormouse.sh`, so that sender must be verified there.
+Billing stays closed, and its Cron Trigger idle, until the account Worker holds all five Stripe bindings: the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING`, which `wrangler.jsonc` carries with the live Prices, and the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` (`docs/specs/hosted.md` -> "Billing"). Set the two secrets with the prompts above right before the first release that carries the vars; preflight refuses an account Worker missing either. `db:migrate` grants `dormouse_app` the `pgstencil_billing` schema itself (`hosted/server/runtime-roles.sql`), since that schema is the package's and no hand grant can precede it. Keep Stripe's customer emails for successful payments on, since the `/billing` confirmation tells a buyer Stripe sends each receipt, and cancellation in the customer portal, since the confirmation sends a member to Manage billing to cancel. The account Worker emails purchase confirmations, withdrawal acknowledgements, subscription notices (renewal and annual reminders, price changes, dispute suspensions and restorations), and the [billing alert](#billing-alert) through the same Postmark server as sign-in codes, from `support@dormouse.sh`, so that sender must be verified there.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a credential pair do and do not enable. Facebook is outside this milestone.
 
 ## Stripe setup
 
-One Stripe account holds only Dormouse, because retries, customer emails, and the default portal are account-wide. Do this in its sandbox first, then live. Checked against a sandbox on 2026-11-03.
+One Stripe account holds only Dormouse, because retries, customer emails, and the default portal are account-wide. Do this in its sandbox first, then live. Checked against a sandbox on 2026-11-03; the live account was configured as below on 2026-11-11.
 
 - **Product:** one, with a tax code. **Prices:** recurring, USD, `tax_behavior=exclusive`, whole dollars matching `website/src/lib/hosted-pricing.ts`: `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING`, comma-separated in `FOUNDING_LADDER` order.
 - **Stripe Tax:** head office, default tax code, and a registration everywhere the business must collect. It collects only where registered.
-- **Customer portal, the default configuration:** cancel at period end with no proration or reason, payment methods, invoice history, email and address; **plan switching off**, since a Price billing does not know fails that owner's webhooks and leaving founding loses the lock.
-- **Revenue recovery:** Settings → Billing → Subscriptions and emails → Manage failed payments → Card payments: **Smart Retries, up to 8 times within 2 months**; on the first failed renewal attempt, leave the subscription past due; if all retries fail, cancel it; if a dispute is opened, leave it past due. The window must stay at least 30 days, since a founder keeps the lock only while Stripe retries (`docs/specs/pricing.md`); 1 month is 28 days, too short. Set on 2026-11-10 in the main account's test mode and the sandbox; **recheck it in live mode once live exists**, since whether live inherits it is unknown. Failed-payment emails on, since Hosted sends none, with a Stripe-hosted link.
+- **Customer portal, the default configuration:** cancel at period end with no proration or reason, payment methods, invoice history, email and address; **plan switching off**, since a Price billing does not know fails that owner's webhooks and leaving founding loses the lock; return URL `https://hosted.dormouse.sh/billing`.
+- **Revenue recovery:** Settings → Billing → Subscriptions and emails → Manage failed payments → Card payments: **Smart Retries, up to 8 times within 2 months**; on the first failed renewal attempt, leave the subscription past due; if all retries fail, cancel it; if a dispute is opened, leave it past due. The window must stay at least 30 days, since a founder keeps the lock only while Stripe retries (`docs/specs/pricing.md`); 1 month is 28 days, too short. Set on 2026-11-10 in the main account's test mode and the sandbox, and on 2026-11-11 in live mode. Failed-payment emails on, since Hosted sends none, with a Stripe-hosted link.
 - **Customer emails:** successful payments and refunds on.
 - **Link:** on. Its instant bank payments come with it, with no separate switch, so Checkout offers "Pay with Bank" beside cards; a refund to a bank account takes a few days to succeed, and a withdrawal or closure it pays stays unsettled until then.
-- **Webhook endpoint:** `https://hosted.dormouse.sh/api/billing/webhook`, created through the API with `api_version` set to the SDK's pinned `STRIPE_API_VERSION`, since any other version is refused with 400. Its events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`, `invoice.paid`, `invoice.payment_failed`.
+- **Webhook endpoint:** `https://hosted.dormouse.sh/api/billing/webhook`, created through the API with `api_version` set to the SDK's pinned `STRIPE_API_VERSION`, since any other version is refused with 400. Its events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`, `invoice.paid`, `invoice.payment_failed`. Live: `we_1UaVTo2BjdKGmhD6AK97ohnF`, created 2026-11-11 at `2026-10-28.endive`.
 
 ## Move the Stripe API version
 
