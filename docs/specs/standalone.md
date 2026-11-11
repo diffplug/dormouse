@@ -24,7 +24,7 @@ flowchart LR
 
 **Must display fatal bootstrap errors with a reload action**, for both Tauri and the browser harness, instead of leaving a blank window.
 
-**A second launch must raise the running `main` and exit before `setup`** (rationale).
+**On Windows and Linux a second launch must raise `main` and exit before `setup`**; on macOS LaunchServices raises the app, and only `open -n` or the bare binary starts another (rationale).
 
 Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry the step order and why.
 
@@ -134,7 +134,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 ### Workspace registry
 
-**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its ids and names on every change; only Rust reads them.
+**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its ids and names on every change.
 
 - **Must mint numbered ids only in Rust**, `workspace:<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`; at boot `boot_reserve_ids`, the Surface block in the same write) so a create mints synchronously; an id never renumbers and never collides across windows. Window labels and Surface ids (`surface_reserve_ids`; `docs/specs/transport.md` → "Surface ids") come off app-wide counters of their own.
 - **Must persist the Workspace and window counters as the Surface counter persists** (`docs/specs/transport.md` → "Surface ids"), all three high-water marks in `<state root>/ids.json`. **Must hand out a window label even when the write fails**, from memory (rationale).
@@ -363,7 +363,7 @@ Source of truth: `QuitMachine` in `standalone/src-tauri/src/quit_state.rs`; `sta
 
 - **A cancel is refused once the walk starts**, and **the walk tears `main` down last**.
 - **A window that leaves outside the flow is forgotten**, its vote never waited on. **A flow that runs out of windows exits.**
-- **A quit keeps every window's snapshot on disk** — the whole difference from a per-window close. A quit mid-transfer restores the Workspace at most once: from the target once it has published it, or from a source handed it back; a source torn down before its target adopts leaves it in no snapshot (§Arrival queue).
+- **A quit keeps every window's snapshot on disk.** A quit mid-transfer restores the Workspace at most once: from the target once it has published it, or from a source handed it back; a source torn down before its target adopts leaves it in no snapshot (§Arrival queue).
 
 ### Trigger interception
 
@@ -377,7 +377,7 @@ Every trigger funnels into `request_quit(app)`:
 | `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` once the cleanup gate clears (macOS; rationale) |
 | the `quit_restart` command | the update notice (`docs/specs/auto-update.md`), `dor app restart` | `request_quit` with the restart intent (§Restart) |
 
-**Never refuse an OS terminate**; that aborts the whole logout (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
+**Never refuse an OS terminate** (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
 
 Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 

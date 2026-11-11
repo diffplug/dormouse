@@ -4698,6 +4698,7 @@ const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 const REOPEN_MENU_ITEM_ID: &str = "dormouse-reopen-closed";
 
 /// A second launch's hand-off: bring the running app forward instead.
+#[cfg(not(target_os = "macos"))]
 fn raise_existing_window(app: &AppHandle) {
     let window = app
         .get_webview_window(routing::MAIN_LABEL)
@@ -4710,14 +4711,20 @@ fn raise_existing_window(app: &AppHandle) {
 
 pub fn run() {
     panic_policy::abort_on_panic();
-    tauri::Builder::default()
-        // First, before any other plugin or `setup` touches the state root: a
-        // second process for this identifier would sweep, merge and write the
-        // same `sessions/`, `ids.json` and `burrow.json` as this one. It hands
-        // off to the running app and exits. The lock is released in
-        // `cleanup_before_exit`, which the relaunch in `RunEvent::Exit` runs
-        // before it starts the successor.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| raise_existing_window(app)))
+    let builder = tauri::Builder::default();
+    // First, before any other plugin or `setup` touches the state root: a
+    // second process for this identifier would sweep, merge and write the
+    // same `sessions/`, `ids.json` and `burrow.json` as this one. It hands off
+    // to the running app and exits. The lock is released in
+    // `cleanup_before_exit`, which the relaunch in `RunEvent::Exit` runs before
+    // it starts the successor. Windows and Linux only: there the lock is the
+    // user's own (a session mutex, a per-user D-Bus name), while the macOS lock
+    // is a socket at a fixed path in the shared `/tmp`, which another user could
+    // hold to take a launch's argv and turn it away. macOS LaunchServices
+    // already raises the running app for an ordinary launch.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| raise_existing_window(app)));
+    builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Replace Tauri's default menu (docs/specs/standalone.md -> Application menu).
@@ -5867,11 +5874,15 @@ mod tests {
     /// starts, or the successor would hand off to this exiting process.
     #[test]
     fn the_single_instance_lock_is_first_and_freed_before_a_relaunch() {
-        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        // A Windows checkout has CRLF line endings; the cfg line is matched in its LF form.
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        let source = source.split("#[cfg(test)]").next().unwrap();
         let builder = source.split("pub fn run() {").nth(1).unwrap();
         let first = builder.find(".plugin(").unwrap();
         // Split so the outbound lint, which counts registrations in this file, skips it.
         assert!(builder[first..].starts_with(concat!(".plugin(", "tauri_plugin_single_instance::init(")));
+        // Off on macOS, where its lock would be a socket in the shared `/tmp`.
+        assert!(builder[..first].trim_end().ends_with("#[cfg(not(target_os = \"macos\"))]\n    let builder = builder"));
         let exit = source.split("RunEvent::Exit => {").nth(1).unwrap().split("_ => {}").next().unwrap();
         assert!(exit.find("app.cleanup_before_exit()").unwrap() < exit.find("tauri::process::restart(").unwrap());
     }
