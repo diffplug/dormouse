@@ -355,7 +355,7 @@ Source of truth: `lib/src/components/RemoteControlSection.tsx`; `lib/src/remote/
 
 ## Running it
 
-1. **Relay + Pocket**: `pnpm dev:relay` builds both, binds loopback, and prints the origin to use for the Burrow, enrollment, and Pocket; `PORT=3000 pnpm dev:relay` keeps it across restarts. A real phone needs `DORMOUSE_ORIGIN` set to a TLS origin. On localhost push is off ("Web Push") unless `DORMOUSE_VAPID_SUBJECT` supplies a contact. Its state is this worktree's (`DEV_STATE_DIR`) whatever the cwd, never the installed app's: a `DORMOUSE_STATE_DIR` equal to `DORMOUSE_RECOVERY_DIR`, which an older Dormouse leaks into its panes, reads as unset.
+1. **Relay + Pocket**: `pnpm dev:relay` builds both, binds loopback, and prints the origin to use for the Burrow, enrollment, and Pocket; `PORT=3000 pnpm dev:relay` keeps it across restarts. A real phone needs `DORMOUSE_ORIGIN` set to a TLS origin. On localhost push is off ("Web Push") unless `DORMOUSE_VAPID_SUBJECT` supplies a contact. Its state is this worktree's (`DEV_STATE_DIR`) whatever the cwd, unless `DORMOUSE_STATE_DIR` names another.
 2. **Burrow**: a dev build baked with that origin ("Relay origin"), e.g. `DORMOUSE_RELAY_ORIGIN=http://localhost:3000 pnpm dev:standalone`, enrolled with the `password` from the generated `setup-password.json`. `node relay/scripts/fake-burrow.mjs <origin>` is a headless stand-in that prints a pairing URL and auto-approves.
 3. **Phone**: open the Relay origin there, then set up a phone from the laptop (`docs/specs/pocket-app.md`).
 
