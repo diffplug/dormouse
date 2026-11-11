@@ -390,12 +390,28 @@ describe('restore', () => {
     expect(leaves(out.tree).sort()).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('degrades to neighbor for a two-child collapse (sibling survives, fingerprint cannot match)', () => {
-    const original = tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5]));
+  it('restores exact, keeping its weight, after a two-child split collapsed to its lone leaf sibling', () => {
+    const original = tree(mk('row', [leaf('a'), 0.7], [leaf('b'), 0.3]));
     const removed = remove(original, 'b'); // collapses to leaf a
     const out = restore(removed.tree, removed.token!);
+    expect(out.tier).toBe('exact');
+    expect(out.tree).toEqual(original);
+  });
+
+  it('restores exact beside a lone leaf sibling the collapse flattened into its grandparent', () => {
+    const original = tree(mk('row', [leaf('x'), 0.5], [mk('col', [leaf('a'), 0.7], [leaf('b'), 0.3]), 0.5]));
+    const removed = remove(original, 'b');
+    const out = restore(removed.tree, removed.token!);
+    expect(out.tier).toBe('exact');
+    expect(out.tree).toEqual(original);
+  });
+
+  it('degrades to neighbor once a lone leaf sibling sits in a split along the edge', () => {
+    const original = tree(mk('row', [leaf('a'), 0.7], [leaf('b'), 0.3]));
+    const removed = remove(original, 'b');
+    const changed = split(removed.tree, 'a', 'left', 'x').tree;
+    const out = restore(changed, removed.token!);
     expect(out.tier).toBe('neighbor');
-    expect(out.tree).toEqual(tree(mk('row', [leaf('a'), 0.5], [leaf('b'), 0.5])));
   });
 
   it('restores exact beside a split sibling after the removed parent collapsed', () => {
