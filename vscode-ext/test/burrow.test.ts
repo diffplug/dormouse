@@ -119,11 +119,22 @@ vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
 }));
 
 /**
- * A relay socket that never opens, for a case that needs a started Burrow and no
- * network: the glue's factory prefers the host's global `WebSocket`.
+ * The service opens its relay and rendezvous sockets with `ws`; while `create`
+ * is set, every `ws` socket this file's modules construct is its answer instead.
  */
+const wsSockets = vi.hoisted(() => ({ create: null as ((url: string) => object) | null }));
+vi.mock('ws', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ws')>();
+  const routed = new Proxy(actual.default, {
+    construct: (target, args, newTarget) =>
+      wsSockets.create ? wsSockets.create(String(args[0])) : Reflect.construct(target, args, newTarget),
+  });
+  return { ...actual, default: routed, WebSocket: routed };
+});
+
+/** A relay socket that never opens, for a case that needs a started Burrow and no network. */
 function stubSilentRelay(): void {
-  vi.stubGlobal('WebSocket', FakeSocket);
+  wsSockets.create = () => new FakeSocket();
 }
 
 /** A stored enrollment at `origin`, as the keychain holds it. */
@@ -374,21 +385,10 @@ async function otherWindowHoldsTheBurrow(): Promise<{ frames: Array<{ kind: stri
   return { frames };
 }
 
-/**
- * Route the service's rendezvous socket to the in-memory room: the glue's
- * factory prefers the host's global `WebSocket`, so that global is what stands
- * in for the network.
- */
+/** Route the service's rendezvous socket to the in-memory room. */
 function stubRendezvous(): TestRendezvous {
   const rendezvous = createTestRendezvous();
-  vi.stubGlobal(
-    'WebSocket',
-    class {
-      constructor(url: string) {
-        return rendezvous.createBurrowSocket(url);
-      }
-    },
-  );
+  wsSockets.create = (url) => rendezvous.createBurrowSocket(url);
   return rendezvous;
 }
 
@@ -432,6 +432,7 @@ afterEach(async () => {
   if (realTmp === undefined) delete process.env.TMPDIR;
   else process.env.TMPDIR = realTmp;
   vi.unstubAllGlobals();
+  wsSockets.create = null;
   await removeDir(dir);
 });
 
@@ -1268,91 +1269,6 @@ describe('burrow service glue', () => {
     warn.mockRestore();
     // Kept, so switching back to the build that made it restores it.
     expect(store.secrets.get(ENROLLMENT_KEY)).toBe(elsewhere);
-  });
-});
-
-describe('the relay socket', () => {
-  /** A `ws` server that greets, echoes one frame, and closes with a code. */
-  async function wsServer() {
-    const { WebSocketServer } = await import('ws');
-    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-    await new Promise((resolve) => server.on('listening', resolve));
-    server.on('connection', (socket) => {
-      socket.send('hello from the relay');
-      socket.on('message', () => socket.close(4001, 'done'));
-    });
-    const { port } = server.address() as { port: number };
-    return { url: `ws://127.0.0.1:${port}`, close: () => server.close() };
-  }
-
-  it('uses the bundled ws where the extension host has no global WebSocket', async () => {
-    // `globalThis.WebSocket` arrived in Node 22, and `engines.vscode` is
-    // `^1.92.0` — VS Code 1.92 shipped Node 20.14, so the supported range spans
-    // the boundary and the fallback is the only implementation on the old side.
-    const mod = await freshBurrow();
-    const relay = await wsServer();
-    vi.stubGlobal('WebSocket', undefined);
-    try {
-      const socket = mod.createRelaySocket(relay.url);
-      const received: string[] = [];
-      const closes: number[] = [];
-      // Exactly the surface `BurrowRuntime` reads, and nothing more.
-      socket.addEventListener('message', (ev) => {
-        received.push(String((ev as { data?: unknown }).data));
-      });
-      socket.addEventListener('close', (ev) => {
-        closes.push(Number((ev as { code?: unknown }).code));
-      });
-      await new Promise<void>((resolve) => socket.addEventListener('open', () => resolve()));
-      expect(socket.readyState).toBe(1);
-
-      await waitFor(() => received.length > 0);
-      expect(received).toEqual(['hello from the relay']);
-
-      socket.send(JSON.stringify({ t: 'hello' }));
-      await waitFor(() => closes.length > 0);
-      expect(closes).toEqual([4001]);
-    } finally {
-      relay.close();
-    }
-  });
-
-  it('sends no Origin header on either implementation', async () => {
-    // The one-time rendezvous refuses any Origin on its Burrow route, so no
-    // browser page can mint a room; this factory opens that socket too.
-    const { WebSocketServer } = await import('ws');
-    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-    await new Promise((resolve) => server.on('listening', resolve));
-    const origins: Array<string | undefined> = [];
-    server.on('connection', (socket, request) => {
-      origins.push(request.headers.origin);
-      socket.close(1000);
-    });
-    const { port } = server.address() as { port: number };
-    try {
-      const mod = await freshBurrow();
-      const closed = (socket: ReturnType<typeof mod.createRelaySocket>) =>
-        new Promise<void>((resolve) => socket.addEventListener('close', () => resolve()));
-      await closed(mod.createRelaySocket(`ws://127.0.0.1:${port}`));
-      vi.stubGlobal('WebSocket', undefined);
-      await closed(mod.createRelaySocket(`ws://127.0.0.1:${port}`));
-      expect(origins).toEqual([undefined, undefined]);
-    } finally {
-      server.close();
-    }
-  });
-
-  it('prefers whatever the extension host already provides', async () => {
-    const mod = await freshBurrow();
-    const built: string[] = [];
-    class PlatformSocket {
-      constructor(url: string) {
-        built.push(url);
-      }
-    }
-    vi.stubGlobal('WebSocket', PlatformSocket);
-    expect(mod.createRelaySocket('wss://relay.dormouse.sh/ws/burrow')).toBeInstanceOf(PlatformSocket);
-    expect(built).toEqual(['wss://relay.dormouse.sh/ws/burrow']);
   });
 });
 

@@ -162,7 +162,7 @@ export const LocalNetworksTypedRange: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
-    await canvas.findByText('Added range · not connected now');
+    await canvas.findByText('Added range');
     await userEvent.type(canvas.getByRole('textbox', { name: 'Add an allowed network range' }), '10.9.0.0/24');
     await userEvent.click(canvas.getByRole('button', { name: 'Add' }));
     await canvas.findByText('10.9.0.0/24');

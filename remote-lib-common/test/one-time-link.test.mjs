@@ -18,10 +18,12 @@ import {
   ONE_TIME_LINK_MAX_LENGTH,
   ONE_TIME_LINK_VERSION,
   ONE_TIME_PAGE_PATH,
+  PAIRING_QR_URL_MAX_LENGTH,
   e2eConnectionPrologue,
   e2eOneTimePrologue,
   e2ePairingPrologue,
   formatOneTimeLinkUrl,
+  formatPairingInvitationUrl,
   fromBase64Url,
   isAcceptedRelayOrigin,
   lengthPrefixedConcat,
@@ -176,11 +178,13 @@ function originOfLength(length) {
   return `https://${labels.join('.')}.dev`;
 }
 
-test('the longest accepted origin still mints and parses', async () => {
+/** The longest origin a one-time link fits: everything else in it is fixed. */
+const MAX_ONE_TIME_ORIGIN_LENGTH = 167;
+
+test('the longest origin a one-time link fits still mints and parses', async () => {
   assert.equal(ONE_TIME_LINK_MAX_LENGTH, 256);
-  assert.equal(MAX_RELAY_ORIGIN_LENGTH, 167);
-  const origin = originOfLength(MAX_RELAY_ORIGIN_LENGTH);
-  assert.equal(origin.length, MAX_RELAY_ORIGIN_LENGTH);
+  const origin = originOfLength(MAX_ONE_TIME_ORIGIN_LENGTH);
+  assert.equal(origin.length, MAX_ONE_TIME_ORIGIN_LENGTH);
   assert.equal(new URL(origin).origin, origin, 'the test origin must be one a URL normalizes to itself');
   const url = formatOneTimeLinkUrl(origin, LINK);
   assert.equal(url.length, ONE_TIME_LINK_MAX_LENGTH);
@@ -188,8 +192,8 @@ test('the longest accepted origin still mints and parses', async () => {
 });
 
 test('one character more is refused at mint time and by the parser', async () => {
-  const origin = originOfLength(MAX_RELAY_ORIGIN_LENGTH + 1);
-  assert.equal(origin.length, MAX_RELAY_ORIGIN_LENGTH + 1);
+  const origin = originOfLength(MAX_ONE_TIME_ORIGIN_LENGTH + 1);
+  assert.equal(origin.length, MAX_ONE_TIME_ORIGIN_LENGTH + 1);
   assert.throws(() => formatOneTimeLinkUrl(origin, LINK), /257 characters/);
   const overLong = urlOf(FIELDS, origin);
   assert.equal(overLong.length, ONE_TIME_LINK_MAX_LENGTH + 1);
@@ -224,6 +228,24 @@ test('a build bakes only a bare link-scheme origin that fits a link', () => {
   ]) {
     assert.equal(isAcceptedRelayOrigin(origin), false, String(origin));
   }
+});
+
+test('a build bakes no origin a pairing QR cannot carry', () => {
+  // A self-host build's one-time link names Hosted's page, never the baked
+  // origin; its pairing QR does, and fits the shorter origin of the two.
+  const invitation = {
+    burrowId: ROOM_ID,
+    inviteId: ROOM_ID,
+    expiry: EXPIRY,
+    setupToken: EPH_PUB,
+    ephPub: fromBase64Url(EPH_PUB),
+    ephPubBase64Url: EPH_PUB,
+  };
+  const longest = originOfLength(MAX_RELAY_ORIGIN_LENGTH);
+  assert.equal(longest.length, MAX_RELAY_ORIGIN_LENGTH);
+  assert.equal(isAcceptedRelayOrigin(longest), true);
+  assert.equal(formatPairingInvitationUrl(longest, invitation).length, PAIRING_QR_URL_MAX_LENGTH);
+  assert.equal(isAcceptedRelayOrigin(originOfLength(MAX_RELAY_ORIGIN_LENGTH + 1)), false);
 });
 
 // --- One rejection per parser rule ----------------------------------------

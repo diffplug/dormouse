@@ -60,6 +60,7 @@ vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
 import {
   API_ROUTES,
   MAX_PENDING_PAIRINGS,
+  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   NOT_ENTITLED_ERROR,
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
@@ -214,14 +215,9 @@ const INTERFACES: NetworkInterfaceInfo[] = [
   { id: 'en0', label: 'Local network', kind: 'lan', prefixes: [LAN] },
 ];
 
-/**
- * A durable store whose contents a test can seed and read back — not
- * `createEphemeralBurrowStateStore`, whose whole point is `persistent: false`,
- * which is what the adopt cases turn on.
- */
+/** A store whose contents a test can seed and read back. */
 function memoryStore(seed: Seed = {}): MemoryStore {
   const store: MemoryStore = {
-    persistent: true,
     enrollment: seed.enrollment ?? null,
     acl: seed.acl ?? {},
     network: seed.network ?? null,
@@ -608,6 +604,7 @@ describe('status', () => {
       connection: 'connected',
       pairedClients: 1,
       suggestedLabel: `${hostname()} (VS Code)`,
+      label: ENROLLMENT.label,
       offer: false,
       hostedEnrollment: null,
       accountOrigin: null,
@@ -846,6 +843,23 @@ describe('enrollOffer', () => {
 });
 
 describe('start', () => {
+  it('retries a start whose store read failed before answering status', async () => {
+    // A store that refuses one read (a locked keychain, a busy file) leaves the
+    // enrollment unread, not absent: "not enrolled" would offer an enrollment
+    // that overwrites it.
+    createService({ enrollment: ENROLLMENT });
+    const seeded = store.loadEnrollment;
+    store.loadEnrollment = async () => {
+      throw new Error('EBUSY: resource busy or locked');
+    };
+    await expect(service.start()).rejects.toThrow('EBUSY');
+
+    expect((await command('status')).error).toContain('EBUSY');
+    store.loadEnrollment = seeded;
+    expect((await command('status')).result).toMatchObject({ enrolled: true, burrowId: ENROLLMENT.burrowId });
+    expect(sockets).toHaveLength(1);
+  });
+
   it('keeps a Burrow whose Noise static halves disagree down, loudly, touching nothing', async () => {
     // A corrupt or hand-edited state file: starting would present an identity
     // every paired Client reads as changed (docs/specs/remote-security-model.md
@@ -2201,6 +2215,26 @@ describe('paired devices and revocation', () => {
     expect(entries[0]!.at).toBe(ACCESS_LOG_MAX_REFUSALS + 1);
     expect(entries.at(-1)!.event).toBe('revoked');
   });
+
+  it('never overwrites an access log it could not read', async () => {
+    const seeded = [{ at: 1, event: 'ended' as const, device: BROWSER }];
+    createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] }, accessLog: seeded });
+    const readable = store.loadAccessLog;
+    store.loadAccessLog = async () => {
+      throw new Error('EACCES: permission denied');
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await service.start();
+    await command('revokeDevice', { id: phoneId });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('[burrow] could not read the access log', expect.anything()));
+    warn.mockRestore();
+    expect(store.accessLog).toEqual(seeded);
+
+    // Read again next time, not remembered as empty.
+    store.loadAccessLog = readable;
+    const { entries } = (await command('accessLog')).result as AccessLogResult;
+    expect(entries).toEqual(seeded);
+  });
 });
 
 describe('Relay-named revocation', () => {
@@ -2955,9 +2989,9 @@ describe('one-time connection', () => {
     expect(sent).toHaveLength(before);
   });
 
-  it('opens the rendezvous with no Origin header, over Node’s own WebSocket', async () => {
+  it('opens the rendezvous with no Origin header, over the default socket', async () => {
     // The Burrow route refuses any Origin, so that no browser page can mint a
-    // room; the default factory is the global the sidecar runs on.
+    // room; the default factory is the one both hosts run on.
     const { WebSocketServer } = await import('ws');
     const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
     await new Promise((resolve) => server.on('listening', resolve));
@@ -2974,6 +3008,29 @@ describe('one-time connection', () => {
       createHostedService(undefined, { relay: { origin, mode: 'hosted' }, createWebSocket: undefined });
       expect(await open()).toMatchObject({ status: 'waiting' });
       expect(upgrades).toEqual([{ url: ONE_TIME_WS_ROUTES.burrow, origin: undefined }]);
+    } finally {
+      service.dispose();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('closes the default socket on an oversized frame, before buffering it', async () => {
+    // Node's global WebSocket takes no `maxPayload`, so on it a hostile relay
+    // could make the process holding every PTY buffer a frame of any size.
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((resolve) => server.on('listening', resolve));
+    const { port } = server.address() as { port: number };
+    const closes: number[] = [];
+    server.on('connection', (socket) => {
+      socket.on('close', (code) => closes.push(code));
+      socket.send('x'.repeat(MAX_RELAY_TO_BURROW_FRAME_LENGTH + 1));
+    });
+    try {
+      const origin = `http://127.0.0.1:${port}`;
+      createHostedService(undefined, { relay: { origin, mode: 'hosted' }, createWebSocket: undefined });
+      void command('oneTimeOpen');
+      await vi.waitFor(() => expect(closes).toEqual([1009]));
     } finally {
       service.dispose();
       await new Promise((resolve) => server.close(resolve));
@@ -3984,6 +4041,21 @@ describe('Hosted enrollment', () => {
   it('is refused on an enrolled machine, before any request', async () => {
     hosted({ enrollment: ENROLLMENT });
     await service.start();
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain(
+      `already enrolled as Burrow ${BURROW_ID}`,
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it('is refused on an enrolled machine whose start could not read the store', async () => {
+    hosted({ enrollment: ENROLLMENT });
+    const seeded = store.loadEnrollment;
+    store.loadEnrollment = async () => {
+      store.loadEnrollment = seeded;
+      throw new Error('the keychain is locked');
+    };
+    await expect(service.start()).rejects.toThrow('locked');
+
     expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain(
       `already enrolled as Burrow ${BURROW_ID}`,
     );

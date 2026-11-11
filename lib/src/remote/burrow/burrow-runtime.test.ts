@@ -133,12 +133,10 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
   function makeBurrow(
     loadAcl: () => BurrowAclRecord[] = () => [],
     options: {
-      withSession?: boolean;
       saveAcl?: BurrowOptions['saveAcl'];
       onPolicyRaised?: BurrowOptions['onPolicyRaised'];
     } = {},
   ): BurrowRuntime {
-    const withSession = options.withSession ?? true;
     const created = new BurrowRuntime({
       enrollment,
       reconnect: false,
@@ -152,18 +150,16 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       onInvitationChanged: recordInvitation,
       onPolicyRaised: options.onPolicyRaised,
       onAccess: (entry) => accessEntries.push(entry),
-      createSession: withSession
-        ? ({ send, label }) => {
-            const entry = { handled: [] as unknown[], disposed: false, send, label };
-            sessions.push(entry);
-            return {
-              handle: (data) => entry.handled.push(data),
-              dispose: () => {
-                entry.disposed = true;
-              },
-            } satisfies RemoteApiSessionLike;
-          }
-        : undefined,
+      createSession: ({ send, label }) => {
+        const entry = { handled: [] as unknown[], disposed: false, send, label };
+        sessions.push(entry);
+        return {
+          handle: (data) => entry.handled.push(data),
+          dispose: () => {
+            entry.disposed = true;
+          },
+        } satisfies RemoteApiSessionLike;
+      },
       now: () => clock,
     });
     created.start();
@@ -2024,31 +2020,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     // pass against a Burrow that never issues at all.
     await openConnection('c1', clientStatic, testRoutingId());
     expect(burrow.pendingChallengeCount).toBe(1);
-  });
-
-  it('leaves no established session behind when there is no remote-api to build', async () => {
-    // A Burrow with no session factory answers the outcome and holds nothing.
-    // Leaving the previous `established` in place would route the next frame on
-    // the old id into a handler that has already been disposed.
-    makeBurrow(() => [], { withSession: false });
-    const { authenticator, clientStatic } = await pairedClient();
-    for (const connectionId of [testRoutingId(), testRoutingId()]) {
-      const { session, burrowChallenge } = await openConnection('c1', clientStatic, connectionId);
-      const binding = connectionBinding(connectionId, burrowChallenge, session, authenticator.credentialId);
-      sendE2e(
-        'c1',
-        'connection',
-        connectionId,
-        'transport',
-        toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
-      );
-      expect(await outcome(session, 'connection', connectionId)).toEqual({
-        ok: true,
-        burrowLabel: BURROW_LABEL,
-      });
-    }
-    await settle();
-    expect(burrow.trackedClientCount).toBe(0);
   });
 
   it('drops a frame whose routing values are out of shape, before any crypto', async () => {

@@ -8,11 +8,13 @@
  */
 
 import { hostname } from 'node:os';
+import WebSocket from 'ws';
 import { enrollVerificationUrl, SELF_HOST_DEVICE_CODE_REFUSAL } from './hosted-enrollment-url';
 import {
   API_ROUTES,
   BurrowAcl,
   MAX_PENDING_PAIRINGS,
+  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   knownPairingDeviceLabel,
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
@@ -159,10 +161,10 @@ export interface BurrowServiceOptions {
    */
   relay: RelayBuild;
   /**
-   * Opens the relay socket and the one-time rendezvous alike. **Must send no
-   * `Origin` header** — the rendezvous refuses one, so that no browser page can
-   * mint a room — which Node's global `WebSocket` (the default) and `ws` both
-   * already do. Reached only through the service's transport guard, as is
+   * Opens the relay socket and the one-time rendezvous alike; defaults to
+   * {@link createRelaySocket}, which both hosts use. **Must send no `Origin`
+   * header** — the rendezvous refuses one, so that no browser page can mint a
+   * room. Reached only through the service's transport guard, as is
    * {@link BurrowServiceOptions.fetch}.
    */
   createWebSocket?: (url: string) => WebSocketLike;
@@ -190,6 +192,19 @@ export interface BurrowServiceOptions {
   /** This machine's interfaces, for `networkPolicy`; injected by the tests. */
   listInterfaces?: () => NetworkInterfaceInfo[];
 
+}
+
+/**
+ * The relay socket and the one-time rendezvous, in both hosts: `ws`, never
+ * Node's global `WebSocket`, because only `ws` takes a `maxPayload`. Without
+ * one a hostile Relay could make this process — the one holding every PTY —
+ * buffer a frame of any size before `BurrowRuntime` measures it; capped at the
+ * largest legal frame, an oversized one closes the socket unbuffered. `ws`
+ * sends no `Origin` header. Its optional native accelerators (`bufferutil`,
+ * `utf-8-validate`) are left unbundled; it falls back to its JS paths.
+ */
+function createRelaySocket(url: string): WebSocketLike {
+  return new WebSocket(url, { maxPayload: MAX_RELAY_TO_BURROW_FRAME_LENGTH }) as unknown as WebSocketLike;
 }
 
 /**
@@ -481,6 +496,13 @@ export class BurrowService {
    */
   #enrollment: BurrowEnrollment | null = null;
   /**
+   * Set while the last `#start` has not finished: a store that refused a read
+   * leaves this machine's enrollment unknown, not absent, so `status` and every
+   * enroll path retry the start first (`#retryFailedStart`) rather than answer
+   * "not enrolled" and let a new enrollment overwrite the unread one.
+   */
+  #startFailed = false;
+  /**
    * The network policy as last read or set; this service is its only writer.
    * **`null` until read, and read as `nothing` until then** (`#level`).
    */
@@ -596,8 +618,7 @@ export class BurrowService {
     // disposed included (`#level`) — so a path that forgets its own check still
     // opens nothing. Each feature keeps its own check, for the error a person
     // reads.
-    const createWebSocket =
-      options.createWebSocket ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
+    const createWebSocket = options.createWebSocket ?? createRelaySocket;
     this.#createWebSocket = (url) => {
       this.#refuseNothing();
       return createWebSocket(url);
@@ -654,11 +675,17 @@ export class BurrowService {
   }
 
   async #start(): Promise<void> {
+    this.#startFailed = true;
     // The policy before anything: a read that fails leaves the Burrow down.
     await this.#networkPolicy();
     const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
     if (enrollment) await this.#startBurrow(enrollment);
+    this.#startFailed = false;
+  }
 
+  /** Run a start that failed again, throwing if it fails again. **Runs on `#serialize`.** */
+  async #retryFailedStart(): Promise<void> {
+    if (this.#startFailed && !this.#disposed) await this.#start();
   }
 
   /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
@@ -774,6 +801,7 @@ export class BurrowService {
 
   async #enroll(params: EnrollParams): Promise<EnrollResult> {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
+    await this.#retryFailedStart();
     await this.#networkPolicy();
     this.#refuseNothing();
     return this.#enrollWith({ password: params.password }, this.#labelFrom(params));
@@ -808,6 +836,7 @@ export class BurrowService {
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
+    await this.#retryFailedStart();
     await this.#networkPolicy();
     this.#refuseNothing();
     // Re-read at the click, and refused before the token leaves the machine
@@ -893,6 +922,7 @@ export class BurrowService {
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
     if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
     const label = this.#labelFrom(params);
+    if (this.#startFailed) await this.#serialize(() => this.#retryFailedStart());
     this.#refuseEnrolled();
     return this.#hostedEnrollment.begin(label);
   }
@@ -990,6 +1020,7 @@ export class BurrowService {
    * nothing to offer, so the 2 s poll must not stat a file every tick.
    */
   async #status(): Promise<BurrowConsoleStatus> {
+    if (this.#startFailed) await this.#serialize(() => this.#retryFailedStart());
     const offer = this.#enrollment ? null : await readUsableOffer(this.#relay, this.#readOffer);
     const enrollment = this.#enrollment;
     const hostedEnrollment = this.#hostedEnrollment.state();
@@ -1006,6 +1037,7 @@ export class BurrowService {
       connection: this.#burrow?.status ?? 'stopped',
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
       suggestedLabel: suggestedBurrowLabel(this.#kind),
+      label: enrollment.label,
       offer: false,
       hostedEnrollment,
       accountOrigin,
@@ -1395,15 +1427,18 @@ export class BurrowService {
 
   /** The whole log, after every append already queued. */
   #readAccessLog(): Promise<AccessLogResult> {
-    return this.#accessLogQueue(async () => ({ entries: [...(await this.#loadAccessLog())] }));
+    return this.#accessLogQueue(async () => ({ entries: [...((await this.#loadAccessLog()) ?? [])] }));
   }
 
   /** On {@link #accessLogQueue} only. */
-  async #loadAccessLog(): Promise<AccessLogEntry[]> {
-    this.#accessLog ??= await this.#store.loadAccessLog().catch((error: unknown) => {
+  /** The log, or `null` while the store cannot read it: a failed read is retried next time, never kept. */
+  async #loadAccessLog(): Promise<AccessLogEntry[] | null> {
+    try {
+      this.#accessLog ??= await this.#store.loadAccessLog();
+    } catch (error) {
       console.warn('[burrow] could not read the access log', error);
-      return [];
-    });
+      return null;
+    }
     return this.#accessLog;
   }
 
@@ -1416,7 +1451,11 @@ export class BurrowService {
     const entry = parseAccessLogEntry(raw);
     if (!entry) return;
     void this.#accessLogQueue(async () => {
-      this.#accessLog = appendAccessLog(await this.#loadAccessLog(), entry);
+      // An entry over a log that could not be read is dropped: saving it
+      // would replace the whole log with one entry.
+      const log = await this.#loadAccessLog();
+      if (!log) return;
+      this.#accessLog = appendAccessLog(log, entry);
       this.#emit({ name: 'access' });
       await this.#store.saveAccessLog(this.#accessLog);
     }).catch((error: unknown) => {

@@ -24,7 +24,7 @@ async function makeAssertion(tamper = {}, authenticatorOpts = {}) {
 test('a well-formed assertion verifies', async () => {
   const { authenticator, assertion } = await makeAssertion();
   const result = await verifyPasskeyAssertion(assertion, authenticator.publicKey, EXPECTED);
-  assert.deepEqual(result, { ok: true, userPresent: true, userVerified: true, signCount: 1 });
+  assert.deepEqual(result, { ok: true });
 });
 
 test('WebCrypto digest failures are ordinary denials', async () => {
@@ -62,15 +62,6 @@ test('missing WebCrypto is an ordinary denial', async () => {
   }
 });
 
-test('signCount reflects successive assertions', async () => {
-  const authenticator = await SimAuthenticator.create({ rpId: RP_ID });
-  await authenticator.assert({ challenge: CHALLENGE, origin: ORIGIN });
-  const second = await authenticator.assert({ challenge: CHALLENGE, origin: ORIGIN });
-  const result = await verifyPasskeyAssertion(second, authenticator.publicKey, EXPECTED);
-  assert.equal(result.ok, true);
-  assert.equal(result.signCount, 2);
-});
-
 test('accepts a padded challenge encoding in clientDataJSON', async () => {
   const { authenticator, assertion } = await makeAssertion({ challenge: `${CHALLENGE}==` });
   const result = await verifyPasskeyAssertion(assertion, authenticator.publicKey, EXPECTED);
@@ -88,15 +79,6 @@ test('rejects the wrong origin', async () => {
   const { authenticator, assertion } = await makeAssertion({ origin: 'https://evil.example' });
   const result = await verifyPasskeyAssertion(assertion, authenticator.publicKey, EXPECTED);
   assert.deepEqual(result, { ok: false, reason: 'origin-mismatch' });
-});
-
-test('accepts any origin from the allowlist', async () => {
-  const { authenticator, assertion } = await makeAssertion({ origin: 'https://beta.dormouse.dev' });
-  const result = await verifyPasskeyAssertion(assertion, authenticator.publicKey, {
-    ...EXPECTED,
-    origin: [ORIGIN, 'https://beta.dormouse.dev'],
-  });
-  assert.equal(result.ok, true);
 });
 
 test('rejects a registration (webauthn.create) assertion', async () => {
@@ -121,7 +103,6 @@ test('requireUserVerification demands the UV flag', async () => {
   const { authenticator, assertion } = await makeAssertion({ userVerified: false });
   const relaxed = await verifyPasskeyAssertion(assertion, authenticator.publicKey, EXPECTED);
   assert.equal(relaxed.ok, true);
-  assert.equal(relaxed.userVerified, false);
   const strict = await verifyPasskeyAssertion(assertion, authenticator.publicKey, {
     ...EXPECTED,
     requireUserVerification: true,

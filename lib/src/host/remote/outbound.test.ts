@@ -225,8 +225,9 @@ describe('under every other level, exactly the listed connections', () => {
     if (mode === 'hosted') expect(contacted).toContain(hostOf(HOSTED_VOICE_ORIGIN));
     // STUN is listed for when a phone connects, and no phone did.
     expect(contacted).not.toContain(CLOUDFLARE_STUN_HOST);
-    // Every attempt went through the globals the service guards: nothing reached
-    // a socket, a lookup, or the addon on its own.
-    expect(net.offMachine().filter((attempt) => !attempt.via.startsWith('globalThis.'))).toEqual([]);
+    // Every attempt went through the transports the service guards — the
+    // global fetch and its `ws` sockets: nothing reached a socket, a lookup,
+    // or the addon on its own.
+    expect(net.offMachine().filter((attempt) => !attempt.via.startsWith('globalThis.') && attempt.via !== 'ws')).toEqual([]);
   }, CASE_TIMEOUT_MS);
 });
