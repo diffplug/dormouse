@@ -721,6 +721,8 @@ describe('the Burrows list', () => {
     const note = container.querySelector(`[title="${TRANSPORT_PATH_LABELS.relay.title} ` +
       `${TRANSPORT_RELAY_CAUSES.declined}"]`);
     expect(note?.textContent).toBe(TRANSPORT_PATH_LABELS.relay.label);
+    // A phone shows no hover text, so the reason is on the screen as well.
+    expect(container.textContent).toContain(TRANSPORT_RELAY_CAUSES.declined);
 
     act(() => fake.onTransportPath?.('direct', null));
     await settle();
@@ -729,6 +731,7 @@ describe('the Burrows list', () => {
     expect(container.textContent).not.toContain(TRANSPORT_PATH_LABELS.relay.label);
     // Nothing left to explain: the hover text is the path alone.
     expect(container.querySelector(`[title="${TRANSPORT_PATH_LABELS.direct.title}"]`)).not.toBeNull();
+    expect(container.textContent).not.toContain(TRANSPORT_RELAY_CAUSES.declined);
   });
 
   /**
