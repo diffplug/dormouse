@@ -345,7 +345,7 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 Triggered by `,` in command mode or by clicking the session name in the pane header. **Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal or Tool pane, on every face, mounts the title editor.
 
-The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
+The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Never submit it untouched**: the seed would pin the derived label. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs); `<unnamed>` is allowed as a user pin. On rejection the input still closes — it is not a blocking dialog — and a transient warning names the offending value.
 
