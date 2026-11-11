@@ -27,6 +27,7 @@ import { parseReplay } from './replay-parse';
 import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import { PtyDataDispatch } from '../pty-flow';
+import { coalesceCwds } from './coalesce-cwds';
 
 /**
  * What `awaitHostReply` settles with when its caller's own deadline fired and
@@ -303,8 +304,9 @@ export class VSCodeAdapter implements PlatformAdapter {
     return this.requestResponse('pty:getCwd', 'pty:cwd', { id }, (msg) => msg.cwd);
   }
 
-  /** One round trip and one pty-host scan for every pane a save probes. */
-  async getCwds(ids: string[]): Promise<Record<string, string | null>> {
+  /** One round trip and one pty-host scan for every pane a save probes —
+   *  across every save landing at the same moment (`coalesceCwds`). */
+  private readonly cwdBatch = coalesceCwds(async (ids) => {
     const result = await this.requestResponse<Record<string, string | null>>(
       'pty:getCwds', 'pty:cwds', { ids },
       (msg) => msg.cwds as Record<string, string | null>,
@@ -312,6 +314,10 @@ export class VSCodeAdapter implements PlatformAdapter {
       2500,
     );
     return result ?? {};
+  });
+
+  getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    return this.cwdBatch(ids);
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {

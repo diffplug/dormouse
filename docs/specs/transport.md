@@ -243,7 +243,7 @@ Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone);
 
 **Must keep recovery commands outside `PersistedPane`.** Capture, records, and execution follow `docs/compatible-agents.md`.
 
-Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/lib/window-session-aggregator.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `standalone/src/coalesce-cwds.ts`.
+Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/lib/window-session-aggregator.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `lib/src/lib/platform/coalesce-cwds.ts`.
 
 ## Persistence policy
 
