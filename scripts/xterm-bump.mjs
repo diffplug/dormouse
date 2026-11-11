@@ -188,9 +188,11 @@ for (const name of ADDONS) {
 }
 
 const current = JSON.parse(read('lib/package.json')).dependencies;
-const standaloneCurrent = JSON.parse(read('standalone/package.json')).dependencies;
+const standaloneCurrent = JSON.parse(read('standalone/package.json')).devDependencies;
+// standalone pins only the subset its tests mock.
+const standaloneSet = Object.fromEntries(Object.entries(chosen.set).filter(([n]) => n in standaloneCurrent));
 const changed = [CORE, ...ADDONS].filter(
-  (n) => current[n] !== chosen.set[n] || standaloneCurrent[n] !== chosen.set[n],
+  (n) => current[n] !== chosen.set[n] || (n in standaloneSet && standaloneCurrent[n] !== chosen.set[n]),
 );
 
 console.log(`Coherent @xterm/* set from ${UPSTREAM_REPO}@${chosen.gitHead.slice(0, 8)}:\n`);
@@ -203,7 +205,8 @@ for (const name of [CORE, ...ADDONS]) {
 if (changed.length === 0) {
   console.log('\nlib and standalone are already on the newest coherent set.');
 } else {
-  for (const rel of ['lib/package.json', 'standalone/package.json']) repin(rel, chosen.set);
+  repin('lib/package.json', chosen.set);
+  repin('standalone/package.json', standaloneSet);
   console.log(
     dryRun
       ? '\n--dry-run: no files written.'

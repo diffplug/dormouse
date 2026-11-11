@@ -135,7 +135,6 @@
     "ovsx": "^1.0.0",
     "playwright-core": "^1.63.0",
     "remote-lib-common": "workspace:*",
-    "tailwindcss": "^4.3.0",
     "typescript": "^7.0.0",
     "vite": "^8.0.14",
     "vitest": "^5.0.0"
