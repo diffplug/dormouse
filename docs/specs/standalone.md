@@ -46,7 +46,7 @@ The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1 �
 
 - **Reads fail closed.** Only `ENOENT` and an unparseable file answer empty — but the network policy's unparseable file reads as Nothing (`docs/specs/remote-network.md` → "Policy"). Any other read error is neither answered nor memoized: the load rejects, taking the save behind it (rationale).
 - **The in-memory view advances only after the rename succeeds.**
-- **`persistent` is declared, never inferred.** With no state directory (Rust passes an empty value) the store holds both values in memory, warns once, and reports `persistent: false`. The browser harness is not this case: its per-run temp directory makes a dev enrollment live and die with the run.
+- **With no state directory** (Rust passes an empty value) **the store holds both values in memory** and warns once. The browser harness is not this case: its per-run temp directory makes a dev enrollment live and die with the run.
 
 **The direct path.** The sidecar answers a `direct-offer` (`docs/specs/remote-api.md` → Transport → "Direct path") over `node-datachannel`. **A sidecar package's transitive dependencies do not ship** — the bundle copies `standalone/sidecar/node_modules` alone — so the addon, its platform packages and `detect-libc` are declared in `standalone/sidecar/package.json` directly, and **every entry it declares stays `external` to `burrow.cjs`**, since the addon resolves its `.node` beside its own `__dirname`. Source of truth: `assertNothingInlined` in `standalone/scripts/build-sidecar-proxy.mjs`.
 

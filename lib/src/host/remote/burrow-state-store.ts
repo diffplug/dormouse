@@ -27,13 +27,6 @@ import { createSerialQueue } from './serial-queue';
 export type { BurrowAclRecord };
 
 export interface BurrowStateStore {
-  /**
-   * Whether a write survives this process. A host without a usable private
-   * state directory uses an ephemeral store and reports `false`. Required
-   * rather than optional: an implementor must state its durability before
-   * a consumer can rely on it.
-   */
-  readonly persistent: boolean;
   loadEnrollment(): Promise<BurrowEnrollment | null>;
   saveEnrollment(enrollment: BurrowEnrollment): Promise<void>;
   clearEnrollment(): Promise<void>;
@@ -105,8 +98,6 @@ function parseState(raw: string): BurrowStateFile {
  * describes no Burrow, has its own ({@link NETWORK_POLICY_FILE_NAME}).
  */
 export class FileBurrowStateStore implements BurrowStateStore {
-  readonly persistent = true;
-
   readonly #dir: string;
   readonly #path: string;
   readonly #policyPath: string;
@@ -246,8 +237,8 @@ async function readIfPresent(path: string): Promise<string | null> {
  * Held in memory rather than dropped: a Burrow enrolled here has to keep working
  * for the rest of the session — its ACL is what authorizes every pairing it
  * then approves, and reads that answered empty would de-pair each device the
- * moment it was approved. Nothing survives the process, which `persistent` says
- * out loud and the dev loop warns about once.
+ * moment it was approved. Nothing survives the process, which the first save
+ * warns about once.
  */
 export function createEphemeralBurrowStateStore(onWarn: (message: string) => void): BurrowStateStore {
   let warned = false;
@@ -261,7 +252,6 @@ export function createEphemeralBurrowStateStore(onWarn: (message: string) => voi
   let network: NetworkPolicy | null = null;
   let accessLog: AccessLogEntry[] = [];
   return {
-    persistent: false,
     loadEnrollment: async () => enrollment,
     saveEnrollment: async (next) => {
       warnOnce();

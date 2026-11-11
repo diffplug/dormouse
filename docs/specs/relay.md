@@ -295,7 +295,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 * **Reads fail closed**: an error that says nothing about what the file holds answers neither empty nor stale, since an empty ACL silently de-pairs every device.
 * **The in-memory view advances only after the durable write lands.**
 * **Every mutation is serialized in call order**, so an older ACL snapshot cannot land last (rationale).
-* **A store that cannot persist still holds what it is given** in memory and reports `persistent: false`.
+* **A store that cannot persist still holds what it is given** in memory.
 * **The ACL is keyed per `burrowId`**: an enrollment onto a fresh one starts empty; a re-enrollment onto the same one keeps its paired devices.
 
 **Enrollment** (Settings, or the console hook, once):

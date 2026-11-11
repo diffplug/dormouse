@@ -415,14 +415,6 @@ describe('createEphemeralBurrowStateStore', () => {
     expect(await store.loadEnrollment()).toBeNull();
   });
 
-  it('says out loud whether a write survives the process', () => {
-    // The two stores have to disagree here: the dev harness holds the Burrow in
-    // memory only, and a store read as durable when it is not would let a
-    // caller believe an enrollment outlives a restart.
-    expect(createEphemeralBurrowStateStore(() => {}).persistent).toBe(false);
-    expect(new FileBurrowStateStore(dir).persistent).toBe(true);
-  });
-
   it('files records under their own burrow, like the real store', async () => {
     const store = createEphemeralBurrowStateStore(() => {});
     await store.saveAcl('burrow-1', [aclRecord('other', 'client-1')]);

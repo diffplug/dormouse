@@ -215,14 +215,9 @@ const INTERFACES: NetworkInterfaceInfo[] = [
   { id: 'en0', label: 'Local network', kind: 'lan', prefixes: [LAN] },
 ];
 
-/**
- * A durable store whose contents a test can seed and read back — not
- * `createEphemeralBurrowStateStore`, whose whole point is `persistent: false`,
- * which is what the adopt cases turn on.
- */
+/** A store whose contents a test can seed and read back. */
 function memoryStore(seed: Seed = {}): MemoryStore {
   const store: MemoryStore = {
-    persistent: true,
     enrollment: seed.enrollment ?? null,
     acl: seed.acl ?? {},
     network: seed.network ?? null,
