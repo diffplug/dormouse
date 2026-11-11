@@ -23,7 +23,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const nodePty = require('node-pty');
-const { create, detectAvailableShells } = require('./pty-core');
+const { create, detectAvailableShells, WSL_CLI_ENV } = require('./pty-core');
 
 const PLATFORM = process.platform;
 const WIN = PLATFORM === 'win32';
@@ -230,6 +230,11 @@ const KNOWN = [
     // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: TERM_PROGRAM undefined.
     shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: iTerm2 identity/,
     why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",
+  },
+  {
+    // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: DORMOUSE_DEHYDRATE is '' in the distro.
+    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: unset names arrive unset/,
+    why: "withWslCliEnv lists every name the dor CLI reads in WSLENV whether or not the pane has it, and WSL then sets each unset one empty in the distro: DORMOUSE_DEHYDRATE arrives as '' (dor-tool.md: the host strips it from every pane but a rehydrated one; readDehydrated reads '' as none). In a standalone pane DORMOUSE_HOST_WORKSPACE, DORMOUSE_AGENT_BROWSER_BIN, and DORMOUSE_PLAYWRIGHT_BIN are unset too (dor-cli.md), so likely arrive empty as well; this case lists every one",
   },
   {
     // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
@@ -788,13 +793,29 @@ shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async
     return text.includes('ENV-DUMP-END') && Object.fromEntries(text.split('\n').filter((line) => line.includes('='))
       .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
   }, 'env dump', 30_000, 100);
-  assert.equal(env.DORMOUSE_SURFACE_ID, pane.id);
-  for (const key of MUST_NOT_LEAK) assert.equal(env[key], undefined, `${row.name}: the host's ${key} reached the distro`);
+  // Each check is its own subtest, so every one reports and a todo on one
+  // covers nothing else.
+  const check = (name, fn) => {
+    const todo = todoFor(row, `WSL environment: ${name}`);
+    return t.test(`${row.name}: ${name}`, todo ? { todo } : {}, fn);
+  };
+  await check('dor CLI context', () => assert.equal(env.DORMOUSE_SURFACE_ID, pane.id));
+  // A name WSLENV forwards arrives even when the pane has no value for it;
+  // what must never arrive is the host's value. Whether it arrives at all is
+  // the next check.
+  await check('no host values', () => {
+    for (const key of MUST_NOT_LEAK) {
+      if (WSL_CLI_ENV.includes(key)) assert.ok(!env[key], `${row.name}: the host's ${key} reached the distro as ${JSON.stringify(env[key])}`);
+      else assert.equal(env[key], undefined, `${row.name}: the host's ${key} reached the distro`);
+    }
+  });
+  await check('unset names arrive unset', () => {
+    const empty = WSL_CLI_ENV.filter((key) => env[key] === '');
+    assert.deepEqual(empty, [], `${row.name}: set but empty in the distro: ${empty.join(', ')}`);
+  });
   // The identity every pane gets (docs/specs/transport.md -> iTerm2 identity),
-  // all reported at once, in a subtest of its own so a todo on it covers
-  // nothing else.
-  const todo = todoFor(row, 'WSL environment: iTerm2 identity');
-  await t.test(`${row.name}: iTerm2 identity`, todo ? { todo } : {}, () => {
+  // all reported at once.
+  await check('iTerm2 identity', () => {
     const identity = { TERM_PROGRAM: 'iTerm.app', LC_TERMINAL: 'iTerm2', COLORTERM: 'truecolor' };
     const wrong = Object.entries(identity).filter(([key, value]) => env[key] !== value)
       .concat(['TERM_PROGRAM_VERSION', 'LC_TERMINAL_VERSION'].filter((key) => !env[key]).map((key) => [key]))
