@@ -1,6 +1,6 @@
 import { test, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { digest } from "@pgstencil/auth/security";
+import { digest } from "../token-digest";
 import { Hono } from "hono";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";

@@ -2,8 +2,7 @@ import { test, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Hono } from "hono";
-import { escape } from "@pgstencil/auth/email";
-import { EmailDev } from "pgstencil";
+import { EmailDev, escapeHtml } from "pgstencil";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER, LIST_ANNUAL, LIST_MONTHLY } from "../../../website/src/lib/hosted-pricing";
@@ -1816,7 +1815,7 @@ test("a completed checkout emails what was agreed once, to the Stripe customer's
     DIFFPLUG_POSTAL_ADDRESS,
   ])
     expect(mail!.text, fact).toContain(fact);
-  expect(mail!.html).toContain(escape(MODEL_WITHDRAWAL_FORM));
+  expect(mail!.html).toContain(escapeHtml(MODEL_WITHDRAWAL_FORM));
   expect(mail!.text).not.toContain("signin@example.test");
 
   // Redelivered, or the same checkout in another event: nothing new.

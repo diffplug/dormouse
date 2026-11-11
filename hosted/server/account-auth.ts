@@ -8,5 +8,8 @@ import { authPolicy } from "./policy";
 export const auth = createBetterAuthWorker<AccountEnv>({
   ...authPolicy,
   email: (env) => postmarkEmail(env.POSTMARK_SERVER_TOKEN, env.EMAIL_FROM),
+  // Postmark sends from `EMAIL_FROM` whatever the message says; this makes the
+  // message itself say so too.
+  emailFrom: (env) => env.EMAIL_FROM,
   hooks: (env) => authMetricHooks(env.HYPERDRIVE.connectionString),
 });

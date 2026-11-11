@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { STRIPE_API_VERSION } from "@pgstencil/stripe";
 
 /** The Stripe API version production's webhook endpoint renders events at. */
-const PINNED = "2026-08-26.dahlia";
+const PINNED = "2026-10-28.endive";
 
 test("the Stripe API version the webhook accepts is the one production's endpoint sends", () => {
   expect(

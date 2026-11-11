@@ -385,9 +385,9 @@ Source of truth: `hosted/server/metric-labels.ts`; `recordMetric` and `authMetri
 
 **Must isolate test stacks from development and concurrent runs, remove containers and volumes on teardown, and reap abandoned stacks only after their owner exits.**
 
-**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only.
+**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. **Never let a `db:*` script fall back to the development database**: each refuses an unset or empty `DATABASE_URL`.
 
-Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` in `hosted/package.json`; `hosted/scripts/test-databases.mjs`. Pinned by `hosted/server/tests/boundary.test.ts`.
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `accountRoutes` and `accountCron` in `hosted/server/account-routes.ts`; `build` and `db:*` in `hosted/package.json`; `hosted/pgstencil.json`; `hosted/scripts/test-databases.mjs`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/scripts/db-scripts.test.mjs`.
 
 ## PR previews
 

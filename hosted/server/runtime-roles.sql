@@ -11,11 +11,12 @@
 -- the code reads or writes. A grant some other role made is beyond a REVOKE
 -- here; hosted/server/tests/runtime-roles.test.ts pins the result.
 --
--- Applied as the migration role by `db:migrate`, after every migration, and
--- alone by `db:roles`: one transaction, idempotent. It creates a missing role
--- NOLOGIN, refuses one holding a role attribute or membership, and never
--- alters an existing one, so LOGIN and a password set out of band survive; it
--- then revokes everything either role holds and grants exactly the list.
+-- Applied as the migration role by `db:migrate` and `db:migrate:preview`,
+-- after every migration, and alone by `db:roles`: one transaction,
+-- idempotent. It creates a missing role NOLOGIN, refuses one holding a role
+-- attribute or membership, and never alters an existing one, so LOGIN and a
+-- password set out of band survive; it then revokes everything either role
+-- holds and grants exactly the list.
 -- Never put a password here.
 
 BEGIN;
