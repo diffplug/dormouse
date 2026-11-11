@@ -2008,6 +2008,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       const p = ptys.get(request.id);
       if (request.op === 'home') {
         result.home = os.homedir();
+        result.hostname = os.hostname();
       } else if (request.op === 'info') {
         // Left null when inspection throws: unknown work is never idle.
         result.busy = null;

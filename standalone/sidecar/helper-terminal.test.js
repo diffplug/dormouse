@@ -217,7 +217,7 @@ test('a stored helper command reaches nothing: no answer, no write, no rewrite',
       await manager.context(request, 'context');
       return events.findLast(e => e.event === 'context').data;
     };
-    assert.deepEqual(await answer({ op: 'home' }), { requestId: 'context', home });
+    assert.deepEqual(await answer({ op: 'home' }), { requestId: 'context', home, hostname: os.hostname() });
     manager.spawn('parent');
     manager.spawn('helper', { helper: { parentId: 'parent' } });
     assert.equal(manager.getHelperParentId('helper'), 'parent');
