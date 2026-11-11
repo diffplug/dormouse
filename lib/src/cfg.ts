@@ -41,6 +41,10 @@ export const cfg = {
      * wait to ring on inactivity. Keep these effects coupled; there is no separate
      * minimum command runtime (product decision, 2026-09-24). */
     echoWindow: 750,
+    /** ms — after a user verb clears a ring or a hold, how long a report with
+     * no work since is a receipt rather than a new summons. Covers the idle
+     * notice Claude Code sends about a minute after a turn ends. */
+    acknowledgedFor: 180_000,
     /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic visual snapshots). */
     ringingPaused: false,
   },

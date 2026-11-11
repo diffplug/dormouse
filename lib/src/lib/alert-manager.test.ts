@@ -709,6 +709,19 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null });
   });
 
+  it('rings a report again once the acknowledgement has lapsed, with no work since', () => {
+    const id = 'receipt-lapses';
+    manager.notifyFromProtocol(id, REPORT);
+    manager.dismissAlert(id);
+    manager.clearTodo(id);
+    vi.advanceTimersByTime(cfg.alert.acknowledgedFor - 1);
+    manager.notifyFromProtocol(id, REPORT);
+    expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+    vi.advanceTimersByTime(1);
+    manager.notifyFromProtocol(id, REPORT);
+    expect(manager.getState(id).status).toBe('ALERT_RINGING');
+  });
+
   it.each([
     ['complete', [{ state: 'normal', percent: 40 }, { state: 'clear', percent: null }], 'cargo build finished'],
     ['warning', [{ state: 'warning', percent: 40 }, { state: 'normal', percent: 100 }], 'cargo build finished with a warning'],

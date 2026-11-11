@@ -295,7 +295,7 @@ stateDiagram-v2
     state "Acknowledged" as Yes
     [*] --> Fresh
     Fresh --> Yes: a verb while Ringing or Held
-    Yes --> Fresh: work, ring, or a command start
+    Yes --> Fresh: work, ring, a command start, or three minutes
   }
 ```
 
@@ -378,7 +378,7 @@ Is there anything to wait for?
 
 `idle` is a resolution, not a failure (rationale). Absent shell integration "is a command running" is unanswerable, so an `exit` await there falls back to the grace window and resolves `idle` rather than erroring.
 
-**Resolution must consume only the ring or held source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring, else mid-hold, resolves immediately; under `exit` only an `exit` source resolves it, and one without leaves it parked.
+**Resolution must consume only the source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring, else mid-hold, resolves immediately; under `exit` only an `exit` source resolves it; anything else parks.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
 - **Must skip the `watching` source once work has resumed since it joined the ring** (`workSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
@@ -520,7 +520,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | a rule stops covering the `watching` key | withdraws `watching` |
 
 - **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any work only updates an existing TODO (the Acknowledged machine in Completion events; rationale).
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report within three minutes and before any work only updates an existing TODO (the Acknowledged machine in Completion events; rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.

@@ -298,12 +298,14 @@ interface AlertEntry {
   detector: QuiesceDetector;
   ring: Ring | null;
   /**
-   * A user verb cleared a ring or a hold and no output has arrived since, so
-   * a report describes the state the user already acknowledged
-   * (`holdOrDeliver`). Opening a ring or starting a command forgets it, so it
-   * implies no ring.
+   * Until this instant, a user verb cleared a ring or a hold and no output has
+   * arrived since, so a report describes the state the user already
+   * acknowledged (`holdOrDeliver`). Opening a ring or starting a command
+   * forgets it (0), so it implies no ring. Bounded in time because output
+   * counts as work only near input: a program that reports on its own
+   * schedule would otherwise never ring again after one acknowledgement.
    */
-  ackedQuiet: boolean;
+  ackedUntil: number;
   /** The live `OSC 9;4` cycle. Never touches the ring, and the ring never touches it. */
   progress: ActiveProtocolProgress | null;
   commandExitWatch: CommandExitWatch | null;
@@ -389,7 +391,7 @@ export class AlertManager {
   private noteWork(id: string, entry: AlertEntry): void {
     if (entry.ring?.watching) entry.ring.watching.workSince = true;
     if (entry.held?.watching) entry.held.watching.workSince = true;
-    entry.ackedQuiet = false;
+    entry.ackedUntil = 0;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
 
@@ -586,7 +588,7 @@ export class AlertManager {
     const arrived = held ?? ++this.arrivals;
     if (this.isEngaged(id)) {
       this.hold(entry, source, detail, arrived);
-    } else if (source === 'report' && entry.ackedQuiet) {
+    } else if (source === 'report' && Date.now() < entry.ackedUntil) {
       // A hold already put its detail on the TODO, which may have moved on since.
       if (held === undefined) this.updateReceipt(entry, detail);
     } else {
@@ -901,7 +903,7 @@ export class AlertManager {
     entry.pendingCommandLine = null;
     // A new command is news the acknowledgement never saw, even when it stays
     // silent until its report: its echo fell in the echo window, not output.
-    entry.ackedQuiet = false;
+    entry.ackedUntil = 0;
     entry.commandExitWatch = {
       displayCommand: resolved.displayCommand,
       watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
@@ -954,7 +956,7 @@ export class AlertManager {
     if (ring === null) {
       ring = { episode: createAlertEpisode(), sources: [], watching: null, detail, arrived };
       entry.ring = ring;
-      entry.ackedQuiet = false;
+      entry.ackedUntil = 0;
     } else {
       takeRicher(ring, detail, arrived);
     }
@@ -993,7 +995,7 @@ export class AlertManager {
     if (ring === null && held === null) return null;
     if (ring !== null) entry.ring = null;
     entry.held = null;
-    entry.ackedQuiet = true;
+    entry.ackedUntil = Date.now() + cfg.alert.acknowledgedFor;
     if (ring?.watching || held?.watching) this.answeredWatching(entry);
     return ring;
   }
@@ -1310,7 +1312,7 @@ export class AlertManager {
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
     entry.ring = null;
     entry.held = null;
-    entry.ackedQuiet = false;
+    entry.ackedUntil = 0;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
     this.endRun(entry);
@@ -1374,7 +1376,7 @@ export class AlertManager {
       entry = {
         detector: this.createDetector(id),
         ring: null,
-        ackedQuiet: false,
+        ackedUntil: 0,
         progress: null,
         commandExitWatch: null,
         pendingCommandLine: null,
