@@ -805,13 +805,20 @@ export const RULES = [
     pattern: /"build:pocket":\s*"[^"]*&& node scripts\/assert-pocket-worker\.mjs"/,
   },
   {
-    rule: 'The root build runs the Pocket build, so CI sees a real bundler output',
+    rule: 'The root build runs the Hosted build, so CI sees a real bundler output',
     security: 'the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one',
     kind: 'require',
     file: 'package.json',
-    // Anchored inside the `build` script, not on the command: `dev:relay`
-    // runs the same line, so a bare match stayed green after `build` stopped
-    // building the worker at all.
+    // Anchored inside the `build` script, not on the script name, which
+    // `build:hosted`'s own definition also carries.
+    pattern: /"build":\s*"[^"]*pnpm build:hosted/,
+  },
+  {
+    rule: 'The Hosted build runs the Pocket build',
+    security: 'the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one',
+    kind: 'require',
+    file: 'hosted/package.json',
+    // Anchored inside the `build` script, the one the root `build` reaches.
     pattern: /"build":\s*"[^"]*pnpm --filter dormouse-lib build:pocket/,
   },
 ];
