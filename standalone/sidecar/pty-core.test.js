@@ -1516,6 +1516,7 @@ test('resolveSpawnConfig injects WSL bash integration via a sh -c detector', () 
 
   // -d Ubuntu is preserved; the detector execs bash with our init-file (referenced
   // by its /mnt path, single-quoted so the "Program Files" space survives).
+  // `-e`, never `--`: the distro's default shell would expand the detector first.
   const detector =
     'u=$(whoami 2>/dev/null); '
     + 'login=$(grep "^$u:" /etc/passwd 2>/dev/null | cut -d: -f7); '
@@ -1524,7 +1525,7 @@ test('resolveSpawnConfig injects WSL bash integration via a sh -c detector', () 
     + "*) exec bash --init-file "
     + "'/mnt/c/Program Files/Dormouse/shell-integration/bash/shellIntegration.bash' -i;; esac; fi; "
     + 'exec "${login:-/bin/sh}" -l';
-  assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '--', 'sh', '-c', detector]);
+  assert.deepEqual(config.shellArgs, ['-d', 'Ubuntu', '-e', 'sh', '-c', detector]);
 });
 
 // The integration scripts live under the user's profile directory, and a
@@ -1569,7 +1570,7 @@ test('resolveSpawnConfig starts a WSL shell in its Linux directory, which Window
   const wsl = (cwd) => resolveSpawnConfig({ shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'], cwd }, runtime);
   const config = wsl('/home/me/projects/app');
   // Integration still recognizes the launch; the distro resolves the directory.
-  assert.deepEqual(config.shellArgs.slice(0, 6), ['--cd', '/home/me/projects/app', '-d', 'Ubuntu', '--', 'sh']);
+  assert.deepEqual(config.shellArgs.slice(0, 6), ['--cd', '/home/me/projects/app', '-d', 'Ubuntu', '-e', 'sh']);
   assert.equal(config.cwd, 'C:\\Users\\tester');
   assert.equal(config.cwdWarning, null);
   // A Windows directory is still the PTY's own, with no `--cd`.

@@ -410,7 +410,9 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
     const mount = winPathToWslMount(script);
     if (mount && fileExists(script, fsModule)) {
       // A `sh -c` detector, passed as one argv element so node-pty hands it to
-      // wsl.exe → sh verbatim (no shell-quoting games). It reads the login shell
+      // wsl.exe → sh verbatim (no shell-quoting games). `-e`, not `--`: after
+      // `--` wsl.exe runs the command through the distro's default shell, which
+      // expands `$u` and `$login` before sh sees them. It reads the login shell
       // from /etc/passwd (NSS-independent, unlike getent which flaked on cold
       // starts) and: steps aside for an explicit zsh/fish login shell; otherwise
       // execs bash with our init-file when bash exists (covering bash and an empty
@@ -427,7 +429,7 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
         `case "$login" in *zsh|*fish) exec "$login" -l;; *) exec bash --init-file ${quotedMount} -i;; esac; fi;`,
         'exec "${login:-/bin/sh}" -l',
       ].join(' ');
-      return { env, shellArgs: [...shellArgs, '--', 'sh', '-c', detector] };
+      return { env, shellArgs: [...shellArgs, '-e', 'sh', '-c', detector] };
     }
   }
 
