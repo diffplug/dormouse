@@ -514,7 +514,9 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       if (blank.exitCode !== 0) return fail(`Could not prepare the agent-browser viewport before navigation: ${blank.stderr.trim() || `agent-browser exited ${blank.exitCode}`}`);
       let dpr = launchViewport.dpr;
       if (dpr === undefined) {
-        const ratio = await run([...sessionArgs, ...nativeLaunchOptions, 'eval', 'window.devicePixelRatio']);
+        // Boundaries the user turned on in agent-browser's env or config would
+        // wrap the number in marker lines; the flag overrides both.
+        const ratio = await run([...sessionArgs, ...nativeLaunchOptions, '--content-boundaries', 'false', 'eval', 'window.devicePixelRatio']);
         dpr = ratio.exitCode === 0 ? parseNativeDpr(ratio.stdout) : undefined;
         if (dpr === undefined) return fail('Could not measure agent-browser DPR before navigation');
       }

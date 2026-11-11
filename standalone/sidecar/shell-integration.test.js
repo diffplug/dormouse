@@ -292,6 +292,79 @@ test('bash: an array PROMPT_COMMAND from the profile keeps E the submitted line'
   }
 });
 
+// A DEBUG trap the profile set (a title setter, a timer) keeps running beside
+// ours, and the line still reports as itself.
+test('bash: a DEBUG trap from the profile still runs, and E is the submitted line', { timeout: 60_000 }, async () => {
+  const bash = interactiveBash('trap \'__user_trapped="$__user_trapped|$BASH_COMMAND"\' DEBUG\n');
+  try {
+    const { commands, starts } = await bash.run('echo seen');
+    assert.deepEqual(commands, ['echo seen']);
+    assert.equal(starts, 1);
+    const { printed } = await bash.run('echo "trapped=$__user_trapped"');
+    assert.match(printed, /trapped=[\s\S]*\|echo seen\|/);
+  } finally {
+    await bash.close();
+  }
+});
+
+// bash-preexec (Atuin, starship, other terminals' integrations) installs its
+// DEBUG trap (from bash 5.3, a PS0 hook) and PROMPT_COMMAND at the first
+// prompt, from an install string it leaves in PROMPT_COMMAND, and runs the hooks
+// registered in its arrays, each preexec given the line `history 1` reads. This
+// stand-in keeps that shape: the integration must register there, so the user's
+// hooks run and E is the line, not bash-preexec's own function.
+const BASH_PREEXEC_STAND_IN = [
+  'bash_preexec_imported=defined',
+  '__sbp_v=$(( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] ))',
+  '__sbp_ret() { return "$1"; }',
+  '__sbp_precmd() { local s=$? f; for f in "${precmd_functions[@]}"; do __sbp_ret "$s"; "$f"; done; }',
+  '__sbp_interactive() { __sbp_ready=1; }',
+  '__sbp_preexec() { local line f; line=$(HISTTIMEFORMAT= builtin history 1); line=${line#*[[:digit:]][* ] }; for f in "${preexec_functions[@]}"; do "$f" "$line"; done; }',
+  '__sbp_trap() { [ -n "$__sbp_ready" ] || return; __sbp_ready=; __sbp_preexec; }',
+  '__bp_invoke_preexec_from_ps0() { __sbp_preexec; }',
+  // Its install, as bash-preexec 0.7 does it: the trap, or from bash 5.3 a PS0
+  // hook; then its prologue joins element 0 of PROMPT_COMMAND and its epilogue
+  // is appended, so every other element (systemd's hook on Ubuntu) stays between.
+  '__sbp_install() {',
+  '  if (( __sbp_v >= 503 )); then PS0=${PS0-}\'${ __bp_invoke_preexec_from_ps0 "$_" >&2; }\'; else trap \'__sbp_trap "$_"\' DEBUG; fi',
+  '  local i; for i in "${!PROMPT_COMMAND[@]}"; do PROMPT_COMMAND[i]=${PROMPT_COMMAND[i]//"$__sbp_install_string"/}; done',
+  '  PROMPT_COMMAND=__sbp_precmd${PROMPT_COMMAND:+$\'\\n\'$PROMPT_COMMAND}',
+  '  if (( __sbp_v >= 501 )); then PROMPT_COMMAND+=(__sbp_interactive); else PROMPT_COMMAND+=$\'\\n__sbp_interactive\'; fi',
+  '  __sbp_precmd; __sbp_interactive',
+  '}',
+  // Left in PROMPT_COMMAND for the first prompt, as an element of an array one.
+  '__sbp_install_string=$\'trap - DEBUG\\n__sbp_install\'',
+  'if (( __sbp_v >= 501 )); then PROMPT_COMMAND+=("$__sbp_install_string"); else PROMPT_COMMAND=${PROMPT_COMMAND:+$PROMPT_COMMAND$\'\\n\'}$__sbp_install_string; fi',
+  'user_preexec() { __user_preexecs=$((${__user_preexecs:-0} + 1)); }',
+  'preexec_functions+=(user_preexec)',
+  '',
+].join('\n');
+test('bash: with bash-preexec loaded, its hooks run and E is the submitted line', { timeout: 60_000 }, async () => {
+  const bash = interactiveBash(BASH_PREEXEC_STAND_IN);
+  try {
+    for (const line of ['true', 'echo p && echo q']) {
+      const { commands, starts } = await bash.run(line);
+      assert.deepEqual(commands, [line], `bash reported ${JSON.stringify(commands)} for ${JSON.stringify(line)}`);
+      assert.equal(starts, 1);
+    }
+    const { printed } = await bash.run('(exit 7)');
+    assert.match(printed, /\x1b\]633;D;7\x07/);
+    const { printed: counted } = await bash.run('echo "preexecs=$__user_preexecs"');
+    assert.match(counted, /preexecs=4/);
+    // A line HISTIGNORE keeps out leaves `history 1`, bash-preexec's $1, naming
+    // the line before. From the DEBUG trap E still reads as the line; from the
+    // PS0 hook (bash 5.3+) that $1 is all there is.
+    if (BASH_MAJOR * 100 + BASH_MINOR < 503) {
+      await bash.run("HISTIGNORE='cd /'");
+      await bash.run('cd / && echo hi');
+      const { commands } = await bash.run('cd /');
+      assert.deepEqual(commands, ['cd /'], `bash reported ${JSON.stringify(commands)} for "cd /"`);
+    }
+  } finally {
+    await bash.close();
+  }
+});
+
 // Setting ZDOTDIR in ~/.zshenv is how a user moves the rest of their zsh
 // dotfiles. The integration sources that .zshenv itself, so it must follow the
 // ZDOTDIR it leaves, or such a user's .zprofile and .zshrc never run. The

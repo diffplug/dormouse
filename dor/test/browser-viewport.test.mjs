@@ -82,9 +82,32 @@ test('new agent-browser managed launch prepares blank page before destination', 
   const result = await runCli(['agent-browser', 'open', 'http://localhost:5173'], options);
   assert.equal(result.stdout, 'native\n');
   assert.deepEqual(calls.slice(0, 4).map(c => c[1].slice(2)), [
-    ['open', 'about:blank'], ['eval', 'window.devicePixelRatio'], ['set', 'viewport', '1440', '900', '2'], ['open', 'http://localhost:5173'],
+    ['open', 'about:blank'], ['--content-boundaries', 'false', 'eval', 'window.devicePixelRatio'], ['set', 'viewport', '1440', '900', '2'], ['open', 'http://localhost:5173'],
   ]);
   assert.deepEqual(calls.at(-1)[1].initialViewport, { mode: 'fixed', width: 1440, height: 900 });
+});
+
+// agent-browser's content boundaries, on in its env or config, wrap eval output
+// in marker lines; the measurement turns them off for its own read.
+test('a launch measures the pixel ratio with content boundaries off', async () => {
+  const calls = [];
+  const result = await runCli(['agent-browser', 'open', 'http://localhost:5173'], {
+    env: { PWD: process.cwd(), AGENT_BROWSER_CONTENT_BOUNDARIES: '1' },
+    client: {
+      resolveBrowser: async () => ({ binding: { session: 'dormouse.1.default' }, fresh: true,
+        initialViewport: { mode: 'fixed', width: 1440, height: 900 }, launchViewport: { width: 1440, height: 900 } }),
+      browserSurface: async () => ({}),
+    },
+    execAgentBrowser: async (_binary, args) => {
+      calls.push(args);
+      if (!args.includes('eval')) return { exitCode: 0, stdout: '', stderr: '' };
+      const off = args.some((arg, i) => arg === '--content-boundaries' && args[i + 1] === 'false');
+      const stdout = off ? '2\n' : '--- AGENT_BROWSER_PAGE_CONTENT nonce=0 origin=about:blank ---\n2\n--- END_AGENT_BROWSER_PAGE_CONTENT nonce=0 ---\n';
+      return { exitCode: 0, stdout, stderr: '' };
+    },
+  });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(calls[2].slice(2), ['set', 'viewport', '1440', '900', '2']);
 });
 
 test('agent-browser preparation preserves valued flags and only replaces the destination', async () => {
@@ -122,7 +145,7 @@ for (const flags of [
     },
   });
   assert.equal(result.exitCode, 0, result.stderr);
-  assert.deepEqual(calls[1], ['--session', 'dormouse.1.default', ...flags, 'eval', 'window.devicePixelRatio']);
+  assert.deepEqual(calls[1], ['--session', 'dormouse.1.default', ...flags, '--content-boundaries', 'false', 'eval', 'window.devicePixelRatio']);
   assert.deepEqual(calls[2], ['--session', 'dormouse.1.default', ...flags, 'set', 'viewport', '1440', '900', '2']);
   assert.deepEqual(calls[3], ['--session', 'dormouse.1.default', 'open', 'http://localhost:5173', ...flags, '--quiet']);
   assert.deepEqual(calls[4], ['--session', 'dormouse.1.default', 'stream', 'status', '--json', ...flags]);
@@ -164,7 +187,7 @@ test('fresh agent-browser goto and navigate prepare before destination scripts',
     };
     await runCli(['agent-browser', verb, 'http://localhost:5173'], options);
     assert.deepEqual(argsSeen.slice(0, 4).map(args => args.slice(2)), [
-      [verb, 'about:blank'], ['eval', 'window.devicePixelRatio'], ['set', 'viewport', '1440', '900', '2'], [verb, 'http://localhost:5173'],
+      [verb, 'about:blank'], ['--content-boundaries', 'false', 'eval', 'window.devicePixelRatio'], ['set', 'viewport', '1440', '900', '2'], [verb, 'http://localhost:5173'],
     ]);
   }
 });

@@ -15,6 +15,7 @@ import type { GitInfoResult } from './git-types';
 export type { ToolControlResult, ToolHostRequest } from './tool-types';
 export type { GitInfoResult } from './git-types';
 import type { PersistedAlertState, PersistedWindow } from '../session-types';
+import { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from 'dor-lib-common/terminal-context';
 
 export interface PtyInfo {
   helper?: HelperIdentity;
@@ -89,12 +90,7 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 }
 
 
-/**
- * How long the VS Code extension host waits for its pty-host child to answer a
- * terminal-context request (`vscode-ext/src/pty-manager.ts`) before answering
- * the webview with an error. `info` and `promote` inspect the process tree.
- */
-export const TERMINAL_CONTEXT_CHILD_TIMEOUT_MS = 10_000;
+export { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS };
 
 /** The webview's deadline for that answer: the child's bound plus one hop. */
 export const TERMINAL_CONTEXT_TIMEOUT_MS = TERMINAL_CONTEXT_CHILD_TIMEOUT_MS + OPEN_PORT_ROUND_TRIP_MARGIN_MS;
