@@ -640,6 +640,12 @@ describe('iframe proxy — serving', () => {
     expect(res.body).toMatch(/dev server running|couldn’t reach/i);
     expect(res.headers['x-frame-options']).toBeUndefined();
   });
+
+  it('fails a subresource on an unreachable upstream as a connection, never with the page', async () => {
+    const url = await frame('http://127.0.0.1:1/');
+    await expect(request(url, { headers: { 'sec-fetch-dest': 'empty', accept: 'text/event-stream' } })).rejects.toMatchObject({ code: 'ECONNRESET' });
+    expect((await request(url, { headers: { 'sec-fetch-dest': 'iframe' } })).body).toMatch(/couldn’t reach/i);
+  });
 });
 
 describe('iframe proxy — the proxy never vouches for a stranger', () => {

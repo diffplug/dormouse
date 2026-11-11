@@ -658,6 +658,13 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
       res.destroy();
       return;
     }
+    // A fetch, script or EventSource sees what it would without the proxy, a
+    // failed connection: a page standing in for its body would read as a
+    // success, and an EventSource never reconnects after one.
+    if (!documentLoad) {
+      res.destroy();
+      return;
+    }
     const code = (err as { code?: string }).code;
     serveErrorPage(grant, res, code === 'ETIMEDOUT'
       ? timedOutPage(grant.upstream)
