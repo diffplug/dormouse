@@ -1883,13 +1883,15 @@ function Invoke-Rollback {
     return 1
   }
   Write-Host "rolling back: $cur -> $prev"
-  $nodeBin = $null
-  foreach ($candidate in @((Join-Path $Root "releases\$prev\runtime\node.exe"), (Join-Path $Root "releases\$cur\runtime\node.exe"))) {
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $nodeBin = $candidate; break }
+  # Swap with the target release's own runtime. run-relay.ps1 starts whatever
+  # current.txt names with that release's runtime\node.exe, so a target without
+  # one cannot start, and borrowing the runtime of the release being rolled away
+  # from would move the pointers only to leave the Relay down.
+  $nodeBin = Join-Path $Root "releases\$prev\runtime\node.exe"
+  if (-not (Test-Path -LiteralPath $nodeBin -PathType Leaf)) {
+    [Console]::Error.WriteLine("previous release has no usable runtime: $nodeBin")
+    return 1
   }
-  if (-not $nodeBin) { [Console]::Error.WriteLine('no usable runtime found to swap the release pointers'); return 1 }
-  # `previous` first: $nodeBin can be the CURRENT release's runtime, and moving
-  # `current` to $prev would repoint it at the runtime that was just rejected.
   if ($cur) { Set-ReleasePointer -ReleaseId $cur -PointerPath $PreviousPointer -NodeBin $nodeBin }
   Set-ReleasePointer -ReleaseId $prev -PointerPath $CurrentPointer -NodeBin $nodeBin
   if ((Get-CurrentRelease) -ne $prev) {
