@@ -950,6 +950,15 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     expect(wheel.defaultPrevented).toBe(true);
   });
 
+  it('scales a wheel delta as it scales the pointer, on a screencast drawn smaller than its viewport', async () => {
+    const canvas = await renderWithMode('passthrough', 'ab-panel');
+    canvas.getBoundingClientRect = () => ({ width: 640, height: 360, left: 0, top: 0, right: 640, bottom: 360, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    await act(async () => {
+      canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 100, clientY: 50, deltaX: 3, deltaY: 40 }));
+    });
+    expect(sentMouse()).toEqual([expect.objectContaining({ eventType: 'mouseWheel', x: 200, y: 100, deltaX: 6, deltaY: 80 })]);
+  });
+
   it('sends no keys to an unselected pane in passthrough', async () => {
     const canvas = await renderWithMode('passthrough', 'some-other-pane');
     await act(async () => {
