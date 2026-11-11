@@ -155,6 +155,14 @@ export function callerWorkingDirectory(flag: string | undefined, { env, host }: 
   return host.resolvePath(base, flag ?? '.');
 }
 
+/** `callerWorkingDirectory` for a command Dormouse launches there. A `--cwd`
+ *  naming no directory fails here: the PTY host would start the shell in the
+ *  home directory instead, and the command would run there. */
+export function launchDirectory(flag: string | undefined, options: CliOptions): string | Error {
+  const cwd = callerWorkingDirectory(flag, options);
+  return flag === undefined || options.host.isDirectory(cwd) ? cwd : new Error(`directory '${cwd}' does not exist`);
+}
+
 /** The help both browser commands give their `dor-diagnostics` intercept. */
 export function diagnosticsHelp(command: string): string {
   return `and dor-diagnostics to print, as JSON, what the pane and the host know about

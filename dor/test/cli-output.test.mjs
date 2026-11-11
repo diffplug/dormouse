@@ -584,9 +584,23 @@ test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', 
   assert.equal(msysToWindowsCwd('/c/Users/me/site', 'linux'), '/c/Users/me/site');
 });
 
+/** A host on which every `--cwd` these fixtures name exists. */
+const anyDirectoryHost = { ...NODE_HOST, isDirectory: () => true };
+
+test('ensure and tool refuse a --cwd that names no directory, launching nothing', async () => {
+  const missing = join(tmpdir(), 'dor-no-such-directory');
+  for (const argv of [['ensure', '--cwd', missing, '--', 'npm', 'install'], ['tool', '--cwd', missing, '--', 'npm', 'install']]) {
+    const client = fixtureClient();
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 1, argv[0]);
+    assert.match(result.stderr, /dor-no-such-directory' does not exist/, argv[0]);
+    assert.deepEqual(client.requests, [], argv[0]);
+  }
+});
+
 test('ensure and tool accept --flag=value before --, as stricli does', async () => {
   const ensure = fixtureClient();
-  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' } });
+  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' }, host: anyDirectoryHost });
   assert.equal(ensured.exitCode, 0, ensured.stderr);
   assert.equal(smudgeWindowsPaths(ensure.requests[0].request.cwd), '/work/other');
   assert.equal(ensure.requests[0].request.surface, 'surface:3');
@@ -612,6 +626,7 @@ test('ensure json output', async () => {
     'ensure-json',
     await runCli(['ensure', '--json', '--minimize', '--cwd', '/Users/me/projects/site', '--', 'pnpm', 'dev'], {
       client: fixtureClient(),
+      host: anyDirectoryHost,
     }),
   );
 });

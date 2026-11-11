@@ -704,6 +704,8 @@ export interface CliHost {
   homedir(): string;
   /** This platform's `path.resolve` of `path` against `base`. */
   resolvePath(base: string, path: string): string;
+  /** Whether `path` is an existing directory. */
+  isDirectory(path: string): boolean;
   connect(endpoint: ControlEndpoint): ControlClient;
   /** Streams the files under `cwd` for `dor open`'s picker. */
   listFiles(cwd: string, options: { onFiles: (paths: string[]) => void; signal: AbortSignal; home?: string }): Promise<{ truncated: boolean }>;
