@@ -3,10 +3,11 @@
  * Every `Verb-Noun` call in `deploy/local/install-windows.ps1` uses a verb
  * PowerShell actually approves. Runs from the repo root via `pnpm test`.
  *
- * Why this exists: nothing runs the `.ps1`. `deploy-lint.mjs` matches text,
- * `installer-verify-test.mjs` executes the *shell* helpers, and CI's Windows
- * leg only parses it — and a call to a cmdlet that does not exist parses
- * fine. A repo-wide rename proved the cost by
+ * Why this exists: almost nothing runs the `.ps1`. `deploy-lint.mjs` matches
+ * text, `installer-verify-test.mjs` executes the *shell* helpers, and CI's
+ * Windows leg parses it and runs only its rollback functions
+ * (`installer-windows-rollback-test.ps1`) — and a call to a cmdlet that does
+ * not exist parses fine. A repo-wide rename proved the cost by
  * turning all 147 `Write-Host` calls into `Write-Burrow`: a cmdlet that does
  * not exist, in a script that only fails on the operator's machine.
  *

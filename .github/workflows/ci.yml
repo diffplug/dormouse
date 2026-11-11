@@ -509,10 +509,10 @@ jobs:
           }
           "::warning::Windows PowerShell still starts slowly; the shell tests below may time out"
 
-      # The syntax gate for the two shipped PowerShell scripts, which nothing
-      # else loads; both must run on Windows PowerShell 5.1, so its parser
-      # reads them. A parse does not check that a cmdlet exists:
-      # scripts/ps1-cmdlet-lint.mjs covers the installer's names.
+      # The syntax gate for the two shipped PowerShell scripts: both must run
+      # on Windows PowerShell 5.1, so its parser reads them whole. A parse does
+      # not check that a cmdlet exists: scripts/ps1-cmdlet-lint.mjs covers the
+      # installer's names, and the step below runs its rollback functions.
       - name: Parse the PowerShell scripts
         if: runner.os == 'Windows'
         shell: powershell
@@ -524,6 +524,14 @@ jobs:
             foreach ($e in $errors) { "::error file=$file,line=$($e.Extent.StartLineNumber)::$($e.Message)"; $failed = $true }
           }
           if ($failed) { exit 1 }
+
+      # The Windows installer's rollback functions, taken from the shipped file
+      # and run on Windows PowerShell 5.1 against a temporary install root, with
+      # Task Scheduler and process control stubbed.
+      - name: Windows installer rollback test
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\installer-windows-rollback-test.ps1
 
       - name: Windows browser host and shell tests
         run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/host/agent-browser-host.test.ts src/lib/shell-escape.test.ts
