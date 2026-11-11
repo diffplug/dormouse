@@ -103,6 +103,10 @@ const HEAD_STREAM_CAP = 512 * 1024;
 // across chunks is still found. A longer `<body …>` split mid-tag is found by
 // the full-prefix instrumentation at the cap or the end instead.
 const MARKER_CARRY = 1024;
+// Both tags are optional, and a page that streams fragments often writes
+// neither: this long after its first bytes, instrument what has arrived and
+// pipe, as a browser would already be rendering it.
+const HEAD_WAIT_MS = 200;
 // Fetch destinations that load a document the shim goes into. Only their
 // requests ask for an identity body, so every other request keeps its
 // compression; a request without the header (an older engine) is treated as one.
@@ -747,7 +751,7 @@ function decodedBody(response: http.IncomingMessage, encoding: string): Readable
 
 // Inject the shim into the <head> while streaming, without buffering the whole
 // document: accumulate only until the insertion point (</head>, else <body>,
-// else the cap), instrument that prefix, then pipe the rest through untouched.
+// else the cap or `HEAD_WAIT_MS`), instrument that prefix, then pipe the rest through untouched.
 // latin1 is byte-preserving, so searching/rewriting ASCII tags and re-encoding
 // can't corrupt multibyte bytes in <head> (e.g. an em-dash in <title>), in any
 // ASCII-compatible charset — which is why the upstream's `content-type`, charset
@@ -776,7 +780,19 @@ function streamHtml(
   let carry = '';
   let handled = false;
   let bomChecked = false;
+  let waiting: ReturnType<typeof setTimeout> | undefined;
   const prefix = () => Buffer.concat(pending).toString('latin1');
+  // Instrument the buffered prefix, then hand the remainder to a raw pipe
+  // (backpressure + end).
+  const instrumentAndPipe = () => {
+    clearTimeout(waiting);
+    if (handled || res.destroyed) return;
+    handled = true;
+    body.off('data', onData);
+    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
+    pending.length = 0;
+    body.pipe(res);
+  };
 
   // Each chunk is decoded and searched once, plus the carry, so a large head
   // costs linear rather than quadratic time.
@@ -799,24 +815,24 @@ function streamHtml(
     const scan = carry + chunk.toString('latin1');
     if (buffered <= HEAD_STREAM_CAP && !HEAD_MARKER.test(scan)) {
       carry = scan.slice(-MARKER_CARRY);
+      waiting ??= setTimeout(instrumentAndPipe, HEAD_WAIT_MS);
       return;
     }
-    // Found the insertion point (or hit the cap): instrument the buffered
-    // prefix, then hand the remainder to a raw pipe (backpressure + end).
-    handled = true;
-    body.off('data', onData);
-    res.write(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
-    pending.length = 0;
-    body.pipe(res);
+    // Found the insertion point (or hit the cap).
+    instrumentAndPipe();
   };
 
   body.on('data', onData);
   body.on('end', () => {
+    clearTimeout(waiting);
     if (handled) return; // the pipe ends `res`
     // Whole document arrived before any head marker — instrument and finish.
     res.end(Buffer.from(instrumentHtml(prefix(), embedderOrigin, preserveCsp, grant.tunneled), 'latin1'));
   });
-  body.on('error', () => { if (!res.writableEnded) res.destroy(); });
+  body.on('error', () => {
+    clearTimeout(waiting);
+    if (!res.writableEnded) res.destroy();
+  });
 }
 
 function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {

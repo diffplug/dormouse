@@ -497,6 +497,31 @@ describe('iframe proxy — serving', () => {
     expect(first).toMatch(/<\/script><\/head>$/);
   });
 
+  it('streams a page that writes neither a head nor a body tag before its response ends', async () => {
+    let finish: () => void = () => {};
+    const port = await upstream(async (_q, s) => {
+      s.writeHead(200, { 'content-type': 'text/html' });
+      s.write('<!doctype html><p>1</p>');
+      await new Promise<void>((resolve) => { finish = resolve; });
+      s.end('<p>2</p>');
+    });
+    const u = new URL(await frame(`http://127.0.0.1:${port}/`));
+    try {
+      const first = await new Promise<string>((resolve, reject) => {
+        const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname }, (res) => {
+          res.once('data', (c: Buffer) => resolve(c.toString('latin1')));
+        });
+        req.on('error', reject);
+        req.end();
+        setTimeout(() => reject(new Error('nothing arrived while the upstream was open')), 5_000);
+      });
+      expect(first).toContain('__dormouse');
+      expect(first).toContain('<p>1</p>');
+    } finally {
+      finish();
+    }
+  });
+
   it('passes non-HTML through untouched (no shim), still stripping framing headers', async () => {
     const port = await upstream((_q, s) => {
       s.writeHead(200, { 'content-type': 'application/javascript', 'x-frame-options': 'SAMEORIGIN' });
