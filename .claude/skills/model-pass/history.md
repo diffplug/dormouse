@@ -49,4 +49,45 @@ The two columns are **not comparable**: the first wave took the core library, bo
 - A cross-unit synthesis by the model under test, which is where the process proposals came from.
 - Opus as both bulk reviewer and implementer.
 
-**Use next time.** Worker: Opus 5.5 or its successor. Priority areas last time: mobile UI and Pocket.
+### Follow-up, 2026-11-10: the findings left for a decision
+
+The 16 `high` findings went to the maintainer one at a time, each as its own PR; all 16 merged. The other 280 open findings were sorted by the model under test into 13 classes, each with one default, so the maintainer accepted a table rather than answering 280 questions, and gave about ten product answers, asked one at a time.
+
+| Class | Count | Default |
+|---|---|---|
+| Fix | 108 | Fix, one finding per commit |
+| Text only (spec, comment, message) | 21 | Fix |
+| Dead or legacy code | 26 | Delete |
+| Needs a device to confirm | 21 | Check on the device before any code |
+| Performance | 14 | Measure first |
+| Security hardening | 9 | Fix |
+| Needs a design | 12 | Four built; the rest deferred past launch |
+| Needs the maintainer | 18 | One recommendation each |
+| Release pipeline | 5 | Hold for the next tag dry run |
+| Stale or duplicate | 30 | Close |
+| Accepted as is | 16 | Close |
+
+| Fix wave | Lanes | Fixed | Skipped | Already fixed | Opus tokens | Per fix |
+|---|---|---|---|---|---|---|
+| First (by area) | 9 | 163 | 8 | 5 | 3.57M | About 22k |
+| Second (Windows-confirmed, a wire change, cross-cutting deletions) | 4 | 18 | 0 | 3 | 0.93M | About 52k |
+
+All 13 lane PRs merged within a day of opening. Still open at close: 12 performance findings, the 5 release-pipeline items, 8 design items, the 8 skips that carry a real question, and the phone and Linux checks.
+
+**Device checks.** Eleven Windows claims were run on a real machine, seven over SSH and four on screen by the maintainer. Six were confirmed and fixed, two did not reproduce and were dropped, one was harmless, one was measured and deferred, and one could not be exercised and was fixed on a best guess with a backstop: six real out of the ten exercised.
+
+**Regressions and collisions the follow-up caused.**
+
+- Nine lane PRs merging in one evening pushed a spec over its word budget five times; once the collision landed and left `main` red until the next lane re-baselined it. Several specs sat exactly at their budgets, so any two lanes that each added a sentence collided.
+- Four canary patches went stale, and one lane was pushed with a stale canary because the push command did not gate on the canary test.
+- One lane turned a silent failure into a rejected promise that four fire-and-forget callers did not handle. It was caught and fixed before merge.
+- Two Windows-only tests ran in CI for the first time and failed on facts no macOS run shows (8.3 short paths, CRLF checkouts).
+- The extra CI load exposed a timing flake in a test of the graceful stop, fixed in #1705.
+
+**What worked and is kept.**
+
+- The digest: classes with a default each, then questions one at a time.
+- One implementer per lane, kept alive, so a review finding went back to the agent that wrote the fix.
+- Running the device checks before writing the device fixes.
+
+**Use next time.** Worker: Opus 5.5 or its successor. Priority areas last time: mobile UI and Pocket. Digest the undecided findings into classes as soon as the reviews end, leave slack in every spec budget a lane will touch before the lanes start, merge lane PRs one at a time with the canary test in the push gate, and book the device time while the reviews run.
