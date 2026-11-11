@@ -328,6 +328,8 @@ describe('IframePanel', () => {
         origin: PROXY, data: { __dormouse: 'location', url: PROXY + path, loaded: true },
       }));
     });
+    // Each resolved frame first reports the document it loaded.
+    await observe('/app');
     await observe('/other?q=1#part');
     const original = container.querySelector('iframe');
     setTitle.mockClear();
@@ -336,6 +338,7 @@ describe('IframePanel', () => {
     expect(container.querySelector('iframe')!.src).toBe(PROXY + '/other?q=1#part');
     expect(container.querySelector('iframe')).not.toBe(original);
     expect(setTitle).not.toHaveBeenCalled();
+    await observe('/other?q=1#part');
 
     await observe('/third');
     await act(async () => chrome().chromeActions.back());
@@ -343,6 +346,25 @@ describe('IframePanel', () => {
     await act(async () => chrome().chromeActions.forward());
     expect(chrome().chrome().url).toBe('http://example.test/third');
     await act(async () => chrome().chromeActions.back());
+    await act(async () => chrome().chromeActions.back());
+    expect(chrome().chrome().url).toBe('http://example.test/app');
+  });
+
+  it('replaces an entry with where the server redirected it, so Back reaches the page before', async () => {
+    const { platform } = installBrowserHost();
+    platform.createIframeProxyUrl = vi.fn<CreateIframeProxyUrl>(async (url) => ({ ok: true as const, url: url.replace('http://example.test', PROXY) }));
+    await renderPanel(stubActions(), paneProps('iframe-redirect'), vi.fn());
+    const chrome = () => getAgentBrowserScreenController('iframe-redirect')!;
+    const loaded = async (path: string) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: PROXY, data: { __dormouse: 'location', url: PROXY + path, loaded: true },
+      }));
+    });
+    await loaded('/app');
+    await act(async () => chrome().chromeActions.navigate('http://example.test/docs'));
+    // The server answers /docs with a redirect to /docs/.
+    await loaded('/docs/');
+    expect(chrome().chrome().url).toBe('http://example.test/docs/');
     await act(async () => chrome().chromeActions.back());
     expect(chrome().chrome().url).toBe('http://example.test/app');
   });

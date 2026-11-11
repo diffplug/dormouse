@@ -106,6 +106,7 @@ function sameUrl(a: string, b: string): boolean {
  *  that is the current one, so Back does not land on it to redirect again. */
 function redirectHistory(history: IframeHistory, fromUrl: string | null, nextUrl: string): IframeHistory {
   const current = history.entries[history.index];
+  if (current !== undefined && sameUrl(current, nextUrl)) return history;
   if (current === undefined || fromUrl === null || !sameUrl(current, fromUrl)) return appendHistory(history, nextUrl);
   return { entries: [...history.entries.slice(0, history.index), nextUrl], index: history.index };
 }
@@ -213,6 +214,14 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     setReloadNonce((n) => n + 1);
   }, [paneWrite, id]);
   const observeFrameUrl = useCallback((nextUrl: string) => applyFrameUrl(nextUrl, false), [applyFrameUrl]);
+  // The first document a resolved frame reports is the entry it loaded, or
+  // where the server redirected that entry: it takes the entry's place, so
+  // Back does not land on the redirecting URL only to be sent on again.
+  const observeFrameLoad = useCallback((nextUrl: string) => {
+    setLiveUrl(nextUrl);
+    setHistory((prev) => redirectHistory(prev, prev.entries[prev.index] ?? null, nextUrl));
+    paneWrite.setTitle(id, hostPathDisplay(nextUrl, true));
+  }, [paneWrite, id]);
 
   const goToHistoryIndex = useCallback((nextIndex: number) => {
     const prev = historyRef.current;
@@ -472,14 +481,16 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
         if (!nextUrl) return;
         // Only a load report vouches for the document that just loaded: a
         // clicked link's report comes from the page being left.
+        const firstLoad = data.loaded === true && lastShimReportRef.current === Number.NEGATIVE_INFINITY;
         if (data.loaded === true) lastShimReportRef.current = performance.now();
         setUninstrumented(false);
-        observeFrameUrl(nextUrl);
+        if (firstLoad) observeFrameLoad(nextUrl);
+        else observeFrameUrl(nextUrl);
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, followRedirect]);
+  }, [id, proxyOrigin, actions, liveUrl, sourceUrl, observeFrameUrl, observeFrameLoad, followRedirect]);
 
   // Raw fallback frames have no injected shim, but focusing a cross-origin
   // iframe still blurs the parent window while the document itself remains
