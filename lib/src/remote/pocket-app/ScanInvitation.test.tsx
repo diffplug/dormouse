@@ -292,6 +292,33 @@ describe('after a ceremony that failed without leaving this screen', () => {
 
     expect(camera.started).toBe(2);
   });
+
+  it('does not re-run a failed ceremony off the same code still in view', async () => {
+    // The QR stays on the computer's screen after its ceremony failed here, and
+    // the reopened camera decodes it again within half a second.
+    const camera = fakeCamera();
+    const onScanned = vi.fn<(invitation: PairingInvitation) => void>();
+    render({ startScan: camera.startScan, onScanned });
+    await settle();
+    const { url } = await invitationUrl();
+    act(() => camera.read(url));
+    await settle();
+    expect(onScanned).toHaveBeenCalledOnce();
+
+    render({ startScan: camera.startScan, onScanned, busy: 'pair' });
+    await settle();
+    render({ startScan: camera.startScan, onScanned });
+    await settle();
+    expect(camera.started).toBe(2);
+    act(() => camera.read(url));
+    await settle();
+    expect(onScanned).toHaveBeenCalledOnce();
+
+    const next = await invitationUrl();
+    act(() => camera.read(next.url));
+    await settle();
+    expect(onScanned).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('when the camera cannot be opened', () => {

@@ -141,6 +141,14 @@ export function ScanInvitation({
    * an error on screen telling the user to scan again.
    */
   const acceptingRef = useRef(false);
+  /**
+   * The code whose handover last settled with this screen still up — a
+   * ceremony that failed. The camera keeps decoding the same QR every half
+   * second, and handing it over again would restart that ceremony before its
+   * error could be read, so the camera skips it until it reads something else.
+   * A paste is a deliberate retry and is not held back.
+   */
+  const settledTextRef = useRef<string | null>(null);
   // Retire pending parses without disabling fresh input if this screen stays up.
   const parseGenerationRef = useRef(0);
   useEffect(() => () => { parseGenerationRef.current++; }, []);
@@ -198,6 +206,7 @@ export function ScanInvitation({
         await onScanned(invitation);
       } finally {
         acceptingRef.current = false;
+        settledTextRef.current = text;
       }
     },
     [appOrigin, onScanned, stopCamera],
@@ -223,7 +232,9 @@ export function ScanInvitation({
       if (!live) return;
       try {
         const controls = await startScan(video, (text) => {
-          if (live) void accept(text);
+          if (!live || text === settledTextRef.current) return;
+          settledTextRef.current = null;
+          void accept(text);
         });
         if (!live) {
           release(controls, video);
@@ -297,6 +308,7 @@ export function ScanInvitation({
           onSubmit={(e) => {
             e.preventDefault();
             if (busy !== null || pasted.trim().length === 0) return;
+            settledTextRef.current = null;
             void accept(pasted.trim());
           }}
         >
