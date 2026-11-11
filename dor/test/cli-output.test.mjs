@@ -2011,6 +2011,10 @@ test('list --command matches the reported command line, not its summarized label
     .surfaces.map(surface => surface.id);
   assert.deepEqual(await ids('npm run dev --host'), ['surface:1']);
   assert.deepEqual(await ids('npm run dev'), ['surface:2']);
+  // What a listing prints is what the filter takes back.
+  const listed = JSON.parse((await runCli(['list', '--json'], { client, env: listEnv })).stdout).surfaces;
+  assert.equal(listed[0].command_line, 'npm run dev --host');
+  assert.deepEqual(await ids(listed[0].command_line), ['surface:1']);
 });
 
 test('list ports text output', async () => {
