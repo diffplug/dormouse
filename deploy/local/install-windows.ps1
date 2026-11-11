@@ -648,7 +648,9 @@ Write-Step "Checking the source checkout"
 
 function Invoke-Git {
   param([string[]]$Arguments)
-  return Invoke-Native -FilePath 'git.exe' -Arguments (@('-C', $REPO_ROOT) + $Arguments)
+  # Invoke-Native's Start-Process -Wait also waits for descendants, and with
+  # core.fsmonitor on, `git status` leaves an fsmonitor daemon running behind it.
+  return Invoke-Native -FilePath 'git.exe' -Arguments (@('-C', $REPO_ROOT, '-c', 'core.fsmonitor=false') + $Arguments)
 }
 
 $r = Invoke-Git @('rev-parse', 'HEAD')
