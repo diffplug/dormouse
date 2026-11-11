@@ -494,7 +494,7 @@ describe('AgentBrowserPanel Playwright params', () => {
     // The pane sizes the host was asked to sync each stream's browser to.
     const synced = (port: number) => stream(port).sent.map((raw) => JSON.parse(raw))
       .filter((message) => message.type === 'sync').map(({ width, height, dpr }) => `${width}x${height}@${dpr}`);
-    const params = { surfaceType: 'browser', renderMode: 'playwright-screencast', session: 'app', cwd: '/first', stream: 4321, browserViewport: { mode: 'pane-sync' }, syncEngaged: true } as const;
+    const params = { surfaceType: 'browser', renderMode: 'playwright-screencast', session: 'app', cwd: '/first', stream: 4321, browserViewport: { mode: 'pane-sync' } } as const;
 
     await renderPanel(paneProps('pw-panel', params));
     await vi.waitFor(() => expect(synced(4321)).toContain('800x600@1'));

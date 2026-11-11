@@ -56,7 +56,6 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const binaryPath = params?.binaryPath;
   const url = params?.url;
   const key = params?.key;
-  const syncEngaged = params?.syncEngaged;
   const cwd = params?.cwd;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
   // back to resolving it from params for a direct mount (tests).
@@ -112,8 +111,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // one the host reported for a native launch (`followParamsHeadedness`).
   useEffect(() => {
     if (controller.released) setGeneration((current) => current + 1);
-    else controller.updateParams({ session, launchSession, binaryPath, url, syncEngaged, key, cwd, renderMode: seededMode });
-  }, [controller, session, launchSession, binaryPath, url, syncEngaged, key, cwd, seededMode]);
+    else controller.updateParams({ session, launchSession, binaryPath, url, key, cwd, renderMode: seededMode });
+  }, [controller, session, launchSession, binaryPath, url, key, cwd, seededMode]);
 
   // Lend the controller this view's live DOM bindings. Last attach wins; the
   // detach is identity-guarded inside the controller so a stale StrictMode

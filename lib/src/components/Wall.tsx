@@ -2190,8 +2190,8 @@ export function Wall({
         closeBrowserSurface(id, params);
         // The Tool's browser launches itself, in the Tool's own session.
         lath.store.updateParams(id, toolProvider
-          ? { toolRender: mode, ...toolBrowserLaunchParams(id, params ?? {}, url, toolProvider), syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}) }
-          : { toolRender: mode, renderMode: mode, url, session: undefined, launchSession: undefined, launchFallback: undefined, syncEngaged: false });
+          ? { toolRender: mode, ...toolBrowserLaunchParams(id, params ?? {}, url, toolProvider), ...(viewport ? { browserViewport: viewport } : {}) }
+          : { toolRender: mode, renderMode: mode, url, session: undefined, launchSession: undefined, launchFallback: undefined });
         return;
       }
 
@@ -2250,7 +2250,7 @@ export function Wall({
           session: undefined,
           ...(previousSession ? { launchSession: previousSession } : {}),
         };
-        swapBrowserRenderer(id, params, { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback });
+        swapBrowserRenderer(id, params, { surfaceType: 'browser', renderMode: mode, url, cwd, ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback });
         selectPane(id);
       }
     },
@@ -2265,7 +2265,7 @@ export function Wall({
         minimized: false,
         // A launch that fails takes its pane with it.
         params: providers.length
-          ? { surfaceType: 'browser', renderMode: renderModeFor(preferredBrowserProvider(providers), 'screencast'), url, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+          ? { surfaceType: 'browser', renderMode: renderModeFor(preferredBrowserProvider(providers), 'screencast'), url, launchFallback: 'close' satisfies LaunchFallback }
           : { surfaceType: 'browser', renderMode: 'iframe', url },
         reference,
         title: hostPathDisplay(url, true),
@@ -2300,7 +2300,7 @@ export function Wall({
       // renderer the swap replaced.
       if (fallback === 'embed') {
         void closeBrowserSurface(id, params);
-        lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false, launchSession: undefined, launchFallback: undefined });
+        lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', launchSession: undefined, launchFallback: undefined });
       } else {
         swapBrowserRenderer(id, params, fallback.restore);
       }
@@ -2343,7 +2343,7 @@ export function Wall({
     // terminal's directory is only what it reported, so the host's neutral one
     // serves (docs/specs/dor-browser.md -> "Pane Context Menu Connect").
     let params: Record<string, unknown> = {
-      surfaceType: 'browser', renderMode: mode, url: entry.url, syncEngaged: false, contextPortKey: key,
+      surfaceType: 'browser', renderMode: mode, url: entry.url, contextPortKey: key,
     };
     // A prepared browser that never became a Pane closes, at once on cancel.
     // Cancelling bumps the generation first, so `current()` sees it too.
@@ -2408,7 +2408,7 @@ export function Wall({
       preserveSource: true,
       // A launch that fails takes its pane with it. No cwd, as openContextPort.
       params: provider && hostSupportsBrowser(provider)
-        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, launchFallback: 'close' satisfies LaunchFallback }
         : { surfaceType: 'browser', renderMode: 'iframe', url: shownUrl },
       reference,
       title: hostPathDisplay(shownUrl, true),

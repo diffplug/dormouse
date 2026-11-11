@@ -491,7 +491,8 @@ describe('sync-to-pane', () => {
     const sink = pane.sink;
     hostSync(4321, 'off');
     expect(screen.snapshot()).toMatchObject({ syncEngaged: false, state: 'SCALED' });
-    expect(sink.updateParameters).toHaveBeenLastCalledWith({ syncEngaged: false });
+    // `browserViewport` alone persists the choice, once a measurement says what took over.
+    expect(sink.updateParameters).not.toHaveBeenCalledWith(expect.objectContaining({ syncEngaged: expect.anything() }));
     // Disengaged, the pane's size goes nowhere.
     const sent = syncs(4321).length;
     pane.resize(900, 700);
@@ -728,7 +729,7 @@ describe('launch', () => {
     const host = launchHost(async () => ({ ok: true, session: 'prepared', stream: 4321 }));
     host.platform.toolControl = vi.fn(async () => ({ status: 'browser-config' as const,
       config: { ...defaultBrowserViewportConfig(), defaultViewport: 'pane-sync' } }));
-    const params = { renderMode: `${provider}-screencast` as const, url: 'http://localhost:5173/', syncEngaged: false };
+    const params = { renderMode: `${provider}-screencast` as const, url: 'http://localhost:5173/' };
     const controller = acquireAgentBrowserSurfaceController('prepared', params);
     const ready = await controller.prepareForPlacement();
     await flushMicrotasks();
@@ -738,7 +739,7 @@ describe('launch', () => {
     controller.attachView(resizablePane(640, 480).sink);
     await flushMicrotasks();
     expect(syncs(4321).at(-1)).toEqual([640, 480, window.devicePixelRatio || 1]);
-    expect(ready.params).toMatchObject({ browserViewport: { mode: 'pane-sync' }, syncEngaged: true });
+    expect(ready.params).toMatchObject({ browserViewport: { mode: 'pane-sync' } });
     expect(host.requests('launch')).toHaveLength(1);
     expect(opens(host)).toHaveLength(0);
   });

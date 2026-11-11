@@ -17,7 +17,7 @@ import {
 } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getPlatform, IS_MAC } from '../../lib/platform';
-import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import { BUILTIN_BROWSER_VIEWPORTS, defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { msSince } from '../../lib/elapsed';
 import { isSeenObserved, type SurfaceSightObserved } from '../../lib/surface-sight';
@@ -149,7 +149,6 @@ export interface AgentBrowserSurfaceParams {
   key?: string;
   binaryPath?: string;
   url?: string;
-  syncEngaged?: boolean;
   browserViewport?: BrowserViewportSetting;
 }
 
@@ -275,7 +274,6 @@ export class AgentBrowserSurfaceController {
   private initialStream: number | undefined;
   private paramsUrl: string | undefined;
   private paramsKey: string | null;
-  private paramsSyncEngaged: boolean | undefined;
   private browserViewport: BrowserViewportSetting;
   private paramsViewportExplicit: boolean;
 
@@ -411,7 +409,6 @@ export class AgentBrowserSurfaceController {
     this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     this.paramsUrl = params.url;
     this.paramsKey = params.key ?? null;
-    this.paramsSyncEngaged = params.syncEngaged;
     this.latestRestorableUrl = isBrowsableUrl(params.url) ? params.url : undefined;
     // Headedness is derived from the canonical renderMode; an unset mode (a
     // direct mount in tests) is not popped out.
@@ -419,8 +416,8 @@ export class AgentBrowserSurfaceController {
     // A fresh Surface starts fixed; explicit pane-sync survives restoration.
     this.browserViewport = isBrowserViewportSetting(params.browserViewport)
       ? params.browserViewport
-      : params.syncEngaged === true ? { mode: 'pane-sync' } : { mode: 'fixed', width: 1440, height: 900 };
-    this.paramsViewportExplicit = isBrowserViewportSetting(params.browserViewport) || params.syncEngaged === true;
+      : { mode: 'fixed', ...BUILTIN_BROWSER_VIEWPORTS.desktop };
+    this.paramsViewportExplicit = isBrowserViewportSetting(params.browserViewport);
     this.syncEngaged = this.browserViewport.mode === 'pane-sync';
     this.chrome = { url: '', displayUrl: '', title: null, key: this.paramsKey };
 
@@ -725,7 +722,6 @@ export class AgentBrowserSurfaceController {
       this.paramsKey = params.key ?? null;
       this.recomputeChrome();
     }
-    if (params.syncEngaged !== undefined) this.paramsSyncEngaged = params.syncEngaged;
     if (isBrowserViewportSetting(params.browserViewport)) {
       this.browserViewport = params.browserViewport;
       this.paramsViewportExplicit = true;
@@ -1257,11 +1253,6 @@ export class AgentBrowserSurfaceController {
   private setSyncEngaged(syncEngaged: boolean): void {
     if (this.syncEngaged === syncEngaged) return;
     this.syncEngaged = syncEngaged;
-    // Persist so it round-trips through the persisted layout; skip no-ops.
-    if (this.paramsSyncEngaged !== syncEngaged) {
-      this.paramsSyncEngaged = syncEngaged;
-      this.writeParams({ syncEngaged });
-    }
     // Reflect the flip in the indicator immediately.
     this.publishScreen();
   }

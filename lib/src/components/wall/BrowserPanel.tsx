@@ -33,7 +33,6 @@ export type BrowserPanelParams = {
   launchSession?: string;
   key?: string;
   binaryPath?: string;
-  syncEngaged?: boolean;
   browserViewport?: BrowserViewportSetting;
   launchFallback?: LaunchFallback;
   /** Set only on a Surface the pane context menu opened for a port, as

@@ -41,7 +41,6 @@ type BrowserParamsLike = {
   toolScope?: unknown;
   /** Tool only: the approval this Surface is waiting on before it runs. */
   toolPending?: unknown;
-  syncEngaged?: unknown;
   browserViewport?: unknown;
 };
 
@@ -254,7 +253,7 @@ export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMod
   const p = asParams(params);
   return browserDisplayMode({
     renderMode: resolveRenderMode(p),
-    syncEngaged: p.syncEngaged === true || (isBrowserViewportSetting(p.browserViewport) && p.browserViewport.mode === 'pane-sync'),
+    syncEngaged: isBrowserViewportSetting(p.browserViewport) && p.browserViewport.mode === 'pane-sync',
   });
 }
 
