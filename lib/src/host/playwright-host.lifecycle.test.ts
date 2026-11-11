@@ -2,7 +2,7 @@
 import { neutralBrowserCwd } from './browser-neutral-cwd';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { WebSocket } from 'ws';
@@ -251,6 +251,7 @@ test('a binding whose project directory was removed closes through the workspace
 
 test('with no workspace left above it, a removed directory closes an unscoped session from the neutral directory, never one scoped to a removed workspace', async () => {
   const gone = mkdtempSync(path.join(os.tmpdir(), 'dor-pw-gone-'));
+  const realGone = realpathSync(gone);
   rmSync(gone, { recursive: true });
   mocks.workspace.mockImplementation(() => undefined);
   const registry = (workspaceDir?: string) => mocks.cli.mockImplementation(async (_binary, args) => ({
@@ -266,12 +267,40 @@ test('with no workspace left above it, a removed directory closes an unscoped se
   expect((await pw({ op: 'close' }, { cwd: gone, session: 'test' })).ok).toBe(true);
   expect(closes().map(([, , options]) => options.cwd)).toEqual([neutralBrowserCwd()]);
 
+  // Scoped to a removed workspace holding the directory: refused.
   mocks.cli.mockClear();
-  registry(gone);
+  registry(realGone);
   const refused = await pw({ op: 'close' }, { cwd: gone, session: 'test' });
   expect(refused.ok).toBe(false);
   expect(refused.error).toContain('which was removed');
   expect(closes()).toEqual([]);
+
+  // A same-named session in an unrelated removed workspace is not this one.
+  mocks.cli.mockClear();
+  registry(path.join(realGone + '-elsewhere', 'other'));
+  expect((await pw({ op: 'close' }, { cwd: gone, session: 'test' })).ok).toBe(true);
+  expect(closes().map(([, , options]) => options.cwd)).toEqual([neutralBrowserCwd()]);
+});
+
+test('a removed directory that held its own workspace inside an outer one is not closed in the outer scope', async () => {
+  const outer = mkdtempSync(path.join(os.tmpdir(), 'dor-pw-outer-'));
+  const gone = path.join(outer, 'pkg');
+  const realGone = path.join(realpathSync(outer), 'pkg');
+  mocks.workspace.mockImplementation(() => realpathSync(outer));
+  mocks.cli.mockImplementation(async (_binary, args) => ({
+    ok: true, exitCode: 0, stderr: '',
+    stdout: JSON.stringify(args.includes('list') ? { servers: [{
+      title: 'test', workspaceDir: realGone, playwrightLib: process.cwd(),
+      endpoint: '/tmp/test-playwright.pipe', browser: { browserName: 'chromium' },
+    }] } : { result: '' }),
+  }));
+  try {
+    const refused = await pw({ op: 'close' }, { cwd: gone, session: 'test' });
+    expect(refused.ok).toBe(false);
+    expect(mocks.cli.mock.calls.filter(([, args]) => args[1] === 'close')).toEqual([]);
+  } finally {
+    rmSync(outer, { recursive: true, force: true });
+  }
 });
 
 test('a launch no binding names a project for runs the CLI in the neutral directory, not the host\'s', async () => {

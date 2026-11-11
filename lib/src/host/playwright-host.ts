@@ -7,6 +7,7 @@
  * owns everything the providers share.
  */
 import { realpathSync } from 'node:fs';
+import path from 'node:path';
 import type { Browser, Page, CDPSession } from 'playwright-core';
 import { BROWSER_PROVIDERS, isDirectory, spawnAndCapture } from 'dor-lib-common';
 import { neutralBrowserCwd } from './browser-neutral-cwd';
@@ -35,6 +36,15 @@ const INPUT_BACKLOG = 256;
 // unbounded: it lasts as long as the page load, nothing waits on it past a
 // launch's own bounds, and ending it could take down the browser it started.
 const CLI_TIMEOUT_MS = 10_000;
+
+/** `file` as the registry spells it: real up to its nearest remaining ancestor. */
+function realpathBelow(file: string): string {
+  const at = path.resolve(file);
+  const real = realpathOrUndefined(at);
+  if (real !== undefined) return real;
+  const parent = path.dirname(at);
+  return parent === at ? at : path.join(realpathBelow(parent), path.basename(at));
+}
 
 function realpathOrUndefined(file: string): string | undefined {
   try {
@@ -364,17 +374,20 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     if (!v.page) throw new Error('No playwright page is open');
     return { v, page: v.page };
   }
-  /** Refuse a close the neutral directory would address to another session:
-   *  the binding's directory is gone with no workspace above it, and the
-   *  registry lists the session under a workspace that was removed too. */
+  /** Refuse a close that would address another scope than the session's: the
+   *  binding's directory is gone, and the registry lists the session under a
+   *  removed workspace holding that directory, other than the one it now
+   *  resolves to (an ancestor's, or none). */
   async function closable(b: Binding, timeoutMs?: number) {
-    if (b.workspace !== undefined || isDirectory(b.cwd)) return;
+    if (isDirectory(b.cwd)) return;
+    const cwd = realpathBelow(b.cwd);
     const list = await cli(b, ['list', '--all', '--json'], timeoutMs);
     if (list.exitCode !== 0) throw new Error(list.stderr || 'Cannot discover playwright browsers');
     const parsed = JSON.parse(list.stdout);
     const servers: unknown = parsed.servers ?? parsed.data?.servers;
     const removed = (Array.isArray(servers) ? servers : []).find(s =>
       s.title === b.session && typeof s.workspaceDir === 'string' && s.workspaceDir && !isDirectory(s.workspaceDir)
+      && s.workspaceDir !== b.workspace && (cwd === s.workspaceDir || cwd.startsWith(s.workspaceDir + path.sep))
       && typeof s.playwrightLib === 'string' && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
     if (removed) throw new Error(`playwright session ${b.session} belongs to ${removed.workspaceDir}, which was removed; close it with playwright-cli`);
   }
