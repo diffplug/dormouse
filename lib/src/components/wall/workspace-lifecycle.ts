@@ -240,9 +240,12 @@ function pendWorkspace(id: WorkspaceId): void {
   const replacement = workspaces.length === 1 ? getActiveWorkspaceId() : null;
   const release = () => setHeld(held.filter(heldId => heldId !== id));
   const restore = (focus: boolean) => {
-    createWorkspace({ ...meta, activate: focus });
-    moveWorkspace(id, index);
-    release();
+    // Render its tab before selecting it, as `dropFromStrip` does.
+    flushSync(() => {
+      createWorkspace({ ...meta, activate: focus });
+      moveWorkspace(id, index);
+      release();
+    });
     // Back on the strip: its record is written again.
     void getWallHandle(id)?.flushPersistence();
     if (focus) getWallHandle(id)?.selectWorkspaceTab();
