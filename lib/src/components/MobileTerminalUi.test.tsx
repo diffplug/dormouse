@@ -361,6 +361,25 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onSendInput).not.toHaveBeenCalled();
   });
 
+  it('opens no rose while the composer covers the top of the panned terminal', () => {
+    const onSendInput = vi.fn();
+    const { container, terminal, typeButton, field } = renderUi({ onSendInput });
+    const begin = vi.spyOn(gestureMenu, 'beginMobileGesture');
+    vi.spyOn(gestureMenu, 'finishMobileGesture').mockReturnValue({
+      state: gestureMenu.MOBILE_GESTURE_IDLE_STATE,
+      action: { kind: 'confirm', confirmation: 'ctrlC', action: { kind: 'input', input: 'ctrlC' } },
+    });
+    act(() => typeButton.click());
+    act(() => {
+      terminal.dispatchEvent(pointerEvent('pointerdown'));
+      terminal.dispatchEvent(pointerEvent('pointerup'));
+    });
+    expect(begin).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-mobile-gesture-dialog]')).toBeNull();
+    expect(field()).not.toBeNull();
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
   // Pocket moves to another Session when the active one closes on the computer.
   it('drops a confirmation and closes the composer when the active Session changes under them', () => {
     const onSendInput = vi.fn();

@@ -52,12 +52,13 @@ import {
   PAIRING_DENIAL_MESSAGES,
   PASSKEY_UNAVAILABLE_MESSAGE,
   PRESENCE_CHALLENGE_MISMATCH_MESSAGE,
+  POCKET_API_TIMEOUT_MS,
   PocketClient,
+  RELAY_NO_ANSWER_MESSAGE,
   SessionExpiredError,
   SessionSupersededError,
   SetupTokenInvalidError,
   localStoragePocketStorage,
-  purgeLegacyPairedMarkers,
   type PocketClientDeps,
   type PocketSession,
   type PocketStorage,
@@ -1878,6 +1879,22 @@ describe('the session across launches', () => {
     expect(storage.getSession()).toBeNull();
   });
 
+  it('fails a request the Relay never answers, rather than waiting on it', async () => {
+    // Pocket holds every control while a request is out.
+    const storage = memoryStorage();
+    storage.setSession(stored);
+    const timers = fakeTimers();
+    const stalled: typeof fetch = (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+    });
+    const { client } = makeClient({}, { storage, now: () => NOW, fetch: stalled, setTimer: timers.setTimer });
+
+    const listed = client.listBurrows();
+    timers.fireAt(POCKET_API_TIMEOUT_MS);
+
+    await expect(listed).rejects.toThrow(RELAY_NO_ANSWER_MESSAGE);
+  });
+
   it('is cleared from storage by the session gate 401', async () => {
     const storage = memoryStorage();
     storage.setSession(stored);
@@ -2616,33 +2633,6 @@ describe('localStoragePocketStorage', () => {
 
     expect(map.get('dormouse-pocket:passkey:cred-new')).toBe('pk-new');
     expect([...storage.knownCredentialIds()].sort()).toEqual(['cred-new', 'cred-old']);
-  });
-
-  /**
-   * The pre-end-to-end Burrows view offered a button from these markers. The
-   * `KnownBurrowV1` records replaced them, so one left behind is a claim about
-   * authorization that nothing checks.
-   */
-  it('purges the legacy paired markers and touches nothing else', () => {
-    const { map, store } = fakeLocalStorage();
-    map.set('dormouse-pocket:paired:h1', '1');
-    map.set('dormouse-pocket:paired:h2', '1');
-    map.set('dormouse-pocket:passkey:cred-1', 'pk-1');
-    map.set('dormouse-pocket:push-endpoint', 'digest');
-    vi.stubGlobal('localStorage', store);
-
-    purgeLegacyPairedMarkers();
-
-    expect([...map.keys()].sort()).toEqual([
-      'dormouse-pocket:passkey:cred-1',
-      'dormouse-pocket:push-endpoint',
-    ]);
-  });
-
-  it('purging is silent on a browser with no storage at all', () => {
-    vi.stubGlobal('localStorage', blockedLocalStorage());
-
-    expect(() => purgeLegacyPairedMarkers()).not.toThrow();
   });
 });
 

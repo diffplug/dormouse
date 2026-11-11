@@ -109,11 +109,21 @@ function release(controls: ScanControls | null, video: HTMLVideoElement | null):
   video.srcObject = null;
 }
 
+/**
+ * How long a failed code must go unseen before the camera reading it again is
+ * a deliberate re-scan. The decoder reports a code in view every 500 ms plus
+ * its decode time, and each missed frame adds another 500 ms plus decode
+ * (`delayBetweenScanSuccess` / `delayBetweenScanAttempts` in `@zxing/browser`),
+ * so this leaves room for a few misses before a code held in view counts as one.
+ */
+export const RESCAN_GAP_MS = 3_000;
+
 export function ScanInvitation({
   busy,
   error,
   appOrigin,
   startScan = startCameraScan,
+  now = Date.now,
   onScanned,
   onCancel,
 }: {
@@ -123,6 +133,8 @@ export function ScanInvitation({
   /** The origin a code must name; `location.origin` in the app. */
   appOrigin: string;
   startScan?: StartScan;
+  /** Test seam for the clock {@link RESCAN_GAP_MS} is measured on. */
+  now?: () => number;
   /**
    * Handed the parsed invitation. Awaited, so this screen knows when a ceremony
    * that failed without leaving it is over and it may look again.
@@ -141,6 +153,18 @@ export function ScanInvitation({
    * an error on screen telling the user to scan again.
    */
   const acceptingRef = useRef(false);
+  /**
+   * The code whose handover last settled with this screen still up — a
+   * ceremony that failed. The camera keeps decoding the same QR every half
+   * second, and handing it over again would restart that ceremony before its
+   * error could be read, so the camera skips it **while it stays in view**:
+   * a sighting after {@link RESCAN_GAP_MS} with none is the user aiming again,
+   * the retry most failures ask for. A paste is a deliberate retry and is not
+   * held back.
+   */
+  const settledTextRef = useRef<string | null>(null);
+  /** When {@link settledTextRef}'s code was last in view, or could have been. */
+  const settledSeenAtRef = useRef(0);
   // Retire pending parses without disabling fresh input if this screen stays up.
   const parseGenerationRef = useRef(0);
   useEffect(() => () => { parseGenerationRef.current++; }, []);
@@ -198,9 +222,11 @@ export function ScanInvitation({
         await onScanned(invitation);
       } finally {
         acceptingRef.current = false;
+        settledTextRef.current = text;
+        settledSeenAtRef.current = now();
       }
     },
-    [appOrigin, onScanned, stopCamera],
+    [appOrigin, now, onScanned, stopCamera],
   );
 
   // **No camera while a ceremony this screen started is running.** It was
@@ -223,13 +249,24 @@ export function ScanInvitation({
       if (!live) return;
       try {
         const controls = await startScan(video, (text) => {
-          if (live) void accept(text);
+          if (!live) return;
+          if (text === settledTextRef.current) {
+            const at = now();
+            const gap = at - settledSeenAtRef.current;
+            settledSeenAtRef.current = at;
+            if (gap <= RESCAN_GAP_MS) return;
+          }
+          settledTextRef.current = null;
+          void accept(text);
         });
         if (!live) {
           release(controls, video);
           return;
         }
         controlsRef.current = controls;
+        // The camera was off through the ceremony: the gap counts from when it
+        // could see again, so a code still in view is not a re-scan.
+        settledSeenAtRef.current = now();
         setCamera('live');
       } catch (err: unknown) {
         // Released here too, not only on the way out: the decoder can throw
@@ -250,7 +287,7 @@ export function ScanInvitation({
       release(controlsRef.current, video);
       controlsRef.current = null;
     };
-  }, [accept, busy, startScan]);
+  }, [accept, busy, now, startScan]);
 
   const cameraProblem =
     camera === 'denied'
@@ -297,6 +334,7 @@ export function ScanInvitation({
           onSubmit={(e) => {
             e.preventDefault();
             if (busy !== null || pasted.trim().length === 0) return;
+            settledTextRef.current = null;
             void accept(pasted.trim());
           }}
         >
