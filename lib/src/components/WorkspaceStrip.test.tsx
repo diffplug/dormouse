@@ -349,8 +349,11 @@ describe('WorkspaceStrip', () => {
 
     await act(async () => { todoPill(first)!.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
     await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
-    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
-    await act(async () => { todoPill(first)!.click(); });
+    // The browser dispatches the release's click in the same task as `pointerup`.
+    await act(async () => {
+      window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 }));
+      todoPill(first)!.click();
+    });
     expect(handle.enterNextTodo).not.toHaveBeenCalled();
     expect(getActiveWorkspaceId()).toBe('workspace:2');
     await act(async () => { todoPill(first)!.click(); });
@@ -511,13 +514,36 @@ describe('WorkspaceStrip', () => {
     await act(async () => { tab.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
     await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
     expect(capture).toHaveBeenCalledTimes(1);
-    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
-
-    // The click the release produces is the drag's tail and must not activate…
-    await act(async () => { activateButton(first).click(); });
+    // The click the release produces, in the same task, is the drag's tail and
+    // must not activate…
+    await act(async () => {
+      window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 }));
+      activateButton(first).click();
+    });
     expect(getActiveWorkspaceId()).toBe('workspace:2');
     // …but the latch is one-shot, so the next click (a keyboard activation, a
     // later plain click) is a real activate again.
+    await act(async () => { activateButton(first).click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+  });
+
+  it('lets the drag tail lapse when the capture element took the click, so a later activation still activates', async () => {
+    createWorkspace({ id: 'workspace:2' });
+    await render();
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { left: 0, right: 100, width: 100, top: 0, bottom: 24, height: 24, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    );
+    const tab = tabFor(first);
+    Object.defineProperty(tab, 'setPointerCapture', { configurable: true, value: () => {} });
+    Object.defineProperty(tab, 'releasePointerCapture', { configurable: true, value: () => {} });
+
+    await act(async () => { tab.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
+    // The release's click went to the captured tab, not the button; a task later
+    // a keyboard or synthetic activation is a real one.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     await act(async () => { activateButton(first).click(); });
     expect(getActiveWorkspaceId()).toBe(first);
   });
