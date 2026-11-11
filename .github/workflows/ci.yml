@@ -528,6 +528,27 @@ jobs:
       - name: Windows browser host and shell tests
         run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/host/agent-browser-host.test.ts src/lib/shell-escape.test.ts
 
+      # fish is on no runner image; zsh, bash 3.2, and pwsh are on macOS's.
+      # No `brew update`: the image's formula data is recent enough for one
+      # bottle, and an update costs minutes.
+      - name: Install fish (shell conformance)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: brew install fish && fish --version
+
+      # The whole sidecar suite, real shells included: the Linux job is the only
+      # other place it runs, and macOS's bash is 3.2. The conformance suite
+      # fails if a shell DORMOUSE_REQUIRE_SHELLS names is missing.
+      - name: Sidecar tests (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        env:
+          DORMOUSE_REQUIRE_SHELLS: zsh,bash,fish,pwsh
+        run: pnpm --filter dormouse-sidecar test
+
       # node-pty ships the Windows addon and ConPTY DLL as prebuilds, so the
       # install above suffices. The Linux suite cannot exercise native close.
       - name: Windows PTY shutdown tests
