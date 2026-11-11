@@ -112,8 +112,9 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
   async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS, initialViewport?: BrowserViewportSetting) {
     const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
-      // A removed project directory cannot be spawned in.
-      cwd: isDirectory(b.cwd) ? b.cwd : neutralBrowserCwd(),
+      // A removed project directory cannot be spawned in: its workspace
+      // scopes the same sessions, and with none the neutral directory does.
+      cwd: isDirectory(b.cwd) ? b.cwd : b.workspace ?? neutralBrowserCwd(),
       env: initialViewport?.mode === 'fixed' ? { ...(b.env ?? process.env), PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } : b.env,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
     });
@@ -363,6 +364,20 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     if (!v.page) throw new Error('No playwright page is open');
     return { v, page: v.page };
   }
+  /** Refuse a close the neutral directory would address to another session:
+   *  the binding's directory is gone with no workspace above it, and the
+   *  registry lists the session under a workspace that was removed too. */
+  async function closable(b: Binding, timeoutMs?: number) {
+    if (b.workspace !== undefined || isDirectory(b.cwd)) return;
+    const list = await cli(b, ['list', '--all', '--json'], timeoutMs);
+    if (list.exitCode !== 0) throw new Error(list.stderr || 'Cannot discover playwright browsers');
+    const parsed = JSON.parse(list.stdout);
+    const servers: unknown = parsed.servers ?? parsed.data?.servers;
+    const removed = (Array.isArray(servers) ? servers : []).find(s =>
+      s.title === b.session && typeof s.workspaceDir === 'string' && s.workspaceDir && !isDirectory(s.workspaceDir)
+      && typeof s.playwrightLib === 'string' && realpathOrUndefined(s.playwrightLib) === b.install.libraryPath);
+    if (removed) throw new Error(`playwright session ${b.session} belongs to ${removed.workspaceDir}, which was removed; close it with playwright-cli`);
+  }
   const exited = (r: { exitCode: number; stderr: string }) => r.stderr.trim() || `playwright-cli exited ${r.exitCode}`;
   const live = (v: Viewer): LiveBrowser => ({ stream: v.instance, headed: v.headed });
 
@@ -390,7 +405,11 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     },
 
     // Finish the old CLI session before discovering the replacement endpoint.
-    stop: (b, timeoutMs) => cli(b, ['close'], timeoutMs),
+    async stop(b, timeoutMs) {
+      const end = Date.now() + timeoutMs;
+      await closable(b, timeoutMs);
+      return cli(b, ['close'], end - Date.now());
+    },
 
     async open(b, url, isHeaded, initialViewport) {
       const r = await cli(b, ['open', ...(url === undefined ? [] : [url]), '--browser=chromium', ...(isHeaded ? ['--headed'] : [])], null, initialViewport);
@@ -409,7 +428,9 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     },
 
     async close(b, timeoutMs) {
-      const r = await cli(b, ['close'], timeoutMs);
+      const end = Date.now() + timeoutMs;
+      await closable(b, timeoutMs);
+      const r = await cli(b, ['close'], end - Date.now());
       if (r.exitCode !== 0) throw new Error(exited(r));
     },
 

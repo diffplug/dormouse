@@ -14,14 +14,14 @@ import { WINDOW_GONE_GRACE_MS } from './browser-viewer';
 import { createPlaywrightProvider } from './playwright-host';
 import { BROWSER_REQUEST_TIMEOUT_MS, VIEWER_TEXT_INPUT_MAX, viewerTextInputs, type BrowserOp, type BrowserRequestBinding } from '../lib/platform/browser-automation';
 
-const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn() }));
+const mocks = vi.hoisted(() => ({ cli: vi.fn(), connect: vi.fn(), clipboard: vi.fn(), workspace: vi.fn() }));
 vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typeof import('dor-lib-common')>(), spawnAndCapture: mocks.cli }));
 vi.mock('./playwright-install', () => ({
   resolvePlaywrightInstall: () => ({
     binary: '/tools/playwright-cli', libraryPath: process.cwd(),
     library: { chromium: { connect: mocks.connect } },
   }),
-  playwrightWorkspace: () => process.cwd(),
+  playwrightWorkspace: (cwd: string) => mocks.workspace(cwd),
 }));
 
 let host: ReturnType<typeof createBrowserHost>;
@@ -48,6 +48,7 @@ const viewSession = async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.workspace.mockImplementation(() => process.cwd());
   cdp = { send: vi.fn().mockResolvedValue({ data: 'aGVsbG8=' }), detach: vi.fn().mockResolvedValue(undefined), on: vi.fn() };
   attach = vi.fn().mockResolvedValue(cdp);
   page = Object.assign(new EventEmitter(), {
@@ -240,12 +241,37 @@ test('a single-page browser refreshes without asking the CLI for its selection',
   expect(mocks.cli.mock.calls.map(([, args]) => args[1])).toEqual(['list']);
 });
 
-test('a binding whose project directory was removed still closes, its CLI run in the neutral directory', async () => {
+test('a binding whose project directory was removed closes through the workspace above it, still in place', async () => {
   const gone = mkdtempSync(path.join(os.tmpdir(), 'dor-pw-gone-'));
   rmSync(gone, { recursive: true });
   expect((await pw({ op: 'close' }, { cwd: gone, session: 'test' })).ok).toBe(true);
   const close = mocks.cli.mock.calls.find(([, args]) => args[1] === 'close');
-  expect(close?.[2].cwd).toBe(neutralBrowserCwd());
+  expect(close?.[2].cwd).toBe(process.cwd());
+});
+
+test('with no workspace left above it, a removed directory closes an unscoped session from the neutral directory, never one scoped to a removed workspace', async () => {
+  const gone = mkdtempSync(path.join(os.tmpdir(), 'dor-pw-gone-'));
+  rmSync(gone, { recursive: true });
+  mocks.workspace.mockImplementation(() => undefined);
+  const registry = (workspaceDir?: string) => mocks.cli.mockImplementation(async (_binary, args) => ({
+    ok: true, exitCode: 0, stderr: '',
+    stdout: JSON.stringify(args.includes('list') ? { servers: [{
+      title: 'test', ...(workspaceDir ? { workspaceDir } : {}), playwrightLib: process.cwd(),
+      endpoint: '/tmp/test-playwright.pipe', browser: { browserName: 'chromium' },
+    }] } : { result: '' }),
+  }));
+  const closes = () => mocks.cli.mock.calls.filter(([, args]) => args[1] === 'close');
+
+  registry();
+  expect((await pw({ op: 'close' }, { cwd: gone, session: 'test' })).ok).toBe(true);
+  expect(closes().map(([, , options]) => options.cwd)).toEqual([neutralBrowserCwd()]);
+
+  mocks.cli.mockClear();
+  registry(gone);
+  const refused = await pw({ op: 'close' }, { cwd: gone, session: 'test' });
+  expect(refused.ok).toBe(false);
+  expect(refused.error).toContain('which was removed');
+  expect(closes()).toEqual([]);
 });
 
 test('a launch no binding names a project for runs the CLI in the neutral directory, not the host\'s', async () => {

@@ -250,10 +250,13 @@ test.skipIf(process.platform === 'win32')('a hint that links to a share or devic
   expect(resolvePlaywrightInstall(local, {}).binary).toBe(local);
 });
 
-test('a removed project directory has no workspace, rather than failing its binding', () => {
+test('a removed directory takes the workspace above it, and has none when it held its own', () => {
   const project = path.join(root, 'project');
   mkdirSync(path.join(project, '.playwright'), { recursive: true });
-  expect(playwrightWorkspace(project)).toBe(project);
+  const sub = path.join(project, 'packages', 'app');
+  mkdirSync(sub, { recursive: true });
+  rmSync(path.join(project, 'packages'), { recursive: true });
+  expect(playwrightWorkspace(sub)).toBe(project);
   rmSync(project, { recursive: true });
   expect(playwrightWorkspace(project)).toBeUndefined();
 });
