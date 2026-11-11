@@ -119,6 +119,20 @@ describe('handlePaneShortcuts modifiers and kill', () => {
     expect(ctx.requestKill).toHaveBeenCalledWith('pane-a');
     expect(event.defaultPrevented).toBe(true);
   });
+
+  it('takes a capital letter under Caps Lock as its verb, but leaves Shift+letter unbound', () => {
+    const ctx = makeCtx();
+    const capsLock = new KeyboardEvent('keydown', { key: 'K', modifierCapsLock: true, cancelable: true } as KeyboardEventInit);
+    expect(handlePaneShortcuts(capsLock, ctx, { current: null })).toBe(true);
+    expect(ctx.requestKill).toHaveBeenCalledWith('pane-a');
+
+    vi.mocked(ctx.requestKill).mockClear();
+    const shifted = new KeyboardEvent('keydown', { key: 'K', shiftKey: true, cancelable: true });
+    expect(handlePaneShortcuts(shifted, ctx, { current: null })).toBe(false);
+    const both = new KeyboardEvent('keydown', { key: 'K', shiftKey: true, modifierCapsLock: true, cancelable: true } as KeyboardEventInit);
+    expect(handlePaneShortcuts(both, ctx, { current: null })).toBe(false);
+    expect(ctx.requestKill).not.toHaveBeenCalled();
+  });
 });
 
 describe('handlePaneShortcuts reopen', () => {

@@ -218,7 +218,7 @@ Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard
 
 `docs/specs/shortcuts.md` tables every binding; this section owns the dispatch behavior behind it.
 
-**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits any binding; Option/AltGr permits `|`, `%`, `"`, `>`.
+**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits the symbol bindings, and a letter verb matches its capital only under Caps Lock without Shift; Option/AltGr permits `|`, `%`, `"`, `>`.
 
 **Must use `,` to rename the selected terminal pane or Workspace tab in command mode**, without activating an inactive Workspace.
 
