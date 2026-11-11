@@ -20,6 +20,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { TauriAdapter } from "./tauri-adapter";
+import tauriConf from "../src-tauri/tauri.conf.json";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -129,16 +130,30 @@ describe("TauriAdapter browser requests", () => {
 });
 
 describe("TauriAdapter external links", () => {
-  it("revalidates every URI before the shell opens it, refusing the schemes the dialog refuses", () => {
+  it("revalidates every URI before the shell opens it, refusing the schemes the dialog refuses", async () => {
     const adapter = new TauriAdapter();
     vi.mocked(shellOpen).mockClear();
-    adapter.openExternal("ms-msdt:x");
-    adapter.openExternal("search-ms:query=x");
-    adapter.openExternal("javascript:alert(1)");
+    for (const uri of ["ms-msdt:x", "search-ms:query=x", "javascript:alert(1)"]) {
+      await expect(adapter.openExternal(uri)).rejects.toThrow("Dormouse does not open this link.");
+    }
     expect(shellOpen).not.toHaveBeenCalled();
-    adapter.openExternal("vscode://file/x.ts");
-    adapter.openExternal("https://example.com/");
+    await adapter.openExternal("vscode://file/x.ts");
+    await adapter.openExternal("https://example.com/");
     expect(vi.mocked(shellOpen).mock.calls).toEqual([["vscode://file/x.ts"], ["https://example.com/"]]);
+  });
+
+  it("hands the shell's refusal back to the caller", async () => {
+    vi.mocked(shellOpen).mockRejectedValueOnce(new Error("Scope not allowed"));
+    await expect(new TauriAdapter().openExternal("https://example.com/")).rejects.toThrow("Scope not allowed");
+  });
+
+  it("admits IPv6-literal web links to the shell's open scope, and no other app's link", () => {
+    // The plugin wraps the configured pattern in `^…$`.
+    const scope = new RegExp(`^${tauriConf.plugins.shell.open}$`);
+    const admitted = ["https://example.com/", "http://[::1]:5173/", "http://[fe80::1]/x", "mailto:team@example.com"];
+    expect(admitted.filter((uri) => !scope.test(uri))).toEqual([]);
+    expect(["vscode://file/x.ts", "zed://file/x", "ssh://host", "file:///etc/passwd"].filter((uri) => scope.test(uri))).toEqual([]);
+    expect(new TauriAdapter().opensOtherApps).toBe(false);
   });
 });
 

@@ -87,3 +87,7 @@ The [Bash reference manual](https://www.gnu.org/software/bash/manual/html_node/C
 **Why the JS path still owns our fields under a native Edit menu.** It predates the macOS standalone Edit menu (`docs/specs/standalone.md` → "Application menu"), and it cancels the keydown, which keeps the menu item from also pasting.
 
 **Why `readClipboardText` is the gate.** It selects the two standalone adapters, and it over-reaches to `standalone/src/browser-sidecar-adapter.ts`, whose Chrome webview *does* have working native chords — there the JS path replaces a working one rather than standing down. Worth knowing when a chord misbehaves only in the browser sidecar: the suspect is the JS handler, not the webview.
+
+## OSC 8 hyperlinks
+
+Standalone opens through the Tauri shell plugin, whose `open` scope (`plugins.shell.open` in `standalone/src-tauri/tauri.conf.json`) is its default pattern plus IPv6-literal web links: `vscode:`, `zed:`, `ssh:` and the like fail it. Widening the scope to every scheme `normalizeExternalUri` admits would hand any app's link to the OS opener from a capability that also launches local paths, so the dialog shows those links blocked instead of offering an open that silently does nothing (2026-11).

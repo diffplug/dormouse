@@ -352,8 +352,12 @@ export interface PlatformAdapter {
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 
   // Open a sanitized external URI. Implementations must revalidate because
-  // terminal output is untrusted.
-  openExternal?(uri: string): void;
+  // terminal output is untrusted. A returned promise rejects when the host's
+  // opener refuses the URI.
+  openExternal?(uri: string): void | Promise<void>;
+  // False on a host whose opener refuses a link another app handles (any
+  // scheme but web and mail), so the link dialog offers no open for one.
+  readonly opensOtherApps?: false;
 
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;

@@ -507,12 +507,14 @@ export class TauriAdapter implements PlatformAdapter {
     }
   }
 
-  openExternal(uri: string): void {
+  // The shell plugin's `open` scope (`plugins.shell.open` in tauri.conf.json)
+  // admits only web, `mailto:`, and `tel:` links.
+  readonly opensOtherApps = false as const;
+
+  openExternal(uri: string): Promise<void> {
     const normalized = normalizeExternalUri(uri);
-    if (!normalized) return;
-    open(normalized).catch((err) =>
-      console.error("[tauri-adapter] openExternal failed:", err),
-    );
+    if (!normalized) return Promise.reject(new Error("Dormouse does not open this link."));
+    return open(normalized);
   }
 
   onFilesDropped(handler: (paths: string[]) => void): () => void {

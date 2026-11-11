@@ -33,8 +33,18 @@ function PendingAnswerDialog({ request }: { request: PendingExternalLink }) {
   return <ExternalLinkModal request={request} onCancel={clearExternalLinkConfirmation} onConfirm={confirm} />;
 }
 
+/** The request as this host can act on it: a host that cannot hand a link to
+ *  another app shows that link blocked. */
+function forHost(request: PendingExternalLink): PendingExternalLink {
+  const d = request.decision;
+  if (d.status !== 'openable' || !d.otherApp || getPlatform().opensOtherApps !== false) return request;
+  const reason = `This app cannot hand ${d.scheme}: links to another app.`;
+  return { ...request, decision: { status: 'blocked', scheme: d.scheme, displayUri: d.displayUri, reason } };
+}
+
 function PendingLinkDialog({ request }: { request: PendingExternalLink }) {
-  const decision = request.decision.status === 'openable' && request.verdict !== 'deceptive' ? request.decision : null;
+  const [shown] = useState(() => forHost(request));
+  const decision = shown.decision.status === 'openable' && shown.verdict !== 'deceptive' ? shown.decision : null;
   // A `file:` link opens through `dor open`, never the system URL opener.
   const [source] = useState(() => decision?.scheme === 'file' ? fileLinkSource(request.source) : null);
   const fileSource = typeof source === 'object' ? source : null;
@@ -65,8 +75,14 @@ function PendingLinkDialog({ request }: { request: PendingExternalLink }) {
     if (source === null) {
       const platform = getPlatform();
       if (!platform.openExternal) return setError('This host cannot open external links.');
-      platform.openExternal(decision.uri);
-      clearExternalLinkConfirmation();
+      const opened = platform.openExternal(decision.uri);
+      if (!opened) return clearExternalLinkConfirmation();
+      // A host that answers keeps the dialog until the opener has, so a refusal shows here.
+      setError(undefined);
+      setBusy(true);
+      opened.then(() => {
+        if (current()) clearExternalLinkConfirmation();
+      }, fail);
       return;
     }
     if (typeof source === 'string') return setError(source);
@@ -79,7 +95,7 @@ function PendingLinkDialog({ request }: { request: PendingExternalLink }) {
 
   return (
     <ExternalLinkModal
-      request={request}
+      request={shown}
       onCancel={clearExternalLinkConfirmation}
       onConfirm={confirm}
       handlers={handlers}

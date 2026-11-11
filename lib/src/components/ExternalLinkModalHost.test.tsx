@@ -6,8 +6,8 @@ import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import type { DorControlResult } from 'dor/protocol';
 import { clearExternalLinkConfirmation, confirmLinkOpen, getExternalLinkConfirmationSnapshot, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), toolControl: vi.fn(), confirm: () => {} }));
-vi.mock('../lib/platform', () => ({ getPlatform: () => ({ openExternal: mocks.open, toolControl: mocks.toolControl }) }));
+const mocks = vi.hoisted(() => ({ open: vi.fn(), toolControl: vi.fn(), confirm: () => {}, opensOtherApps: undefined as false | undefined }));
+vi.mock('../lib/platform', () => ({ getPlatform: () => ({ openExternal: mocks.open, toolControl: mocks.toolControl, opensOtherApps: mocks.opensOtherApps }) }));
 vi.mock('./wall/wall-handles', () => ({ wallHandleOwning: () => ({}) }));
 vi.mock('./ExternalLinkModal', async (original) => {
   const real = await original<typeof import('./ExternalLinkModal')>();
@@ -27,6 +27,7 @@ let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
   mocks.open.mockReset();
+  mocks.opensOtherApps = undefined;
   requests = [];
   window.addEventListener('dormouse:control-request', capture);
   container = document.createElement('div');
@@ -69,6 +70,26 @@ it('names the scheme of a link that opens another app, starts on Cancel, and ope
   act(() => requestExternalLinkConfirmation('vscode://file/repo/src/App.tsx:4', 'open in editor'));
   act(() => button('Open vscode://').click());
   expect(mocks.open).toHaveBeenCalledWith('vscode://file/repo/src/App.tsx:4');
+});
+
+it('offers no open for another app\'s link on a host that cannot hand one over', () => {
+  mocks.opensOtherApps = false;
+  act(() => requestExternalLinkConfirmation('vscode://file/repo/src/App.tsx:4', 'open in editor'));
+  expect(hasOpenButton()).toBe(false);
+  expect(document.body.textContent).toContain('This app cannot hand vscode: links to another app.');
+  act(() => mocks.confirm());
+  expect(mocks.open).not.toHaveBeenCalled();
+  act(() => clearExternalLinkConfirmation());
+  act(() => requestExternalLinkConfirmation('https://trusted.example/'));
+  expect(hasOpenButton()).toBe(true);
+});
+
+it('keeps the dialog open with the host\'s refusal when its opener rejects', async () => {
+  mocks.open.mockRejectedValue(new Error('Scope not allowed'));
+  act(() => requestExternalLinkConfirmation('https://trusted.example/'));
+  await act(async () => button('Open URL').click());
+  expect(alertText()).toBe('Scope not allowed');
+  expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
 });
 
 it('shows an other-app link\'s own text only when it is a plain label, never the URL again', () => {
