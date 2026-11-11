@@ -341,8 +341,7 @@ function listenToPage(frame: HTMLIFrameElement) {
 
 /**
  * A minimized browser pane whose page focuses itself every 50 ms gets none of
- * the keys typed into the terminal (docs/specs/tiling-engine.md -> "Parked
- * leaves"). Real input throughout: the click into the page opens WebKit's
+ * the keys typed into the terminal. Real input throughout: the click into the page opens WebKit's
  * cross-origin focus gate, and the keys are routed by the browser, not
  * dispatched. Outside the Vitest runner there is no real input, so the play
  * stops after rendering.

@@ -1,8 +1,7 @@
 /**
  * A parked leaf is hidden, but no style and no `inert` stops a framed page inside
- * it from focusing itself, and every key then goes to a page nobody can see
- * (docs/specs/tiling-engine.md → "Parked leaves"). While anything is parked, the
- * Wall runs this watch to take the keyboard back.
+ * it from focusing itself, and every key then goes to a page nobody can see.
+ * While anything is parked, the Wall runs this watch to take the keyboard back.
  */
 
 /** How often to look while something is parked: focus moving from one frame
