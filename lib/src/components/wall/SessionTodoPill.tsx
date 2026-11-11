@@ -4,10 +4,10 @@ import { HEADER_PILL_CLASS, POPUP_SURFACE_CLASS } from '../design';
 import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
 import { clearSessionTodo } from '../../lib/terminal-registry';
 import type { ActivityState } from '../../lib/session-activity-store';
+import { clampOverlayPosition, insetOverlayBounds, overlayViewportBounds } from '../../lib/ui-geometry';
 import { TerminalContextContext } from './wall-context';
 
 const TODO_PREVIEW_GAP = 6;
-const TODO_PREVIEW_MARGIN = 8;
 
 /**
  * A Session's TODO pill, on every Pane
@@ -86,12 +86,12 @@ function TodoNotificationPreview({
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const top = anchorRect.bottom + TODO_PREVIEW_GAP;
-    const maxLeft = Math.max(TODO_PREVIEW_MARGIN, window.innerWidth - rect.width - TODO_PREVIEW_MARGIN);
+    // Capped to the room below the pill and clamped at that capped height, so a
+    // tall preview stays below the pill rather than rising over it.
+    const maxHeight = Math.max(48, insetOverlayBounds(overlayViewportBounds()).bottom - top);
     setStyle({
-      position: 'fixed',
-      left: Math.min(Math.max(anchorRect.left, TODO_PREVIEW_MARGIN), maxLeft),
-      top,
-      maxHeight: Math.max(48, window.innerHeight - top - TODO_PREVIEW_MARGIN),
+      ...clampOverlayPosition({ left: anchorRect.left, top, width: rect.width, height: Math.min(rect.height, maxHeight) }),
+      maxHeight,
     });
   }, [anchorRect]);
 

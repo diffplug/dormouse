@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { createPortal } from 'react-dom';
 import { POPUP_SURFACE_CLASS } from '../design';
 import { cfg } from '../../cfg';
+import { clampOverlayPosition } from '../../lib/ui-geometry';
 import { useDismissOverlay } from './use-dismiss-overlay';
 
 const POPOVER_GAP = 6;
-const POPOVER_MARGIN = 8;
 
 export interface AnchoredWarningProps {
   anchorRect: DOMRect;
@@ -29,13 +29,12 @@ export function AnchoredWarning({ anchorRect, title, message, onClose, ...dataAt
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const top = anchorRect.bottom + POPOVER_GAP;
-    const maxLeft = Math.max(POPOVER_MARGIN, window.innerWidth - rect.width - POPOVER_MARGIN);
-    setStyle({
-      position: 'fixed',
-      left: Math.min(Math.max(anchorRect.left, POPOVER_MARGIN), maxLeft),
-      top,
-    });
+    setStyle(clampOverlayPosition({
+      left: anchorRect.left,
+      top: anchorRect.bottom + POPOVER_GAP,
+      width: rect.width,
+      height: rect.height,
+    }));
   }, [anchorRect]);
 
   useDismissOverlay(onClose, ref);
