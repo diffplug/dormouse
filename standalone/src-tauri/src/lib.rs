@@ -5702,6 +5702,18 @@ mod tests {
         );
     }
 
+    /// Every `pty:data` the routing drops is acknowledged to the sidecar, or
+    /// the PTY it came from stays paused on output no window ever saw. The
+    /// dispatch needs a running app, so its wiring is read from the source.
+    #[test]
+    fn dispatch_acknowledges_every_dropped_chunk() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let dispatch = src.split("fn dispatch_sidecar_event(").nth(1).unwrap().split("\n}").next().unwrap();
+        let nowhere = dispatch.split("Delivery::Nowhere =>").nth(1).expect("a Nowhere arm").split("Delivery::Broadcast =>").next().unwrap();
+        let ack = nowhere.find("dropped_output_ack(event, &data)").expect("the drop is acknowledged");
+        assert!(nowhere[ack..].contains("send_to_sidecar(&sidecar, line)"));
+    }
+
     /// Output no window will parse is acknowledged on its behalf, in the
     /// sidecar's own unit, a JS string's length: UTF-16 code units.
     #[test]
