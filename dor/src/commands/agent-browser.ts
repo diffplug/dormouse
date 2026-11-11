@@ -130,7 +130,9 @@ export const AGENT_BROWSER: BrowserCliDescriptor = {
   navigationVerbs: new Set(['open', 'goto', 'navigate']),
   // `close` tears the session down; the Wall notices the stream dropping and
   // placeholders the surface, so opening one here would be self-defeating.
-  noBind: new Set(['close']),
+  // The rest never touch a browser, and the stream probe after them would
+  // start one at `about:blank`.
+  noBind: new Set(['close', 'skills', 'install', 'upgrade', 'doctor', 'session', 'profiles', 'dashboard', 'mcp']),
   informational: new Set(['--help', '-h']),
   // Its sessions are global to the socket directory: a command runs where the
   // caller is, with the caller's executable.

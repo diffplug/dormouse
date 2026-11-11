@@ -1309,6 +1309,14 @@ test('agent-browser close skips surface management', async () => {
   assert.equal(surfaceRequest(client), undefined);
 });
 
+test('agent-browser skills runs alone, without a stream probe or a surface', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', 'skills', 'get', 'core'], { client, execAgentBrowser: ab.exec });
+  assert.deepEqual(ab.calls, [['agent-browser', '--session', 'dormouse.1.default', 'skills', 'get', 'core']]);
+  assert.equal(surfaceRequest(client), undefined);
+});
+
 test('agent-browser without a control endpoint stays a pure passthrough', async () => {
   const ab = fakeAgentBrowser();
   const result = await runCli(['agent-browser', 'open', 'http://localhost:5173'], { execAgentBrowser: ab.exec });

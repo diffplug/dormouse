@@ -217,8 +217,9 @@ export interface BrowserCliDescriptor {
   paths: PathArgs;
   /** A test's stand-in for the spawn. */
   exec(options: CliOptions): BrowserExec | undefined;
-  /** The argv that reads the session's stream port once a command has
-   *  succeeded — the browser exists then, so asking starts none — under the
+  /** The argv that reads the session's stream port once a command that may
+   *  bind has succeeded — the browser exists then, so asking starts none
+   *  (verbs that never start one belong in `noBind`) — under the
    *  caller's own environment; the port it prints is handed over with the
    *  bind. Absent when the host reports the port. */
   streamStatus?(session: string, headed?: boolean): string[];
