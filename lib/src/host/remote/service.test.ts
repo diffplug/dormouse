@@ -847,6 +847,23 @@ describe('enrollOffer', () => {
 });
 
 describe('start', () => {
+  it('retries a start whose store read failed before answering status', async () => {
+    // A store that refuses one read (a locked keychain, a busy file) leaves the
+    // enrollment unread, not absent: "not enrolled" would offer an enrollment
+    // that overwrites it.
+    createService({ enrollment: ENROLLMENT });
+    const seeded = store.loadEnrollment;
+    store.loadEnrollment = async () => {
+      throw new Error('EBUSY: resource busy or locked');
+    };
+    await expect(service.start()).rejects.toThrow('EBUSY');
+
+    expect((await command('status')).error).toContain('EBUSY');
+    store.loadEnrollment = seeded;
+    expect((await command('status')).result).toMatchObject({ enrolled: true, burrowId: ENROLLMENT.burrowId });
+    expect(sockets).toHaveLength(1);
+  });
+
   it('keeps a Burrow whose Noise static halves disagree down, loudly, touching nothing', async () => {
     // A corrupt or hand-edited state file: starting would present an identity
     // every paired Client reads as changed (docs/specs/remote-security-model.md
@@ -4008,6 +4025,21 @@ describe('Hosted enrollment', () => {
   it('is refused on an enrolled machine, before any request', async () => {
     hosted({ enrollment: ENROLLMENT });
     await service.start();
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain(
+      `already enrolled as Burrow ${BURROW_ID}`,
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it('is refused on an enrolled machine whose start could not read the store', async () => {
+    hosted({ enrollment: ENROLLMENT });
+    const seeded = store.loadEnrollment;
+    store.loadEnrollment = async () => {
+      store.loadEnrollment = seeded;
+      throw new Error('the keychain is locked');
+    };
+    await expect(service.start()).rejects.toThrow('locked');
+
     expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain(
       `already enrolled as Burrow ${BURROW_ID}`,
     );

@@ -496,6 +496,13 @@ export class BurrowService {
    */
   #enrollment: BurrowEnrollment | null = null;
   /**
+   * Set while the last `#start` has not finished: a store that refused a read
+   * leaves this machine's enrollment unknown, not absent, so `status` and every
+   * enroll path retry the start first (`#retryFailedStart`) rather than answer
+   * "not enrolled" and let a new enrollment overwrite the unread one.
+   */
+  #startFailed = false;
+  /**
    * The network policy as last read or set; this service is its only writer.
    * **`null` until read, and read as `nothing` until then** (`#level`).
    */
@@ -668,11 +675,17 @@ export class BurrowService {
   }
 
   async #start(): Promise<void> {
+    this.#startFailed = true;
     // The policy before anything: a read that fails leaves the Burrow down.
     await this.#networkPolicy();
     const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
     if (enrollment) await this.#startBurrow(enrollment);
+    this.#startFailed = false;
+  }
 
+  /** Run a start that failed again, throwing if it fails again. **Runs on `#serialize`.** */
+  async #retryFailedStart(): Promise<void> {
+    if (this.#startFailed && !this.#disposed) await this.#start();
   }
 
   /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
@@ -788,6 +801,7 @@ export class BurrowService {
 
   async #enroll(params: EnrollParams): Promise<EnrollResult> {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
+    await this.#retryFailedStart();
     await this.#networkPolicy();
     this.#refuseNothing();
     return this.#enrollWith({ password: params.password }, this.#labelFrom(params));
@@ -822,6 +836,7 @@ export class BurrowService {
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
+    await this.#retryFailedStart();
     await this.#networkPolicy();
     this.#refuseNothing();
     // Re-read at the click, and refused before the token leaves the machine
@@ -907,6 +922,7 @@ export class BurrowService {
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
     if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
     const label = this.#labelFrom(params);
+    if (this.#startFailed) await this.#serialize(() => this.#retryFailedStart());
     this.#refuseEnrolled();
     return this.#hostedEnrollment.begin(label);
   }
@@ -1004,6 +1020,7 @@ export class BurrowService {
    * nothing to offer, so the 2 s poll must not stat a file every tick.
    */
   async #status(): Promise<BurrowConsoleStatus> {
+    if (this.#startFailed) await this.#serialize(() => this.#retryFailedStart());
     const offer = this.#enrollment ? null : await readUsableOffer(this.#relay, this.#readOffer);
     const enrollment = this.#enrollment;
     const hostedEnrollment = this.#hostedEnrollment.state();
