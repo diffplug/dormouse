@@ -2074,6 +2074,18 @@ export function Wall({
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
   }, [enterPassthrough, lath, nav, transferRefusal]);
 
+  /** An inline rename closing drops DOM focus on `<body>`, where passthrough
+   *  keys reach nothing; the selected pane's terminal takes it back, unless
+   *  the gesture that closed the editor focused something else. */
+  const refocusAfterRename = useCallback(() => {
+    if (modeRef.current !== 'passthrough') return;
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      focusSelected(true);
+    });
+  }, [focusSelected]);
+
   // --- Wall actions (for tab buttons) ---
 
   const wallActions: WallActions = useMemo(() => ({
@@ -2145,6 +2157,7 @@ export function Wall({
       const trimmed = value.trim();
       if (!trimmed) {
         setRenamingPaneId(null);
+        refocusAfterRename();
         return { accepted: false, reason: 'empty' as const };
       }
       const result = setTerminalUserTitle(id, trimmed);
@@ -2152,10 +2165,12 @@ export function Wall({
         lath.store.setTitle(id, trimmed);
       }
       setRenamingPaneId(null);
+      refocusAfterRename();
       return result;
     },
     onCancelRename: () => {
       setRenamingPaneId(null);
+      refocusAfterRename();
     },
     onSwapRenderMode: async (id, mode, viewport) => {
       if (transferRefusal(id)) return;
@@ -2304,7 +2319,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal, refocusAfterRename]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled

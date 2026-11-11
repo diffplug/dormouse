@@ -280,6 +280,24 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each(['Enter', 'Escape'])('gives the passthrough terminal the keyboard back after %s closes its rename', async (key) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      await act(async () => { container.querySelector<HTMLElement>('[data-pane-title-for="surface:a"]')!.click(); });
+      const input = container.querySelector<HTMLInputElement>('[data-renaming-input-for="surface:a"]')!;
+      expect(input).not.toBeNull();
+      focus.mockClear();
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+      expect(container.querySelector('[data-renaming-input-for="surface:a"]')).toBeNull();
+      await flushFrame();
+      expect(focus).toHaveBeenCalledWith('surface:a', true);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
   it('cancels an ensure restart before a late prompt can relaunch its command', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
