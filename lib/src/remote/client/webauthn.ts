@@ -11,6 +11,20 @@
 
 import { fromBase64Url, toBase64Url, utf8Encode, type PasskeyAssertion } from 'remote-lib-common';
 
+/**
+ * Shown when the passkey prompt is dismissed or times out. WebAuthn rejects
+ * both as a `NotAllowedError` whose message is the browser's own sentence
+ * (Chromium's ends in a spec URL), so it is replaced by this one.
+ */
+export const PASSKEY_CANCELLED_MESSAGE = 'The passkey request was cancelled or timed out. Try again.';
+
+/** A prompt's rejection, with a dismissal or timeout as {@link PASSKEY_CANCELLED_MESSAGE}. */
+function passkeyPromptError(error: unknown): unknown {
+  return error instanceof DOMException && error.name === 'NotAllowedError'
+    ? new Error(PASSKEY_CANCELLED_MESSAGE)
+    : error;
+}
+
 /** Shown when this device already holds a passkey the Relay has registered. */
 export const PASSKEY_ALREADY_REGISTERED_MESSAGE =
   'This device already has a passkey for this Relay. Sign in with it instead.';
@@ -141,8 +155,10 @@ async function registerPasskey(
       },
       attestation: 'none',
     },
+  }).catch((error: unknown) => {
+    throw passkeyPromptError(error);
   })) as PublicKeyCredential | null;
-  if (!credential) throw new Error('passkey creation was cancelled');
+  if (!credential) throw new Error(PASSKEY_CANCELLED_MESSAGE);
   const response = credential.response as AuthenticatorAttestationResponse;
   const spki = response.getPublicKey();
   if (!spki) throw new Error('authenticator did not return a public key (ES256 required)');
@@ -176,8 +192,10 @@ async function getAssertion(
       })),
       userVerification: 'preferred',
     },
+  }).catch((error: unknown) => {
+    throw passkeyPromptError(error);
   })) as PublicKeyCredential | null;
-  if (!credential) throw new Error('passkey assertion was cancelled');
+  if (!credential) throw new Error(PASSKEY_CANCELLED_MESSAGE);
   const response = credential.response as AuthenticatorAssertionResponse;
   return {
     credentialId: credential.id,
