@@ -28,7 +28,9 @@ const { create, detectAvailableShells } = require('./pty-core');
 const PLATFORM = process.platform;
 const WIN = PLATFORM === 'win32';
 const GUARD_TEST = 'every shell DORMOUSE_REQUIRE_SHELLS names is installed';
+// Read before the environment is cleared of DORMOUSE_* below.
 const REQUIRED = (process.env.DORMOUSE_REQUIRE_SHELLS || '').split(',').map((name) => name.trim()).filter(Boolean);
+const WRITE_PROFILE = process.env.DORMOUSE_CONFORMANCE_WRITE_PROFILE === '1';
 
 // ── The repo's parser ─────────────────────────────────────────────────────
 // Bundled from lib source with standalone's esbuild, as build-sidecar-proxy.mjs
@@ -481,7 +483,7 @@ shellCase('the user\'s dotfiles load', (row) => DOTFILES[row.name], async (t, ro
 // DORMOUSE_CONFORMANCE_WRITE_PROFILE=1 says the machine is disposable (CI); the
 // original is put back.
 shellCase('the user\'s PowerShell profile loads', (row) => WIN && row.family === 'pwsh', async (t, row, located) => {
-  if (process.env.DORMOUSE_CONFORMANCE_WRITE_PROFILE !== '1') {
+  if (!WRITE_PROFILE) {
     return cannotRun(t, row, 'writing the real $PROFILE needs DORMOUSE_CONFORMANCE_WRITE_PROFILE=1');
   }
   const asked = spawnSync(located.path, ['-NoProfile', '-NonInteractive', '-Command', '$PROFILE.CurrentUserCurrentHost'], { encoding: 'utf8', timeout: 30_000 });
