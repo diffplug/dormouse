@@ -34,8 +34,8 @@ export function accountApp(
     unavailable: "Sign-in is temporarily unavailable. Please try again.",
     routes(app) {
       configure?.(app);
-      // The packed adapter's own cap, applied here too so nothing that wraps
-      // `fetchAuth` reads more than the adapter would accept.
+      // The packed adapter's own 16 KiB cap, applied first: past it the
+      // adapter answers 500, this a 413.
       app.all("/api/auth/*", smallBody(16 * 1024), (c) =>
         c.req.method !== "POST" &&
         !openAuthRead(c.req.path) &&

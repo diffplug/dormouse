@@ -672,7 +672,7 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   };
   for (const sameSite of SAME_SITE)
     expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
-  // A body past the adapter's cap is refused before anything parses it.
+  // A body past the adapter's cap answers 413, not the adapter's own 500.
   const oversized = await browser.post("email-otp/send-verification-otp", {
     email: "member@example.test",
     type: "sign-in",
