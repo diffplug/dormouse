@@ -210,6 +210,16 @@ const KNOWN = [
     shells: ['pwsh'], platforms: ['darwin', 'linux'], unintegrated: true, case: BOUNDARY_CASES_RE,
     why: 'pwsh as the login shell spawns as `pwsh -l`, and powerShellIntegratedArgs injects only into a bare or -NoExit launch, so the pane gets no integration',
   },
+  {
+    // Seen on Windows 11, 2026-11-11.
+    shells: ['powershell'], platforms: ['win32'], case: /^command line: unicode/,
+    why: "Windows PowerShell 5.1 mangles non-ASCII in E: typed `echo 'héllo wörld ✓ 日本語 🐭 a b　c'`, reported `echo 'héllo wörld √ ??? ?? a b c'`",
+  },
+  {
+    // Seen on Windows PowerShell 5.1, Windows 11, 2026-11-11; pwsh runs the same prompt code.
+    shells: ['powershell', 'pwsh'], platforms: ['win32'], case: /^boundaries: a cmdlet that fails after a native exit code/,
+    why: 'shellIntegration.ps1 reports a failed cmdlet with the stale $LASTEXITCODE of an earlier native command: expected 1, reported 7',
+  },
 ];
 
 const knownFor = (row, test) => KNOWN.find((entry) => entry.shells.includes(row.name)
