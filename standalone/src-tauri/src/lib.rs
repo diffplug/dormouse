@@ -4986,6 +4986,10 @@ pub fn run() {
                 }
                 Err(e) => append_log(format!("[session] {e}")),
             }
+            // A pasted image outlives a quit inside its cleanup timer.
+            std::thread::spawn(|| {
+                clipboard_read::sweep_stale_drops(&env::temp_dir(), SystemTime::now());
+            });
 
             // On non-macOS, remove native decorations for a fully custom title bar.
             // macOS uses titleBarStyle "Overlay" from config instead, which preserves
