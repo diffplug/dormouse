@@ -778,13 +778,11 @@ export function DisconnectConfirm({
   busy,
   run,
   onDone,
-  label = 'Disconnect',
   warning = 'Paired phones will need to pair again.',
 }: {
   busy: boolean;
   run: (action: () => Promise<void>) => Promise<boolean>;
   onDone: () => void;
-  label?: string;
   warning?: string;
 }) {
   return (
@@ -801,7 +799,7 @@ export function DisconnectConfirm({
           })
         }
       >
-        {label}
+        Disconnect
       </button>
       <button type="button" disabled={busy} className={modalActionButton()} onClick={onDone}>
         Cancel
