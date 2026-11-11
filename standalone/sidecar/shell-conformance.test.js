@@ -241,11 +241,6 @@ const KNOWN = [
     shells: ['zsh'], platforms: ['linux'], case: /^shipped directory: nothing written/,
     why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",
   },
-  {
-    // Seen on Windows PowerShell 5.1, Windows 11, 2026-11-11; pwsh runs the same prompt code.
-    shells: ['powershell', 'pwsh'], platforms: ['win32'], case: /^boundaries: a cmdlet that fails after a native exit code/,
-    why: 'shellIntegration.ps1 reports a failed cmdlet with the stale $LASTEXITCODE of an earlier native command: expected 1, reported 7',
-  },
 ];
 
 const knownFor = (row, test) => KNOWN.find((entry) => entry.shells.includes(row.name)
@@ -690,6 +685,8 @@ const BOUNDARY_CASES = [
   ['a command that fails', { posix: 'false', fish: 'false', pwsh: CMDLET_FAILS }, 1],
   ['a command that exits 7', FAIL_7, 7],
   ['a cmdlet that fails after a native exit code', { pwsh: CMDLET_FAILS }, 1],
+  // $LASTEXITCODE is unchanged, and this time it is the command's own.
+  ['the same exit code again', FAIL_7, 7],
   ['an empty Enter', { all: '' }, null],
 ];
 
