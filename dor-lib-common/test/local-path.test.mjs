@@ -96,7 +96,9 @@ test('takes the stored spelling from the native realpath, run once no link is le
 });
 
 test('on a case-insensitive volume, answers the stored case as realpath does', async (t) => {
-  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'local-path-case-')));
+  // The native realpath, as `localRealpath` answers: on Windows the temp directory may be spelled
+  // with an 8.3 name (`RUNNER~1`), which only the native call expands.
+  const root = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'local-path-case-')));
   try {
     writeFileSync(path.join(root, 'Doc.md'), '');
     if (!existsSync(path.join(root, 'doc.md'))) return t.skip('case-sensitive volume');

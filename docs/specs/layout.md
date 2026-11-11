@@ -155,7 +155,7 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 - **Must move a Pane or Door on release over another Workspace tab**, inserting beside the destination's last selected live pane. **Never activate on hover.** A header or Door press owns a pane drag; a tab press owns reorder and cross-Window tear-out. A drop on a strip gap, the source tab, or a disabled target moves nothing; Escape and pointer cancellation change nothing.
 - **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Otherwise disable both, and refuse CLI `--new`.
 - **Must offer Move to workspace in terminal and Tool context.** **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
-- **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. **Never close a departing Session.** A moved preview slot is pinned.
+- **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. **Never close a departing Session.** A moved preview slot is pinned, and a moved browser drops its `--key`, reachable by id.
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with the typed-letter Workspace confirmation ([Workspace lifecycle](#workspace-lifecycle)): the Surface reopens at its last-known saved URL, possibly losing page state. Doors remain minimized while waiting. CLI consent: `docs/specs/dor-cli.md` → dor move.
 - **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Iframe consent never bypasses a dirty or pending refusal.
 - **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus: `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors unless it is pinned, which refills instead; if Doors remain but no pane does, refill normally.
@@ -218,7 +218,7 @@ Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard
 
 `docs/specs/shortcuts.md` tables every binding; this section owns the dispatch behavior behind it.
 
-**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits the symbol bindings, and a letter verb matches its capital only under Caps Lock without Shift; Option/AltGr permits `|`, `%`, `"`, `>`.
+**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits the symbol bindings; a letter verb matches its capital only under Caps Lock without Shift; Option/AltGr permits `|`, `%`, `"`, `>`.
 
 **Must use `,` to rename the selected terminal pane or Workspace tab in command mode**, without activating an inactive Workspace.
 
@@ -345,7 +345,7 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 Triggered by `,` in command mode or by clicking the session name in the pane header. **Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal or Tool pane, on every face, mounts the title editor.
 
-The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Never submit it untouched**: the seed would pin the derived label. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
+The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Never submit it untouched**: that would pin the derived label. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs); `<unnamed>` is allowed as a user pin. On rejection the input still closes — it is not a blocking dialog — and a transient warning names the offending value.
 

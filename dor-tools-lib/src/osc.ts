@@ -65,7 +65,7 @@ function readKey(value: unknown): string[] | null {
  * Returns null for another verb, an oversized or malformed payload, or a
  * non-object — never throws, because this runs on arbitrary process output.
  */
-export function parseToolPayload(content: string, verb: string): Record<string, unknown> | null {
+function parseToolPayload(content: string, verb: string): Record<string, unknown> | null {
   if (!content.startsWith(`${verb};`)) return null;
   const raw = content.slice(verb.length + 1);
   if (raw.length === 0 || raw.length > TOOL_PAYLOAD_LIMIT) return null;

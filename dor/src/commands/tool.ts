@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import {
   callerWorkingDirectory,
+  launchDirectory,
   errorMessage,
   renderPrintableJson,
   requireControlClient,
@@ -35,7 +36,9 @@ interface ToolFlags {
 }
 
 // A named tool waits on the same shell-integration handshake `dor ensure` does,
-// plus a `dormouse.yml` read; both are bounded well under this.
+// plus a `dormouse.yml` read; both are bounded well under this. That bounds
+// this launch only: launches share one host queue, each held until its command
+// reports, so one queued behind others can outlast it.
 export const TOOL_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
@@ -193,9 +196,12 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
   // `validateToolArgs` already accepted this argv, so the walk cannot fail.
   const head = headPositionals(this.commandArgs);
   const named = head.ok && head.value.length > 0;
+  const cwd = launchDirectory(flags.cwd, this.options);
+  if (cwd instanceof Error) return cwd;
   return dispatchToolSurface(this, {
     ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
     ...launchPlacement(this, flags),
+    cwd,
   }, flags.json === true);
 }
 

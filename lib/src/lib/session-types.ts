@@ -36,7 +36,7 @@ export interface PersistedToolMetadata {
   key?: string[];
   /** The Workspace's preview slot mark (`docs/specs/dor-tool.md` -> Preview slot). */
   preview?: true;
-  /** The canonical file an `open` gave this Tool. */
+  /** The canonical file or folder an `open` or a `$TARGET` gave this Tool. */
   target?: string;
   /** The `dormouse.yml` that declared a project or user Tool. */
   origin?: ToolOrigin;

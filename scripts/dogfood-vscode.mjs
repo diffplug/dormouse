@@ -49,9 +49,6 @@ function installVsix() {
   process.exit(result.status ?? 1);
 }
 
-// Remove the legacy extension if present; ignore failure when it isn't installed.
-run('code --uninstall-extension diffplug.mouseterm', { ignoreFailure: true, stdio: 'ignore', env: codeEnv });
-
 run('pnpm package');
 installVsix();
 

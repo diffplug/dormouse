@@ -11,7 +11,7 @@ import {
   $isImageNode, addExportVisitor$, addTableCellEditorChild$, createActiveEditorSubscription$, editImageToolbarComponent$, iconComponentFor$, ImageNode, INSERT_IMAGE_COMMAND, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, initialMarkdownNormalize$, InsertCodeBlock, InsertTable, InsertThematicBreak,
-  linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, NESTED_EDITOR_UPDATED_COMMAND, quotePlugin, realmPlugin,
+  linkDialogPlugin, linkDialogState$, openLinkEditDialog$, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, markdownSourceEditorValue$, MDXEditor, muteChange$, NESTED_EDITOR_UPDATED_COMMAND, quotePlugin, realmPlugin,
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type LexicalVisitor, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
@@ -129,6 +129,11 @@ function CellEdits() {
   return <span ref={ref} hidden />;
 }
 
+/** The file's text as loaded, trimmed at the end as a save trims it, until a
+ * save replaces the file. MDXEditor's source mode otherwise shows the rich
+ * editor's export, which reformats the whole document. */
+let loadedText: string | null = null;
+
 /** The document's text, unless the file no longer opens rich: then the page
  * reloads, and its `view` route serves the source editor, so MDXEditor never
  * loads what a save would restructure. A Reload of a file changed on disk, or
@@ -142,7 +147,11 @@ const markdownSource: DocumentSource<string> = {
     }
     return { content: text, version, name };
   },
-  save: textSource.save,
+  async save(text, version) {
+    const saved = await textSource.save(text, version);
+    loadedText = null;
+    return saved;
+  },
 };
 
 // The editor trims the document; saves end it with one newline, and the server
@@ -157,7 +166,9 @@ const session = documentSession<string>({
   apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
     uploadedWidths.clear();
-    flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
+    const markdown = text.replace(/\r\n?/g, '\n');
+    loadedText = markdown.trimEnd();
+    flushSync(() => root.render(<Page key={++loads} markdown={markdown} />));
   },
 }, {
   report(doc) { update({ doc }); },
@@ -248,6 +259,21 @@ const capture = realmPlugin({
     realm = r;
     r.pub(addExportVisitor$, lineBreakVisitor);
     r.pub(addTableCellEditorChild$, CellEdits);
+    // While the document is clean, source mode shows the file itself, so a
+    // source edit saves the file plus that edit. Leaving it, the rich editor
+    // imports that text again; its reformatting is not an edit.
+    r.sub(viewMode$, mode => {
+      if (session.dirty()) return;
+      if (mode === 'source' && loadedText !== null) {
+        const muted = r.getValue(muteChange$);
+        r.pub(muteChange$, true);
+        try { r.pub(markdownSourceEditorValue$, loadedText); } finally { r.pub(muteChange$, muted); }
+        session.rebase();
+      } else if (mode === 'rich-text') {
+        // Joins the import's update, so it runs once that export has landed.
+        r.getValue(rootEditor$)?.update(() => {}, { onUpdate: () => session.rebase() });
+      }
+    });
     const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<ImageChromeProps>;
     if (toolbar !== ImageChrome) DefaultImageToolbar = toolbar;
     // Ahead of MDXEditor's own handler, which creates the node from the payload,

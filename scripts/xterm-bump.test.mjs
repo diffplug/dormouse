@@ -14,6 +14,8 @@ const oldCore = '6.1.0-beta.12';
 const newCore = '7.1.0-beta.12';
 const forkVersion = '0.20.0-sdf12.0';
 const pins = { [CORE]: newCore, ...Object.fromEntries(ADDONS.map((n) => [n, '1.0.0-beta.2'])) };
+// standalone pins, as devDependencies, only the subset its tests mock.
+const { '@xterm/addon-webgl': _webgl, ...standalonePins } = pins;
 
 function archive(manifest) {
   const data = Buffer.from(JSON.stringify(manifest));
@@ -26,13 +28,13 @@ function archive(manifest) {
   return gzipSync(Buffer.concat([header, data, Buffer.alloc((512 - data.length % 512) % 512 + 1024)]));
 }
 
-function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false, lib = pins, standalone = pins, canopyCore = newCore, compareFiles = null } = {}) {
+function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false, lib = pins, standalone = standalonePins, canopyCore = newCore, compareFiles = null } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'xterm-bump-'));
   try {
     for (const dir of ['scripts', 'lib', 'standalone', 'canopy']) mkdirSync(join(root, dir));
     copyFileSync(new URL('./xterm-bump.mjs', import.meta.url), join(root, 'scripts/xterm-bump.mjs'));
     for (const [dir, dependencies] of Object.entries({ lib, standalone, canopy: { [CORE]: canopyCore, [FORK]: 'old-url', '@xterm/addon-webgl': '1.0.0-beta.2' } })) {
-      writeFileSync(join(root, dir, 'package.json'), JSON.stringify({ dependencies }, null, 2));
+      writeFileSync(join(root, dir, 'package.json'), JSON.stringify(dir === 'standalone' ? { devDependencies: dependencies } : { dependencies }, null, 2));
     }
     const versions = { [CORE]: { [oldCore]: { gitHead: 'old-commit' }, [newCore]: { gitHead: 'new-commit' } } };
     for (const addon of ADDONS) versions[addon] = {
@@ -60,7 +62,7 @@ function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false
       };
     `);
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(join(root, 'fetch.mjs')).href, join(root, 'scripts/xterm-bump.mjs'), ...args], { encoding: 'utf8' });
-    const packages = Object.fromEntries(['lib', 'standalone', 'canopy'].map((dir) => [dir, JSON.parse(readFileSync(join(root, dir, 'package.json'))).dependencies]));
+    const packages = Object.fromEntries(['lib', 'standalone', 'canopy'].map((dir) => [dir, JSON.parse(readFileSync(join(root, dir, 'package.json')))[dir === 'standalone' ? 'devDependencies' : 'dependencies']]));
     return { ...result, packages };
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -95,19 +97,20 @@ for (const [label, options, reason] of [
   assert.equal(result.packages.canopy[FORK], 'old-url');
 });
 test('default bump repairs standalone when lib already has the newest coherent set', () => {
-  const result = run([], { standalone: { ...pins, [CORE]: oldCore } });
+  const result = run([], { standalone: { ...standalonePins, [CORE]: oldCore } });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.packages.standalone, pins);
+  assert.deepEqual(result.packages.standalone, standalonePins);
 });
 test('default bump repins every addon lib depends on', () => {
   const stale = { ...pins, '@xterm/addon-serialize': '1.0.0-beta.1' };
-  const result = run([], { lib: stale, standalone: stale });
+  const { '@xterm/addon-webgl': _staleWebgl, ...standaloneStale } = stale;
+  const result = run([], { lib: stale, standalone: standaloneStale });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.packages.lib, pins);
-  assert.deepEqual(result.packages.standalone, pins);
+  assert.deepEqual(result.packages.standalone, standalonePins);
 });
 test('default dry-run preserves standalone drift', () => {
-  const result = run(['--dry-run'], { standalone: { ...pins, [CORE]: oldCore } });
+  const result = run(['--dry-run'], { standalone: { ...standalonePins, [CORE]: oldCore } });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.packages.standalone[CORE], oldCore);
   assert.match(result.stdout, /no files written/);

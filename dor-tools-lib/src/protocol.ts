@@ -25,7 +25,7 @@ export interface ToolViewAccess {
   apply(position: ToolViewPosition): Promise<void>;
 }
 
-export const DOR_TOOL_VERSION = 1;
+const DOR_TOOL_VERSION = 1;
 
 const CONNECTION_LIMIT = 128;
 const REQUEST_LIMIT = 64;

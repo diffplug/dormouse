@@ -14,6 +14,11 @@ import * as browserController from './agent-browser-surface-controller';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import type { PersistedSession } from '../../lib/session-types';
+import type { ToolControlResult, ToolHostRequest } from '../../lib/platform/tool-types';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createToolHost } from '../../host/tool-host';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
@@ -117,11 +122,11 @@ function openLookup(file: string, tool = 'viewer') {
 }
 
 function installHost() {
-  const toolControl = vi.fn(async (request: { op: string; target?: string; tool?: string; name?: string; args?: string[] }) =>
+  const toolControl = vi.fn(async (request: { op: string; target?: string; tool?: string; name?: string; args?: string[] }): Promise<ToolControlResult> =>
     request.op === 'open'
       ? openLookup(request.target!, request.tool)
-      // A named lookup of the same Tool: its key, but no target.
-      : { ...openLookup(request.args![0]), target: undefined });
+      // A named lookup of the same `$TARGET` Tool: the same answer.
+      : openLookup(request.args![0], request.name));
   Object.assign(fake, { toolControl });
   return toolControl;
 }
@@ -533,8 +538,8 @@ describe('dor open --preview', () => {
 
   it('keeps a slot whose command outlives its interrupt\'s grace, previewing beside it without holding the queue', async () => {
     await mountSlot({ slot: { holdInterrupt: true } });
-    // Only the host's state polls run on the test's clock.
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    // Only the host's state polls, and the clock they read, run on the test's clock.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     try {
       const respond = await request({ file: 'b.md', preview: true });
       await waitUntil(() => typed['surface:slot'].length === 1);
@@ -599,9 +604,9 @@ describe('a prompt after the interrupt\'s grace', () => {
 
   /** Preview b.md into a slot whose viewer is still running when the grace
    *  runs out: the slot is kept and b.md created beside it, whose command has
-   *  reported, freeing the launch queue. Only the host's state polls run on
-   *  the test's clock unless `clock` fakes more. */
-  async function outliveGrace(clock: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setInterval', 'clearInterval'] }) {
+   *  reported, freeing the launch queue. Only the host's state polls and the
+   *  clock they read run on the test's clock unless `clock` fakes more. */
+  async function outliveGrace(clock: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setInterval', 'clearInterval', 'Date'] }) {
     await mountSlot({ slot: { holdInterrupt: true } });
     vi.useFakeTimers(clock);
     const respond = await request({ file: 'b.md', preview: true });
@@ -645,7 +650,7 @@ describe('a prompt after the interrupt\'s grace', () => {
     shell('surface:a', null);
     shell('surface:slot', 'view /repo/a.md', { holdInterrupt: true });
     shell('surface:kept', 'view /repo/b.md');
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     const first = await request({ file: 'c.md', preview: true });
     const second = await request({ file: 'b.md', preview: true });
     expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'surface:slot' });
@@ -795,8 +800,18 @@ describe('pinning the slot', () => {
     expect(document.activeElement?.closest('[data-terminal-context]')).not.toBeNull();
   });
 
+  it('pins by a named launch of its Tool and file, as by open', async () => {
+    await mountSlot();
+    expect(await answer(await request({ name: 'viewer', args: ['a.md'] }))).toMatchObject({ status: 'existing', surfaceId: 'surface:slot' });
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
+  });
+
   it('never lets a marked slot answer a keyed launch of its Tool', async () => {
-    await mountSlot({ caller: 'claude' });
+    const toolControl = await mountSlot({ caller: 'claude' });
+    // Keyed on the file without taking it as `$TARGET`: no target, so only
+    // keyed dedupe could find the slot.
+    toolControl.mockImplementationOnce(async request => ({ ...openLookup(request.args![0]), target: undefined }));
     const respond = await request({ name: 'viewer', args: ['a.md'] });
     await waitUntil(() => leafCount() === 3);
     const created = newLeaf();
@@ -1551,12 +1566,120 @@ it('holds no other launch while asking to discard edits, and focuses a destinati
   expect((await paramsOf('surface:slot'))?.toolTarget).toBe('/repo/a.md');
 });
 
-it('Back resolves the original handler in its original lookup directory', async () => {
+it.each([
+  { scope: 'user', name: 'viewer', handler: 'viewer' },
+  { scope: 'builtin', name: 'file', handler: 'builtin:file' },
+])('Back resolves the original $scope handler through open dispatch in its original lookup directory', async ({ scope, name, handler }) => {
   const host = installHost();
-  await mountWall([{ id: 'surface:slot', params: viewerParams('docs/a.md', { toolPreview: undefined }) }]);
+  await mountWall([{ id: 'surface:slot', params: viewerParams('docs/a.md', { toolPreview: undefined, toolScope: scope, toolName: name }) }]);
   shell('surface:a', null); shell('surface:slot', 'view /repo/docs/a.md');
   await answer(await request({ file: '/repo/docs/b.md', disposition: 'current' }, 'surface:slot'));
   expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', cwd: '/repo/docs' }));
   await answer(await request({ history: 'back', disposition: 'current' }, 'surface:slot'));
-  expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', target: '/repo/docs/a.md', cwd: '/repo', tool: 'viewer' }));
+  expect(host).toHaveBeenLastCalledWith(expect.objectContaining({ op: 'open', target: '/repo/docs/a.md', cwd: '/repo', tool: handler }));
+});
+
+describe('Back to a project Tool, through the real Tool host', () => {
+  let dir = '';
+  let project = '';
+  let a = '';
+  let b = '';
+  /** A host reading the fixture's user file; granted the project unless `ungranted`. */
+  async function useHost(options: { ungranted?: boolean } = {}) {
+    const host = createToolHost({ userConfigPath: join(dir, 'user', 'dormouse.yml') });
+    if (!options.ungranted) await host.handle({ op: 'trust', kind: 'folder', projectRoot: project });
+    const toolControl = vi.fn((request: ToolHostRequest) => host.handle(request));
+    Object.assign(fake, { toolControl });
+    return toolControl;
+  }
+
+  beforeEach(async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), 'dor-tool-back-')));
+    project = join(dir, 'project');
+    a = join(project, 'a.md');
+    b = join(project, 'b.md');
+    await mkdir(join(dir, 'user'));
+    await mkdir(project);
+    // The user file declares a same-named Tool, which Back must never run.
+    await writeFile(join(dir, 'user', 'dormouse.yml'), "tools:\n  view:\n    run: [userview, $TARGET]\nopen:\n  - {match: '*.md', tool: view}\n");
+    await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view, $TARGET]\n');
+    await writeFile(a, '# a');
+    await writeFile(b, '# b');
+    await useHost();
+    await mountWall([{ id: 'surface:tool', params: {
+      surfaceType: 'tool', command: `view ${a}`, toolArgv: ['view', a], cwd: project, toolName: 'view',
+      toolRender: 'iframe', toolPort: 'announced', toolTarget: a, toolOrigin: { file: join(project, 'dormouse.yml') },
+    } }]);
+    shell('surface:a', null);
+    shell('surface:tool', `view ${a}`);
+    // A link in the project Tool's document goes through open dispatch.
+    expect(await answer(await request({ file: b, disposition: 'current' }, 'surface:tool'))).toMatchObject({ status: 'retargeted' });
+    expect(typed['surface:tool']).toEqual(['\x03', `userview ${b}\r`]);
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const back = () => request({ history: 'back', disposition: 'current' }, 'surface:tool');
+
+  it('re-runs the project Tool by name from its lookup directory, never the same-named user Tool', async () => {
+    const toolControl = await useHost();
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted', surfaceId: 'surface:tool' });
+    expect(toolControl).toHaveBeenCalledWith({ op: 'lookup', name: 'view', cwd: project, args: [a], global: false });
+    expect(typed['surface:tool'].slice(2)).toEqual(['\x03', `view ${a}\r`]);
+    const params = await paramsOf('surface:tool');
+    expect(params).toMatchObject({ toolName: 'view', toolTarget: a, toolArgv: ['view', a] });
+    expect(params).not.toHaveProperty('toolScope');
+    // The entry Back revisited keeps its scope for the next traversal.
+    expect(await answer(await request({ history: 'forward', disposition: 'current' }, 'surface:tool'))).toMatchObject({ status: 'retargeted' });
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted' });
+    expect(typed['surface:tool'].slice(-1)).toEqual([`view ${a}\r`]);
+  });
+
+  it.each<[string, () => Promise<void>, string]>([
+    ['its project lost its grant', async () => { await useHost({ ungranted: true }); }, 'not approved'],
+    ['its project file no longer declares it', async () => { await writeFile(join(project, 'dormouse.yml'), 'tools:\n  other:\n    run: [other]\n'); }, "no project Tool 'view'"],
+    // Still the project Tool, but with no target: it would otherwise be placed
+    // as an ordinary launch of `view <a>` in a new pane.
+    ['its Tool now takes $ARGS', async () => { await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view, $ARGS]\n'); }, "'view' no longer takes a file"],
+    ['its Tool now takes neither token', async () => { await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view]\n'); }, "'view' no longer takes a file"],
+    ...(process.platform === 'win32' ? [] : [['its document now resolves elsewhere', async () => {
+      await writeFile(join(project, 'c.md'), '# c');
+      await rm(a);
+      await symlink(join(project, 'c.md'), a);
+    }, 'a.md now resolves to'] as [string, () => Promise<void>, string]]),
+  ])('fails on the source when %s, leaving its location and history', async (_, change, error) => {
+    await change();
+    const failed = await back();
+    await waitUntil(() => failed.mock.calls.length > 0);
+    expect(failed.mock.calls[0][0]).toMatchObject({ ok: false, error: expect.stringContaining(error) });
+    expect(typed['surface:tool']).toHaveLength(2);
+    expect(leafCount()).toBe(2);
+    expect(container.textContent).not.toContain('Always allow');
+    await waitUntil(() => !!container.querySelector('[data-lath-leaf="surface:tool"] [role="alert"]')?.textContent?.includes(error));
+    const params = await paramsOf('surface:tool');
+    expect(params).toMatchObject({ toolTarget: b });
+    expect(params).not.toHaveProperty('toolPending');
+    // The history is intact: once the project is back, so is Back.
+    await writeFile(join(project, 'dormouse.yml'), 'tools:\n  view:\n    run: [view, $TARGET]\n');
+    await rm(a);
+    await writeFile(a, '# a');
+    await useHost();
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted' });
+    expect((await paramsOf('surface:tool'))?.toolTarget).toBe(a);
+  });
+
+  it.skipIf(process.platform === 'win32')('fails Forward through open dispatch when its document now resolves elsewhere', async () => {
+    expect(await answer(await back())).toMatchObject({ status: 'retargeted' });
+    await writeFile(join(project, 'c.md'), '# c');
+    await rm(b);
+    await symlink(join(project, 'c.md'), b);
+    const failed = await request({ history: 'forward', disposition: 'current' }, 'surface:tool');
+    await waitUntil(() => failed.mock.calls.length > 0);
+    expect(failed.mock.calls[0][0]).toEqual({ ok: false, error: `${b} now resolves to ${join(project, 'c.md')}` });
+    expect(typed['surface:tool']).toHaveLength(4);
+    expect(leafCount()).toBe(2);
+    expect((await paramsOf('surface:tool'))?.toolTarget).toBe(a);
+  });
 });
