@@ -221,9 +221,15 @@ const KNOWN = [
     why: 'pwsh as the login shell spawns as `pwsh -l`, and powerShellIntegratedArgs injects only into a bare or -NoExit launch, so the pane gets no integration',
   },
   {
-    // Seen on Windows 11, 2026-11-11.
-    shells: ['powershell'], platforms: ['win32'], case: /^command line: unicode/,
-    why: "Windows PowerShell 5.1 mangles non-ASCII in E: typed `echo 'héllo wörld ✓ 日本語 🐭 a b　c'`, reported `echo 'héllo wörld √ ??? ?? a b c'`",
+    // Seen on Windows 11 and windows-latest, 2026-11-11. The cwd case's
+    // unicode directory passes on both shells.
+    shells: ['powershell', 'pwsh'], platforms: ['win32'], case: /^command line: unicode/,
+    why: "PowerShell (5.1 and 7) mangles non-ASCII in E: typed `echo 'héllo wörld ✓ 日本語 🐭 a b　c'`, reported `echo 'héllo wörld √ ??? ?? a b c'`. Likely cause: shellIntegration.ps1 writes E with [Console]::Write, encoded in [Console]::OutputEncoding (the OEM code page), while P;Cwd rides the prompt string the host writes as Unicode",
+  },
+  {
+    // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
+    shells: ['zsh'], platforms: ['linux'], case: /^nothing is written into the shipped zsh directory/,
+    why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",
   },
   {
     // Seen on Windows PowerShell 5.1, Windows 11, 2026-11-11; pwsh runs the same prompt code.
@@ -298,7 +304,7 @@ function freshHome(row, files = {}) {
  * Spawn `row`'s shell as a pane through pty-core, feeding its output to the
  * owner's parse and answering the queries xterm.js would. Killed after the test.
  */
-function openPane(t, row, located, { home = freshHome(row), cwd = home } = {}) {
+function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {} } = {}) {
   const id = `surface:conformance-${++paneCount}`;
   const spawned = [];
   const ptyModule = {
@@ -440,7 +446,7 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home } = {}) {
   const spawnOptions = { cwd, shell: located.path, args: located.args, cols: 200, rows: 50 };
   // HOME is where POSIX shells, fish and pwsh look for the user's files; Git
   // Bash reads it too. Windows PowerShell and WSL do not (see the profile case).
-  if (!WIN || row.msys) spawnOptions.env = { HOME: home };
+  spawnOptions.env = !WIN || row.msys ? { HOME: home, ...env } : env;
   mgr.spawn(id, spawnOptions);
   return pane;
 }
@@ -488,6 +494,25 @@ shellCase('the shipped integration reports a prompt', (row) => row.integrated, a
   await pane.waitFor(() => pane.prompts >= 1 || row.prompt?.test(pane.text()), 'a prompt', FIRST_PROMPT_MS)
     .catch((error) => noPrompt(t, row, error));
   await pane.waitFor(() => pane.prompts >= 1, 'a reported prompt (OSC 633/133 A then B)', 5_000);
+});
+
+// ── 0b. Nothing is written into the shipped zsh directory ─────────────────
+// zsh starts with ZDOTDIR pointing into the signed bundle (terminal-state.md:
+// nothing may be written there). Run against a copy, with the system's own
+// startup files as they are, compinit included.
+const SHIPPED_ZSH = ['.gitignore', '.zprofile', '.zshenv', '.zshrc'];
+shellCase('nothing is written into the shipped zsh directory', (row) => row.name === 'zsh', async (t, row, located) => {
+  const copy = fs.mkdtempSync(path.join(SCRATCH, 'integration-'));
+  fs.cpSync(path.join(__dirname, 'shell-integration'), copy, { recursive: true, filter: (from) => !/\.zcompdump|\.zsh_history|\.zsh_sessions/.test(path.basename(from)) });
+  const pane = openPane(t, row, located, { home: freshHome(null), env: { DORMOUSE_SHELL_INTEGRATION_DIR: copy } });
+  // A runner's group-writable fpath stops compinit to ask; a person answers y.
+  const insecure = /Ignore insecure directories and continue \[y\]/;
+  await pane.waitFor(() => pane.prompts >= 1 || insecure.test(pane.text()), 'a prompt or compinit\'s question', FIRST_PROMPT_MS)
+    .catch((error) => noPrompt(t, row, error));
+  if (pane.prompts < 1) pane.write('y');
+  await pane.run('true');
+  const written = fs.readdirSync(path.join(copy, 'zsh')).filter((name) => !SHIPPED_ZSH.includes(name));
+  assert.deepEqual(written, [], `zsh wrote ${written.join(', ')} into the shipped directory`);
 });
 
 // ── 1. The user's dotfiles load ───────────────────────────────────────────
