@@ -7,21 +7,12 @@ export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
   backdropFilter: "blur(12px)",
 };
 
-/**
- * Asks readers not to post the site anywhere big yet (Hacker News, mostly)
- * while Hosted rolls out. Delete it, and the `prelaunch` props, at launch.
- */
-export const PRELAUNCH_NOTICE = "Pre-launch — word of mouth only, please. No top-level forum posts.";
-
-type SiteHeaderProps = Omit<ComponentProps<typeof SharedSiteHeader>, "links" | "notice"> & {
-  /** Show the pre-launch strip (Home, the docs, and the policy pages). */
-  prelaunch?: boolean;
-};
+type SiteHeaderProps = Omit<ComponentProps<typeof SharedSiteHeader>, "links">;
 
 /** The shared site header (`lib/src/site/SiteHeader.tsx`) with this site's links. */
-function SiteHeader({ prelaunch = false, ...props }: SiteHeaderProps) {
+function SiteHeader(props: SiteHeaderProps) {
   const links = props.activePath === "/playground" ? NAV_LINKS_OFF_PLAYGROUND : NAV_LINKS;
-  return <SharedSiteHeader links={links} notice={prelaunch ? PRELAUNCH_NOTICE : undefined} {...props} />;
+  return <SharedSiteHeader links={links} {...props} />;
 }
 
 export default SiteHeader;

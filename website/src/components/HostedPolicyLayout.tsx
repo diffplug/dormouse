@@ -30,7 +30,7 @@ export function PolicyText({ title, applicability, sections }: PolicyPage) {
 export default function HostedPolicyLayout({ path, ...page }: PolicyPage & { path: string }) {
   return (
     <>
-      <SiteHeader activePath={path} style={STATIC_PAGE_HEADER_STYLE} prelaunch />
+      <SiteHeader activePath={path} style={STATIC_PAGE_HEADER_STYLE} />
       <div className="min-h-screen bg-[var(--color-bg)] px-4 pt-28 pb-12 text-[var(--color-text)] md:px-6 md:pt-36">
         <main className="mx-auto max-w-3xl">
           <PolicyText {...page} />
