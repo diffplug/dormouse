@@ -821,6 +821,19 @@ describe('launch environment', () => {
       expect(fake.calls).toContain('close shell-test');
     } finally { await host.close(); }
   });
+  it('keeps a resolved environment through an unrelated failure, for the close after it', async () => {
+    const fake = fakeProvider();
+    fake.provider.act = async () => { throw new Error('page gone'); };
+    const close = vi.spyOn(fake.provider, 'close');
+    const env = { PATH: '/shell/bin' };
+    const launchEnv = vi.fn(async () => env);
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      expect(await host.request({ ...envRequest, op: 'navigate', url: 'https://example.com/next' })).toMatchObject({ ok: false, error: 'page gone' });
+      expect(await host.request({ ...envRequest, op: 'close' })).toEqual({ ok: true });
+      expect(close.mock.calls.at(-1)?.[0].env === env).toBe(true);
+    } finally { await host.close(); }
+  });
   it('retries shell initialization after failure', async () => {
     const fake = fakeProvider();
     const launchEnv = vi.fn().mockRejectedValueOnce(new Error('shell failed')).mockResolvedValue({ PATH: '/shell/bin' });

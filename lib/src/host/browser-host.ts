@@ -828,7 +828,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await p.act(b, r);
       }
     } catch (error) {
-      if (created) forgetEnv(envKey, created);
+      // A resolved environment outlives an unrelated failure, since a close
+      // never resolves one of its own; a shell that failed is retried, and a
+      // session this request named itself was never handed to anyone.
+      if (created && (created.env === undefined || r.binding.session === undefined)) forgetEnv(envKey, created);
       return { ok: false, error: messageOf(error) };
     }
   }
