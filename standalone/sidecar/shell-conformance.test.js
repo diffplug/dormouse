@@ -129,11 +129,27 @@ const SHELLS = [
   { name: 'powershell', platforms: ['win32'], family: 'pwsh', integrated: true, prompt: PWSH_PROMPT, find: (offered) => byLabel(offered, 'Windows PowerShell') },
   { name: 'cmd', platforms: ['win32'], family: 'cmd', integrated: false, prompt: /[A-Za-z]:\\[^\r\n>]*>/, find: (offered) => byLabel(offered, 'Command Prompt') },
   { name: 'git-bash', platforms: ['win32'], family: 'posix', integrated: true, msys: true, find: (offered) => byLabel(offered, 'Git Bash') },
-  { name: 'wsl', platforms: ['win32'], family: 'posix', integrated: true, wsl: true, find: (offered) => offered.find((shell) => /[\\/]wsl\.exe$/i.test(shell.path)) ?? null },
+  // The picker offers every registered distro by name (`-d <distro>`), never
+  // the default one. A distro with bash is integrated; one without (Docker
+  // Desktop's `docker-desktop`, a busybox root shell) is offered all the same,
+  // and its pane runs the user's login shell with no integration.
+  { name: 'wsl', platforms: ['win32'], family: 'posix', integrated: true, wsl: true, find: (offered) => wslDistro(offered, true) },
+  { name: 'wsl-no-bash', platforms: ['win32'], family: 'posix', integrated: false, wsl: true, prompt: /[#$] $/, find: (offered) => wslDistro(offered, false) },
 ].filter((row) => row.platforms.includes(PLATFORM));
 
 const byName = (offered, name) => offered.find((shell) => shell.name === name) ?? null;
 const byLabel = (offered, label) => offered.find((shell) => shell.name === label) ?? null;
+/** The first offered WSL distro whose sh starts and that has bash, or lacks
+ *  it; a distro with no runnable shell (`docker-desktop-data`) is neither. */
+function wslDistro(offered, withBash) {
+  return offered.find((shell) => {
+    if (!/[\\/]wsl\.exe$/i.test(shell.path) || shell.args?.[0] !== '-d') return false;
+    const probe = spawnSync(shell.path, ['-d', shell.args[1], '-e', 'sh', '-c', 'if command -v bash >/dev/null; then echo HAS-BASH; else echo NO-BASH; fi'],
+      { encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    return (probe.stdout || '').includes(withBash ? 'HAS-BASH' : 'NO-BASH');
+  }) ?? null;
+}
+
 function pwshAsLoginShell() {
   const found = spawnSync('which', ['pwsh'], { encoding: 'utf8' });
   const resolved = found.status === 0 ? found.stdout.trim() : '';
@@ -224,6 +240,15 @@ function cdCommand(row, dir) {
 
 // ── A pane ────────────────────────────────────────────────────────────────
 let paneCount = 0;
+// A cold Windows PowerShell 5.1 start is the slowest first prompt measured
+// (about 1.5 s, now and then past 15 s; ci.yml warms it first).
+const FIRST_PROMPT_MS = 20_000;
+/** shell name -> the case where it first showed no prompt. */
+const NO_PROMPT = new Map();
+function noPrompt(t, row, error) {
+  if (!NO_PROMPT.has(row.name)) NO_PROMPT.set(row.name, `"${t.fullName ?? t.name}": ${error.message.slice(0, 300)}`);
+  throw error;
+}
 
 /** A fresh home, its files written from `{ relative: contents }`. */
 function freshHome(files = {}) {
@@ -315,10 +340,12 @@ function openPane(t, row, located, { home = freshHome(), cwd = home } = {}) {
   pane.text = () => pane.raw.replace(/\x1b\[[0-9;?>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>]/g, '');
   pane.pid = () => spawned.at(-1)?.pid;
   pane.write = (data) => mgr.write(id, data);
-  /** Ready for input: the first prompt the shell reports, else its prompt text. */
+  /** Ready for input: the first prompt the shell reports, else its prompt text.
+   *  A shell's first miss fails its later cases at once (`shellCase`). */
   pane.ready = () => (row.integrated && !located.unreported
-    ? pane.waitFor(() => pane.prompts >= 1, 'first prompt', 60_000)
-    : pane.waitFor(() => row.prompt.test(pane.text()), 'prompt text', 60_000));
+    ? pane.waitFor(() => pane.prompts >= 1, 'first prompt', FIRST_PROMPT_MS)
+    : pane.waitFor(() => row.prompt.test(pane.text()), 'prompt text', FIRST_PROMPT_MS))
+    .catch((error) => noPrompt(t, row, error));
   /** Submit `line` (a `\r` inside it is a further Enter) and wait for the next prompt. */
   pane.run = async (line, what = JSON.stringify(line)) => {
     // A line that never came back leaves the shell mid-command: every later
@@ -368,6 +395,7 @@ function shellCase(name, applies, body, { timeout = 60_000, reads = false } = {}
     test(`${row.name}: ${name}`, { timeout, ...(todo ? { todo } : {}) }, async (t) => {
       const located = (await LOCATED).get(row.name);
       if (!located) return cannotRun(t, row, `${row.name} is not installed`);
+      if (NO_PROMPT.has(row.name)) assert.fail(`${row.name} never prompted; see ${NO_PROMPT.get(row.name)}`);
       if (reads && located.unreported) {
         if (todo) return undefined;
         return cannotRun(t, row, `${row.name} reports no boundaries: ${located.unreported}`);
@@ -393,7 +421,8 @@ shellCase('the shipped integration reports a prompt', (row) => row.integrated, a
     return cannotRun(t, row, `${row.name} reports no boundaries: ${located.unreported}`);
   }
   const pane = openPane(t, row, located);
-  await pane.waitFor(() => pane.prompts >= 1 || row.prompt?.test(pane.text()), 'a prompt', 60_000);
+  await pane.waitFor(() => pane.prompts >= 1 || row.prompt?.test(pane.text()), 'a prompt', FIRST_PROMPT_MS)
+    .catch((error) => noPrompt(t, row, error));
   await pane.waitFor(() => pane.prompts >= 1, 'a reported prompt (OSC 633/133 A then B)', 5_000);
 });
 
@@ -496,7 +525,7 @@ shellCase('the reported command line is the typed one', (row) => row.integrated,
     const line = hostileLine(row, lines);
     if (line === undefined) continue;
     const todo = todoFor(row, `command line: ${name}`);
-    await t.test(name, todo ? { todo } : {}, async () => {
+    await t.test(`${row.name}: ${name}`, todo ? { todo } : {}, async () => {
       const events = await pane.run(line, name);
       const typed = line.replace(/\r/g, '\n');
       const starts = events.filter((event) => event.type === 'commandStart');
@@ -529,7 +558,7 @@ shellCase('the reported cwd is local and right', (row) => row.integrated, async 
   }
   for (const [name, target] of targets) {
     const todo = todoFor(row, `cwd: ${name}`);
-    await t.test(name, todo ? { todo } : {}, async () => {
+    await t.test(`${row.name}: ${name}`, todo ? { todo } : {}, async () => {
       const spelled = row.msys ? msysPath(target) : target;
       await pane.run(cdCommand(row, spelled));
       const cwd = pane.state.cwd;
@@ -558,7 +587,7 @@ shellCase('prompt and command boundaries arrive in order', (row) => row.integrat
     const line = hostileLine(row, lines);
     if (line === undefined) continue;
     const todo = todoFor(row, `boundaries: ${name}`);
-    await t.test(name, todo ? { todo } : {}, async () => {
+    await t.test(`${row.name}: ${name}`, todo ? { todo } : {}, async () => {
       const lastBefore = pane.state.lastCommand;
       const events = await pane.run(line, name);
       const kinds = events.map((event) => event.type);
@@ -639,12 +668,18 @@ shellCase('the pane environment is clean', (row) => !row.wsl, async (t, row, loc
 // is the contract there (WSL_CLI_ENV in pty-core.js).
 shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async (t, row, located) => {
   const pane = openPane(t, row, located);
-  const out = path.join(SCRATCH, 'wsl-env.txt');
-  await pane.run(`env > '${msysPath(out).replace(/^\//, '/mnt/')}'`);
-  const env = Object.fromEntries(fs.readFileSync(out, 'utf8').split('\n').filter((line) => line.includes('='))
-    .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  const out = path.join(SCRATCH, `${row.name}-env.txt`);
+  await pane.ready();
+  // wslpath, not a guessed mount: docker-desktop mounts drives at /mnt/host.
+  pane.write(`env > "$(wslpath -u '${out}')"\r`);
+  const env = await pane.waitFor(() => {
+    let text;
+    try { text = fs.readFileSync(out, 'utf8'); } catch { return null; }
+    return text.includes('PATH=') && Object.fromEntries(text.split('\n').filter((line) => line.includes('='))
+      .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  }, 'env dump', 30_000, 100);
   assert.equal(env.DORMOUSE_SURFACE_ID, pane.id);
   assert.equal(env.TERM_PROGRAM, 'iTerm.app');
   assert.equal(env.COLORTERM, 'truecolor');
-  for (const key of MUST_NOT_LEAK) assert.equal(env[key], undefined, `wsl: the host's ${key} reached the distro`);
+  for (const key of MUST_NOT_LEAK) assert.equal(env[key], undefined, `${row.name}: the host's ${key} reached the distro`);
 });
