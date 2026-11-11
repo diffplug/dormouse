@@ -68,14 +68,19 @@ function bashArgsAreInjectable(shellArgs) {
 // that command, so its environment is set up first and our prompt wrapper
 // installs after it. A non-interactive one-off (a -Command/-File/-EncodedCommand
 // without -NoExit) is returned as null so we don't alter it.
+//
+// A leading `-l` / `-Login` (pwsh as the login shell on macOS and Linux, which
+// `resolveLoginArg` adds) stays first, the only position pwsh honors it in, and
+// the rest is judged as if it were absent.
 function powerShellIntegratedArgs(shellArgs, script) {
   const dotSource = `. '${script.replace(/['\u2018-\u201b]/g, (c) => c + c)}'`;
   const args = [...(shellArgs || [])];
+  const is = (arg, ...names) => names.includes(arg.toLowerCase());
+  const login = args.length > 0 && is(args[0], '-l', '-login') ? [args.shift()] : [];
 
   // No args at all → a plain interactive REPL; add our own dot-source.
-  if (args.length === 0) return ['-NoExit', '-Command', dotSource];
+  if (args.length === 0) return [...login, '-NoExit', '-Command', dotSource];
 
-  const is = (arg, ...names) => names.includes(arg.toLowerCase());
   // Only augment interactive sessions; without -NoExit a command/file runs and
   // exits, so there's no prompt to wrap.
   if (!args.some((a) => is(a, '-noexit', '-noe'))) return null;
@@ -85,10 +90,10 @@ function powerShellIntegratedArgs(shellArgs, script) {
   const cmdIdx = args.findIndex((a) => is(a, '-command', '-c'));
   if (cmdIdx !== -1 && cmdIdx + 1 < args.length) {
     args[cmdIdx + 1] = `${args[cmdIdx + 1]}; ${dotSource}`;
-    return args;
+    return [...login, ...args];
   }
   // Interactive but no inline command (e.g. just `-NoExit`); add ours.
-  return [...args, '-Command', dotSource];
+  return [...login, ...args, '-Command', dotSource];
 }
 
 function resolveLoginArg(shell, platform = process.platform) {

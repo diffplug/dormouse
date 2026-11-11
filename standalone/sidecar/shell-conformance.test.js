@@ -217,10 +217,6 @@ function cannotRun(t, row, reason) {
 const BOUNDARY_CASES_RE = /^(?:the shipped integration reports a prompt|the reported command line|the reported cwd|prompt and command boundaries)/;
 const KNOWN = [
   {
-    shells: ['pwsh'], platforms: ['darwin', 'linux'], unintegrated: true, case: BOUNDARY_CASES_RE,
-    why: 'pwsh as the login shell spawns as `pwsh -l`, and powerShellIntegratedArgs injects only into a bare or -NoExit launch, so the pane gets no integration',
-  },
-  {
     // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: TERM_PROGRAM undefined.
     shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: iTerm2 identity/,
     why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",
@@ -332,6 +328,7 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
     if (event === 'data' && data.id === id) {
       chunkFrom = pane.raw.length;
       pane.raw += data.data;
+      pane.lastDataAt = Date.now();
       stream.write(data.data);
       // A shell that marks no prompt end is ready once its prompt text
       // follows the A.
@@ -424,6 +421,17 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
     // case on this pane fails at once rather than waiting out its own timeout.
     if (pane.stuck) throw new Error(`${row.name}: the pane is still running ${pane.stuck}`);
     await pane.ready();
+    // .NET's console on macOS and Linux asks for the cursor position as
+    // PSReadLine starts a line, and what it reads while it waits for the
+    // answer it decodes a byte at a time, so a character of several bytes
+    // typed that soon arrives broken, in any terminal. Type once that answer
+    // is in and the shell has gone quiet, as a person would.
+    if (row.family === 'pwsh' && !WIN) {
+      await pane.waitFor(() => {
+        const prompt = pane.raw.lastIndexOf('\x1b]633;B');
+        return prompt >= 0 && pane.raw.includes('\x1b[6n', prompt) && Date.now() - pane.lastDataAt >= 100;
+      }, 'PSReadLine to ask for the cursor', 10_000, 25);
+    }
     const before = pane.prompts;
     const mark = pane.semantic.length;
     pane.write(`${line}\r`);

@@ -1375,6 +1375,27 @@ test('resolveSpawnConfig injects pwsh integration via -NoExit -Command dot-sourc
   assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
 });
 
+test('resolveSpawnConfig injects pwsh as the login shell on macOS and Linux, keeping -l first', () => {
+  for (const platform of ['darwin', 'linux']) {
+    const config = resolveSpawnConfig(undefined, {
+      platform,
+      env: { SHELL: '/usr/local/bin/pwsh', HOME: '/home/tester', DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/dormouse/shell-integration' },
+      osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+      fsModule: integrationFsModule,
+    });
+    // pwsh honors -l only as its first argument.
+    assert.deepEqual(config.shellArgs, ['-l', '-NoExit', '-Command', ". '/opt/dormouse/shell-integration/pwsh/shellIntegration.ps1'"], platform);
+  }
+  const explicit = (args) => resolveSpawnConfig({ args }, {
+    platform: 'linux',
+    env: { SHELL: '/usr/bin/pwsh', HOME: '/home/tester', DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/d' },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp' },
+    fsModule: integrationFsModule,
+  }).shellArgs;
+  assert.deepEqual(explicit(['-Login', '-NoExit', '-NoLogo']), ['-Login', '-NoExit', '-NoLogo', '-Command', ". '/opt/d/pwsh/shellIntegration.ps1'"]);
+  assert.deepEqual(explicit(['-l', '-Command', 'Get-Process']), ['-l', '-Command', 'Get-Process']);
+});
+
 test('resolveSpawnConfig injects Windows PowerShell (powershell.exe) too', () => {
   const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
   const config = resolveSpawnConfig(
