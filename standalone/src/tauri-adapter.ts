@@ -13,6 +13,7 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyDataDetail,
+  PtyDataHandler,
   PtyInfo,
   PtyListDetail,
   PtyMarkedDetail,
@@ -52,6 +53,7 @@ import { withTimeout } from "./with-timeout";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
+import { PtyDataDispatch } from "dormouse-lib/lib/pty-flow";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import { applyLiveTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
@@ -88,7 +90,7 @@ export interface TauriAdapter extends AlertClientMethods {}
 export class TauriAdapter implements PlatformAdapter {
   readonly offersLabs = true;
   readonly reapsTools = true;
-  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
+  private readonly ptyData = new PtyDataDispatch((id, chars) => this.acknowledgePtyData(id, chars));
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
@@ -156,9 +158,7 @@ export class TauriAdapter implements PlatformAdapter {
       // (docs/specs/terminal-escapes.md → "Parsing location").
       listenToWindow<PtyDataDetail>("pty:data", (event) => {
         const { id, data, textData } = event.payload;
-        for (const handler of this.dataHandlers) {
-          handler({ id, data, textData });
-        }
+        this.ptyData.deliver({ id, data, textData });
       }),
 
       // The Tool half of the sidecar's parse; its reports stayed with the
@@ -490,13 +490,15 @@ export class TauriAdapter implements PlatformAdapter {
     return () => { this.filesDroppedHandlers.delete(handler); };
   }
 
-  onPtyData(handler: (detail: PtyDataDetail) => void): void {
-    this.dataHandlers.add(handler);
+  onPtyData(handler: PtyDataHandler): void {
+    this.ptyData.add(handler);
   }
 
-  offPtyData(handler: (detail: PtyDataDetail) => void): void {
-    this.dataHandlers.delete(handler);
+  offPtyData(handler: PtyDataHandler): void {
+    this.ptyData.delete(handler);
   }
+
+  acknowledgePtyData(_id: string, _chars: number): void {}
 
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void {
     this.exitHandlers.add(handler);

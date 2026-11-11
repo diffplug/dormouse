@@ -9,6 +9,7 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyDataDetail,
+  PtyDataHandler,
   PtyListDetail,
   PtyMarkedDetail,
   PtyReplayDetail,
@@ -44,6 +45,7 @@ import { nativeClipboardWriter } from "./native-clipboard";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
+import { PtyDataDispatch } from "dormouse-lib/lib/pty-flow";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import { applyLiveTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
@@ -63,7 +65,7 @@ export interface BrowserSidecarAdapter extends AlertClientMethods {}
 export class BrowserSidecarAdapter implements PlatformAdapter {
   readonly offersLabs = true;
   readonly reapsTools = true;
-  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
+  private readonly ptyData = new PtyDataDispatch((id, chars) => this.acknowledgePtyData(id, chars));
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
@@ -273,8 +275,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // where a drop yields `File` objects and no host paths, so there is nothing to
   // report. Implementing it would claim the capability and never fire.
 
-  onPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.add(handler); }
-  offPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.delete(handler); }
+  onPtyData(handler: PtyDataHandler): void { this.ptyData.add(handler); }
+  offPtyData(handler: PtyDataHandler): void { this.ptyData.delete(handler); }
+  acknowledgePtyData(_id: string, _chars: number): void {}
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.add(handler); }
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.delete(handler); }
   requestInit(requestId?: string): void {
@@ -318,8 +321,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } else if (event === "pty:data") {
       // Already parsed by the sidecar, which owns the PTY; its events arrive as
       // the two messages below (docs/specs/terminal-escapes.md).
-      const payload = data as PtyDataDetail;
-      for (const handler of this.dataHandlers) handler(payload);
+      this.ptyData.deliver(data as PtyDataDetail);
     } else if (event === "terminal:toolEvents") {
       const payload = data as { id: string; events: TerminalProtocolEvent[] };
       applyLiveToolEvents(payload.id, payload.events);
