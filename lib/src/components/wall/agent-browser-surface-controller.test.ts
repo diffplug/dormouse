@@ -1536,7 +1536,7 @@ describe('relaunch (pop-out / pop-in)', () => {
       screen.chromeActions.reload();
       screen.chromeActions.navigate('https://first.example/');
       screen.chromeActions.navigate('https://latest.example/');
-      screen.actions.applyViewport(1024, 768, 2);
+      void screen.actions.applyViewportSetting?.({ mode: 'fixed', width: 1024, height: 768, dpr: 2 }).catch(() => {});
       screen.actions.engageSync();
       const [first, second] = controller.snapshot().tabs;
       controller.selectTab(second);
@@ -1652,7 +1652,7 @@ describe('relaunch (pop-out / pop-in)', () => {
     await flushMicrotasks();
     const screen = getAgentBrowserScreenController('id')!;
     screen.actions.setRenderMode?.('agent-browser-popout');
-    screen.actions.applyViewport(1024, 768, 2);
+    void screen.actions.applyViewportSetting?.({ mode: 'fixed', width: 1024, height: 768, dpr: 2 }).catch(() => {});
     host.resolvePopOut({ ok: true, stream: 3456 });
     await flushMicrotasks();
     expect(controller.snapshot()).toMatchObject({ poppedOut: true, phase: 'live' });
@@ -1748,6 +1748,21 @@ describe('relaunch (pop-out / pop-in)', () => {
     attach.resolve({ ok: true, stream: 1111 });
     await flushMicrotasks();
     expect(host.relaunches(true)).toEqual([onSess({ op: 'launch', url: 'http://localhost:5173/', headed: true })]);
+  });
+
+  it('keeps a Fixed size the Display modal picks before the browser is bound, and applies it once live', async () => {
+    const host = relaunchHost();
+    const attach = pending();
+    host.answers.attach = () => attach.promise;
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', url: 'https://page.example/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    await getAgentBrowserScreenController('id')!.actions.applyViewportSetting!({ mode: 'fixed', width: 800, height: 600, dpr: 1 });
+    expect(host.requests('viewport')).toEqual([]);
+
+    attach.resolve({ ok: true, stream: 1111 });
+    await flushMicrotasks();
+    expect(host.requests('viewport').map(({ width, height }) => [width, height])).toEqual([[800, 600]]);
   });
 
   it('a failed pop-out comes back in the pane, relaunching headless at its page if no daemon came up', async () => {

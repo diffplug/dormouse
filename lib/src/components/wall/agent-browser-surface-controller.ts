@@ -440,7 +440,14 @@ export class AgentBrowserSurfaceController {
         this.syncToPane();
       },
       applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
-      applyViewportSetting: (setting) => this.applyViewportSetting(setting),
+      // The Display modal's. A Fixed size picked while a screencast is not
+      // yet live is the pending intent, run once it is; `dor`'s sizing calls
+      // the method itself, which fails fast, since it measures right after.
+      applyViewportSetting: (setting) => {
+        if (setting.mode !== 'fixed' || this.headed || this.driver()) return this.applyViewportSetting(setting);
+        this.fixViewport(setting);
+        return Promise.resolve();
+      },
       openModal: () => openAgentBrowserScreenModal(this.id),
       setRenderMode: (mode, opts) => this.setRenderMode(mode, opts),
     };
