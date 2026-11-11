@@ -4,7 +4,6 @@ import App from './App';
 import { restorePocketTheme } from './pocket-theme';
 import { registerPushServiceWorker } from './service-worker';
 import { erasePairingHashOnChange, takePairingHash } from './pair-link';
-import { purgeLegacyPairedMarkers } from '../client/pocket-client';
 
 // Apply the theme to <body> before the first render so the auth screens — not
 // just the terminal wall — render with the shared VSCode `--color-*` tokens
@@ -19,10 +18,6 @@ restorePocketTheme();
 // there — see `pair-link.ts`.
 const arrivedByCamera = takePairingHash();
 erasePairingHashOnChange();
-
-// One sweep of the markers the pre-end-to-end Burrows view kept. Boot, because it
-// is a one-time cleanup rather than anything a screen depends on.
-purgeLegacyPairedMarkers();
 
 // Best-effort and never awaited: the worker only carries push, so registering
 // it must not sit in front of the first paint (docs/specs/pocket-app.md).

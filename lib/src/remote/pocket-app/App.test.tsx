@@ -375,21 +375,42 @@ describe('BurrowsView actions', () => {
     const remove = [...rowFor('First laptop').querySelectorAll('button')].at(-1)!;
     expect(remove.disabled).toBe(false);
     act(() => remove.click());
+    // Remove sits beside Connect and cannot be undone from the phone.
+    expect(onForget).not.toHaveBeenCalled();
+    const confirm = container.querySelector('[role="group"]')!;
+    expect(confirm.textContent).toContain('Remove First laptop from this phone?');
+
+    act(() => [...confirm.querySelectorAll('button')].find((b) => b.textContent === 'Remove')!.click());
 
     expect(onForget).toHaveBeenCalledWith(offline[0]);
   });
 
-  it('disables Connect on an offline Burrow but not Pair again', () => {
-    // Pairing starts at the scanner and needs no relay socket: the code on the
-    // computer's screen is what says whether it is there.
+  it('keeps the record when the Remove question is cancelled', () => {
+    const onForget = vi.fn();
+    renderBurrows({ onForget });
+
+    act(() => [...rowFor('Second laptop').querySelectorAll('button')].at(-1)!.click());
+    act(() => buttonNamed('Cancel')!.click());
+
+    expect(container.querySelector('[role="group"]')).toBeNull();
+    expect(onForget).not.toHaveBeenCalled();
+  });
+
+  it('leaves Connect and Pair again tappable on a row read as offline', () => {
+    // The online flag is only as fresh as the last list read: a computer that
+    // woke since must not need a Refresh before it can be reached.
+    const onConnect = vi.fn();
     const offline: BurrowView[] = [
       { ...BURROWS[0]!, online: false },
       { ...BURROWS[1]!, online: false, needsPairing: true },
     ];
-    renderBurrows({ burrows: offline });
+    renderBurrows({ burrows: offline, onConnect });
 
-    expect(rowFor('First laptop').querySelector('button')!.disabled).toBe(true);
+    expect(rowFor('First laptop').textContent).toContain('Offline');
+    expect(rowFor('First laptop').querySelector('button')!.disabled).toBe(false);
     expect(rowFor('Second laptop').querySelector('button')!.disabled).toBe(false);
+    act(() => rowFor('First laptop').querySelector('button')!.click());
+    expect(onConnect).toHaveBeenCalledWith(offline[0]);
   });
 
   it('offers a removed row Forget alone, enabled offline, naming who removed it', () => {

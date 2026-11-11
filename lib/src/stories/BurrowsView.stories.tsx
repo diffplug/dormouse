@@ -13,7 +13,7 @@ import {
 import { PhoneFrame } from './PhoneFrame';
 
 // A paired online burrow (Connect), a burrow whose authorization the laptop revoked
-// (Pair again), and an offline burrow (dimmed row, its Connect disabled) — the
+// (Pair again), and an offline burrow (dimmed row) — the
 // full row matrix in one frame. Every row is a record this phone holds; a Burrow
 // it has never paired with is not listed at all.
 const MIXED_BURROWS: BurrowView[] = [

@@ -4,7 +4,7 @@ Expect: lib/src/remote/client/pocket-client.ts
 Source: reverses part of #1223 (Pocket signed the challenge the Relay's `begin` answered instead of deriving its own)
 
 diff --git a/lib/src/remote/client/pocket-client.test.ts b/lib/src/remote/client/pocket-client.test.ts
-index 147dc795b..1e1043656 100644
+index ea95ccf2b..ce4a787f6 100644
 --- a/lib/src/remote/client/pocket-client.test.ts
 +++ b/lib/src/remote/client/pocket-client.test.ts
 @@ -51,7 +51,6 @@ import {
@@ -12,10 +12,10 @@ index 147dc795b..1e1043656 100644
    PAIRING_DENIAL_MESSAGES,
    PASSKEY_UNAVAILABLE_MESSAGE,
 -  PRESENCE_CHALLENGE_MISMATCH_MESSAGE,
+   POCKET_API_TIMEOUT_MS,
    PocketClient,
-   SessionExpiredError,
-   SessionSupersededError,
-@@ -2153,12 +2152,6 @@ describe('the presence proof', () => {
+   RELAY_NO_ANSWER_MESSAGE,
+@@ -2170,12 +2169,6 @@ describe('the presence proof', () => {
      return { client, prompts, finished };
    }
  
@@ -28,7 +28,7 @@ index 147dc795b..1e1043656 100644
    /**
     * A paired phone, past the window its pairing opened, and another connection
     * on that phone's own paired static which the phone never opened: the binding
-@@ -2226,38 +2219,6 @@ describe('the presence proof', () => {
+@@ -2243,38 +2236,6 @@ describe('the presence proof', () => {
      return { harness, binding, nonce, present };
    }
  
@@ -68,7 +68,7 @@ index 147dc795b..1e1043656 100644
      const harness = await makeE2eHarness();
      const phone = await behindRelay(
 diff --git a/lib/src/remote/client/pocket-client.ts b/lib/src/remote/client/pocket-client.ts
-index df6956e62..6ebf43f5c 100644
+index 601c8c032..fe86bf1bd 100644
 --- a/lib/src/remote/client/pocket-client.ts
 +++ b/lib/src/remote/client/pocket-client.ts
 @@ -38,7 +38,6 @@ import {
@@ -94,7 +94,7 @@ index df6956e62..6ebf43f5c 100644
  /**
   * What a ceremony that simply never answered reports.
   *
-@@ -1229,12 +1220,6 @@ export class PocketClient {
+@@ -1240,12 +1231,6 @@ export class PocketClient {
     * authenticates no other pairing or connection; the Relay's `finish` proves
     * nothing to the Burrow, which recomputes the challenge and verifies the same
     * assertion itself.
@@ -107,7 +107,7 @@ index df6956e62..6ebf43f5c 100644
     */
    async #provePresence(binding: PresenceBinding): Promise<PresenceProofV1> {
      const auth = this.#auth();
-@@ -1243,13 +1228,7 @@ export class PocketClient {
+@@ -1254,13 +1239,7 @@ export class PocketClient {
        { binding },
        auth,
      );
