@@ -270,7 +270,7 @@ describe('FileBurrowStateStore', () => {
   it.runIf(process.platform !== 'win32')(
     'tightens a state directory the burrow created first',
     async () => {
-      // Production Tauri creates app_data_dir before spawning the sidecar, so
+      // Production Tauri creates its data directory before spawning the sidecar, so
       // mkdir's creation mode alone cannot make this directory private.
       await chmod(dir, 0o755);
       const store = new FileBurrowStateStore(dir);

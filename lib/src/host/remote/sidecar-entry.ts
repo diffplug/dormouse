@@ -417,7 +417,7 @@ export interface SidecarHostOptions {
   /**
    * Where the enrollment + ACL file lives. The browser dev harness passes a
    * per-run temp dir; standalone passes an empty value only when Rust could not
-   * create the app-data directory, which falls back to the in-memory store.
+   * create or lock its data directory, which falls back to the in-memory store.
    */
   stateDir?: string;
   /**

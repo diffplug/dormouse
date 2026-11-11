@@ -707,6 +707,17 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     }
   });
 
+  it('answers no handshake on an invitation past its TTL, however valid its message 1', async () => {
+    // The phone's parser refuses a code this old too, but only advisorily: the
+    // Burrow's own clock is the one that decides.
+    makeBurrow();
+    const invitation = await mintInvitation();
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    expect(await openPairing('c1', invitation, await generateNoiseKeyPair())).toBeNull();
+    expect(burrow.trackedClientCount).toBe(0);
+    expect(burrow.invitationState(invitation.inviteId)).toBe('consumed');
+  });
+
   it('reports an invitation expired once its TTL passes', async () => {
     makeBurrow();
     const invitation = await mintInvitation();
@@ -877,13 +888,27 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(
       await attemptConnection('c2', await generateNoiseKeyPair(), authenticator),
     ).toEqual({ ok: false, code: 'pairing-required' });
+    expect(accessEntries.at(-1)).toMatchObject({ reason: 'pairing-required: client-not-paired' });
 
-    // A passkey nobody approved, from the approved browser.
+    // A passkey nobody approved, from the approved browser: one the account
+    // gained after pairing, which the Burrow never asks the Relay about.
     const strangerPasskey = await newAuthenticator();
     expect(await attemptConnection('c1', clientStatic, strangerPasskey)).toEqual({
       ok: false,
       code: 'pairing-required',
     });
+    expect(accessEntries.at(-1)).toMatchObject({ reason: 'pairing-required: passkey-not-paired' });
+
+    // Both halves foreign: an attacker with a browser and a passkey of their
+    // own, whatever a compromised Relay vouched for. Nothing the ACL holds moved.
+    expect(await attemptConnection('c4', await generateNoiseKeyPair(), strangerPasskey)).toEqual({
+      ok: false,
+      code: 'pairing-required',
+    });
+    expect(accessEntries.at(-1)).toMatchObject({
+      reason: 'pairing-required: passkey-not-paired,client-not-paired',
+    });
+    expect(savedRecords).toEqual([paired]);
 
     // The paired static and the paired credential id, signed with another key:
     // the proof verifies against the key it presents, so the key-hash compare
@@ -950,6 +975,18 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(
       await attemptConnection('c1', clientStatic, authenticator, {
         binding: (b) => ({ ...b, connectionId: testRoutingId() }),
+      }),
+    ).toEqual(denial);
+    // A pairing proof over this very handshake: the kinds differ, so a ceremony
+    // that costs no Burrow challenge cannot stand in for one that does.
+    expect(
+      await attemptConnection('c1', clientStatic, authenticator, {
+        binding: (b) => ({
+          kind: 'pairing',
+          burrowId: b.burrowId,
+          handshakeHash: b.handshakeHash,
+          passkeyCredentialId: b.passkeyCredentialId,
+        }),
       }),
     ).toEqual(denial);
   });
@@ -1171,6 +1208,40 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       event: 'connection-denied',
       reason: 'pairing-required: passkey-not-paired,client-not-paired',
     });
+  });
+
+  it('trusts a revoked phone again only through a new pairing', async () => {
+    makeBurrow();
+    const { authenticator, clientStatic, record } = await pairedClient();
+    burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings');
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual({ ok: false, code: 'pairing-required' });
+
+    const again = await requestPairing('c2', authenticator, { clientStatic });
+    approvals.at(-1)!.approve(again.code);
+    expect(await outcome(again.session, 'pairing', again.invitation.inviteId)).toMatchObject({ ok: true });
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual(success);
+  });
+
+  it('trusts another static under the same passkey only through its own pairing, each record standing alone', async () => {
+    // A synced passkey on a second device, or this browser after losing its
+    // data: the paired credential, and a Client static nobody approved.
+    makeBurrow();
+    const { authenticator, clientStatic, record } = await pairedClient();
+    const fresh = await generateNoiseKeyPair();
+    expect(await attemptConnection('c2', fresh, authenticator)).toEqual({ ok: false, code: 'pairing-required' });
+    expect(accessEntries.at(-1)).toMatchObject({ reason: 'pairing-required: client-not-paired' });
+
+    const second = await requestPairing('c2', authenticator, { clientStatic: fresh });
+    approvals.at(-1)!.approve(second.code);
+    expect(await outcome(second.session, 'pairing', second.invitation.inviteId)).toMatchObject({ ok: true });
+    expect(await attemptConnection('c2', fresh, authenticator)).toEqual(success);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual(success);
+    expect(new Set(burrow.activeRecords.map(({ deliveryId }) => deliveryId)).size).toBe(2);
+
+    // Revoking the stranded static leaves the one that replaced it standing.
+    expect(burrow.revoke({ clientStaticPublicKey: record.clientStaticPublicKey }, 'settings')).toHaveLength(1);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual({ ok: false, code: 'pairing-required' });
+    expect(await attemptConnection('c2', fresh, authenticator)).toEqual(success);
   });
 
   it('revoking a passkey ends every session it authorized', async () => {

@@ -92,11 +92,10 @@ export const MAX_DIRECT_PENDING_BYTES = 4 * 1024 * 1024;
 
 /**
  * How many channel frames either direction holds, whatever their size, so it
- * stops a peer sending thousands of tiny ones. Terminal output is not coalesced:
- * each PTY read, at most about 1 KiB, is its own frame, so a burst the link
- * cannot drain can reach this as well as {@link MAX_DIRECT_PENDING_BYTES}. The
- * relationship between the two is pinned by
- * `remote-lib-common/test/direct-path.test.mjs`.
+ * stops a peer sending thousands of tiny ones. Terminal output is joined per
+ * macrotask, so a burst the link cannot drain arrives in frames of kilobytes and
+ * reaches {@link MAX_DIRECT_PENDING_BYTES} first. The relationship between the
+ * two is pinned by `remote-lib-common/test/direct-path.test.mjs`.
  */
 export const MAX_DIRECT_PENDING_FRAMES = 8192;
 

@@ -133,6 +133,26 @@ test('a page that never answers its title or measurement holds a refresh only so
   }
 });
 
+test('a screencast whose CDP attachment never answers holds a viewer refresh only so long', async () => {
+  page.goto = vi.fn(async () => null);
+  attach.mockImplementationOnce(() => new Promise(() => {}));
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const viewer = await viewSession();
+  try {
+    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
+    let first: unknown;
+    void pw({ op: 'navigate', url: 'http://localhost/first' }).then((r) => { first = r; });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(first).toBeDefined());
+    // The page was forgotten with the attachment: the next request starts afresh.
+    expect(await pw({ op: 'navigate', url: 'http://localhost/next' })).toMatchObject({ ok: true });
+    expect(page.goto).toHaveBeenCalledWith('http://localhost/next', { waitUntil: 'commit' });
+  } finally {
+    viewer.socket.terminate();
+    vi.useRealTimers();
+  }
+});
+
 test('closing during a CDP attachment releases it without capturing', async () => {
   let complete!: (value: typeof cdp) => void;
   attach.mockImplementation(() => new Promise(resolve => { complete = resolve; }));

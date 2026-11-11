@@ -2,6 +2,10 @@
 
 Evidence for `docs/specs/one-time.md`, keyed by its headings.
 
+## Link
+
+**Why the phone never refuses a link on its own clock (2026-11).** The expiry is written on the laptop's clock and was checked on the phone's, so a laptop five minutes slow — a WSL2 VM after the Windows host slept, a resumed VM, time sync blocked — had every fresh link refused the moment it was shown, with copy that sent the person to make another link that would fail the same way. The Burrow checks its own copy at the request and the approval, and the room refuses a join past its `expiresAt` with 4010, each on the clock that wrote the deadline, so the phone's check protected nothing. The phone's own bound is a duration from the tap, which no room outlives, so a dead link still fails promptly on the room's refusal. A tolerance like pairing's `INVITATION_CLOCK_SKEW_MS` was rejected for this path.
+
 ## Hosted rendezvous
 
 **Why the room reads nothing.** A room that parsed a frame would have started to act on what a handshake says, and a room that logged or stored one would keep handshake ciphertext past the handshake.
