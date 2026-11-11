@@ -359,7 +359,6 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   const remedy = BROWSER_PROVIDER_GUI[remedyProvider ?? 'agent-browser'];
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
-    applyViewport() {},
     openModal() { openAgentBrowserScreenModal(id); },
     // iframe is the current backend; every other offered mode swaps to an
     // automated browser. Wired only when the host can launch one — without it

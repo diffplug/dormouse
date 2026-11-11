@@ -435,7 +435,6 @@ export class AgentBrowserSurfaceController {
         this.setBrowserViewport({ mode: 'pane-sync' });
         this.syncToPane();
       },
-      applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
       // The Display modal's. A Fixed size picked while a screencast is not
       // yet live is the pending intent, run once it is; `dor`'s sizing calls
       // the method itself, which fails fast, since it measures right after.
