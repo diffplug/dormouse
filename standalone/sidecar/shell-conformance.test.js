@@ -228,12 +228,12 @@ const KNOWN = [
   },
   {
     // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: TERM_PROGRAM undefined.
-    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^the pane environment reaches the WSL distro/,
+    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: iTerm2 identity/,
     why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",
   },
   {
     // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
-    shells: ['zsh'], platforms: ['linux'], case: /^nothing is written into the shipped zsh directory/,
+    shells: ['zsh'], platforms: ['linux'], case: /^shipped directory: nothing written/,
     why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",
   },
   {
@@ -525,8 +525,12 @@ shellCase('nothing is written into the shipped zsh directory', (row) => row.name
     .catch((error) => noPrompt(t, row, error));
   if (pane.prompts < 1) pane.write('y');
   await pane.run('true');
-  const written = fs.readdirSync(path.join(copy, 'zsh')).filter((name) => !SHIPPED_ZSH.includes(name));
-  assert.deepEqual(written, [], `zsh wrote ${written.join(', ')} into the shipped directory`);
+  // Its own subtest, so a todo on what was written covers only that.
+  const todo = todoFor(row, 'shipped directory: nothing written');
+  await t.test(`${row.name}: nothing written`, todo ? { todo } : {}, () => {
+    const written = fs.readdirSync(path.join(copy, 'zsh')).filter((name) => !SHIPPED_ZSH.includes(name));
+    assert.deepEqual(written, [], `zsh wrote ${written.join(', ')} into the shipped directory`);
+  });
 });
 
 // ── 1. The user's dotfiles load ───────────────────────────────────────────
@@ -787,12 +791,16 @@ shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async
   assert.equal(env.DORMOUSE_SURFACE_ID, pane.id);
   for (const key of MUST_NOT_LEAK) assert.equal(env[key], undefined, `${row.name}: the host's ${key} reached the distro`);
   // The identity every pane gets (docs/specs/transport.md -> iTerm2 identity),
-  // all reported at once.
-  const identity = { TERM_PROGRAM: 'iTerm.app', LC_TERMINAL: 'iTerm2', COLORTERM: 'truecolor' };
-  const wrong = Object.entries(identity).filter(([key, value]) => env[key] !== value)
-    .concat(['TERM_PROGRAM_VERSION', 'LC_TERMINAL_VERSION'].filter((key) => !env[key]).map((key) => [key]))
-    .map(([key]) => `${key}=${env[key]}`);
-  assert.deepEqual(wrong, [], `${row.name}: the distro lacks Dormouse's identity`);
+  // all reported at once, in a subtest of its own so a todo on it covers
+  // nothing else.
+  const todo = todoFor(row, 'WSL environment: iTerm2 identity');
+  await t.test(`${row.name}: iTerm2 identity`, todo ? { todo } : {}, () => {
+    const identity = { TERM_PROGRAM: 'iTerm.app', LC_TERMINAL: 'iTerm2', COLORTERM: 'truecolor' };
+    const wrong = Object.entries(identity).filter(([key, value]) => env[key] !== value)
+      .concat(['TERM_PROGRAM_VERSION', 'LC_TERMINAL_VERSION'].filter((key) => !env[key]).map((key) => [key]))
+      .map(([key]) => `${key}=${env[key]}`);
+    assert.deepEqual(wrong, [], `${row.name}: the distro lacks Dormouse's identity`);
+  });
 });
 
 // ── Last: nothing left running ────────────────────────────────────────────
