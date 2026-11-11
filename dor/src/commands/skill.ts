@@ -2,7 +2,7 @@
 
 import { buildCommand } from '@stricli/core';
 import type { Command, DorCommandContext } from './types.js';
-import { callerWorkingDirectory, renderJson, writeStdout } from './shared.js';
+import { callerWorkingDirectory, renderJson, stringParser, writeStdout } from './shared.js';
 
 interface SkillFlags {
   readonly install?: boolean;
@@ -32,10 +32,12 @@ const CANDIDATES = ['AGENTS.md', 'CLAUDE.md'] as const;
 
 export const skillCommand: Command = {
   name: 'skill',
-  command: buildCommand<SkillFlags, [], DorCommandContext>({
+  command: buildCommand<SkillFlags, [string?], DorCommandContext>({
     docs: {
       brief: 'Print the Dormouse agent skill, or install its bootstrap stub.',
       fullDescription: `Prints the Dormouse agent skill — instructions that teach a coding agent to drive Dormouse through the dor CLI: run background processes in visible panes, open browser surfaces, and launch and coordinate sub-agents. The text ships inside the CLI, so it always matches the Dormouse that staged it.
+
+A topic prints a further guide instead. \`dor skill tools\` teaches an agent to write or change a Dor Tool: where its declaration and source live, the OSC 367 sequences it writes, and how to reload and inspect it.
 
 --install instead writes a marker-delimited bootstrap stub into the project's agent instructions file. The stub is the detection rule — if DORMOUSE_SURFACE_ID is set, run \`dor skill\` and follow it — plus two loud, mandatory directives (use \`dor ensure\` for long-running processes, \`dor agent-browser\` for browsers) that must land before an agent would think to run \`dor skill\`. It stays otherwise fact-free, so a committed stub does not go stale.
 
@@ -56,14 +58,24 @@ JSON output:
         install: { kind: 'boolean', brief: 'Install the bootstrap stub into the project\'s agent instructions file.', optional: true, withNegated: false },
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
       },
+      positional: { kind: 'tuple', parameters: [{ parse: stringParser, brief: 'Guide to print instead: tools.', placeholder: 'topic', optional: true }] },
     },
     func: runSkillCommand,
   }),
 };
 
-function runSkillCommand(this: DorCommandContext, flags: SkillFlags): void | Error {
-  if (flags.install === true) return installStub(this, flags.json === true);
-  const markdown = this.options.host.skillMarkdown;
+function runSkillCommand(this: DorCommandContext, flags: SkillFlags, topic?: string): void | Error {
+  if (flags.install === true) {
+    if (topic !== undefined) return new Error('--install takes no topic');
+    return installStub(this, flags.json === true);
+  }
+  const { skillMarkdown, skillTopics } = this.options.host;
+  // Own keys only, so `constructor` is as unknown as any other word.
+  const topics = Object.keys(skillTopics);
+  if (topic !== undefined && !topics.includes(topic)) {
+    return new Error(`unknown skill topic '${topic}' (known: ${topics.join(', ')})`);
+  }
+  const markdown = topic === undefined ? skillMarkdown : skillTopics[topic];
   writeStdout(this, flags.json === true ? renderJson({ markdown }) : markdown);
   return undefined;
 }

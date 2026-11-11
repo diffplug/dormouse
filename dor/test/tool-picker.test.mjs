@@ -127,7 +127,7 @@ test('with no Tool declared, a terminal gets the listing and a pointer, not a pi
   const listed = await runCli(['tool', '--list'], { client: toolClient({ tools: [] }), env: ENV });
   assert.equal(result.exitCode, 0);
   assert.equal(result.stderr, listed.stderr);
-  assert.equal(result.stdout, `${listed.stdout}Declare a Tool in either file; dor skill shows how.\n`);
+  assert.equal(result.stdout, `${listed.stdout}Declare a Tool in either file; dor skill tools shows how.\n`);
 });
 
 test('--json at a terminal prints the JSON listing; a placement flag beside it fails', async () => {

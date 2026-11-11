@@ -710,6 +710,8 @@ export interface CliHost {
   loadBuiltinViewers(): Promise<BuiltinViewers>;
   versionMetadata: VersionMetadata;
   skillMarkdown: string;
+  /** `dor skill <topic>`'s documents, by topic. */
+  skillTopics: Readonly<Record<string, string>>;
 }
 
 /** `dor-tools-builtin/runtime`: each entry starts its viewer and answers its

@@ -7,7 +7,7 @@ import { listFiles } from './commands/file-list.js';
 import { PLAYWRIGHT } from './commands/playwright.js';
 import type { CliHost } from './commands/types.js';
 import { SocketControlClient } from './control-client.js';
-import { DOR_SKILL_MARKDOWN } from './generated-skill.js';
+import { DOR_SKILL_MARKDOWN, DOR_SKILL_TOPICS } from './generated-skill.js';
 import { DOR_VERSION_METADATA } from './generated-version.js';
 
 /** The machine `dor` runs on: everything `cli-core.ts` and the commands need
@@ -27,4 +27,5 @@ export const NODE_HOST: CliHost = {
   loadBuiltinViewers: () => import(new URL('./builtin/runtime.js', import.meta.url).href),
   versionMetadata: DOR_VERSION_METADATA,
   skillMarkdown: DOR_SKILL_MARKDOWN,
+  skillTopics: DOR_SKILL_TOPICS,
 };

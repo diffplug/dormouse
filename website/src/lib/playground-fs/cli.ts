@@ -11,6 +11,12 @@ import changelog from "../../data/changelog.json";
 import SKILL_MARKDOWN from "../../../../dor/skill.md?raw";
 import { HOME, normalizePath, type VirtualFs } from "./vfs";
 
+// `dor skill <topic>`'s documents, `dor/skill-<topic>.md`, as the CLI's codegen finds them.
+const SKILL_TOPIC_FILES = import.meta.glob("../../../../dor/skill-*.md", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const SKILL_TOPICS = Object.fromEntries(
+  Object.entries(SKILL_TOPIC_FILES).map(([path, text]) => [path.slice("../../../../dor/skill-".length, -".md".length), text]),
+);
+
 export const UNSUPPORTED = "UNSUPPORTED IN PLAYGROUND";
 
 const unsupported = (what: string): never => {
@@ -39,6 +45,7 @@ function playgroundHost(fs: VirtualFs): CliHost {
     // The build Settings → About names; unstamped (tests), the latest release.
     versionMetadata: readBuildStamp() ?? { version: changelog.releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 },
     skillMarkdown: SKILL_MARKDOWN,
+    skillTopics: SKILL_TOPICS,
   };
 }
 

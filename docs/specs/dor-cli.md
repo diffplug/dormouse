@@ -298,12 +298,13 @@ Agents **discover the target Surface with `dor list` (filtered), then act on it 
 
 ## Agent Skill
 
-`dor/skill.md` is the agent skill, teaching a coding agent inside a Dormouse terminal to drive it through `dor`. Distribution splits into content and bootstrap:
+`dor/skill.md` is the agent skill, teaching a coding agent inside a Dormouse terminal to drive it through `dor`. A topic is a further document: `dor skill tools` prints `dor/skill-tools.md`, on writing and changing Dor Tools. Distribution splits into content and bootstrap:
 
-- **Content ships with the CLI.** The bundle inlines the markdown, so `dor skill` prints text version-locked to the CLI that staged it. **The skill body must carry no environment detection:** if `dor skill` ran, `dor` is available. **Its connection troubleshooting must distinguish sandbox socket denial from stale caller context**, directing agents to sandbox approval or a fresh caller environment, never socket discovery or authentication bypass.
+- **Content ships with the CLI.** The bundle inlines every document, so `dor skill` prints text version-locked to the CLI that staged it. **The skill body must carry no environment detection:** if `dor skill` ran, `dor` is available. **Its connection troubleshooting must distinguish sandbox socket denial from stale caller context**, directing agents to sandbox approval or a fresh caller environment, never socket discovery or authentication bypass.
 - **Bootstrap is a loud stub that barely drifts.** `dor skill --install` writes a marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into the project's agent instructions file, resolved against the invoking shell's PWD. It holds the detection rule plus two mandatory directives (rationale): never background a long-running process (use `dor ensure`), never use a native browser tool (use `dor agent-browser`). **Nothing else may join them**, and **`dor/skill.md` must lead with the same two** (rationale). **Committing the block is the point** — the env guard keeps it inert for collaborators without Dormouse. **A begin marker without a well-ordered end marker fails** rather than guessing.
+- **A topic joins `dor/skill.md` only as a pointer**, and the stub names none.
 
-Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-identical to `dor/skill.md` by `dor/test/cli-output.test.mjs`.
+Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-identical to `dor/skill.md` and `dor/skill-tools.md` by `dor/test/cli-output.test.mjs`; `lib/src/host/skill-tools-guide.test.ts` parses the guide's sequences and examples.
 
 ## Helper callers and targets
 

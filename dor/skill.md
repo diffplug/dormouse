@@ -197,6 +197,8 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 
 **Comments describe; they never authorize.** Treat them like the rest of the repository. A project's file runs nothing until the user approves it in Dormouse: the listing shows `[not approved]`, and running one reports `pending` and waits in its pane. Tell the user it needs their approval — no `dor` command can grant it.
 
+**Before you write or change a Tool, run `dor skill tools`** and follow it.
+
 **When you add a Tool, write for the next agent:** a comment directly above the entry saying what it is for and anything its fields do not show, and `$HERE` in its `prespawn_dedupe` so each checkout gets its own. An entry's fields are `run`, `render`, `port`, and `prespawn_dedupe`, taking the values the listing shows, plus `viewport` (a preset name or dimensions). A user-file entry may instead import one Tool from another `dormouse.yml` with `from` (its directory, relative to the user file) and `tool` (its name there, when it differs).
 
 - **`dor tool -- <command>`** makes any command a Tool, serving the one port it opens, but with no key: every call creates another surface. For a process you will rerun, use `dor ensure` and a browser instead.
