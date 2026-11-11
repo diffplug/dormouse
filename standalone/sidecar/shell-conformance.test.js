@@ -217,11 +217,6 @@ function cannotRun(t, row, reason) {
 const BOUNDARY_CASES_RE = /^(?:the shipped integration reports a prompt|the reported command line|the reported cwd|prompt and command boundaries)/;
 const KNOWN = [
   {
-    // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: TERM_PROGRAM undefined.
-    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: iTerm2 identity/,
-    why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",
-  },
-  {
     // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
     shells: ['zsh'], platforms: ['linux'], case: /^shipped directory: nothing written/,
     why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",

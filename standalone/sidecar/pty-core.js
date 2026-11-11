@@ -296,10 +296,13 @@ const WSL_CLI_ENV = [
   'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
   'DORMOUSE_AGENT_BROWSER_BIN', 'DORMOUSE_PLAYWRIGHT_BIN', 'DORMOUSE_DEHYDRATE',
 ];
+// The terminal identity every pane gets (docs/specs/transport.md -> "iTerm2
+// identity"), which programs in the distro read as much as Windows ones do.
+const WSL_IDENTITY_ENV = ['TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'LC_TERMINAL', 'LC_TERMINAL_VERSION', 'COLORTERM'];
 // dor/bin/dor adds its own return-only entries for these, so other Windows
 // programs started from WSL never see them.
 const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD', 'WSL_DISTRO_NAME'];
-const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_LAUNCHER_ENV]);
+const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_IDENTITY_ENV, ...WSL_LAUNCHER_ENV]);
 
 // Replace conflicting flags inherited from a parent host, preserve user vars.
 // Windows env names ignore case, so an inherited `WslEnv` is the same variable.
@@ -311,7 +314,7 @@ function withWslCliEnv(env) {
   const inherited = key ? env[key].split(':').filter((entry) =>
     entry && !WSL_MANAGED_NAMES.has(entry.split('/')[0].toUpperCase())) : [];
   if (key) delete env[key];
-  env.WSLENV = [...inherited, ...WSL_CLI_ENV.filter((name) => names.has(name))].join(':');
+  env.WSLENV = [...inherited, ...[...WSL_CLI_ENV, ...WSL_IDENTITY_ENV].filter((name) => names.has(name))].join(':');
 }
 
 // Directory holding the per-shell OSC 633 integration scripts. Shipped next to
