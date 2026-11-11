@@ -7245,7 +7245,9 @@ mod tests {
     /// window without the snapshot removal a deliberate close performs.
     #[test]
     fn an_unacknowledged_close_keeps_the_snapshot() {
-        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        // A Windows checkout has CRLF line endings; the function's end is found by its LF form.
+        let src = include_str!("lib.rs").replace("\r\n", "\n");
+        let src = src.split("#[cfg(test)]").next().unwrap();
         let body = src.split("fn request_window_close(").nth(1).unwrap()
             .split("\n}\n").next().unwrap();
         for removal in ["finish_window_close", "close_window_snapshot", "remove_session_from", "begin_closing"] {
