@@ -51,20 +51,22 @@ The two columns are **not comparable**: the first wave took the core library, bo
 
 ### Follow-up, 2026-11-10: the findings left for a decision
 
-The 16 `high` findings went to the maintainer one at a time, each as its own PR; all 16 merged. The other 280 open findings were sorted by the model under test into 13 classes, each with one default, so the maintainer accepted a table rather than answering 280 questions, and gave about ten product answers, asked one at a time.
+Sixteen `high` findings went to the maintainer one at a time, each as its own PR, and all 16 merged: the 15 the table above counts as left for a decision, and one an implementer had skipped. The other 280 open findings (251 left for a decision and 29 of the 30 implementer skips, which that table counts on separate rows) were sorted by the model under test into 13 classes, each with one default, so the maintainer accepted a table rather than answering 280 questions, and gave about ten product answers, asked one at a time.
 
 | Class | Count | Default |
 |---|---|---|
 | Fix | 108 | Fix, one finding per commit |
 | Text only (spec, comment, message) | 21 | Fix |
-| Dead or legacy code | 26 | Delete |
+| Dead code | 18 | Delete |
+| Pre-launch compatibility code | 8 | Delete |
 | Needs a device to confirm | 21 | Check on the device before any code |
 | Performance | 14 | Measure first |
 | Security hardening | 9 | Fix |
 | Needs a design | 12 | Four built; the rest deferred past launch |
 | Needs the maintainer | 18 | One recommendation each |
 | Release pipeline | 5 | Hold for the next tag dry run |
-| Stale or duplicate | 30 | Close |
+| Already fixed on `main` | 12 | Close |
+| Duplicate of another open finding | 18 | Close |
 | Accepted as is | 16 | Close |
 
 | Fix wave | Lanes | Fixed | Skipped | Already fixed | Opus tokens | Per fix |
