@@ -81,7 +81,7 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 367 ; open ; <json> ST` | A Tool run's request to open a local path as `dor open`, preview or not, or with a disposition and optional fragment as a document-link navigation; live output of the run the host launched only | [dor-tool.md](dor-tool.md#osc-367), [document navigation](dor-tool.md#document-navigation) |
 | `OSC 367 ; dehydrate ; <json> ST` | A stopping Tool's restore payload; live output only | [dor-tool.md](dor-tool.md#reaping) |
 | `OSC 367 ; <any other verb> ST` | Consumed and ignored | [dor-tool.md](dor-tool.md#osc-367) |
-| `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
+| `OSC 1337 ; CurrentDir=<cwd> ST`/`RemoteHost=<host>` | CWD, host (iTerm2) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 1337 ; File=...:<data> ST` / `MultipartFile=...` / `FilePart=...` / `FileEnd` | iTerm2 inline image protocol (IIP); passed through to ImageAddon. | [layout.md](layout.md#inline-graphics) |
 | `OSC 1337 ; ReportCellSize ST` | iTerm2 cell-size query; passed through and answered by the owner's ImageAddon. | [layout.md](layout.md#inline-graphics) |
 | `OSC 1337 ; <anything else> ST` | Unsupported iTerm2 extension; consumed and ignored. | [security-local.md](security-local.md#terminal-output) |

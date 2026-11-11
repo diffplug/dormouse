@@ -161,6 +161,10 @@ export class TerminalProtocolParser {
   // Retain only a split ESC terminator/cancel, never the oversized payload.
   private discarding: { heldEsc: string } | null = null;
   private osc99Pending = new Map<string, Osc99PendingNotification>();
+  /** The host of the last `OSC 1337;RemoteHost=[user@]host`, which iTerm2's
+   *  shell integration sends before each `CurrentDir=`: the directory it
+   *  reports is on that host. */
+  private remoteHost: string | undefined;
 
   /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
   /** `localHost`: this machine's hostname, when known, so an OSC 7 naming it is local. */
@@ -318,12 +322,27 @@ export class TerminalProtocolParser {
     return heldEsc ? text.slice(0, -1) : text;
   }
 
+  private parseOsc1337(content: string): TerminalProtocolEvent[] | null {
+    // Forwarded subcommands are ImageAddon's; `null` passes them through.
+    if (oscDispositionAt(content, 0) === 'forward') return null;
+    const remoteHost = '1337;RemoteHost=';
+    if (content.startsWith(remoteHost)) {
+      const value = content.slice(remoteHost.length);
+      this.remoteHost = value.slice(value.lastIndexOf('@') + 1);
+      return [];
+    }
+    const prefix = '1337;CurrentDir=';
+    if (!content.startsWith(prefix)) return [];
+    const cwd = cwdFromOsc1337(content.slice(prefix.length), undefined, this.remoteHost, this.localHost);
+    return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
+  }
+
   private parseOsc(content: string): TerminalProtocolEvent[] | null {
     if (content === '7' || content.startsWith('7;')) return parseOsc7(content, this.localHost);
     if (content === '9' || content.startsWith('9;')) return this.parseOsc9(content);
     if (content === '133' || content.startsWith('133;')) return parseOsc133(content);
     if (content === '633' || content.startsWith('633;')) return parseOsc633(content);
-    if (content === '1337' || content.startsWith('1337;')) return parseOsc1337(content);
+    if (content === '1337' || content.startsWith('1337;')) return this.parseOsc1337(content);
     if (content === '0' || content.startsWith('0;')) return parseOscTitle(content, 'osc0');
     if (content === '2' || content.startsWith('2;')) return parseOscTitle(content, 'osc2');
     if (content === '99' || content.startsWith('99;')) return this.parseOsc99(content);
@@ -919,15 +938,6 @@ function matchesPrefix(text: string, from: number, command: string): boolean {
     if (text[from + k] !== command[k]) return false;
   }
   return true;
-}
-
-function parseOsc1337(content: string): TerminalProtocolEvent[] | null {
-  // Forwarded subcommands are ImageAddon's; `null` passes them through.
-  if (oscDispositionAt(content, 0) === 'forward') return null;
-  const prefix = '1337;CurrentDir=';
-  if (!content.startsWith(prefix)) return [];
-  const cwd = cwdFromOsc1337(content.slice(prefix.length));
-  return cwd ? [{ kind: 'semantic', event: { type: 'cwd', cwd } }] : [];
 }
 
 function parseOscTitle(content: string, source: TerminalTitle['source']): TerminalProtocolEvent[] {

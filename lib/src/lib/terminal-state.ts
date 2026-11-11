@@ -235,6 +235,13 @@ export function namesMachine(host: string, own: string): boolean {
   return host === own || host === short(own) || short(host) === own;
 }
 
+/** The host an escape names, bounded, or undefined when it names none or
+ *  names this machine (`localHost`, when known). */
+function reportedHost(named: string | undefined, localHost: string | undefined): string | undefined {
+  const host = named === undefined ? undefined : boundedCwdValue(named) || undefined;
+  return host && localHost && namesMachine(host.toLowerCase(), localHost.toLowerCase()) ? undefined : host;
+}
+
 /** `localHost` is this machine's hostname, when known: a URI naming it is a
  *  local directory, its host dropped. */
 export function cwdFromOsc7(rawUriInput: string, now = Date.now(), localHost?: string): CwdState | null {
@@ -253,8 +260,7 @@ export function cwdFromOsc7(rawUriInput: string, now = Date.now(), localHost?: s
   // Bounded the same way `decodedPath` is. The host is retained, rendered, and
   // part of `cwdIdentity`, so it is sanitized where it is built rather than on
   // the URL parser rejecting every control character a host could decode to.
-  const named = boundedCwdValue(fileUriHost(rawUri, parsed.hostname)) || undefined;
-  const host = named && localHost && namesMachine(named.toLowerCase(), localHost.toLowerCase()) ? undefined : named;
+  const host = reportedHost(fileUriHost(rawUri, parsed.hostname), localHost);
   return {
     uri: rawUri,
     path: decodedPath,
@@ -289,8 +295,18 @@ export function cwdFromOsc633(rawPath: string, now = Date.now()): CwdState | nul
   return cwdFromDecodedPath(rawPath, 'osc633', now);
 }
 
-export function cwdFromOsc1337(rawPath: string, now = Date.now()): CwdState | null {
-  return cwdFromDecodedPath(rawPath, 'osc1337', now);
+/** `remoteHost` is the host of the shell's last `RemoteHost=` report: a
+ *  directory on another machine than `localHost` is remote, as for OSC 7. */
+export function cwdFromOsc1337(
+  rawPath: string,
+  now = Date.now(),
+  remoteHost?: string,
+  localHost?: string,
+): CwdState | null {
+  const cwd = cwdFromDecodedPath(rawPath, 'osc1337', now);
+  const host = reportedHost(remoteHost, localHost);
+  if (!cwd || !host) return cwd;
+  return { ...cwd, host, isRemote: cwd.isRemote || isRemoteFileHost(host) };
 }
 
 export function cwdFromProcessPath(rawPath: string, now = Date.now()): CwdState | null {
