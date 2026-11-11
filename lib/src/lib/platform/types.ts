@@ -243,6 +243,10 @@ export interface PlatformAdapter {
   spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
+  /** A host delivers no `onPtyExit` for a PTY this webview killed: VS Code
+   *  releases its ownership first and standalone routes the exit nowhere.
+   *  `FakePtyAdapter` reports one at once, which the website playground's
+   *  shells rely on to dispose themselves. */
   killPty(id: string): void;
 
   /**
