@@ -1833,6 +1833,7 @@ export function Wall({
           browserViewport: resolved.viewport,
           toolPort: resolved.port,
           ...(key ? { toolKey: key } : {}),
+          ...(resolved.target !== undefined ? { toolTarget: resolved.target } : {}),
           toolOrigin: toolOriginOf(resolved),
         });
         // Hand the leaf its command only now. The approval marker stays in place

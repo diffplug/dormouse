@@ -14,6 +14,7 @@ import * as browserController from './agent-browser-surface-controller';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import type { PersistedSession } from '../../lib/session-types';
+import type { ToolControlResult } from '../../lib/platform/tool-types';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
@@ -117,11 +118,11 @@ function openLookup(file: string, tool = 'viewer') {
 }
 
 function installHost() {
-  const toolControl = vi.fn(async (request: { op: string; target?: string; tool?: string; name?: string; args?: string[] }) =>
+  const toolControl = vi.fn(async (request: { op: string; target?: string; tool?: string; name?: string; args?: string[] }): Promise<ToolControlResult> =>
     request.op === 'open'
       ? openLookup(request.target!, request.tool)
-      // A named lookup of the same Tool: its key, but no target.
-      : { ...openLookup(request.args![0]), target: undefined });
+      // A named lookup of the same `$TARGET` Tool: the same answer.
+      : openLookup(request.args![0], request.name));
   Object.assign(fake, { toolControl });
   return toolControl;
 }
@@ -795,8 +796,18 @@ describe('pinning the slot', () => {
     expect(document.activeElement?.closest('[data-terminal-context]')).not.toBeNull();
   });
 
+  it('pins by a named launch of its Tool and file, as by open', async () => {
+    await mountSlot();
+    expect(await answer(await request({ name: 'viewer', args: ['a.md'] }))).toMatchObject({ status: 'existing', surfaceId: 'surface:slot' });
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
+  });
+
   it('never lets a marked slot answer a keyed launch of its Tool', async () => {
-    await mountSlot({ caller: 'claude' });
+    const toolControl = await mountSlot({ caller: 'claude' });
+    // Keyed on the file without taking it as `$TARGET`: no target, so only
+    // keyed dedupe could find the slot.
+    toolControl.mockImplementationOnce(async request => ({ ...openLookup(request.args![0]), target: undefined }));
     const respond = await request({ name: 'viewer', args: ['a.md'] });
     await waitUntil(() => leafCount() === 3);
     const created = newLeaf();
