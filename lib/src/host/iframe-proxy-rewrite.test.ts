@@ -20,7 +20,7 @@ const IFRAME_SHIM = iframeShim(APP);
 
 type ShimListener = (event: Record<string, unknown>) => void;
 
-function shimFrame(parentOrigin: string, deliver: (data: unknown) => void, location = { origin: PROXY, href: `${PROXY}/story` }) {
+function shimFrame(parentOrigin: string, deliver: (data: unknown) => void, location = { origin: PROXY, href: `${PROXY}/story` }, navigationType?: string) {
   const listeners = new Map<string, ShimListener[]>();
   const addEventListener = (type: string, listener: ShimListener) => {
     const current = listeners.get(type) ?? [];
@@ -52,6 +52,7 @@ function shimFrame(parentOrigin: string, deliver: (data: unknown) => void, locat
     CustomEvent: class { constructor(public type: string) {} },
     dispatchEvent: (event: { type: string }) => dispatched.push(event.type),
     history,
+    ...(navigationType ? { performance: { getEntriesByType: (type: string) => type === 'navigation' ? [{ type: navigationType }] : [] } } : {}),
     addEventListener,
     setTimeout: (run: () => void) => { timers.push(run); return 0; },
     URL,
@@ -192,10 +193,24 @@ describe('the shim addresses the grant and app, not the world', () => {
     frame.emit('pageshow', {});
     frame.emit('popstate', {});
     expect(delivered.filter(data => data.__dormouse !== 'theme-request')).toEqual([
-      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
-      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
+      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true, nav: 'push' },
+      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true, nav: 'push' },
       { __dormouse: 'location', url: `${PROXY}/story`, nav: 'traverse' },
     ]);
+  });
+
+  it('says a load reached by history traversal or a reload is one', () => {
+    const loads = (navigationType: string, persisted = false) => {
+      const delivered: Array<Record<string, unknown>> = [];
+      const frame = shimFrame(APP, (data) => delivered.push(data as Record<string, unknown>), undefined, navigationType);
+      frame.emit('pageshow', { persisted });
+      return delivered.filter(data => data.__dormouse === 'location').map(data => data.nav);
+    };
+    expect(loads('back_forward')).toEqual(['traverse']);
+    expect(loads('reload')).toEqual(['replace']);
+    expect(loads('navigate')).toEqual(['push']);
+    // A back-forward cache restore keeps the timing entry of its first load.
+    expect(loads('navigate', true)).toEqual(['traverse']);
   });
 
   it('says how the page changed its URL', () => {

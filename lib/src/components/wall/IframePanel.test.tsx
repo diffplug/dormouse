@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
+import { runInNewContext } from 'node:vm';
+import { iframeShim } from '../../host/iframe-proxy-rewrite';
 import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
@@ -395,6 +397,30 @@ describe('IframePanel', () => {
       expect(url()).toBe('/app');
       await back();
       expect(url()).toBe('/app');
+    });
+
+    // The page's own Back to an earlier document loads it anew; its shim's
+    // load report, run here as the shipped shim, says it was a traversal.
+    it('moves back when the page loads an earlier entry by traversal', async () => {
+      const { report, url, forward } = await render('iframe-traverse-load');
+      await report('/a', { nav: 'push' });
+      await act(async () => {
+        runInNewContext(iframeShim('http://app.test'), {
+          window: { parent: { postMessage(data: unknown, target: string) {
+            if (target === PROXY) window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data }));
+          } } },
+          location: { origin: PROXY, href: `${PROXY}/app` },
+          document: { readyState: 'complete', documentElement: null, body: null, hasFocus: () => false },
+          history: {},
+          performance: { getEntriesByType: () => [{ type: 'back_forward' }] },
+          addEventListener: () => {},
+          setTimeout: (run: () => void) => { run(); return 0; },
+          URL,
+        });
+      });
+      expect(url()).toBe('/app');
+      await forward();
+      expect(url()).toBe('/a');
     });
 
     it('moves to the entry a popstate names and keeps Forward', async () => {

@@ -122,10 +122,11 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 //     cancels the press would otherwise get none from the browser.
 //   - `location`: the proxied frame's current URL. The parent converts it back
 //     to the upstream URL and uses it to keep iframe Back/Forward/Reload chrome
-//     honest. `nav` says how it changed: `push` (a link, `pushState`, or a
-//     fragment change), `replace` (`replaceState`), or `traverse` (`popstate`,
-//     the page moving through its own history); a load report carries
-//     `loaded: true` instead.
+//     honest. `nav` says how it changed: `push` (a link, `pushState`, a
+//     fragment change, or a plain load), `replace` (`replaceState`, or a
+//     reload), or `traverse` (`popstate`, a load by history traversal, or a
+//     back-forward cache restore: the page moving through its own history). A
+//     load report also carries `loaded: true`.
 //   - `open-window`: an anchor with any target but `_self` (`_blank`, `_top`,
 //     `_parent`, a named frame) or a `window.open` the single-frame renderer
 //     can't honor; the parent offers it as a new pane instead.
@@ -177,8 +178,14 @@ export function iframeShim(embedderOrigin: string): string {
   },true);
   function postLocation(nav){post('location',{url:String(location.href),nav:nav});}
   // The document's own load, flagged: the parent takes only these as proof
-  // that the document it just loaded carries the shim.
-  function postLoaded(){post('location',{url:String(location.href),loaded:true});post('theme-request');}
+  // that the document it just loaded carries the shim. A restore from the
+  // back-forward cache is a traversal whatever the original load was.
+  function loadNav(e){
+    if(e&&e.persisted)return 'traverse';
+    try{var n=performance.getEntriesByType('navigation')[0];if(n&&n.type==='back_forward')return 'traverse';if(n&&n.type==='reload')return 'replace';}catch(_e){}
+    return 'push';
+  }
+  function postLoaded(e){post('location',{url:String(location.href),loaded:true,nav:loadNav(e)});post('theme-request');}
   function anchorHref(e){
     var n=e&&e.target;
     while(n&&n.nodeType===1){
