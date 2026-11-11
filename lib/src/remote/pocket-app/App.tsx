@@ -1412,10 +1412,11 @@ export function BurrowsView({
                     <button
                       type="button"
                       className={pkButton({ tone: 'primary', size: 'sm' })}
-                      // Pairing again starts at the scanner, which needs no relay
-                      // socket and no online Burrow — the code on the computer's
-                      // screen is what says whether it is there.
-                      disabled={busy !== null || (!burrow.online && !burrow.needsPairing && !burrow.removed)}
+                      // Enabled on an offline row too: `online` is only as fresh
+                      // as the last list read, and nothing re-reads it on its own.
+                      // The Relay answers a Connect to an offline Burrow at once,
+                      // and that answer re-reads the list.
+                      disabled={busy !== null}
                       onClick={action.run}
                     >
                       {action.label}
