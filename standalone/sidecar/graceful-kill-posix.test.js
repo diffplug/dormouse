@@ -67,7 +67,9 @@ async function shell(t, line) {
   // where a hangup ends it. One sent while bash is still between the command
   // and that prompt is sometimes not acted on (bash 5.2 on Linux), which is
   // the deadline's job to cover and not what a test of the ordinary stop means.
-  const idle = () => until(() => /PID=\d+\r?\n[\s\S]*\x1b\]633;A/.test(output), 'the prompt after the command');
+  // `633;B` closes `PS1`, the last thing written before the reader starts;
+  // `633;A` comes earlier, from inside `PROMPT_COMMAND`.
+  const idle = () => until(() => /PID=\d+\r?\n[\s\S]*\x1b\]633;B/.test(output), 'the prompt after the command');
   return { mgr, events, pid, stop, idle, leaves: (more) => pids.push(...more) };
 }
 
