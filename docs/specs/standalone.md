@@ -187,7 +187,7 @@ Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `Win
 
 ### Per-window close
 
-**Closing a window with siblings alive ends that window alone**; only the last window's close is the quit, and on macOS too.
+**Closing a window with siblings alive, not closing, ends that window alone**; only the last window's close is the quit, on macOS too.
 
 1. Rust prevents the close and emits `dormouse://window-close-requested`.
 2. The webview acks; if that listener is dead, a watchdog destroys the window, **keeping its snapshot**.
@@ -393,7 +393,7 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 
 | Phase | State | Budget |
 |---|---|---|
-| 1 — ack | some window has not acked | **past §UI watchdog's threshold**, as the close ack (rationale); a listener is dead ⇒ log and `app.exit(0)` |
+| 1 — ack | some window has not acked | **past §UI watchdog's threshold**, like the close's (rationale); a listener is dead ⇒ log and `app.exit(0)` |
 | 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
 | 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 

@@ -800,11 +800,34 @@ fn redrive_deferred_teardown(app: &AppHandle) {
 
 /// Only the last window's close is a quit (§Per-window close).
 fn request_close_or_quit(app: &AppHandle, label: &str) {
-    if app.webview_windows().len() > 1 {
-        request_window_close(app, label);
-    } else {
+    let last = match (app.try_state::<QuitState>(), app.try_state::<WindowState>()) {
+        (Some(quit), Some(windows)) => {
+            // Lock order: close machine, then closing.
+            let close = guard(&quit.close);
+            is_last_window(&window_labels(app), &close, &guard(&windows.closing), label)
+        }
+        _ => app.webview_windows().len() <= 1,
+    };
+    if last {
         request_quit(app, QuitIntent::default());
+    } else {
+        request_window_close(app, label);
     }
+}
+
+/// Whether closing `label` would leave no window open. A sibling whose own
+/// close is already in flight still counts in `webview_windows()` until its
+/// `Destroyed`, but is going away: counting it would let two overlapping
+/// closes each remove their snapshot, and the app exit with none on disk.
+fn is_last_window(
+    labels: &[String],
+    close: &CloseMachine,
+    closing: &HashSet<String>,
+    label: &str,
+) -> bool {
+    labels
+        .iter()
+        .all(|other| other == label || close.active(other) || closing.contains(other))
 }
 
 /// Start (or join) a quit with `intent` (docs/specs/standalone.md -> "Restart").
@@ -5737,6 +5760,24 @@ mod tests {
         record_arrival_on_disk(dir.path(), &later).unwrap();
         super::withdraw_arrival_on_disk(dir.path(), &later, None).unwrap();
         assert!(read_arrivals_from(dir.path()).unwrap().is_empty());
+    }
+
+    /// Two overlapping closes: the second is the quit, so one window's
+    /// snapshot survives on disk (docs/specs/standalone.md -> "Per-window close").
+    #[test]
+    fn a_close_beside_only_closing_siblings_is_the_quit() {
+        let labels = ["main".to_string(), "ws-2".to_string(), "ws-3".to_string()];
+        let mut close = super::CloseMachine::default();
+        let mut closing = HashSet::new();
+        assert!(!super::is_last_window(&labels, &close, &closing, "main"));
+        close.request("ws-2");
+        assert!(!super::is_last_window(&labels, &close, &closing, "main"));
+        closing.insert("ws-3".to_string());
+        assert!(super::is_last_window(&labels, &close, &closing, "main"));
+        // A sibling whose close the user declined is open again.
+        close.clear("ws-2");
+        assert!(!super::is_last_window(&labels, &close, &closing, "main"));
+        assert!(super::is_last_window(&labels[..1], &close, &closing, "main"));
     }
 
     #[test]
