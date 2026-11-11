@@ -90,7 +90,8 @@ export async function sendNotices(
       LEFT JOIN public.dormouse_price_changes c ON c.id = n."priceChangeId"
       -- A renewal-type notice states what its renewal charges: the new Price of
       -- a change whose notice for that renewal went, or can still go, in time
-      -- for it to apply.
+      -- for it to apply. The renewal notice is due days before the change's,
+      -- so a verified change that will be noticed for that renewal counts too.
       LEFT JOIN LATERAL (
         SELECT pc."toPriceId" FROM public.dormouse_billing_notices p
         JOIN public.dormouse_price_changes pc ON pc.id = p."priceChangeId"
@@ -98,6 +99,12 @@ export async function sendNotices(
           AND p."subscriptionId" = n."subscriptionId" AND p."renewsAt" = n."renewsAt"
           AND CASE WHEN p."sentAt" IS NULL THEN p."renewsAt" > $1::timestamptz + make_interval(days => $7)
             ELSE p."sentAt" <= p."renewsAt" - make_interval(days => $8) END
+        UNION ALL
+        SELECT pc."toPriceId" FROM public.dormouse_price_changes pc
+        WHERE n.kind IN ('renewal', 'annual') AND pc."fromPriceId" = s.price_id AND pc.id = ANY ($6::text[])
+          AND n."renewsAt" >= pc."effectiveAt" AND n."renewsAt" > $1::timestamptz + make_interval(days => $7)
+          AND NOT EXISTS (SELECT FROM public.dormouse_billing_notices p WHERE p.kind = 'price_change'
+            AND p."subscriptionId" = n."subscriptionId" AND p."renewsAt" = n."renewsAt")
         LIMIT 1) next ON true
       LEFT JOIN public.dormouse_withdrawals w ON w.id = n."withdrawalId"
       -- A checkout reused across a terms change holds one consent per version.

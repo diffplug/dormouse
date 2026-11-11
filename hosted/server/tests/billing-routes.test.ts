@@ -2045,6 +2045,30 @@ test("a renewal notice sent beside a price change's states the new price that re
     expect(await mailTo(account, "renews")).toContain(`for another year at $${LIST_ANNUAL} plus any applicable tax`);
 });
 
+test("a renewal notice due before its price change's notice states the new price that renewal charges", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const member = await f.account();
+  const { subscription } = await f.buy(member, "yearly");
+  await f.sql(
+    `INSERT INTO dormouse_price_changes (id, plan, "fromPriceId", "toPriceId", "fromUsd", "toUsd", "effectiveAt")
+    VALUES ('yearly-120', 'yearly', $1, $2, $3, $4, $5)`,
+    [f.setup.yearly, CHANGED_PRICES.yearly, LIST_ANNUAL, CHANGED_USD.yearly, f.time.now()],
+  );
+  // Inside the renewal notice's 30 days, outside the change's 21.
+  const renewsAt = new Date(subscription.items.data[0]!.current_period_end * 1000);
+  f.time.advanceMilliseconds(renewsAt.getTime() - f.time.now().getTime() - (RENEWAL_NOTICE_DAYS - 1) * DAY_MS);
+  await resyncBilling(f.setup, f.database.url, origin, f.mail);
+
+  expect(await f.sql(`SELECT kind FROM dormouse_billing_notices WHERE kind = 'price_change'`)).toHaveLength(0);
+  const [{ email }] = await f.sql<{ email: string }>(
+    `SELECT email FROM dormouse_billing_notices WHERE "userId" = $1 AND kind = 'renewal'`,
+    [member.id],
+  );
+  const renewal = f.email.all().find((mail) => mail.to.includes(email) && mail.subject.includes("renews"))!.text;
+  expect(renewal).toContain(`for another year at $${CHANGED_USD.yearly} plus any applicable tax`);
+});
+
 test("a dispute's suspension and restoration are each emailed once to the billing email, and the cron retries a failed send", async ({
   onTestFinished,
 }) => {
