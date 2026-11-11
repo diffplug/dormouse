@@ -255,7 +255,7 @@ Source of truth: `dor/src/commands/reopen.ts`, `handleReopenControl` in `lib/src
 
 **Must resolve navigation targets CLI-side before forwarding to the browser provider.** Only the first target of a navigation verb is eligible. Skip known option values; an unknown option leaves the argv unchanged rather than guessing its arity. The provider descriptors and `resolveOpenTargetArgs` own recognized verbs and option arities.
 
-A Surface handle resolves through `surface.resolveOpen`, sharing `dor list --ports`' scan and grouping bindings by distinct port. Zero or several distinct ports fail, the latter listing the choices. **Must open a discovered port at a numeric address**, preferring loopback over a specific LAN/Tailnet bind and IPv4 over IPv6 within either group; never substitute `localhost` (rationale). **Must use the host-selected destination for a wildcard bind and omit one the host reports as shadowed** (`docs/specs/transport.md` → Port scan destinations). Only terminal Surfaces own ports, so a browser-Surface handle is rejected.
+`surface.resolveOpen` shares `dor list --ports`' scan, grouping bindings by port. Zero or multiple ports fail; multiple ports list the choices. **Must open discovered ports at numeric addresses**, preferring loopback over LAN/Tailnet and IPv4 over IPv6 within either group; never substitute `localhost` (rationale). **Must use host-selected wildcard destinations, omitting those reported as shadowed** (`docs/specs/transport.md` → Port scan destinations). Browser-Surface handles are rejected: only terminal Surfaces own ports.
 
 Source of truth: `dor/src/commands/open-target.ts`, `resolveOpenTargetArgs` in `dor/src/commands/browser-cli.ts`, `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`.
 
