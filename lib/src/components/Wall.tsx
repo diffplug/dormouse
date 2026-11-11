@@ -1968,6 +1968,7 @@ export function Wall({
       else enterPassthrough(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
+    revealRefusal,
     showNotice: (text, id = livePaneId()) => {
       if (id) showShellSpawnNotice(id, text);
     },

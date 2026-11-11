@@ -340,7 +340,7 @@ describe('workspace.close', () => {
     const forced = request('workspace.close', { workspace: 'workspace:2', force: true });
     await handleWorkspaceControl(forced);
     expect(answer(forced)).toBe(
-      "workspace 'workspace:2' was not closed: Helper has running work. Stop it in the helper, then close this terminal again.",
+      "workspace 'workspace:2' was not closed: A helper in this Workspace has running work. Stop it, then close the Workspace again.",
     );
     expect(closeAll).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);

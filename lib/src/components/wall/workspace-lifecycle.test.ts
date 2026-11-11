@@ -164,18 +164,22 @@ describe('closeWorkspaceWithSurfaces', () => {
     const [first] = ids();
     createWorkspace({ id: 'workspace:2' });
     const closeAll = vi.fn(async () => null);
-    const showNotice = vi.fn();
-    handleFor('workspace:2', { closeAll, showNotice, surfaceIds: () => ['surface:a', 'surface:b'] });
-    vi.spyOn(helperTerminal, 'getHelper').mockImplementation((id) =>
-      id === 'surface:b' ? { id: 'surface:helper', parentId: 'surface:b' } as HelperTerminal : undefined);
-    const probe = vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValue(true);
+    const revealRefusal = vi.fn();
+    handleFor('workspace:2', { closeAll, revealRefusal, surfaceIds: () => ['surface:a', 'surface:b'] });
+    // Both members have a helper; only the second's is busy.
+    vi.spyOn(helperTerminal, 'getHelper').mockImplementation((id) => ({ id: `helper:${id}`, parentId: id }) as HelperTerminal);
+    let secondProbe: () => Promise<boolean> = async () => true;
+    vi.spyOn(helperTerminal, 'helperHasWork').mockImplementation((helper) =>
+      helper.parentId === 'surface:b' ? secondProbe() : Promise.resolve(false));
 
-    expect(await closeWorkspaceWithSurfaces('workspace:2', 'silent')).toMatch(/^Helper has running work/);
-    expect(showNotice).not.toHaveBeenCalled();
-    // A helper that cannot be inspected refuses as a busy one does.
-    probe.mockRejectedValue(new Error('no host'));
-    expect(await closeWorkspaceWithSurfaces('workspace:2')).toMatch(/^Helper has running work/);
-    expect(showNotice).toHaveBeenCalledTimes(1);
+    const refusal = 'A helper in this Workspace has running work. Stop it, then close the Workspace again.';
+    expect(await closeWorkspaceWithSurfaces('workspace:2', 'silent')).toBe(refusal);
+    expect(revealRefusal).not.toHaveBeenCalled();
+    // A helper that cannot be inspected refuses as a busy one does, and a
+    // gesture reveals the member whose helper refused.
+    secondProbe = async () => { throw new Error('no host'); };
+    expect(await closeWorkspaceWithSurfaces('workspace:2')).toBe(refusal);
+    expect(revealRefusal).toHaveBeenCalledExactlyOnceWith('surface:b', refusal);
     expect(closeAll).not.toHaveBeenCalled();
     expect(ids()).toEqual([first, 'workspace:2']);
   });
