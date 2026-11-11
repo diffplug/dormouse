@@ -26,3 +26,19 @@ USER_ZDOTDIR=${ZDOTDIR:-$HOME}
 
 # Re-pin so zsh still reads our .zprofile/.zshrc next.
 ZDOTDIR=${DORMOUSE_ZDOTDIR}
+
+# A system startup file can run compinit before our .zshrc hands ZDOTDIR back
+# (Debian and Ubuntu's /etc/zsh/zshrc does), and compinit dumps to
+# ${ZDOTDIR:-$HOME}/.zcompdump: into this directory, which nothing may write
+# (see .zshrc). Run it with the user's ZDOTDIR instead, so the dump lands where
+# it would without us. compinit leaves itself an autoload stub when it is done;
+# .zshrc removes this wrapper if nothing called it.
+__dormouse_had_compinit=${+functions[compinit]}
+compinit() {
+  builtin unfunction compinit
+  builtin autoload -Uz compinit
+  if [[ ${ZDOTDIR} == "${DORMOUSE_ZDOTDIR}" ]]; then
+    local ZDOTDIR=${USER_ZDOTDIR}
+  fi
+  compinit "$@"
+}

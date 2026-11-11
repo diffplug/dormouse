@@ -43,7 +43,7 @@ Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, 
 
 ### WSL interop
 
-**Must preserve every variable the CLI reads through `WSLENV` on Windows panes**, including those that start WSL later, preserving unrelated user entries. (rationale)
+**Must forward through `WSLENV` each variable the CLI reads that a Windows pane has, never an unset one**, keeping unrelated user entries. (rationale)
 
 - **Must run the bundled Windows runtime from WSL**, translating only its executable path; script and pipe paths stay opaque. Requires WSL's Windows interop.
 - **Must translate the caller's `PWD` back to Windows for the CLI only**, never for other Windows programs, and forward its distro name.

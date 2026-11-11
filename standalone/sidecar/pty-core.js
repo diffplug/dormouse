@@ -68,14 +68,19 @@ function bashArgsAreInjectable(shellArgs) {
 // that command, so its environment is set up first and our prompt wrapper
 // installs after it. A non-interactive one-off (a -Command/-File/-EncodedCommand
 // without -NoExit) is returned as null so we don't alter it.
+//
+// A leading `-l` / `-Login` (pwsh as the login shell on macOS and Linux, which
+// `resolveLoginArg` adds) stays first, the only position pwsh honors it in, and
+// the rest is judged as if it were absent.
 function powerShellIntegratedArgs(shellArgs, script) {
   const dotSource = `. '${script.replace(/['\u2018-\u201b]/g, (c) => c + c)}'`;
   const args = [...(shellArgs || [])];
+  const is = (arg, ...names) => names.includes(arg.toLowerCase());
+  const login = args.length > 0 && is(args[0], '-l', '-login') ? [args.shift()] : [];
 
   // No args at all → a plain interactive REPL; add our own dot-source.
-  if (args.length === 0) return ['-NoExit', '-Command', dotSource];
+  if (args.length === 0) return [...login, '-NoExit', '-Command', dotSource];
 
-  const is = (arg, ...names) => names.includes(arg.toLowerCase());
   // Only augment interactive sessions; without -NoExit a command/file runs and
   // exits, so there's no prompt to wrap.
   if (!args.some((a) => is(a, '-noexit', '-noe'))) return null;
@@ -85,10 +90,10 @@ function powerShellIntegratedArgs(shellArgs, script) {
   const cmdIdx = args.findIndex((a) => is(a, '-command', '-c'));
   if (cmdIdx !== -1 && cmdIdx + 1 < args.length) {
     args[cmdIdx + 1] = `${args[cmdIdx + 1]}; ${dotSource}`;
-    return args;
+    return [...login, ...args];
   }
   // Interactive but no inline command (e.g. just `-NoExit`); add ours.
-  return [...args, '-Command', dotSource];
+  return [...login, ...args, '-Command', dotSource];
 }
 
 function resolveLoginArg(shell, platform = process.platform) {
@@ -291,19 +296,25 @@ const WSL_CLI_ENV = [
   'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
   'DORMOUSE_AGENT_BROWSER_BIN', 'DORMOUSE_PLAYWRIGHT_BIN', 'DORMOUSE_DEHYDRATE',
 ];
+// The terminal identity every pane gets (docs/specs/transport.md -> "iTerm2
+// identity"), which programs in the distro read as much as Windows ones do.
+const WSL_IDENTITY_ENV = ['TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'LC_TERMINAL', 'LC_TERMINAL_VERSION', 'COLORTERM'];
 // dor/bin/dor adds its own return-only entries for these, so other Windows
 // programs started from WSL never see them.
 const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD', 'WSL_DISTRO_NAME'];
-const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_LAUNCHER_ENV]);
+const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_IDENTITY_ENV, ...WSL_LAUNCHER_ENV]);
 
 // Replace conflicting flags inherited from a parent host, preserve user vars.
 // Windows env names ignore case, so an inherited `WslEnv` is the same variable.
+// Only names this pane has are listed: WSL sets every name WSLENV lists in the
+// distro, one the pane lacks as an empty variable.
 function withWslCliEnv(env) {
+  const names = new Set(Object.keys(env).map((name) => name.toUpperCase()));
   const key = Object.keys(env).find((name) => name.toUpperCase() === 'WSLENV');
   const inherited = key ? env[key].split(':').filter((entry) =>
     entry && !WSL_MANAGED_NAMES.has(entry.split('/')[0].toUpperCase())) : [];
   if (key) delete env[key];
-  env.WSLENV = [...inherited, ...WSL_CLI_ENV].join(':');
+  env.WSLENV = [...inherited, ...[...WSL_CLI_ENV, ...WSL_IDENTITY_ENV].filter((name) => names.has(name))].join(':');
 }
 
 // Directory holding the per-shell OSC 633 integration scripts. Shipped next to

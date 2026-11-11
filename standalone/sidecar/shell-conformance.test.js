@@ -216,36 +216,6 @@ function cannotRun(t, row, reason) {
 // prompt text instead. Delete the entry with the fix.
 const BOUNDARY_CASES_RE = /^(?:the shipped integration reports a prompt|the reported command line|the reported cwd|prompt and command boundaries)/;
 const KNOWN = [
-  {
-    shells: ['pwsh'], platforms: ['darwin', 'linux'], unintegrated: true, case: BOUNDARY_CASES_RE,
-    why: 'pwsh as the login shell spawns as `pwsh -l`, and powerShellIntegratedArgs injects only into a bare or -NoExit launch, so the pane gets no integration',
-  },
-  {
-    // Seen on Windows 11 and windows-latest, 2026-11-11. The cwd case's
-    // unicode directory passes on both shells.
-    shells: ['powershell', 'pwsh'], platforms: ['win32'], case: /^command line: unicode/,
-    why: "PowerShell (5.1 and 7) mangles non-ASCII in E: typed `echo 'héllo wörld ✓ 日本語 🐭 a b　c'`, reported `echo 'héllo wörld √ ??? ?? a b c'`. Likely cause: shellIntegration.ps1 writes E with [Console]::Write, encoded in [Console]::OutputEncoding (the OEM code page), while P;Cwd rides the prompt string the host writes as Unicode",
-  },
-  {
-    // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: TERM_PROGRAM undefined.
-    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: iTerm2 identity/,
-    why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",
-  },
-  {
-    // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: DORMOUSE_DEHYDRATE is '' in the distro.
-    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: unset names arrive unset/,
-    why: "withWslCliEnv lists every name the dor CLI reads in WSLENV whether or not the pane has it, and WSL then sets each unset one empty in the distro: DORMOUSE_DEHYDRATE arrives as '' (dor-tool.md: the host strips it from every pane but a rehydrated one; readDehydrated reads '' as none). In a standalone pane DORMOUSE_HOST_WORKSPACE, DORMOUSE_AGENT_BROWSER_BIN, and DORMOUSE_PLAYWRIGHT_BIN are unset too (dor-cli.md), so likely arrive empty as well; this case lists every one",
-  },
-  {
-    // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
-    shells: ['zsh'], platforms: ['linux'], case: /^shipped directory: nothing written/,
-    why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",
-  },
-  {
-    // Seen on Windows PowerShell 5.1, Windows 11, 2026-11-11; pwsh runs the same prompt code.
-    shells: ['powershell', 'pwsh'], platforms: ['win32'], case: /^boundaries: a cmdlet that fails after a native exit code/,
-    why: 'shellIntegration.ps1 reports a failed cmdlet with the stale $LASTEXITCODE of an earlier native command: expected 1, reported 7',
-  },
 ];
 
 const knownFor = (row, test) => KNOWN.find((entry) => entry.shells.includes(row.name)
@@ -275,6 +245,8 @@ function cdCommand(row, dir) {
 }
 
 // ── A pane ────────────────────────────────────────────────────────────────
+const COLS = 200;
+const ROWS = 50;
 let paneCount = 0;
 /** Every PTY the suite spawned: `{ id, pid, exited, exit }`. */
 const SPAWNED = [];
@@ -293,6 +265,34 @@ const NO_PROMPT = new Map();
 function noPrompt(t, row, error) {
   if (!NO_PROMPT.has(row.name)) NO_PROMPT.set(row.name, `"${t.fullName ?? t.name}": ${error.message.slice(0, 300)}`);
   throw error;
+}
+
+/** Move `cursor` ({ row, col, wrap }) over `text` as a `cols` x `rows`
+ *  terminal would: printed characters (one column each), CR, LF, BS, TAB and
+ *  the CSI cursor moves; every other escape moves nothing. Rough, but enough
+ *  for a cursor position query to get xterm.js's answer. */
+function trackCursor(cursor, text, cols, rows) {
+  const tokens = /\x1b\[([0-9;?>=]*)[ -\/]*([@-~])|\x1b[()][0-9A-Za-z]|\x1b.|([\r\n\b\t])|[\x00-\x1f\x7f]|([^\x00-\x1f\x7f]+)/gs;
+  for (let match; (match = tokens.exec(text));) {
+    const [, params, final, control, printed] = match;
+    if (final) {
+      const [a = 0, b = 0] = params.replace(/[?>=]/g, '').split(';').map(Number);
+      const moves = { H: [a || 1, b || 1], f: [a || 1, b || 1], A: [cursor.row - (a || 1), cursor.col], B: [cursor.row + (a || 1), cursor.col],
+        C: [cursor.row, cursor.col + (a || 1)], D: [cursor.row, cursor.col - (a || 1)], G: [cursor.row, a || 1], d: [a || 1, cursor.col] };
+      if (moves[final]) [cursor.row, cursor.col, cursor.wrap] = [...moves[final], false];
+    } else if (control === '\r') [cursor.col, cursor.wrap] = [1, false];
+    else if (control === '\n') cursor.row += 1;
+    else if (control === '\b') [cursor.col, cursor.wrap] = [cursor.col - 1, false];
+    else if (control === '\t') cursor.col = Math.min(cols, (Math.floor((cursor.col - 1) / 8) + 1) * 8 + 1);
+    else if (printed) {
+      for (const _ of printed) {
+        if (cursor.wrap) [cursor.row, cursor.col, cursor.wrap] = [cursor.row + 1, 1, false];
+        if (cursor.col >= cols) cursor.wrap = true; else cursor.col += 1;
+      }
+    }
+    cursor.row = Math.min(rows, Math.max(1, cursor.row));
+    cursor.col = Math.min(cols, Math.max(1, cursor.col));
+  }
 }
 
 const stripEscapes = (text) => text.replace(/\x1b\[[0-9;?>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>]/g, '');
@@ -339,10 +339,17 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
   let promptFrom = 0;
   let chunkFrom = 0;
   let answeredTo = 0;
+  // Answered from the tracked cursor, not a fixed 1;1: PSReadLine checks its
+  // rendering against the answer, and a constant one makes a line that wraps a
+  // few rows read as a scrolled screen, so it redraws the prompt (A, P, B)
+  // while the line is still being edited.
+  const cursor = { row: 1, col: 1, wrap: false };
+  let trackedTo = 0;
   const mgr = create((event, data) => {
     if (event === 'data' && data.id === id) {
       chunkFrom = pane.raw.length;
       pane.raw += data.data;
+      pane.lastDataAt = Date.now();
       stream.write(data.data);
       // A shell that marks no prompt end is ready once its prompt text
       // follows the A.
@@ -380,10 +387,15 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
       queries.lastIndex = answeredTo;
       for (let match; (match = queries.exec(pane.visible));) {
         answeredTo = queries.lastIndex;
-        const reply = match[0].endsWith('c') ? '\x1b[?62;22c' : match[0].endsWith('n') ? '\x1b[1;1R' : '\x1bP>|xterm.js(6.1.0)\x1b\\';
+        trackCursor(cursor, pane.visible.slice(trackedTo, match.index), COLS, ROWS);
+        trackedTo = Math.max(trackedTo, answeredTo);
+        const reply = match[0].endsWith('c') ? '\x1b[?62;22c' : match[0].endsWith('n') ? `\x1b[${cursor.row};${cursor.col}R` : '\x1bP>|xterm.js(6.1.0)\x1b\\';
         mgr.write(id, reply);
       }
       answeredTo = Math.max(answeredTo, pane.visible.length - 6);
+      // Up to any escape sequence the chunk ends inside.
+      const end = pane.visible.length - (/\x1b[[()]?[0-9;?>= -\/]*$/.exec(pane.visible.slice(trackedTo))?.[0].length ?? 0);
+      if (end > trackedTo) { trackCursor(cursor, pane.visible.slice(trackedTo, end), COLS, ROWS); trackedTo = end; }
     },
   });
   // Stop through pty-core, as the host does, and join the exits: a ConPTY
@@ -435,6 +447,17 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
     // case on this pane fails at once rather than waiting out its own timeout.
     if (pane.stuck) throw new Error(`${row.name}: the pane is still running ${pane.stuck}`);
     await pane.ready();
+    // .NET's console on macOS and Linux asks for the cursor position as
+    // PSReadLine starts a line, and what it reads while it waits for the
+    // answer it decodes a byte at a time, so a character of several bytes
+    // typed that soon arrives broken, in any terminal. Type once that answer
+    // is in and the shell has gone quiet, as a person would.
+    if (row.family === 'pwsh' && !WIN) {
+      await pane.waitFor(() => {
+        const prompt = pane.raw.lastIndexOf('\x1b]633;B');
+        return prompt >= 0 && pane.raw.includes('\x1b[6n', prompt) && Date.now() - pane.lastDataAt >= 100;
+      }, 'PSReadLine to ask for the cursor', 10_000, 25);
+    }
     const before = pane.prompts;
     const mark = pane.semantic.length;
     pane.write(`${line}\r`);
@@ -460,7 +483,7 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
   };
   pane.hasPty = () => mgr.hasPty(id);
 
-  const spawnOptions = { cwd, shell: located.path, args: located.args, cols: 200, rows: 50 };
+  const spawnOptions = { cwd, shell: located.path, args: located.args, cols: COLS, rows: ROWS };
   // HOME is where POSIX shells, fish and pwsh look for the user's files; Git
   // Bash reads it too. Windows PowerShell and WSL do not (see the profile case).
   spawnOptions.env = !WIN || row.msys ? { HOME: home, ...env } : env;
@@ -529,12 +552,19 @@ shellCase('nothing is written into the shipped zsh directory', (row) => row.name
   await pane.waitFor(() => pane.prompts >= 1 || insecure.test(pane.text()), 'a prompt or compinit\'s question', FIRST_PROMPT_MS)
     .catch((error) => noPrompt(t, row, error));
   if (pane.prompts < 1) pane.write('y');
-  await pane.run('true');
+  // Where a system file's compinit (Debian and Ubuntu run one) put its dump.
+  const dumpfile = path.join(pane.home, 'dumpfile.txt');
+  await pane.run(`print -r -- "\${_comp_dumpfile-}" > '${dumpfile}'`);
   // Its own subtest, so a todo on what was written covers only that.
   const todo = todoFor(row, 'shipped directory: nothing written');
   await t.test(`${row.name}: nothing written`, todo ? { todo } : {}, () => {
     const written = fs.readdirSync(path.join(copy, 'zsh')).filter((name) => !SHIPPED_ZSH.includes(name));
     assert.deepEqual(written, [], `zsh wrote ${written.join(', ')} into the shipped directory`);
+  });
+  await t.test(`${row.name}: a completion dump lands where it would without Dormouse`, () => {
+    const dump = fs.readFileSync(dumpfile, 'utf8').trim();
+    if (dump) assert.equal(dump, path.join(pane.home, '.zcompdump'));
+    if (dump) assert.ok(fs.existsSync(dump), `no ${dump}`);
   });
 });
 
@@ -690,6 +720,8 @@ const BOUNDARY_CASES = [
   ['a command that fails', { posix: 'false', fish: 'false', pwsh: CMDLET_FAILS }, 1],
   ['a command that exits 7', FAIL_7, 7],
   ['a cmdlet that fails after a native exit code', { pwsh: CMDLET_FAILS }, 1],
+  // $LASTEXITCODE is unchanged, and this time it is the command's own.
+  ['the same exit code again', FAIL_7, 7],
   ['an empty Enter', { all: '' }, null],
 ];
 
