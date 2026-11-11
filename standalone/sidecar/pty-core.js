@@ -438,6 +438,24 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
   return { env, shellArgs };
 }
 
+/** The macOS system locale as a `LANG` value: `AppleLocale` (`en_US`,
+ *  `zh-Hans_CN`, `en_US@rg=gbzzzz`) as `xx_YY.UTF-8` when the system has that
+ *  locale, else `en_US.UTF-8`. `en_DE` names a region without a locale. */
+function macLang(appleLocale, fsModule = fs) {
+  const m = /^([a-z]{2,3})(?:-[A-Za-z]+)?_([A-Z]{2})(?![A-Za-z0-9])/.exec(appleLocale || '');
+  const name = m && `${m[1]}_${m[2]}.UTF-8`;
+  return name && directoryExists(`/usr/share/locale/${name}`, fsModule) ? name : 'en_US.UTF-8';
+}
+
+/** `defaults read -g AppleLocale`, or null. */
+function readAppleLocale() {
+  return new Promise((resolve) => {
+    execFile('defaults', ['read', '-g', 'AppleLocale'], { timeout: 5000 }, (err, stdout) => {
+      resolve(err ? null : String(stdout).trim() || null);
+    });
+  });
+}
+
 function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
   const platform = runtime.platform || process.platform;
@@ -488,6 +506,11 @@ function resolveSpawnConfig(options, runtime = {}) {
     COLORTERM: 'truecolor',
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
+  // A Finder or Dock launch inherits launchd's environment, which sets no
+  // locale: bash would then drop typed non-ASCII and `ls` print `?`.
+  if (platform === 'darwin' && !childEnv.LANG && !childEnv.LC_ALL && !childEnv.LC_CTYPE) {
+    childEnv.LANG = macLang(runtime.appleLocale, fsModule);
+  }
   const dehydrate = dehydrateEnv(options?.dehydrate);
   if (dehydrate !== null) childEnv.DORMOUSE_DEHYDRATE = dehydrate;
   // Every Windows pane, including PowerShell/cmd that later run wsl.
@@ -1589,10 +1612,13 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
+  // Read once, without blocking a spawn: one before it answers gets `en_US.UTF-8`.
+  let systemLocale = null;
+  readLocale().then((locale) => { systemLocale = locale; });
 
   const pty = ptyModule;
   const ptys = new Map(); // id -> pty.IPty
@@ -1685,7 +1711,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   function spawn(id, options) {
     let config;
     try {
-      config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform, resolveBinary });
+      config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform, resolveBinary, appleLocale: systemLocale });
     } catch (err) {
       failSpawn(id, err);
       return;
