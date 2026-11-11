@@ -21,7 +21,6 @@ import {
   explainTerminalTitle,
   deriveSurfaceLabel,
   buildAppTitleResolver,
-  groupTerminalPanes,
   notificationDisplayTitle,
   reduceTerminalState,
   shortestUniqueCwdLabels,
@@ -819,20 +818,6 @@ describe('header and grouping derivation', () => {
 
     expect(deriveHeader(local, [local, remote]).secondary).toBe('localhost:app');
     expect(deriveHeader(remote, [local, remote]).secondary).toBe('prod-box:app');
-  });
-
-  it('groups by directory, command, and status', () => {
-    const running = runningPane('/repo/app', 'npm run dev');
-    const idle = createTerminalPaneState({ cwd: cwdFromManualPath('/repo/api', 1)! });
-    const finished = reduceTerminalState(running, { type: 'commandFinish', exitCode: 0 }, { now: () => 2 });
-
-    expect(groupTerminalPanes([running, idle], 'directory').map((group) => group.label)).toEqual(['app', 'api']);
-    expect(groupTerminalPanes([running, idle], 'command').map((group) => group.label)).toEqual(['npm run dev', DEFAULT_IDLE_TITLE]);
-    expect(groupTerminalPanes([running, idle, finished], 'status').map((group) => group.key)).toEqual([
-      'running',
-      'unknown',
-      'finished',
-    ]);
   });
 });
 

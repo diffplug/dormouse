@@ -102,14 +102,6 @@ export interface DerivedHeader {
   lastCommandFailed?: boolean;
 }
 
-export type TerminalGroupingMode = 'none' | 'directory' | 'command' | 'status';
-
-export interface TerminalGroup {
-  key: string;
-  label: string;
-  panes: TerminalPaneState[];
-}
-
 export interface TerminalNotificationTitleLike {
   source?: string;
   title?: string | null;
@@ -615,52 +607,6 @@ export function titleSourceLabel(source: TerminalTitleSource): string {
       return 'OSC 777';
     case 'user':
       return 'user';
-  }
-}
-
-export function groupTerminalPanes(
-  panes: TerminalPaneState[],
-  mode: TerminalGroupingMode,
-  options: DirectoryDisplayOptions = {},
-): TerminalGroup[] {
-  if (mode === 'none') {
-    return [{ key: 'all', label: 'All', panes }];
-  }
-
-  if (mode === 'directory') {
-    const cwds = panes.map(effectiveCwd).filter((cwd): cwd is CwdState => !!cwd);
-    const labels = shortestUniqueCwdLabels(cwds, options);
-    return groupBy(panes, (pane) => {
-      const cwd = effectiveCwd(pane);
-      if (!cwd) return { key: 'unknown', label: DEFAULT_DIRECTORY_LABEL };
-      const key = cwdIdentity(cwd);
-      return { key, label: labels.get(key) ?? cwdDisplay(cwd, options) };
-    });
-  }
-
-  if (mode === 'command') {
-    return groupBy(panes, (pane) => {
-      const label = pane.currentCommand?.displayCommand ?? idleLabel(pane);
-      return { key: label, label };
-    });
-  }
-
-  return groupBy(panes, (pane) => {
-    const status = statusBucket(pane.activity.kind);
-    return { key: status, label: status };
-  });
-}
-
-function statusBucket(kind: ShellActivity['kind']): 'unknown' | 'idle' | 'running' | 'finished' {
-  switch (kind) {
-    case 'running':
-      return 'running';
-    case 'finished':
-      return 'finished';
-    case 'unknown':
-      return 'unknown';
-    default:
-      return 'idle';
   }
 }
 
@@ -1457,12 +1403,6 @@ function isAppTitleFreshFor(pane: TerminalPaneState, command: CommandRun): boole
   return true;
 }
 
-function idleLabel(pane: TerminalPaneState): string {
-  const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
-  if (userTitle) return userTitle;
-  return DEFAULT_IDLE_TITLE;
-}
-
 const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
 
 // Under Windows ConPTY an OSC 0/2 title is frequently just the child process's
@@ -1529,23 +1469,6 @@ function findInRunTerminalTitle(pane: TerminalPaneState, command: CommandRun): T
  *  shell's cwd (`docs/specs/terminal-state.md`). */
 export function effectiveCwd(pane: TerminalPaneState): CwdState | null {
   return pane.currentCommand?.cwdAtStart ?? pane.cwd;
-}
-
-function groupBy(
-  panes: TerminalPaneState[],
-  keyForPane: (pane: TerminalPaneState) => { key: string; label: string },
-): TerminalGroup[] {
-  const groups = new Map<string, TerminalGroup>();
-  for (const pane of panes) {
-    const { key, label } = keyForPane(pane);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.panes.push(pane);
-    } else {
-      groups.set(key, { key, label, panes: [pane] });
-    }
-  }
-  return [...groups.values()];
 }
 
 function latestTerminalTitleCandidate(state: TerminalPaneState | null | undefined): TerminalTitle | null {
