@@ -15,7 +15,7 @@ import { TerminalProtocolParser } from '../../lib/terminal-protocol';
 import { getToolAnnounce, recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { applyLiveToolEvents, recordToolEvents } from '../../lib/tool-events';
-import { getToolReap, isToolReaped, isToolStopping, markToolReaped, resetToolReaps } from '../../lib/tool-reap-store';
+import { takeToolReap, isToolReaped, isToolStopping, markToolReaped, resetToolReaps } from '../../lib/tool-reap-store';
 import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import { rehydrateTool, stopTool, TOOL_STOP_GRACE_MS, toolReapBlocker } from './tool-reaper';
@@ -167,7 +167,7 @@ describe('stopTool', () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(await stopped).toBe(true);
     expect(kills).toEqual([ID]);
-    expect(getToolReap(ID)).toEqual({ payload: PAYLOAD, cwd: '/repo', alert: expect.anything() });
+    expect(takeToolReap(ID)).toEqual({ payload: PAYLOAD, cwd: '/repo', alert: expect.anything() });
     expect(registry.get(ID)?.exited).toBe(true);
     // The run is over: its announcement no longer speaks for the Session.
     expect(getToolAnnounce(ID)).toBeNull();
@@ -204,7 +204,7 @@ describe('stopTool', () => {
     await finishStop();
     expect(await stopped).toBe(true);
     expect(kills).toEqual([ID]);
-    expect(getToolReap(ID)?.payload).toBeNull();
+    expect(takeToolReap(ID)?.payload).toBeNull();
   });
 
   it('never reconstructs a payload from replay', async () => {
@@ -213,7 +213,7 @@ describe('stopTool', () => {
     recordToolEvents(ID, new TerminalProtocolParser().process(`\x1b]367;dehydrate;${PAYLOAD}\x07`).events);
     await finishStop();
     await stopped;
-    expect(getToolReap(ID)?.payload).toBeNull();
+    expect(takeToolReap(ID)?.payload).toBeNull();
   });
 
   it('leaves a Tool closed mid-stop to its closure', async () => {
