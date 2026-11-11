@@ -48,7 +48,7 @@ describe('theme store', () => {
   it('drops malformed array elements while keeping well-formed themes', () => {
     // Corrupted or externally tampered storage: a valid array whose elements
     // are the wrong shape (null / missing id). Before the per-element guard,
-    // Array.isArray passed and these reached getTheme()'s `.find(t => t.id)`
+    // Array.isArray passed and these reached a theme lookup's `.find(t => t.id)`
     // and addInstalledTheme()'s `.filter(t => t.id)`, throwing on `null.id`.
     localStorage.setItem(
       INSTALLED_KEY,

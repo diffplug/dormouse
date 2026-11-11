@@ -13,7 +13,6 @@ import {
   addInstalledTheme,
   getActiveThemeId,
   getBundledThemes,
-  getTheme,
   removeInstalledTheme,
   setActiveThemeId,
 } from './store';
@@ -21,6 +20,7 @@ import type { DormouseTheme } from './types';
 import { installLocalStorageStub } from '../test-local-storage';
 
 const KIMBIE_DARK = 'vscode.theme-kimbie-dark.kimbie-dark';
+const kimbieDark = () => getBundledThemes().find((t) => t.id === KIMBIE_DARK);
 
 const INSTALLED_THEME: DormouseTheme = {
   id: 'store.installed-theme',
@@ -71,7 +71,7 @@ describe('applyTheme', () => {
   );
 
   it('reapplies the same theme when document hydration removes body styles', () => {
-    const theme = getTheme(KIMBIE_DARK);
+    const theme = kimbieDark();
     expect(theme).toBeDefined();
 
     applyTheme(theme!);
@@ -100,7 +100,7 @@ describe('applyTheme', () => {
   });
 
   it('repairs native-control polarity when reapplying an otherwise visible theme', () => {
-    const theme = getTheme(KIMBIE_DARK)!;
+    const theme = kimbieDark()!;
     applyTheme(theme);
     document.body.style.removeProperty('color-scheme');
 
@@ -156,7 +156,7 @@ describe('applyTheme', () => {
 
     const listener = vi.fn();
     const unsubscribe = subscribeToActiveTheme(listener);
-    const kimbie = getTheme(KIMBIE_DARK);
+    const kimbie = kimbieDark();
     if (kimbie) applyTheme(kimbie);
     unsubscribe();
 

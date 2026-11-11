@@ -70,10 +70,6 @@ export function getAllThemes(): DormouseTheme[] {
   return [...getBundledThemes(), ...getInstalledThemes()];
 }
 
-export function getTheme(id: string): DormouseTheme | undefined {
-  return getAllThemes().find((t) => t.id === id);
-}
-
 export function addInstalledTheme(theme: DormouseTheme): void {
   const storage = getStorage();
   if (!storage) return;
