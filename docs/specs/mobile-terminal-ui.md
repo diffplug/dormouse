@@ -26,7 +26,7 @@ The touch selector controls what a pane-content touch does.
 | --- | --- | --- |
 | Gestures | Always | Either-edge drags scroll; other pane-content touches, pen presses, and primary clicks open the radial menu. |
 | Text selection (`Select`) | Always | Touch, pen, and primary drags select terminal text as on desktop; a capturing pane gets mouse override. |
-| Mouse | Active TUI capturing mouse events, even from before attaching | Touches are passed through as terminal mouse input. |
+| Mouse | Active TUI capturing mouse events | Touches are passed through as terminal mouse input. |
 
 **Mouse mode falls back to Gestures when the active pane stops capturing mouse events.**
 
