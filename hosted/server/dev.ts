@@ -71,8 +71,11 @@ auth.app.get("/api/dev/emails", (c) =>
 const sandbox = billingSetup(process.env);
 if (sandbox?.live) throw new Error("The development entry refuses a live Stripe key.");
 // Else StripeDev in place of Stripe, so checkout runs end to end without a card
-// or a charge. Its state sits beside the development database's, which outlives
-// a restart, and its webhook comes back through this server.
+// or a charge. It serves no invoices, refunds, disputes, or subscription reads,
+// so a withdrawal, a paid account's closure, or a price change never settles on
+// it and leaves the cron failing: those need Stripe test mode. Its state sits
+// beside the development database's, which outlives a restart, and its webhook
+// comes back through this server.
 const stripe = sandbox
   ? undefined
   : await stripeDevBilling(

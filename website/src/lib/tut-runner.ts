@@ -244,6 +244,8 @@ export class TutRunner implements InteractiveProgram {
   private starColors: readonly string[] | null = null;
   private backgroundTimer: ReturnType<typeof setInterval> | null = null;
   private capturingMouse = false;
+  /** Whether its Session is on screen; see {@link setShown}. */
+  private shown = true;
 
   constructor(options: TutRunnerOptions) {
     this.adapter = options.adapter;
@@ -301,6 +303,13 @@ export class TutRunner implements InteractiveProgram {
     if (!this.backgroundTimer) return;
     clearInterval(this.backgroundTimer);
     this.backgroundTimer = null;
+  }
+
+  /** Whether its Session is on screen: the gesture background moves only while it is. */
+  setShown(shown: boolean): void {
+    this.shown = shown;
+    if (!shown) this.stopBackgroundTicks();
+    else if (this.capturingMouse && !this.disposed && !prefersReducedMotion()) this.startBackgroundTicks();
   }
 
   private resetFlappyGame(): void {
@@ -698,7 +707,7 @@ export class TutRunner implements InteractiveProgram {
           this.starColors = null;
           this.render();
         }) ?? null;
-        if (!prefersReducedMotion()) this.startBackgroundTicks();
+        if (this.shown && !prefersReducedMotion()) this.startBackgroundTicks();
       } else {
         this.themeUnsub?.();
         this.themeUnsub = null;
