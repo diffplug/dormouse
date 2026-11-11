@@ -147,6 +147,8 @@ Two consecutive ticks, not one, because an owner is disabled before its dialog i
 
 ## Quit flow
 
+**What is not intercepted.** tao answers Windows' `WM_ENDSESSION` itself and does not process `WM_QUERYENDSESSION` (`tao-0.37.2/src/platform_impl/windows/event_loop.rs`): it destroys the loop and calls `std::process::exit(0)`, so `RunEvent::Exit` shuts the sidecar down but no window votes, captures or flushes. A SIGTERM, SIGINT or SIGHUP ends the process with no `RunEvent` at all. Either persists as a crash does (`docs/specs/transport.md` → "The governing rule"): the last debounced save stands and no agent resumes. Intercepting them would take a `WM_QUERYENDSESSION` subclass with `ShutdownBlockReasonCreate` on Windows and a signal handler calling `request_quit` on unix. Checked 2026-11.
+
 **Why the two teardown flows arbitrate.** They are independent machines that share one single-slot confirm store, and the store simply returned when a second `openQuitConfirm` arrived. The second flow's context was never settled, so its `phase` stayed `confirming` for the life of the window: a quit that met an open close dialog never voted, and Rust's phase-2 wait is unbounded by design because it waits on a human. The broadcast `quit-cancelled` made it worse by dismissing whichever dialog was open — including a close's — without telling its flow.
 
 Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* close acked and stopped, which is the same unbounded wait reached by a different route. Voting is right because the window really is ending.

@@ -667,8 +667,9 @@ fn send_window_labels(app: &AppHandle) {
 
 // ── Quit interception ─────────────────────────────────────────────────────────
 //
-// Every quit trigger funnels through `request_quit`, which asks each window's
-// orchestrator (standalone/src/quit.ts) to vote, then walks them one at a time.
+// Every intercepted quit trigger funnels through `request_quit`, which asks
+// each window's orchestrator (standalone/src/quit.ts) to vote, then walks them
+// one at a time. Windows session end and POSIX signals are not intercepted.
 // Protocol + watchdog phases: docs/specs/standalone.md §Quit flow.
 #[derive(Default)]
 struct QuitState {

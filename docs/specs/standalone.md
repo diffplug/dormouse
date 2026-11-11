@@ -190,7 +190,7 @@ Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `Win
 **Closing a window with siblings alive, not closing, ends that window alone**; only the last window's close is the quit, on macOS too.
 
 1. Rust prevents the close and emits `dormouse://window-close-requested`.
-2. The webview acks; if that listener is dead, a watchdog destroys the window, **keeping its snapshot**.
+2. The webview acks; failing that, a watchdog destroys the window, **keeping its snapshot**.
 3. It asks when any of *its own* Workspaces' closes would (`docs/specs/reopen.md` → "Workspaces and windows"), and hands Rust a reopen record when it asked nothing.
 4. It removes its snapshot, kills its PTYs, and calls back `close_window`.
 
@@ -355,7 +355,7 @@ Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
 Source of truth: `QuitMachine` in `standalone/src-tauri/src/quit_state.rs`; `standalone/src/quit.ts` (the webview orchestrator).
 
-**Must intercept every quit trigger in Rust** and run the webview teardown before exiting (rationale).
+**Must intercept every quit trigger in Rust but Windows session end and POSIX signals**, and run the webview teardown first (rationale).
 
 **Every window votes before any window is torn down** (rationale); the walk then tears them down one at a time.
 
@@ -393,7 +393,7 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 
 | Phase | State | Budget |
 |---|---|---|
-| 1 — ack | some window has not acked | **past §UI watchdog's threshold**, like the close's (rationale); a listener is dead ⇒ log and `app.exit(0)` |
+| 1 — ack | some window has not acked | **past §UI watchdog's threshold**, like the close's (rationale); then log and `app.exit(0)` |
 | 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
 | 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 
