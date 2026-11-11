@@ -6,8 +6,10 @@
  * flow control — minus Rust and the webview, whose acknowledgements these tests
  * send or withhold. Here rather than beside `pty-core`'s `node --test` suites
  * because the host is TypeScript that only this package's vitest reads from
- * source. Written to run on Windows too, where ConPTY's pause is the open
- * question.
+ * source. Written to run on Windows too: every program is `node` running a
+ * fixture script, never a shell line, and a Ctrl+C reaches it as Dormouse's
+ * renderer sends one (win32-input-mode records once ConPTY asks for them).
+ * Each failure names what the PTY printed first, so a red explains itself.
  *
  * Every flood is capped in bytes (`FLOOD_CAP`) and every wait in time, so a
  * broken backpressure fails a test rather than filling memory or running on.
@@ -34,22 +36,23 @@ const nodePty = sidecarRequire('node-pty');
 /** What one paused PTY may still forward: one node-pty read past the mark. */
 const ONE_READ = 64 * 1024;
 const FLOOD_CAP = 40_000_000;
-const IS_WINDOWS = process.platform === 'win32';
 const YES = ['/usr/bin/yes', '/bin/yes'].find((candidate) => {
   try { readFileSync(candidate); return true; } catch { return false; }
 });
 
 /**
- * A program that writes `cap` chars of 80-column lines as fast as its PTY
- * takes them, recording how many it has written in `counter` after each
- * write: that file is how a test sees it blocked. With a `tail`, it instead
+ * The PTY's program, `node` on every platform. `flood <counter> <cap>` writes
+ * `cap` chars of 80-column lines as fast as its PTY takes them, recording how
+ * many it has written in `counter` after each write: that file is how a test
+ * sees it start, and sees it blocked. `tail <counter> <cap> <tail> <pauseMs>`
  * writes `cap` chars as one line in one write, so the host pauses on its last
- * char with nothing left unread, then after `pauseMs` writes the tail and
- * exits 7.
+ * char with nothing left unread, then after `pauseMs` writes `tail` and exits
+ * 7. Every argument is nonempty: an empty one does not survive every
+ * platform's command line.
  */
 const FLOOD_SCRIPT = `
 const fs = require('fs');
-const [counter, cap, tail, pauseMs] = process.argv.slice(2);
+const [mode, counter, cap, tail, pauseMs] = process.argv.slice(2);
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const write = (text) => {
   for (let at = 0; at < text.length;) {
@@ -57,13 +60,15 @@ const write = (text) => {
     catch (error) { if (error.code !== 'EAGAIN') throw error; sleep(5); }
   }
 };
-if (tail) {
+fs.writeFileSync(counter, '0');
+if (mode === 'tail') {
   write('y'.repeat(Number(cap)));
   fs.writeFileSync(counter, cap);
-  sleep(Number(pauseMs));
+  sleep(Number(pauseMs) || 0);
   write(tail);
   process.exit(7);
 }
+if (mode !== 'flood') throw new Error('unknown mode ' + mode);
 const chunk = ('y'.repeat(79) + '\\n').repeat(50);
 let written = 0;
 while (written < Number(cap)) {
@@ -73,18 +78,25 @@ while (written < Number(cap)) {
 }
 `;
 
+/** Ctrl+C as Dormouse's renderer sends it: on Windows, once ConPTY has asked for
+ *  win32-input-mode, xterm's key records for Ctrl down, C down and up, Ctrl
+ *  up; otherwise the control character the tty turns into SIGINT. */
+const WIN32_CTRL_C = '\x1b[17;29;0;1;8;1_\x1b[67;46;3;1;8;1_\x1b[67;46;3;0;8;1_\x1b[17;29;0;0;0;1_';
+
 interface Pty {
   /** Chars the host sent the window as \`pty:data\`. */
   forwarded: number;
-  /** The last 200 chars it sent. */
+  /** The first 200 chars its program printed, before the parse. */
+  head: string;
+  /** The last 200 chars the host sent. */
   tail: string;
   exit?: { exitCode: number; at: number };
 }
 
-const until = async (predicate: () => boolean, what: string, ms = 10_000) => {
+const until = async (predicate: () => boolean, what: string, ms = 10_000, detail = () => '') => {
   const deadline = Date.now() + ms;
   while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}; ${detail()}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };
@@ -108,7 +120,7 @@ function sidecar() {
   const ptys = new Map<string, Pty>();
   const pty = (id: string) => {
     let entry = ptys.get(id);
-    if (!entry) ptys.set(id, entry = { forwarded: 0, tail: '' });
+    if (!entry) ptys.set(id, entry = { forwarded: 0, head: '', tail: '' });
     return entry;
   };
   // The Burrow's memory-only store says so once.
@@ -127,6 +139,11 @@ function sidecar() {
     }
   };
   const mgr = create((event, data) => {
+    const raw = data as { id?: string; data?: string };
+    if (event === 'data' && raw.id && typeof raw.data === 'string') {
+      const entry = pty(raw.id);
+      if (entry.head.length < 200) entry.head = (entry.head + raw.data).slice(0, 200);
+    }
     host!.onPtyEvent(event, data);
     if (event !== 'data') send(`pty:${event}`, data);
   }, nodePty, { replay: true, sliceSince });
@@ -141,20 +158,36 @@ function sidecar() {
   cleanup.push(() => live.dispose());
 
   const counterOf = (id: string) => path.join(dir, `${id}.count`);
+  /** How many chars the program behind `id` has written; -1 before it starts. */
+  const written = (id: string) => {
+    try { return Number(readFileSync(counterOf(id), 'utf8')); } catch { return -1; }
+  };
+  const spawnNode = (id: string, args: string[]) => live.handleCommand('pty:spawn', {
+    id,
+    options: { shell: process.execPath, args: [script, ...args], cwd: dir, cols: 100, rows: 30 },
+  });
   return {
     host: live,
     mgr,
     pauses,
     pty,
-    /** How many chars the program behind `id` has written. */
-    written: (id: string) => {
-      try { return Number(readFileSync(counterOf(id), 'utf8')) || 0; } catch { return 0; }
+    written,
+    /** Everything a failure message needs to explain itself. */
+    describe: (id: string) => {
+      const entry = pty(id);
+      return `forwarded ${entry.forwarded}, program wrote ${written(id)}, paused ${pauses.filter((p) => p === id).length}x, `
+        + `exit ${JSON.stringify(entry.exit ?? null)}, output began ${JSON.stringify(entry.head)}`;
     },
-    flood(id: string, cap = FLOOD_CAP, tail = '', pauseMs = 0) {
-      live.handleCommand('pty:spawn', {
-        id,
-        options: { shell: process.execPath, args: [script, counterOf(id), String(cap), tail, String(pauseMs)], cwd: dir, cols: 100, rows: 30 },
-      });
+    flood(id: string, cap = FLOOD_CAP) {
+      spawnNode(id, ['flood', counterOf(id), String(cap)]);
+    },
+    floodThenTail(id: string, cap: number, tail: string, pauseMs: number) {
+      spawnNode(id, ['tail', counterOf(id), String(cap), tail, String(pauseMs)]);
+    },
+    /** Ctrl+C as the renderer would send it to this PTY. */
+    interrupt(id: string) {
+      const data = pty(id).head.includes('\x1b[?9001h') ? WIN32_CTRL_C : '\x03';
+      live.handleCommand('pty:input', { id, data });
     },
     spawn(id: string, shell: string, args: string[]) {
       live.handleCommand('pty:spawn', { id, options: { shell, args, cwd: dir, cols: 100, rows: 30 } });
@@ -167,8 +200,13 @@ function sidecar() {
 
 type Sidecar = ReturnType<typeof sidecar>;
 
-/** Waits until `id` forwards nothing for `quietMs`: its PTY is paused. */
-async function settled(side: Sidecar, id: string, quietMs = 400): Promise<number> {
+/**
+ * Waits until `id`'s program has started and its PTY has forwarded more than
+ * `above`, then forwards nothing for `quietMs`: its PTY is paused. Never
+ * before the program starts, which a slow `node` start on Windows took longer
+ * than `quietMs` to do, while ConPTY's own setup sequences sat quiet.
+ */
+async function settled(side: Sidecar, id: string, above = 0, quietMs = 400): Promise<number> {
   let last = -1;
   let since = Date.now();
   await until(() => {
@@ -178,8 +216,8 @@ async function settled(side: Sidecar, id: string, quietMs = 400): Promise<number
       since = Date.now();
       return false;
     }
-    return now > 0 && Date.now() - since >= quietMs;
-  }, `${id} to stop forwarding`);
+    return side.written(id) > 0 && now > above && Date.now() - since >= quietMs;
+  }, `${id} to forward past ${above} and stop`, 15_000, () => side.describe(id));
   return last;
 }
 
@@ -188,43 +226,43 @@ describe('a flood nobody acknowledges', { timeout: 30_000 }, () => {
     const side = sidecar();
     side.flood('a');
     const forwarded = await settled(side, 'a');
-    expect(forwarded).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS);
-    expect(forwarded).toBeLessThanOrEqual(PTY_HIGH_WATERMARK_CHARS + ONE_READ);
+    expect(forwarded, side.describe('a')).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS);
+    expect(forwarded, side.describe('a')).toBeLessThanOrEqual(PTY_HIGH_WATERMARK_CHARS + ONE_READ);
     // The program's own count stops: its writes block on the full PTY.
     const before = side.written('a');
     await sleep(500);
-    expect(side.written('a')).toBe(before);
-    expect(before).toBeLessThan(FLOOD_CAP);
+    expect(side.written('a'), side.describe('a')).toBe(before);
+    expect(before, side.describe('a')).toBeLessThan(FLOOD_CAP);
   });
 
   it('resumes as the window acknowledges', async () => {
     const side = sidecar();
     side.flood('a');
-    const paused = await settled(side, 'a');
+    const paused = await settled(side, 'a', PTY_HIGH_WATERMARK_CHARS);
     const written = side.written('a');
     side.ack('a', paused - PTY_LOW_WATERMARK_CHARS);
-    const resumed = await settled(side, 'a');
-    expect(resumed).toBeGreaterThan(paused + PTY_LOW_WATERMARK_CHARS);
-    expect(side.written('a')).toBeGreaterThan(written);
+    const resumed = await settled(side, 'a', paused);
+    expect(resumed, side.describe('a')).toBeGreaterThan(paused + PTY_LOW_WATERMARK_CHARS);
+    expect(side.written('a'), side.describe('a')).toBeGreaterThan(written);
   });
 
   it('is forgiven and resumed when its window re-asks, and at a transfer mark', async () => {
     const side = sidecar();
     side.flood('a');
-    const first = await settled(side, 'a');
+    const first = await settled(side, 'a', PTY_HIGH_WATERMARK_CHARS);
     side.host.handleCommand('pty:requestInit', { ids: ['a'], forWindow: 'main', requestId: 'init-1' });
-    const second = await settled(side, 'a');
+    const second = await settled(side, 'a', first);
     // Nothing was acknowledged: a whole fresh window's worth went out.
-    expect(second - first).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS - ONE_READ);
+    expect(second - first, side.describe('a')).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS - ONE_READ);
     side.host.handleCommand('pty:mark', { ids: ['a'], requestId: 'mark-1' });
-    const third = await settled(side, 'a');
-    expect(third - second).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS - ONE_READ);
+    const third = await settled(side, 'a', second);
+    expect(third - second, side.describe('a')).toBeGreaterThan(PTY_HIGH_WATERMARK_CHARS - ONE_READ);
   });
 
   it('leaves a second PTY flowing', async () => {
     const side = sidecar();
     side.flood('stuck');
-    await settled(side, 'stuck');
+    await settled(side, 'stuck', PTY_HIGH_WATERMARK_CHARS);
     const stuck = side.pty('stuck').forwarded;
     // A renderer that keeps up with the other PTY: it acknowledges everything.
     const cap = 4_000_000;
@@ -237,9 +275,9 @@ describe('a flood nobody acknowledges', { timeout: 30_000 }, () => {
       acknowledged += owed;
     }, 5);
     cleanup.push(() => clearInterval(keepUp));
-    await until(() => side.pty('free').exit !== undefined, 'the free PTY to finish', 20_000);
-    expect(side.written('free')).toBeGreaterThanOrEqual(cap);
-    expect(side.pty('stuck').forwarded).toBe(stuck);
+    await until(() => side.pty('free').exit !== undefined, 'the free PTY to finish', 20_000, () => side.describe('free'));
+    expect(side.written('free'), side.describe('free')).toBeGreaterThanOrEqual(cap);
+    expect(side.pty('stuck').forwarded, side.describe('stuck')).toBe(stuck);
   });
 });
 
@@ -248,39 +286,47 @@ describe('a paused PTY', { timeout: 30_000 }, () => {
     const side = sidecar();
     // One char past the high watermark, then quiet while the host pauses,
     // then a tail nothing reads until the program is gone.
-    side.flood('a', PTY_HIGH_WATERMARK_CHARS + 1, 'TAIL-OF-THE-RUN', 300);
-    await until(() => side.pauses.includes('a'), 'the pause');
-    await until(() => side.pty('a').exit !== undefined, 'the exit');
-    expect(side.pty('a').exit!.exitCode).toBe(7);
-    expect(side.pty('a').tail).toContain('TAIL-OF-THE-RUN');
+    side.floodThenTail('a', PTY_HIGH_WATERMARK_CHARS + 1, 'TAIL-OF-THE-RUN', 300);
+    await until(() => side.pauses.includes('a'), 'the pause', 15_000, () => side.describe('a'));
+    await until(() => side.pty('a').exit !== undefined, 'the exit', 10_000, () => side.describe('a'));
+    expect(side.pty('a').exit!.exitCode, side.describe('a')).toBe(7);
+    expect(side.pty('a').tail, side.describe('a')).toContain('TAIL-OF-THE-RUN');
   });
 
-  it.skipIf(!YES || IS_WINDOWS)('ends a paused `yes` at a Ctrl+C', async () => {
+  // `yes` itself, which Windows does not have; the case after it is the same
+  // check on every platform, with `node` flooding instead.
+  it.skipIf(!YES)('ends a paused `yes` at a Ctrl+C (POSIX: no `yes` on Windows)', async () => {
     const side = sidecar();
     side.spawn('yes', YES!, ['y']);
-    await settled(side, 'yes');
+    let last = -1;
+    let since = Date.now();
+    await until(() => {
+      const now = side.pty('yes').forwarded;
+      if (now !== last) { last = now; since = Date.now(); return false; }
+      return now > PTY_HIGH_WATERMARK_CHARS && Date.now() - since >= 400;
+    }, 'yes to stop forwarding', 15_000, () => side.describe('yes'));
     const pressed = Date.now();
-    side.host.handleCommand('pty:input', { id: 'yes', data: '\x03' });
-    await until(() => side.pty('yes').exit !== undefined, 'yes to exit', 5_000);
-    expect(side.pty('yes').exit!.at - pressed).toBeLessThan(1_000);
+    side.interrupt('yes');
+    await until(() => side.pty('yes').exit !== undefined, 'yes to exit', 5_000, () => side.describe('yes'));
+    expect(side.pty('yes').exit!.at - pressed, side.describe('yes')).toBeLessThan(1_000);
   });
 
   it('ends a paused program at a Ctrl+C, on every platform', async () => {
     const side = sidecar();
     side.flood('a');
-    await settled(side, 'a');
+    await settled(side, 'a', PTY_HIGH_WATERMARK_CHARS);
     const pressed = Date.now();
-    side.host.handleCommand('pty:input', { id: 'a', data: '\x03' });
-    await until(() => side.pty('a').exit !== undefined, 'the program to exit', 5_000);
-    expect(side.pty('a').exit!.at - pressed).toBeLessThan(1_000);
-    expect(side.written('a')).toBeLessThan(FLOOD_CAP);
+    side.interrupt('a');
+    await until(() => side.pty('a').exit !== undefined, 'the program to exit', 5_000, () => side.describe('a'));
+    expect(side.pty('a').exit!.at - pressed, side.describe('a')).toBeLessThan(1_000);
+    expect(side.written('a'), side.describe('a')).toBeLessThan(FLOOD_CAP);
   });
 
   it('stops and reports its exit at a graceful kill', async () => {
     const side = sidecar();
     side.flood('a');
-    await settled(side, 'a');
+    await settled(side, 'a', PTY_HIGH_WATERMARK_CHARS);
     side.mgr.gracefulKill(['a'], 2_000, 'stop-1');
-    await until(() => side.pty('a').exit !== undefined, 'the exit', 5_000);
+    await until(() => side.pty('a').exit !== undefined, 'the exit', 5_000, () => side.describe('a'));
   });
 });
