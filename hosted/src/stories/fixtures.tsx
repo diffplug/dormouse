@@ -62,7 +62,7 @@ function HostedStory({ phone, light, ...args }: HostedStoryArgs) {
   return <HostedFrame phone={phone} light={light}><HostedPage
     session={null} enabled={[...providers]} accounts={[]} hostedVoice={null}
     computers={null} passkeys={null} enrolling={null} noPlan={false} loading={false} busy=""
-    error={null} notice={null} comingSoon={false} fresh={true}
+    error={null} notice={null} fresh={true}
     act={async (_label, action) => { await action(); }} refresh={idle} approve={idle}
     signOut={idle} clearEnrollment={nothing} turnOffVoice={idle}
     removeOne={idle} removeKey={idle} submit={(event) => event.preventDefault()}

@@ -24,8 +24,7 @@ export const accountQuery = <Row extends Record<string, unknown>>(
  * Whether the account's own page made this read: the browser says
  * `Sec-Fetch-Site: same-origin`, and an `Origin`, if presented, is exactly
  * `origin`. A sibling's page, a navigation, and a request without Fetch
- * Metadata all fail. {@link cookieEntitled}'s in-process login lookup vouches
- * for a request its gate admitted by carrying the header itself.
+ * Metadata all fail.
  */
 export function ownPageRead(request: Request, origin: string): boolean {
   const presented = request.headers.get("origin");
@@ -113,9 +112,7 @@ function cookieGate(
     const read = c.req.method === "GET" || c.req.method === "HEAD";
     if (read ? !ownPageRead(c.req.raw, origin) : c.req.header("origin") !== origin)
       return c.json({ message: "Invalid origin." }, 403);
-    // This request passed the gate above, so its lookup is the account's own
-    // read: `prelaunchAuth` refuses a login read that does not say so.
-    const headers = new Headers({ "sec-fetch-site": "same-origin" });
+    const headers = new Headers();
     for (const name of ["cookie", "cf-connecting-ip"]) {
       const value = c.req.header(name);
       if (value) headers.set(name, value);

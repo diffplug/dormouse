@@ -40,8 +40,6 @@ import { WithdrawalAcknowledgement, WithdrawalFunction } from "./Withdrawal";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
-/** MailerLite's own page for the "Dormouse signup" form: double opt-in, into the "Dormouse" group. */
-export const SUBSCRIBE_URL = "https://preview.mailerlite.io/forms/2773191/203349323128243736/share";
 const SELF_HOST_URL = "https://dormouse.sh/self-host/";
 
 const ROW_CLASS = `flex min-h-14 items-center justify-between gap-4 py-1.5 ${DASHED_ROW_CLASS}`;
@@ -116,7 +114,6 @@ export interface HostedPageProps {
   email: string;
   code: string;
   enterCode: boolean;
-  comingSoon: boolean;
   fresh: boolean | null;
   /** The docs pages' theme control. Off in story frames, whose theme the
    * control (which paints the top-level document) cannot reach. */
@@ -147,7 +144,7 @@ export function HostedPage({
   closeAccount = async () => {},
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
   enrolling, noPlan, loading, busy, error, notice, email, code, enterCode,
-  comingSoon, fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
+  fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
   removeOne, removeKey, submit, setEmail, setCode, setEnterCode, changeEmail,
   sendCode, noteContinued, social,
 }: HostedPageProps) {
@@ -192,9 +189,7 @@ export function HostedPage({
   return (
     <HostedShell themeControl={themeControl}>
         <h1 className={`mb-3 text-balance leading-tight ${PAGE_TITLE_CLASS}`}>
-          {comingSoon
-            ? "Coming soon"
-            : enrolling
+          {enrolling
             ? enrolling.purpose === "voice"
               ? "Turn on Natural Voice"
               : "Enroll remote control"
@@ -211,9 +206,7 @@ export function HostedPage({
               : "Sign in to Dormouse Hosted"}
         </h1>
         <p className={`mb-10 ${PAGE_INTRO_CLASS}`}>
-          {comingSoon
-            ? "Get an email when it opens."
-            : enrolling
+          {enrolling
             ? !enrolling.code
               ? "This link cannot be approved."
               : session
@@ -241,10 +234,6 @@ export function HostedPage({
         </p>
         {loading ? (
           <p role="status">Checking your account…</p>
-        ) : comingSoon ? (
-          <a className={PRIMARY_CLASS} href={SUBSCRIBE_URL}>
-            Join the email list
-          </a>
         ) : (
           <>
             {error && (

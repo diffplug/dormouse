@@ -82,7 +82,7 @@ it("shows the ElevenLabs plan and what needs acting on, or that it has no readin
 
 it("asks a signed-out visitor to sign in, and tells anyone but the admin there is no page", async () => {
   await mount(() => Response.json({ message: "Sign in first." }, { status: 401 }));
-  expect(container.querySelector('a[href="/login?signin"]')).not.toBeNull();
+  expect(container.querySelector('a[href="/login"]')).not.toBeNull();
   await act(async () => root.unmount());
   root = createRoot(container);
   await mount(() => Response.json({ message: "Not found." }, { status: 404 }));

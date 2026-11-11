@@ -461,6 +461,8 @@ const relaySecrets = ["RELAY_ENROLL_SECRET", "RELAY_VAPID_PUBLIC_KEY", "RELAY_VA
 const accountSecrets = [
   "AUTH_SECRET",
   "POSTMARK_SERVER_TOKEN",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
   ...oauthProviders(configs.account).flatMap((name) => [
     `${name.toUpperCase()}_CLIENT_ID`,
     `${name.toUpperCase()}_CLIENT_SECRET`,
@@ -592,7 +594,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
   const minimal = (extra) =>
     provider({
       secrets: {
-        "dormouse-hosted": ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", ...extra],
+        "dormouse-hosted": ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", ...extra],
         "dormouse-relay": relaySecrets,
         "dormouse-voice": ["ELEVENLABS_API_KEY"],
       },

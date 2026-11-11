@@ -33,7 +33,6 @@ import { accountApp } from "../account-app";
 import { cookieEntitled, openAuthRead } from "../account-gate";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { authPolicy } from "../policy";
-import { prelaunchAuth } from "../prelaunch";
 import { BILLING_WEBHOOK_PATH } from "../billing-routes";
 import { FOUNDER_AVATAR_PREFIX } from "../cohort-routes";
 import { COHORT_ENDPOINT } from "../../../website/src/lib/hosted-cohorts";
@@ -724,8 +723,8 @@ test("auth reads answer only the account's own page; writes, callbacks, and the 
   const write = { cookie: `${cookie}; ${csrfCookie}`, origin: account, "x-csrf-token": csrf, "content-type": "application/json" };
   expect((await fetch("/api/auth/sign-out", write, "POST", "{}")).status).toBeGreaterThanOrEqual(500);
   // A provider's callback arrives from its own site, carrying the login for a
-  // connection; neither it nor the CSRF challenge nor the provider list is
-  // looked up pre-launch, which without a database would fail them (5xx).
+  // connection; neither it nor the CSRF challenge nor the provider list reads
+  // the login, which without a database would fail them (5xx).
   const callback = await fetch("/api/auth/callback/github?code=x&state=y", { cookie, "sec-fetch-site": "cross-site" });
   expect(callback.status).toBe(303);
   const sibling = { cookie, "sec-fetch-site": "same-site", origin: ORIGINS.relay };
@@ -742,46 +741,7 @@ test("auth reads answer only the account's own page; writes, callbacks, and the 
   expect(outbound).toEqual([]);
 });
 
-test("pre-launch looks a login up for every read the account's own page made, and only then", async () => {
-  const origin = "https://account.example.test";
-  const seen: string[] = [];
-  const auth = prelaunchAuth(async (request) => {
-    seen.push(new URL(request.url).pathname);
-    return Response.json(null);
-  });
-  const env = { HYPERDRIVE: { connectionString: "postgres://user:pass@127.0.0.1:9/none" } } as AccountEnv;
-  const send = (path: string, headers: Record<string, string> = {}, method = "GET") => {
-    seen.length = 0;
-    return auth(new Request(origin + path, { method, headers: { cookie: "session=victim", ...headers } }), env, {} as ExecutionContext);
-  };
-  // Any read carrying a login is refused before any lookup unless the page
-  // made it, however the path is spelled and whether or not the adapter serves it.
-  const reads = ["/api/auth/get-session", "/api/auth/list-sessions", "/api/auth/list%2Dsessions", "/api/auth/account-info", "/api/providers"];
-  for (const path of reads)
-    for (const method of ["GET", "HEAD", "DELETE"])
-      for (const headers of <Record<string, string>[]>[{}, { "sec-fetch-site": "same-site", origin: "https://relay.example.test" }, { "sec-fetch-site": "same-origin", origin: "null" }]) {
-        expect((await send(path, headers, method)).status, `${method} ${path} ${JSON.stringify(headers)}`).toBe(403);
-        expect(seen, path).toEqual([]);
-      }
-  // The page's read, or a cookie route's lookup: looked up, then answered.
-  for (const path of ["/api/auth/get-session", "/api/auth/account-info"]) {
-    expect((await send(path, { "sec-fetch-site": "same-origin" })).status).toBe(200);
-    expect(seen).toEqual(["/api/auth/get-session", path]);
-  }
-  // A provider callback, the CSRF challenge, and a write go straight through,
-  // cookie and all, with no lookup.
-  for (const [path, method] of [
-    ["/api/auth/callback/github", "GET"],
-    ["/api/auth/%63srf", "GET"],
-    ["/api/auth/callback/apple", "POST"],
-    ["/api/auth/sign-out", "POST"],
-  ]) {
-    await send(path, { "sec-fetch-site": "cross-site" }, method);
-    expect(seen, path).toEqual([path]);
-  }
-});
-
-test("every GET the installed Better Auth serves is gated and looked up pre-launch, a provider callback alone excepted", async () => {
+test("every GET the installed Better Auth serves is refused to a sibling, a provider callback alone excepted", async () => {
   const built = createAuthApp({
     ...authPolicy,
     databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
@@ -801,16 +761,10 @@ test("every GET the installed Better Auth serves is gated and looked up pre-laun
     const read = (headers: Record<string, string>) =>
       workers.account.dispatchFetch(ORIGINS.account + path, { redirect: "manual", headers: { cookie, ...headers } });
     const sibling = (await read({ "sec-fetch-site": "same-site", origin: ORIGINS.relay })).status;
-    // Without a database, a looked-up login fails the request (5xx).
-    const own = (await read({ "sec-fetch-site": "same-origin" })).status;
     if (openAuthRead(path)) {
       expect(path).toMatch(/^\/api\/auth\/callback\//);
       expect(sibling, path).not.toBe(403);
-      expect(own, path).toBeLessThan(500);
-    } else {
-      expect(sibling, path).toBe(403);
-      expect(own, path).toBeGreaterThanOrEqual(500);
-    }
+    } else expect(sibling, path).toBe(403);
   }
 });
 

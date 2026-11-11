@@ -12,7 +12,7 @@ import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
 import { ADMIN_EMAIL, entitled, entitledSql, RENEWAL_GRACE } from "../entitlement";
 import { migrations } from "../migrations";
 import { reconcileCommand } from "../reconcile";
-import { ORIGINS, bundleWorker, miniflareOptions, alone } from "./bundle";
+import { ORIGINS, bundleWorker, miniflareOptions, alone, wrangler } from "./bundle";
 import { workerDatabases } from "./worker-roles";
 
 // Billing's core: the setup from bindings, the founding cohort, the
@@ -55,6 +55,15 @@ test("billing is closed without every Stripe binding, and refuses a ladder the p
   expect(() => billingSetup({ ...env, STRIPE_PRICE_YEARLY: "price_m" })).toThrow(/distinct/);
   expect(() => billingSetup({ ...env, STRIPE_PRICE_MONTHLY: "prod_m" })).toThrow(/distinct/);
   expect(() => billingSetup({ ...env, STRIPE_PRICE_MONTHLY: "price_m'" })).toThrow(/distinct/);
+});
+
+test("production's checked-in Prices open billing once its two secrets are set", () => {
+  const setup = billingSetup({
+    ...(wrangler.account.vars as Record<string, string>),
+    STRIPE_SECRET_KEY: "sk_live_x",
+    STRIPE_WEBHOOK_SECRET: "whsec_x",
+  });
+  expect(setup?.founding).toHaveLength(FOUNDING_LADDER.length);
 });
 
 test("the open cohort is the last one bought at until its net count fills: a refund there returns a seat, one before never reopens", () => {
