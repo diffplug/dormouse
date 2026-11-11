@@ -1541,6 +1541,8 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector('[data-lath-leaf="surface:new-tab"]')).toBeNull();
       expect(container.querySelector('[data-lath-leaf="surface:swapped"]')).not.toBeNull();
       expect(getAgentBrowserScreenController('surface:swapped')?.snapshot().renderMode).toBe('iframe');
+      // The reason outlives the panel the fallback replaced.
+      expect(container.querySelector('.shell-spawn-notice')?.textContent).toContain('agent-browser binary not found');
     } finally {
       untouchedSpy.mockRestore();
     }

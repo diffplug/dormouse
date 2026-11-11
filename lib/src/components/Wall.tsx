@@ -2285,6 +2285,12 @@ export function Wall({
       const fallback = launchFallbackFromParams(params);
       if (!fallback || lath.isDying(id) || isClosingSurface(id)) return;
       console.warn(`[dormouse] browser surface '${id}' could not launch:`, error);
+      // The fallback replaces the panel that would have said why, so the
+      // reason (a provider CLI that is not installed, say) shows here.
+      const reason = `The browser could not be opened (${error}).`;
+      // A pane that closes says it on another, the last selected if it lives.
+      const noticeId = fallback === 'close' ? [livePaneId(), ...nav.panes()].find(other => other && other !== id) : id;
+      if (noticeId) showShellSpawnNotice(noticeId, reason, 8000);
       if (fallback === 'close') {
         void closeSurfaceRef.current(id);
         return;
@@ -2302,7 +2308,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterPassthrough, enterCommandMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav, transferRefusal, livePaneId, showShellSpawnNotice]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
