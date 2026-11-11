@@ -321,7 +321,7 @@ export interface BurrowOptions {
    */
   createWebSocket: (url: string) => WebSocketLike;
   /** Build the remote-api handler for an authorized client (`BurrowService.#createApiSession` in `lib/src/host/remote/service.ts`). */
-  createSession?: (opts: RemoteApiSessionContext) => RemoteApiSessionLike;
+  createSession: (opts: RemoteApiSessionContext) => RemoteApiSessionLike;
   /**
    * Where the ACL comes from and goes. Required, with no webview-store default:
    * this controller runs in the Tauri sidecar and the VS Code extension host, so
@@ -427,7 +427,7 @@ export class BurrowRuntime {
   readonly #presenceWindows: PresenceWindows;
 
   readonly #createWebSocket: (url: string) => WebSocketLike;
-  readonly #createSession?: BurrowOptions['createSession'];
+  readonly #createSession: BurrowOptions['createSession'];
   readonly #saveAcl: BurrowOptions['saveAcl'];
   readonly #requestApproval: (pending: Omit<PendingPairing, 'kind'>) => void;
   readonly #dismissApproval: (clientId: string) => void;
@@ -765,7 +765,8 @@ export class BurrowRuntime {
   }
 
   /**
-   * What one invitation is doing. An id this Burrow has never held, or no longer
+   * What one invitation is doing, for tests: the panel learns it from
+   * `onInvitationChanged`. An id this Burrow has never held, or no longer
    * holds, reads as `consumed`: from the panel's side those are the same fact —
    * the code on screen can no longer be used.
    */
@@ -1952,12 +1953,6 @@ export class BurrowRuntime {
       burrowLabel: boundedBurrowLabel(this.#enrollment.label),
       ...(directOnly ? { directOnly: true as const } : {}),
     } satisfies ConnectionOutcomeV1);
-    if (!this.#createSession) {
-      // No remote-api behind this Burrow: the outcome is the whole answer, and
-      // the entry holds nothing, so it must not stay under a relay-chosen key.
-      this.#pruneClient(clientId);
-      return;
-    }
     // Destructured, so the session's closures retain only what an established
     // session is — the id and the two cipher states — and not the pending
     // record, whose handshake hash, Client static and challenge are spent.
