@@ -227,6 +227,11 @@ const KNOWN = [
     why: "PowerShell (5.1 and 7) mangles non-ASCII in E: typed `echo 'héllo wörld ✓ 日本語 🐭 a b　c'`, reported `echo 'héllo wörld √ ??? ?? a b c'`. Likely cause: shellIntegration.ps1 writes E with [Console]::Write, encoded in [Console]::OutputEncoding (the OEM code page), while P;Cwd rides the prompt string the host writes as Unicode",
   },
   {
+    // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: TERM_PROGRAM undefined.
+    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^the pane environment reaches the WSL distro/,
+    why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",
+  },
+  {
     // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
     shells: ['zsh'], platforms: ['linux'], case: /^nothing is written into the shipped zsh directory/,
     why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",
@@ -780,9 +785,14 @@ shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async
       .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
   }, 'env dump', 30_000, 100);
   assert.equal(env.DORMOUSE_SURFACE_ID, pane.id);
-  assert.equal(env.TERM_PROGRAM, 'iTerm.app');
-  assert.equal(env.COLORTERM, 'truecolor');
   for (const key of MUST_NOT_LEAK) assert.equal(env[key], undefined, `${row.name}: the host's ${key} reached the distro`);
+  // The identity every pane gets (docs/specs/transport.md -> iTerm2 identity),
+  // all reported at once.
+  const identity = { TERM_PROGRAM: 'iTerm.app', LC_TERMINAL: 'iTerm2', COLORTERM: 'truecolor' };
+  const wrong = Object.entries(identity).filter(([key, value]) => env[key] !== value)
+    .concat(['TERM_PROGRAM_VERSION', 'LC_TERMINAL_VERSION'].filter((key) => !env[key]).map((key) => [key]))
+    .map(([key]) => `${key}=${env[key]}`);
+  assert.deepEqual(wrong, [], `${row.name}: the distro lacks Dormouse's identity`);
 });
 
 // ── Last: nothing left running ────────────────────────────────────────────
