@@ -463,7 +463,7 @@ export class PocketClient {
     return this.#core.establishedRoute?.burrowId ?? null;
   }
 
-  /** See {@link ClientSessionCore.transportPath}. */
+  /** See {@link ClientSessionCore.transportPath}. For tests: the app hears it from {@link setOnTransportChanged}. */
   get transportPath(): DirectPath {
     return this.#core.transportPath;
   }
@@ -1188,7 +1188,7 @@ export class PocketClient {
     this.#core.unsubscribe(subId);
   }
 
-  /** See {@link ClientSessionCore.sendKeepalive}. */
+  /** See {@link ClientSessionCore.sendKeepalive}. For tests: the session arms its own keepalives. */
   sendKeepalive(): void {
     this.#core.sendKeepalive();
   }
