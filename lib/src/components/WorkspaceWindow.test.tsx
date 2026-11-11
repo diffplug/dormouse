@@ -792,6 +792,44 @@ describe('WorkspaceWindow', () => {
     expect(handle.surfaceIds()).toEqual([]);
   });
 
+  // One browser, one Surface, across the window (docs/specs/dor-browser.md →
+  // "Managed identity"): a raw `--session` names no key to steer it.
+  it('answers a surface.browser for a session another Workspace shows with that Surface, creating none', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    const browser = vi.fn(async () => ({ ok: true, stream: 4321, headed: false }));
+    Object.assign(fake, { browserProviders: ['agent-browser', 'playwright'], browser });
+    await render();
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
+    await flush();
+    const bind = async (workspaceId: string) => {
+      const handle = getWallHandle(workspaceId)!;
+      const respond = vi.fn();
+      await act(async () => {
+        await handle.handleDorControl({
+          requestId: `bind-${workspaceId}`,
+          method: SURFACE_CONTROL_METHODS.browser,
+          surfaceId: handle.surfaceIds()[0],
+          params: { provider: 'playwright', session: 'shared', cwd: '/repo' },
+          respond,
+        });
+      });
+      await flush();
+      return respond.mock.calls[0]?.[0] as { ok: boolean; result: { status: string; surfaceId: string } };
+    };
+
+    const created = await bind('workspace:2');
+    expect(created.ok).toBe(true);
+    expect(created.result.status).toBe('created');
+    expect(getWallHandle('workspace:2')!.surfaceIds()).toContain(created.result.surfaceId);
+    const before = getWallHandle(first)!.surfaceIds().length;
+
+    const again = await bind(first);
+    expect(again.ok).toBe(true);
+    expect(again.result.status).toBe('existing');
+    expect(again.result.surfaceId).toBe(created.result.surfaceId);
+    expect(getWallHandle(first)!.surfaceIds()).toHaveLength(before);
+  });
+
   it('names each Workspace its own agent-browser session for the same --key', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();

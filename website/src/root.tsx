@@ -11,8 +11,8 @@ import {
   useRouteError,
   type MetaArgs,
 } from "react-router";
-import SiteHeader from "./components/SiteHeader";
-import { siteMeta, sitePath } from "./lib/site-meta";
+import SiteErrorPage from "./components/SiteErrorPage";
+import { siteMeta } from "./lib/site-meta";
 import { trackPageview, type SiteRouteHandle } from "./lib/site-analytics";
 import { FONT_READY_SCRIPT, FONT_READY_STYLE } from "./lib/font-ready";
 import bodyFont from "@fontsource/ubuntu-mono/files/ubuntu-mono-latin-400-normal.woff2?url";
@@ -75,25 +75,12 @@ export default function Root() {
 }
 
 /**
- * A path no route matches, or a page that failed: the site's header and a
- * way home, in place of the framework's bare error. Cloudflare Pages answers
- * an unknown path with the homepage's HTML, so this is what its reader sees
- * once the page hydrates.
+ * A page that failed, or a 404 a route throws: the site's header and a way
+ * home, in place of the framework's bare error. An unknown path is the
+ * catch-all route's (pages/NotFound.tsx), not this.
  */
 export function ErrorBoundary() {
   const error = useRouteError();
   const notFound = isRouteErrorResponse(error) && error.status === 404;
-  return (
-    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
-      <SiteHeader />
-      <main className="mx-auto flex max-w-2xl flex-col gap-5 px-4 pt-32 pb-24 md:px-6">
-        <h1 className="font-display text-[clamp(1.75rem,3vw+0.75rem,2.75rem)]">
-          {notFound ? "There is no page here." : "This page failed to load."}
-        </h1>
-        <a href={sitePath("/")} className="text-lg text-[var(--color-caramel)] underline underline-offset-4">
-          Go to the Dormouse home page
-        </a>
-      </main>
-    </div>
-  );
+  return <SiteErrorPage heading={notFound ? "There is no page here." : "This page failed to load."} />;
 }

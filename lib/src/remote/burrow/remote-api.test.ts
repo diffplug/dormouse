@@ -239,6 +239,11 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 8; i += 1) await Promise.resolve();
 }
 
+/** Output read in one macrotask is sent as one `terminal.data` at its end. */
+function nextMacrotask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 /**
  * Resolving a surface is a promise — an owner in another webview is a round
  * trip away, and the local path takes the same seam rather than a second one —
@@ -731,11 +736,15 @@ describe('RemoteApiSession surface.attach', () => {
     await attach(session, 100, 30);
     sent.length = 0;
 
+    // A macrotask apart, so each read is its own message.
     provider.emitData('pty-1', 'plain');
+    await nextMacrotask();
     provider.emitData('pty-1', 'pre\x1b]1337;File=inline=1:AAAA\x07post', 'prepost');
+    await nextMacrotask();
     // Present-and-empty is authoritative: a chunk of nothing but a forwarded
     // image sequence has a text projection, and it is the empty string.
     provider.emitData('pty-1', '\x1b]1337;File=inline=1:AAAA\x07', '');
+    await nextMacrotask();
 
     expect(sent.map((payload) => (payload as RemoteEventMsg).data)).toEqual([
       { bytes: toBase64Url(utf8Encode('plain')) },
@@ -748,6 +757,92 @@ describe('RemoteApiSession surface.attach', () => {
         text: toBase64Url(utf8Encode('')),
       },
     ]);
+  });
+
+  it('sends the reads of one macrotask as one terminal.data, ahead of terminal.closed', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+    sent.length = 0;
+
+    provider.emitData('pty-1', 'one\r\n');
+    provider.emitData('pty-1', 'two\r\n');
+    provider.emitData('pty-1', 'three\r\n');
+    await nextMacrotask();
+    expect(terminalData(sent)).toEqual(['one\r\ntwo\r\nthree\r\n']);
+
+    sent.length = 0;
+    provider.emitData('pty-1', 'last\r\n');
+    provider.emitData('pty-1', 'words\r\n');
+    provider.emitExit('pty-1', 0);
+    expect(sent.map((payload) => (payload as RemoteEventMsg).event)).toEqual([
+      REMOTE_EVENTS.terminalData,
+      REMOTE_EVENTS.terminalClosed,
+    ]);
+    expect(terminalData(sent)).toEqual(['last\r\nwords\r\n']);
+  });
+
+  it("carries a batch's text projection when any read in it has one", async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+    sent.length = 0;
+
+    provider.emitData('pty-1', 'a\r\n');
+    provider.emitData('pty-1', 'pre\x1b]1337;File=inline=1:AAAA\x07post', 'prepost');
+    provider.emitData('pty-1', 'é😀');
+    await nextMacrotask();
+
+    expect(sent.map((payload) => (payload as RemoteEventMsg).data)).toEqual([
+      {
+        bytes: toBase64Url(utf8Encode('a\r\npre\x1b]1337;File=inline=1:AAAA\x07posté😀')),
+        text: toBase64Url(utf8Encode('a\r\npreposté😀')),
+      },
+    ]);
+  });
+
+  it('sends a batch as it reaches the size bound, never growing one past it', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+    sent.length = 0;
+
+    const read = 'x'.repeat(10 * 1024);
+    for (let i = 0; i < 5; i += 1) provider.emitData('pty-1', read);
+    // Three reads fit 32 KiB and a fourth would not, so those three went
+    // without waiting for the macrotask.
+    expect(terminalData(sent).map((data) => data.length)).toEqual([3 * read.length]);
+    await nextMacrotask();
+    expect(terminalData(sent).map((data) => data.length)).toEqual([3 * read.length, 2 * read.length]);
+  });
+
+  it('sends output read before a reply ahead of it, and nothing once disposed', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+    sent.length = 0;
+
+    provider.emitData('pty-1', 'before detach');
+    session.handle({ requestId: 'detach-1', method: REMOTE_METHODS.surfaceDetach, params: { surfaceId: 'surface:1' } });
+    expect(sent).toEqual([
+      { subId: 'attach-1', event: REMOTE_EVENTS.terminalData, data: { bytes: toBase64Url(utf8Encode('before detach')) } },
+      { requestId: 'detach-1', ok: true, result: {} },
+    ]);
+
+    await attach(session, 100, 30, 'surface:1', 'attach-2');
+    sent.length = 0;
+    provider.emitData('pty-1', 'unsent');
+    session.dispose();
+    await nextMacrotask();
+    expect(sent).toEqual([]);
   });
 
   it('falls back to the surface size for a missing dimension', async () => {

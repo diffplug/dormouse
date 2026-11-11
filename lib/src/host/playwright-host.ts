@@ -13,7 +13,7 @@ import { BROWSER_PROVIDERS, isDirectory, spawnAndCapture } from 'dor-lib-common'
 import { neutralBrowserCwd } from './browser-neutral-cwd';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
-import { settleAllWithin } from '../lib/settle-within';
+import { settleAllWithin, within } from '../lib/settle-within';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerBrowserInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserProvider, LiveBrowser } from './browser-host';
 import { measuredViewport, type ViewerSink, type ViewportSize } from './browser-viewer';
@@ -233,39 +233,43 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     if (!v.page || v.cdp || v.disposed || v.headed || !watching(v)) return;
     const page = v.page;
     try {
-      const cdp = await page.context().newCDPSession(page);
-      // Another refresh, tab change, or parking may finish while CDP attaches.
-      if (v.disposed || !watching(v) || v.page !== page || v.cdp) { await cdp.detach().catch(() => {}); return; }
-      v.cdp = cdp;
-      let acked = 0;
-      // The last frame forwarded: a capture over the host's CDP makes Chrome
-      // send it again, which forwarded would pulse the next capture, round and
-      // round (rationale).
-      let last: string | undefined;
-      cdp.on('Page.screencastFrame', event => {
-        if (v.disposed || v.cdp !== cdp) return;
-        const ack = () => {
-          acked = Date.now();
-          void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
-        };
-        setTimeout(ack, Math.max(0, acked + FRAME_INTERVAL_MS - Date.now())).unref();
-        if (event.data === last) return;
-        last = event.data;
-        // Decoded once, here; the viewer sockets carry it as binary.
-        const jpeg = Buffer.from(event.data, 'base64');
-        // The metadata measures the window the frame shows, not the viewport.
-        const windowWidth = event.metadata.deviceWidth > 0 ? event.metadata.deviceWidth : undefined;
-        for (const { sink, headed } of v.subscribers) if (!headed) sink.frame(jpeg, v.viewport, windowWidth);
-      });
-      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
+      await within(attachFrames(v, page), CLI_TIMEOUT_MS, 'playwright screencast start');
     } catch (e) {
-      // A page that navigates while CDP attaches fails either call. Forget the
+      // A page that navigates while CDP attaches fails either call, and one
+      // whose connection stops answering never finishes them. Forget the
       // page, so the next refresh sees a new one: it releases the attachment
-      // and starts again, instead of leaving the viewer frozen on a screencast
-      // that never started.
+      // and starts again, instead of leaving the viewer frozen on a
+      // screencast that never started.
       if (v.page === page) v.page = undefined;
       throw e;
     }
+  }
+  async function attachFrames(v: Viewer, page: Page) {
+    const cdp = await page.context().newCDPSession(page);
+    // Another refresh, tab change, or parking may finish while CDP attaches.
+    if (v.disposed || !watching(v) || v.page !== page || v.cdp) { await cdp.detach().catch(() => {}); return; }
+    v.cdp = cdp;
+    let acked = 0;
+    // The last frame forwarded: a capture over the host's CDP makes Chrome
+    // send it again, which forwarded would pulse the next capture, round and
+    // round (rationale).
+    let last: string | undefined;
+    cdp.on('Page.screencastFrame', event => {
+      if (v.disposed || v.cdp !== cdp) return;
+      const ack = () => {
+        acked = Date.now();
+        void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
+      };
+      setTimeout(ack, Math.max(0, acked + FRAME_INTERVAL_MS - Date.now())).unref();
+      if (event.data === last) return;
+      last = event.data;
+      // Decoded once, here; the viewer sockets carry it as binary.
+      const jpeg = Buffer.from(event.data, 'base64');
+      // The metadata measures the window the frame shows, not the viewport.
+      const windowWidth = event.metadata.deviceWidth > 0 ? event.metadata.deviceWidth : undefined;
+      for (const { sink, headed } of v.subscribers) if (!headed) sink.frame(jpeg, v.viewport, windowWidth);
+    });
+    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70 });
   }
   function schedule(v: Viewer) {
     if (v.disposed || !v.subscribers.size || v.timer) return;

@@ -73,31 +73,39 @@ jobs:
       # also rotates mirrors. That much machinery is not worth it for one
       # package; the retry here covers the common case without turning a
       # `Build & Test` red for a reason unrelated to the diff.
-      # 13 minutes, not 6: the budget has to outlast the schedule it wraps, or
-      # Actions kills the step mid-attempt and the ::error:: below — the line
-      # that says what the failure costs — never prints. Worst case is
-      # 3 x (120 update + 120 install) + 2 x 15 sleep = 750s, and the last sleep
-      # is guarded to keep that `2 x` true: unguarded it is 3 x 15 = 765s, which
-      # halves the headroom for pure dead time before a step that is already
-      # failing.
-      - name: Install zsh (shell-integration tests)
-        timeout-minutes: 13
+      # fish is not on the image either, and comes from the fish project's
+      # release-4 PPA: the archive's fish (3.7 on 24.04) predates the OSC 133
+      # fish reports itself, which is all the integration a fish pane has
+      # (docs/specs/terminal-state.md). pwsh is on the image. The real-shell
+      # conformance suite (standalone/sidecar/shell-conformance.test.js) fails
+      # the Test step below if any shell DORMOUSE_REQUIRE_SHELLS names is missing.
+      # 20 minutes: the budget has to outlast the schedule it wraps, or Actions
+      # kills the step mid-attempt and the ::error:: below — the line that says
+      # what the failure costs — never prints. Worst case is
+      # 3 x (120 PPA + 120 update + 120 install) + 2 x 15 sleep = 1110s, and the
+      # last sleep is guarded to keep that `2 x` true.
+      - name: Install zsh and fish (shell tests)
+        timeout-minutes: 20
         run: |
           for i in 1 2 3; do
-            if sudo timeout 120 apt-get update -q \
-               && sudo timeout 120 apt-get install -y -q --no-install-recommends zsh; then
+            if sudo timeout 120 add-apt-repository -y -n ppa:fish-shell/release-4 \
+               && sudo timeout 120 apt-get update -q \
+               && sudo timeout 120 apt-get install -y -q --no-install-recommends zsh fish; then
+              fish --version
               exit 0
             fi
-            echo "::warning::apt attempt $i for zsh failed or timed out"
+            echo "::warning::apt attempt $i for zsh and fish failed or timed out"
             if [ "$i" -lt 3 ]; then sleep 15; fi
           done
-          echo "::error::could not install zsh; the shell-integration suite would silently cover only bash"
+          echo "::error::could not install zsh and fish; the shell suites need both"
           exit 1
 
       # Library tests have their own runner. test:other finishes the checkout
       # isolation check before overlapping audit and package tests.
       - name: Test
         timeout-minutes: 20
+        env:
+          DORMOUSE_REQUIRE_SHELLS: zsh,bash,fish,pwsh
         run: pnpm test:other
 
       - name: Build
@@ -520,11 +528,38 @@ jobs:
       - name: Windows browser host and shell tests
         run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts src/host/agent-browser-host.test.ts src/lib/shell-escape.test.ts
 
+      # fish is on no runner image; zsh, bash 3.2, and pwsh are on macOS's.
+      # No `brew update`: the image's formula data is recent enough for one
+      # bottle, and an update costs minutes.
+      - name: Install fish (shell conformance)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: brew install fish && fish --version
+
+      # The whole sidecar suite, real shells included: the Linux job is the only
+      # other place it runs, and macOS's bash is 3.2. The conformance suite
+      # fails if a shell DORMOUSE_REQUIRE_SHELLS names is missing.
+      - name: Sidecar tests (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        env:
+          DORMOUSE_REQUIRE_SHELLS: zsh,bash,fish,pwsh
+        run: pnpm --filter dormouse-sidecar test
+
       # node-pty ships the Windows addon and ConPTY DLL as prebuilds, so the
-      # install above suffices. The Linux suite cannot exercise native close.
-      - name: Windows PTY shutdown tests
+      # install above suffices. The Linux suite cannot exercise native close,
+      # nor any Windows shell. The conformance suite writes the runner's own
+      # PowerShell profiles, which no environment variable moves.
+      - name: Windows PTY and shell tests
         if: runner.os == 'Windows'
-        run: pnpm exec node --test --test-force-exit standalone/sidecar/graceful-kill-windows.test.js standalone/sidecar/pty-host-wiring.test.js
+        timeout-minutes: 10
+        env:
+          DORMOUSE_REQUIRE_SHELLS: pwsh,powershell,cmd,git-bash
+          DORMOUSE_CONFORMANCE_WRITE_PROFILE: '1'
+        run: pnpm exec node --test --test-force-exit standalone/sidecar/graceful-kill-windows.test.js standalone/sidecar/pty-host-wiring.test.js standalone/sidecar/pty-core.test.js standalone/sidecar/shell-conformance.test.js
 
       # The package suites run on Linux, where these cases skip: `.cmd` shims
       # and UNC working directories, ACL-preserving saves, PATHEXT, and the WSL

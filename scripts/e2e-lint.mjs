@@ -33,8 +33,8 @@
  *     one is absent. A handshake that mixes in the wrong order, a seal that
  *     reuses a salt, or an ACL conjunction checking three fields instead of
  *     four all pass here. `remote-lib-common/test/noise.test.mjs`,
- *     `push-seal.test.mjs`, `security-guarantees.test.mjs`, and the
- *     malicious-relay harness own that, and so does the audit.
+ *     `push-seal.test.mjs`, `lib/src/remote/burrow/burrow-runtime.test.ts`,
+ *     and the malicious-relay harness own that, and so does the audit.
  *   - It reasons about spelled-out identifiers and string literals. A protocol
  *     name assembled at runtime, an algorithm chosen through a variable, or a
  *     dependency reached through a re-export is invisible to a regex and always

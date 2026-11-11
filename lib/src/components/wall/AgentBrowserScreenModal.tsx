@@ -204,7 +204,6 @@ export function AgentBrowserScreenModal({
         void controller.actions.applyViewportSetting(selectedViewport()).then(onClose, (error: unknown) => setApplyError(error instanceof Error ? error.message : String(error)));
         return;
       }
-      else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
     }
     onClose();
   };

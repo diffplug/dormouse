@@ -5,6 +5,11 @@
  * Hosted's `hosted/server/tests/relay-room.test.ts`. One copy, so the two
  * Relays cannot drift into two routings.
  *
+ * One routing rule is not here: closing a socket that holds more than
+ * `MAX_RELAY_SOCKET_BUFFERED_BYTES` unsent is self-host only, since a Workers
+ * WebSocket reports no buffered byte count, so its cases are in
+ * `relay/test/relay-limits.test.mjs`.
+ *
  * {@link socketCases} drive bare sockets through a *driver*:
  *
  * - `connectBurrow()` → `{ burrowId, burrowToken, socket }`: a fresh enrolled

@@ -20,7 +20,7 @@ const IFRAME_SHIM = iframeShim(APP);
 
 type ShimListener = (event: Record<string, unknown>) => void;
 
-function shimFrame(parentOrigin: string, deliver: (data: unknown) => void) {
+function shimFrame(parentOrigin: string, deliver: (data: unknown) => void, location = { origin: PROXY, href: `${PROXY}/story` }, navigationType?: string) {
   const listeners = new Map<string, ShimListener[]>();
   const addEventListener = (type: string, listener: ShimListener) => {
     const current = listeners.get(type) ?? [];
@@ -41,19 +41,26 @@ function shimFrame(parentOrigin: string, deliver: (data: unknown) => void) {
     classList: { toggle: (k: string, enabled: boolean) => enabled ? classes.add(k) : classes.delete(k) },
   };
   const dispatched: string[] = [];
+  // The page's own history calls move `location`, as a browser's do.
+  const move = (_state: unknown, _title: string, url: string) => { location.href = new URL(url, location.href).href; };
+  const history = { pushState: move, replaceState: move };
+  const timers: Array<() => void> = [];
   runInNewContext(IFRAME_SHIM, {
     window,
-    location: { origin: PROXY, href: `${PROXY}/story` },
+    location,
     document: { readyState: 'loading', documentElement: root, body: root, hasFocus: () => focus.held },
     CustomEvent: class { constructor(public type: string) {} },
     dispatchEvent: (event: { type: string }) => dispatched.push(event.type),
-    history: {},
+    history,
+    ...(navigationType ? { performance: { getEntriesByType: (type: string) => type === 'navigation' ? [{ type: navigationType }] : [] } } : {}),
     addEventListener,
-    setTimeout: () => 0,
+    setTimeout: (run: () => void) => { timers.push(run); return 0; },
     URL,
   });
   return {
-    parent, properties, classes, root, dispatched, focus,
+    parent, properties, classes, root, dispatched, focus, history, location,
+    /** Run the timers the shim set, as a tick would. */
+    tick() { for (const run of timers.splice(0)) run(); },
     emit(type: string, event: Record<string, unknown>) {
       for (const listener of listeners.get(type) ?? []) listener(event);
     },
@@ -186,9 +193,41 @@ describe('the shim addresses the grant and app, not the world', () => {
     frame.emit('pageshow', {});
     frame.emit('popstate', {});
     expect(delivered.filter(data => data.__dormouse !== 'theme-request')).toEqual([
-      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
-      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
-      { __dormouse: 'location', url: `${PROXY}/story` },
+      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true, nav: 'push' },
+      { __dormouse: 'location', url: `${PROXY}/story`, loaded: true, nav: 'push' },
+      { __dormouse: 'location', url: `${PROXY}/story`, nav: 'traverse' },
+    ]);
+  });
+
+  it('says a load reached by history traversal or a reload is one', () => {
+    const loads = (navigationType: string, persisted = false) => {
+      const delivered: Array<Record<string, unknown>> = [];
+      const frame = shimFrame(APP, (data) => delivered.push(data as Record<string, unknown>), undefined, navigationType);
+      frame.emit('pageshow', { persisted });
+      return delivered.filter(data => data.__dormouse === 'location').map(data => data.nav);
+    };
+    expect(loads('back_forward')).toEqual(['traverse']);
+    expect(loads('reload')).toEqual(['replace']);
+    expect(loads('navigate')).toEqual(['push']);
+    // A back-forward cache restore keeps the timing entry of its first load.
+    expect(loads('navigate', true)).toEqual(['traverse']);
+  });
+
+  it('says how the page changed its URL', () => {
+    const delivered: Array<Record<string, unknown>> = [];
+    const frame = shimFrame(APP, (data) => delivered.push(data as Record<string, unknown>));
+    frame.history.pushState(null, '', '/a');
+    frame.tick();
+    frame.history.replaceState(null, '', '/a?page=2');
+    frame.tick();
+    frame.location.href = `${PROXY}/story`;
+    frame.emit('popstate', {});
+    frame.emit('hashchange', {});
+    expect(delivered.filter(data => data.__dormouse === 'location')).toEqual([
+      { __dormouse: 'location', url: `${PROXY}/a`, nav: 'push' },
+      { __dormouse: 'location', url: `${PROXY}/a?page=2`, nav: 'replace' },
+      { __dormouse: 'location', url: `${PROXY}/story`, nav: 'traverse' },
+      { __dormouse: 'location', url: `${PROXY}/story`, nav: 'push' },
     ]);
   });
 

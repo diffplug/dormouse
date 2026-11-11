@@ -155,9 +155,11 @@ export const DialogKeyboardContext = createContext<AcquireDialogKeyboard>(() => 
 
 /** Reference-count the leases over one Wall's dialog-keyboard flag, so a dialog
  *  closing over another one leaves the survivor's suppression standing
- *  (docs/specs/layout.md → "Keyboard shortcuts (command mode)"). */
+ *  (docs/specs/layout.md → "Keyboard shortcuts (command mode)"). `onIdle`
+ *  runs when the last lease is released. */
 export function createDialogKeyboardCoordinator(
   activeRef: { current: boolean },
+  onIdle?: () => void,
 ): AcquireDialogKeyboard {
   let ownerCount = 0;
   return () => {
@@ -169,6 +171,7 @@ export function createDialogKeyboardCoordinator(
       released = true;
       ownerCount = Math.max(0, ownerCount - 1);
       activeRef.current = ownerCount > 0;
+      if (ownerCount === 0) onIdle?.();
     };
   };
 }

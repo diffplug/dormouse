@@ -74,6 +74,8 @@
 
 ## Routing
 
+**Why a bound on what a socket holds unsent.** `ws` never refuses a send: a peer that stops reading — a phone whose page iOS suspended mid-burst, a laptop asleep on a half-open socket — leaves everything sent to it in the Relay's memory until the heartbeat closes it 90 to 120 s later. Measured on the self-host Relay with a Client that stopped reading its TCP socket (`ws` 8.22, Node 24.22, 2026-11): at 1 MB/s it held 18.0 MiB after 20 s, and at 18.6 MB/s 186 MiB after 10 s with RSS up 306 MiB, linear until the heartbeat; with the bound, 4.0 MiB at either rate. The direct path's sender bound is reused because both hold the same terminal stream for a peer not draining it. Closing costs the phone a reconnect, which it pays on any dropped socket. A Workers WebSocket has no `bufferedAmount` (workerd 1.20261104.1 lists none, and a Durable Object's send into a peer that reads nothing returns at once, 25 MiB in 3 ms, with no error), so Hosted's room cannot apply it without counting what it sends, which tells it nothing about what the peer read.
+
 **Why the Burrow cannot lean on the Relay's shape guard.** Trusting the relay's own `isE2eClientFrame` would take a relay-supplied object on faith where that is least acceptable: the routing values it uses as map keys, and the ciphertext it is about to spend WebCrypto on. The relay's copy keeps a bad frame off the wire; the Burrow's exists because the model does not trust the relay.
 
 ## Relay origin

@@ -386,17 +386,16 @@ export function oneTimeFrameText(
 
 /**
  * Open `runtime` and read its link back the way a phone does: parsed from the
- * `waiting` URL against `origin`, at `now` once the open settled. Throws where
- * it did not settle at `waiting`, or the link did not parse.
+ * `waiting` URL against `origin`. Throws where it did not settle at `waiting`,
+ * or the link did not parse.
  */
 export async function openOneTimeLink(
   runtime: { open(): Promise<OneTimeState> },
   origin: string,
-  now: () => number,
 ): Promise<OneTimeLink> {
   const state = await runtime.open();
   if (state.status !== 'waiting') throw new Error(`expected waiting, got ${state.status}`);
-  const link = await parseOneTimeLinkUrl(state.url, origin, now());
+  const link = await parseOneTimeLinkUrl(state.url, origin);
   if (!link) throw new Error('the link did not parse');
   return link;
 }

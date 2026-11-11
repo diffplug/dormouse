@@ -174,7 +174,7 @@ function makeRuntime(
 }
 
 /** Open the runtime and read its link back the way a phone does. */
-const openLink = (): Promise<OneTimeLink> => openOneTimeLink(runtime, ORIGIN, clock.now);
+const openLink = (): Promise<OneTimeLink> => openOneTimeLink(runtime, ORIGIN);
 
 /** The Burrow's own frames of one step, off its socket's send log, whether or not anyone got them. */
 function burrowSent(step: 'response' | 'transport'): Array<Record<string, unknown>> {

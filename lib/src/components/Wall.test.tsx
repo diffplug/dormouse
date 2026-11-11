@@ -44,6 +44,7 @@ import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-st
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
+import { clearExternalLinkConfirmation, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
 import { installSurfaceIdPool, resetSurfaceIdPool } from '../lib/surface-ids';
 import { cfg } from '../cfg';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
@@ -299,6 +300,28 @@ describe('Wall on the Lath engine', () => {
       await flushFrame();
       expect(focus).toHaveBeenCalledWith('surface:a', true);
     } finally {
+      focus.mockRestore();
+    }
+  });
+
+  it.each([false, true])('gives the passthrough terminal the keyboard back after the last dialog closes (another field focused: %s)', async (elsewhere) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    const field = document.body.appendChild(document.createElement('input'));
+    try {
+      await act(async () => { requestExternalLinkConfirmation('https://example.com/'); });
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      focus.mockClear();
+      await act(async () => {
+        clearExternalLinkConfirmation();
+        if (elsewhere) field.focus();
+      });
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      await flushFrame();
+      expect(focus.mock.calls.some(([id, focused]) => id === 'surface:a' && focused)).toBe(!elsewhere);
+    } finally {
+      field.remove();
       focus.mockRestore();
     }
   });

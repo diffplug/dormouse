@@ -372,7 +372,7 @@ describe('embedded pages', () => {
       snapshot: {
         renderMode, viewport: { w: 0, h: 0, dpr: 1 }, syncEngaged: false,
       },
-      actions: { engageSync() {}, applyViewport() {}, openModal() {} },
+      actions: { engageSync() {}, openModal() {} },
       chrome: { url, displayUrl: url, title: 'Page', key: null },
       chromeActions: { navigate() {}, back() {}, forward() {}, reload() {} },
       hostCapable: false,
