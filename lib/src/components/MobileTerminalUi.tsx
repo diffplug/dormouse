@@ -50,6 +50,7 @@ import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
 import { EdgeScrollMotion, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal } from '../lib/mobile-terminal-scroll';
+import { kittyKeyboardFlags } from '../lib/terminal-modes';
 import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
 import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
@@ -193,11 +194,16 @@ const CURSOR_KEYS: ReadonlySet<MobileGestureInputId> = new Set(['up', 'down', 'r
 
 /** What a key sends to a Session: the arrows, Home and End take their `ESC O`
  *  form while its program has application cursor keys on, as xterm's own
- *  encoder does; ncurses' keypad mode matches only that form. */
+ *  encoder does; ncurses' keypad mode matches only that form. Shift+Enter
+ *  takes its kitty form only while the program has kitty keyboard flags
+ *  pushed, as xterm's does; any other program reads Enter, never a sequence
+ *  it would print. */
 function terminalKeySequence(id: MobileGestureInputId, sessionId: string | undefined): string {
   const data = MOBILE_TERMINAL_KEY_SEQUENCES[id];
-  if (!CURSOR_KEYS.has(id) || !sessionId) return data;
-  return getTerminalInstance(sessionId)?.modes.applicationCursorKeysMode ? `\x1bO${data.slice(2)}` : data;
+  const terminal = sessionId ? getTerminalInstance(sessionId) : null;
+  if (id === 'shiftEnter') return terminal && kittyKeyboardFlags(terminal) ? data : MOBILE_TERMINAL_KEY_SEQUENCES.enter;
+  if (!CURSOR_KEYS.has(id)) return data;
+  return terminal?.modes.applicationCursorKeysMode ? `\x1bO${data.slice(2)}` : data;
 }
 
 /** What a physical keyboard's key sends; null leaves the key to the page.

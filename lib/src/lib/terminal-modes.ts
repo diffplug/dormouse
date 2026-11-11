@@ -49,6 +49,12 @@ export function readTerminalModes(terminal: Terminal): TerminalModes {
   };
 }
 
+/** The kitty keyboard flags in force on `terminal`'s active screen; 0 until its
+ * program pushes some. */
+export function kittyKeyboardFlags(terminal: Terminal): number {
+  return xtermCore(terminal)?.coreService?.kittyKeyboard.flags ?? 0;
+}
+
 const MOUSE_TRACKING = new Map<unknown, number>([['x10', 9], ['vt200', 1000], ['drag', 1002], ['any', 1003]]);
 const MOUSE_ENCODING = new Map<unknown, number>([['sgr', 1006], ['sgrPixels', 1016]]);
 /** DECSCUSR's steady parameter for each style; the blinking one is one lower. */
