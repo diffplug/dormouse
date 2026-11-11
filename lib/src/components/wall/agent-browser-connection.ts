@@ -9,6 +9,10 @@ export type { AgentBrowserTab };
  *  on it, before the attempt counts as a close and is retried. */
 export const VIEW_URL_TIMEOUT_MS = 15_000;
 export const DIAL_TIMEOUT_MS = 10_000;
+/** A newly seen tab is followed only this soon after the viewer's own press
+ *  or key: a popup the pane's click opened is the user's to see, while one an
+ *  agent's command opened stays where the agent's CLI put its selection. */
+export const FOLLOW_NEW_TAB_MS = 2_000;
 
 export type AgentBrowserConnectionState = 'connecting' | 'open' | 'closed' | 'failed';
 
@@ -95,6 +99,8 @@ export class AgentBrowserConnection {
   private readonly warnedThrows = new Set<string>();
   private knownTabIds = new Set<string>();
   private pendingNewTab: { tabId: string; initialUrl: string; seenAtMs: number } | null = null;
+  /** When this viewer last sent a press or a key down. */
+  private pressedAt = -Infinity;
   private snap: AgentBrowserSnapshot;
 
   constructor(private readonly deps: AgentBrowserConnectionDeps) {
@@ -130,6 +136,7 @@ export class AgentBrowserConnection {
   }
 
   send(payload: Record<string, unknown>): void {
+    if ((payload.type === 'input_mouse' && payload.eventType === 'mousePressed') || (payload.type === 'input_keyboard' && payload.eventType === 'keyDown')) this.pressedAt = Date.now();
     const ws = this.socket;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
   }
@@ -354,6 +361,10 @@ export class AgentBrowserConnection {
     const fresh = next.filter((t) => !this.knownTabIds.has(t.tabId));
     const newest = fresh[fresh.length - 1];
     if (!newest) return;
+    if (Date.now() - this.pressedAt > FOLLOW_NEW_TAB_MS) {
+      this.debug('new-tab-unfollowed', { tabId: newest.tabId });
+      return;
+    }
     const duplicateUrl = !!newest.url && previousTabs.some((tab) => tab.url === newest.url);
     if (!newest.active) maybeSelectTab(newest, 'new-tab-inactive');
     else if (duplicateUrl) {
