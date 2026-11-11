@@ -231,7 +231,8 @@ function resolveSurfaceTarget(
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
   // drops it before dispatching (`requestForWall`), so an omitted target falls
-  // back to this Workspace's focused Surface.
+  // back to this Workspace's focused Surface. A held caller these surfaces
+  // omit (a minimized one, among visible panes) falls back the same way.
   const resolvedTarget = target ?? (callerSurfaceId !== undefined ? 'surface:self' : 'surface:focused');
   const classified = parseSurfaceTarget(resolvedTarget);
   if (classified.kind === 'invalid') return { ok: false, message: classified.message };
@@ -243,7 +244,7 @@ function resolveSurfaceTarget(
   if (classified.kind === 'title') {
     return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
   }
-  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
+  const fallback = !target ? (surfaces.find((surface) => surface.focused) ?? surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   const pending = classified.kind === 'id' ? pendingSurfaceRefusal(classified.id) : null;
   return { ok: false, message: pending ?? `surface '${resolvedTarget}' was not found` };

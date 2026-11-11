@@ -858,6 +858,34 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('places an iframe from a minimized caller beside the focused Surface', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />);
+    });
+    await flush();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Minimize"]')!.click();
+    });
+    await flush();
+
+    let response: { ok: boolean; error?: string; result?: { status: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.iframe,
+          params: { url: 'http://localhost:5173/' },
+          surfaceId: 'surface:a',
+          respond: (r: typeof response) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+
+    expect(response?.error).toBeUndefined();
+    expect(response?.ok).toBe(true);
+    expect(container.querySelector('[data-lath-leaf="surface:b"]')).not.toBeNull();
+  });
+
   it('validates a dor await and parks it on the host alert manager', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:1']} initialMode="command" />);
