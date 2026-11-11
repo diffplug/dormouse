@@ -122,7 +122,6 @@ export function ToolPanel(props: PaneProps) {
     return () => { cancelled = true; clearTimeout(timer); };
     // A fresh binding or request cancels work for the retired page. Other
     // metadata updates must not restart restoration while the user scrolls.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.id, props.params?.url, props.params?.session, viewRequest?.token, write]);
 
   // Rendered alone, not as one of two halves: mounting TerminalPanel would spawn

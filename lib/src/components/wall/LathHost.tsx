@@ -563,7 +563,6 @@ export function LathHost({
   useEffect(() => {
     if (externalDrag) dragController.beginExternal(externalDrag.id, externalDrag.startX, externalDrag.startY);
     else dragController.endExternal();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalDragId]);
 
   // Swallow the one click the browser synthesizes after a real drag (so a drop over a
@@ -665,7 +664,6 @@ export function LathHost({
     // its last preview size, so neither a ResizeObserver event nor a settlement change
     // would fire — including a final pointermove whose rAF never ran before pointerup.
     pump(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.tree, snapshot.zoomedId]);
 
   // A container resize re-lays out instantly (snap) — tweening every resize frame
@@ -675,7 +673,6 @@ export function LathHost({
     const { targets, layers } = presentationTargets(snapshot.tree, rectRef.current, snapshot.zoomedId);
     animator.retarget(targets, nowMs(), undefined, { snap: true, layers });
     pump();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.width, size.height]);
 
   // After EVERY React commit, re-assert the animator frames while unsettled — a
