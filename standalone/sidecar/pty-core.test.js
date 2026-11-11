@@ -193,7 +193,8 @@ test('Windows panes carry dor context through WSL and back without translating p
       fsModule: { statSync() { throw new Error('ENOENT'); } },
     });
     const entries = config.env.WSLENV.split(':');
-    assert.deepEqual(entries, ['USER_FILES/lp', 'USER_FLAG/u', ...WSL_CLI_ENV]);
+    assert.deepEqual(entries, ['USER_FILES/lp', 'USER_FLAG/u',
+      'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID', 'DORMOUSE_HOST', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN']);
     for (const key of ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN']) {
       assert.equal(config.env[key], env[key]);
     }
@@ -210,7 +211,18 @@ test('WSLENV merges an inherited entry of any casing and leaves the launcher ent
     env: { WslEnv: 'USER_FLAG/u:PWD/pw:ELECTRON_RUN_AS_NODE/w' },
   });
   assert.equal(config.env.WslEnv, undefined);
-  assert.deepEqual(config.env.WSLENV.split(':'), ['USER_FLAG/u', ...WSL_CLI_ENV]);
+  assert.deepEqual(config.env.WSLENV.split(':'), ['USER_FLAG/u', 'DORMOUSE_SURFACE_ID']);
+});
+
+test('WSLENV lists no name the pane lacks, which WSL would set empty in the distro', () => {
+  const spawn = (options, env) => resolveSpawnConfig(options, { platform: 'win32', env }).env;
+  const plain = spawn({ shell: 'C:\\Windows\\System32\\wsl.exe', surfaceId: 'surface:1' }, { DORMOUSE_DEHYDRATE: 'inherited', WSLENV: 'DORMOUSE_DEHYDRATE' });
+  assert.equal(plain.DORMOUSE_DEHYDRATE, undefined);
+  for (const name of plain.WSLENV.split(':')) assert.ok(Object.hasOwn(plain, name), `${name} is listed but unset`);
+  assert.ok(!plain.WSLENV.split(':').includes('DORMOUSE_DEHYDRATE'));
+  // A rehydrated pane has the payload, so it crosses.
+  const rehydrated = spawn({ surfaceId: 'surface:2', dehydrate: '{"v":1}' }, {});
+  assert.ok(rehydrated.WSLENV.split(':').includes('DORMOUSE_DEHYDRATE'));
 });
 
 test('WSLENV forwards every DORMOUSE_* variable the dor CLI reads', () => {

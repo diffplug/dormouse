@@ -222,11 +222,6 @@ const KNOWN = [
     why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",
   },
   {
-    // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: DORMOUSE_DEHYDRATE is '' in the distro.
-    shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: unset names arrive unset/,
-    why: "withWslCliEnv lists every name the dor CLI reads in WSLENV whether or not the pane has it, and WSL then sets each unset one empty in the distro: DORMOUSE_DEHYDRATE arrives as '' (dor-tool.md: the host strips it from every pane but a rehydrated one; readDehydrated reads '' as none). In a standalone pane DORMOUSE_HOST_WORKSPACE, DORMOUSE_AGENT_BROWSER_BIN, and DORMOUSE_PLAYWRIGHT_BIN are unset too (dor-cli.md), so likely arrive empty as well; this case lists every one",
-  },
-  {
     // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
     shells: ['zsh'], platforms: ['linux'], case: /^shipped directory: nothing written/,
     why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",

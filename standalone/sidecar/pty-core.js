@@ -303,12 +303,15 @@ const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_LAUNCHER_ENV]);
 
 // Replace conflicting flags inherited from a parent host, preserve user vars.
 // Windows env names ignore case, so an inherited `WslEnv` is the same variable.
+// Only names this pane has are listed: WSL sets every name WSLENV lists in the
+// distro, one the pane lacks as an empty variable.
 function withWslCliEnv(env) {
+  const names = new Set(Object.keys(env).map((name) => name.toUpperCase()));
   const key = Object.keys(env).find((name) => name.toUpperCase() === 'WSLENV');
   const inherited = key ? env[key].split(':').filter((entry) =>
     entry && !WSL_MANAGED_NAMES.has(entry.split('/')[0].toUpperCase())) : [];
   if (key) delete env[key];
-  env.WSLENV = [...inherited, ...WSL_CLI_ENV].join(':');
+  env.WSLENV = [...inherited, ...WSL_CLI_ENV.filter((name) => names.has(name))].join(':');
 }
 
 // Directory holding the per-shell OSC 633 integration scripts. Shipped next to
