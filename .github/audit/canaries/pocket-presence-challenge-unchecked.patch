@@ -4,7 +4,7 @@ Expect: lib/src/remote/client/pocket-client.ts
 Source: reverses part of #1223 (Pocket signed the challenge the Relay's `begin` answered instead of deriving its own)
 
 diff --git a/lib/src/remote/client/pocket-client.test.ts b/lib/src/remote/client/pocket-client.test.ts
-index b7a91c6..25d98e3 100644
+index ea95ccf2b..ce4a787f6 100644
 --- a/lib/src/remote/client/pocket-client.test.ts
 +++ b/lib/src/remote/client/pocket-client.test.ts
 @@ -51,7 +51,6 @@ import {
@@ -12,10 +12,10 @@ index b7a91c6..25d98e3 100644
    PAIRING_DENIAL_MESSAGES,
    PASSKEY_UNAVAILABLE_MESSAGE,
 -  PRESENCE_CHALLENGE_MISMATCH_MESSAGE,
+   POCKET_API_TIMEOUT_MS,
    PocketClient,
-   SessionExpiredError,
-   SessionSupersededError,
-@@ -2005,12 +2004,6 @@ describe('the presence proof', () => {
+   RELAY_NO_ANSWER_MESSAGE,
+@@ -2170,12 +2169,6 @@ describe('the presence proof', () => {
      return { client, prompts, finished };
    }
  
@@ -28,7 +28,7 @@ index b7a91c6..25d98e3 100644
    /**
     * A paired phone, past the window its pairing opened, and another connection
     * on that phone's own paired static which the phone never opened: the binding
-@@ -2078,38 +2071,6 @@ describe('the presence proof', () => {
+@@ -2243,38 +2236,6 @@ describe('the presence proof', () => {
      return { harness, binding, nonce, present };
    }
  
@@ -68,7 +68,7 @@ index b7a91c6..25d98e3 100644
      const harness = await makeE2eHarness();
      const phone = await behindRelay(
 diff --git a/lib/src/remote/client/pocket-client.ts b/lib/src/remote/client/pocket-client.ts
-index 33381cf..352a714 100644
+index e7d1eea71..e07d1e6d5 100644
 --- a/lib/src/remote/client/pocket-client.ts
 +++ b/lib/src/remote/client/pocket-client.ts
 @@ -38,7 +38,6 @@ import {
@@ -79,7 +79,7 @@ index 33381cf..352a714 100644
    pushEndpointFingerprint,
    pushSubscriptionDeletePath,
    randomBase64Url,
-@@ -356,14 +355,6 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> =
+@@ -361,14 +360,6 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> =
    'burrow-error': 'The computer could not finish the connection.',
  };
  
@@ -94,7 +94,7 @@ index 33381cf..352a714 100644
  /**
   * What a ceremony that simply never answered reports.
   *
-@@ -1170,12 +1161,6 @@ export class PocketClient {
+@@ -1238,12 +1229,6 @@ export class PocketClient {
     * authenticates no other pairing or connection; the Relay's `finish` proves
     * nothing to the Burrow, which recomputes the challenge and verifies the same
     * assertion itself.
@@ -107,7 +107,7 @@ index 33381cf..352a714 100644
     */
    async #provePresence(binding: PresenceBinding): Promise<PresenceProofV1> {
      const auth = this.#auth();
-@@ -1184,13 +1169,7 @@ export class PocketClient {
+@@ -1252,13 +1237,7 @@ export class PocketClient {
        { binding },
        auth,
      );
