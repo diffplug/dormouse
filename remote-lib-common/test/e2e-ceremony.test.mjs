@@ -461,10 +461,10 @@ test('a bare challenge is a Burrow that offers no window, and an unknown offer i
   }
 });
 
-test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denials', () => {
+test('isConnectionOutcomeV1 takes a labelled success or one of four fixed denials', () => {
   assert.equal(isConnectionOutcomeV1({ ok: true, burrowLabel: 'Laptop' }), true);
   assert.equal(isConnectionOutcomeV1({ ok: true, burrowLabel: 'Laptop', directOnly: true }), true);
-  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy', 'burrow-error']) {
+  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy']) {
     assert.equal(isConnectionOutcomeV1({ ok: false, code }), true, code);
   }
   for (const [why, value] of [
@@ -668,7 +668,7 @@ test('a window request is the same size on the wire as a proof', async () => {
 test('a connection success and every connection denial are the same size on the wire', async () => {
   const burrow = await established();
   const success = burrow.sendControl({ ok: true, burrowLabel: "Ned's MacBook Pro (16-inch, 2025)" });
-  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy', 'burrow-error']) {
+  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy']) {
     assert.equal(burrow.sendControl({ ok: false, code }).length, success.length, code);
   }
   // And the two ceremonies' outcomes are indistinguishable from each other too:

@@ -470,23 +470,6 @@ describe('DirectPeer', () => {
       },
     );
 
-    it('refuses one the peer created, which is where the check can fail', async () => {
-      // The offerer only re-reads the channel it asked for; the answerer is
-      // handed one by a peer it has no reason to trust to have asked for the
-      // same thing.
-      const { clientPeer, burrowPeer, burrow } = pair({
-        channel: 'unordered',
-        channelSide: 'answerer',
-      });
-
-      const offer = await clientPeer.offer();
-      expect(await burrowPeer.answer(offer!)).toBeNull();
-
-      expect(burrow.closes).toEqual([
-        'the direct channel is not the reliable ordered one this session opens',
-      ]);
-    });
-
     it('abandons a channel that cannot carry one Noise message', async () => {
       const { clientPeer, client } = await connected({ maxMessageSize: 16_384 });
 

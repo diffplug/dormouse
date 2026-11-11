@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -197,11 +197,17 @@ describe('FileBurrowStateStore', () => {
     await writeFile(join(dir, 'access-log.json'), JSON.stringify([entry, { at: 'soon', event: 'paired' }]));
     expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([entry]);
 
-    // A log that cannot be read starts over rather than failing anything.
+    // A log that cannot be parsed starts over rather than failing anything.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await writeFile(join(dir, 'access-log.json'), '[{');
     expect(await new FileBurrowStateStore(dir).loadAccessLog()).toEqual([]);
     warn.mockRestore();
+  });
+
+  it('rejects an access log it cannot read, rather than answering it empty', async () => {
+    // Empty would let the next entry's save replace every record in the file.
+    await mkdir(join(dir, 'access-log.json'));
+    await expect(new FileBurrowStateStore(dir).loadAccessLog()).rejects.toThrow();
   });
 
   it('clearing the enrollment leaves the records alone', async () => {
@@ -413,14 +419,6 @@ describe('createEphemeralBurrowStateStore', () => {
 
     await store.clearEnrollment();
     expect(await store.loadEnrollment()).toBeNull();
-  });
-
-  it('says out loud whether a write survives the process', () => {
-    // The two stores have to disagree here: the dev harness holds the Burrow in
-    // memory only, and a store read as durable when it is not would let a
-    // caller believe an enrollment outlives a restart.
-    expect(createEphemeralBurrowStateStore(() => {}).persistent).toBe(false);
-    expect(new FileBurrowStateStore(dir).persistent).toBe(true);
   });
 
   it('files records under their own burrow, like the real store', async () => {

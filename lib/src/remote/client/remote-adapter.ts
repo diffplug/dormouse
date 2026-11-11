@@ -15,7 +15,7 @@ import {
   type TerminalDataEvent,
 } from 'remote-lib-common';
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
-import type { PlatformAdapter, PtyDataDetail, PtyInfo, OpenPort } from '../../lib/platform/types';
+import type { PlatformAdapter, PtyDataDetail, OpenPort } from '../../lib/platform/types';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 
 /** Terminal stream callbacks for {@link RemoteAdapterClient.attach}. */
@@ -67,7 +67,6 @@ const DEFAULT_SIZE: Size = { cols: 80, rows: 24 };
 
 type DataHandler = (detail: PtyDataDetail) => void;
 type ExitHandler = (detail: { id: string; exitCode: number }) => void;
-type ListHandler = (detail: { ptys: PtyInfo[] }) => void;
 type DirectoryListener = (entries: DirectoryEntry[]) => void;
 
 export class RemotePtyAdapter implements PlatformAdapter {
@@ -75,7 +74,6 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   readonly #dataHandlers = new Set<DataHandler>();
   readonly #exitHandlers = new Set<ExitHandler>();
-  readonly #listHandlers = new Set<ListHandler>();
   readonly #directoryListeners = new Set<DirectoryListener>();
 
   /** Latest directory snapshot, in Burrow order. */
@@ -135,31 +133,16 @@ export class RemotePtyAdapter implements PlatformAdapter {
     }
   }
 
-  // --- Directory (onPtyList + adapter-specific getters) --------------------
+  // --- Directory (adapter-specific getters) --------------------------------
 
-  requestInit(): void {
-    if (this.#disposed) return;
-    void this.#ensureDirectoryWatch().catch(() => {});
-    // Give a resuming UI the latest known list immediately.
-    if (this.#entries.length > 0) this.#emitPtyList();
-  }
-
-  onPtyList(handler: ListHandler): void {
-    this.#listHandlers.add(handler);
-  }
-
-  offPtyList(handler: ListHandler): void {
-    this.#listHandlers.delete(handler);
-  }
+  // The desktop resume path: Pocket's wall reads the directory below instead.
+  requestInit(): void {}
+  onPtyList(): void {}
+  offPtyList(): void {}
 
   /** The full directory snapshot (titles/activity/ringing/hasTODO) without attaching. */
   getDirectoryEntries(): DirectoryEntry[] {
     return [...this.#entries];
-  }
-
-  /** The directory entry for a surface, or undefined. */
-  getPaneEntry(surfaceId: string): DirectoryEntry | undefined {
-    return this.#entries.find((entry) => entry.surfaceId === surfaceId);
   }
 
   /** Subscribe to directory snapshots; returns an unsubscribe fn. */
@@ -190,19 +173,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
   #onSnapshot(entries: DirectoryEntry[]): void {
     if (this.#disposed) return;
     this.#entries = entries;
-    this.#emitPtyList();
     for (const listener of this.#directoryListeners) listener(entries);
-  }
-
-  #emitPtyList(): void {
-    const ptys: PtyInfo[] = this.#entries.map((entry) => ({
-      id: entry.surfaceId,
-      // `entry.alive` is real PTY-process liveness (a lingering exited surface
-      // reports false), NOT `entry.exitCode` — that is the last command's
-      // shell-integration status, which deriving alive from was the bug.
-      alive: entry.alive,
-    }));
-    for (const handler of this.#listHandlers) handler({ ptys });
   }
 
   // --- Attach / active pane (adapter-specific extra) -----------------------
@@ -306,7 +277,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   writePty(id: string, data: string): void {
     if (this.#attached?.surfaceId !== id) return; // Burrow only accepts the attached pane
     // The Burrow discards these anyway (remote-api.md -> "Terminal surfaces"), so
-    // don't spend the relay on them.
+    // don't spend the relay on them. By shape alone, so a modified F3 key
+    // (`CSI 1;<mod>R`, a cursor report byte for byte) is dropped too.
     if (inputIsReplayTerminalReport(data)) return;
     void this.#client.write(id, toBase64Url(utf8Encode(data))).catch(() => {});
   }

@@ -116,6 +116,7 @@ const STATUS_FIELDS: {
   connection: Object.is,
   pairedClients: Object.is,
   suggestedLabel: Object.is,
+  label: Object.is,
   offer: Object.is,
   // A fresh object every poll, so field by field: a reference compare would
   // republish every 2 s while a code waits.

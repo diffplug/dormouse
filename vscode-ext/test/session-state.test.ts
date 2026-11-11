@@ -10,7 +10,7 @@ const ptyManager = vi.hoisted(() => ({
 
 vi.mock('../src/pty-manager', () => ptyManager);
 
-import { discardUnreadableSessionState, getSavedSessionState, mergeAlertStates, refreshSavedSessionStateFromPtys } from '../src/session-state';
+import { discardUnreadableSessionState, getSavedSessionState, mergeAlertStates, recoveryDirectory, refreshSavedSessionStateFromPtys } from '../src/session-state';
 
 const liveAlert = (overrides: Partial<AlertState> = {}): AlertState => ({
   ...DEFAULT_ALERT_STATE,
@@ -112,5 +112,31 @@ describe('VS Code session alert persistence', () => {
     await discardUnreadableSessionState(kept.context);
     expect(kept.read()).toBe(current);
     info.mockRestore();
+  });
+});
+
+describe('VS Code recovery record directory', () => {
+  function folderlessWindow() {
+    const state = new Map<string, unknown>();
+    return {
+      globalStorageUri: { fsPath: '/global' },
+      workspaceState: {
+        get: (key: string) => state.get(key),
+        update: (key: string, value: unknown) => { state.set(key, value); return Promise.resolve(); },
+      },
+    } as never;
+  }
+
+  it('gives each folder-less window its own directory, kept across activations', () => {
+    const a = folderlessWindow();
+    const b = folderlessWindow();
+    const dirA = recoveryDirectory(a);
+    expect(dirA).not.toBe(recoveryDirectory(b));
+    expect(dirA).not.toBe('/global');
+    expect(recoveryDirectory(a)).toBe(dirA);
+  });
+
+  it('uses a window\'s own storage when it has a folder', () => {
+    expect(recoveryDirectory({ storageUri: { fsPath: '/ws' }, globalStorageUri: { fsPath: '/global' } } as never)).toBe('/ws');
   });
 });

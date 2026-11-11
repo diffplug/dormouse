@@ -152,14 +152,14 @@ describe('replaceLeaf', () => {
 });
 
 describe('restoreLeaf', () => {
-  it('restores a removed leaf (neighbor tier) and sets its meta', () => {
+  it('restores a removed leaf (exact tier) and sets its meta', () => {
     const store = seeded();
     store.setLayoutGeometry(RECT);
     const removed = store.removeLeaf('b');
     expect(removed.ok).toBe(true);
     const r = store.restoreLeaf(leafMeta({ component: 'browser', title: 'B-back' }), removed.token!, { fallbackRef: 'a' });
     expect(r.ok).toBe(true);
-    expect(r.tier).toBe('neighbor');
+    expect(r.tier).toBe('exact');
     expect(store.has('b')).toBe(true);
     expect(store.getSnapshot().leafMeta.get('b')?.title).toBe('B-back');
   });

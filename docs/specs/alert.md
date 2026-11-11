@@ -34,7 +34,7 @@ Public `status` is a projection — first match wins:
 
 **Must identify each unresolved summons with an `episode` id and start time**. Opening the ring creates it; clearing ends it. A source joining an active ring joins its episode and never starts another delivery episode. **Never persist episodes.**
 
-`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await).
+`awaited`: a `dor await` is parked (Await). **Must send realms only changes to ringing, `episode`, `todo`, `notification`, or `awaited`** (rationale).
 
 **Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics):
 
@@ -84,7 +84,7 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 ### State machines
 
-**Must keep these diagrams the whole alert model**: every transition the code makes is an edge, so a change to one changes its diagram. They are one system: a machine's edges fire on what another emits, and Dispatch reads the states its questions name. An edge reads trigger, then — what it emits.
+**Must keep these diagrams the whole alert model**: every transition the code makes is an edge, so a change to one changes its diagram. They are one system: a machine's edges fire on what another emits; the overview below draws the main wires only. An edge reads trigger, then — what it emits.
 
 ```mermaid
 flowchart TD
@@ -295,7 +295,7 @@ stateDiagram-v2
     state "Acknowledged" as Yes
     [*] --> Fresh
     Fresh --> Yes: a verb while Ringing or Held
-    Yes --> Fresh: work, ring, or a command start
+    Yes --> Fresh: work, ring, a command start, or three minutes
   }
 ```
 
@@ -336,7 +336,7 @@ stateDiagram-v2
     [*] --> arrive
     arrive --> Failed: an invalid request or a helper Session — cancelled
     arrive --> Failed: the Session already removed — died
-    arrive --> Resolved: Ringing with a source it accepts — withdraw it
+    arrive --> Resolved: Ringing, else a hold, with a source it accepts — withdraw it
     arrive --> Parked: Seen or Unseen
     arrive --> Grace: NoCommand
     Grace --> Parked: a command start, or work under quiet
@@ -378,7 +378,7 @@ Is there anything to wait for?
 
 `idle` is a resolution, not a failure (rationale). Absent shell integration "is a command running" is unanswerable, so an `exit` await there falls back to the grace window and resolves `idle` rather than erroring.
 
-**Resolution must consume only the ring source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring resolves immediately; under `exit` only an `exit` source resolves it, and a ring without one leaves it parked.
+**Resolution must consume only the source it resolved on**, its `cause` from that source: `report` → `bell`, `exit` → `exit`, `watching` → `quiet`. An await arriving mid-ring, else mid-hold, resolves immediately; under `exit` only an `exit` source resolves it; anything else parks.
 
 - **Must skip the `exit` source while a foreground command is running** (rationale).
 - **Must skip the `watching` source once work has resumed since it joined the ring** (`workSince`; work as in State machines), and **never stand the detector in for that flag** (rationale).
@@ -498,7 +498,7 @@ Source of truth: grammars, parsing, sanitization limits, and `applyTerminalEvent
 Command-exit alerting consumes normalized semantic command events from `docs/specs/terminal-state.md` (`OSC 133`, `OSC 633`, or equivalent) and **must not parse raw OSC itself**.
 
 - A command start creates `commandExitWatch`; its seen lifecycle is the Foreground command machine (Completion events → State machines).
-- **Must derive armed, never store it**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
+- **Must derive armed, never store it**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`.
 - When the same command finishes — a prompt boundary with no finish event counts, with no exit code — or the PTY exits before a finish event, it rings only if it was seen. **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification: the summarized command and its exit code.
 - A different command start, Session destruction, or the host's own interrupt (a reap, restart, or preview retarget: `docs/specs/dor-tool.md` → Run end) clears the watch without ringing.
@@ -520,7 +520,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | a rule stops covering the `watching` key | withdraws `watching` |
 
 - **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any work only updates an existing TODO (the Acknowledged machine in Completion events; rationale).
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report within three minutes and before any work only updates an existing TODO (the Acknowledged machine in Completion events; rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.

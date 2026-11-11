@@ -298,12 +298,14 @@ interface AlertEntry {
   detector: QuiesceDetector;
   ring: Ring | null;
   /**
-   * A user verb cleared a ring or a hold and no output has arrived since, so
-   * a report describes the state the user already acknowledged
-   * (`holdOrDeliver`). Opening a ring or starting a command forgets it, so it
-   * implies no ring.
+   * Until this instant, a user verb cleared a ring or a hold and no output has
+   * arrived since, so a report describes the state the user already
+   * acknowledged (`holdOrDeliver`). Opening a ring or starting a command
+   * forgets it (0), so it implies no ring. Bounded in time because output
+   * counts as work only near input: a program that reports on its own
+   * schedule would otherwise never ring again after one acknowledgement.
    */
-  ackedQuiet: boolean;
+  ackedUntil: number;
   /** The live `OSC 9;4` cycle. Never touches the ring, and the ring never touches it. */
   progress: ActiveProtocolProgress | null;
   commandExitWatch: CommandExitWatch | null;
@@ -389,7 +391,7 @@ export class AlertManager {
   private noteWork(id: string, entry: AlertEntry): void {
     if (entry.ring?.watching) entry.ring.watching.workSince = true;
     if (entry.held?.watching) entry.held.watching.workSince = true;
-    entry.ackedQuiet = false;
+    entry.ackedUntil = 0;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
   }
 
@@ -586,7 +588,7 @@ export class AlertManager {
     const arrived = held ?? ++this.arrivals;
     if (this.isEngaged(id)) {
       this.hold(entry, source, detail, arrived);
-    } else if (source === 'report' && entry.ackedQuiet) {
+    } else if (source === 'report' && Date.now() < entry.ackedUntil) {
       // A hold already put its detail on the TODO, which may have moved on since.
       if (held === undefined) this.updateReceipt(entry, detail);
     } else {
@@ -713,19 +715,25 @@ export class AlertManager {
   }
 
   /**
-   * Consume the ring source an await arriving right now would resolve on, if
-   * any: only that source is withdrawn. Gated because the ring outlives the
-   * fact a source describes (`docs/specs/alert.md` -> Await, rationale): `exit`
-   * only with nothing running, `watching` only with no output since it joined,
-   * a report always.
+   * Consume the source an await arriving right now would resolve on, if any:
+   * from the ring, else from a hold, so a completion the user happened to be
+   * looking at answers a program the same as one nobody saw. Only that source
+   * is withdrawn. Gated because a latch outlives the fact a source describes
+   * (`docs/specs/alert.md` -> Await, rationale): `exit` only with nothing
+   * running, `watching` only with no output since it joined, a report always.
    */
   private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
-    if (until === 'quiet' && this.withdrawRingSource(entry, 'report')) return 'bell';
-    if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit')) return 'exit';
+    return this.consumeAwaitableSource(entry, 'ring', until)
+      ?? this.consumeAwaitableSource(entry, 'held', until);
+  }
+
+  private consumeAwaitableSource(entry: AlertEntry, latch: 'ring' | 'held', until: AwaitUntil): AwaitCause | null {
+    if (until === 'quiet' && this.withdrawRingSource(entry, 'report', latch)) return 'bell';
+    if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit', latch)) return 'exit';
     if (
       until === 'quiet'
-      && entry.ring?.watching?.workSince === false
-      && this.withdrawRingSource(entry, 'watching')
+      && entry[latch]?.watching?.workSince === false
+      && this.withdrawRingSource(entry, 'watching', latch)
     ) return 'quiet';
     return null;
   }
@@ -895,7 +903,7 @@ export class AlertManager {
     entry.pendingCommandLine = null;
     // A new command is news the acknowledgement never saw, even when it stays
     // silent until its report: its echo fell in the echo window, not output.
-    entry.ackedQuiet = false;
+    entry.ackedUntil = 0;
     entry.commandExitWatch = {
       displayCommand: resolved.displayCommand,
       watchKey: resolved.rawCommandLine === null ? null : commandWatchKey(resolved.rawCommandLine),
@@ -948,7 +956,7 @@ export class AlertManager {
     if (ring === null) {
       ring = { episode: createAlertEpisode(), sources: [], watching: null, detail, arrived };
       entry.ring = ring;
-      entry.ackedQuiet = false;
+      entry.ackedUntil = 0;
     } else {
       takeRicher(ring, detail, arrived);
     }
@@ -956,12 +964,12 @@ export class AlertManager {
   }
 
   /**
-   * An await answers one source, taking it off the ring. Never an
-   * acknowledgement: a ring left empty goes, leaving no TODO. Returns whether
-   * the source was there.
+   * An await answers one source, taking it off the ring or the hold. Never an
+   * acknowledgement: a ring left empty goes, leaving no TODO; a hold left
+   * empty goes, leaving the TODO it set. Returns whether the source was there.
    */
-  private withdrawRingSource(entry: AlertEntry, source: RingSource): boolean {
-    const ring = entry.ring;
+  private withdrawRingSource(entry: AlertEntry, source: RingSource, latch: 'ring' | 'held' = 'ring'): boolean {
+    const ring = entry[latch];
     if (ring === null) return false;
     let empty: boolean;
     if (source === 'watching') {
@@ -972,7 +980,7 @@ export class AlertManager {
       ring.sources = ring.sources.filter((candidate) => candidate !== source);
       empty = ring.sources.length === 0 && ring.watching === null;
     }
-    if (empty) entry.ring = null;
+    if (empty) entry[latch] = null;
     if (source === 'watching') this.answeredWatching(entry);
     return true;
   }
@@ -987,7 +995,7 @@ export class AlertManager {
     if (ring === null && held === null) return null;
     if (ring !== null) entry.ring = null;
     entry.held = null;
-    entry.ackedQuiet = true;
+    entry.ackedUntil = Date.now() + cfg.alert.acknowledgedFor;
     if (ring?.watching || held?.watching) this.answeredWatching(entry);
     return ring;
   }
@@ -1304,7 +1312,7 @@ export class AlertManager {
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
     entry.ring = null;
     entry.held = null;
-    entry.ackedQuiet = false;
+    entry.ackedUntil = 0;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
     this.endRun(entry);
@@ -1368,7 +1376,7 @@ export class AlertManager {
       entry = {
         detector: this.createDetector(id),
         ring: null,
-        ackedQuiet: false,
+        ackedUntil: 0,
         progress: null,
         commandExitWatch: null,
         pendingCommandLine: null,
@@ -1399,10 +1407,16 @@ export class AlertManager {
   }
 }
 
+/**
+ * Whether any realm could tell two states apart. Realms read only whether it
+ * rings, the episode, TODO, its detail, and `awaited`; the rest of `status`
+ * and `watchingEnabled` move on every detector and engagement edge, and
+ * publishing those cost an IPC message and every pane header a re-render with
+ * nothing to show, so they ride along on the next change that matters.
+ */
 function alertStatesEqual(a: AlertState, b: AlertState): boolean {
   if (
-    a.status !== b.status
-    || a.watchingEnabled !== b.watchingEnabled
+    (a.status === 'ALERT_RINGING') !== (b.status === 'ALERT_RINGING')
     || a.todo !== b.todo
     || a.awaited !== b.awaited
     || a.episode?.id !== b.episode?.id

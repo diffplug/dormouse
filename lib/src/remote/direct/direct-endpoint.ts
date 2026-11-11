@@ -427,9 +427,11 @@ export class DirectEndpoint {
    * The channel went away. **An answerer that has not answered yet owes the
    * offerer a decline**: the peer has heard nothing back and would otherwise
    * wait out its whole setup budget for a channel that is never coming. The
-   * route matters because this can run *inside* `peer.answer()` — a channel
-   * refused on adopt reports here before the description is even built — and
+   * route matters because this can run *inside* `peer.answer()` — an offer the
+   * stack refuses, a connection that fails, or the setup deadline — and
    * `#answer` then finds the peer already replaced and returns without a word.
+   * A channel refused on adopt is not one of them on a real stack: its channel
+   * event comes only after the answer is out.
    */
   #onClosed(reason: string): void {
     if (!this.#alive()) return;

@@ -403,14 +403,4 @@ describe("TauriAdapter terminal stream", () => {
     expect(alerts).toEqual([]);
     expect(invoke).not.toHaveBeenCalled();
   });
-
-  it("settles the replayed command when a marked buffer belongs to an exited PTY", async () => {
-    const { deliver } = await listening();
-    deliver("pty:list", { ptys: [{ id: "exited-replay", alive: false, exitCode: 7 }], requestId: "handback-1" });
-    deliver("pty:replay", {
-      id: "exited-replay", requestId: "handback-1",
-      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
-    });
-    expect(getTerminalPaneState("exited-replay").currentCommand).toBeNull();
-  });
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,14 +117,6 @@ test('dev honors explicit ports/origins/state and refuses an occupied port witho
   assert.equal(listening.origin, 'https://dev.example.test');
   const response = await enroll(listening, await password(stateDir));
   assert.equal((await response.json()).origin, listening.origin);
-});
-
-test('dev ignores the app state root an older Dormouse terminal leaks', async t => {
-  const a = await fixture(t);
-  const installed = path.join(a.dir, 'installed-app');
-  await a.start({ DORMOUSE_STATE_DIR: installed, DORMOUSE_RECOVERY_DIR: installed }).listening();
-  assert.ok(await password(path.join(a.dir, 'data')));
-  await assert.rejects(access(installed));
 });
 
 test('the headless fake Burrow enrolls against a dev Relay at its origin', async t => {

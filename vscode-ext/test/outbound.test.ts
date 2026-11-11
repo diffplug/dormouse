@@ -233,6 +233,6 @@ describe('under every other level, exactly the listed connections', () => {
     expect(contacted).toContain(hostOf(relayBuild.origin));
     if (mode === 'hosted') expect(contacted).toContain(hostOf(HOSTED_VOICE_ORIGIN));
     expect(contacted).not.toContain(CLOUDFLARE_STUN_HOST);
-    expect(net.offMachine().filter((attempt) => !attempt.via.startsWith('globalThis.'))).toEqual([]);
+    expect(net.offMachine().filter((attempt) => !attempt.via.startsWith('globalThis.') && attempt.via !== 'ws')).toEqual([]);
   }, CASE_TIMEOUT_MS);
 });

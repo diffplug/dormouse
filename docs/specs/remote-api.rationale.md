@@ -102,7 +102,7 @@ A queued HTTP request has no Burrow exchange to cancel. Checking its abort only 
 
 **Why only this machine.** Frames exist for Dor Tools and local dev servers. A remote page has its framing and script protections stripped by the proxy, and fronting one from a phone would add a way to reach it with no consent the Burrow can read. Starting narrow can be loosened later; the reverse would break whoever came to rely on it. A name is no evidence: `localhost` is whatever the resolver says, and a grant connects only to what it pinned.
 
-**Why a window rather than the transport's own backpressure.** The session gives a sender no drain signal on either path, and the direct path's sender queue disposes the session on overflow (`MAX_DIRECT_PENDING_BYTES`) — a terminal never approaches it, but one page load of a multi-megabyte bundle would. A window the Client acknowledges bounds the queue on both paths alike; encoded, it sits well under the direct path's bound.
+**Why a window rather than the transport's own backpressure.** The session gives a sender no drain signal on either path, and the direct path's sender queue disposes the session on overflow (`MAX_DIRECT_PENDING_BYTES`) — a terminal burst the link cannot drain (`seq 1 1000000` is 600,000 reads of at most 1 KiB, each its own message, in 3.3 s on Node 24.22.2, 2026-11) reaches it, as would one page load of a multi-megabyte bundle. A window the Client acknowledges bounds the queue on both paths alike; encoded, it sits well under the direct path's bound.
 
 ## Input authority and multiple viewers
 

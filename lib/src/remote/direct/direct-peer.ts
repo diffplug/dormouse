@@ -407,9 +407,9 @@ export class DirectPeer {
     // offerer armed its own; see {@link DIRECT_ANSWER_TIMEOUT_MS}.
     this.#armSetupTimeout(DIRECT_ANSWER_TIMEOUT_MS);
     try {
-      // Registered before the remote description is set: the channel event can
-      // fire inside `setRemoteDescription`, and a listener added after it would
-      // miss the only one this negotiation sends.
+      // Registered before the remote description is set, so the one channel
+      // event this negotiation sends finds it however early a stack fires it
+      // (the test fake fires it inside `setRemoteDescription`).
       this.#peer.addEventListener('datachannel', (ev) => {
         const channel = (ev as { channel?: DirectChannelLike } | null)?.channel;
         if (channel) this.#adopt(channel);

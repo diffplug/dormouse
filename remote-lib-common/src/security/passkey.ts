@@ -17,8 +17,8 @@ import { concatBytes, constantTimeEqual, fromBase64Url, toBase64Url, utf8Decode,
 import { ecdsaDerToRaw } from './ecdsa.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 
-export const PASSKEY_KEY_ALGORITHM = { name: 'ECDSA', namedCurve: 'P-256' } as const;
-export const PASSKEY_SIGN_ALGORITHM = { name: 'ECDSA', hash: 'SHA-256' } as const;
+const PASSKEY_KEY_ALGORITHM = { name: 'ECDSA', namedCurve: 'P-256' } as const;
+const PASSKEY_SIGN_ALGORITHM = { name: 'ECDSA', hash: 'SHA-256' } as const;
 
 /** Authenticator-data flag bits (WebAuthn §6.1). */
 const FLAG_USER_PRESENT = 0x01;
@@ -39,8 +39,8 @@ export interface PasskeyAssertion {
 export interface PasskeyAssertionExpectations {
   /** Base64url challenge the assertion must be bound to. */
   readonly challenge: string;
-  /** Origin(s) the assertion may come from, e.g. `https://dormouse.dev`. */
-  readonly origin: string | readonly string[];
+  /** The origin the assertion must come from, e.g. `https://dormouse.dev`. */
+  readonly origin: string;
   /** Relying-party id the credential must be scoped to, e.g. `dormouse.dev`. */
   readonly rpId: string;
   /** Require the authenticator's user-verification flag (biometric/PIN), not just presence. */
@@ -68,13 +68,12 @@ export type PasskeyAssertionFailure =
   | 'public-key-invalid'
   | 'signature-invalid';
 
+/**
+ * Pass or the reason it failed, and nothing more: the sign counter is not
+ * read, since synced passkeys do not keep one.
+ */
 export type PasskeyAssertionResult =
-  | {
-      readonly ok: true;
-      readonly userPresent: true;
-      readonly userVerified: boolean;
-      readonly signCount: number;
-    }
+  | { readonly ok: true }
   | { readonly ok: false; readonly reason: PasskeyAssertionFailure };
 
 /**
@@ -121,8 +120,7 @@ async function verifyAssertion(
   ) {
     return { ok: false, reason: 'challenge-mismatch' };
   }
-  const origins = typeof expected.origin === 'string' ? [expected.origin] : expected.origin;
-  if (typeof clientData.origin !== 'string' || !origins.includes(clientData.origin)) {
+  if (clientData.origin !== expected.origin) {
     return { ok: false, reason: 'origin-mismatch' };
   }
 
@@ -143,15 +141,9 @@ async function verifyAssertion(
   }
   const flags = authenticatorData[32]!;
   if ((flags & FLAG_USER_PRESENT) === 0) return { ok: false, reason: 'user-presence-missing' };
-  const userVerified = (flags & FLAG_USER_VERIFIED) !== 0;
-  if (expected.requireUserVerification && !userVerified) {
+  if (expected.requireUserVerification && (flags & FLAG_USER_VERIFIED) === 0) {
     return { ok: false, reason: 'user-verification-missing' };
   }
-  const signCount =
-    authenticatorData[33]! * 0x1000000 +
-    authenticatorData[34]! * 0x10000 +
-    authenticatorData[35]! * 0x100 +
-    authenticatorData[36]!;
 
   let publicKey;
   try {
@@ -181,7 +173,7 @@ async function verifyAssertion(
   }
   if (!verified) return { ok: false, reason: 'signature-invalid' };
 
-  return { ok: true, userPresent: true, userVerified, signCount };
+  return { ok: true };
 }
 
 /**

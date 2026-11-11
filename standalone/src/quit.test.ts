@@ -358,6 +358,20 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
+  it("brings this window forward when a quit asks in it, and only then", async () => {
+    const raised = () => mocks.invoke.mock.calls.some((call) => call[0] === "quit_raise");
+    initQuitFlow(fakeAdapter());
+    quitRequested();
+    await settle();
+    expect(raised()).toBe(false);
+
+    quitCancelled();
+    mocks.countRunningSessions.mockReturnValue(2);
+    setQuitConfirmGate(vi.fn());
+    quitRequested();
+    expect(raised()).toBe(true);
+  });
+
   it("hands the gate the requester Rust sent, and leaves it out of the count", async () => {
     mocks.countRunningSessions.mockReturnValue(1);
     const gate = vi.fn();

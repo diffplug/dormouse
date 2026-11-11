@@ -285,7 +285,9 @@ export function WorkspaceStrip({
           key={menu.id}
           menu={menu}
           workspace={menuWorkspace}
-          onMoveToNewWindow={onMoveToNewWindow}
+          // A window's only Workspace never tears out: that would rebuild
+          // the same window under a new label.
+          onMoveToNewWindow={workspaces.length > 1 ? onMoveToNewWindow : undefined}
         />
       )}
       {/* Rename owns its input until it ends, and the confirmation waits behind
@@ -417,6 +419,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
       }}
       onAuxClick={(event) => {
         if (event.button !== 1) return;
+        // A middle-click in the open rename editor is a paste (the primary
+        // selection on Linux), never the close verb.
+        if (event.target instanceof Element && event.target.closest('[data-workspace-rename-for]')) return;
         event.preventDefault();
         onRequestClose(id);
       }}

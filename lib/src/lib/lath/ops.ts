@@ -195,12 +195,23 @@ export function restore(
       };
     }
 
-    if (token.siblingLeafIds && token.siblingLeafIds.length > 1 && token.siblingFingerprint) {
+    if (token.siblingLeafIds && token.siblingLeafIds.length > 0 && token.siblingFingerprint) {
       const siblingTarget = targetByLeafSet(tree, new Set(token.siblingLeafIds), token.edge);
       const resolved = siblingTarget && materializeTarget(tree, siblingTarget);
       if (resolved) {
         const sibling = nodeAtPath(resolved.tree, resolved.path);
-        if (sibling && structureFingerprint(sibling) === token.siblingFingerprint) {
+        // A lone leaf stands in for its parent only when that parent held nothing
+        // else, so the removal collapsed it, and only while the leaf is the root
+        // or its own parent runs across the edge: nesting beside it then rebuilds
+        // the old parent in its slot, where elsewhere it would rescale siblings.
+        const axis = edgeAxis(token.edge);
+        const container = resolved.path.length > 0 ? nodeAtPath(resolved.tree, resolved.path.slice(0, -1)) : null;
+        const fillsSlot = token.siblingLeafIds.length > 1 || (
+          sibling !== null
+          && token.fingerprint === structureFingerprint({ kind: 'split', dir: axis, children: [{ node: sibling, weight: 1 }] })
+          && (container === null || (container.kind === 'split' && container.dir !== axis))
+        );
+        if (sibling && fillsSlot && structureFingerprint(sibling) === token.siblingFingerprint) {
           // The siblings share `1 - weight`, as in the parent-split branch above.
           const r = insertImpl(tree, token.leafId, siblingTarget, token.weight, true);
           if (r.ok) return { tree: r.tree, ok: true, tier: 'exact' };

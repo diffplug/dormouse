@@ -21,7 +21,7 @@ export type QuitConfirmPhase = "open" | "quitting";
  */
 export interface QuitConfirmIntent {
   kind: "quit" | "close-window";
-  /** This window holds an approved, downloaded update that closing throws away:
+  /** This window holds an approved update, downloading or downloaded, that closing throws away:
    *  the download lives in the webview, so nothing else can install it
    *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */
   discardsUpdate?: boolean;

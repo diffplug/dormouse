@@ -97,6 +97,12 @@ describe('ManagedVoiceSection', () => {
     expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
   });
 
+  it('enrolled under Nothing, never claims Natural Voice is on', async () => {
+    await render({ status: ENROLLED, network: networkPolicyResult(nothingPolicy(), 'hosted', []) });
+    expect(text()).toContain('Natural Voice is turned on for this computer.');
+    expect(text()).not.toContain('Natural Voice is on.');
+  });
+
   it('enrolled, picks a voice from the curated set', async () => {
     const { voice } = await render({ status: ENROLLED });
     expect(text()).toContain('Natural Voice is on.');

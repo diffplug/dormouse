@@ -9,6 +9,28 @@ import {
 } from './lath-wall-engine';
 import type { PersistedDoor } from '../../lib/session-types';
 import { leaves } from '../../lib/lath/model';
+import { LATH_MOTION_MS } from '../../lib/lath/animator';
+import { cfg } from '../../cfg';
+
+describe('lath-wall-engine motion', () => {
+  it('reads instant motion per motion, so a live toggle applies without a new engine', () => {
+    const engine = createLathWallEngine();
+    const animate = cfg.layout.animate;
+    try {
+      cfg.layout.animate = true;
+      expect(engine.exitMs).toBe(LATH_MOTION_MS);
+      engine.animator.retarget(new Map([['a', { x: 0, y: 0, width: 100, height: 100 }]]), 0);
+
+      cfg.layout.animate = false;
+      expect(engine.exitMs).toBe(0);
+      engine.animator.retarget(new Map([['a', { x: 200, y: 0, width: 100, height: 100 }]]), 10);
+      expect(engine.animator.settledAt(10)).toBe(true);
+      expect(engine.animator.framesAt(10).get('a')?.rect.x).toBe(200);
+    } finally {
+      cfg.layout.animate = animate;
+    }
+  });
+});
 
 describe('lath-wall-engine seed', () => {
   it('(a) hydrates from a LathPersistedLayout, ignoring initialPaneIds', () => {

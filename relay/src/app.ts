@@ -252,24 +252,21 @@ class EnrollmentOfferNotInvalidated extends Error {}
 /**
  * How many live sign-in sessions one account may hold; a sign-in past it ends
  * that account's oldest. Each takes a passkey assertion, and a person signs in
- * from a handful of devices, each again when its 12 hours run out.
+ * from a handful of devices, each again when its 12 hours run out. This Relay
+ * has one account, so it bounds the whole store.
  */
 export const MAX_SESSIONS_PER_ACCOUNT = 32;
-/** How many live sign-in sessions the store holds in all, oldest ended first. */
-export const MAX_SESSIONS = 256;
 
 /**
  * In-memory session store. Exposed on the created app so the `/ws/client` path
  * can validate a raw `token` query param, and the `requireSession` middleware a
  * `Bearer` header, against one shared source of truth.
  *
- * Every session carries the same TTL, so insertion order is expiry order, in
- * the whole map and in each account's set alike: the oldest is always first.
+ * Every session carries the same TTL, so insertion order is expiry order: the
+ * oldest is always first.
  */
 export class SessionStore {
   readonly #sessions = new Map<string, Session>();
-  /** Each account's tokens, oldest first. */
-  readonly #byAccount = new Map<string, Set<string>>();
   readonly #now: () => number;
 
   constructor(now: () => number) {
@@ -285,15 +282,10 @@ export class SessionStore {
   mint(accountId: string): { token: string; session: Session } {
     const now = this.#now();
     this.#sweepExpired(now);
-    const own = this.#byAccount.get(accountId);
-    while (own !== undefined && own.size >= MAX_SESSIONS_PER_ACCOUNT) this.#forget(own.values().next().value!);
-    while (this.#sessions.size >= MAX_SESSIONS) this.#forget(this.#sessions.keys().next().value!);
+    while (this.#sessions.size >= MAX_SESSIONS_PER_ACCOUNT) this.#sessions.delete(this.#sessions.keys().next().value!);
     const token = toBase64Url(randomBytes(32));
     const session: Session = { accountId, expiresAt: now + RELAY_SESSION_TTL_MS };
     this.#sessions.set(token, session);
-    const tokens = this.#byAccount.get(accountId) ?? new Set<string>();
-    tokens.add(token);
-    this.#byAccount.set(accountId, tokens);
     return { token, session };
   }
 
@@ -302,7 +294,7 @@ export class SessionStore {
     const session = this.#sessions.get(token);
     if (!session) return null;
     if (this.#now() >= session.expiresAt) {
-      this.#forget(token);
+      this.#sessions.delete(token);
       return null;
     }
     return session;
@@ -311,17 +303,8 @@ export class SessionStore {
   #sweepExpired(now: number): void {
     for (const [token, session] of this.#sessions) {
       if (now < session.expiresAt) break;
-      this.#forget(token);
+      this.#sessions.delete(token);
     }
-  }
-
-  #forget(token: string): void {
-    const session = this.#sessions.get(token);
-    if (session === undefined) return;
-    this.#sessions.delete(token);
-    const tokens = this.#byAccount.get(session.accountId);
-    tokens?.delete(token);
-    if (tokens?.size === 0) this.#byAccount.delete(session.accountId);
   }
 }
 

@@ -1,11 +1,9 @@
 /**
  * This Window's half of the application-wide Workspace registry
  * (docs/specs/standalone.md → "Workspace registry"): ids are minted from a
- * block the host reserved, every store change is reported to the host, and the
- * host's union of every window comes back as a snapshot the strip and `dor`
- * can read.
+ * block the host reserved, and every store change is reported to the host,
+ * whose union of every window routes `dor`.
  */
-import { useSyncExternalStore } from "react";
 import {
   getWorkspacesSnapshot,
   installWorkspaceIdPool,
@@ -15,56 +13,8 @@ import {
 import { installSurfaceIdPool, maxSurfaceNumber, SURFACE_ID_POOL_SIZE } from "dormouse-lib/lib/surface-ids";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 
-export interface RegistryWorkspace {
-  id: string;
-  name: string;
-  active: boolean;
-}
-
-export interface RegistryWindow {
-  label: string;
-  workspaces: RegistryWorkspace[];
-}
-
-export interface WorkspaceRegistrySnapshot {
-  revision: number;
-  windows: RegistryWindow[];
-}
-
-const EMPTY: WorkspaceRegistrySnapshot = { revision: 0, windows: [] };
-let snapshot: WorkspaceRegistrySnapshot = EMPTY;
-const listeners = new Set<() => void>();
-
-/** Accept a host snapshot, unless one newer is already held. */
-export function acceptRegistrySnapshot(next: WorkspaceRegistrySnapshot): void {
-  if (next.revision < snapshot.revision) return;
-  snapshot = next;
-  listeners.forEach((listener) => listener());
-}
-
-export function getRegistrySnapshot(): WorkspaceRegistrySnapshot {
-  return snapshot;
-}
-
-export function useWorkspaceRegistry(): WorkspaceRegistrySnapshot {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    getRegistrySnapshot,
-  );
-}
-
-export function resetWorkspaceRegistry(): void {
-  snapshot = EMPTY;
-  listeners.forEach((listener) => listener());
-}
-
 export interface RegistryHost {
   invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
-  /** Subscribe to the host's registry broadcasts; returns the unsubscribe. */
-  onSnapshot(handler: (snapshot: WorkspaceRegistrySnapshot) => void): Promise<() => void> | (() => void);
 }
 
 /**
@@ -81,8 +31,7 @@ export async function installWorkspaceRegistry(host: RegistryHost, restored: Per
   let reportSequence = 0;
   const report = () => {
     scheduled = false;
-    const { workspaces, activeId } = getWorkspacesSnapshot();
-    const entries = workspaces.map((ws) => ({ id: ws.id, name: ws.name, active: ws.id === activeId }));
+    const entries = getWorkspacesSnapshot().workspaces.map((ws) => ({ id: ws.id, name: ws.name }));
     const key = JSON.stringify(entries);
     if (key === last) return;
     last = key;
@@ -100,7 +49,6 @@ export async function installWorkspaceRegistry(host: RegistryHost, restored: Per
     queueMicrotask(report);
   };
   const unsubscribeStore = subscribeToWorkspaces(schedule);
-  const unlisten = await host.onSnapshot(acceptRegistrySnapshot);
   const restoredMax = maxSurfaceNumber(restored?.workspaces.map((workspace) => workspace.session) ?? []);
   // Both pools' first blocks in one reservation: one durable write, not two.
   const boot = host.invoke<{ workspaces: string[]; surfaces: string[] }>(
@@ -116,13 +64,7 @@ export async function installWorkspaceRegistry(host: RegistryHost, restored: Per
       restoredMax,
       boot.then((ids) => ids.surfaces),
     ),
-    host.invoke<WorkspaceRegistrySnapshot>("workspace_registry").then(acceptRegistrySnapshot).catch(() => {
-      // A failed fetch leaves it empty until the next broadcast.
-    }),
   ]);
   schedule();
-  return () => {
-    unsubscribeStore();
-    unlisten();
-  };
+  return unsubscribeStore;
 }
