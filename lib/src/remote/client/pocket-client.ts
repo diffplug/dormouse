@@ -1631,24 +1631,6 @@ function parseStoredSession(raw: string | null): PocketSession | null {
 }
 
 /**
- * The legacy per-Burrow markers, removed once per page life.
- *
- * `dormouse-pocket:paired:*` was the local guess the pre-end-to-end Burrows view
- * offered a button from; the `KnownBurrowV1` records replaced it, and a marker
- * left behind is a claim about authorization that nothing checks. Best-effort,
- * like every other touch of this storage.
- */
-export function purgeLegacyPairedMarkers(): void {
-  // Collected before removing: mutating while enumerating by index skips keys.
-  const stale = keysWithPrefix('dormouse-pocket:paired:');
-  try {
-    for (const key of stale) globalThis.localStorage.removeItem(key);
-  } catch {
-    // Blocked or absent storage holds no markers to remove.
-  }
-}
-
-/**
  * Every `localStorage` key under `prefix`, or none when the store cannot be
  * read at all — a browser with site data blocked throws on the property access
  * itself, not merely on `getItem`.

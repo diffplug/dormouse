@@ -59,7 +59,6 @@ import {
   SessionSupersededError,
   SetupTokenInvalidError,
   localStoragePocketStorage,
-  purgeLegacyPairedMarkers,
   type PocketClientDeps,
   type PocketSession,
   type PocketStorage,
@@ -2634,33 +2633,6 @@ describe('localStoragePocketStorage', () => {
 
     expect(map.get('dormouse-pocket:passkey:cred-new')).toBe('pk-new');
     expect([...storage.knownCredentialIds()].sort()).toEqual(['cred-new', 'cred-old']);
-  });
-
-  /**
-   * The pre-end-to-end Burrows view offered a button from these markers. The
-   * `KnownBurrowV1` records replaced them, so one left behind is a claim about
-   * authorization that nothing checks.
-   */
-  it('purges the legacy paired markers and touches nothing else', () => {
-    const { map, store } = fakeLocalStorage();
-    map.set('dormouse-pocket:paired:h1', '1');
-    map.set('dormouse-pocket:paired:h2', '1');
-    map.set('dormouse-pocket:passkey:cred-1', 'pk-1');
-    map.set('dormouse-pocket:push-endpoint', 'digest');
-    vi.stubGlobal('localStorage', store);
-
-    purgeLegacyPairedMarkers();
-
-    expect([...map.keys()].sort()).toEqual([
-      'dormouse-pocket:passkey:cred-1',
-      'dormouse-pocket:push-endpoint',
-    ]);
-  });
-
-  it('purging is silent on a browser with no storage at all', () => {
-    vi.stubGlobal('localStorage', blockedLocalStorage());
-
-    expect(() => purgeLegacyPairedMarkers()).not.toThrow();
   });
 });
 
