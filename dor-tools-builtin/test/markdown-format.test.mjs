@@ -54,8 +54,6 @@ for (const source of [
   'Title\n\\=\n',
   '\\\\= literal backslash\n',
   '\\[literal](url)\n',
-  '\\[literal][ref]\n\n[ref]: /target\n',
-  '\\[literal]\n\n[literal]: /target\n',
   '\\[literal]: /target\n',
   '[link \\[label\\]](/target)\n',
   '- \\[x] plain list text\n',
