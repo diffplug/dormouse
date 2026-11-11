@@ -1427,15 +1427,18 @@ export class BurrowService {
 
   /** The whole log, after every append already queued. */
   #readAccessLog(): Promise<AccessLogResult> {
-    return this.#accessLogQueue(async () => ({ entries: [...(await this.#loadAccessLog())] }));
+    return this.#accessLogQueue(async () => ({ entries: [...((await this.#loadAccessLog()) ?? [])] }));
   }
 
   /** On {@link #accessLogQueue} only. */
-  async #loadAccessLog(): Promise<AccessLogEntry[]> {
-    this.#accessLog ??= await this.#store.loadAccessLog().catch((error: unknown) => {
+  /** The log, or `null` while the store cannot read it: a failed read is retried next time, never kept. */
+  async #loadAccessLog(): Promise<AccessLogEntry[] | null> {
+    try {
+      this.#accessLog ??= await this.#store.loadAccessLog();
+    } catch (error) {
       console.warn('[burrow] could not read the access log', error);
-      return [];
-    });
+      return null;
+    }
     return this.#accessLog;
   }
 
@@ -1448,7 +1451,11 @@ export class BurrowService {
     const entry = parseAccessLogEntry(raw);
     if (!entry) return;
     void this.#accessLogQueue(async () => {
-      this.#accessLog = appendAccessLog(await this.#loadAccessLog(), entry);
+      // An entry over a log that could not be read is dropped: saving it
+      // would replace the whole log with one entry.
+      const log = await this.#loadAccessLog();
+      if (!log) return;
+      this.#accessLog = appendAccessLog(log, entry);
       this.#emit({ name: 'access' });
       await this.#store.saveAccessLog(this.#accessLog);
     }).catch((error: unknown) => {

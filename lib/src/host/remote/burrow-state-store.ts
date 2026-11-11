@@ -43,9 +43,9 @@ export interface BurrowStateStore {
    * The access log, oldest first (`lib/src/remote/burrow/access-log.ts`):
    * one per machine, not per `burrowId`, since a one-time connection needs
    * no enrollment. **Must sit under the same private storage as the ACL**
-   * (`docs/specs/security-remote.md` -> "Credentials at rest"). A read that fails
-   * answers what it could, never a rejection: the log informs and authorizes
-   * nothing.
+   * (`docs/specs/security-remote.md` -> "Credentials at rest"). A log that
+   * reads but does not parse answers what it could; a read that fails rejects,
+   * so no caller overwrites a log it never saw.
    */
   loadAccessLog(): Promise<AccessLogEntry[]>;
   saveAccessLog(entries: readonly AccessLogEntry[]): Promise<void>;
@@ -167,11 +167,12 @@ export class FileBurrowStateStore implements BurrowStateStore {
 
   /** Not memoized: the service, its one reader, keeps what it read. */
   async loadAccessLog(): Promise<AccessLogEntry[]> {
+    const raw = await readIfPresent(this.#accessLogPath);
+    if (raw === null) return [];
     try {
-      const raw = await readIfPresent(this.#accessLogPath);
-      return raw === null ? [] : parseAccessLog(JSON.parse(raw));
+      return parseAccessLog(JSON.parse(raw));
     } catch (error) {
-      console.warn(`[burrow] could not read ${this.#accessLogPath}; starting a new access log`, error);
+      console.warn(`[burrow] could not parse ${this.#accessLogPath}; starting a new access log`, error);
       return [];
     }
   }

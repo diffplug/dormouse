@@ -2215,6 +2215,26 @@ describe('paired devices and revocation', () => {
     expect(entries[0]!.at).toBe(ACCESS_LOG_MAX_REFUSALS + 1);
     expect(entries.at(-1)!.event).toBe('revoked');
   });
+
+  it('never overwrites an access log it could not read', async () => {
+    const seeded = [{ at: 1, event: 'ended' as const, device: BROWSER }];
+    createService({ enrollment: ENROLLMENT, network: NOTHING, acl: { [BURROW_ID]: [PHONE] }, accessLog: seeded });
+    const readable = store.loadAccessLog;
+    store.loadAccessLog = async () => {
+      throw new Error('EACCES: permission denied');
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await service.start();
+    await command('revokeDevice', { id: phoneId });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('[burrow] could not read the access log', expect.anything()));
+    warn.mockRestore();
+    expect(store.accessLog).toEqual(seeded);
+
+    // Read again next time, not remembered as empty.
+    store.loadAccessLog = readable;
+    const { entries } = (await command('accessLog')).result as AccessLogResult;
+    expect(entries).toEqual(seeded);
+  });
 });
 
 describe('Relay-named revocation', () => {
