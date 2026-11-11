@@ -310,7 +310,9 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
   const ptyModule = {
     spawn: (...args) => {
       const p = nodePty.spawn(...args);
-      const record = { id, pid: p.pid, exited: false };
+      // node-pty learns a ConPTY shell's pid after spawn returns (0 until
+      // then), so the pid is read from the PTY when asked, not copied here.
+      const record = { id, get pid() { return p.pid; }, exited: false };
       record.exit = new Promise((resolve) => p.onExit(() => { record.exited = true; resolve(); }));
       SPAWNED.push(record);
       spawned.push(record);
@@ -382,7 +384,7 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
     try { mgr.killAll(); } catch { /* already gone */ }
     await Promise.race([Promise.all(spawned.map((record) => record.exit)), new Promise((resolve) => setTimeout(resolve, 5_000))]);
     for (const record of spawned) {
-      if (!record.exited) { try { process.kill(record.pid, 'SIGKILL'); } catch { /* gone */ } }
+      if (!record.exited && record.pid > 0) { try { process.kill(record.pid, 'SIGKILL'); } catch { /* gone */ } }
     }
   });
 
@@ -404,7 +406,12 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
     check();
   });
   pane.text = () => stripEscapes(pane.raw);
-  pane.pid = () => spawned.at(-1)?.pid;
+  /** The shell's pid; ask while the pane is live (ConPTY reports it late). */
+  pane.pid = () => {
+    const pid = spawned.at(-1)?.pid;
+    assert.ok(pid > 0, `${row.name}: node-pty reports no pid (${pid}) for the pane's shell`);
+    return pid;
+  };
   pane.write = (data) => mgr.write(id, data);
   /** Ready for input: the first prompt the shell reports, else its prompt text.
    *  A shell's first miss fails its later cases at once (`shellCase`). */
@@ -474,6 +481,8 @@ function shellCase(name, applies, body, { timeout = 60_000, reads = false } = {}
 /** Whether `pid` still runs. A zombie has ended: its reaper may be a
  *  container's init that never reaps. */
 const alive = (pid) => {
+  // kill(0, 0) signals this process group, so 0 would read as alive.
+  assert.ok(Number.isInteger(pid) && pid > 0, `not a process id: ${pid}`);
   try { process.kill(pid, 0); } catch (error) { return error.code === 'EPERM'; }
   if (PLATFORM !== 'linux') return true;
   try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '')[0] !== 'Z'; } catch { return false; }
