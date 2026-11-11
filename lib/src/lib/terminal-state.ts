@@ -1427,7 +1427,11 @@ function isGenericProcessTitle(title: string): boolean {
   // Basename, not program name: the suffix is the evidence this test is looking
   // for, so stripping it would leave every `.exe` title indistinguishable.
   const basename = commandBasename(trimmed);
-  if (/\s/.test(basename)) return false; // carries arguments/description → meaningful
+  // Only a title that is one name or path can be bare. A path may hold spaces
+  // (`C:\Program Files\…\pwsh.exe`) but then starts as one; `vim ~/src/fish`
+  // has its space before the path and carries arguments.
+  const wholePath = /^(?:[A-Za-z]:[\\/]|\\\\|[/~])/.test(trimmed) || !/\s/.test(trimmed.split(/[\\/]/)[0]);
+  if (!wholePath || /\s/.test(basename)) return false; // carries arguments/description → meaningful
   if (WINDOWS_EXECUTABLE_SUFFIX.test(basename)) return true; // bare executable path
   return GENERIC_PROCESS_TITLE_NAMES.has(basename.toLowerCase()); // bare shell/interpreter name
 }

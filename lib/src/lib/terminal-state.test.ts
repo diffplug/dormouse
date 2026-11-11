@@ -683,6 +683,15 @@ describe('header and grouping derivation', () => {
     expect(deriveHeader(pane, [pane])).toEqual({ primary: 'pnpm dev:website' });
   });
 
+  it('keeps a title that carries arguments, even when it ends in a shell\'s name', () => {
+    for (const title of ['vim ~/src/fish', 'user@host: ~/src/bash', 'ssh box /bin/zsh']) {
+      const pane = reduceTerminalState(runningPane('/repo/app', 'pnpm dev'), { type: 'title', title: { title, source: 'osc0', updatedAt: 2 } });
+      expect(deriveHeader(pane, [pane]).primary).toBe(title);
+    }
+    const pwsh = reduceTerminalState(runningPane('/repo/app', 'pnpm dev'), { type: 'title', title: { title: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', source: 'osc0', updatedAt: 2 } });
+    expect(deriveHeader(pwsh, [pwsh]).primary).toBe('pnpm dev');
+  });
+
   it('keeps the command when the title is a bare shell name', () => {
     const pane = reduceTerminalState(
       runningPane('/repo/app', 'pnpm dev:website'),
