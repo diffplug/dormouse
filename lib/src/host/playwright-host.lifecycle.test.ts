@@ -2,6 +2,9 @@
 import { neutralBrowserCwd } from './browser-neutral-cwd';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createBrowserCaptures } from './browser-capture';
 import { createBrowserHost, type BrowserProvider } from './browser-host';
@@ -217,6 +220,14 @@ test('a native reopen in headless mode clears headed shutdown ownership', async 
 test('a single-page browser refreshes without asking the CLI for its selection', async () => {
   expect((await pw({ op: 'attach' })).ok).toBe(true);
   expect(mocks.cli.mock.calls.map(([, args]) => args[1])).toEqual(['list']);
+});
+
+test('a binding whose project directory was removed still closes, its CLI run in the neutral directory', async () => {
+  const gone = mkdtempSync(path.join(os.tmpdir(), 'dor-pw-gone-'));
+  rmSync(gone, { recursive: true });
+  expect((await pw({ op: 'close' }, { cwd: gone, session: 'test' })).ok).toBe(true);
+  const close = mocks.cli.mock.calls.find(([, args]) => args[1] === 'close');
+  expect(close?.[2].cwd).toBe(neutralBrowserCwd());
 });
 
 test('a launch no binding names a project for runs the CLI in the neutral directory, not the host\'s', async () => {

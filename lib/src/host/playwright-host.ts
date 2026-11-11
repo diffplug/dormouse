@@ -8,7 +8,7 @@
  */
 import { realpathSync } from 'node:fs';
 import type { Browser, Page, CDPSession } from 'playwright-core';
-import { BROWSER_PROVIDERS, spawnAndCapture } from 'dor-lib-common';
+import { BROWSER_PROVIDERS, isDirectory, spawnAndCapture } from 'dor-lib-common';
 import { neutralBrowserCwd } from './browser-neutral-cwd';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
@@ -108,7 +108,8 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   /** One CLI call, ended after `timeoutMs` (none for `null`); throws when it could not run or finish. */
   async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS, initialViewport?: BrowserViewportSetting) {
     const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
-      cwd: b.cwd,
+      // A removed project directory cannot be spawned in.
+      cwd: isDirectory(b.cwd) ? b.cwd : neutralBrowserCwd(),
       env: initialViewport?.mode === 'fixed' ? { ...(b.env ?? process.env), PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } : b.env,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
     });

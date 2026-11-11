@@ -148,7 +148,9 @@ function samePath(a: string, b: string): boolean {
 }
 
 export function playwrightWorkspace(cwd: string): string | undefined {
-  let dir = realpathSync(cwd);
+  // A removed project directory scopes nothing: its binding must still close.
+  let dir: string;
+  try { dir = realpathSync(cwd); } catch { return undefined; }
   for (let i = 0; i < 10; i++) {
     if (existsSync(path.join(dir, '.playwright'))) return dir;
     const parent = path.dirname(dir);
