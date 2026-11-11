@@ -221,12 +221,6 @@ const KNOWN = [
     why: 'pwsh as the login shell spawns as `pwsh -l`, and powerShellIntegratedArgs injects only into a bare or -NoExit launch, so the pane gets no integration',
   },
   {
-    // Seen on Windows 11 and windows-latest, 2026-11-11. The cwd case's
-    // unicode directory passes on both shells.
-    shells: ['powershell', 'pwsh'], platforms: ['win32'], case: /^command line: unicode/,
-    why: "PowerShell (5.1 and 7) mangles non-ASCII in E: typed `echo 'héllo wörld ✓ 日本語 🐭 a b　c'`, reported `echo 'héllo wörld √ ??? ?? a b c'`. Likely cause: shellIntegration.ps1 writes E with [Console]::Write, encoded in [Console]::OutputEncoding (the OEM code page), while P;Cwd rides the prompt string the host writes as Unicode",
-  },
-  {
     // Seen on Windows 11 (Ubuntu and docker-desktop), 2026-11-11: TERM_PROGRAM undefined.
     shells: ['wsl', 'wsl-no-bash'], platforms: ['win32'], case: /^WSL environment: iTerm2 identity/,
     why: "a WSL pane lacks the iTerm2 identity: WSL passes into the distro only what WSLENV names, and withWslCliEnv lists only the dor CLI's DORMOUSE_* variables, so TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_TERMINAL, LC_TERMINAL_VERSION, and COLORTERM never arrive (seen: TERM_PROGRAM undefined)",

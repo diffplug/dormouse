@@ -108,8 +108,10 @@ function Global:__dormouse_633_hook_readline {
 		$commandLine = $Global:__dormouse_633_original_readline.Invoke()
 		# Skip blank submissions (bare Enter, Ctrl+C) — no command runs, so no D.
 		if (-not [string]::IsNullOrWhiteSpace($commandLine)) {
-			[Console]::Write((__dormouse_633_osc "E;$(__dormouse_633_escape $commandLine)"))
-			[Console]::Write((__dormouse_633_osc 'C'))
+			# Through the host, as the prompt's own text goes, never [Console]::Write:
+			# on Windows that encodes in the console's output code page (OEM), which
+			# turns most of Unicode into '?'.
+			$Host.UI.Write((__dormouse_633_osc "E;$(__dormouse_633_escape $commandLine)") + (__dormouse_633_osc 'C'))
 			$Global:__dormouse_633_command_running = $true
 		}
 		return $commandLine
