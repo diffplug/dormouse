@@ -103,7 +103,7 @@ Requests are correlated by `requestId`, events by `subId` (`RemoteRequest`, `Rem
 
 ### Hello
 
-First exchange on the control channel; establishes version and viewer kind (`HelloParams` / `HelloResult`), and returns the flat `grants` ([Input authority](#input-authority-and-multiple-viewers)). **The Burrow does not *gate* other methods on it** — authorization already happened at connect time, so skipping hello grants nothing.
+First exchange on the control channel (`HelloParams` / `HelloResult`). In v1 only `capabilities` is read: the Burrow ignores `protocolVersion` and `viewer`, answers version 1 and the flat `grants` ([Input authority](#input-authority-and-multiple-viewers)), which no Client reads. **The Burrow does not *gate* other methods on it** — authorization already happened at connect time, so skipping hello grants nothing.
 
 **`capabilities.frames` decides what the directory names**: the Burrow lists browser entries and `browser` fields only to a session whose latest hello declared it, re-listing when a hello changes that. `HelloResult.frames` says the Burrow serves the tunnel.
 
