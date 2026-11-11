@@ -621,6 +621,25 @@ describe('WorkspaceStrip', () => {
     expect(chromeKeyboardHeld()).toBe(false);
   });
 
+  it('keeps the Workspace and its rename when the editor itself is middle-clicked', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
+    stubHandle('workspace:2', { closeAll: async () => null });
+    await render();
+
+    await act(async () => {
+      activateButton('workspace:2').click();
+    });
+    const input = container.querySelector<HTMLInputElement>('[data-workspace-rename-for="workspace:2"]')!;
+    expect(input).not.toBeNull();
+    await act(async () => {
+      input.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)).toEqual([first, 'workspace:2']);
+    expect(getWorkspaceUiSnapshot().renamingId).toBe('workspace:2');
+  });
+
   it('never starts a reorder from a press inside the open rename editor', async () => {
     createWorkspace({ id: 'workspace:2' });
     createWorkspace({ id: 'workspace:3' });
