@@ -216,11 +216,6 @@ function cannotRun(t, row, reason) {
 // prompt text instead. Delete the entry with the fix.
 const BOUNDARY_CASES_RE = /^(?:the shipped integration reports a prompt|the reported command line|the reported cwd|prompt and command boundaries)/;
 const KNOWN = [
-  {
-    // Seen in ubuntu:24.04 (zsh 5.9), 2026-11-11.
-    shells: ['zsh'], platforms: ['linux'], case: /^shipped directory: nothing written/,
-    why: "Debian's /etc/zsh/zshrc runs compinit while ZDOTDIR is still the shipped directory, so compinit writes .zcompdump there",
-  },
 ];
 
 const knownFor = (row, test) => KNOWN.find((entry) => entry.shells.includes(row.name)
@@ -516,12 +511,19 @@ shellCase('nothing is written into the shipped zsh directory', (row) => row.name
   await pane.waitFor(() => pane.prompts >= 1 || insecure.test(pane.text()), 'a prompt or compinit\'s question', FIRST_PROMPT_MS)
     .catch((error) => noPrompt(t, row, error));
   if (pane.prompts < 1) pane.write('y');
-  await pane.run('true');
+  // Where a system file's compinit (Debian and Ubuntu run one) put its dump.
+  const dumpfile = path.join(pane.home, 'dumpfile.txt');
+  await pane.run(`print -r -- "\${_comp_dumpfile-}" > '${dumpfile}'`);
   // Its own subtest, so a todo on what was written covers only that.
   const todo = todoFor(row, 'shipped directory: nothing written');
   await t.test(`${row.name}: nothing written`, todo ? { todo } : {}, () => {
     const written = fs.readdirSync(path.join(copy, 'zsh')).filter((name) => !SHIPPED_ZSH.includes(name));
     assert.deepEqual(written, [], `zsh wrote ${written.join(', ')} into the shipped directory`);
+  });
+  await t.test(`${row.name}: a completion dump lands where it would without Dormouse`, () => {
+    const dump = fs.readFileSync(dumpfile, 'utf8').trim();
+    if (dump) assert.equal(dump, path.join(pane.home, '.zcompdump'));
+    if (dump) assert.ok(fs.existsSync(dump), `no ${dump}`);
   });
 });
 
