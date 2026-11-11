@@ -2782,8 +2782,34 @@ fn fit_geometry(saved: WindowGeometry, min: (f64, f64), monitors: &[WindowGeomet
     fit
 }
 
-/// Every connected display in logical coordinates, the primary first.
-fn monitor_rects(app: &AppHandle) -> Vec<WindowGeometry> {
+/// The physical box a saved box came from, on a platform whose displays each
+/// have their own logical space (Windows). The box was saved as physical ÷ the
+/// scale of the display it sat on, and `monitors` measures each display in
+/// its own scale, so the box scales back by the scale of the display it
+/// overlaps most there. `None` when it overlaps none.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn physical_box(saved: WindowGeometry, monitors: &[(WindowGeometry, f64)]) -> Option<CachedRect> {
+    let overlap = |m: &WindowGeometry| {
+        let w = (saved.x + saved.width).min(m.x + m.width) - saved.x.max(m.x);
+        let h = (saved.y + saved.height).min(m.y + m.height) - saved.y.max(m.y);
+        if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
+    };
+    let (_, scale) = monitors
+        .iter()
+        .map(|(m, scale)| (overlap(m) * scale * scale, *scale))
+        .filter(|(area, _)| *area > 0.0)
+        .max_by(|a, b| a.0.total_cmp(&b.0))?;
+    let physical = |v: f64| (v * scale).round();
+    Some(CachedRect {
+        origin: (physical(saved.x) as i32, physical(saved.y) as i32),
+        size: (physical(saved.width) as u32, physical(saved.height) as u32),
+        scale,
+    })
+}
+
+/// Every connected display in logical coordinates with its scale factor, the
+/// primary first.
+fn monitor_rects(app: &AppHandle) -> Vec<(WindowGeometry, f64)> {
     let primary = app.primary_monitor().ok().flatten();
     let mut monitors = app.available_monitors().unwrap_or_default();
     if let Some(primary) = &primary {
@@ -2795,12 +2821,13 @@ fn monitor_rects(app: &AppHandle) -> Vec<WindowGeometry> {
         .iter()
         .map(|m| {
             let scale = m.scale_factor();
-            WindowGeometry {
+            let rect = WindowGeometry {
                 x: f64::from(m.position().x) / scale,
                 y: f64::from(m.position().y) / scale,
                 width: f64::from(m.size().width) / scale,
                 height: f64::from(m.size().height) / scale,
-            }
+            };
+            (rect, scale)
         })
         .collect()
 }
@@ -2913,15 +2940,31 @@ fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
         first.and_then(|w| w.min_height).unwrap_or(0.0),
     );
     let monitors = monitor_rects(app);
+    let logical: Vec<WindowGeometry> = monitors.iter().map(|(rect, _)| *rect).collect();
     let saved_box = |label: &str| {
-        read_geometry(dir, label).map(|saved| SavedGeometry { rect: fit_geometry(saved.rect, min, &monitors), ..saved })
+        read_geometry(dir, label).map(|saved| SavedGeometry { rect: fit_geometry(saved.rect, min, &logical), ..saved })
     };
     // Maximized after the box is in place, so restoring down returns to it.
     if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
         if let Some(saved) = saved_box(routing::MAIN_LABEL) {
             let geometry = saved.rect;
-            let _ = window.set_position(tauri::LogicalPosition::new(geometry.x, geometry.y));
-            let _ = window.set_size(tauri::LogicalSize::new(geometry.width, geometry.height));
+            // Windows scales a logical position by the display `main` is on
+            // now, not the one the box was saved on, so place it in physical
+            // pixels; a box on no display leaves it where the config put it.
+            // A later window needs none of this: tao's creation path tries the
+            // scale of each display.
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(rect) = physical_box(geometry, &monitors) {
+                    let _ = window.set_position(tauri::PhysicalPosition::new(rect.origin.0, rect.origin.1));
+                    let _ = window.set_size(tauri::PhysicalSize::new(rect.size.0, rect.size.1));
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = window.set_position(tauri::LogicalPosition::new(geometry.x, geometry.y));
+                let _ = window.set_size(tauri::LogicalSize::new(geometry.width, geometry.height));
+            }
             if saved.maximized {
                 let _ = window.maximize();
             }
@@ -5275,6 +5318,29 @@ mod tests {
         assert_eq!(fit_geometry(on_above, min, &[primary]), g(239.5, 0.0, 961.0, 1050.0));
         // No monitor list means no opinion on the position.
         assert_eq!(fit_geometry(on_above, min, &[]), on_above);
+    }
+
+    /// Windows gives each display its own logical space, so `main`'s saved box
+    /// goes back to physical pixels by the scale of the display it was on, not
+    /// the primary's (§Boot and geometry).
+    #[test]
+    fn a_saved_box_returns_to_physical_pixels_by_its_own_displays_scale() {
+        use super::{physical_box, CachedRect, WindowGeometry as G};
+        // A 2880x1800 panel at 150% as primary, a 1920x1080 monitor at 100%
+        // to its right: physical x 2880..4800.
+        let monitors = [
+            (G { x: 0.0, y: 0.0, width: 1920.0, height: 1200.0 }, 1.5),
+            (G { x: 2880.0, y: 0.0, width: 1920.0, height: 1080.0 }, 1.0),
+        ];
+        // Saved on the secondary at physical (3400, 100).
+        let on_secondary = CachedRect { origin: (3400, 100), size: (1200, 800), scale: 1.0 };
+        assert_eq!(physical_box(on_secondary.to_logical(), &monitors), Some(on_secondary));
+        // Saved on the primary at physical (300, 150).
+        let on_primary = CachedRect { origin: (300, 150), size: (1500, 900), scale: 1.5 };
+        assert_eq!(physical_box(on_primary.to_logical(), &monitors), Some(on_primary));
+        // On no display: no position, so `main` stays where the config put it.
+        assert_eq!(physical_box(G { x: 9000.0, y: 0.0, width: 800.0, height: 600.0 }, &monitors), None);
+        assert_eq!(physical_box(on_secondary.to_logical(), &[]), None);
     }
 
     // RAII guard so a failing assert doesn't leak the temp dir.
