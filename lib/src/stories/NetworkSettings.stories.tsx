@@ -115,8 +115,8 @@ export const NothingCheckDue: Story = {
 
 /**
  * The Phones hint names the choices that allow a phone, each a shortcut to
- * itself — and Local networks chosen with nothing allowed allows the Wi-Fi,
- * never the tailnet or Docker.
+ * itself — and Local networks chosen allows no network until one is switched
+ * on, and says so.
  */
 export const NothingChooseFromPhones: Story = {
   parameters: { primedBurrow: hosted(nothingPolicy()) },
@@ -125,7 +125,8 @@ export const NothingChooseFromPhones: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Local networks only' }));
     await waitFor(() =>
       expect(canvas.getByRole('radio', { name: /^Local networks/ })).toHaveAttribute('aria-checked', 'true'));
-    await expect(canvas.getByRole('switch', { name: 'Allow Local network en0 on' })).toBeVisible();
+    await canvas.findByText('No network is allowed, so no phone can connect.');
+    await expect(canvas.getByRole('switch', { name: 'Allow Local network en0 off' })).toBeVisible();
     await expect(canvas.getByRole('switch', { name: 'Allow Tailscale utun4 off' })).toBeVisible();
     await expect(canvas.getByRole('switch', { name: 'Allow Virtual network bridge100 off' })).toBeVisible();
     await canvas.findByRole('button', { name: 'One-time connection' });
@@ -324,7 +325,8 @@ export const SwitchingLevels: Story = {
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await userEvent.click(canvas.getByRole('radio', { name: /^Local networks/ }));
-    await canvas.findByText('Allowed networks');
+    await canvas.findByText('No network is allowed, so no phone can connect.');
+    await userEvent.click(canvas.getByRole('switch', { name: 'Allow Local network en0 off' }));
     await canvas.findByText('Your phone, on an allowed network');
     await userEvent.click(canvas.getByRole('radio', { name: /^Anywhere/ }));
     await canvas.findByText(CLOUDFLARE_STUN_HOST);
