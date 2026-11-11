@@ -196,22 +196,23 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
   // `validateToolArgs` already accepted this argv, so the walk cannot fail.
   const head = headPositionals(this.commandArgs);
   const named = head.ok && head.value.length > 0;
-  const cwd = launchDirectory(flags.cwd, this.options);
-  if (cwd instanceof Error) return cwd;
+  const placement = launchPlacement(this, flags);
+  if (placement instanceof Error) return placement;
   return dispatchToolSurface(this, {
     ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
-    ...launchPlacement(this, flags),
-    cwd,
+    ...placement,
   }, flags.json === true);
 }
 
 function launchPlacement(context: DorCommandContext, flags: ToolFlags) {
+  const cwd = launchDirectory(flags.cwd, context.options);
+  if (cwd instanceof Error) return cwd;
   return {
     ...workspaceParam(flags.workspace),
     fresh: flags.fresh === true,
     minimized: flags.minimize === true,
     surface: flags.surface,
-    cwd: callerWorkingDirectory(flags.cwd, context.options),
+    cwd,
   };
 }
 
@@ -223,6 +224,9 @@ async function pickTool(context: DorCommandContext, flags: ToolFlags, placing: b
     // A placement flag means the caller meant to launch something.
     return placing ? new Error('dor tool requires a tool name or -- <command...>') : listTools(context, flags);
   }
+  // Checked before the picker opens: a pick is a launch, and its --cwd must exist.
+  const placement = launchPlacement(context, flags);
+  if (placement instanceof Error) return placement;
   const listing = await readToolList(context, flags);
   if (listing instanceof Error) return listing;
   if (listing.tools.length === 0) {
@@ -240,7 +244,7 @@ async function pickTool(context: DorCommandContext, flags: ToolFlags, placing: b
   return dispatchToolSurface(context, {
     // A shadowed user Tool is the one chosen, so the project's must not run.
     name: choice.name, args: [], global: flags.global === true || choice.shadowed,
-    ...launchPlacement(context, flags),
+    ...placement,
   }, false);
 }
 
