@@ -4,9 +4,9 @@
  * against the real host wiring (`docs/specs/security-local.md` -> "Network
  * policy").
  *
- * The globals the Burrow service and managed voice reach for — `fetch` and
- * `WebSocket` — are replaced by recorders that answer locally (a 503, a socket
- * that never opens), and everything
+ * What the Burrow service and managed voice reach for — the global `fetch`,
+ * and the `ws` upgrade request the service's sockets send — is answered locally
+ * (a 503, an upgrade that never answers), and everything
  * underneath them is hooked too, so a path that bypasses the globals is still
  * seen: every TCP connect (`net.Socket.prototype.connect`, which `http`,
  * `https`, `tls`, and undici all end in), `tls.connect`, `dgram.createSocket`,
@@ -20,6 +20,7 @@
 
 import dgram from 'node:dgram';
 import dns from 'node:dns';
+import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import https from 'node:https';
 import Module, { syncBuiltinESMExports } from 'node:module';
@@ -80,6 +81,27 @@ function connectHost(args: unknown[]): string | null {
   }
   if (typeof first === 'string' && !/^\d+$/.test(first)) return null;
   return typeof args[1] === 'string' ? args[1] : 'localhost';
+}
+
+/** Whether a `http(s).request` is a `ws` socket's upgrade: the service's guarded transport. */
+function isWebSocketUpgrade(options: unknown): boolean {
+  const headers = (options as { headers?: Record<string, unknown> } | null)?.headers;
+  return typeof options === 'object' && headers?.Upgrade === 'websocket';
+}
+
+/**
+ * The upgrade request of a socket that never opens. `ws` only listens on it and
+ * ends it; closing the socket meanwhile destroys it, which closes it.
+ */
+class UnansweredRequest extends EventEmitter {
+  end(): this {
+    return this;
+  }
+
+  destroy(): this {
+    process.nextTick(() => this.emit('close'));
+    return this;
+  }
 }
 
 /** Install every hook. Call {@link OutboundRecorder.restore} in `afterEach`. */
@@ -148,7 +170,12 @@ export function recordOutbound(): OutboundRecorder {
             : ((first as { hostname?: string; host?: string } | undefined)?.hostname ??
               (first as { host?: string } | undefined)?.host ??
               'localhost');
-        record(`${name}.${key}`, host);
+        if (isWebSocketUpgrade(first)) {
+          const attempt = record('ws', host);
+          if (!staysLocal(attempt)) return new UnansweredRequest();
+        } else {
+          record(`${name}.${key}`, host);
+        }
         return original(...args);
       }) as never);
     }

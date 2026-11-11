@@ -13,7 +13,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fromBase64Url, toBase64Url, type PairingInvitation } from 'remote-lib-common';
+import { fromBase64Url, INVITATION_CLOCK_SKEW_MS, toBase64Url, type PairingInvitation } from 'remote-lib-common';
 
 import { RESCAN_GAP_MS, SCAN_REJECTED_MESSAGE, ScanInvitation, type ScanControls } from './ScanInvitation';
 import { buttonNamed, invitationUrl as sharedInvitationUrl, settle } from './app-test-utils';
@@ -41,8 +41,9 @@ afterEach(() => {
 /** A live invitation URL for the origin this screen is checking against. */
 const invitationUrl = () => sharedInvitationUrl(ORIGIN);
 
-/** The same URL a second after its five minutes ran out. */
-const deadInvitationUrl = () => sharedInvitationUrl(ORIGIN, Math.floor(Date.now() / 1000) - 1);
+/** The same URL a second after its five minutes, and the phone's clock tolerance, ran out. */
+const deadInvitationUrl = () =>
+  sharedInvitationUrl(ORIGIN, Math.floor((Date.now() - INVITATION_CLOCK_SKEW_MS) / 1000) - 1);
 
 /** A camera whose decodes the test drives, and whose teardown it can observe. */
 function fakeCamera() {

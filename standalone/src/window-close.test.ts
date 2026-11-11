@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   needsConfirmation: vi.fn(() => false),
   reopenSnapshot: vi.fn((): unknown => null),
   getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
-  hasPendingUpdate: vi.fn(() => false),
+  hasApprovedUpdate: vi.fn(() => false),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -32,7 +32,7 @@ vi.mock("dormouse-lib/lib/workspace-store", () => ({
 }));
 // Closing a window throws away the download it is holding, so the close asks
 // about that too (`docs/specs/auto-update.md` → "Quit-time install").
-vi.mock("./updater", () => ({ hasPendingUpdate: mocks.hasPendingUpdate }));
+vi.mock("./updater", () => ({ hasApprovedUpdate: mocks.hasApprovedUpdate }));
 
 import { initWindowClose, _resetWindowCloseForTesting } from "./window-close";
 import {
@@ -66,7 +66,7 @@ describe("per-window close", () => {
     });
     mocks.needsConfirmation.mockReturnValue(false);
     mocks.invoke.mockResolvedValue(undefined);
-    mocks.hasPendingUpdate.mockReturnValue(false);
+    mocks.hasApprovedUpdate.mockReturnValue(false);
     mocks.reopenSnapshot.mockReturnValue(null);
   });
 
@@ -141,7 +141,7 @@ describe("per-window close", () => {
     // The download lives in this webview's memory, so closing the window is the
     // one ending that silently discards it.
     mocks.needsConfirmation.mockReturnValue(false);
-    mocks.hasPendingUpdate.mockReturnValue(true);
+    mocks.hasApprovedUpdate.mockReturnValue(true);
     const adapter = fakeAdapter();
     initWindowClose(adapter);
     closeRequested();

@@ -4,8 +4,6 @@ import { useSyncExternalStore } from 'react';
 import { parseRenderMode, type BrowserAutomationProvider, type SurfaceRenderMode } from 'dor-lib-common/browser-providers';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 
-export type ScreenState = 'SYNCED' | 'SCALED';
-
 /** Canonical renderer values, one per provider presentation plus the embed
  *  (`dor-lib-common/src/browser-providers.ts`); defaulting belongs to
  *  `resolveRenderMode`. */
@@ -42,7 +40,6 @@ export function browserDisplayMode(
 }
 
 export interface ScreenSnapshot {
-  state: ScreenState;
   /** The surface's current render backend, always supplied — only persisted
    *  params can lack one, and `resolveRenderMode` is the single place that
    *  answers for those. Together with `syncEngaged`, drives the surface's
@@ -50,10 +47,6 @@ export interface ScreenSnapshot {
   renderMode: RenderMode;
   /** The browser's live CSS viewport + inferred device pixel ratio. */
   viewport: { w: number; h: number; dpr: number };
-  /** The pane's CSS pixel size (the canvas render area). */
-  paneCss: { w: number; h: number };
-  /** The Dormouse window's device pixel ratio. */
-  displayDpr: number;
   syncEngaged: boolean;
 }
 
@@ -298,7 +291,7 @@ export function useAgentBrowserScreenController(id: string): ScreenController | 
 
 const NO_SUBSCRIBE = () => () => {};
 
-/** A controller's live snapshot (SYNCED/SCALED + dims), or null. Re-renders on
+/** A controller's live snapshot (render mode, sync, viewport), or null. Re-renders on
  *  every published snapshot for that controller. */
 export function useAgentBrowserScreenSnapshot(controller: ScreenController | null): ScreenSnapshot | null {
   return useSyncExternalStore(
@@ -308,7 +301,7 @@ export function useAgentBrowserScreenSnapshot(controller: ScreenController | nul
 }
 
 /** A controller's display identity alone, or null: re-renders only when it
- *  changes, never for the pane size every resize frame republishes. */
+ *  changes, never for a viewport change the snapshot also publishes. */
 export function useAgentBrowserDisplayMode(controller: ScreenController | null): BrowserDisplayMode | null {
   return useSyncExternalStore(
     controller ? controller.subscribe : NO_SUBSCRIBE,

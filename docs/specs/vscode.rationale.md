@@ -18,6 +18,8 @@
 
 **Why the recovery record is not `workspaceState`.** Writing it there was tried and measured (2026-08): detection completed and the record was never written — the state store's SQLite flush is already tearing down while `deactivate()` runs.
 
+**Why a folder-less window gets its own subdirectory.** Every window with no folder has no `storageUri`, and the store assumes one host process per directory: the first capture of each process deletes the record and each writes only its own captures, so with a shared `recovery.json` only the last window to tear down kept its agents' resume commands. The key is written at activation because a `workspaceState` write first issued in `deactivate()` never lands (above); an empty window restores its `workspaceState` along with its saved session, so the key comes back with the panes it serves.
+
 ## Surface id minting
 
 **Why the mark is not in `workspaceState`.** Its writes reach disk on VS Code's own schedule, so a raised mark could be lost after its numbers were handed out, and the next run would reuse them; the counter file is flushed, then its directory, before a reservation is answered.
@@ -78,8 +80,6 @@
 
 
 **Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
-
-**Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.
 
 ## The direct path
 

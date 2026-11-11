@@ -8,10 +8,12 @@ import { mintSurfaceId, resetSurfaceIdPool } from '../surface-ids';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
   applyTerminalSemanticEvents: vi.fn(),
+  applyLiveTerminalSemanticEvents: vi.fn(),
 }));
 
 vi.mock('../terminal-state-store', () => ({
   applyTerminalSemanticEvents: terminalStateStoreMocks.applyTerminalSemanticEvents,
+  applyLiveTerminalSemanticEvents: terminalStateStoreMocks.applyLiveTerminalSemanticEvents,
 }));
 
 const terminalThemeMocks = vi.hoisted(() => ({
@@ -297,8 +299,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'terminal:semanticEvents', id: 'pane-1', events }));
     void adapter;
 
-    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
-    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', events);
+    expect(terminalStateStoreMocks.applyLiveTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyLiveTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', events);
   });
 
   it('counts a remote Client\'s input as touching the Session', () => {
@@ -336,8 +338,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     new VSCodeAdapter();
     windowTarget.dispatchEvent(hostMessage(wirePayload));
 
-    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
-    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', hostEvents);
+    expect(terminalStateStoreMocks.applyLiveTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyLiveTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', hostEvents);
   });
 
   it('forwards shell replacement requests from the extension host', () => {
@@ -435,7 +437,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
       expect(replays).toEqual([]);
       expect(exits).toEqual([]);
       expect(lists).toEqual([]);
-      expect(terminalStateStoreMocks.applyTerminalSemanticEvents).not.toHaveBeenCalled();
+      expect(terminalStateStoreMocks.applyLiveTerminalSemanticEvents).not.toHaveBeenCalled();
     });
 
     it('rejects a wrong token as firmly as a missing one', () => {
@@ -592,15 +594,6 @@ describe('VSCodeAdapter remote host link', () => {
     const adapter = new VSCodeAdapter();
     adapter.burrow.notify();
     expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify' });
-  });
-
-  it('rejects what is still in flight when the webview shuts down', async () => {
-    // The extension host cleans up the PTYs, but nothing there will ever answer
-    // a command this webview is still holding.
-    const adapter = new VSCodeAdapter();
-    const pending = adapter.burrow.command('status');
-    adapter.shutdown();
-    await expect(pending).rejects.toThrow('burrow bridge closed');
   });
 
   it('ignores an unauthenticated result, so framed content cannot settle a command', async () => {

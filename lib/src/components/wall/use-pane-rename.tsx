@@ -26,6 +26,9 @@ export function usePaneRename(id: string) {
         className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
         initialValue={initialValue}
         blurAction="submit"
+        // The seed is the derived label: submitting it untouched would pin it
+        // as the user title for good, or warn that `<idle>` is reserved.
+        submitUntouched={false}
         onSubmit={submit}
         onCancel={actions.onCancelRename}
       />

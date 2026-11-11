@@ -2,9 +2,9 @@ import { registerWallHandle, stubWallHandle } from '../components/wall/wall-hand
 import { setWorkspaceTransferPending } from './window-session-aggregator';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
+import { markSessionTouched, registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
 import { installSurfaceIdPool, resetSurfaceIdPool } from './surface-ids';
-import { applyTerminalSemanticEvents, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
+import { applyTerminalSemanticEvents, countRunningSessions, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
 import { beginPromotion, cancelPromotion, closeHelperParent, detachHelper, disposeHelper, resetHelper, finishPromotion, getHelper, helperHasWork, openHelper, reattachHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
 
 const host = vi.hoisted(() => ({ writePty: vi.fn(), terminalContext: vi.fn(), getCwd: vi.fn() }));
@@ -220,7 +220,7 @@ describe('helper lifecycle', () => {
       expect(host.writePty).not.toHaveBeenCalled();
     } finally { unsubscribe(); }
   });
-  it('stops hidden polling, invalidates idle, and still checks running work on demand', async () => {
+  it('stops hidden polling, keeps idle until input, and still checks running work on demand', async () => {
     const helper = await openHelper('parent');
     registry.get(helper.id)!.untouched = false;
     await vi.advanceTimersByTimeAsync(2000);
@@ -230,7 +230,12 @@ describe('helper lifecycle', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(host.terminalContext).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+    // No input since the idle answer: a quit counts no running work for it.
+    expect(registry.get(helper.id)?.helperBusy).toBe(false);
+    expect(countRunningSessions()).toBe(0);
+    markSessionTouched(helper.id);
     expect(registry.get(helper.id)?.helperBusy).toBeUndefined();
+    expect(countRunningSessions()).toBe(1);
     host.terminalContext.mockResolvedValue({ busy: true });
     expect(await helperHasWork(helper)).toBe(true);
     setHelperVisible('parent', true);

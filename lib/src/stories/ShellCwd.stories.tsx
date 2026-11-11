@@ -19,7 +19,6 @@ import {
   cwdFromOsc9_9,
   cwdFromProcessPath,
   deriveHeader,
-  groupTerminalPanes,
   UNNAMED_PANEL_TITLE,
   type CommandRun,
   type CwdState,
@@ -130,22 +129,7 @@ export const TitleCandidatesInHeaderMenu: Story = {
   play: openHeaderContextMenu,
 };
 
-export const GroupingKeys: Story = storyFor([
-  caseState('App dev server', running('/repo/app', 'npm run dev'), 'Directory: app, command: npm run dev, status: running'),
-  caseState('API dev server', running('/repo/api', 'npm run dev'), 'Directory: api, command: npm run dev, status: running'),
-  caseState('App test', running('/repo/app', 'pnpm test --watch'), 'Shares directory with app dev'),
-  caseState('API idle', idle({ cwd: manual('/repo/api'), activity: { kind: 'editing' } }), 'Idle directory grouping uses pane CWD'),
-  caseState('Docs finished', finished('/repo/docs', 'cargo test', 0), 'Finished status group'),
-  caseState('Unknown', idle({ activity: { kind: 'unknown' } }), 'Unknown status group'),
-], { showGroups: true });
-
-function ShellCwdMatrix({
-  cases,
-  showGroups = false,
-}: {
-  cases: ShellCwdCase[];
-  showGroups?: boolean;
-}) {
+function ShellCwdMatrix({ cases }: { cases: ShellCwdCase[] }) {
   const states = cases.map((item) => item.state);
 
   return (
@@ -174,7 +158,6 @@ function ShellCwdMatrix({
           );
         })}
       </div>
-      {showGroups && <GroupingPreview cases={cases} />}
     </div>
   );
 }
@@ -221,39 +204,11 @@ function DerivedBadge({
   );
 }
 
-function GroupingPreview({ cases }: { cases: ShellCwdCase[] }) {
-  const panes = cases.map((item) => item.state);
-  return (
-    <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
-      {(['directory', 'command', 'status'] as const).map((mode) => (
-        <section key={mode} className="border border-border bg-surface-raised/40 p-3">
-          <h3 className="mb-2 text-sm font-semibold capitalize">{mode}</h3>
-          <div className="grid gap-1">
-            {groupTerminalPanes(panes, mode).map((group) => (
-              <div key={`${mode}-${group.key}`} className="min-w-0">
-                <span className="font-semibold">{group.label}</span>
-                <span className="text-muted">: {casesForGroup(cases, group.panes).join(', ')}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function casesForGroup(cases: ShellCwdCase[], panes: TerminalPaneState[]): string[] {
-  return cases.filter((item) => panes.includes(item.state)).map((item) => item.label);
-}
-
 /** Each case is one Surface, numbered `surface:1` onward. */
-function storyFor(unnumbered: Omit<ShellCwdCase, 'id'>[], extraArgs: { showGroups?: boolean } = {}): Story {
+function storyFor(unnumbered: Omit<ShellCwdCase, 'id'>[]): Story {
   const cases = unnumbered.map((item, i) => ({ ...item, id: surfaceIdFor(i + 1) }));
   return {
-    args: {
-      cases,
-      ...extraArgs,
-    },
+    args: { cases },
     parameters: {
       primedTerminalState: {
         byId: Object.fromEntries(cases.map((item) => [item.id, item.state])),

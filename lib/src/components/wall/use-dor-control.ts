@@ -1061,7 +1061,7 @@ export function useDorControl({
         renderMode: renderModeFor(provider, 'screencast'),
         ...(cwd ? { cwd } : {}),
         session,
-        ...(initialViewport ? { browserViewport: initialViewport, syncEngaged: initialViewport.mode === 'pane-sync' } : {}),
+        ...(initialViewport ? { browserViewport: initialViewport } : {}),
         ...(key !== undefined ? { key } : {}),
         ...refreshedParams,
       },
@@ -2455,7 +2455,7 @@ export function useDorControl({
             const changed = await browser.viewport(setting.width, setting.height, setting.dpr);
             if (!changed.ok) throw new Error(changed.error ?? 'Could not resize browser viewport');
           } else throw new Error('pane-sync requires a mounted screencast pane');
-          updateSurfaceParams(targetId, { browserViewport: setting, syncEngaged: setting.mode === 'pane-sync' });
+          updateSurfaceParams(targetId, { browserViewport: setting });
         }
         const measured = await browser.measure();
         if (!measured.ok && setting) throw new Error(measured.error ?? 'Could not measure browser viewport');
@@ -2467,7 +2467,7 @@ export function useDorControl({
           const stored = (lath.getMeta(targetId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
           if (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync') {
             if (controller) controller.adoptMeasuredViewport(measured.viewport);
-            else updateSurfaceParams(targetId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, measured.viewport), syncEngaged: false });
+            else updateSurfaceParams(targetId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, measured.viewport) });
           }
         }
         const stored = (lath.getMeta(targetId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
@@ -2556,7 +2556,7 @@ export function useDorControl({
         if (observed.ok && observed.viewport && (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync')) {
           const controller = getAgentBrowserSurfaceController(result.surfaceId);
           if (controller) controller.adoptMeasuredViewport(observed.viewport);
-          else updateSurfaceParams(result.surfaceId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, observed.viewport), syncEngaged: false });
+          else updateSurfaceParams(result.surfaceId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, observed.viewport) });
         }
       }
       // Bound: later commands for the key resolve to this Surface.

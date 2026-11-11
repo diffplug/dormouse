@@ -25,11 +25,7 @@ interface PersistedShellIdentity {
   args: string[];
 }
 
-type StoredShellSelection = PersistedShellIdentity | string;
-
-/** Accept the current identity object and the legacy path-only string. */
-function isStoredShellSelection(value: unknown): value is StoredShellSelection {
-  if (isString(value)) return true;
+function isStoredShellSelection(value: unknown): value is PersistedShellIdentity {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<PersistedShellIdentity>;
   return isString(candidate.path)
@@ -125,16 +121,12 @@ export function seedShellStore(shells: ShellEntry[]): void {
     shells.length === state.shells.length
     && shells.every((shell, index) => shellEntryEquals(shell, state.shells[index]))
   ) return;
-  const saved = loadJson<StoredShellSelection, null>(
+  const saved = loadJson<PersistedShellIdentity, null>(
     SELECTED_KEY,
     null,
     isStoredShellSelection,
   );
-  // Path-only values were written before arguments became part of identity.
-  const selected = (typeof saved === 'string'
-    ? shells.find((shell) => shell.path === saved)
-    : shells.find((shell) => shellIdentityEquals(shell, saved ?? undefined)))
-    ?? shells[0];
+  const selected = shells.find((shell) => shellIdentityEquals(shell, saved ?? undefined)) ?? shells[0];
   publishSelected(selected);
   emit({ shells: [...shells], selected });
 }

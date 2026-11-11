@@ -227,6 +227,23 @@ describe('handleMouseSelectionKeys', () => {
       expect(vi.mocked(nudgeCopyEdge).mock.calls).toEqual([['pane-a', 'end', 1], ['pane-a', 'start', -1]]);
     });
 
+    it('leaves Enter, Escape, and paste to a modal dialog over the Wall', async () => {
+      const { setSelection, copySelection } = await open();
+      const { doPaste } = await import('../../../lib/clipboard');
+      vi.mocked(doPaste).mockClear();
+      const dialog = document.createElement('div');
+      dialog.setAttribute('aria-modal', 'true');
+      const button = dialog.appendChild(document.createElement('button'));
+      for (const init of [{ key: 'Enter' }, { key: 'Escape' }, { key: 'v', metaKey: true }]) {
+        const e = fakeEvent(button, init);
+        expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
+        expect(e.defaultPrevented).toBe(false);
+      }
+      expect(copySelection).not.toHaveBeenCalled();
+      expect(setSelection).not.toHaveBeenCalled();
+      expect(doPaste).not.toHaveBeenCalled();
+    });
+
     it('closes on Escape, consuming it', async () => {
       const { setSelection } = await open();
       const { e, handled } = press({ key: 'Escape' });

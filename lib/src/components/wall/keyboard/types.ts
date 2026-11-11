@@ -81,3 +81,10 @@ export type ArrowKey = keyof typeof ARROW_OPPOSITES;
 export function isArrowKey(key: string): key is ArrowKey {
   return key in ARROW_OPPOSITES;
 }
+
+/** The key a command-mode verb matches. Caps Lock alone turns a letter into
+ *  its lowercase verb; Shift+letter stays its own, unbound key. */
+export function commandKey(e: KeyboardEvent): string {
+  const capsLock = e.getModifierState?.('CapsLock') === true;
+  return capsLock && !e.shiftKey && /^[A-Z]$/.test(e.key) ? e.key.toLowerCase() : e.key;
+}

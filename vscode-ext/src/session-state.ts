@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
@@ -10,6 +12,7 @@ import { createRecoveryStore, type RecoveryStore } from '../../lib/src/host/reco
 import { log } from './log';
 
 const SESSION_STATE_KEY = 'dormouse.session';
+const RECOVERY_KEY_STATE_KEY = 'dormouse.recoveryKey';
 
 export function getSavedSessionState(context: vscode.ExtensionContext): PersistedSession | null {
   return readPersistedSession(context.workspaceState.get<unknown>(SESSION_STATE_KEY));
@@ -116,10 +119,38 @@ export async function refreshSavedSessionStateFromPtys(
 let store: RecoveryStore | null = null;
 function recoveryStore(context: vscode.ExtensionContext): RecoveryStore {
   store ??= createRecoveryStore(
-    context.storageUri?.fsPath ?? context.globalStorageUri?.fsPath,
+    recoveryDirectory(context),
     { log: { info: (message) => log.info(message), error: (message) => log.error(message) } },
   );
   return store;
+}
+
+/**
+ * Create this activation's recovery store now, at activation: a folder-less
+ * window's directory key is written to `workspaceState` here, while that write
+ * can still reach disk, never first in `deactivate()`.
+ */
+export function initRecoveryStore(context: vscode.ExtensionContext): void {
+  recoveryStore(context);
+}
+
+/**
+ * The directory of this window's recovery record. The store assumes one host
+ * process per directory, so a window with no folder, which has no `storageUri`
+ * and would otherwise share `globalStorageUri` with every other such window,
+ * gets a subdirectory named by a key kept in its own `workspaceState`.
+ */
+export function recoveryDirectory(context: vscode.ExtensionContext): string | undefined {
+  if (context.storageUri) return context.storageUri.fsPath;
+  if (!context.globalStorageUri) return undefined;
+  const saved = context.workspaceState.get<unknown>(RECOVERY_KEY_STATE_KEY);
+  // Only a key this module wrote ever names a directory.
+  let key = typeof saved === 'string' && /^[0-9a-f-]{36}$/.test(saved) ? saved : null;
+  if (!key) {
+    key = randomUUID();
+    void context.workspaceState.update(RECOVERY_KEY_STATE_KEY, key);
+  }
+  return path.join(context.globalStorageUri.fsPath, 'recovery', key);
 }
 
 /**
@@ -145,6 +176,7 @@ function recoveryStore(context: vscode.ExtensionContext): RecoveryStore {
  */
 export async function captureAgentRecoveryCommands(
   context: vscode.ExtensionContext,
+  silenceRun: (id: string) => void,
   maxWaitMs = DEFAULT_RECOVERY_WAIT_MS,
 ): Promise<void> {
   const recovery = recoveryStore(context);
@@ -156,6 +188,7 @@ export async function captureAgentRecoveryCommands(
     liveIds: ptyManager.liveIds,
     resize: (id, cols, rows) => ptyManager.resize(id, cols, rows),
     interrupt: (ids) => ptyManager.interrupt(ids),
+    silenceRun,
     receivedChars: (id) => ptyManager.getScrollbackReceived(id),
     outputSince: (id, mark) => ptyManager.getScrollbackSince(id, mark),
     onCommand: (id, command) => recovery.record(id, command),

@@ -73,7 +73,6 @@ function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<stri
     launchSession: undefined,
     launchFallback: undefined,
     renderMode: undefined,
-    syncEngaged: undefined,
   });
   return true;
 }

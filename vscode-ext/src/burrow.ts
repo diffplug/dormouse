@@ -44,10 +44,6 @@ import {
 import type { BurrowSurfaceProvider } from '../../lib/src/remote/burrow/burrow-surface-provider';
 import { createBurrowFrameHost } from '../../lib/src/host/remote/frame-host';
 import { createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease } from './iframe-proxy-host';
-import {
-  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
-  type WebSocketLike,
-} from '../../lib/src/remote/burrow/burrow-runtime';
 import type { ExtensionMessage } from './message-types';
 import {
   broadcastUiEvent,
@@ -209,33 +205,6 @@ export function notifyDirectoryChanged(): void {
 }
 
 /**
- * The relay socket, preferring whatever this extension host already provides.
- *
- * `globalThis.WebSocket` only landed in Node 22, and `engines.vscode` here is
- * `^1.92.0` — VS Code 1.92 shipped Node 20.14, and the supported range spans
- * the boundary — so on an older host there is no global to use and the bundled
- * `ws` is the only implementation. Its socket satisfies the same
- * surface `BurrowRuntime` reads and nothing more: `send`, `close`, `readyState`,
- * `addEventListener`, with `message` events carrying `.data` and `close` events
- * carrying `.code`.
- *
- * `ws`'s optional native accelerators (`bufferutil`, `utf-8-validate`) are
- * deliberately left unbundled and unshipped; `ws` falls back to its JS paths.
- *
- * `ws` defaults `maxPayload` to 100 MiB, which a hostile relay would spend in
- * this process — the extension host, holding every PTY. Cap it at the largest
- * legal frame so an oversized one is never buffered; `BurrowRuntime` re-measures
- * the same bound before parsing, because the global implementation takes no
- * such option.
- */
-export function createRelaySocket(url: string): WebSocketLike {
-  const global = globalThis.WebSocket;
-  if (global) return new global(url) as unknown as WebSocketLike;
-  const Ws = (require('ws') as typeof import('ws')).WebSocket;
-  return new Ws(url, { maxPayload: MAX_RELAY_TO_BURROW_FRAME_LENGTH }) as unknown as WebSocketLike;
-}
-
-/**
  * What this window last wrote to the one-time serving marker, so only a flip
  * writes; `null` until the service's start has written it.
  */
@@ -274,7 +243,6 @@ function startService(): void {
       isLocal: (url) => isUpstreamOnThisMachine(url),
     }),
     kind: 'vscode',
-    createWebSocket: createRelaySocket,
     sendToUi: (event, data) => {
       if (event === BURROW_RESULT_EVENT) {
         answer(data as BurrowResult);

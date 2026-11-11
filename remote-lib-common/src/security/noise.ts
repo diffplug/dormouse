@@ -441,10 +441,6 @@ class SymmetricState {
     return new SymmetricState(crypto, hash);
   }
 
-  get handshakeHash(): Uint8Array {
-    return this.#hash;
-  }
-
   async mixHash(data: Uint8Array): Promise<void> {
     this.#hash = await sha256(this.#crypto, concatBytes(this.#hash, data));
   }

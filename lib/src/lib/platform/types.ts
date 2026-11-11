@@ -220,7 +220,6 @@ export interface WritePtyOptions {
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
-  shutdown(): void;
 
   /**
    * Reach the Burrow service behind this host. Present exactly when a
@@ -244,6 +243,10 @@ export interface PlatformAdapter {
   spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
+  /** A host delivers no `onPtyExit` for a PTY this webview killed: VS Code
+   *  releases its ownership first and standalone routes the exit nowhere.
+   *  `FakePtyAdapter` reports one at once, which the website playground's
+   *  shells rely on to dispose themselves. */
   killPty(id: string): void;
 
   /**
@@ -352,8 +355,14 @@ export interface PlatformAdapter {
   onFilesDropped?(handler: (paths: string[]) => void): () => void;
 
   // Open a sanitized external URI. Implementations must revalidate because
-  // terminal output is untrusted.
-  openExternal?(uri: string): void;
+  // terminal output is untrusted. A host whose opener answers returns a
+  // promise of its refusal (`undefined` once opened) that never rejects, so a
+  // caller that does not wait for it leaves nothing unhandled.
+  openExternal?(uri: string): void | Promise<string | undefined>;
+  // False on a host whose opener refuses a link another app handles (every
+  // scheme but web, `mailto:`, and `tel:`), so the link dialog offers no open
+  // for one; `tel:` stays openable.
+  readonly opensOtherApps?: false;
 
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;

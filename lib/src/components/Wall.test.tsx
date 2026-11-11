@@ -1,4 +1,4 @@
-import { previousWorkspaceSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
+import { previousWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 /**
  * @vitest-environment jsdom
  *
@@ -33,7 +33,7 @@ import type { BrowserRequest, BrowserResult } from '../lib/platform/browser-auto
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
-import { pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
+import { markSessionTouched, pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
 import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
@@ -280,6 +280,24 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); });
       expect(menu.hasAttribute('inert') || !menu.isConnected).toBe(true);
       expect(focus).not.toHaveBeenCalledWith('surface:a', true);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
+  it.each(['Enter', 'Escape'])('gives the passthrough terminal the keyboard back after %s closes its rename', async (key) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      await act(async () => { container.querySelector<HTMLElement>('[data-pane-title-for="surface:a"]')!.click(); });
+      const input = container.querySelector<HTMLInputElement>('[data-renaming-input-for="surface:a"]')!;
+      expect(input).not.toBeNull();
+      focus.mockClear();
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+      expect(container.querySelector('[data-renaming-input-for="surface:a"]')).toBeNull();
+      await flushFrame();
+      expect(focus).toHaveBeenCalledWith('surface:a', true);
     } finally {
       focus.mockRestore();
     }
@@ -533,6 +551,22 @@ describe('Wall on the Lath engine', () => {
     vi.spyOn(fake, 'getCwd').mockReturnValue(new Promise(() => {}));
     await act(async () => window.dispatchEvent(new Event('pagehide')));
     expect(saveState).toHaveBeenCalledWith(expect.objectContaining({ panes: [expect.objectContaining({ id: 'surface:a' })] }));
+  });
+
+  it('saves a Session\'s first input at once, not on the heartbeat', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    await act(async () => { await getWallHandle(DEFAULT_WORKSPACE_ID)!.flushPersistence(); });
+    registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
+    try {
+      const saveState = vi.spyOn(fake, 'saveState');
+      await act(async () => { markSessionTouched('surface:a'); });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, SESSION_SAVE_DEBOUNCE_MS + 200)); });
+      const saved = saveState.mock.calls.at(-1)?.[0] as { panes?: { id: string; untouched: boolean }[] } | undefined;
+      expect(saved?.panes?.find(pane => pane.id === 'surface:a')?.untouched).toBe(false);
+    } finally {
+      registry.delete('surface:a');
+    }
   });
 
   it('saves on pagehide while a probing save is still waiting on its CWD answer', async () => {
@@ -1097,6 +1131,32 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('never selects a parked browser surface whose page takes focus', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" onEvent={onEvent} />);
+    });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'surface:a');
+
+    try {
+      const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
+      const leaf = container.querySelector<HTMLElement>(`[data-lath-leaf="${surfaceId}"]`)!;
+      await act(async () => { leaf.querySelector<HTMLElement>('[aria-label="Minimize"]')!.click(); });
+      await flush();
+      expect(leaf.dataset.lathParked).toBe('');
+      onEvent.mockClear();
+
+      await act(async () => {
+        leaf.querySelector('iframe')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      });
+      const selectedParked = onEvent.mock.calls.some(([event]) => event.type === 'selectionChange' && event.id === surfaceId);
+      expect(selectedParked).toBe(false);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it.each(['playwright', 'agent-browser'] as const)('never binds a %s key to a session a Surface in another Workspace still holds', async (provider) => {
     const { requests } = hostBrowsers({ attach: async () => ({ ok: true, stream: 4555 }) });
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
@@ -1656,6 +1716,8 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector('[data-lath-leaf="surface:new-tab"]')).toBeNull();
       expect(container.querySelector('[data-lath-leaf="surface:swapped"]')).not.toBeNull();
       expect(getAgentBrowserScreenController('surface:swapped')?.snapshot().renderMode).toBe('iframe');
+      // The reason outlives the panel the fallback replaced.
+      expect(container.querySelector('.shell-spawn-notice')?.textContent).toContain('agent-browser binary not found');
     } finally {
       untouchedSpy.mockRestore();
     }

@@ -7,12 +7,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 // The real spawner, observed: a symlinked path gives git's answer unchanged
 // (git chdirs to the physical path itself), so only argv shows canonicalization.
 const spawned = vi.hoisted(() => [] as string[][]);
+const timeouts = vi.hoisted(() => [] as (number | undefined)[]);
 vi.mock('dor-lib-common', async (importActual) => {
   const actual = await importActual<typeof import('dor-lib-common')>();
   return {
     ...actual,
-    spawnAndCapture: (binary: string, args: readonly string[]) => {
+    spawnAndCapture: (binary: string, args: readonly string[], options?: { timeoutMs?: number }) => {
       spawned.push([...args]);
+      timeouts.push(options?.timeoutMs);
       // A directory named `hung` stands in for a network mount git never returns from.
       if (args.some((arg) => arg.endsWith('/hung'))) return new Promise(() => {});
       return actual.spawnAndCapture(binary, args);
@@ -119,15 +121,29 @@ describe('gitInfo', () => {
     expect((await gitInfo([dir]))[dir]).toEqual({ repo: 'unborn', branch: 'fresh' });
   });
 
-  it('leaves a lookup past its deadline out of the answer, never answering null', async () => {
+  it('leaves a lookup past its deadline out of the answer, never answering null, and starts no second one', async () => {
     const hung = join(root, 'hung');
     mkdirSync(hung, { recursive: true });
     git(hung, 'init', '-q');
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
+      spawned.length = 0;
+      timeouts.length = 0;
+      // The lookup's filesystem reads are real: wait (unfaked) until it spawns.
+      const spawnedMore = async (count: number) => {
+        for (const until = Date.now() + 1_000; spawned.length < count && Date.now() < until;) await new Promise(setImmediate);
+      };
       const answer = gitInfo([hung]);
+      await spawnedMore(1);
       await vi.advanceTimersByTimeAsync(3_000);
       expect(await answer).toEqual({});
+      // The caller's retry joins the lookup still running.
+      const retry = gitInfo([hung]);
+      await spawnedMore(2);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(await retry).toEqual({});
+      expect(spawned.length).toBe(1);
+      expect(timeouts).toEqual([3_000]);
     } finally {
       vi.useRealTimers();
     }

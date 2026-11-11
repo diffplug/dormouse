@@ -8,9 +8,12 @@
 import { loadJson, saveJson } from "../lib/local-json-store";
 
 /**
- * Softer than the site's `#000`, still dark enough to arrive from a black
- * homepage without a flash. Only the pre-choice default; the picker's own
- * persistence takes over the moment someone chooses.
+ * The website's one pre-choice default, for the reference pages and every
+ * playground alike: `restoreActiveTheme` persists the fallback it resolves,
+ * so a second default on this origin would lose to whichever page a visitor
+ * opened first. Softer than the site's `#000`, still dark enough to arrive
+ * from a black homepage without a flash. The picker's own persistence takes
+ * over the moment someone chooses.
  */
 export const DOCS_THEME_ID = "vscode.theme-defaults.dark-visual-studio";
 

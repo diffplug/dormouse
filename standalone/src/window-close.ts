@@ -4,7 +4,7 @@ import { finalizePendingKills } from "dormouse-lib/lib/pending-kills";
 import { openQuitConfirm } from "./quit-confirm-store";
 import { createTeardownFlow } from "./teardown-flow";
 import type { TauriAdapter } from "./tauri-adapter";
-import { hasPendingUpdate } from "./updater";
+import { hasApprovedUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
 import { listenToWindow } from "./window-label";
 
@@ -40,7 +40,7 @@ const flow = createTeardownFlow({
   // Asks when any member's own close would (docs/specs/reopen.md). An approved
   // download lives in this webview's memory, so closing throws it away — worth
   // asking about even when everything else could be reopened.
-  mustConfirm: () => windowNeedsCloseConfirmation() || hasPendingUpdate(),
+  mustConfirm: () => windowNeedsCloseConfirmation() || hasApprovedUpdate(),
   proceed: runCloseTeardown,
 });
 
@@ -49,7 +49,7 @@ export function initWindowClose(adapter: TauriAdapter): void {
   void listenToWindow("dormouse://window-close-requested", () => {
     flow.request({
       kind: "close-window",
-      ...(hasPendingUpdate() ? { discardsUpdate: true } : {}),
+      ...(hasApprovedUpdate() ? { discardsUpdate: true } : {}),
       ...(windowNeedsCloseConfirmation() ? { unreopenable: true } : {}),
     });
   });

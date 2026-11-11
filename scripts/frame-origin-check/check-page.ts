@@ -3,10 +3,11 @@
  * as it would in Pocket, through the shipped worker, bootstrap page and bridge,
  * and a fake OpenFrame answers it here, so the check needs no session or pairing.
  */
-import { FRAME_BOOTSTRAP_PATH } from 'remote-lib-common';
+import { FRAME_BOOTSTRAP_PATH, IFRAME_SANDBOX } from 'remote-lib-common';
 import type { FrameRequestInit, FrameResponse, FrameSocketHandlers, OpenFrame } from '../../lib/src/remote/client/frame-client';
 import { serveFrame } from '../../lib/src/remote/frame-origin/frame-bridge';
 import { tunnelSocketShim } from '../../lib/src/host/iframe-proxy-rewrite';
+import { IFRAME_ALLOW } from '../../lib/src/lib/iframe-policy';
 
 declare const FRAMED_PAGE: string;
 const FRAME_ORIGIN: string = (document.documentElement.dataset.frameOrigin ?? '');
@@ -156,8 +157,11 @@ async function run(): Promise<void> {
   record(`case: ${CASE}`, true, `${location.origin} framing ${FRAME_ORIGIN}`);
   record('run in this context', true, priorRuns === 0 ? 'first; Pocket-side storage was empty' : `number ${priorRuns + 1}; Pocket-side storage kept from ${Math.round((Date.now() - lastRunAt) / 1000)} s ago`);
   await probe();
+  // Both frames carry the sandbox Pocket gives them (`PocketBrowserFrame.tsx`),
+  // so the worker, bridge, and shim are measured under production's flags.
   const bootstrap = document.createElement('iframe');
   bootstrap.hidden = true;
+  bootstrap.setAttribute('sandbox', 'allow-scripts allow-same-origin');
   bootstrap.src = FRAME_ORIGIN + FRAME_BOOTSTRAP_PATH;
   const { port1, port2 } = new MessageChannel();
   const ready = new Promise<void>((resolve) => {
@@ -184,6 +188,8 @@ async function run(): Promise<void> {
   });
   const page = document.createElement('iframe');
   page.id = 'page';
+  page.setAttribute('sandbox', IFRAME_SANDBOX);
+  page.allow = IFRAME_ALLOW;
   page.src = `${FRAME_ORIGIN}/page.html`;
   document.body.append(page);
   try {

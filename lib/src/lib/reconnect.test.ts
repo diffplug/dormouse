@@ -43,7 +43,6 @@ function createPlatform(ptys: PtyInfo[], savedState: PersistedSession | null): P
 
   return {
     init: async () => {},
-    shutdown: () => {},
     getAvailableShells: vi.fn(async () => []),
     spawnPty: vi.fn(),
     writePty: vi.fn(),

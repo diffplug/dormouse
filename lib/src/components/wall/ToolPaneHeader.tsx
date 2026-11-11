@@ -87,7 +87,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
       }}
     >
       {(tier === 'full' || tier === 'compact') && (
-        <BrowserDisplayButton mode={displayMode} onOpen={screen ? () => screen.actions.openModal() : undefined} />
+        <BrowserDisplayButton mode={displayMode} onOpen={screen?.actions.setRenderMode ? () => screen.actions.openModal() : undefined} />
       )}
       <TerminalContextButton surfaceId={id} />
       {tier !== 'tiny' && <ToolNavigationButtons id={id} params={params} />}

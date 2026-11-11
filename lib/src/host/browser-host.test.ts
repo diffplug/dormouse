@@ -4,6 +4,7 @@ import { createBrowserHost } from './browser-host';
 import { neutralBrowserCwd } from './browser-neutral-cwd';
 import { fakeProvider, openViewer, syncStates } from './browser-host-test-utils';
 import { SYNC_SETTLE_MS } from './browser-sync';
+import { BROWSER_REQUEST_TIMEOUT_MS } from '../lib/platform/browser-automation';
 
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
 
@@ -373,6 +374,32 @@ describe('createBrowserHost', () => {
       void host.close().then(() => { shutDown = true; });
       await vi.advanceTimersByTimeAsync(10_000);
       expect(shutDown).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a staged launch\'s sizing and a release, so neither holds the browser\'s queue', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeProvider();
+      const host = createBrowserHost({ writeClipboardText: vi.fn(), providers: { 'agent-browser': () => fake.provider } });
+      const s1 = { provider: 'agent-browser', binding: { session: 's1' } } as const;
+      // A daemon that never answers the initial sizing.
+      fake.gate('viewport s1 1440x900@undefined');
+      let launched: unknown;
+      void host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/', headed: false, initialViewport: { mode: 'fixed', width: 1440, height: 900 } }).then((r) => { launched = r; });
+      await vi.advanceTimersByTimeAsync(BROWSER_REQUEST_TIMEOUT_MS);
+      expect(launched).toMatchObject({ ok: false, error: 'sizing the new browser timed out' });
+      // A provider connection that never lets go still leaves the close to run.
+      fake.provider.release = () => new Promise(() => {});
+      fake.calls.length = 0;
+      let closed: unknown;
+      void host.request({ ...s1, op: 'close' }).then((r) => { closed = r; });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(closed).toEqual({ ok: true });
+      expect(fake.calls).toEqual(['close s1']);
+      await host.close();
     } finally {
       vi.useRealTimers();
     }
@@ -819,6 +846,19 @@ describe('launch environment', () => {
       expect(await host.request({ ...envRequest, op: 'close' })).toEqual({ ok: true });
       expect(launchEnv).not.toHaveBeenCalled();
       expect(fake.calls).toContain('close shell-test');
+    } finally { await host.close(); }
+  });
+  it('keeps a resolved environment through an unrelated failure, for the close after it', async () => {
+    const fake = fakeProvider();
+    fake.provider.act = async () => { throw new Error('page gone'); };
+    const close = vi.spyOn(fake.provider, 'close');
+    const env = { PATH: '/shell/bin' };
+    const launchEnv = vi.fn(async () => env);
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      expect(await host.request({ ...envRequest, op: 'navigate', url: 'https://example.com/next' })).toMatchObject({ ok: false, error: 'page gone' });
+      expect(await host.request({ ...envRequest, op: 'close' })).toEqual({ ok: true });
+      expect(close.mock.calls.at(-1)?.[0].env === env).toBe(true);
     } finally { await host.close(); }
   });
   it('retries shell initialization after failure', async () => {

@@ -28,6 +28,9 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   if (isEditableTarget(tgt) && !isTerminalInputProxy(tgt)) {
     return false;
   }
+  // A modal over the Wall (the copy-failure report) owns its keys: Enter
+  // presses its focused button and Esc closes it, the selection kept.
+  if (tgt?.closest?.('[aria-modal="true"]')) return false;
 
   const sid = ctx.selectedIdRef.current;
   if (!sid) return false;

@@ -888,7 +888,7 @@ describe('RemoteControlSection', () => {
       }
       if (cmd === 'beginHostedEnrollment') return hostedWaiting();
       return enrolledNow
-        ? enrolled({ ...hosted, connection: 'removed' })
+        ? enrolled({ ...hosted, connection: 'removed', label: 'Work laptop' })
         : { ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() };
     });
     platform = { burrow: link };
@@ -903,7 +903,8 @@ describe('RemoteControlSection', () => {
       .map(([cmd]) => cmd)
       .filter((cmd) => cmd === 'clearEnrollment' || cmd === 'beginHostedEnrollment');
     expect(order).toEqual(['clearEnrollment', 'beginHostedEnrollment']);
-    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'ned-mac' });
+    // Under the name it was enrolled with, not the suggestion.
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'Work laptop' });
     // The code is in view, not folded behind Persistent Relay.
     expect(codeShown()).toBe('47');
   });

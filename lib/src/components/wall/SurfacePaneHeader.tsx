@@ -18,8 +18,7 @@ import { MinimizeKillButtons, PaneActionGroup, SplitButtons } from './PaneAction
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
-  useAgentBrowserScreenSnapshot,
-  browserDisplayMode,
+  useAgentBrowserDisplayMode,
 } from './agent-browser-screen';
 import { BrowserDisplayButton } from './BrowserDisplayIcon';
 import { InlineEditInput } from './InlineEditInput';
@@ -61,7 +60,7 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
   // browser surface — both renderers register one, terminals never do, so the
   // whole browser chrome (nav + URL + connection) is strictly scoped to it.
   const screen = useAgentBrowserScreenController(id);
-  const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
+  const displayMode = useAgentBrowserDisplayMode(screen);
   const chrome = useAgentBrowserChromeSnapshot(screen);
   // Dev-server connection: when the active tab is loopback, correlate its port
   // to the Dormouse terminal pane serving it (resolved Wall-side). Hooks run
@@ -130,12 +129,12 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
   const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => {
     return (
       <>
-        {screen && screenSnapshot && chrome ? (
+        {screen && displayMode && chrome ? (
           <>
             {/* Render/screen chip → far left, out of the way of the nav controls.
                 The glyph reflects reality — frame = embed, and robot +
                 presentation = agent-visible browser. */}
-            <BrowserDisplayButton mode={browserDisplayMode(screenSnapshot)} onOpen={() => screen.actions.openModal()} />
+            <BrowserDisplayButton mode={displayMode} onOpen={screen.actions.setRenderMode ? () => screen.actions.openModal() : undefined} />
 
             {/* Back / forward / refresh — native agent-browser commands; always
                 enabled (no canGoBack/Forward in the stream). Collapse before the

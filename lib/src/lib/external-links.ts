@@ -99,11 +99,16 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
   if (normalizeForMatch(text) === normalizeForMatch(uri)) return 'match';
 
   const shown = normalizeDisplayText(text);
-  // `README.md:42` over `file:///x/README.md` names a file, not a host. The text
+  // `README.md:42` over `file:///x/README.md` names a file, not a host. Any
+  // tail of the path counts: a program that wraps its own lines prints the
+  // link on each row, and the click reads one row (`Editor.tsx`). The text
   // as printed counts too: normalizing strips `_app.tsx`'s underscore and
   // composes a decomposed name, so neither matches its own path afterwards.
-  const file = decodeFileLink(uri);
-  if (file && [shown, text].some((name) => namesPath(file.path, name.replace(LINE_SUFFIX_RE, '')))) return 'plain';
+  const path = decodeFileLink(uri)?.path;
+  if (path !== undefined && [shown, text].some((name) => {
+    const tail = name.replace(LINE_SUFFIX_RE, '');
+    return tail !== '' && path.endsWith(tail);
+  })) return 'plain';
 
   const shapedHost = extractUrlShapedHost(shown, normalizeDisplayText(text, false));
   if (shapedHost === null) return 'plain';

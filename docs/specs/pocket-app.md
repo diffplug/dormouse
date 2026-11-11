@@ -5,11 +5,10 @@
 
 ## The seam: the remote session is a platform adapter
 
-`lib` renders every Dormouse surface through a `PlatformAdapter`, whose PTY core — `requestInit`/`onPtyList` resume path included — maps one-to-one onto the remote-api v1 terminal protocol:
+`lib` renders every Dormouse surface through a `PlatformAdapter`, whose PTY core maps one-to-one onto the remote-api v1 terminal protocol:
 
 | PlatformAdapter          | remote-api                              |
 | ------------------------ | --------------------------------------- |
-| `onPtyList`              | `directory.snapshot`                    |
 | attach semantics         | `surface.attach` (attach-is-the-resize) |
 | `onPtyData`              | `terminal.data`, both projections        |
 | `writePty`               | `terminal.write`, minus renderer replies |
@@ -62,7 +61,6 @@ flowchart TD
 * **Must settle fire-and-forget PTY failures and release subscriptions that arrive after disposal**; a disposed adapter never restarts or delivers events.
 * **Must serialize attachment transitions**, completing stale detaches before another attachment to the same surface starts.
 * **Must close an authorized connection when `hello` or adapter initialization fails, or the wall's current attachment fails; report on the Burrows list.**
-* **`PtyInfo.alive` is `entry.alive`, never derived from `entry.exitCode`** — the latter is the last command's shell-integration status.
 * **An absent `terminal.closed` exit code maps to `-1`, not `0`** — the local path's sentinel.
 * **Exited surfaces stay in the directory** with `alive:false`, so the wall filters them out of selectable sessions and the active-pane default.
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 // The in-process session-flush handshake and drain wrappers on TauriAdapter are
 // pure webview-side logic — they never invoke Tauri — so we only need to stub the
@@ -19,7 +19,9 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
+import { registry, type TerminalEntry } from "dormouse-lib/lib/terminal-store";
 import { TauriAdapter } from "./tauri-adapter";
+import tauriConf from "../src-tauri/tauri.conf.json";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -129,16 +131,33 @@ describe("TauriAdapter browser requests", () => {
 });
 
 describe("TauriAdapter external links", () => {
-  it("revalidates every URI before the shell opens it, refusing the schemes the dialog refuses", () => {
+  it("revalidates every URI before the shell opens it, refusing the schemes the dialog refuses", async () => {
     const adapter = new TauriAdapter();
     vi.mocked(shellOpen).mockClear();
-    adapter.openExternal("ms-msdt:x");
-    adapter.openExternal("search-ms:query=x");
-    adapter.openExternal("javascript:alert(1)");
+    for (const uri of ["ms-msdt:x", "search-ms:query=x", "javascript:alert(1)"]) {
+      expect(await adapter.openExternal(uri)).toBe("Dormouse does not open this link.");
+    }
     expect(shellOpen).not.toHaveBeenCalled();
-    adapter.openExternal("vscode://file/x.ts");
-    adapter.openExternal("https://example.com/");
+    await adapter.openExternal("vscode://file/x.ts");
+    await adapter.openExternal("https://example.com/");
     expect(vi.mocked(shellOpen).mock.calls).toEqual([["vscode://file/x.ts"], ["https://example.com/"]]);
+  });
+
+  it("answers the shell's refusal rather than rejecting", async () => {
+    vi.mocked(shellOpen).mockRejectedValueOnce(new Error("Scope not allowed"));
+    // Answered, never thrown: a caller that opens without waiting (a header's
+    // system-browser button) must leave no unhandled rejection behind.
+    expect(await new TauriAdapter().openExternal("https://example.com/")).toBe("Scope not allowed");
+    expect(await new TauriAdapter().openExternal("https://example.com/")).toBeUndefined();
+  });
+
+  it("admits IPv6-literal web links to the shell's open scope, and no other app's link", () => {
+    // The plugin wraps the configured pattern in `^…$`.
+    const scope = new RegExp(`^${tauriConf.plugins.shell.open}$`);
+    const admitted = ["https://example.com/", "http://[::1]:5173/", "http://[fe80::1]/x", "mailto:team@example.com"];
+    expect(admitted.filter((uri) => !scope.test(uri))).toEqual([]);
+    expect(["vscode://file/x.ts", "zed://file/x", "ssh://host", "file:///etc/passwd"].filter((uri) => scope.test(uri))).toEqual([]);
+    expect(new TauriAdapter().opensOtherApps).toBe(false);
   });
 });
 
@@ -198,14 +217,12 @@ describe("TauriAdapter window persistence", () => {
 
     expect(adapter.getWindowState()).toEqual(windowBlob);
     expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("clear_session");
-    adapter.shutdown();
   });
 
   it("starts fresh on a blob an older build wrote", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify({ ...windowBlob, version: 1 }) : undefined));
     expect(adapter.getWindowState()).toBeNull();
-    adapter.shutdown();
     info.mockRestore();
   });
 
@@ -220,7 +237,6 @@ describe("TauriAdapter window persistence", () => {
     // Synchronous by the time the cold restore asks, which is what awaiting
     // `recoveryReady` before planning buys.
     expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
-    adapter.shutdown();
   });
 
   it("restores without recovery when the record cannot be read", async () => {
@@ -230,14 +246,12 @@ describe("TauriAdapter window persistence", () => {
       return undefined;
     });
     expect(adapter.getRecoveryCommands()).toEqual({});
-    adapter.shutdown();
   });
 
   it("asks for nothing when there are no saved panes", async () => {
     const { adapter, invoke } = await booted(() => undefined);
     expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("take_recovery_commands");
     expect(adapter.getRecoveryCommands()).toEqual({});
-    adapter.shutdown();
   });
 
   it("captures agent recovery and proceeds when the capture fails", async () => {
@@ -247,7 +261,6 @@ describe("TauriAdapter window persistence", () => {
     });
     await expect(adapter.captureAgentRecovery(1300)).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledWith("capture_agent_recovery", { timeout: 1300 });
-    adapter.shutdown();
   });
 });
 
@@ -332,13 +345,6 @@ describe("TauriAdapter remote host link", () => {
     expect(sent()[0]).toMatchObject({ cmd: "notify" });
     expect(sent()[0]!.params).toBeUndefined();
   });
-
-  it("rejects what is still in flight when the sidecar is killed", async () => {
-    const { adapter } = await bridged();
-    const pending = adapter.burrow.command("status");
-    adapter.shutdown();
-    await expect(pending).rejects.toThrow("burrow bridge closed");
-  });
 });
 
 // The sidecar owns the parse (docs/specs/terminal-escapes.md → "Parsing
@@ -375,6 +381,9 @@ describe("TauriAdapter terminal stream", () => {
     const { adapter, deliver, invoke } = await listening();
     const alerts: AlertStateDetail[] = [];
     adapter.onAlertState((detail) => void alerts.push(detail));
+    // A live event reaches only a registered Session.
+    registry.set("sem-pty", {} as TerminalEntry);
+    onTestFinished(() => { registry.delete("sem-pty"); });
 
     deliver("terminal:semanticEvents", {
       id: "sem-pty",
@@ -402,15 +411,5 @@ describe("TauriAdapter terminal stream", () => {
     expect(getTerminalPaneState("sem-pty").cwd?.path).toBe("/tmp/here");
     expect(alerts).toEqual([]);
     expect(invoke).not.toHaveBeenCalled();
-  });
-
-  it("settles the replayed command when a marked buffer belongs to an exited PTY", async () => {
-    const { deliver } = await listening();
-    deliver("pty:list", { ptys: [{ id: "exited-replay", alive: false, exitCode: 7 }], requestId: "handback-1" });
-    deliver("pty:replay", {
-      id: "exited-replay", requestId: "handback-1",
-      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
-    });
-    expect(getTerminalPaneState("exited-replay").currentCommand).toBeNull();
   });
 });

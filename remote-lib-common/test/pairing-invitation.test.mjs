@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  INVITATION_CLOCK_SKEW_MS,
   PAIRING_FRAGMENT_LENGTH,
   PAIRING_HASH_PREFIX,
   PAIRING_INVITATION_VERSION,
@@ -279,15 +280,22 @@ test('the expiry is ten decimal digits inside a uint32, and not already past', a
     assert.equal(await parsePairingInvitationUrl(urlWithField(3, expiry), ORIGIN, NOW), null, why);
   }
   // Advisory only — the Burrow's memory stays authoritative — but a code that is
-  // already dead should fail here rather than after a handshake.
-  assert.equal(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + 1), null);
-  assert.ok(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000));
+  // long dead should fail here rather than after a handshake.
+  assert.equal(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + INVITATION_CLOCK_SKEW_MS + 1), null);
+  assert.ok(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + INVITATION_CLOCK_SKEW_MS));
+});
+
+test('a phone whose clock runs minutes ahead of the Burrow still takes a fresh code', async () => {
+  // The expiry is the Burrow's clock, the check the phone's: a laptop five
+  // minutes slow mints codes the phone would otherwise read as already dead.
+  assert.ok(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + 5 * 60_000));
+  assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + 5 * 60_000), false);
 });
 
 // --- Telling a dead code apart from a wrong one ----------------------------
 
-/** Epoch ms one millisecond past {@link EXPIRY}: the code is dead. */
-const PAST = EXPIRY * 1000 + 1;
+/** Epoch ms one millisecond past {@link EXPIRY} and the clock tolerance: the code is dead. */
+const PAST = EXPIRY * 1000 + INVITATION_CLOCK_SKEW_MS + 1;
 
 test('an expired code is the one refusal a caller can tell apart', async () => {
   // Three answers, not two. The parser refuses all three the same way — that is
@@ -299,8 +307,8 @@ test('an expired code is the one refusal a caller can tell apart', async () => {
   // for *this* relay, which is what the user needs to hear.
   const foreign = EXPECTED_URL.replace(ORIGIN, 'https://pocket.evil');
   assert.equal(await pairingInvitationExpired(foreign, ORIGIN, PAST), false);
-  // The live side of the boundary is the parser's own: expiry second inclusive.
-  assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, EXPIRY * 1000), false);
+  // The live side of the boundary is the parser's own: the tolerance inclusive.
+  assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + INVITATION_CLOCK_SKEW_MS), false);
   assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, NOW), false);
 });
 

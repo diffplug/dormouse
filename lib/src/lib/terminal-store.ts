@@ -84,8 +84,20 @@ export function markSessionTouched(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
   entry.inputVersion = (entry.inputVersion ?? 0) + 1;
+  const flipped = entry.untouched;
   entry.untouched = false;
   if (entry.helper) entry.helperBusy = undefined;
+  if (flipped) for (const listener of touchedListeners) listener(id);
+}
+
+const touchedListeners = new Set<(id: string) => void>();
+
+/** Hears a Session's one flip from `untouched`, which persistence saves at
+ *  once: a restore inside the heartbeat would bring the Session back
+ *  untouched, and closing it would then ask nothing. */
+export function subscribeToSessionTouched(listener: (id: string) => void): () => void {
+  touchedListeners.add(listener);
+  return () => { touchedListeners.delete(listener); };
 }
 /** Helper Sessions are private to their source: excluded from alerts, public `dor` targets, remote projections, and cross-pane derivations. */
 export const isHelperSession = (id: string): boolean => !!registry.get(id)?.helper;

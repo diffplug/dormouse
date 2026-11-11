@@ -14,7 +14,11 @@ function defangPasteEscapes(text: string): string {
 function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
-  const payload = bracketed ? `\x1b[200~${defangPasteEscapes(text)}\x1b[201~` : text;
+  // Each line break as Enter's `\r`, as xterm's own paste (Edit → Paste) sends
+  // it: ConPTY reads a CRLF's LF as a second key, and a raw-mode program reads
+  // a bare LF as `^J`.
+  const lines = text.replace(/\r?\n/g, '\r');
+  const payload = bracketed ? `\x1b[200~${defangPasteEscapes(lines)}\x1b[201~` : lines;
   // Paste and file-drop input bypass xterm's onData handler, so they take the
   // keystroke path's write here: touched, acknowledged, then written.
   writeUserInput(terminalId, payload);

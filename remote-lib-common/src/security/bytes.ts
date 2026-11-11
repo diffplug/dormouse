@@ -149,7 +149,7 @@ export function lengthPrefixedConcat(parts: readonly Uint8Array[]): Uint8Array {
 }
 
 /** Bytes in the big-endian `u32` every length prefix in this system uses. */
-export const UINT32_SIZE = 4;
+const UINT32_SIZE = 4;
 
 /** Write `value` as big-endian `u32` at `offset`; the caller sizes `out`. */
 export function writeUint32BE(out: Uint8Array, offset: number, value: number): void {

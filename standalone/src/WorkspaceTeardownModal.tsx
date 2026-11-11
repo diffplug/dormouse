@@ -52,7 +52,7 @@ export function WorkspaceTeardownModal({
   char?: string;
   workspaceNames?: readonly string[];
   /** Whether this tears down the whole app or one window, and whether that
-   *  discards a downloaded update. A quit and a restart read the same. */
+   *  discards an approved update. A quit and a restart read the same. */
   intent?: QuitConfirmIntent;
 }) {
   const progressRef = useRef<HTMLParagraphElement>(null);
@@ -79,7 +79,7 @@ export function WorkspaceTeardownModal({
   // bring it back: a shell someone typed into, or a Surface no reopen rebuilds.
   const idle = intent.unreopenable ? 'Reopen cannot bring this window back.' : 'No commands are still running.';
   const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : idle;
-  const update = intent.discardsUpdate ? ' The downloaded update will be discarded.' : '';
+  const update = intent.discardsUpdate ? ' The approved update will be discarded.' : '';
   // A quit captures agent resumes; a window close ends its Sessions for good.
   const resume = intent.kind === 'quit' ? ' Supported agent sessions resume when Dormouse reopens.' : '';
   return <WorkspaceKillConfirm char={char} detail={`${scope}${count}${update}${resume}`} onConfirm={confirmQuit} onCancel={cancelQuit}

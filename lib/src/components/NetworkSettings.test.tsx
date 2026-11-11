@@ -520,13 +520,34 @@ describe('Settings → Network', () => {
     expect(sentPolicies()).toEqual([{ ...LOCAL, allowed: [] }]);
   });
 
-  it('keeps a range another switch reading On still needs when one is turned off', async () => {
+  it('removes every range of an interface turned off, one another switch shares included', async () => {
     const both = { ...LOCAL, allowed: [LAN, 'fd00:1::/64', '10.1.0.0/16'] };
     link({ status: UNENROLLED_STATUS, network: networkPolicyResult(both, 'hosted', INTERFACES) });
     await render();
     await act(async () =>
       container.querySelector<HTMLElement>('[role="switch"][aria-label="Allow Local network en5 on"]')!.click());
-    expect(sentPolicies()).toEqual([{ ...both, allowed: [LAN, 'fd00:1::/64'] }]);
+    expect(sentPolicies()).toEqual([{ ...both, allowed: ['fd00:1::/64'] }]);
+  });
+
+  it('never calls a typed range holding a connected interface not connected', async () => {
+    // The panel compares strings, not ranges: a supernet of en0's LAN has no
+    // owner here, though this machine is connected inside it.
+    const wide = { ...LOCAL, allowed: ['192.168.0.0/16'] };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(wide, 'hosted', [WIFI]) });
+    await render();
+    expect(text()).toContain('Added range192.168.0.0/16');
+    expect(text()).not.toContain('not connected now');
+  });
+
+  it('turns off one of two interfaces on the same LAN', async () => {
+    // A docked laptop: Wi-Fi and Ethernet report the same ranges.
+    const wired: NetworkInterfaceInfo = { ...WIFI, id: 'en7' };
+    const both = { ...LOCAL, allowed: [...WIFI.prefixes] };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(both, 'hosted', [WIFI, wired]) });
+    await render();
+    await act(async () =>
+      container.querySelector<HTMLElement>('[role="switch"][aria-label="Allow Local network en0 on"]')!.click());
+    expect(sentPolicies()).toEqual([{ ...both, allowed: [] }]);
   });
 
   it('shows the last refused phone above the allowed networks until it is dismissed', async () => {
@@ -614,7 +635,7 @@ describe('Settings → Network', () => {
     expect(command).toHaveBeenCalledWith('setNetworkPolicy', {
       policy: { ...LOCAL, allowed: [LAN, '10.8.0.7/24'] },
     });
-    expect(text()).toContain('Added range · not connected now10.8.0.0/24');
+    expect(text()).toContain('Added range10.8.0.0/24');
     expect(text()).not.toContain('10.8.0.7');
     expect(input.value).toBe('');
   });

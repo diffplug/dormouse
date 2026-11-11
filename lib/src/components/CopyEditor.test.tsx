@@ -443,6 +443,12 @@ describe('CopyEditor: presses inside it belong to its pane', () => {
     expect(getMouseSelectionState('term-1').selection).not.toBeNull();
     expect(paneDown).not.toHaveBeenCalled();
     expect(paneMenu).not.toHaveBeenCalled();
+    // A modal over the pane keeps the selection it may ask the user to retry.
+    const modal = document.body.appendChild(document.createElement('div'));
+    modal.setAttribute('aria-modal', 'true');
+    act(() => { modal.appendChild(document.createElement('button')).dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    modal.remove();
+    expect(getMouseSelectionState('term-1').selection).not.toBeNull();
     act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
     expect(getMouseSelectionState('term-1').selection).toBeNull();
     expect(editor()).toBeNull();

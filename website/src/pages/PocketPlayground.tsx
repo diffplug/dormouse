@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PocketTerminalExperience } from "../components/PocketTerminalExperience";
-import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
+import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 import { ShareUrlButton } from "../components/ShareUrlButton";
 import { ThemePicker } from "dormouse-lib/components/ThemePicker";
@@ -12,7 +12,7 @@ import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
 
 function MobilePocketPlaygroundPage() {
-  useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
+  useRestoredTheme(DOCS_THEME_ID);
   return (
     <main className="fixed inset-0 bg-[var(--color-app-bg)] text-[var(--color-app-fg)]">
       {/* Its Sessions screen's Settings page picks the theme. */}
@@ -24,7 +24,7 @@ function MobilePocketPlaygroundPage() {
 function DesktopPocketPlaygroundPage() {
   // Declared here rather than left to PocketTerminalExperience below: the
   // header's picker renders first and re-resolves through this fallback.
-  useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
+  useRestoredTheme(DOCS_THEME_ID);
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       <SiteHeader

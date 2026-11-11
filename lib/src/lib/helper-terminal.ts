@@ -28,13 +28,10 @@ export function setHelperVisible(parentId: string, visible: boolean): void {
   else visibleParents.delete(parentId);
   const helper = helpers.get(parentId);
   if (!helper) return;
+  // A hidden helper keeps its last idle answer: Dormouse never writes to one,
+  // and any input it receives clears the answer (`markSessionTouched`).
   if (visible) watchHelper(helper);
-  else {
-    clearInterval(helper.timer);
-    // An old idle result cannot prove a hidden helper is still idle at quit.
-    const entry = registry.get(helper.id);
-    if (entry) entry.helperBusy = undefined;
-  }
+  else clearInterval(helper.timer);
 }
 
 /** While visible, publishes a helper's exit and refreshes the host work inspection. */
@@ -49,10 +46,7 @@ function watchHelper(helper: HelperTerminal): void {
     if (entry.exited) { clearInterval(helper.timer); notifyHelpers(); return; }
     if (inspecting) return;
     inspecting = true;
-    void helperHasWork(helper).catch(() => { entry.helperBusy = true; }).finally(() => {
-      inspecting = false;
-      if (!visibleParents.has(helper.parentId)) entry.helperBusy = undefined;
-    });
+    void helperHasWork(helper).catch(() => { entry.helperBusy = true; }).finally(() => { inspecting = false; });
   };
   helper.timer = setInterval(check, WORK_INSPECTION_MS);
   check();
