@@ -140,7 +140,7 @@ An enrolled Burrow mints a setup token over its own authenticated channel; the a
 | `v` | literal `1`, one character | E2E wire version; any other value is rejected, never negotiated |
 | `burrowId` | 16 bytes as 22-character unpadded base64url | relay destination |
 | `inviteId` | 16 bytes as 22-character unpadded base64url | single-use invitation held only in Burrow memory |
-| `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | advisory Client fail-fast; Burrow memory stays authoritative |
+| `expiry` | unsigned 32-bit epoch seconds as exactly 10 decimal digits | phone fail-fast, `INVITATION_CLOCK_SKEW_MS` late; Burrow memory authoritative |
 | `setupToken` | 32 bytes as 43-character unpadded base64url | credential for `/api/setup/*` |
 | `ephPub` | 32-byte X25519 public key as 43-character unpadded base64url | one-use Burrow Noise responder key for this invitation |
 

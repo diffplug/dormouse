@@ -72,6 +72,15 @@ const PAIRING_LINK_SHAPE: LinkUrlShape = {
   hashPrefix: PAIRING_HASH_PREFIX,
 };
 
+/**
+ * How long past its expiry a phone still accepts a code. The expiry is stamped
+ * on the Burrow's clock and checked on the phone's, and the two can disagree by
+ * minutes (a VM resumed from suspend, a machine with time sync off); without
+ * this, a laptop that slow makes every fresh code read as expired. The Burrow's
+ * own check of its invitation stays exact.
+ */
+export const INVITATION_CLOCK_SKEW_MS = 10 * 60_000;
+
 /** One invitation, as the Burrow holds it and the Client reads it back. */
 export interface PairingInvitation {
   /** The relay destination, base64url of 16 bytes. */
@@ -189,8 +198,8 @@ export async function parsePairingInvitationUrl(
   const expiry = Number(expiryText);
   if (expiry > MAX_UINT32) return null;
   // Advisory only — the Burrow's own memory stays authoritative — but a code that
-  // is already dead should fail here rather than after a handshake.
-  if (expiry * 1000 < now) return null;
+  // is long dead should fail here rather than after a handshake.
+  if (expiry * 1000 + INVITATION_CLOCK_SKEW_MS < now) return null;
 
   let ephPub: Uint8Array;
   try {
@@ -235,5 +244,5 @@ export async function pairingInvitationExpired(
   // No invitation can already be expired at the epoch, so this parse applies
   // every rule *but* the expiry one.
   const invitation = await parsePairingInvitationUrl(text, appOrigin, 0, crypto);
-  return invitation !== null && invitation.expiry * 1000 < now;
+  return invitation !== null && invitation.expiry * 1000 + INVITATION_CLOCK_SKEW_MS < now;
 }
