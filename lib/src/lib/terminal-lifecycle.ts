@@ -399,8 +399,8 @@ const INTEGRATION_TYPE_TIMEOUT_MS = 8_000;
 // shell with no integration (e.g. cmd.exe) never half-runs an untrackable
 // command.
 function typeCommandWhenPromptReady(id: string, command: string, requireIntegration: boolean): void {
-  const timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS;
-  let elapsed = 0;
+  // By the clock, as `dor`'s host waits are: throttled timers tick slower.
+  const deadline = Date.now() + (requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS);
   const timer = setInterval(() => {
     // A gone shell can't run anything. `exited` also covers a spawn that failed
     // outright (pty-core answers a spawn error with an exit), where the seeded
@@ -421,7 +421,7 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
     if (ready) {
       clearInterval(timer);
       type();
-    } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
+    } else if (Date.now() >= deadline) {
       clearInterval(timer);
       // Best effort for split; drop for ensure (the handler kills + errors).
       if (!requireIntegration) type();

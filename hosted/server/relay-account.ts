@@ -7,7 +7,7 @@ import {
   normalizeEnrollUserCode,
   readJson,
 } from "remote-lib-common";
-import { accountQuery, cookieEntitled, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
+import { accountQuery, cookieEntitled, cookieLogin, isRecentLogin, smallBody, type AccountHost } from "./account-gate";
 import { recordMetric } from "./metrics";
 import { ENROLLMENT_TTL_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
 
@@ -30,12 +30,14 @@ export const ALREADY_APPROVED = "That code is already approved.";
 
 /**
  * The account's half of the Hosted Relay: approving a device-code enrollment,
- * and listing and removing the account's Burrows and passkeys. Cookie routes
- * behind `cookieEntitled`; the relay Worker serves none of them. Call
- * before any `/api/*` catch-all.
+ * and listing and removing the account's Burrows and passkeys. Cookie routes;
+ * the relay Worker serves none of them. Call before any `/api/*` catch-all.
  */
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {
   const gate = cookieEntitled(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
+  // Any signed-in account, so one whose plan has ended can still see and
+  // remove what it enrolled.
+  const own = cookieLogin(host);
 
   const small = smallBody(1024);
 
@@ -101,7 +103,7 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
     return c.json(approval ?? { mismatched: false, redeemed: false });
   });
 
-  app.get("/api/relay/burrows", gate, async (c) => {
+  app.get("/api/relay/burrows", own, async (c) => {
     const burrows = await accountQuery(
       host(c),
       `SELECT "burrowId", label, "enrolledAt" FROM dormouse_relay_burrows
@@ -116,7 +118,7 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
   // it holds one, is closed as revoked and its Clients told `burrow-gone`.
   // The removal is done once the row is: a close that fails is logged, and
   // the object's hourly sweep closes the socket instead.
-  app.delete("/api/relay/burrows/:burrowId", gate, async (c) => {
+  app.delete("/api/relay/burrows/:burrowId", own, async (c) => {
     const burrowId = c.req.param("burrowId");
     const { userId } = c.get("login");
     const removed =
@@ -139,7 +141,7 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
 
   // Each passkey with the computer whose setup code registered it, while that
   // computer is enrolled: the label is whatever the registering phone chose.
-  app.get("/api/relay/passkeys", gate, async (c) => {
+  app.get("/api/relay/passkeys", own, async (c) => {
     const passkeys = await accountQuery(
       host(c),
       `SELECT "credentialId", label, "createdAt", "burrowId" FROM dormouse_relay_passkeys
@@ -157,7 +159,7 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
   // opening its socket later, reads the removal. As with a Burrow, the removal
   // is done once the row is: a close or nudge that fails is logged, and the
   // object's sweep does it instead.
-  app.delete("/api/relay/passkeys/:credentialId", gate, async (c) => {
+  app.delete("/api/relay/passkeys/:credentialId", own, async (c) => {
     const { userId } = c.get("login");
     const [removed] = await accountQuery<{ sessions: string[] }>(
       host(c),

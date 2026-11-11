@@ -42,7 +42,7 @@ export const killCommand: Command = {
       customUsage: ['<surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]'],
       fullDescription: `Kills a surface. One confirmation mode is required.
 
---confirm-if-read kills only if dor read <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters.
+--confirm-if-read kills only if dor read <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters. Join a value that starts with "-" to the flag (--confirm-if-read=--watch).
 
 --confirm-dangerously kills without further confirmation. Use only when automation has already validated the target.
 

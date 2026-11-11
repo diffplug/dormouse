@@ -25,6 +25,7 @@ function playgroundHost(fs: VirtualFs): CliHost {
     cwd: () => HOME,
     homedir: () => HOME,
     resolvePath: (base, path) => normalizePath(path.startsWith("/") ? path : `${base}/${path}`),
+    isDirectory: (path) => fs.list(path) !== null,
     // Every run passes its client; the env names no socket.
     connect: () => unsupported("the dor control socket"),
     listFiles: async (cwd, { onFiles }) => {

@@ -10,7 +10,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { SpawnPtyOptions } from '../../lib/platform/types';
 import { disposeSession, getOrCreateTerminal } from '../../lib/terminal-registry';
 import { registry } from '../../lib/terminal-store';
-import { applyTerminalSemanticEvents, getTerminalPaneState } from '../../lib/terminal-state-store';
+import { applyTerminalSemanticEvents, getTerminalPaneState, subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
 import { getToolAnnounce, recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
@@ -19,6 +19,7 @@ import { getToolReap, isToolReaped, isToolStopping, markToolReaped, resetToolRea
 import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import { rehydrateTool, stopTool, TOOL_STOP_GRACE_MS, toolReapBlocker } from './tool-reaper';
+import { toolRunEnded } from './use-tool-run-end';
 
 vi.mock('@xterm/xterm', () => import('../../lib/xterm-test-mock'));
 vi.mock('@xterm/addon-fit', () => import('../../lib/xterm-test-mock'));
@@ -170,6 +171,29 @@ describe('stopTool', () => {
     expect(registry.get(ID)?.exited).toBe(true);
     // The run is over: its announcement no longer speaks for the Session.
     expect(getToolAnnounce(ID)).toBeNull();
+  });
+
+  it('keeps the designation through its own kill, which a Session exiting on its own ends', async () => {
+    const lath = servingTool();
+    const params = () => lath.getMeta(ID)?.params;
+    const ended: boolean[] = [];
+    const unsubscribe = subscribeToTerminalPaneState(() => { ended.push(toolRunEnded(ID, params())); });
+    try {
+      const stopped = stopTool(lath, ID);
+      await finishStop();
+      expect(await stopped).toBe(true);
+      expect(ended.length).toBeGreaterThan(0);
+      expect(ended.includes(true)).toBe(false);
+    } finally {
+      unsubscribe();
+    }
+    resetToolReaps();
+    disposeSession(ID);
+    const crashed = servingTool();
+    // As the PTY's exit leaves it (`handleExit`).
+    registry.get(ID)!.exited = true;
+    applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode: 1 }]);
+    expect(toolRunEnded(ID, crashed.getMeta(ID)?.params)).toBe(true);
   });
 
   it('kills a Tool that ignores the interrupt after the grace, keeping no payload', async () => {

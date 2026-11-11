@@ -282,6 +282,62 @@ test('a save keeps a line break that ends its paragraph from writing a literal b
   assert.ok(saved.startsWith('Intro word.\n\nLine one\\\nLine two'), saved);
 });
 
+/** The source editor's CodeMirror view, as `EditorView.findFromDOM` finds it. */
+const sourceView = w => w.document.querySelector('.mdxeditor-source-editor .cm-content')?.cmTile?.root?.view;
+const showSource = async (w, mode = 'source') => { await w.__dorToolView.apply({ mode }); await settle(); };
+// The rich editor renumbers this list and rewrites the hard break.
+const REFORMATTED = '3. third\n4. fourth\n\nUse a -> b  \nnext\n';
+
+test('source mode shows a clean document as the file holds it, and a source edit saves the file plus that edit', { timeout: 30_000 }, async () => {
+  await open(REFORMATTED, { act: async (w, posts) => {
+    await showSource(w);
+    const view = sourceView(w);
+    assert.equal(view.state.doc.toString(), REFORMATTED.trimEnd());
+    assert.equal(label(w), 'Saved');
+    view.dispatch({ changes: { from: view.state.doc.length, insert: ' edited' } });
+    await settle();
+    assert.equal(label(w), 'Unsaved');
+    saveKey(w);
+    await settle();
+    assert.deepEqual(saves(posts), [`${REFORMATTED.trimEnd()} edited\n`]);
+  } });
+});
+
+test('visiting source mode and returning without an edit leaves the document saved', { timeout: 30_000 }, async () => {
+  await open(REFORMATTED, { act: async (w, posts) => {
+    await showSource(w);
+    await showSource(w, 'rich-text');
+    assert.equal(label(w), 'Saved');
+    saveKey(w);
+    await settle();
+    assert.deepEqual(saves(posts), []);
+    assert.deepEqual(posts.filter(post => post.url === 'state').map(post => post.body.dirty), [false]);
+  } });
+});
+
+test('a plain click follows a relative link, and a drag selecting its text does not', { timeout: 30_000 }, async () => {
+  await open('See [the design notes](design.md).\n', { act: async (w, posts) => {
+    const link = w.document.querySelector('.prose a[href]');
+    const text = w.document.createTreeWalker(link, w.NodeFilter.SHOW_TEXT).nextNode();
+    const select = (start, end) => {
+      const range = w.document.createRange();
+      range.setStart(text, start);
+      range.setEnd(text, end);
+      w.getSelection().removeAllRanges();
+      w.getSelection().addRange(range);
+    };
+    const opens = () => posts.filter(post => post.url === 'open').map(post => post.body.href);
+    select(4, 10);
+    link.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+    await settle();
+    assert.deepEqual(opens(), []);
+    select(4, 4);
+    link.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, button: 0, detail: 1 }));
+    await settle();
+    assert.deepEqual(opens(), ['design.md']);
+  } });
+});
+
 // What the rich editor writes must never hold indented code, which decides a
 // document under the parse bound, nor look like it could to the scan, which
 // decides one past it, or a document it saved would reopen as source.

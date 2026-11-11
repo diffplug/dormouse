@@ -2,6 +2,8 @@ import { builtinModules, createRequire } from 'node:module';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import { workspaceSourceAliases } from '../../scripts/workspace-sources.mjs';
+
 // Hosted's disclosure is a walk over `dormouse-hosted`'s declared edges that
 // skips optional peers (website/scripts/product-sections.js), so a package a
 // Worker or the account page bundles, supplied only by a development
@@ -103,5 +105,60 @@ export async function assertHostedBundlesDisclosed(disclosure, repoRoot) {
     undisclosedReleases(releases, disclosure).map((release) => `${release} (bundled from hosted/${entry})`));
   if (missing.length > 0) {
     throw new Error(`Hosted bundles releases the disclosure does not list: ${missing.join(', ')}. Declare each as a dependency of dormouse-hosted, or of the package that imports it.`);
+  }
+}
+
+// The Terminal's and the built-in Tools' walks read `dependencies` alone, and
+// each of their bundlers resolves any installed package, so a source file that
+// imports a devDependency ships it undisclosed. These are the entries their
+// builds bundle, with the externals each build keeps out: the sidecar's
+// (standalone/scripts/build-sidecar-proxy.mjs), the extension's
+// (vscode-ext/scripts/esbuild.mjs), the webviews, Pocket, and the one-time page
+// (their Vite configs), `dor` (dor/package.json), and the built-in Tools'
+// (dor-tools-builtin/scripts/build.mjs, build-viewer.mjs). A new bundle is
+// added here by hand.
+const nodeBundle = (external = []) => ({ platform: 'node', format: 'cjs', external: ['bufferutil', 'utf-8-validate', ...external] });
+const pageBundle = { platform: 'browser', format: 'esm', jsx: 'automatic', external: ['virtual:*', '@standalone-latest'] };
+const sidecar = (entry, external) => ({ dir: 'lib', entry: `src/host/${entry}`, options: nodeBundle(external) });
+const extension = (entry) => ({ dir: 'vscode-ext', entry, options: nodeBundle(['vscode', 'node-pty', 'node-datachannel', 'node-datachannel/*']) });
+const page = (dir, entry, extra = {}) => ({ dir, entry, options: { ...pageBundle, ...extra } });
+export const PRODUCT_BUNDLES = [
+  ...['iframe-proxy.ts', 'browser-host.ts', 'agent-browser-host.ts', 'playwright-host.ts', 'tool-host.ts', 'git-info.ts', 'recovery.ts'].map((entry) => sidecar(entry)),
+  sidecar('remote/sidecar-entry.ts', ['node-datachannel', 'node-datachannel/*', '@node-datachannel/*']),
+  extension('src/extension.ts'),
+  extension('src/pty-host.js'),
+  ...['src/main.tsx', 'src/remote/pocket-app/main.tsx', 'src/remote/pocket-app/sw-entry.ts', 'src/remote/one-time-app/main.tsx',
+    'src/remote/frame-origin/worker-entry.ts', 'src/remote/frame-origin/bootstrap.ts'].map((entry) => page('lib', entry)),
+  page('standalone', 'src/main.tsx'),
+  // Its build writes these two first; they hold text, not imports.
+  { dir: 'dor', entry: 'src/dor.ts', options: { platform: 'node', format: 'esm', external: ['./generated-skill.js', './generated-version.js'] } },
+  { dir: 'dor-tools-builtin', entry: 'src/runtime.ts', options: { platform: 'node', format: 'esm' } },
+  ...['viewer/editor.ts', 'node_modules/monaco-editor/esm/vs/editor/editor.worker.js', 'viewer/image/main.tsx', 'viewer/image/png-worker.ts', 'viewer/tooltip-page.ts']
+    .map((entry) => page('dor-tools-builtin', entry)),
+  page('dor-tools-builtin', 'viewer/markdown.tsx', { splitting: true, outdir: 'out' }),
+];
+
+/** Every npm release the Terminal and the built-in Tools bundle, by entry. */
+export async function productBundles(repoRoot, bundles = PRODUCT_BUNDLES) {
+  const esbuild = createRequire(join(resolve(repoRoot, 'hosted'), 'package.json'))('esbuild');
+  const alias = workspaceSourceAliases();
+  return Promise.all(bundles.map(async ({ dir, entry, options }) => {
+    const absWorkingDir = realpathSync(resolve(repoRoot, dir));
+    const { metafile } = await esbuild.build({
+      absWorkingDir, entryPoints: [entry], bundle: true, write: false, metafile: true, logLevel: 'silent', alias,
+      loader: { '.css': 'empty', '.svg': 'empty', '.png': 'empty', '.ttf': 'empty', '.woff': 'empty', '.woff2': 'empty', '.sql': 'text' },
+      define: { 'process.env.NODE_ENV': '"production"' },
+      ...options,
+    });
+    return { entry: `${dir}/${entry}`, releases: bundledReleases(metafile, absWorkingDir) };
+  }));
+}
+
+/** Throw unless every release the Terminal and the built-in Tools bundle is in `disclosure`. */
+export async function assertProductBundlesDisclosed(disclosure, repoRoot, bundles = PRODUCT_BUNDLES) {
+  const missing = (await productBundles(repoRoot, bundles)).flatMap(({ entry, releases }) =>
+    undisclosedReleases(releases, disclosure).map((release) => `${release} (bundled from ${entry})`));
+  if (missing.length > 0) {
+    throw new Error(`The Terminal or the built-in Tools bundle releases the disclosure does not list: ${missing.join(', ')}. Declare each as a dependency of the package whose build bundles it.`);
   }
 }
