@@ -359,8 +359,9 @@ export interface PlatformAdapter {
   // promise of its refusal (`undefined` once opened) that never rejects, so a
   // caller that does not wait for it leaves nothing unhandled.
   openExternal?(uri: string): void | Promise<string | undefined>;
-  // False on a host whose opener refuses a link another app handles (any
-  // scheme but web and mail), so the link dialog offers no open for one.
+  // False on a host whose opener refuses a link another app handles (every
+  // scheme but web, `mailto:`, and `tel:`), so the link dialog offers no open
+  // for one; `tel:` stays openable.
   readonly opensOtherApps?: false;
 
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.

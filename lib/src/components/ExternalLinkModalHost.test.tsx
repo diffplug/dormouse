@@ -82,6 +82,12 @@ it('offers no open for another app\'s link on a host that cannot hand one over',
   act(() => clearExternalLinkConfirmation());
   act(() => requestExternalLinkConfirmation('https://trusted.example/'));
   expect(hasOpenButton()).toBe(true);
+  // `tel:` hands off to another app, but standalone's opener admits it.
+  act(() => clearExternalLinkConfirmation());
+  act(() => requestExternalLinkConfirmation('tel:5551234'));
+  expect(hasOpenButton()).toBe(true);
+  act(() => mocks.confirm());
+  expect(mocks.open).toHaveBeenCalledWith('tel:5551234');
 });
 
 it('keeps the dialog open with the refusal its host\'s opener answers', async () => {

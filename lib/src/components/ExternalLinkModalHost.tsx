@@ -38,6 +38,8 @@ function PendingAnswerDialog({ request }: { request: PendingExternalLink }) {
 function forHost(request: PendingExternalLink): PendingExternalLink {
   const d = request.decision;
   if (d.status !== 'openable' || !d.otherApp || getPlatform().opensOtherApps !== false) return request;
+  // `tel:` is outside STANDARD_SCHEMES but inside standalone's shell-open scope.
+  if (d.scheme === 'tel') return request;
   const reason = `This app cannot hand ${d.scheme}: links to another app.`;
   return { ...request, decision: { status: 'blocked', scheme: d.scheme, displayUri: d.displayUri, reason } };
 }
