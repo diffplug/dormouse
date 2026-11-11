@@ -272,6 +272,20 @@ describe('pairing, end to end', () => {
     expect(harness.savedAcl[0]!.accountId).toBe(ACCOUNT_ID);
   });
 
+  it('pairs every Burrow under its own static, so no Burrow trusts the key another approved', async () => {
+    // One browser profile, one passkey, two laptops.
+    const knownBurrows = memoryKnownBurrows();
+    const first = await makeE2eHarness({ knownBurrows });
+    const second = await makeE2eHarness({ knownBurrows, authenticator: first.authenticator });
+    expect((await first.pairAndApprove(await first.mintInvitation())).ok).toBe(true);
+    expect((await second.pairAndApprove(await second.mintInvitation())).ok).toBe(true);
+
+    const staticFor = (burrowId: string) => knownBurrows.records.get(burrowId)!.clientStaticKeyPair.publicKeyRaw;
+    expect(staticFor(first.burrowId)).not.toBe(staticFor(second.burrowId));
+    expect(first.savedAcl.map((record) => record.clientStaticPublicKey)).toEqual([staticFor(first.burrowId)]);
+    expect(second.savedAcl.map((record) => record.clientStaticPublicKey)).toEqual([staticFor(second.burrowId)]);
+  });
+
   it("refuses an outcome naming another account than the session's, and stores nothing", async () => {
     const harness = await makeE2eHarness();
     const invitation = await harness.mintInvitation();
