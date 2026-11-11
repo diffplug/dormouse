@@ -24,7 +24,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -70,6 +70,9 @@ type SharedChild = Arc<Mutex<Box<dyn ChildWrapper + Send + Sync>>>;
 struct SidecarState {
     tx: SidecarSender,
     pending_requests: PendingRequests,
+    /// Set by the reaper, under the `pending_requests` lock, once the sidecar
+    /// has exited; nothing restarts it.
+    exited: Arc<AtomicBool>,
     next_request_id: AtomicU64,
     child: SharedChild,
 }
@@ -1281,6 +1284,47 @@ fn request_from_sidecar(
     request_from_sidecar_timeout(state, event, data, Duration::from_secs(1))
 }
 
+/// The waiter for `request_id`'s answer, or `None` once the sidecar has exited:
+/// nothing will ever answer, so the caller fails at once instead of waiting out
+/// its timeout.
+fn register_request(
+    pending: &PendingRequests,
+    exited: &AtomicBool,
+    request_id: &str,
+) -> Option<mpsc::Receiver<JsonValue>> {
+    let mut pending = guard(pending);
+    if exited.load(Ordering::SeqCst) {
+        return None;
+    }
+    let (tx, rx) = mpsc::channel();
+    pending.insert(request_id.to_string(), tx);
+    Some(rx)
+}
+
+/// The sidecar is gone: fail every request waiting on it, and every later one
+/// (`register_request`). Under the map's lock, so no request slips in between.
+fn sidecar_exited(pending: &PendingRequests, exited: &AtomicBool) {
+    let mut pending = guard(pending);
+    exited.store(true, Ordering::SeqCst);
+    pending.clear();
+}
+
+/// Tell every pane its PTY is gone with the sidecar that ran it, so each shows
+/// an exit notice instead of freezing. Not during a quit: the teardown's own
+/// sidecar kill ends shells that the windows are already saving or closing.
+fn deliver_sidecar_exit(app: &AppHandle) {
+    if quit_approved(app) || quit_walking(app) {
+        return;
+    }
+    let Some(windows) = app.try_state::<WindowState>() else {
+        return;
+    };
+    let ids: Vec<String> = guard(&windows.routing).owners.keys().cloned().collect();
+    for id in ids {
+        dispatch_sidecar_event(app, "pty:exit", serde_json::json!({ "id": id, "exitCode": -1 }));
+    }
+}
+
 /// INVARIANT: every `#[tauri::command]` that reaches these two blocking helpers
 /// must be declared `#[tauri::command(async)]` (or be an `async fn`). Tauri runs
 /// a plain sync command on the **main thread**, where the `recv_timeout` below
@@ -1300,12 +1344,9 @@ fn request_from_sidecar_timeout(
         "req-{}",
         state.next_request_id.fetch_add(1, Ordering::Relaxed)
     );
-    let (tx, rx) = mpsc::channel();
-    state
-        .pending_requests
-        .lock()
-        .map_err(|_| "failed to lock pending request map".to_string())?
-        .insert(request_id.clone(), tx);
+    let Some(rx) = register_request(&state.pending_requests, &state.exited, &request_id) else {
+        return Err(format!("sidecar exited before responding to {event}"));
+    };
 
     let mut payload = match data {
         JsonValue::Object(map) => map,
@@ -4589,7 +4630,9 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     };
 
     let handle = app.clone();
+    let reaper_app = app.clone();
     let pending_requests: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+    let exited = Arc::new(AtomicBool::new(false));
     let pending_requests_for_task = Arc::clone(&pending_requests);
 
     std::thread::spawn(move || {
@@ -4666,6 +4709,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     // making them wait the full timeout when the sidecar has already died.
     let child_for_reaper = Arc::clone(&child);
     let pending_for_reaper = Arc::clone(&pending_requests);
+    let exited_for_reaper = Arc::clone(&exited);
     std::thread::spawn(move || {
         loop {
             let status = match child_for_reaper.lock() {
@@ -4675,9 +4719,8 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             match status {
                 Ok(Some(status)) => {
                     append_log(format!("[sidecar] exited (status: {status})"));
-                    if let Ok(mut pending) = pending_for_reaper.lock() {
-                        pending.clear();
-                    }
+                    sidecar_exited(&pending_for_reaper, &exited_for_reaper);
+                    deliver_sidecar_exit(&reaper_app);
                     return;
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(250)),
@@ -4692,6 +4735,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     Ok(SidecarState {
         tx,
         pending_requests,
+        exited,
         next_request_id: AtomicU64::new(0),
         child,
     })
@@ -5760,6 +5804,22 @@ mod tests {
         record_arrival_on_disk(dir.path(), &later).unwrap();
         super::withdraw_arrival_on_disk(dir.path(), &later, None).unwrap();
         assert!(read_arrivals_from(dir.path()).unwrap().is_empty());
+    }
+
+    /// A request made after the sidecar died fails at once rather than
+    /// waiting out its timeout for an answer nothing will send.
+    #[test]
+    fn requests_fail_at_once_after_the_sidecar_exits() {
+        let pending: super::PendingRequests = Default::default();
+        let exited = std::sync::atomic::AtomicBool::new(false);
+        let waiting = super::register_request(&pending, &exited, "req-0").expect("sidecar alive");
+        super::sidecar_exited(&pending, &exited);
+        assert!(matches!(
+            waiting.recv_timeout(std::time::Duration::from_secs(5)),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+        ));
+        assert!(super::register_request(&pending, &exited, "req-1").is_none());
+        assert!(guard(&pending).is_empty());
     }
 
     /// Two overlapping closes: the second is the quit, so one window's
