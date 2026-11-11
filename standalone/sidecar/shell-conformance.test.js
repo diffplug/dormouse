@@ -737,11 +737,12 @@ shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async
   const out = path.join(SCRATCH, `${row.name}-env.txt`);
   await pane.ready();
   // wslpath, not a guessed mount: docker-desktop mounts drives at /mnt/host.
-  pane.write(`env > "$(wslpath -u '${out}')"\r`);
+  // The marker comes last, so a read that sees it sees the whole dump.
+  pane.write(`{ env; echo ENV-DUMP-END; } > "$(wslpath -u '${out}')"\r`);
   const env = await pane.waitFor(() => {
     let text;
     try { text = fs.readFileSync(out, 'utf8'); } catch { return null; }
-    return text.includes('PATH=') && Object.fromEntries(text.split('\n').filter((line) => line.includes('='))
+    return text.includes('ENV-DUMP-END') && Object.fromEntries(text.split('\n').filter((line) => line.includes('='))
       .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
   }, 'env dump', 30_000, 100);
   assert.equal(env.DORMOUSE_SURFACE_ID, pane.id);
