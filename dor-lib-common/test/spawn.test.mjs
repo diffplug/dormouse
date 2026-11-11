@@ -176,12 +176,12 @@ test('reads PATH by any spelling on Windows, and only by its own elsewhere', () 
   assert.equal(envValue({ Path: '/bin' }, 'PATH', false), undefined);
 });
 
-test('a .cmd shim started in a UNC cwd runs its target there, not in %SystemRoot%', { skip: windowsOnly }, async () => {
+test('a .cmd shim started in a UNC cwd runs its target there, not in %SystemRoot%', { skip: windowsOnly }, async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dor-unc-'));
   // The admin share is the UNC path every Windows machine has, as WSL's would be.
   const unc = `\\\\localhost\\${dir[0]}$${dir.slice(2)}`;
   try {
-    if (!existsSync(unc)) return;
+    if (!existsSync(unc)) return t.skip('no admin share');
     await mkdir(path.join(dir, 'node_modules', 'cwd-cli'), { recursive: true });
     await writeFile(path.join(dir, 'node_modules', 'cwd-cli', 'cli.js'), 'process.stdout.write(process.cwd() + "|" + process.argv.slice(2).join("|"))');
     const shim = path.join(dir, 'cwd-cli.cmd');

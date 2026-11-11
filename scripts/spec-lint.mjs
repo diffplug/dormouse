@@ -105,8 +105,8 @@
  *      wherever it moves, and a retired ID never comes back. Every `S<n>` the
  *      prompts in .github/audit/ cite names a live rule.
  *
- * scripts/spec-lint-selftest.mjs plants one defect per finding check and
- * requires this lint to go red.
+ * scripts/spec-lint-selftest.mjs plants a defect for each finding check, though
+ * not for every message a check prints, and requires this lint to go red.
  */
 import { readdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
