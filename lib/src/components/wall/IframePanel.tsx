@@ -348,7 +348,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     openModal() { openAgentBrowserScreenModal(id); },
     // iframe is the current backend; every other offered mode swaps to an
     // automated browser. Wired only when the host can launch one — without it
-    // the modal hides its Render section, but the chrome (URL/nav) still shows.
+    // the header offers no Display modal, but the chrome (URL/nav) still shows.
     setRenderMode: swapCapable
       ? (mode, opts) => { if (mode !== 'iframe' && renderModes.includes(mode)) {
         if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);

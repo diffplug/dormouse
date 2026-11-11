@@ -135,7 +135,7 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
             {/* Render/screen chip → far left, out of the way of the nav controls.
                 The glyph reflects reality — frame = embed, and robot +
                 presentation = agent-visible browser. */}
-            <BrowserDisplayButton mode={browserDisplayMode(screenSnapshot)} onOpen={() => screen.actions.openModal()} />
+            <BrowserDisplayButton mode={browserDisplayMode(screenSnapshot)} onOpen={screen.actions.setRenderMode ? () => screen.actions.openModal() : undefined} />
 
             {/* Back / forward / refresh — native agent-browser commands; always
                 enabled (no canGoBack/Forward in the stream). Collapse before the
