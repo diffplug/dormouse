@@ -131,7 +131,7 @@ Each notice is a `dormouse_billing_notices` row, recorded before it is sent and 
 
 - **Must send every notice to the Stripe customer's email**, never the sign-in email, so a provider-only account gets them.
 - **Must record a dispute's or a purchase's notice in the webhook's transaction** and send it after the commit; a failed send never fails the event.
-- **Must fill a purchase's notice from its checkout's consent** ("Billing"), never the current price or terms.
+- **Must fill a purchase's notice's plan, price, and terms version from its checkout's consent** ("Billing"); its other lines restate today's disclosure.
 - **A price change is an operator's `dormouse_price_changes` row** (`hosted/README.md`); both its Prices grant the plan once inserted. **Never act on one naming a founding Price or another plan's**, or whose Prices Stripe does not hold at its amounts, in USD, at the plan's interval.
 - **Must move a subscription to the new Price, without proration, only after its notice was sent at least 7 days before the renewal it names**, while Stripe still renews it then on the old Price; a later notice waits for the next renewal. Checks: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must state in a renewal notice or annual reminder the price its renewal charges**: a price change's new Price once its notice for that renewal went, or can still go, at least 7 days ahead.
@@ -337,7 +337,7 @@ Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The v
 | `GET /api/relay/passkeys` | login cookie, same-origin fetch | 200 `{ passkeys }`, each with the enrolled Burrow whose setup token registered it, or none |
 | `DELETE /api/relay/passkeys/:credentialId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 
-Errors are the managed-voice cookie routes' ("Managed voice"): the four list and remove routes admit an account without a plan, so a lapsed one can still remove what it enrolled, and the two enrollment routes refuse it 403 `NOT_ENTITLED_ERROR`.
+Errors are the managed-voice cookie routes' ("Managed voice"): the list and remove routes admit an account without a plan, and the two enrollment routes refuse it 403 `NOT_ENTITLED_ERROR`.
 
 - **Must refuse approval from a login older than `LOGIN_FRESH_AGE_MS`**, 403 `RECENT_LOGIN_REQUIRED`, failing closed when the login's `createdAt` is missing or unparsable; the voice routes require no recent login.
 - **Must count every approval attempt** against `RELAY_APPROVE_LIMIT` (10 a minute per account) before reading the body: 429 with `Retry-After` past it.
