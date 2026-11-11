@@ -1864,6 +1864,12 @@ test("a purchase's confirmation that fails to send never fails the webhook, and 
 
   // Later than any other notice's retry lasts, and with the subscription long past its period.
   f.time.advanceMilliseconds(60 * DAY_MS);
+  // A refused send names its notice in the alert.
+  const [{ id }] = await f.sql<{ id: string }>(`SELECT id FROM dormouse_billing_notices WHERE kind = 'purchase'`);
+  f.mailing.failures = 1;
+  const failure = await resyncBilling(f.setup, f.database.url, origin, f.mail).then(() => null, (error: unknown) => error);
+  expect(alertLines(failure).map((line) => line.text)).toEqual([`Notice ${id} (purchase): Postmark outage`]);
+  f.time.advanceMilliseconds(6 * 60 * 1000);
   await resyncBilling(f.setup, f.database.url, origin, f.mail);
   expect(f.confirmations()).toHaveLength(1);
   expect(await unsent()).toEqual([]);

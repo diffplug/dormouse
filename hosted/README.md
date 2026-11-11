@@ -277,7 +277,7 @@ When the account cron's billing pass fails, the Worker emails `support@dormouse.
 | --- | --- |
 | `paid outside Stripe`, `refund awaits the customer's action` | [Refund by hand](#refund-by-hand), before the deadline it names |
 | `refund not yet succeeded` | Nothing unless a deadline is near: Stripe is completing it, and the cron settles it. Near one, ask Stripe why |
-| `acknowledgement unsent`, `gave no billing email` | [Acknowledgement by hand](#acknowledgement-by-hand) |
+| `acknowledgement unsent`, `gave no billing email`, or the same `Notice` line (`withdrawal` or `purchase`) for days | [Acknowledgement by hand](#acknowledgement-by-hand) |
 | `Price change` | [Change a price](#change-a-price): fix or delete the row |
 | Anything else | Usually a Stripe, Postmark, or database outage, which the next runs clear. Past a day, the same line returns, and it is a bug to fix |
 
@@ -317,6 +317,12 @@ A withdrawal's acknowledgement email is retried until it is sent, and the cron f
    ```sql
    UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE "withdrawalId" = '<withdrawal id>' AND "sentAt" IS NULL;
    ```
+
+A purchase's confirmation is retried until sent too, with no overdue line, so one Postmark refuses (an address it holds inactive after a bounce or a spam complaint) fails every run, naming the notice. Send what the customer agreed to another way, then record it as sent by the notice id the error names:
+
+```sql
+UPDATE dormouse_billing_notices SET "sentAt" = now(), email = '<address it was sent to>' WHERE id = '<notice id>' AND kind = 'purchase' AND "sentAt" IS NULL;
+```
 
 ## Support runbooks
 

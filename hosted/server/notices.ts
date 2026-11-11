@@ -155,7 +155,16 @@ export async function sendNotices(
       if (!contacts.has(notice.userId)) contacts.set(notice.userId, await billingContact(billing, notice.userId));
       const email = contacts.get(notice.userId)?.email;
       if (!email) throw new Error(`Notice ${notice.id}: Stripe gave no billing email to send it to`);
-      await mail().send(noticeMessage(email, notice, billing.planOf(notice.priceId), context));
+      // The mail library's message names no notice; its status and the
+      // provider's code are properties, so the alert line says them.
+      await mail()
+        .send(noticeMessage(email, notice, billing.planOf(notice.priceId), context))
+        .catch((error: unknown) => {
+          const { httpStatus, providerCode } = (error ?? {}) as { httpStatus?: unknown; providerCode?: unknown };
+          const reason = error instanceof Error ? error.message : String(error);
+          const status = httpStatus === undefined ? "" : ` (${httpStatus}/${providerCode ?? "-"})`;
+          throw new Error(`Notice ${notice.id} (${notice.kind}): ${reason}${status}`);
+        });
       await run(billing.db, `UPDATE public.dormouse_billing_notices SET "sentAt" = $2, email = $3 WHERE id = $1`, [
         notice.id,
         billing.time.now(),
