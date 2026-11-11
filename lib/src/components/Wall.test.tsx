@@ -1,4 +1,4 @@
-import { previousWorkspaceSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
+import { previousWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 /**
  * @vitest-environment jsdom
  *
@@ -33,7 +33,7 @@ import type { BrowserRequest, BrowserResult } from '../lib/platform/browser-auto
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
-import { pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
+import { markSessionTouched, pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
 import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
@@ -446,6 +446,22 @@ describe('Wall on the Lath engine', () => {
     vi.spyOn(fake, 'getCwd').mockReturnValue(new Promise(() => {}));
     await act(async () => window.dispatchEvent(new Event('pagehide')));
     expect(saveState).toHaveBeenCalledWith(expect.objectContaining({ panes: [expect.objectContaining({ id: 'surface:a' })] }));
+  });
+
+  it('saves a Session\'s first input at once, not on the heartbeat', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+    await act(async () => { await getWallHandle(DEFAULT_WORKSPACE_ID)!.flushPersistence(); });
+    registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
+    try {
+      const saveState = vi.spyOn(fake, 'saveState');
+      await act(async () => { markSessionTouched('surface:a'); });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, SESSION_SAVE_DEBOUNCE_MS + 200)); });
+      const saved = saveState.mock.calls.at(-1)?.[0] as { panes?: { id: string; untouched: boolean }[] } | undefined;
+      expect(saved?.panes?.find(pane => pane.id === 'surface:a')?.untouched).toBe(false);
+    } finally {
+      registry.delete('surface:a');
+    }
   });
 
   it('saves on pagehide while a probing save is still waiting on its CWD answer', async () => {
