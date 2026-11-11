@@ -34,6 +34,7 @@ import {
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
 import { stripTerminalControls } from '../../lib/terminal-controls';
+import { registry } from '../../lib/terminal-store';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
@@ -2057,6 +2058,12 @@ export function useDorControl({
       }
       const target = requireTerminalSurface(params.surface, detail);
       if (!target) return;
+      // The host drops a write to a Session with no PTY: one that exited, a
+      // reaped Tool, or a Tool awaiting approval.
+      if (registry.get(target.id)?.exited || toolPendingFromParams(lath.getMeta(target.id)?.params)) {
+        detail.respond({ ok: false, error: `surface '${target.id}' has no running shell` });
+        return;
+      }
       // Input someone chose to send: an untouched shell it reaches is no longer
       // one a close may take without asking (docs/specs/layout.md → "Kill confirmation").
       markSessionTouched(target.id);

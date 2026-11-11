@@ -3464,6 +3464,23 @@ describe('Wall on the Lath engine', () => {
     });
   });
 
+  it('refuses dor send to a Session whose shell exited, writing nothing', async () => {
+    registry.set('surface:4', { exited: true } as unknown as TerminalEntry);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:4']} />));
+      await flush();
+      const write = vi.spyOn(fake, 'writePty');
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', input: 'ls\r' }, respond,
+      } })));
+      expect(write).not.toHaveBeenCalled();
+      expect(respond).toHaveBeenCalledWith({ ok: false, error: "surface 'surface:4' has no running shell" });
+    } finally {
+      registry.delete('surface:4');
+    }
+  });
+
   it('counts dor send as input, so a kill of the shell it reached confirms', async () => {
     registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
     try {
