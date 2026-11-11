@@ -1405,6 +1405,8 @@ export class PocketClient {
       POCKET_API_TIMEOUT_MS,
     );
     let response: Response;
+    let parsed: T & { error?: string };
+    // The deadline covers the body too: a Relay can send headers and stall.
     try {
       response = await this.#fetch(`${this.#baseUrl}${route}`, {
         method,
@@ -1412,10 +1414,13 @@ export class PocketClient {
         ...(method === 'GET' || method === 'DELETE' ? {} : { body: JSON.stringify(body ?? {}) }),
         signal: controller.signal,
       });
+      parsed = (await response.json().catch(() => {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        return {};
+      })) as T & { error?: string };
     } finally {
       cancelTimeout();
     }
-    const parsed = (await response.json().catch(() => ({}))) as T & { error?: string };
     // Only the session gate's 401 means "sign in again" — a refused setup token
     // answers 401 too, and bouncing the user to sign-in for that would be a
     // worse bug than the one this fixes.
