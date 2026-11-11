@@ -175,7 +175,7 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`; `dispatch_sid
 
 **Boot reopens every window `sessions/` names**, `main` first then each `ws-<n>` in numeric order, capped at `MAX_RESTORED_WINDOWS` with the excess logged and left on disk. **An unreadable snapshot still opens its window**, booting fresh. **A session naming no `main` relaunches with a fresh, empty one**.
 
-**Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`, written through the same atomic writer and re-applied at boot. No `tauri-plugin-window-state` (rationale).
+**Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`, written through the same atomic writer and re-applied at boot, a maximized one over its unmaximized box. No `tauri-plugin-window-state` (rationale).
 
 **Every window has a minimum size**, set in `standalone/src-tauri/tauri.conf.json` and cloned to every later window. **A restored box is raised to it and re-centered on the primary display unless a minimum-size patch is visible** (rationale).
 
