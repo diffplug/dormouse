@@ -201,6 +201,7 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
   return dispatchToolSurface(this, {
     ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
     ...launchPlacement(this, flags),
+    cwd,
   }, flags.json === true);
 }
 
