@@ -65,6 +65,10 @@ export const PAIRING_FRAGMENT_LENGTH =
  */
 export const PAIRING_QR_URL_MAX_LENGTH = 256;
 
+/** The longest origin a pairing URL fits: {@link PAIRING_QR_URL_MAX_LENGTH} less the fixed `/#pair?` + fragment tail. */
+export const MAX_PAIRING_ORIGIN_LENGTH =
+  PAIRING_QR_URL_MAX_LENGTH - '/'.length - PAIRING_HASH_PREFIX.length - PAIRING_FRAGMENT_LENGTH;
+
 /** Where a pairing URL carries its fragment: at the root, after {@link PAIRING_HASH_PREFIX}. */
 const PAIRING_LINK_SHAPE: LinkUrlShape = {
   maxLength: PAIRING_QR_URL_MAX_LENGTH,
