@@ -26,7 +26,7 @@ Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in `dor-lib-common/sr
 - `contextPortKey` is persisted, carried only by a Surface the pane context menu opened for a port. **Must keep agent-browser's provider suffix `agent`**, the value persisted before Playwright existed, so a restored pane still matches.
 - **Never move a browser Surface's DOM, and never let a minimize unmount it** (rationale): a minimize parks the leaf (`docs/specs/tiling-engine.md` → "Parked leaves"), keeping scroll, form, and script state. A restart is a cold load: every param survives it, no document state does.
 
-Source of truth: `AgentBrowserSurfaceParams` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `resolveRenderMode` in `lib/src/components/wall/browser-surface.ts`.
+Source of truth: `resolveRenderMode` and `launchFallbackFromParams` in `lib/src/components/wall/browser-surface.ts`; `openContextPort` in `lib/src/components/Wall.tsx`.
 
 ## Placement And Lifetime
 

@@ -2193,7 +2193,7 @@ for (const [name, options, args, message] of [
 // scope claims, read from the same prompts the audit runs.
 test('the published audit index lists every domain with its specs', async () => {
   const { auditIndex } = await import('../website/scripts/generate-docs.js');
-  const index = await auditIndex(repo);
+  const index = await auditIndex();
   const published = Object.fromEntries(index.domains.map((d) => [d.name, d.specs.map((s) => s.path).sort()]));
   assert.deepEqual(published, Object.fromEntries(domains(repo).map((d) => [d.domain, [...d.specs].sort()])));
 });
