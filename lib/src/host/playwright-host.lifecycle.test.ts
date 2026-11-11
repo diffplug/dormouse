@@ -140,11 +140,40 @@ test('captures reuse recent tab state but refresh it when it expires', async () 
   // No viewer yet, so attach left the tab state to the first capture.
   expect(await capture()).toBe(true);
   mocks.cli.mockClear();
+  page.evaluate = vi.fn(async () => ({ width: 640, height: 480, dpr: 1 }));
   for (let i = 0; i < 10; i++) expect(await capture()).toBe(true);
-  expect(mocks.cli).not.toHaveBeenCalled();
+  expect(page.evaluate).not.toHaveBeenCalled();
   now.mockReturnValue(10750);
   expect(await capture()).toBe(true);
-  expect(mocks.cli).toHaveBeenCalledExactlyOnceWith('/tools/playwright-cli', ['--session=test', 'tab-list', '--json'], { cwd: binding.cwd, timeoutMs: 10_000 });
+  expect(page.evaluate).toHaveBeenCalled();
+});
+
+test('a multi-page browser asks the CLI for its selection only when a page opens or closes, or the last answer is 5 s old', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
+  let pages = [page, Object.assign(new EventEmitter(), page)];
+  browser.contexts = () => [{ pages: () => pages }];
+  const tabLists = () => mocks.cli.mock.calls.filter(([, args]) => args.includes('tab-list')).length;
+  expect(await capture()).toBe(true);
+  expect(tabLists()).toBe(1);
+  // Refreshes at the poll's cadence reuse the answer.
+  for (let t = 10750; t < 15000; t += 750) { // to 14500
+    now.mockReturnValue(t);
+    expect(await capture()).toBe(true);
+  }
+  expect(tabLists()).toBe(1);
+  now.mockReturnValue(15250);
+  expect(await capture()).toBe(true);
+  expect(tabLists()).toBe(2);
+  // A page opens: asked at the next refresh.
+  pages = [...pages, Object.assign(new EventEmitter(), page)];
+  now.mockReturnValue(16000);
+  expect(await capture()).toBe(true);
+  expect(tabLists()).toBe(3);
+  // One closes: asked again.
+  pages = pages.slice(0, 2);
+  now.mockReturnValue(16750);
+  expect(await capture()).toBe(true);
+  expect(tabLists()).toBe(4);
 });
 
 test('GUI tab selection refreshes immediately even with a recent capture', async () => {
