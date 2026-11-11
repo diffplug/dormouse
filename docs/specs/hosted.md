@@ -337,7 +337,7 @@ Begin refuses an absent or mismatched origin with `ORIGIN_MISMATCH_ERROR`. The v
 | `GET /api/relay/passkeys` | login cookie, same-origin fetch | 200 `{ passkeys }`, each with the enrolled Burrow whose setup token registered it, or none |
 | `DELETE /api/relay/passkeys/:credentialId` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 
-Errors are the managed-voice cookie routes' ("Managed voice"), except that their 403 carries `NOT_ENTITLED_ERROR`.
+Errors are the managed-voice cookie routes' ("Managed voice"): the four list and remove routes admit an account without a plan, so a lapsed one can still remove what it enrolled, and the two enrollment routes refuse it 403 `NOT_ENTITLED_ERROR`.
 
 - **Must refuse approval from a login older than `LOGIN_FRESH_AGE_MS`**, 403 `RECENT_LOGIN_REQUIRED`, failing closed when the login's `createdAt` is missing or unparsable; the voice routes require no recent login.
 - **Must count every approval attempt** against `RELAY_APPROVE_LIMIT` (10 a minute per account) before reading the body: 429 with `Retry-After` past it.

@@ -184,6 +184,25 @@ it("lists each computer by the name it enrolled under, else its short id, and ea
   ]);
 });
 
+it("an account without a plan sees its computers and passkeys only while it has some", async () => {
+  vi.mocked(api.getSession).mockResolvedValue(login());
+  vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+  await mount(null);
+  const sections = () => [...container.querySelectorAll("section[aria-labelledby]")].map((section) => section.getAttribute("aria-labelledby"));
+  expect(sections()).not.toContain("computers");
+  expect(sections()).not.toContain("passkeys");
+  expect(container.textContent).toContain("Natural Voice and remote control are not available yet.");
+
+  const enrolledAt = new Date(NOW).toISOString();
+  vi.mocked(api.getComputers).mockResolvedValue([{ burrowId: "kept-computer-id", label: "studio", enrolledAt }]);
+  vi.mocked(api.getPasskeys).mockResolvedValue([{ credentialId: "one", label: "iPhone", createdAt: enrolledAt, burrowId: null }]);
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await mount(null);
+  expect(sections()).toEqual(expect.arrayContaining(["computers", "passkeys"]));
+  expect(container.querySelector("section[aria-labelledby=computers] button")?.textContent).toBe("Remove");
+});
+
 it("an approval that completes after a newer link opened keeps the newer code", async () => {
   vi.mocked(api.getSession).mockResolvedValue(login());
   let resolve!: () => void;
