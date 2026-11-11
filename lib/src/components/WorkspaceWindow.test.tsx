@@ -1226,6 +1226,16 @@ describe('Surface moves between Workspaces', () => {
     expect(getWallHandle('workspace:2')!.ownsSurface('frame')).toBe(true);
   });
 
+  it('drops a browser\'s key as it leaves its Workspace, keeping its session', async () => {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'workspace:2', activate: false });
+    const meta = browserLeafMeta('default', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:3000/', session: 'dormouse.workspace-1.default', key: 'default' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('web'), leafMeta: { web: meta } } }, 'workspace:2': { initialPaneIds: ['pane-x'] } }} /></>);
+    const prepared = getWallHandle(source)!.prepareSurfaceMove('web');
+    expect(prepared.meta.params?.key).toBeUndefined();
+    expect(prepared.meta.params?.session).toBe('dormouse.workspace-1.default');
+  });
+
   /** A source holding only a plain iframe, beside two terminal Workspaces. */
   async function iframeWalls() {
     const source = getActiveWorkspaceId();

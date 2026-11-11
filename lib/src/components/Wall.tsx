@@ -1918,6 +1918,9 @@ export function Wall({
       if ((meta.params?.launchSession && !meta.params?.session) || getAgentBrowserSurfaceController(id)?.snapshot().phase === 'launching') throw new Error('Wait for the browser to connect before moving this Surface');
       const params = { ...meta.params };
       delete params.toolPreview;
+      // A browser's `--key` names it within its Workspace; the destination may
+      // hold that key already. The Surface stays reachable by its id.
+      if (surfaceKindFromParams(params) === 'browser') delete params.key;
       return {
         meta: { ...meta, params },
         iframe: isIframeSurface(id), terminal: surfaceHasTerminal(id),
