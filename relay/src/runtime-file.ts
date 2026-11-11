@@ -3,9 +3,10 @@
  * state; see `docs/specs/relay.md` → "Configuration" and `SELF_HOST.md`.
  */
 
-import { randomUUID } from 'node:crypto';
-import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+
+import { replaceAtomically } from './atomic-write.js';
 
 /** What a running Relay records about itself, once it has actually bound. */
 export interface RuntimeInfo {
@@ -36,9 +37,8 @@ export interface RuntimeInfo {
  */
 export async function writeRuntimeFile(path: string, info: RuntimeInfo): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const tmp = `${path}.${randomUUID()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(info, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  await rename(tmp, path);
+  const contents = `${JSON.stringify(info, null, 2)}\n`;
+  await replaceAtomically(path, (tmp) => writeFile(tmp, contents, { encoding: 'utf8', mode: 0o600 }));
 }
 
 /**
