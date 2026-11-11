@@ -10,7 +10,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Loading: Story = { args: { loading: true } };
-export const ComingSoon: Story = { args: { comingSoon: true } };
 export const EmailOnly: Story = { args: { enabled: [] } };
 export const Providers: Story = {};
 export const Phone: Story = { args: { phone: true } };
@@ -30,10 +29,8 @@ export const ConnectionFailed: Story = { args: { error: { read: true, message: "
 };
 export const CodeRejected: Story = { args: { ...CodeEntry.args, error: { read: false, message: "That did not work. Check your details and try again. If connecting a provider, sign in again first." } } };
 export const RateLimited: Story = { args: { error: { read: false, message: "Too many attempts. Wait a minute before trying again." } } };
-export const PrelaunchRefused: Story = { args: { error: { read: false, message: "That did not work. Check your details and try again. If connecting a provider, sign in again first." } } };
 export const EnrollmentEntry: Story = { args: { enrolling: ENROLLMENT } };
 export const VoiceEntry: Story = { args: { enrolling: { ...ENROLLMENT, purpose: "voice" } } };
-export const EnrollmentComingSoon: Story = { args: { enrolling: ENROLLMENT, comingSoon: true } };
 export const EditExistingCode: Story = {
   args: { email: "alex@example.com" },
   play: async ({ canvasElement }) => {

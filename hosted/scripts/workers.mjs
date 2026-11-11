@@ -40,6 +40,9 @@ export const APP_WORKERS = {
     secrets: (config) => [
       "AUTH_SECRET",
       "POSTMARK_SERVER_TOKEN",
+      // Billing's, beside the Price vars `wrangler.jsonc` carries.
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
       ...oauthProviders(config).flatMap((provider) => {
         assert.ok(providerIds.includes(provider), "Unknown OAuth provider");
         return [

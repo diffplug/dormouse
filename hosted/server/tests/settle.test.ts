@@ -7,7 +7,6 @@ import {
   keepRead,
   pageError,
   pendingEnd,
-  preLaunchNotice,
   reread,
   settle,
   type AccountState,
@@ -81,19 +80,6 @@ describe("pendingEnd", () => {
     const error = { text: "mismatch", error: true };
     expect(pendingEnd(pending, approved(state(false, []), { mismatched: true }))).toEqual(error);
     expect(pendingEnd(pending, approved(state(true, []), { mismatched: true }))).toEqual(error);
-  });
-});
-
-describe("preLaunchNotice", () => {
-  it("shows only once a lookup succeeded and found no login", () => {
-    expect(preLaunchNotice("signed-out", false)).toBe(true);
-    expect(preLaunchNotice("signed-in", false)).toBe(false);
-    expect(preLaunchNotice("failed", false)).toBe(false);
-    expect(preLaunchNotice("pending", false)).toBe(false);
-  });
-
-  it("never replaces a sign-in form the URL opened", () => {
-    expect(preLaunchNotice("signed-out", true)).toBe(false);
   });
 });
 

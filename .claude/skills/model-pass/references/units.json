@@ -655,7 +655,7 @@
     {
       "unit": "hosted-server-a",
       "rules": [
-        "^hosted/server/(relay-[a-z-]+|one-time[a-z-]*|socket-room|pocket|frame-origin|frame-worker|try-worker|relay-worker|account-gate|account-app|account-auth|account-routes|worker-app|worker|headers|bindings|db|migrations|runtime-roles|providers|dev|dev-host-guard|policy|policy-constants|prelaunch|workers-runtime\\.d|preview-[a-z-]+)\\.(ts|js|sql)$",
+        "^hosted/server/(relay-[a-z-]+|one-time[a-z-]*|socket-room|pocket|frame-origin|frame-worker|try-worker|relay-worker|account-gate|account-app|account-auth|account-routes|worker-app|worker|headers|bindings|db|migrations|runtime-roles|providers|dev|dev-host-guard|policy|policy-constants|workers-runtime\\.d|preview-[a-z-]+)\\.(ts|js|sql)$",
         "^hosted/server/tests/(relay|relay-room|relay-push|one-time|pocket|workers|boundary|runtime-roles|frame-origin|enrollment|policy|migrations|artifacts)\\.test\\.ts$",
         "^hosted/server/tests/(raw-socket|relay-room-entry|bundle|worker-roles|worker-entry|one-time-entry|one-time-limits|rate-limit|oauth-server)\\.ts$",
         "^hosted/server/runtime-roles\\.sql$",
@@ -667,7 +667,7 @@
         "docs/specs/security-hosted.md",
         "docs/specs/one-time.md"
       ],
-      "what": "Hosted's relay, one-time, and account-plumbing Workers in `hosted/server/`: `relay-api.ts` (834 lines), `relay-room.ts` (the per-account Durable Object), `relay-push.ts`, relay auth, account, sockets, and rows, the one-time room and routes, the Pocket and frame-origin Workers, the account gate and app, headers, bindings, the database layer, migrations runner, runtime roles (`runtime-roles.sql`), policy, prelaunch, dev helpers, and the preview Workers. The billing, voice, notices, withdrawal, closure, and metrics modules belong to `hosted-server-b`.",
+      "what": "Hosted's relay, one-time, and account-plumbing Workers in `hosted/server/`: `relay-api.ts` (834 lines), `relay-room.ts` (the per-account Durable Object), `relay-push.ts`, relay auth, account, sockets, and rows, the one-time room and routes, the Pocket and frame-origin Workers, the account gate and app, headers, bindings, the database layer, migrations runner, runtime roles (`runtime-roles.sql`), policy, dev helpers, and the preview Workers. The billing, voice, notices, withdrawal, closure, and metrics modules belong to `hosted-server-b`.",
       "read": "**Specs you own** (read first, in the snapshot): `docs/specs/hosted.md` + rationale (login and linking policy, account-scoped Relay and enrollment, Worker deployment, local development), `docs/specs/security-hosted.md` + rationale (account origin, identity, deployment checks, with `FAIL IF` lines), and the Hosted rendezvous sections of `docs/specs/one-time.md`. The origin split is: `hosted.dormouse.sh` = account and Better Auth; `relay.` = account-scoped Relay, Pocket, and the one-time Burrow route; `try.` = one-time page and client route; `voice.` = voice. Report spec-vs-code disagreements in both directions.",
       "focus": [
         "Per-Worker route tables: every route's authentication, account scoping, `Origin` and CSRF checks, and which origin it is served from. Find a route served from the wrong Worker, an account-scoped object reachable with another account's id, and a WebSocket upgrade that skips a check its HTTP sibling makes.",
