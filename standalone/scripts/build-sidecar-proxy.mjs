@@ -13,7 +13,6 @@
 // docs/specs/standalone.md -> "Agent recovery", and docs/specs/alert.md.
 import { build } from 'esbuild';
 import { readFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
@@ -78,14 +77,6 @@ const bundles = [
     external: NATIVE_DIRECT,
   },
 ];
-
-// `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
-// pre-rename `remote-host.cjs` left in an older checkout would ship inside the
-// app — a dead Burrow with its own baked relay origin — and so would
-// an `alert-store.cjs` from before the alerts joined `burrow.cjs`.
-for (const retired of ['remote-host.cjs', 'alert-store.cjs']) {
-  await rm(path.resolve(sidecar, retired), { force: true });
-}
 
 for (const { entry, out, define, assertBaked, external } of bundles) {
   const outfile = path.resolve(sidecar, out);

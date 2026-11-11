@@ -54,9 +54,11 @@ const contacts = new WeakMap<Stripe, Map<string, { at: number; contact: Contact 
 
 /**
  * The Stripe customer's billing email and address country, or null when
- * Stripe cannot say. `cached` reuses an answer Stripe gave within
- * {@link CONTACT_CACHE_MS}, for the billing page's reads; what sends mail or
- * refuses a withdrawal reads Stripe fresh.
+ * the owner has no customer or Stripe deleted it; throws when Stripe cannot
+ * be read, so a send never mistakes an outage for a missing email. `cached`
+ * reuses an answer Stripe gave within {@link CONTACT_CACHE_MS}, for the
+ * billing page's reads; what sends mail or refuses a withdrawal reads Stripe
+ * fresh.
  */
 export async function billingContact(billing: Billing<Plan>, ownerId: string, { cached = false } = {}): Promise<Contact> {
   const customerId = await billing.customerOf(ownerId);
@@ -66,17 +68,12 @@ export async function billingContact(billing: Billing<Plan>, ownerId: string, { 
   if (!known) contacts.set(billing.stripe, (known = new Map()));
   const hit = known.get(customerId);
   if (cached && hit && now - hit.at < CONTACT_CACHE_MS) return hit.contact;
-  try {
-    const customer = await billing.stripe.customers.retrieve(customerId);
-    const contact = customer.deleted
-      ? null
-      : { email: customer.email ?? null, country: customer.address?.country?.toUpperCase() ?? null };
-    known.set(customerId, { at: now, contact });
-    return contact;
-  } catch (error) {
-    console.warn(`Reading Stripe customer ${customerId} failed`, error);
-    return null;
-  }
+  const customer = await billing.stripe.customers.retrieve(customerId);
+  const contact = customer.deleted
+    ? null
+    : { email: customer.email ?? null, country: customer.address?.country?.toUpperCase() ?? null };
+  known.set(customerId, { at: now, contact });
+  return contact;
 }
 
 /**
@@ -96,7 +93,10 @@ export async function withdrawalOffer(
   const startedAt = new Date(subscription.started_at);
   const until = new Date(startedAt.getTime() + WITHDRAWAL_OPEN_DAYS * DAY_MS);
   if (billing.time.now() >= until) return null;
-  const contact = await billingContact(billing, ownerId, { cached });
+  const contact = await billingContact(billing, ownerId, { cached }).catch((error: unknown) => {
+    console.warn(`Reading the Stripe customer of ${ownerId} failed`, error);
+    return null;
+  });
   if (contact?.country && !WITHDRAWAL_COUNTRIES.has(contact.country)) return null;
   return {
     subscription: subscription.id,

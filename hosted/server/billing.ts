@@ -310,6 +310,12 @@ const RESYNC_OWNERS = 20;
  * a withdrawal's acknowledgement among them, and the price changes they allow.
  * Billing closed does nothing. Every owner, withdrawal, closure, dispute,
  * and notice is tried; any failure fails the invocation after.
+ *
+ * Unlike the voice sweep and the push send, these batches are not sized to
+ * Workers Free's 50 subrequests per invocation: a run with every batch full
+ * makes several hundred Stripe, mail, and database fetches, which only a paid
+ * Workers plan allows. At the Free limit the rest of the run fails, and the
+ * alert's own mail with it.
  */
 export async function resyncBilling(
   setup: BillingSetup | null,

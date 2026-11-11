@@ -637,24 +637,6 @@ importers:
       '@tauri-apps/plugin-updater':
         specifier: ^2.13.1
         version: 2.14.1
-      '@xterm/addon-fit':
-        specifier: 0.12.0-beta.333
-        version: 0.12.0-beta.333(@xterm/xterm@6.1.0-beta.337)
-      '@xterm/addon-image':
-        specifier: 0.10.0-beta.332
-        version: 0.10.0-beta.332(@xterm/xterm@6.1.0-beta.337)
-      '@xterm/addon-serialize':
-        specifier: 0.15.0-beta.331
-        version: 0.15.0-beta.331(@xterm/xterm@6.1.0-beta.337)
-      '@xterm/addon-unicode-graphemes':
-        specifier: 0.5.0-beta.331
-        version: 0.5.0-beta.331(@xterm/xterm@6.1.0-beta.337)
-      '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.330
-        version: 0.20.0-beta.330(@xterm/xterm@6.1.0-beta.337)
-      '@xterm/xterm':
-        specifier: 6.1.0-beta.337
-        version: 6.1.0-beta.337
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
@@ -680,6 +662,21 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.0.2
         version: 6.2.1(vite@8.3.6(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      '@xterm/addon-fit':
+        specifier: 0.12.0-beta.333
+        version: 0.12.0-beta.333(@xterm/xterm@6.1.0-beta.337)
+      '@xterm/addon-image':
+        specifier: 0.10.0-beta.332
+        version: 0.10.0-beta.332(@xterm/xterm@6.1.0-beta.337)
+      '@xterm/addon-serialize':
+        specifier: 0.15.0-beta.331
+        version: 0.15.0-beta.331(@xterm/xterm@6.1.0-beta.337)
+      '@xterm/addon-unicode-graphemes':
+        specifier: 0.5.0-beta.331
+        version: 0.5.0-beta.331(@xterm/xterm@6.1.0-beta.337)
+      '@xterm/xterm':
+        specifier: 6.1.0-beta.337
+        version: 6.1.0-beta.337
       cross-spawn:
         specifier: ^7.0.6
         version: 7.0.6
@@ -695,9 +692,6 @@ importers:
       remote-lib-common:
         specifier: workspace:*
         version: link:../remote-lib-common
-      tailwindcss:
-        specifier: ^4.3.0
-        version: 4.3.5
       typescript:
         specifier: ^7.0.0
         version: 7.0.2
@@ -784,9 +778,6 @@ importers:
       remote-lib-common:
         specifier: workspace:*
         version: link:../remote-lib-common
-      tailwindcss:
-        specifier: ^4.3.0
-        version: 4.3.5
       typescript:
         specifier: ^7.0.0
         version: 7.0.2

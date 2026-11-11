@@ -40,7 +40,7 @@ export async function listFiles(cwd: string, { onFiles, home, signal }: FileList
     onFiles(paths);
   };
 
-  const own = git ? await gitFiles(git, cwd) : null;
+  const own = git ? await gitFiles(git, cwd, signal) : null;
   if (own) {
     emit(own);
     return { truncated };
@@ -57,7 +57,7 @@ export async function listFiles(cwd: string, { onFiles, home, signal }: FileList
     const absolute = join(cwd, directory);
     const entries = await readdir(absolute, { withFileTypes: true }).catch(() => []);
     // `.git` is a directory in a clone and a file in a worktree or submodule.
-    const repo = git && directory && !signal?.aborted && entries.some(entry => entry.name === '.git') ? await gitFiles(git, absolute) : null;
+    const repo = git && directory && !signal?.aborted && entries.some(entry => entry.name === '.git') ? await gitFiles(git, absolute, signal) : null;
     if (repo) {
       emit(repo.map(path => `${directory}/${path}`));
       return;
@@ -97,11 +97,11 @@ const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Tracked and untracked-but-not-ignored files under `cwd`, less deleted ones;
  *  dot-folders included. Null outside a work tree `localGitRepository` accepts. */
-async function gitFiles(git: string, cwd: string): Promise<string[] | null> {
+async function gitFiles(git: string, cwd: string, signal?: AbortSignal): Promise<string[] | null> {
   const repository = await localGitRepository(cwd);
   if (!repository) return null;
   const listed = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, 'ls-files', '-z', '-t', '--cached', '--others', '--deleted', '--exclude-standard'], {
-    cwd, env: untrustedGitEnv(repository), timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 256 * 1024 * 1024,
+    cwd, env: untrustedGitEnv(repository), timeoutMs: GIT_TIMEOUT_MS, signal, maxOutputBytes: 256 * 1024 * 1024,
   });
   if (!listed.ok || listed.exitCode !== 0) return null;
   // Each entry is `<tag> <path>`; a deleted file is listed again tagged `R`,

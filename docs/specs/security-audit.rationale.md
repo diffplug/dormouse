@@ -148,9 +148,9 @@ A PASS that names the finding with a `path:line` is a mechanical stand-in for ha
 
 A PASS still exits zero while ledger findings are open: the gate holds a release on what the current tree fails, and the ledger holds what a human has not yet triaged. The status issue lists them anyway, so a PASS is never published as all clear while one is open — the 2026-07-10 and 2026-10-06 closes said exactly that.
 
-The steps list the tracker with `--limit 1000`: the default of 30 once left an older open failure issue unreconciled.
+The steps list the tracker with `--limit 1000`: the default of 30 once left an older open failure issue unreconciled. They search titles for `audit-finding` so that cap counts ledger issues only: the per-run reports share the tracker, and on 2026-11-09 it held 103 issues, 95 filed in the month before, which would have filled an unfiltered read within a year.
 
-`File embargoed findings` comments on a ledger issue only with its fixed `Seen again` sentence because its token is a maintainer's own: the ledger issues and comments the workflow writes carry an admin's login and the `MEMBER` association, so what marks a public summary as a human's is that the workflow never writes one.
+`File embargoed findings` never comments on a ledger issue, because the ledger read sees only an issue's first 100 comments and a comment per run would push a maintainer's `Fixed in` or `## Public summary` out of it, and because its token is a maintainer's own: the ledger issues and comments the workflow writes carry an admin's login and the `MEMBER` association, so what marks a public summary as a human's is that the workflow never writes one.
 
 **Why the whole `audit` job is one concurrency group, queued with `queue: max`.** `File embargoed findings` lists the open ledger once and creates against that listing, and `Publish the audit status` lists the disclosures once and creates against that, so two runs between their list and their create (the nightly, a dispatch, the release gate's dispatch) could file one key twice or disclose one ledger issue twice. The two steps cannot move to a job of their own, which would serialize only them: what they file is the composed report, which would have to cross jobs as an artifact, and this repository's artifacts are public. A run therefore waits behind the run ahead of it, at most that job's timeout. GitHub's default keeps one pending run per group and cancels the older one when another queues, so three overlapping runs could cancel the release gate's, failing a release closed on no finding; `queue: max` keeps up to 100.
 
@@ -160,7 +160,7 @@ The steps list the tracker with `--limit 1000`: the default of 30 once left an o
 
 **Why metadata only.** A ledger issue carries evidence and a reproduction written by a model, which is the payload issue #1027 published. A disclosure names the key, severity, dates, reason, and where — each validated against the checked-out tree, as the status issue validates headings — so nothing an agent phrased crosses. A path that no longer exists is withheld rather than trusted.
 
-**Why a human-only summary, and only from a comment.** The free text a reader wants is a maintainer's to write. The ledger issue's body is the workflow's, model text included, and posted under the same maintainer login, so a `## Public summary` heading there could be a domain's; a comment is a person's, because the workflow comments nothing but its fixed `Seen again` line.
+**Why a human-only summary, and only from a comment.** The free text a reader wants is a maintainer's to write. The ledger issue's body is the workflow's, model text included, and posted under the same maintainer login, so a `## Public summary` heading there could be a domain's; a comment is a person's, because the workflow writes none.
 
 **Why an unpinned status issue is only a WARNING (2026-10-11).** Pinning makes the issue easy to find and changes nothing it says; failing on it would hold VS Code releases on a display setting, for instance after an unpin to make room under GitHub's limit of three pins. The WARNING still reaches the ledger and the status issue's counts, so an unpin is seen.
 

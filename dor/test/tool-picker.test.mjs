@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runCli } from '../dist/cli.js';
+import { NODE_HOST } from '../dist/node-host.js';
 import { validateToolArgs } from '../dist/commands/tool.js';
 import { fakeTerminal, until } from './fake-terminal.mjs';
 
@@ -67,7 +68,8 @@ test('a pick launches the Tool as dor tool <name> with the same flags would', as
 /** The client a typed `dor tool <flags> <name>` sent. */
 async function typed(flags, name) {
   const client = toolClient();
-  await runCli(['tool', ...flags, name], { client, env: ENV });
+  // `--cwd sub` names a directory under ENV's PWD, which exists only here.
+  await runCli(['tool', ...flags, name], { client, env: ENV, host: { ...NODE_HOST, isDirectory: () => true } });
   return client;
 }
 

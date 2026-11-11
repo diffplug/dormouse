@@ -30,8 +30,8 @@
  *     these files and drives them, because each once matched the right string
  *     and returned the wrong answer.
  *   - Windows is checked at the same depth as the other two, which is worth
- *     stating plainly: nothing in CI can execute PowerShell here, so for that
- *     file this lint is the *only* automated signal that a control survives.
+ *     stating plainly: CI only parses that file, on its Windows leg, so for it
+ *     this lint is the *only* automated signal that a control survives.
  *
  * Adding an installer means adding it to INSTALLERS. A rule that genuinely does
  * not apply to a platform belongs in `skip` with a reason, not silently
@@ -122,7 +122,7 @@ export const RULES = [
     rule: 'Credentials at rest — permission checks bind ownership to the installing account',
     patterns: {
       macOS: /me="\$\(id -u\)"|out="\$\(\/usr\/bin\/stat -f '%Lp %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
-      Linux: /me="\$\(id -un\)"|out="\$\(stat -c '%a %U' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
+      Linux: /me="\$\(id -u\)"|out="\$\(stat -c '%a %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
       Windows: /\$ownerSid = \$acl\.GetOwner\(\[Security\.Principal\.SecurityIdentifier\]\)\.Value\s+if \(\$ownerSid -ne \$script:CurrentUserSid\) \{\s+return \[pscustomobject\]@\{ Ok = \$false;/,
     },
     exactMatches: { macOS: 3, Linux: 3, Windows: 2 },
@@ -254,7 +254,7 @@ export const RULES = [
   {
     rule: 'Credentials at rest — the enrollment-offer generator is a platform CSPRNG',
     patterns: {
-      macOS: /\/dev\/urandom/,
+      macOS: /randomBytes\(32\)/,
       Linux: /randomBytes\(32\)/,
       Windows: /RandomNumberGenerator/,
     },

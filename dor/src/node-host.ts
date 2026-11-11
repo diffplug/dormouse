@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { isDirectory } from 'dor-lib-common';
 import { resolve } from 'node:path';
 import { AGENT_BROWSER } from './commands/agent-browser.js';
 import { runBrowserCli } from './commands/browser-cli.js';
@@ -17,6 +18,7 @@ export const NODE_HOST: CliHost = {
   cwd: () => process.cwd(),
   homedir,
   resolvePath: (base, path) => resolve(base, path),
+  isDirectory,
   connect: (endpoint) => new SocketControlClient(endpoint),
   listFiles,
   readTextFile: (path) => (existsSync(path) ? readFileSync(path, 'utf8') : null),
