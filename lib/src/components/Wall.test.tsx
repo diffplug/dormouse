@@ -381,6 +381,36 @@ describe('Wall on the Lath engine', () => {
     expect(writeSpy.mock.calls).toEqual([['surface:a', '\x03']]);
   });
 
+  it('answers a second ensure for the same command with the Surface the first is still launching', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
+    const ensure = async () => {
+      let response: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.ensure,
+            params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:a' },
+            respond: (r: typeof response) => { response = r; },
+          },
+        }));
+      });
+      await waitUntil(() => response !== undefined);
+      return response!;
+    };
+    const first = await ensure();
+    expect(first.result?.status).toBe('created');
+    // The new shell is at its first prompt; the command has not been typed yet.
+    const second = await ensure();
+    expect(second.result?.status).toBe('existing');
+    expect(second.result?.surfaceId).toBe(first.result?.surfaceId);
+    expect(leafCount()).toBe(2);
+  });
+
   it('fails an unintegrated ensure once its wall-clock ceiling passes, however few ticks ran', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);

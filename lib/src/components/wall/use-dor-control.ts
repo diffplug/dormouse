@@ -859,12 +859,24 @@ export function useDorControl({
    *  meanwhile would be acted on moments before it vanishes). */
   const isTargetable = useCallback((id: string) => !lath.isDying(id) && !isClosingSurface(id), [lath, isClosingSurface]);
 
+  /** The Surface `ensure` last created for each cwd and command. Its shell
+   *  reports nothing a concurrent `ensure` could match until the command is
+   *  typed, which waits for the first prompt and the next poll. */
+  const ensureLaunches = useRef(new Map<string, string>());
+
   const findSurfaceIdRunningCommand = useCallback((command: string, cwdPath: string): string | null => {
     const ids = [
       ...lath.listPanes().map((panel) => panel.id),
       ...doorsRef.current.map((door) => door.id),
     ];
-    return ids.find((id) => isTargetable(id) && surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath)) ?? null;
+    const running = ids.find((id) => isTargetable(id) && surfaceRunsCommand(getTerminalPaneState(id), command, cwdPath));
+    if (running) return running;
+    // Still on its way: no command of any kind has finished in that pane yet.
+    const key = `${cwdPath}\0${command}`;
+    const launched = ensureLaunches.current.get(key);
+    if (launched && ids.includes(launched) && isTargetable(launched) && getTerminalPaneState(launched).lastCommand === null) return launched;
+    ensureLaunches.current.delete(key);
+    return null;
   }, [lath, isTargetable]);
 
   /**
@@ -1945,7 +1957,8 @@ export function useDorControl({
       const existingId = findSurfaceIdRunningCommand(command, cwd);
       if (existingId) {
         const minimized = doorsRef.current.some((door) => door.id === existingId);
-        if (booleanParam(params.restart)) {
+        // A launch still on its way starts fresh already; only a running command restarts.
+        if (booleanParam(params.restart) && surfaceRunsCommand(getTerminalPaneState(existingId), command, cwd)) {
           const restarted = await restartSurfaceInPlace(existingId, command, cwd, detail.signal);
           if (!restarted.ok) {
             detail.respond({ ok: false, error: `surface '${existingId}' ${restarted.message}` });
@@ -2002,6 +2015,7 @@ export function useDorControl({
         detail.respond({ ok: false, error: result.message });
         return;
       }
+      ensureLaunches.current.set(`${cwd}\0${command}`, result.value.id);
       // ensure is only useful if the new shell reports OSC 633 — otherwise it
       // can never be matched or restarted. A non-cmd shell can still lack
       // integration (misconfigured, exotic); wait for the signal, and if it
