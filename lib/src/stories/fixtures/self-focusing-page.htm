@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  A page that takes focus on its own timer, framed cross-origin by
+  `Wall.stories.tsx` -> ParkedPageGetsNoKeys. It reports to its parent and is
+  never sent anything: a message from the test's side carries its synthetic
+  user gesture into this page on WebKit, which would open the focus gate the
+  real click is there to open. `.htm`, not `.html`: Vite serves a `.html` file
+  through its HTML transform, which injects its own client script.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Self-focusing page</title>
+</head>
+<body style="margin:0;padding:12px;font:14px system-ui,sans-serif;background:#fff;color:#111">
+<input id="field" aria-label="Page field" style="width:200px;height:28px;font-size:14px">
+<p>Keys received: <span id="keys">0</span></p>
+<script>
+  var keys = 0;
+  var focuses = 0;
+  var field = document.getElementById('field');
+  function report() {
+    parent.postMessage({ selfFocusingPage: true, keys: keys, focuses: focuses }, '*');
+  }
+  document.addEventListener('keydown', function () {
+    keys++;
+    document.getElementById('keys').textContent = String(keys);
+    report();
+  });
+  // Each time this page's window takes focus from outside it.
+  window.addEventListener('focus', function () { focuses++; report(); });
+  setInterval(function () { field.focus(); report(); }, 50);
+</script>
+</body>
+</html>
