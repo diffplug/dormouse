@@ -381,6 +381,37 @@ describe('Wall on the Lath engine', () => {
     expect(writeSpy.mock.calls).toEqual([['surface:a', '\x03']]);
   });
 
+  it('fails an unintegrated ensure once its wall-clock ceiling passes, however few ticks ran', async () => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
+    });
+    await flush();
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(false);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
+    const respond = vi.fn();
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.ensure,
+            params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:a' },
+            respond,
+          },
+        }));
+      });
+      // A hidden webview's timers run about once a second: the clock moves on
+      // while the poll ticks only twice.
+      vi.setSystemTime(Date.now() + 8_000);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(respond).toHaveBeenCalledTimes(1);
+      expect(respond.mock.calls[0][0].ok).toBe(false);
+      expect(respond.mock.calls[0][0].error).toMatch(/requires OSC 633 shell integration/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('removes an unintegrated ensure split as soon as its client cancels', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);

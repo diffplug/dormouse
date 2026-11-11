@@ -354,7 +354,9 @@ function waitForTerminalState(
   if (signal?.aborted) return Promise.resolve('aborted');
   if (predicate(getTerminalPaneState(id))) return Promise.resolve('ready');
   return new Promise((resolve) => {
-    let elapsed = 0;
+    // By the clock, not by ticks: a hidden webview's timers can be throttled
+    // to about one a second, which would stretch a tick count tenfold.
+    const deadline = Date.now() + timeoutMs;
     const finish = (outcome: WaitOutcome) => {
       clearInterval(timer);
       signal?.removeEventListener('abort', cancel);
@@ -364,7 +366,7 @@ function waitForTerminalState(
     const timer = setInterval(() => {
       if (predicate(getTerminalPaneState(id))) {
         finish('ready');
-      } else if ((elapsed += TERMINAL_STATE_POLL_MS) >= timeoutMs) {
+      } else if (Date.now() >= deadline) {
         finish('timeout');
       }
     }, TERMINAL_STATE_POLL_MS);
