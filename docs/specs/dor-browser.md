@@ -1,6 +1,6 @@
 # Dor Browser Surface
 
-> - See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary (a browser pane is a browser Surface), and `docs/specs/dor-cli.md` for the shared `dor` CLI, surface handle model, and host control plumbing this surface builds on.
+> - See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary, and `docs/specs/dor-cli.md` for the shared `dor` CLI, surface handle model, and host control plumbing this surface builds on.
 > - Owns the browser Surface end to end — params, chrome, the renderers, the iframe proxy boundary. Its security boundaries are audited in `docs/specs/security-local.md`, whose `FAIL IF` lines own the properties this spec's mechanisms serve. Evidence behind the rules: [dor-browser.rationale.md](dor-browser.rationale.md).
 
 One body component renders all web content: `BrowserPanel`, persisted as `surfaceType: 'browser'` with a swappable `renderMode`. A browser pane has a target (today always a bare URL; process-backed targets belong to the **dor-tools** scope, `docs/specs/dor-tool.md`) and a render mode (`agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout`, `iframe`). **Never make render a separate surface kind**: it is a pane parameter, and `docs/specs/glossary.md` owns the `kind` / `render_mode` mapping.
