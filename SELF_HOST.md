@@ -321,7 +321,7 @@ Service and install root are in the table at the top of this file; logs and serv
 | KeepAlive | plist `KeepAlive` | the supervision loop in `bin\run-relay.ps1`; Task Scheduler's `RestartCount` is defence in depth, not the mechanism | `Restart=always`, `RestartSec=10` |
 | Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; before every start the installer and `manage` reap its children by install-root image path and command line, never image name | `systemctl --user stop` takes the whole cgroup |
 | `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file | symlinks, swapped with `rename(2)` on the link path |
-| `0700` / `0600` | modes under `umask 077`; `verify` checks mode and owner | an owner-only DACL; `verify` also checks owner SID | modes under `umask 077`; `verify` checks mode and owner |
+| `0700` / `0600` | explicit `chmod`, with `umask 077` around `relay.env`; `verify` checks mode and owner | an owner-only DACL; `verify` also checks owner SID | modes under `umask 077`; `verify` checks mode and owner |
 
 ### Invariants
 

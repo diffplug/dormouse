@@ -360,6 +360,10 @@ fi
 
 WS_STATE="$REPO_ROOT/node_modules/.pnpm-workspace-state-v1.json"
 WS_STATE_BACKUP=""
+# The probe temporaries are here too, so a `die` anywhere between staging and
+# the switch cannot leak them.
+PROBE_STATE=""
+PROBE_LOG=""
 restore_workspace_state() {
   if [ -n "$WS_STATE_BACKUP" ] && [ -f "$WS_STATE_BACKUP" ]; then
     cp -p "$WS_STATE_BACKUP" "$WS_STATE" 2>/dev/null || true
@@ -368,7 +372,9 @@ restore_workspace_state() {
 }
 cleanup() {
   restore_workspace_state
-  rm -f "$TS_STATUS_JSON"
+  rm -f "$TS_STATUS_JSON" "$PROBE_LOG"
+  [ -n "$PROBE_STATE" ] && rm -rf "$PROBE_STATE"
+  return 0
 }
 trap cleanup EXIT
 
@@ -486,18 +492,14 @@ ok "release $RELEASE_ID staged"
 
 step "Runtime configuration"
 
-# 32 bytes of the platform CSPRNG as 64 lowercase hex characters. The enrollment
-# offer is the one secret this installer mints; the Relay owns its setup
-# password and persists it under state/ on first boot. Never substitute $RANDOM,
-# a timestamp, or any other non-CSPRNG source.
+# One named CSPRNG, not a fallback chain: the release's own Node was staged a
+# few lines ago and is the binary this service will run under, so it is always
+# present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
+# Never substitute $RANDOM, a timestamp, or any non-CSPRNG source. The
+# enrollment offer is the one secret this installer mints; the Relay owns its
+# setup password and persists it under state/ on first boot.
 random_hex32() {
-  if [ -x /usr/bin/xxd ]; then
-    /usr/bin/xxd -p -l 32 -c 32 /dev/urandom
-  elif [ -x /usr/bin/openssl ]; then
-    /usr/bin/openssl rand -hex 32
-  else
-    die "no way to generate a high-entropy secret (need /usr/bin/xxd or /usr/bin/openssl)."
-  fi
+  "$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))'
 }
 
 # Which installer-owned keys is the env file $1 missing (absent, or present

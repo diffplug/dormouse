@@ -912,11 +912,12 @@ release_field() {
 }
 
 # $1 = path, $2 = expected octal mode, $3 = label. Asserts both legs of
-# "reachable only by the installing user" from a single stat.
+# "reachable only by the installing user" from a single stat. Compare numeric
+# uids so ownership does not depend on directory-service name resolution.
 owner_only() {
   local out mode owner me
-  me="$(id -un)"
-  out="$(stat -c '%a %U' "$1" 2>/dev/null || true)"
+  me="$(id -u)"
+  out="$(stat -c '%a %u' "$1" 2>/dev/null || true)"
   if [ -z "$out" ]; then
     fail "$3 is missing: $1"
     return
@@ -924,9 +925,9 @@ owner_only() {
   mode="${out%% *}"
   owner="${out#* }"
   if [ "$mode" = "$2" ] && [ "$owner" = "$me" ]; then
-    pass "$3 is mode 0$2, owned by $me"
+    pass "$3 is mode 0$2, owned by uid $me"
   else
-    fail "$3 is mode 0$mode owned by $owner — expected mode 0$2 owned by $me"
+    fail "$3 is mode 0$mode owned by uid $owner — expected mode 0$2 owned by uid $me"
   fi
 }
 

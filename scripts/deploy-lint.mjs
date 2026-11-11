@@ -122,7 +122,7 @@ export const RULES = [
     rule: 'Credentials at rest — permission checks bind ownership to the installing account',
     patterns: {
       macOS: /me="\$\(id -u\)"|out="\$\(\/usr\/bin\/stat -f '%Lp %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
-      Linux: /me="\$\(id -un\)"|out="\$\(stat -c '%a %U' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
+      Linux: /me="\$\(id -u\)"|out="\$\(stat -c '%a %u' "\$1"|if \[ "\$mode" = "\$2" \] && \[ "\$owner" = "\$me" \]/,
       Windows: /\$ownerSid = \$acl\.GetOwner\(\[Security\.Principal\.SecurityIdentifier\]\)\.Value\s+if \(\$ownerSid -ne \$script:CurrentUserSid\) \{\s+return \[pscustomobject\]@\{ Ok = \$false;/,
     },
     exactMatches: { macOS: 3, Linux: 3, Windows: 2 },
@@ -254,7 +254,7 @@ export const RULES = [
   {
     rule: 'Credentials at rest — the enrollment-offer generator is a platform CSPRNG',
     patterns: {
-      macOS: /\/dev\/urandom/,
+      macOS: /randomBytes\(32\)/,
       Linux: /randomBytes\(32\)/,
       Windows: /RandomNumberGenerator/,
     },
