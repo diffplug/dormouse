@@ -730,7 +730,7 @@ export const MAX_CWD_LENGTH = 4096;
  * contain runs of spaces, and this value is compared against real filesystem
  * paths.
  */
-function boundedCwdValue(value: string): string {
+export function boundedCwdValue(value: string): string {
   const stripped = value.replace(/[\x00-\x1f\x7f-\x9f]+/g, '');
   return stripped.length <= MAX_CWD_LENGTH
     ? stripped
