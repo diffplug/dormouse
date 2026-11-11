@@ -63,13 +63,19 @@ async function shell(t, line) {
     }, 10);
     mgr.gracefulKill(['sh'], timeout, 'r');
   });
-  return { mgr, events, pid, stop, leaves: (more) => pids.push(...more) };
+  // The prompt drawn after `line` returned: the shell is back in its reader,
+  // where a hangup ends it. One sent while bash is still between the command
+  // and that prompt is sometimes not acted on (bash 5.2 on Linux), which is
+  // the deadline's job to cover and not what a test of the ordinary stop means.
+  const idle = () => until(() => /PID=\d+\r?\n[\s\S]*\x1b\]633;A/.test(output), 'the prompt after the command');
+  return { mgr, events, pid, stop, idle, leaves: (more) => pids.push(...more) };
 }
 
 test('a graceful stop ends an interactive shell at once, not at the deadline', {
   skip: !BASH, timeout: 15_000,
 }, async (t) => {
-  const { mgr, events, pid, stop } = await shell(t, 'true');
+  const { mgr, events, pid, stop, idle } = await shell(t, 'true');
+  await idle();
   const waited = await stop(2_000);
   assert.ok(events.some(({ event, data }) => event === 'exit' && data.id === 'sh'), 'the shell exits');
   assert.equal(mgr.hasPty('sh'), false);
