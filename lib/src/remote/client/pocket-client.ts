@@ -358,8 +358,10 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> = 
   'presence-rejected': 'The computer could not verify your passkey. Sign in again and try Connect.',
   'protocol-rejected': 'The computer refused this connection.',
   'burrow-busy': 'The computer is already handling as many phones as it can. Try again shortly.',
-  'burrow-error': 'The computer could not finish the connection.',
 };
+
+/** Shown for a connection outcome this phone cannot read. */
+const UNREADABLE_CONNECTION_OUTCOME_MESSAGE = 'The computer could not finish the connection.';
 
 /**
  * Shown when the Relay's `begin` names a presence challenge other than the one
@@ -1043,7 +1045,7 @@ export class PocketClient {
       return this.#connectionUnavailable(err);
     }
     if (!isConnectionOutcomeV1(outcome)) {
-      return { ok: false, message: CONNECTION_DENIAL_MESSAGES['burrow-error'], pairingRequired: false };
+      return { ok: false, message: UNREADABLE_CONNECTION_OUTCOME_MESSAGE, pairingRequired: false };
     }
     if (outcome.ok) {
       // After the outcome and never before: `establish` builds the direct
