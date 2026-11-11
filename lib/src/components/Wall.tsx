@@ -1135,7 +1135,9 @@ export function Wall({
    * manual close uses (helper guard → kill), in order. Resolves null once the
    * Wall is empty and safe to unmount, or the first refusal's message with the
    * Workspace left open — Surfaces ahead of the refusing one already closed — and
-   * the strip then reveals it so the refusal is visible.
+   * the strip then reveals it so the refusal is visible. Callers refuse running
+   * helper work before this starts, so that partial close takes a refusal that
+   * arises mid-walk.
    */
   const closeAll = useCallback(async (editors: readonly string[] = []): Promise<string | null> => {
     closingWorkspaceRef.current = true;
@@ -1966,6 +1968,7 @@ export function Wall({
       else enterPassthrough(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
+    revealRefusal,
     showNotice: (text, id = livePaneId()) => {
       if (id) showShellSpawnNotice(id, text);
     },
