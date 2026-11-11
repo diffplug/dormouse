@@ -190,14 +190,14 @@ Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `Win
 **Closing a window with siblings alive ends that window alone**; only the last window's close is the quit, and on macOS too.
 
 1. Rust prevents the close and emits `dormouse://window-close-requested`.
-2. The webview acks; a watchdog closes the window anyway if that listener is dead.
+2. The webview acks; if that listener is dead, a watchdog destroys the window, **keeping its snapshot**.
 3. It asks when any of *its own* Workspaces' closes would (`docs/specs/reopen.md` → "Workspaces and windows"), and hands Rust a reopen record when it asked nothing.
 4. It removes its snapshot, kills its PTYs, and calls back `close_window`.
 
 - **Must attempt to remove the blob, geometry and temp sibling included, before killing this Window's PTYs** (`docs/specs/transport.md` → "The governing rule"). A removal failure is logged and the close proceeds.
 - **It runs no agent-recovery capture**: nothing resumes; Reopen rebuilds.
 - **It confirms on a pending download as well**: the download lives in this webview, so nothing else can install it (`docs/specs/auto-update.md`).
-- **Must refuse every later save for a closing label, geometry included, for the process lifetime**, whichever path ends the close, the webview's or the ack timeout's; no label is reused within a process.
+- **Must refuse every later save for a label whose close removed its snapshot, geometry included, for the process lifetime**; no label is reused within a process.
 
 **The ack and confirm gates are one shared flow with the quit** (`createTeardownFlow` in `standalone/src/teardown-flow.ts`): a quit votes and waits its turn in the walk, a close tears down at once.
 
@@ -393,7 +393,7 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 
 | Phase | State | Budget |
 |---|---|---|
-| 1 — ack | some window has not acked | short; a listener is dead ⇒ log and `app.exit(0)` |
+| 1 — ack | some window has not acked | **past §UI watchdog's threshold**, as the close ack (rationale); a listener is dead ⇒ log and `app.exit(0)` |
 | 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
 | 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 

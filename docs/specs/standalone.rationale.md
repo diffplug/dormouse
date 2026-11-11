@@ -157,6 +157,10 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 
 **Why the capture goes first and cannot abort the rest.** The resume hint exists only in the window between the interrupt and the kill, so no later step can reconstruct it — but it is also the step most likely to be slow or to fail, and losing an agent's resume is much cheaper than losing the layout, cwds, and notes behind it.
 
+## Quit protocol
+
+**Why the ack waits past the hang threshold.** The ack is the first statement of the page's listener, so a page whose main thread is merely busy misses it. At 2 s, a page stalled for 2–5 s — one the UI watchdog would leave alone — made Cmd+Q exit with no confirmation, capture or final save, and made a close delete the window's snapshot unasked. Decided 2026-11: "dead" means one thing, and an unacknowledged close keeps the snapshot.
+
 ## Restart
 
 **Why not `AppHandle::request_restart`.** It raises `ExitRequested` with `RESTART_EXIT_CODE`, and `ExitRequestApi::prevent_exit` ignores that code (`tauri-2.11.5/src/app.rs`). A restart would slip past the unapproved-exit guard and the hand-back cleanup gate, and the watchdog and `Destroyed` exits, which call `app.exit(0)`, would drop the relaunch. Relaunching from `RunEvent::Exit` keeps one exit path. That exit stops tao's run loop with `[NSApp stop:]`, never `terminate:` (`tao-0.35.2/src/platform_impl/macos/app_state.rs`), so the spliced `applicationShouldTerminate:` sees only OS-initiated terminates. Checked 2026-09.

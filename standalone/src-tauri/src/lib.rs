@@ -701,7 +701,10 @@ fn exit_after_cleanup(app: &AppHandle) -> bool {
 }
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
-const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
+// The ack needs only the page's main thread to run once, so this waits past
+// the UI watchdog's hang threshold: a page that watchdog would still call
+// busy must not lose its confirmation, capture and final save.
+const QUIT_ACK_TIMEOUT_MS: u64 = ui_watchdog::HANG_AFTER.as_millis() as u64 + 1_000;
 // Phase 3: per-phase budget once teardown is running. Each reported phase (the
 // pending-kill drain, the capture and save, the install) refreshes it, so it
 // bounds a single stalled phase, not the sum of all teardown work. Sits above
@@ -711,8 +714,9 @@ const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
 // ~5s cap, which the Windows install phase awaits under one refresh.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
-// A per-window close whose webview never acks: its listener is dead, so close it.
-const CLOSE_ACK_TIMEOUT_MS: u64 = 2_000;
+// A per-window close whose webview never acks: its listener is dead, so
+// destroy the window. The same bound as the quit's, for the same reason.
+const CLOSE_ACK_TIMEOUT_MS: u64 = QUIT_ACK_TIMEOUT_MS;
 
 fn quit_approved(app: &AppHandle) -> bool {
     app.try_state::<QuitState>()
@@ -931,15 +935,18 @@ fn request_window_close(app: &AppHandle, label: &str) {
         }
         drop(close);
         append_log(format!(
-            "[window] {label} never acked its close; closing it anyway"
+            "[window] {label} never acked its close; destroying it and keeping its snapshot"
         ));
-        finish_window_close(&app, &label);
+        // Nothing confirmed a deliberate close, so the window ends as a quit
+        // ends it: its snapshot stays on disk for the next launch to restore.
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.destroy();
+        }
     });
 }
 
 /// The last step of a per-window close: take the window's snapshot off disk and
-/// destroy it. Called from `close_window`, and from the ack watchdog when the
-/// webview never answered.
+/// destroy it. Called from `close_window`.
 ///
 /// The rest — forgetting its PTYs, telling the quit machine, telling the
 /// sidecar's Burrow — happens in the `Destroyed` arm, which is the first moment
@@ -948,8 +955,8 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     append_log(format!("[window] closing {label} and removing its snapshot"));
     if let Some(state) = app.try_state::<WindowState>() {
         // Before the removal, not after: a save already in flight from this
-        // webview would otherwise put the snapshot back. Reached from the
-        // watchdog too, where the webview never called `remove_window_session`.
+        // webview would otherwise put the snapshot back. A window whose last
+        // Workspace moved away never called `remove_window_session`.
         state.begin_closing(label);
     }
     if let Some(state) = app.try_state::<QuitState>() {
@@ -6883,7 +6890,7 @@ mod tests {
     /// label is refused — including one already in flight from the webview that
     /// is going away (docs/specs/standalone.md -> "Per-window close"). Both close
     /// paths set it: the webview's own `remove_window_session`, and
-    /// `finish_window_close` for the ack-timeout path where it never ran.
+    /// `finish_window_close` for a window whose last Workspace moved away.
     #[test]
     fn a_closed_window_refuses_saves_for_the_process_lifetime() {
         let state = super::WindowState::default();
@@ -7170,6 +7177,28 @@ mod tests {
     // whole round trip — up to 10s on a clipboard image paste. Three clipboard
     // commands once slipped through the async port; this scans the source so the
     // omission can't silently recur.
+    /// A page the UI watchdog still calls busy is not dead: neither ack
+    /// watchdog may skip the confirmation before that watchdog would act.
+    #[test]
+    fn ack_watchdogs_wait_past_the_ui_hang_threshold() {
+        let hang = super::ui_watchdog::HANG_AFTER.as_millis() as u64;
+        assert!(super::QUIT_ACK_TIMEOUT_MS > hang);
+        assert!(super::CLOSE_ACK_TIMEOUT_MS > hang);
+    }
+
+    /// An unacknowledged close confirmed nothing, so its watchdog destroys the
+    /// window without the snapshot removal a deliberate close performs.
+    #[test]
+    fn an_unacknowledged_close_keeps_the_snapshot() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let body = src.split("fn request_window_close(").nth(1).unwrap()
+            .split("\n}\n").next().unwrap();
+        for removal in ["finish_window_close", "close_window_snapshot", "remove_session_from", "begin_closing"] {
+            assert!(!body.contains(removal), "the ack watchdog must not call {removal}");
+        }
+        assert!(body.contains("window.destroy()"));
+    }
+
     #[test]
     fn blocking_commands_run_off_the_main_thread() {
         let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
