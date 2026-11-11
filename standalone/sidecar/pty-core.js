@@ -1961,10 +1961,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    * (docs/specs/transport.md -> "Reconnection").
    */
   function list(ids, forWindow, requestId, marks) {
-    // Explicit marked requests may resume a naturally exited buffer. Ordinary
-    // discovery still lists only live PTYs, and kill removes the retained buffer.
+    // A window's own ids include a naturally exited buffer it still shows, so a
+    // reload resumes that pane rather than losing it (and the layout around
+    // it). Discovery with no ids lists only live PTYs; kill removes the buffer.
     const targets = Array.isArray(ids)
-      ? ids.filter((id) => ptys.has(id) || (replay && typeof marks?.[id] === 'number' && sessions.has(id)))
+      ? ids.filter((id) => ptys.has(id) || (replay && sessions.has(id)))
       : [...ptys.keys()];
     const result = targets.map((id) => ({
       id, alive: ptys.has(id), shell: sessions.get(id)?.shell,

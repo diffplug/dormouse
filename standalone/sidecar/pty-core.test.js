@@ -2685,7 +2685,7 @@ test('a mark is ordered in the stream and a since-mark replay is exactly the rem
   assert.equal(events.filter((entry) => entry.event === 'replay').at(-1).data.data, 'onetwothree');
 });
 
-test('marked requests recover exited buffers without reviving or discovering the PTY', () => {
+test('a window\'s own ids list and replay its exited buffers; discovery does not', () => {
   const events = [];
   const pty = fakePtyModule();
   const mgr = create((event, data) => events.push({ event, data }), pty.module, {
@@ -2706,6 +2706,11 @@ test('marked requests recover exited buffers without reviving or discovering the
   mgr.list(['a'], 'main', 'handback-1', { a: 6 });
   assert.deepEqual(events[0].data.ptys.map(({ id, alive, exitCode }) => ({ id, alive, exitCode })), [{ id: 'a', alive: false, exitCode: 7 }]);
   assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'after', forWindow: 'main', requestId: 'handback-1' } });
+  // A reload's boot names the window's ids with no marks: the whole buffer.
+  events.length = 0;
+  mgr.list(['a'], 'main', 'boot');
+  assert.deepEqual(events[0].data.ptys.map(({ id, alive, exitCode }) => ({ id, alive, exitCode })), [{ id: 'a', alive: false, exitCode: 7 }]);
+  assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'beforeafter', forWindow: 'main', requestId: 'boot' } });
   mgr.kill('a');
   events.length = 0;
   mgr.list(['a'], 'main', 'after-kill', { a: 6 });
