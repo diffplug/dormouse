@@ -18,6 +18,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  INVITATION_CLOCK_SKEW_MS,
   PAIRING_DEVICE_LABELS,
   PRESENCE_WINDOW,
   PRESENCE_WINDOW_IDLE_MS,
@@ -445,10 +446,11 @@ test("the Relay cannot pair on the user's behalf: unapproved invitations grant n
 
 test('an expired invitation never reaches a handshake', async () => {
   // Advisory on the Client — the Burrow's memory stays authoritative — but a code
-  // that is already dead fails at the scan rather than after a handshake.
+  // that is long dead (past the phone's clock tolerance too) fails at the scan
+  // rather than after a handshake.
   const { clock, burrow, authenticator, client } = await world();
   const invitation = await burrow.mintInvitation({ ttlSeconds: 60 });
-  clock.advance(61_000);
+  clock.advance(61_000 + INVITATION_CLOCK_SKEW_MS);
   await assert.rejects(
     client.pair(burrow, { accountId: ACCOUNT, authenticator, invitation }),
     /cannot parse/,
