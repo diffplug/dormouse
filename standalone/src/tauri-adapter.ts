@@ -47,16 +47,13 @@ import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { listenToWindow } from "./window-label";
-import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
+import { installWorkspaceRegistry } from "./workspace-registry";
 import { withTimeout } from "./with-timeout";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
-import {
-  applyLiveTerminalSemanticEvents,
-  applyTerminalSemanticEvents,
-} from "dormouse-lib/lib/terminal-state-store";
+import { applyLiveTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
@@ -150,8 +147,6 @@ export class TauriAdapter implements PlatformAdapter {
     // leases it never released; this page holds none yet. Every lease this
     // page takes waits on it, so the release reaches the sidecar first.
     this.leaseOrder.reset = rawInvoke("iframe_release_proxy", { lease: null }).catch(() => {});
-    const replayExits = new Map<string, number>();
-    const replayKey = (id: string, requestId?: string) => JSON.stringify([requestId, id]);
     // Registered together rather than one await after another: every `listen`
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.
@@ -193,11 +188,6 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       listenToWindow<{ ptys: PtyInfo[]; requestId?: string }>("pty:list", (event) => {
-        for (const pty of event.payload.ptys) {
-          const key = replayKey(pty.id, event.payload.requestId);
-          if (!pty.alive) replayExits.set(key, pty.exitCode ?? -1);
-          else replayExits.delete(key);
-        }
         for (const handler of this.listHandlers) {
           handler(event.payload);
         }
@@ -209,15 +199,6 @@ export class TauriAdapter implements PlatformAdapter {
         // them (docs/specs/standalone.md → "Routing").
         const { id, data, requestId } = event.payload;
         const visibleData = parseReplay(id, data);
-        // A listed exited buffer can contain a command-start with no finish.
-        // Apply its exit after rebuilding the replay's command state, for
-        // either target adoption or source hand-back.
-        const key = replayKey(id, requestId);
-        const exitCode = replayExits.get(key);
-        if (exitCode !== undefined) {
-          replayExits.delete(key);
-          applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode }]);
-        }
         for (const handler of this.replayHandlers) {
           handler({ id, data: visibleData, requestId });
         }
@@ -286,8 +267,6 @@ export class TauriAdapter implements PlatformAdapter {
     // the block this reserves (docs/specs/standalone.md → "Workspace registry").
     await installWorkspaceRegistry({
       invoke: (cmd, args) => rawInvoke(cmd, args),
-      onSnapshot: (handler) =>
-        listenToWindow<WorkspaceRegistrySnapshot>("dormouse://workspaces", (event) => handler(event.payload)),
     }, this.windowSlot.read());
   }
 

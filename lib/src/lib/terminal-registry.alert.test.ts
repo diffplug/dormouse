@@ -35,7 +35,7 @@ import {
   focusSession,
   registerSurfaceFocusHandle,
   getOrCreateTerminal,
-  getActivity,
+  getActivity as getRealmActivity,
   getLivePersistedAlertState,
   getActivitySnapshot,
   getTerminalShellKind,
@@ -52,6 +52,7 @@ import {
   toggleSessionTodo,
 } from './terminal-registry';
 import { createAlertEpisode } from './alert-episode';
+import type { AlertManager } from './alert-manager';
 import { doPaste, pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
 import { commandWatchKey } from './terminal-state';
@@ -117,6 +118,20 @@ type TestTerminalEntry = ReturnType<typeof getOrCreateTerminal> & {
 };
 
 const fakePlatform = (platformModule as PlatformModuleWithMock).__fakePlatform;
+
+/**
+ * A realm is sent only what it reads — whether the Session rings, never the
+ * detector's state — so the stories read `status` where it lives, the host's
+ * manager, and check the realm agrees on ringing.
+ */
+function getActivity(id: string): ReturnType<typeof getRealmActivity> {
+  const realm = getRealmActivity(id);
+  const host = (fakePlatform as unknown as { alertManager: AlertManager }).alertManager;
+  if (!host.has(id)) return realm;
+  const { status, watchingEnabled } = host.getState(id);
+  expect(realm.status === 'ALERT_RINGING').toBe(status === 'ALERT_RINGING');
+  return { ...realm, status, watchingEnabled };
+}
 
 function createContainer(): MockElement {
   return new MockElement();

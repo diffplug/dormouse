@@ -67,7 +67,7 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 
 ### Capturing agent recovery
 
-**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture.
+**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, else a per-window `globalStorageUri` subdirectory keyed at activation; never in `workspaceState`** (rationale). If neither directory exists, skip capture.
 
 Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`.
 
@@ -171,8 +171,6 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` and `attemptPublished` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts`, `vscode-ext/test/peer-link.test.ts`, and `vscode-ext/test/peer-endpoint.test.ts`.
 
 **The webview bridge.** A webview reaches the service over `BurrowLink`, implemented in `vscode-adapter.ts` on three messages, each wrapping the shared client's shape in a `payload`: `burrow:command { payload: BurrowCommand }` out, `burrow:result { payload: BurrowResult }` and `burrow:event { payload }` back. **Everything else is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol). Results are **broadcast to every webview in the window** — safe only because the shared client mints globally unique ids — and one correlation id serves both the in-window fan-out and the cross-window forward.
-
-**The relay socket.** The supported `engines.vscode` range spans the Node version that added `globalThis.WebSocket` (rationale), so the service **must be constructed with a factory** that prefers the global and falls back to the bundled `ws`. **The same factory opens the one-time rendezvous, which must carry no `Origin` header** — neither implementation sends one. Source of truth: `createRelaySocket` in `vscode-ext/src/burrow.ts`.
 
 ### The direct path
 

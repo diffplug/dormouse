@@ -12,6 +12,7 @@ import { base64UrlLength, fromBase64Url, isExactBase64Url } from './bytes.js';
 import { isLinkScheme, parseLinkFragment, type LinkUrlShape } from './link-url.js';
 import { NOISE_KEY_LENGTH } from './noise.js';
 import { e2eOneTimePrologue } from './noise-transport.js';
+import { MAX_PAIRING_ORIGIN_LENGTH } from './pairing-invitation.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
 
 /** The E2E wire version the fragment leads with. Any other value is rejected, never negotiated. */
@@ -67,11 +68,15 @@ export const ONE_TIME_FRAGMENT_LENGTH =
 export const ONE_TIME_LINK_MAX_LENGTH = 256;
 
 /**
- * The longest relay origin a desktop build may bake: everything else in a
- * one-time link is fixed, so a longer origin mints links no phone can scan.
+ * The longest relay origin a desktop build may bake: the shorter of what a
+ * pairing QR and a one-time link fit, everything else in each being fixed, so
+ * no build bakes an origin it mints codes no phone can scan for. The pairing
+ * QR's is the shorter, and the one a self-host build is held to.
  */
-export const MAX_RELAY_ORIGIN_LENGTH =
-  ONE_TIME_LINK_MAX_LENGTH - ONE_TIME_PAGE_PATH.length - ONE_TIME_HASH_PREFIX.length - ONE_TIME_FRAGMENT_LENGTH;
+export const MAX_RELAY_ORIGIN_LENGTH = Math.min(
+  MAX_PAIRING_ORIGIN_LENGTH,
+  ONE_TIME_LINK_MAX_LENGTH - ONE_TIME_PAGE_PATH.length - ONE_TIME_HASH_PREFIX.length - ONE_TIME_FRAGMENT_LENGTH,
+);
 
 /**
  * Whether a desktop build may bake `origin` (`docs/specs/relay.md` → "Relay

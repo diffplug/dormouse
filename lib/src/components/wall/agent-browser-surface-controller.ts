@@ -17,7 +17,7 @@ import {
 } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getPlatform, IS_MAC } from '../../lib/platform';
-import { defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import { BUILTIN_BROWSER_VIEWPORTS, defaultBrowserViewportConfig, isBrowserViewportSetting, resolveBrowserViewport, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { msSince } from '../../lib/elapsed';
 import { isSeenObserved, type SurfaceSightObserved } from '../../lib/surface-sight';
@@ -30,7 +30,6 @@ import {
   type ScreenActions,
   type ScreenRegistration,
   type ScreenSnapshot,
-  type ScreenState,
   openAgentBrowserScreenModal,
 } from './agent-browser-screen';
 import { hostPathDisplay, tabDisplayTitle } from './browser-url';
@@ -149,7 +148,6 @@ export interface AgentBrowserSurfaceParams {
   key?: string;
   binaryPath?: string;
   url?: string;
-  syncEngaged?: boolean;
   browserViewport?: BrowserViewportSetting;
 }
 
@@ -275,7 +273,6 @@ export class AgentBrowserSurfaceController {
   private initialStream: number | undefined;
   private paramsUrl: string | undefined;
   private paramsKey: string | null;
-  private paramsSyncEngaged: boolean | undefined;
   private browserViewport: BrowserViewportSetting;
   private paramsViewportExplicit: boolean;
 
@@ -411,7 +408,6 @@ export class AgentBrowserSurfaceController {
     this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     this.paramsUrl = params.url;
     this.paramsKey = params.key ?? null;
-    this.paramsSyncEngaged = params.syncEngaged;
     this.latestRestorableUrl = isBrowsableUrl(params.url) ? params.url : undefined;
     // Headedness is derived from the canonical renderMode; an unset mode (a
     // direct mount in tests) is not popped out.
@@ -419,8 +415,8 @@ export class AgentBrowserSurfaceController {
     // A fresh Surface starts fixed; explicit pane-sync survives restoration.
     this.browserViewport = isBrowserViewportSetting(params.browserViewport)
       ? params.browserViewport
-      : params.syncEngaged === true ? { mode: 'pane-sync' } : { mode: 'fixed', width: 1440, height: 900 };
-    this.paramsViewportExplicit = isBrowserViewportSetting(params.browserViewport) || params.syncEngaged === true;
+      : { mode: 'fixed', ...BUILTIN_BROWSER_VIEWPORTS.desktop };
+    this.paramsViewportExplicit = isBrowserViewportSetting(params.browserViewport);
     this.syncEngaged = this.browserViewport.mode === 'pane-sync';
     this.chrome = { url: '', displayUrl: '', title: null, key: this.paramsKey };
 
@@ -440,7 +436,14 @@ export class AgentBrowserSurfaceController {
         this.syncToPane();
       },
       applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
-      applyViewportSetting: (setting) => this.applyViewportSetting(setting),
+      // The Display modal's. A Fixed size picked while a screencast is not
+      // yet live is the pending intent, run once it is; `dor`'s sizing calls
+      // the method itself, which fails fast, since it measures right after.
+      applyViewportSetting: (setting) => {
+        if (setting.mode !== 'fixed' || this.headed || this.driver()) return this.applyViewportSetting(setting);
+        this.fixViewport(setting);
+        return Promise.resolve();
+      },
       openModal: () => openAgentBrowserScreenModal(this.id),
       setRenderMode: (mode, opts) => this.setRenderMode(mode, opts),
     };
@@ -718,7 +721,6 @@ export class AgentBrowserSurfaceController {
       this.paramsKey = params.key ?? null;
       this.recomputeChrome();
     }
-    if (params.syncEngaged !== undefined) this.paramsSyncEngaged = params.syncEngaged;
     if (isBrowserViewportSetting(params.browserViewport)) {
       this.browserViewport = params.browserViewport;
       this.paramsViewportExplicit = true;
@@ -1250,11 +1252,6 @@ export class AgentBrowserSurfaceController {
   private setSyncEngaged(syncEngaged: boolean): void {
     if (this.syncEngaged === syncEngaged) return;
     this.syncEngaged = syncEngaged;
-    // Persist so it round-trips through the persisted layout; skip no-ops.
-    if (this.paramsSyncEngaged !== syncEngaged) {
-      this.paramsSyncEngaged = syncEngaged;
-      this.writeParams({ syncEngaged });
-    }
     // Reflect the flip in the indicator immediately.
     this.publishScreen();
   }
@@ -1431,23 +1428,17 @@ export class AgentBrowserSurfaceController {
     }
   }
 
-  // --- screen indicator (SYNCED/SCALED) + sync-to-pane ---
+  // --- screen snapshot + sync-to-pane ---
 
   private computeScreenSnapshot(): ScreenSnapshot {
-    // Read the cached pane size (updated by the ResizeObserver)
-    // rather than forcing layout on every frame. null ⇒ no attached view ⇒ 0×0.
-    const pane = this.paneSize;
     const displayDpr = window.devicePixelRatio || 1;
     const device = this.device;
-    const paneCss = { w: pane?.w ?? 0, h: pane?.h ?? 0 };
     // Frames never show the ratio: report the one the browser measures
     // (Playwright's poll, which keeps its own ratio), else the one this Surface
     // fixed, else the one it would sync to.
     const viewport = { w: device.width, h: device.height, dpr: this.status?.devicePixelRatio ?? this.fixedDpr ?? displayDpr };
-    // SYNCED only on the host's word that the browser is at this pane's size.
-    const state: ScreenState = this.syncEngaged && this.hostSynced ? 'SYNCED' : 'SCALED';
     const renderMode = this.renderMode();
-    return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
+    return { viewport, syncEngaged: this.syncEngaged, renderMode };
   }
 
   // Publish to the registry only when something the header/modal cares about
@@ -1457,15 +1448,11 @@ export class AgentBrowserSurfaceController {
     const prev = this.lastPublishedScreen;
     const changed =
       !prev ||
-      prev.state !== next.state ||
       prev.viewport.w !== next.viewport.w ||
       prev.viewport.h !== next.viewport.h ||
       prev.viewport.dpr !== next.viewport.dpr ||
-      prev.displayDpr !== next.displayDpr ||
       prev.syncEngaged !== next.syncEngaged ||
-      prev.renderMode !== next.renderMode ||
-      prev.paneCss.w !== next.paneCss.w ||
-      prev.paneCss.h !== next.paneCss.h;
+      prev.renderMode !== next.renderMode;
     if (changed) {
       this.lastPublishedScreen = next;
       this.registration?.update(next);
@@ -1479,8 +1466,7 @@ export class AgentBrowserSurfaceController {
    * missed — and never from a popped-out window, which is its own size.
    */
   private syncToPane(): void {
-    // A host that cannot drive the provider (the web demo) sizes nothing; the
-    // surface just reads SCALED.
+    // A host that cannot drive the provider (the web demo) sizes nothing.
     if (!this.syncEngaged || this.headed || !this.hosted || this.phase.k !== 'live') return;
     const el = this.sink?.viewport;
     if (!el) return;

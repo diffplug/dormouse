@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { startFolderViewer } from '../../../dor-tools-builtin/src/folder-viewer';
-import { createIframeProxyUrl } from './iframe-proxy';
+import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy';
 
 // The folder viewer's page is framed through the iframe proxy, so its POSTs
 // reach the viewer with whatever Origin the proxy forwards.
+const LEASE_OWNER = 'folder-viewer-proxy-test';
+let views = 0;
 const EMBEDDERS = ['vscode-webview://viewer-test'];
 let root: string;
 const opened: { path: string; preview: boolean }[] = [];
@@ -15,6 +17,7 @@ const viewers: Awaited<ReturnType<typeof startFolderViewer>>[] = [];
 beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), 'dor-folder-proxy-'))); });
 afterEach(async () => {
   opened.length = 0;
+  releaseIframeProxyLease(LEASE_OWNER);
   await Promise.all(viewers.splice(0).map(viewer => viewer.close()));
   await rm(root, { recursive: true, force: true });
 });
@@ -22,7 +25,7 @@ afterEach(async () => {
 async function frame() {
   const viewer = await startFolderViewer(root, { open: async (path, preview) => { opened.push({ path, preview }); return { ok: true, status: 'created' }; } });
   viewers.push(viewer);
-  const result = await createIframeProxyUrl(`http://127.0.0.1:${viewer.port}${viewer.path}`, { embedderOrigins: EMBEDDERS });
+  const result = await createIframeProxyUrl(`http://127.0.0.1:${viewer.port}${viewer.path}`, { embedderOrigins: EMBEDDERS, lease: { owner: LEASE_OWNER, id: `view-${++views}` } });
   if (!result.ok) throw new Error(result.detail);
   return result.url;
 }

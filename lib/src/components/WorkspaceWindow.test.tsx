@@ -1502,6 +1502,20 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(leafIdsIn('workspace:2')).toEqual(leaves);
   });
 
+  it('selects the restored Workspace\'s tab', async () => {
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:3', activate: false });
+    const onEvent = vi.fn();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['surface:a']} onEvent={onEvent} /></>);
+    await act(async () => { requestWorkspaceClose('workspace:2'); });
+    await flush();
+    onEvent.mockClear();
+    await act(async () => { restorePendingKill(pendingKillKey('workspace', 'workspace:2')); });
+    await flush();
+    const selections = onEvent.mock.calls.map(([event]) => event).filter((event) => event.type === 'selectionChange');
+    expect(selections.at(-1)).toEqual({ type: 'selectionChange', id: 'workspace:2', kind: 'workspace' });
+  });
+
   it('brings a pending Workspace back first when restoring a Surface pended inside it', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'workspace:2', name: 'build' });

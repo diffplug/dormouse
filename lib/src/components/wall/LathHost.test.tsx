@@ -527,6 +527,22 @@ describe('LathHost — pane props contract', () => {
     act(() => leafDiv('a')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
     expect(onLeafFocused).toHaveBeenCalledWith('a');
   });
+
+  it('leaves focus in a text field of ours alone, but adopts the terminal input', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const { onLeafFocused } = mount(store);
+    const editor = document.createElement('input');
+    const terminalInput = document.createElement('textarea');
+    terminalInput.className = 'xterm-helper-textarea';
+    leafDiv('b')!.append(editor, terminalInput);
+
+    act(() => editor.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+    expect(onLeafFocused).not.toHaveBeenCalled();
+    act(() => terminalInput.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+    expect(onLeafFocused).toHaveBeenCalledWith('b');
+    editor.remove();
+    terminalInput.remove();
+  });
 });
 
 describe('LathHost — empty tree', () => {
@@ -1015,6 +1031,16 @@ describe('LathHost — pane / Door drag', () => {
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('a', { kind: 'swap', leaf: 'b' });
     expect(shielded()).toBe(false);
+  });
+
+  it('starts no Door drag while a leaf is zoomed, clearing the Wall\'s', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    act(() => store.setZoomed('a'));
+    const { onExternalDrop } = mountDrag(store, { externalDrag: { id: 'door', startX: 100, startY: 700 } });
+    expect(onExternalDrop).toHaveBeenCalledWith(null);
+    act(() => moveTo(5, 300));
+    await flushFrame();
+    expect(overlayEl()).toBeNull();
   });
 
   it('cancels an external drop moved off-wall before its pending frame', async () => {

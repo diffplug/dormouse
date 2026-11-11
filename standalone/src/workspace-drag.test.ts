@@ -69,6 +69,9 @@ beforeEach(() => {
   hit = null;
   mocks.invoke.mockImplementation(async (cmd: string) => (cmd === "window_at_cursor" ? hit : undefined));
   strip();
+  // A second Workspace stays behind, so a release may tear the dragged one out.
+  resetWorkspaces();
+  createWorkspace();
 });
 
 afterEach(() => { cancelEditorClose(); vi.useRealTimers(); });
@@ -334,6 +337,24 @@ describe("releasing the drag", () => {
     await settle();
     expect(mocks.tearOutWorkspace).toHaveBeenCalled();
     expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+  });
+
+  it("never tears out a window's only Workspace, but still moves it to another window", async () => {
+    resetWorkspaces();
+    hit = { label: "main", x: 300, y: 400 };
+    onDropOnOtherWindow("ws-1", { clientX: 300, clientY: 400 }, false);
+    await settle();
+    hit = null;
+    onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
+    await settle();
+    moveWorkspaceToNewWindow("ws-1");
+    await settle();
+    expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
+
+    hit = { label: "ws-2", x: 40, y: 8 };
+    onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 8 }, false);
+    await settle();
+    expect(mocks.transferWorkspaceTo).toHaveBeenCalledTimes(1);
   });
 
   it("clears the hover caret on release", async () => {

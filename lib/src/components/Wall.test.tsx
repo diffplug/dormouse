@@ -285,6 +285,24 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each(['Enter', 'Escape'])('gives the passthrough terminal the keyboard back after %s closes its rename', async (key) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      await act(async () => { container.querySelector<HTMLElement>('[data-pane-title-for="surface:a"]')!.click(); });
+      const input = container.querySelector<HTMLInputElement>('[data-renaming-input-for="surface:a"]')!;
+      expect(input).not.toBeNull();
+      focus.mockClear();
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+      expect(container.querySelector('[data-renaming-input-for="surface:a"]')).toBeNull();
+      await flushFrame();
+      expect(focus).toHaveBeenCalledWith('surface:a', true);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
   it('lists a running terminal with the command line its shell reported', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
@@ -1113,6 +1131,32 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('never selects a parked browser surface whose page takes focus', async () => {
+    const onEvent = vi.fn();
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" onEvent={onEvent} />);
+    });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'surface:a');
+
+    try {
+      const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
+      const leaf = container.querySelector<HTMLElement>(`[data-lath-leaf="${surfaceId}"]`)!;
+      await act(async () => { leaf.querySelector<HTMLElement>('[aria-label="Minimize"]')!.click(); });
+      await flush();
+      expect(leaf.dataset.lathParked).toBe('');
+      onEvent.mockClear();
+
+      await act(async () => {
+        leaf.querySelector('iframe')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      });
+      const selectedParked = onEvent.mock.calls.some(([event]) => event.type === 'selectionChange' && event.id === surfaceId);
+      expect(selectedParked).toBe(false);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it.each(['playwright', 'agent-browser'] as const)('never binds a %s key to a session a Surface in another Workspace still holds', async (provider) => {
     const { requests } = hostBrowsers({ attach: async () => ({ ok: true, stream: 4555 }) });
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
@@ -1672,6 +1716,8 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector('[data-lath-leaf="surface:new-tab"]')).toBeNull();
       expect(container.querySelector('[data-lath-leaf="surface:swapped"]')).not.toBeNull();
       expect(getAgentBrowserScreenController('surface:swapped')?.snapshot().renderMode).toBe('iframe');
+      // The reason outlives the panel the fallback replaced.
+      expect(container.querySelector('.shell-spawn-notice')?.textContent).toContain('agent-browser binary not found');
     } finally {
       untouchedSpy.mockRestore();
     }

@@ -1,6 +1,6 @@
 /**
  * `RemotePtyAdapter` against a network-free fake {@link RemoteAdapterClient}:
- * directory snapshots become `onPtyList` + `getDirectoryEntries`, `setActivePane`
+ * directory snapshots become `getDirectoryEntries`, `setActivePane`
  * drives the one-attachment-per-session detach→attach dance, `terminal.data`
  * round-trips to `onPtyData`, write/resize reach only the attached pane,
  * `terminal.closed` fires `onPtyExit`, and `dispose` cleans up.
@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient, type TerminalHandlers } from './remote-adapter';
-import type { PlatformAdapter, PtyDataDetail, PtyInfo } from '../../lib/platform/types';
+import type { PlatformAdapter, PtyDataDetail } from '../../lib/platform/types';
 
 interface AttachCall {
   surfaceId: string;
@@ -97,45 +97,15 @@ describe('RemotePtyAdapter clipboard', () => {
 });
 
 describe('RemotePtyAdapter directory', () => {
-  it('turns a snapshot into onPtyList without treating command exitCode as PTY death', async () => {
+  it('keeps the latest snapshot, in Burrow order', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
-    const lists: PtyInfo[][] = [];
-    adapter.onPtyList(({ ptys }) => lists.push(ptys));
 
     await adapter.init();
     client.pushSnapshot([entry('s1', { title: 'zsh' }), entry('s2', { exitCode: 0 })]);
 
-    expect(lists).toEqual([
-      [
-        { id: 's1', alive: true },
-        { id: 's2', alive: true },
-      ],
-    ]);
     expect(adapter.getDirectoryEntries().map((e) => e.surfaceId)).toEqual(['s1', 's2']);
     expect(adapter.getDirectoryEntries()[0].title).toBe('zsh');
-    expect(adapter.getPaneEntry('s2')?.exitCode).toBe(0);
-  });
-
-  it('carries the entry alive bit into onPtyList (a dead pane is not attachable)', async () => {
-    const client = new FakeClient();
-    const adapter = new RemotePtyAdapter(client);
-    const lists: PtyInfo[][] = [];
-    adapter.onPtyList(({ ptys }) => lists.push(ptys));
-
-    await adapter.init();
-    // s2's PTY has exited (lingering surface) → alive:false, even with exitCode 0.
-    client.pushSnapshot([
-      entry('s1', { alive: true }),
-      entry('s2', { alive: false, exitCode: 0 }),
-    ]);
-
-    expect(lists).toEqual([
-      [
-        { id: 's1', alive: true },
-        { id: 's2', alive: false },
-      ],
-    ]);
   });
 
   it('notifies subscribeDirectory listeners until they unsubscribe', async () => {
@@ -153,21 +123,6 @@ describe('RemotePtyAdapter directory', () => {
     expect(seen).toHaveLength(1);
   });
 
-  it('requestInit re-emits the cached list without re-watching', async () => {
-    const client = new FakeClient();
-    const watch = vi.spyOn(client, 'watchDirectory');
-    const adapter = new RemotePtyAdapter(client);
-    await adapter.init();
-    client.pushSnapshot([entry('s1')]);
-
-    const lists: PtyInfo[][] = [];
-    adapter.onPtyList(({ ptys }) => lists.push(ptys));
-    adapter.requestInit();
-
-    expect(lists).toEqual([[{ id: 's1', alive: true }]]);
-    expect(watch).toHaveBeenCalledTimes(1);
-    expect(client.attaches).toHaveLength(0);
-  });
 });
 
 describe('RemotePtyAdapter attach / active pane', () => {
@@ -519,28 +474,26 @@ describe('RemotePtyAdapter dispose', () => {
       return new Promise((resolve) => { finishWatch = resolve; });
     });
     const adapter = new RemotePtyAdapter(client);
-    const onList = vi.fn();
-    adapter.onPtyList(onList);
+    const onDirectory = vi.fn();
+    adapter.subscribeDirectory(onDirectory);
     const init = adapter.init();
     await adapter.dispose();
     client.pushSnapshot([entry('s1')]);
     finishWatch('late-directory');
     await init;
     await adapter.init();
-    adapter.requestInit();
     await adapter.setActivePane('s1');
     expect(client.unsubscribes).toEqual(['late-directory']);
-    expect(onList).not.toHaveBeenCalled();
+    expect(onDirectory).not.toHaveBeenCalled();
     expect(watch).toHaveBeenCalledTimes(1);
     expect(client.attaches).toEqual([]);
   });
 
-  it('allows a failed requestInit watch to be retried without an unhandled rejection', async () => {
+  it('allows a failed directory watch to be retried', async () => {
     const client = new FakeClient();
     const watch = vi.spyOn(client, 'watchDirectory').mockRejectedValueOnce(new Error('gone'));
     const adapter = new RemotePtyAdapter(client);
-    adapter.requestInit();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(adapter.init()).rejects.toThrow('gone');
     await adapter.init();
     expect(watch).toHaveBeenCalledTimes(2);
     await adapter.dispose();

@@ -55,7 +55,7 @@ After authorization the same Noise session may move off the Relay onto a WebRTC 
 
 **Every byte on the channel is a Noise transport message of the promoted session**: one message per channel frame, raw bytes, the same two `CipherState`s and counters. **Every inbound frame is bounded at `NOISE_MAX_MESSAGE_LENGTH` before decryption**, and a frame over it — or a non-binary message — disposes the session. (rationale)
 
-**The channel is reliable, ordered, and labelled `DIRECT_CHANNEL_LABEL`, and one whose association reports a per-message limit under `NOISE_MAX_MESSAGE_LENGTH` is refused** — all checked before the open is reported, so a refusal is a channel failure, and an answerer refusing before it has answered declines. An unreported limit is not treated as small. **Two gaps are accepted**: a Burrow's polyfill rebuilds every incoming channel with its own defaults, so the offerer's reliability flags never reach the check and there only the label is load-bearing; and the limit is the *remote's* advertised one, so where the two ends disagree a peer that has already switched loses the session. (rationale)
+**The channel is reliable, ordered, and labelled `DIRECT_CHANNEL_LABEL`, and one whose association reports a per-message limit under `NOISE_MAX_MESSAGE_LENGTH` is refused** — all checked before the open is reported, so a refusal is a channel failure. An unreported limit is not treated as small. **Two gaps are accepted**: a Burrow's polyfill rebuilds every incoming channel with its own defaults, so the offerer's reliability flags never reach the check and there only the label is load-bearing; and the limit is the *remote's* advertised one, so where the two ends disagree a peer that has already switched loses the session. (rationale)
 
 **A sender bounds its own queue, in order**, at `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` — the pair a receiver's hold uses — and overflow disposes the session.
 
@@ -103,7 +103,7 @@ Requests are correlated by `requestId`, events by `subId` (`RemoteRequest`, `Rem
 
 ### Hello
 
-First exchange on the control channel; establishes version and viewer kind (`HelloParams` / `HelloResult`), and returns the flat `grants` ([Input authority](#input-authority-and-multiple-viewers)). **The Burrow does not *gate* other methods on it** — authorization already happened at connect time, so skipping hello grants nothing.
+First exchange on the control channel (`HelloParams` / `HelloResult`). In v1 only `capabilities` is read: the Burrow ignores `protocolVersion` and `viewer`, answers version 1 and the flat `grants` ([Input authority](#input-authority-and-multiple-viewers)), which no Client reads. **The Burrow does not *gate* other methods on it** — authorization already happened at connect time, so skipping hello grants nothing.
 
 **`capabilities.frames` decides what the directory names**: the Burrow lists browser entries and `browser` fields only to a session whose latest hello declared it, re-listing when a hello changes that. `HelloResult.frames` says the Burrow serves the tunnel.
 
@@ -139,7 +139,7 @@ Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, `l
 
 Replicated, not screencast: the client renders its own xterm from the same data the burrow UI consumes. **That is the *processed* stream** — Dormouse-owned sequences parsed, stripped, and answered at the Burrow; renderer-owned ones remain, and every renderer parses them for itself ([terminal-escapes.md](./terminal-escapes.md)).
 
-**The Burrow discards terminal reports arriving from a remote session** — the owner's xterm is the sole reply authority for renderer-owned queries (device attributes, DSR/CPR, window ops, XTSMGRAPHICS, cell size, kitty graphics responses). **A mirror renders and may take size authority, but never answers.** (rationale) Only a chunk wholly made of report shapes is discarded, so keystrokes and pastes never are (`inputIsReplayTerminalReport` in `lib/src/lib/terminal-report-filter.ts`).
+**The Burrow discards terminal reports arriving from a remote session** — the owner's xterm is the sole reply authority for renderer-owned queries (device attributes, DSR/CPR, window ops, XTSMGRAPHICS, cell size, kitty graphics responses). **A mirror renders and may take size authority, but never answers.** (rationale) Only a chunk wholly made of report shapes is discarded, so keystrokes and pastes are not, except a modified F3 (`CSI 1;<mod>R`), which is a cursor report byte for byte (`inputIsReplayTerminalReport` in `lib/src/lib/terminal-report-filter.ts`).
 
 **The unit of processed output is a projection pair, never a bare string.** `terminal.data` carries `bytes` — the renderer projection — and `text`, the same chunk with string-control payloads removed; **`text` omitted means identical to `bytes`, present is authoritative, empty included** (rationale). Additive on protocol-v1. The same pair crosses every Burrow seam as `ProcessedPtyChunk` and arrives as `PtyDataDetail`, so a Client's text consumers read what the Burrow's own do.
 
@@ -395,7 +395,7 @@ Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
 ### QoS hardening (phone-first, orthogonal to the stages above)
 
-* Terminal output is already coalesced burrow-side; the remote stream should add a per-session byte budget with tail-drop + resync (an implicit re-attach: repaint via resize) rather than unbounded buffering on a bad link.
+* Terminal output goes out one message per PTY read, uncoalesced, so a burst the direct path cannot drain ends the session; the remote stream should coalesce it and add a per-session byte budget with tail-drop + resync (an implicit re-attach: repaint via resize) rather than unbounded buffering on a bad link.
 * Detach on backgrounding: when the phone app/PWA loses visibility, the client detaches streams but keeps the control channel; reattach is one message.
 
 ### Open questions

@@ -2,6 +2,10 @@
 
 > Informative companion to [standalone.md](standalone.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Boot sequence
+
+**Why one instance.** A second process for the same identifier ran the whole boot against the live state root: it swept the first's in-flight snapshot temps, merged and deleted its arrival journal, cold-restored its windows with a second set of shells, and from then on both wrote `sessions/main.json`, minted the same `surface:<n>` and `workspace:<n>` from separately loaded counters, and read-modify-wrote one `burrow.json`. Double-clicking a shortcut does it on Windows and Linux; `open -n` on macOS. `tauri-plugin-single-instance` (2.5) holds a session-local named mutex on Windows and a per-user D-Bus name on Linux, and releases it in `cleanup_before_exit`, which the relaunch in `RunEvent::Exit` calls before `tauri::process::restart` starts the successor (read from the plugin's source, 2026-11; not run). **Why not on macOS.** There its lock is a Unix socket at a fixed `/tmp/<identifier>_si.sock` in the shared sticky `/tmp`: another local user listening there first receives each launch's working directory and full argv, and the launch exits. LaunchServices already raises the running app for an ordinary launch, so only a deliberate `open -n` or running the binary directly starts a second one (review, 2026-11).
+
 ## Rust ↔ sidecar bridge
 
 **Why managed-voice audio may ride the pipe when screenshots may not.** A screenshot streams on every settled frame; an utterance is at most one per window at a time, alarms are rare, and a 120-code-point label is well under 300 KB of base64 even at Hosted's 200-character cap. The temp-file path would leave spoken-label audio on disk between the sidecar's write and Rust's read, and an orphan whenever the invoke timed out first.
@@ -147,6 +151,8 @@ Two consecutive ticks, not one, because an owner is disabled before its dialog i
 
 ## Quit flow
 
+**What is not intercepted.** tao answers Windows' `WM_ENDSESSION` itself and does not process `WM_QUERYENDSESSION` (`tao-0.37.2/src/platform_impl/windows/event_loop.rs`): it destroys the loop and calls `std::process::exit(0)`, so `RunEvent::Exit` shuts the sidecar down but no window votes, captures or flushes. A SIGTERM, SIGINT or SIGHUP ends the process with no `RunEvent` at all. Either persists as a crash does (`docs/specs/transport.md` → "The governing rule"): the last debounced save stands and no agent resumes. Intercepting them would take a `WM_QUERYENDSESSION` subclass with `ShutdownBlockReasonCreate` on Windows and a signal handler calling `request_quit` on unix. Checked 2026-11.
+
 **Why the two teardown flows arbitrate.** They are independent machines that share one single-slot confirm store, and the store simply returned when a second `openQuitConfirm` arrived. The second flow's context was never settled, so its `phase` stayed `confirming` for the life of the window: a quit that met an open close dialog never voted, and Rust's phase-2 wait is unbounded by design because it waits on a human. The broadcast `quit-cancelled` made it worse by dismissing whichever dialog was open — including a close's — without telling its flow.
 
 Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* close acked and stopped, which is the same unbounded wait reached by a different route. Voting is right because the window really is ending.
@@ -156,6 +162,10 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 **Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
 
 **Why the capture goes first and cannot abort the rest.** The resume hint exists only in the window between the interrupt and the kill, so no later step can reconstruct it — but it is also the step most likely to be slow or to fail, and losing an agent's resume is much cheaper than losing the layout, cwds, and notes behind it.
+
+## Quit protocol
+
+**Why the ack waits past the hang threshold.** The ack is the first statement of the page's listener, so a page whose main thread is merely busy misses it. At 2 s, a page stalled for 2–5 s — one the UI watchdog would leave alone — made Cmd+Q exit with no confirmation, capture or final save, and made a close delete the window's snapshot unasked. Decided 2026-11: "dead" means one thing, and an unacknowledged close keeps the snapshot.
 
 ## Restart
 

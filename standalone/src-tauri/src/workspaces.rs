@@ -11,7 +11,7 @@
 //! Pure over its own state, like `routing`; `lib.rs` holds the lock and emits.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
 /// One Workspace as its window reported it.
@@ -20,15 +20,10 @@ use std::collections::HashMap;
 pub struct Entry {
     pub id: String,
     pub name: String,
-    #[serde(default)]
-    pub active: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct Registry {
-    /// Bumped on every change a window reports; the snapshot carries it so a
-    /// webview drops one that arrives behind a newer one.
-    pub revision: u64,
     /// Window label → its Workspaces in strip order.
     pub windows: HashMap<String, Vec<Entry>>,
 }
@@ -48,24 +43,14 @@ pub fn snapshot_ids(snapshot: &JsonValue) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Record what `label` holds now. Returns whether anything changed, which is
-/// when the caller broadcasts.
-pub fn report(registry: &mut Registry, label: &str, entries: Vec<Entry>) -> bool {
-    if registry.windows.get(label) == Some(&entries) {
-        return false;
-    }
+/// Record what `label` holds now.
+pub fn report(registry: &mut Registry, label: &str, entries: Vec<Entry>) {
     registry.windows.insert(label.to_string(), entries);
-    registry.revision += 1;
-    true
 }
 
 /// A window is gone, and with it everything it held.
-pub fn forget_window(registry: &mut Registry, label: &str) -> bool {
-    if registry.windows.remove(label).is_none() {
-        return false;
-    }
-    registry.revision += 1;
-    true
+pub fn forget_window(registry: &mut Registry, label: &str) {
+    registry.windows.remove(label);
 }
 
 /// What a `dor` target names: the Workspace id it spells, prefix restored,
@@ -102,33 +87,15 @@ pub fn window_of<'a>(registry: &'a Registry, target: &str) -> Option<&'a str> {
     holders.next().is_none().then_some(first)
 }
 
-/// What every webview receives after a change, ordered by label so the strip
-/// menus and `dor list` agree across windows.
-pub fn snapshot(registry: &Registry) -> JsonValue {
-    let mut labels: Vec<&String> = registry.windows.keys().collect();
-    labels.sort();
-    json!({
-        "revision": registry.revision,
-        "windows": labels.iter().map(|label| json!({
-            "label": label,
-            "workspaces": registry.windows[*label].iter().map(|entry| json!({
-                "id": entry.id,
-                "name": entry.name,
-                "active": entry.active,
-            })).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    fn entry(id: &str, name: &str, active: bool) -> Entry {
+    fn entry(id: &str, name: &str) -> Entry {
         Entry {
             id: id.to_string(),
             name: name.to_string(),
-            active,
         }
     }
 
@@ -141,17 +108,12 @@ mod tests {
     }
 
     #[test]
-    fn a_report_bumps_the_revision_only_when_something_changed() {
+    fn a_closed_window_routes_nothing() {
         let mut registry = Registry::default();
-        assert!(report(&mut registry, "main", vec![entry("workspace:2", "A", true)]));
-        assert_eq!(registry.revision, 1);
-        assert!(!report(&mut registry, "main", vec![entry("workspace:2", "A", true)]));
-        assert_eq!(registry.revision, 1);
-        assert!(report(&mut registry, "main", vec![entry("workspace:2", "B", true)]));
-        assert_eq!(registry.revision, 2);
-        assert!(forget_window(&mut registry, "main"));
-        assert!(!forget_window(&mut registry, "main"));
-        assert_eq!(registry.revision, 3);
+        report(&mut registry, "ws-2", vec![entry("workspace:2", "A")]);
+        assert_eq!(window_of(&registry, "workspace:2"), Some("ws-2"));
+        forget_window(&mut registry, "ws-2");
+        assert_eq!(window_of(&registry, "workspace:2"), None);
     }
 
     #[test]
@@ -160,12 +122,12 @@ mod tests {
         report(
             &mut registry,
             "main",
-            vec![entry("workspace:2", "Build", true), entry("workspace:5", "Docs", false)],
+            vec![entry("workspace:2", "Build"), entry("workspace:5", "Docs")],
         );
         report(
             &mut registry,
             "ws-2",
-            vec![entry("workspace:3", "Build", true)],
+            vec![entry("workspace:3", "Build")],
         );
         assert_eq!(window_of(&registry, "workspace:5"), Some("main"));
         assert_eq!(window_of(&registry, " 3 "), Some("ws-2"));
@@ -182,8 +144,8 @@ mod tests {
     #[test]
     fn an_exact_id_routes_before_a_name_and_never_as_a_position() {
         let mut registry = Registry::default();
-        report(&mut registry, "main", vec![entry("workspace:abc", "2", true), entry("workspace:def", "2", false)]);
-        report(&mut registry, "ws-2", vec![entry("workspace:2", "abc", true)]);
+        report(&mut registry, "main", vec![entry("workspace:abc", "2"), entry("workspace:def", "2")]);
+        report(&mut registry, "ws-2", vec![entry("workspace:2", "abc")]);
         assert_eq!(window_of(&registry, "workspace:abc"), Some("main"));
         assert_eq!(window_of(&registry, "def"), Some("main"));
         assert_eq!(window_of(&registry, "workspace:2"), Some("ws-2"));
@@ -197,9 +159,9 @@ mod tests {
         report(
             &mut registry,
             "main",
-            vec![entry("workspace:7", "Build", true), entry("workspace:8", "0", false)],
+            vec![entry("workspace:7", "Build"), entry("workspace:8", "0")],
         );
-        report(&mut registry, "ws-2", vec![entry("workspace:9", "007", true)]);
+        report(&mut registry, "ws-2", vec![entry("workspace:9", "007")]);
         // `NUMERIC_WORKSPACE_REF` reads neither as a number, so each routes to
         // the window holding the Workspace so named, never to `workspace:7`.
         assert_eq!(window_of(&registry, "007"), Some("ws-2"));
@@ -207,19 +169,5 @@ mod tests {
         assert_eq!(window_of(&registry, "0"), Some("main"));
         assert_eq!(window_of(&registry, "+7"), None);
         assert_eq!(window_of(&registry, "7"), Some("main"));
-    }
-
-    #[test]
-    fn the_snapshot_orders_windows_by_label_and_carries_ids() {
-        let mut registry = Registry::default();
-        report(&mut registry, "ws-2", vec![entry("workspace:3", "B", true)]);
-        report(&mut registry, "main", vec![entry("workspace:2", "A", true)]);
-        let snapshot = snapshot(&registry);
-        assert_eq!(snapshot["revision"], 2);
-        assert_eq!(snapshot["windows"][0]["label"], "main");
-        assert_eq!(snapshot["windows"][0]["workspaces"][0]["id"], "workspace:2");
-        assert!(snapshot["windows"][0]["workspaces"][0].get("ref").is_none());
-        assert_eq!(snapshot["windows"][1]["label"], "ws-2");
-        assert_eq!(snapshot["windows"][1]["workspaces"][0]["active"], true);
     }
 }

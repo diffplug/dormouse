@@ -1079,6 +1079,7 @@ describe('BurrowRuntime bounds', () => {
         opened += 1;
         return new FakeSocket();
       },
+      createSession: () => ({ handle: () => {}, dispose: () => {} }),
       loadAcl: () => [],
       saveAcl: () => {},
       requestApproval: () => {},

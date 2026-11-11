@@ -75,6 +75,7 @@ describe('BurrowRuntime relay socket policy', () => {
         sockets.push(socket);
         return socket;
       },
+      createSession: () => ({ handle: () => {}, dispose: () => {} }),
       loadAcl: () => [],
       saveAcl: () => {},
       requestApproval: () => {},

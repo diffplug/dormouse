@@ -9,7 +9,7 @@ import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
 import { initSurfaceIds } from './surface-ids';
-import { discardUnreadableSessionState, mergeAlertStates, takeRecoveryCommands } from './session-state';
+import { discardUnreadableSessionState, initRecoveryStore, mergeAlertStates, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
@@ -93,6 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
   log.init();
   extensionContext = context;
   discardUnreadableSessionState(context).catch((err) => log.error(`[session] could not delete an unreadable saved session: ${String(err)}`));
+  initRecoveryStore(context);
   ptyManager.setExtensionPath(context.extensionPath);
   const dorRuntime = ptyManager.getDorRuntimeEnv(context.extensionPath);
   const browserShellRuntime = { node: dorRuntime.DORMOUSE_NODE, cli: dorRuntime.DORMOUSE_CLI_JS };

@@ -1,8 +1,8 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as http from 'node:http';
 import * as net from 'node:net';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { MAX_IFRAME_LEASES, createIframeProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease, retainIframeProxyOwners } from './iframe-proxy';
+import { MAX_IFRAME_LEASES, createIframeProxyUrl as createLeasedProxyUrl, isUpstreamOnThisMachine, releaseIframeProxyLease, retainIframeProxyOwners } from './iframe-proxy';
 
 // The app's own ancestor chain, as `lib/src/lib/embedder-origins.ts` reports it
 // from a VS Code webview: the extension's document plus the workbench above it.
@@ -20,39 +20,17 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const upstreams: http.Server[] = [];
 
-// Only `Date` is faked: the servers under test need real I/O timers. Grant
-// expiry and the sweep interval are both read off `Date.now()`, so this is
-// enough to drive them without a five-minute wait — and it keeps the
-// assertions behavioral (is the grant's server still listening?) rather than
-// reaching into module state.
-//
-// The offset only ever grows, across tests as well as within one: the proxy's
-// `lastSweep` is module state that outlives a test, and a clock that went
-// backwards between tests would leave it in the future and suppress every
-// later sweep.
-const CLOCK_START = Date.now();
-let clockOffset = 0;
+// Every grant is a view's: a call naming no lease of its own takes a fresh
+// one, which the test's end releases.
+const TEST_OWNER = 'iframe-proxy-test';
+let views = 0;
+const createIframeProxyUrl: typeof createLeasedProxyUrl = (target, opts) =>
+  createLeasedProxyUrl(target, { lease: { owner: TEST_OWNER, id: `view-${++views}` }, ...opts });
 
-beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['Date'], now: CLOCK_START + clockOffset });
-});
 afterEach(() => {
+  releaseIframeProxyLease(TEST_OWNER);
   for (const s of upstreams.splice(0)) s.close();
 });
-afterAll(() => {
-  vi.useRealTimers();
-});
-
-function advanceClock(ms: number): void {
-  clockOffset += ms;
-  vi.setSystemTime(CLOCK_START + clockOffset);
-}
-
-/** Force the lazy sweep: it runs on the next grant creation. */
-async function sweep(): Promise<void> {
-  const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
-  await createIframeProxyUrl(`http://127.0.0.1:${port}/`, NO_LOG);
-}
 
 function isListening(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -497,6 +475,31 @@ describe('iframe proxy — serving', () => {
     expect(first).toMatch(/<\/script><\/head>$/);
   });
 
+  it('streams a page that writes neither a head nor a body tag before its response ends', async () => {
+    let finish: () => void = () => {};
+    const port = await upstream(async (_q, s) => {
+      s.writeHead(200, { 'content-type': 'text/html' });
+      s.write('<!doctype html><p>1</p>');
+      await new Promise<void>((resolve) => { finish = resolve; });
+      s.end('<p>2</p>');
+    });
+    const u = new URL(await frame(`http://127.0.0.1:${port}/`));
+    try {
+      const first = await new Promise<string>((resolve, reject) => {
+        const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname }, (res) => {
+          res.once('data', (c: Buffer) => resolve(c.toString('latin1')));
+        });
+        req.on('error', reject);
+        req.end();
+        setTimeout(() => reject(new Error('nothing arrived while the upstream was open')), 5_000);
+      });
+      expect(first).toContain('__dormouse');
+      expect(first).toContain('<p>1</p>');
+    } finally {
+      finish();
+    }
+  });
+
   it('passes non-HTML through untouched (no shim), still stripping framing headers', async () => {
     const port = await upstream((_q, s) => {
       s.writeHead(200, { 'content-type': 'application/javascript', 'x-frame-options': 'SAMEORIGIN' });
@@ -639,6 +642,12 @@ describe('iframe proxy — serving', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatch(/dev server running|couldn’t reach/i);
     expect(res.headers['x-frame-options']).toBeUndefined();
+  });
+
+  it('fails a subresource on an unreachable upstream as a connection, never with the page', async () => {
+    const url = await frame('http://127.0.0.1:1/');
+    await expect(request(url, { headers: { 'sec-fetch-dest': 'empty', accept: 'text/event-stream' } })).rejects.toMatchObject({ code: 'ECONNRESET' });
+    expect((await request(url, { headers: { 'sec-fetch-dest': 'iframe' } })).body).toMatch(/couldn’t reach/i);
   });
 });
 
@@ -796,30 +805,6 @@ describe('iframe proxy — the two privileges are the embedder’s, not the port
     expect(res.body).not.toContain("postMessage(m,'*')");
   });
 
-  // A grant holds a live loopback server bound to one upstream, reclaimed by an
-  // idle sweep. Declining to *vouch* for a stranger is not enough if the
-  // stranger can still keep the grant — and its upstream binding — alive long
-  // after the pane closed, so `lastUsed` is refreshed for everyone except a
-  // caller that has named itself as foreign.
-  it.each([
-    ['a foreign Origin does not refresh the grant', 'https://evil.example', false],
-    ['an ordinary in-frame request, which carries no Origin, does', undefined, true],
-  ])('%s', async (_name, origin, expectAlive) => {
-    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('ok'); });
-    const url = await frame(`http://127.0.0.1:${port}/`);
-    const proxyPort = Number(new URL(url).port);
-
-    advanceClock(4 * 60_000);
-    const served = await request(url, {
-      headers: { host: `127.0.0.1:${proxyPort}`, ...(origin ? { origin } : {}) },
-    });
-    expect(served.status).toBe(200); // served either way — admission is not the boundary
-
-    advanceClock(2 * 60_000); // 6 min since the grant was made, 2 since the request
-    await sweep();
-
-    expect(await isListening(proxyPort)).toBe(expectAlive);
-  });
 });
 
 describe('iframe proxy — the upgrade path', () => {
@@ -907,31 +892,10 @@ describe('iframe proxy — the upgrade path', () => {
     expect(seen).toBe('');
   });
 
-  it('answers nothing once the grant has been swept', async () => {
-    advanceClock(6 * 60_000);
-    await sweep();
+  it('answers nothing once the grant\'s lease is released', async () => {
+    releaseIframeProxyLease(TEST_OWNER);
 
     await expect(upgrade(url, wsHeaders({}))).rejects.toMatchObject({ code: 'ECONNREFUSED' });
-  });
-});
-
-describe('iframe grant capacity', () => {
-  it.each(['sequential', 'concurrent'] as const)('keeps at most 32 published listeners after %s creation', async (mode) => {
-    advanceClock(6 * 60_000);
-    await sweep();
-    // An evicted grant's port is free for any process to bind again — another
-    // test file's server, or a later grant here — so a port that merely
-    // listens proves nothing. Only this upstream's token, through this
-    // proxy, does, and live grants never share a port.
-    const token = `capacity-${mode}-${Math.random()}`;
-    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end(token); });
-    const target = `http://127.0.0.1:${port}/`;
-    const urls: string[] = [];
-    if (mode === 'concurrent') urls.push(...await Promise.all(Array.from({ length: 40 }, () => frame(target))));
-    else for (let i = 0; i < 40; i++) urls.push(await frame(target));
-    const answers = await Promise.all(urls.map((url) => get(url).then((r) => r.body === token, () => false)));
-    const live = new Set(urls.filter((_, i) => answers[i]).map((url) => new URL(url).port));
-    expect(live.size).toBe(32);
   });
 });
 
@@ -944,15 +908,11 @@ describe('iframe proxy leases', () => {
   const leased = (l: { owner: string; id: string }) => ({ ...NO_LOG, lease: l });
   const portOf = (url: string) => Number(new URL(url).port);
 
-  it('keeps an idle leased grant past the idle sweep, which reclaims an unleased one', async () => {
-    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('ok'); });
-    const live = await frame(`http://127.0.0.1:${port}/`, leased(lease()));
-    const unleased = await frame(`http://127.0.0.1:${port}/`);
-    advanceClock(6 * 60_000);
-    await sweep();
-    expect(await isListening(portOf(live))).toBe(true);
-    expect((await get(live)).body).toBe('ok');
-    expect(await isListening(portOf(unleased))).toBe(false);
+  it('refuses a grant asked for without a lease, or with a malformed one', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    for (const lease of [undefined, { owner: 'window-a' }, { owner: '', id: 'x' }]) {
+      expect(await createLeasedProxyUrl(`http://127.0.0.1:${port}/`, { ...NO_LOG, lease }), JSON.stringify(lease)).toEqual({ ok: false, reason: 'unreachable', detail: 'invalid iframe lease' });
+    }
   });
 
   it('never evicts a leased grant to make room, however many grants come after it', async () => {

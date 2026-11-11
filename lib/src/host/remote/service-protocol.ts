@@ -522,6 +522,8 @@ export interface BurrowConsoleStatus {
   pairedClients: number;
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
+  /** The name this machine enrolled under, which Enroll again keeps; absent while not enrolled. */
+  label?: string;
   /**
    * Whether the installer left an enrollment offer for `relayOrigin` on this
    * machine, while this self-host Burrow has not enrolled — the Settings

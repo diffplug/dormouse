@@ -30,12 +30,14 @@ test('the bucket admits one burst, then refills one token per interval', () => {
   assert.equal(bucket.take(), 1_000);
 });
 
-test('a backwards clock refills nothing', () => {
+test('a backwards clock refills nothing, and costs at most one interval', () => {
   const clock = makeClock();
   const bucket = new TokenBucket({ capacity: 1, refillIntervalMs: 1_000, now: clock.now });
   assert.equal(bucket.take(), null);
   clock.advance(-10_000);
   assert.equal(bucket.take(), 1_000);
+  clock.advance(1_000);
+  assert.equal(bucket.take(), null);
 });
 
 test('a bucket that would never refuse is refused at construction', () => {

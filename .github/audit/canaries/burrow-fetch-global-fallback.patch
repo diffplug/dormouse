@@ -46,7 +46,7 @@ index b070f94c8..550d0f9af 100644
 -  });
 -});
 diff --git a/lib/src/remote/burrow/burrow-fetch.ts b/lib/src/remote/burrow/burrow-fetch.ts
-index a4661ebc1..6abfae1f6 100644
+index 7121e361e..5c5143caa 100644
 --- a/lib/src/remote/burrow/burrow-fetch.ts
 +++ b/lib/src/remote/burrow/burrow-fetch.ts
 @@ -106,11 +106,8 @@ export function describingFetchFailures(fetch: typeof globalThis.fetch): typeof
@@ -74,10 +74,10 @@ index a4661ebc1..6abfae1f6 100644
      // The service replaced a webview whose CSP checked every redirect target,
      // and a Node process re-checks nothing. Do not let the Relay's open redirect
 diff --git a/scripts/outbound-lint-selftest.mjs b/scripts/outbound-lint-selftest.mjs
-index 68ea073c0..4a4a1b0e5 100644
+index b829d65c2..4a34988b2 100644
 --- a/scripts/outbound-lint-selftest.mjs
 +++ b/scripts/outbound-lint-selftest.mjs
-@@ -93,10 +93,10 @@ selftest.withAppendedOutput(
+@@ -105,10 +105,10 @@ selftest.withAppendedOutput(
  // --- Structural rules ----------------------------------------------------------
  const STRUCTURAL = [
    [
@@ -91,12 +91,12 @@ index 68ea073c0..4a4a1b0e5 100644
    [
      'lib/src/remote/burrow/enrollment.ts',
 diff --git a/scripts/outbound-lint.mjs b/scripts/outbound-lint.mjs
-index de4434a62..0ac7ab7df 100644
+index d87f75f41..ce6a5cb7c 100644
 --- a/scripts/outbound-lint.mjs
 +++ b/scripts/outbound-lint.mjs
-@@ -132,10 +132,6 @@ const OUTBOUND_SITES = {
+@@ -131,10 +131,6 @@ const OUTBOUND_SITES = {
      class: 'guarded:burrow-service',
-     reason: 'createRelaySocket is the socket factory VS Code injects into BurrowService, which calls it only through its transport guard.',
+     reason: 'The choke point itself: wraps the injected (or its capped `ws`) socket factory, fetch, and direct-peer factory in the transport guard that refuses under Nothing, unread, and disposed.',
    },
 -  'lib/src/remote/burrow/burrow-fetch.ts': {
 -    class: 'guarded:burrow-service',
@@ -105,7 +105,7 @@ index de4434a62..0ac7ab7df 100644
    'lib/src/remote/burrow/enrollment.ts': {
      class: 'guarded:burrow-service',
      reason: 'The enrollment exchange calls only its fetch parameter: the Burrow service or managed-voice host supplies a network-policy guard.',
-@@ -159,6 +155,10 @@ const OUTBOUND_SITES = {
+@@ -158,6 +154,10 @@ const OUTBOUND_SITES = {
      reason: 'runUpdateCheck calls check() only when the policy is not nothing and autoUpdate is on; Check now is a click; openUrl opens the changelog or an issue search on a click.',
    },
    // --- user: a click, a command, or the user's own terminal, pane, or agent ---

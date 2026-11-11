@@ -121,7 +121,7 @@ Source of truth: `lib/src/components/Baseboard.tsx`.
 - **Must reveal a Workspace in command mode before a user close or its confirmation.** Successful user closure selects the next Workspace tab in command mode (previous at the end). Command closures stay focus-neutral.
 - **Must order the strip unpinned tabs, `+` (then any host control), empty space, then the pinned group flush against the strip's right end, the store's list partitioned to match**: a new Workspace ends the unpinned group; pinning moves a tab to the pinned group's left edge, unpinning to just left of `+`. **A reorder (drag, `dor workspace move --index`, an arrival's slot) must clamp within its group. Never scroll the pinned group out of view**; the empty space between belongs to the host, never to the strip's drag or drop targets. A pin survives restore, Transfer, tear-out, and window Reopen (`docs/specs/transport.md` → Persisted session types).
 - **Never close a pinned Workspace alone**: it shows no `×`, middle-click and `x` / `k` do nothing, and the close verb refuses it, Labs pending kill included (`dor`: `docs/specs/dor-cli.md` → dor workspace). Its Window's close still closes it.
-- **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy id, Move to new window (hosts that tear out, with the tear-out's consents), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
+- **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy id, Move to new window (hosts that tear out, with the tear-out's consents, never for a window's only Workspace), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
 
 Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `setWorkspacePinned` in `lib/src/lib/workspace-store.ts`; `nextTodoMember` in `lib/src/lib/workspace-union.ts`.
 
@@ -218,7 +218,7 @@ Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard
 
 `docs/specs/shortcuts.md` tables every binding; this section owns the dispatch behavior behind it.
 
-**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits any binding; Option/AltGr permits `|`, `%`, `"`, `>`.
+**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits the symbol bindings; a letter verb matches its capital only under Caps Lock without Shift; Option/AltGr permits `|`, `%`, `"`, `>`.
 
 **Must use `,` to rename the selected terminal pane or Workspace tab in command mode**, without activating an inactive Workspace.
 
@@ -345,7 +345,7 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 Triggered by `,` in command mode or by clicking the session name in the pane header. **Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal or Tool pane, on every face, mounts the title editor.
 
-The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
+The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Never submit it untouched**: that would pin the derived label. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs); `<unnamed>` is allowed as a user pin. On rejection the input still closes — it is not a blocking dialog — and a transient warning names the offending value.
 

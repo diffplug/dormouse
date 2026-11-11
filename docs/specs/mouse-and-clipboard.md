@@ -283,7 +283,7 @@ Paste reads the clipboard in three tiers, preferred in order:
 
 1. **File references** (a Finder/Explorer Copy of a file). Each path is shell-escaped; the space-joined list is written to the PTY with a trailing space, so the next token starts cleanly.
 2. **Plain text.** The adapter's native `readClipboardText` where it has one, else `navigator.clipboard.readText()`. **Never reverse that order** (rationale). A non-empty string goes to the PTY (bracket-wrapped, §8.5).
-3. **Raw image data.** If file references and text are empty, save image bytes to a new temp directory and paste its path as tier 1. **Must use owner-only directory and owner-read/write file modes on Unix-like systems.** Windows storage limits: `docs/specs/security-local.md` -> "Browser panes". The file and directory are removed after about five minutes while the host remains running (rationale).
+3. **Raw image data.** If file references and text are empty, save image bytes to a new temp directory and paste its path as tier 1. **Must use owner-only directory and owner-read/write file modes on Unix-like systems.** Windows storage limits: `docs/specs/security-local.md` -> "Browser panes". Both are removed after about five minutes while the host runs, or at standalone's next start (rationale).
 
 Every tier empty ⇒ silent no-op; **a failed native read must show a pane notice instead**.
 
@@ -343,7 +343,7 @@ Neither `params` nor the URI is parsed at the PTY boundary.
 | State | Target | Dialog |
 |---|---|---|
 | **Openable** | `http:`, `https:`, `mailto:`, and `file:` | cancel plus an open action |
-| **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning that its handler gets the link; cancel plus an open action (standalone: **Blocked**, `tel:` excepted) |
+| **Other app** | any other absolute URI, such as `vscode:` or `tel:` | titled with the scheme as another app, warning its handler gets the link; cancel plus an open action (standalone: **Blocked**, `tel:` excepted) |
 | **Deceptive** | display text URL-shaped (a full URL, a dotted name, or `localhost`) but resolving to a different host than the target, compared after NFKC, without invisible characters, wrapping brackets or punctuation, a root dot, or a port, and with a non-ASCII name as its punycode; any tail of a `file:` target's path, or text naming no host, such as `12.5%` or `v1.2.3`, is not a host claim; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
 | **Blocked** | malformed URIs, targets carrying a control or a character drawn as nothing or as a space it is not (`hasControlOrFormatCharacters`), browser-executable or opaque pseudo-schemes (`javascript:`, `vbscript:`, `data:`, `blob:`, `about:`), a Windows drive path the parser reads as a one-letter scheme (`c:/x.bat`), Windows handlers refused outright (`docs/specs/security-local.md` -> "Terminal output") | **Never silently dropped**: the dialog opens with the reason, close the only action |
 

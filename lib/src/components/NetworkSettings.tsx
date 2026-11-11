@@ -419,14 +419,11 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
     save(({ policy: latest }) => ({ ...latest, allowed: next(latest.allowed) }));
   const add = (cidrs: string[]) => save(({ policy: latest }) => withAllowedNetworks(latest, cidrs));
   const remove = (cidr: string) => change((now) => now.filter((other) => other !== cidr));
-  // Off keeps a range another switch reading On still needs.
+  // Off removes every range of its interface, one another interface shares
+  // included, so the switch always reads Off after; the other then reads as
+  // partly allowed. Two interfaces on one LAN report the same ranges.
   const switchOff = (item: NetworkInterfaceInfo) =>
-    change((now) => {
-      const kept = new Set(
-        interfaces.filter((other) => other !== item && allOn(other, now)).flatMap((other) => other.prefixes),
-      );
-      return now.filter((cidr) => !item.prefixes.includes(cidr) || kept.has(cidr));
-    });
+    change((now) => now.filter((cidr) => !item.prefixes.includes(cidr)));
   const range = draft.trim().toLowerCase();
   // Browser panes read the list under every level; phones only under Local networks.
   const phones = holdsToAllowedNetworks(network.policy.level);
@@ -468,7 +465,10 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
               >
                 Remove
               </button>}
-              name={owner ? `Part of ${owner.label} · ${owner.id}` : 'Added range · not connected now'}
+              // No interface lists it as its own, which says nothing about
+              // being connected: this compares strings, not ranges, and a
+              // typed supernet can hold a connected interface's range.
+              name={owner ? `Part of ${owner.label} · ${owner.id}` : 'Added range'}
               prefixes={[cidr]}
             />
           );

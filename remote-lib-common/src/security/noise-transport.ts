@@ -58,7 +58,7 @@ const EMPTY = new Uint8Array(0);
  * every reason a session dies: to the caller, a body that lies about its length
  * and a ciphertext that does not authenticate are the same terminal event.
  */
-export class NoiseTransportError extends NoiseError {
+class NoiseTransportError extends NoiseError {
   constructor(message: string) {
     super(message);
     this.name = 'NoiseTransportError';
@@ -412,11 +412,6 @@ export class NoiseTransportSession {
 
   get isPoisoned(): boolean {
     return this.#poison !== undefined;
-  }
-
-  /** The counter the receive direction expects next — a test's reorder evidence. */
-  get receiveNonce(): bigint {
-    return this.#receive.nonce;
   }
 
   sendKeepalive(): Uint8Array {

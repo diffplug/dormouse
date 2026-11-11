@@ -72,7 +72,7 @@ Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. *
 
 A pane drag starts on a leaf's header, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, a real window blur (`docs/specs/layout.md` → Corner cases #2), or a release on nothing cancels, and a Door stays. **Must shield every `<iframe>` from the pointer during a pane, Door, sash, or Workspace tab drag**, so Tool and browser panes drag and resize like terminals (`shieldFrames` in `lib/src/lib/frame-shield.ts`). **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
 
-A Door drag-out yields no swap. Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
+A Door drag-out **never starts while zoomed** and yields no swap. Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
 
 Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-controller.ts`.
 
@@ -95,7 +95,7 @@ flowchart TD
   NO --> AL
 ```
 
-- A leaf removed from a two-child split whose survivor is a single leaf always degrades to neighbor (50/50), since the collapse erases the fingerprinted parent. A root-leaf removal reaches only fallback.
+- A two-child split's lone-leaf survivor keeps exact, at its weight, while it is the root or its parent crosses the token's edge; else neighbor. A root-leaf removal reaches only fallback.
 - A survivor that is a split subtree keeps exact, so `A | (B over C)` restores beside the whole `B/C` column rather than inside it — including after that subtree flattened into its grandparent; a changed group degrades to neighbor.
 - **Must reject malformed restore tokens without changing the tree.** **Must ignore a Door token naming another Surface.** Reattach fallback: [layout.md](layout.md#reattach-click-door-entermd-on-door-or-drag-out).
 - **Must supply a live `fallbackRef` when the exact and neighbor tiers fail in a nonempty tree.**

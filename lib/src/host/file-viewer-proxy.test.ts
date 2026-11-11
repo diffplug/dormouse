@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { startFileViewer } from '../../../dor-tools-builtin/src/file-viewer';
-import { createIframeProxyUrl } from './iframe-proxy';
+import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy';
 
+const LEASE_OWNER = 'file-viewer-proxy-test';
+let views = 0;
 const EMBEDDERS = ['vscode-webview://viewer-test', 'vscode-file://vscode-app'];
 let root: string;
 const viewers: Awaited<ReturnType<typeof startFileViewer>>[] = [];
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'dor-viewer-proxy-')); });
 afterEach(async () => {
+  releaseIframeProxyLease(LEASE_OWNER);
   await Promise.all(viewers.splice(0).map(viewer => viewer.close()));
   await rm(root, { recursive: true, force: true });
 });
@@ -20,7 +23,7 @@ async function frame(name: string, contents: string) {
   await writeFile(file, contents);
   const viewer = await startFileViewer(file);
   viewers.push(viewer);
-  const result = await createIframeProxyUrl(`http://127.0.0.1:${viewer.port}${viewer.path}`, { embedderOrigins: EMBEDDERS });
+  const result = await createIframeProxyUrl(`http://127.0.0.1:${viewer.port}${viewer.path}`, { embedderOrigins: EMBEDDERS, lease: { owner: LEASE_OWNER, id: `view-${++views}` } });
   if (!result.ok) throw new Error(result.detail);
   return result.url;
 }

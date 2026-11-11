@@ -363,7 +363,6 @@ const CONNECTION_DENIALS = [
   'presence-rejected',
   'protocol-rejected',
   'burrow-busy',
-  'burrow-error',
 ] as const;
 
 export type ConnectionDenialCode = (typeof CONNECTION_DENIALS)[number];

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolvePlaywrightInstall } from './playwright-install';
+import { playwrightWorkspace, resolvePlaywrightInstall } from './playwright-install';
 
 // Each layout is what npm, pnpm, or cmd-shim writes for `@playwright/cli`, whose
 // `bin` maps `playwright-cli` to `playwright-cli.js` at the package root.
@@ -248,4 +248,15 @@ test.skipIf(process.platform === 'win32')('a hint that links to a share or devic
   mkdirSync(path.dirname(local), { recursive: true });
   symlinkSync(real, local);
   expect(resolvePlaywrightInstall(local, {}).binary).toBe(local);
+});
+
+test('a removed directory takes the workspace above it, and has none when it held its own', () => {
+  const project = path.join(root, 'project');
+  mkdirSync(path.join(project, '.playwright'), { recursive: true });
+  const sub = path.join(project, 'packages', 'app');
+  mkdirSync(sub, { recursive: true });
+  rmSync(path.join(project, 'packages'), { recursive: true });
+  expect(playwrightWorkspace(sub)).toBe(project);
+  rmSync(project, { recursive: true });
+  expect(playwrightWorkspace(project)).toBeUndefined();
 });
