@@ -1895,6 +1895,30 @@ describe('the session across launches', () => {
     await expect(listed).rejects.toThrow(RELAY_NO_ANSWER_MESSAGE);
   });
 
+  it('fails a request whose answer stalls after its headers', async () => {
+    const storage = memoryStorage();
+    storage.setSession(stored);
+    const timers = fakeTimers();
+    let reading = false;
+    const stalledBody: typeof fetch = async (_input, init) => ({
+      status: 200,
+      ok: true,
+      json: () => {
+        reading = true;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        });
+      },
+    }) as Response;
+    const { client } = makeClient({}, { storage, now: () => NOW, fetch: stalledBody, setTimer: timers.setTimer });
+
+    const listed = client.listBurrows();
+    await vi.waitFor(() => expect(reading).toBe(true));
+    timers.fireAt(POCKET_API_TIMEOUT_MS);
+
+    await expect(listed).rejects.toThrow(RELAY_NO_ANSWER_MESSAGE);
+  });
+
   it('is cleared from storage by the session gate 401', async () => {
     const storage = memoryStorage();
     storage.setSession(stored);
