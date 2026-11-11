@@ -254,8 +254,13 @@ async function submitReservedRename() {
     'rename input',
   );
   // Typed, not assigned: an editor nobody changed never submits, and React
-  // hears a change only from real input events.
-  await userEvent.type(input, '<idle>{Enter}');
+  // hears a change only from real input events. The selection is restated
+  // because `type` clicks first, which drops the select-all the editor applies
+  // on mount, and the name would be appended to the seed.
+  await userEvent.type(input, '<idle>{Enter}', {
+    initialSelectionStart: 0,
+    initialSelectionEnd: input.value.length,
+  });
   await requireElement('[data-testid="illegal-rename-warning"]', 'illegal-rename warning');
 }
 
