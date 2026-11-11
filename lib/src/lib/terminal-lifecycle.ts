@@ -404,7 +404,8 @@ function typeCommandWhenPromptReady(
   requireIntegration: boolean,
   timeoutMs = requireIntegration ? INTEGRATION_TYPE_TIMEOUT_MS : LAUNCH_PROMPT_TIMEOUT_MS,
 ): void {
-  let elapsed = 0;
+  // By the clock, as `dor`'s host waits are: throttled timers tick slower.
+  const deadline = Date.now() + timeoutMs;
   const timer = setInterval(() => {
     // A gone shell can't run anything. `exited` also covers a spawn that failed
     // outright (pty-core answers a spawn error with an exit), where the seeded
@@ -425,7 +426,7 @@ function typeCommandWhenPromptReady(
     if (ready) {
       clearInterval(timer);
       type();
-    } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
+    } else if (Date.now() >= deadline) {
       clearInterval(timer);
       // Best effort for split; drop for ensure (the handler kills + errors).
       if (!requireIntegration) type();

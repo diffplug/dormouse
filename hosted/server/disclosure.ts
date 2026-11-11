@@ -37,8 +37,10 @@ export const renewalAgreement = (plan: Plan, price: number) =>
   `I agree that my subscription renews automatically ${renewalCadence(plan)} at $${price} plus any applicable tax until I cancel.`;
 
 /**
- * Everything the checkout page states for `plan` at `price` under terms
- * version `version`, line by line, as its consent record keeps it.
+ * The disclosure lines the checkout page states for `plan` at `price` under
+ * terms version `version`, line by line, as its consent record keeps it. The
+ * page's offer lines (the founding lock and seats left, the yearly saving,
+ * the lapsed founder's list price) are not among them.
  */
 export const presentedLines = (plan: Plan, price: number, version: string) => [
   ...Object.values(disclosure(plan, price)),

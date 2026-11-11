@@ -11,7 +11,7 @@
 
 **Settings is the front door.** A Hosted build turns on managed voice and the Hosted Relay there, and an account with no plan is linked to `#pricing` from Settings and the baseboard alarm buttons (`docs/specs/alert.md` -> "Settings dialog"); the Pocket playground tutorial lands on `/hosted#remote-control`. `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
 
-**Must give every link to the page a `?ref=` from `HOSTED_REFS`, one per link, ahead of its fragment, and strip it from the address bar on arrival**, so a copied link never carries it. `takeVisitRef` answers it, an unlisted value as `other`, and the page's pageview carries it (`docs/specs/website-docs.md` -> "Visit analytics"). Source of truth: `lib/src/lib/hosted-links.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`.
+**Must give every non-navigation, non-policy link to the page a `?ref=` from `HOSTED_REFS`, one per link, ahead of its fragment, and strip it from the address bar on arrival**, so a copied link never carries it. `takeVisitRef` answers it, an unlisted value as `other`, and the page's pageview carries it (`docs/specs/website-docs.md` -> "Visit analytics"). Source of truth: `lib/src/lib/hosted-links.ts`; `takeVisitRef` in `website/src/lib/hosted-ref.ts`.
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers are `PreOrder` until `CHECKOUT_OPEN`, then `InStock`.**
 
@@ -59,6 +59,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `w
 - **Never sell founding to an account whose earlier founding subscription ended and kept its seat**, by cancelling, non-payment, or a refund past the window: a lapsed founder subscribes again at list. One ended within the 30-day refund window returned its seat, so its buyer may buy founding again. The rule reads the account: a closure deletes it, so a closed founder returning under a new account is not recognized. The restoration "Tiers" promises is made in Stripe, on the founder's own Price, never through checkout, which only sells the open cohort's.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
 - **A full refund or a finally reversed payment ends the subscription it paid for**, so the next request is refused. A partial refund or a billing correction, a refund the operator marks as one (`docs/specs/hosted.md` -> "Billing"), never ends it, and an open dispute only suspends it until it closes.
+- **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment").
 - **Checkout starts from a Hosted account**: `/checkout` on the account origin asks for sign-in first, so the subscription belongs to an account from its first event.
 - **Must obtain affirmative agreement to the versioned terms and express consent to automatic renewal at the purchase action**, two unticked boxes, disclosing beside it the price and tax, the interval and renewal price, cancellation, the refund conditions, and the material limits: one individual including work use, no device limit, and managed voice's daily cap. Checkout refuses a Price other than the one shown and records the consent with it and with what it presented (`docs/specs/hosted.md` -> "Billing").
 - **Must keep a durable confirmation at `/billing` while the plan is held**: the plan and price, renewal, the terms version agreed and when, how to cancel, and refunds; Stripe's receipt emails carry each payment.
@@ -110,14 +111,13 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 - **The plan never grants team or enterprise capability** — org accounts, SSO, SCIM, BYOT, audit export.
 - **The Hosted Relay is part of the plan, never a second purchase.** The entitlement reads it from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
-- **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
+- **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
 ### Checkout
 
 The rest of "Checkout and entitlement", once checkout can sell:
 
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
-- **Must license one individual, including work use, with no device limit and no per-device charge**; enrollment's abuse ceiling is far above what a person owns (`docs/specs/hosted.md` -> "Burrow enrollment").
 
 ### Managed voice
 

@@ -24,8 +24,6 @@ set -euo pipefail
 # macOS ships bash 3.2; nothing here may use bash 4+ syntax.
 
 LABEL="sh.dormouse.relay"
-# What LABEL was before the Relay rename; unloaded once, never migrated.
-RETIRED_LABEL="sh.dormouse.server"
 INSTALL_ROOT="$HOME/Library/Application Support/Dormouse Relay"
 LOG_DIR="$HOME/Library/Logs/Dormouse Relay"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -360,6 +358,10 @@ fi
 
 WS_STATE="$REPO_ROOT/node_modules/.pnpm-workspace-state-v1.json"
 WS_STATE_BACKUP=""
+# The probe temporaries are here too, so a `die` anywhere between staging and
+# the switch cannot leak them.
+PROBE_STATE=""
+PROBE_LOG=""
 restore_workspace_state() {
   if [ -n "$WS_STATE_BACKUP" ] && [ -f "$WS_STATE_BACKUP" ]; then
     cp -p "$WS_STATE_BACKUP" "$WS_STATE" 2>/dev/null || true
@@ -368,7 +370,9 @@ restore_workspace_state() {
 }
 cleanup() {
   restore_workspace_state
-  rm -f "$TS_STATUS_JSON"
+  rm -f "$TS_STATUS_JSON" "$PROBE_LOG"
+  [ -n "$PROBE_STATE" ] && rm -rf "$PROBE_STATE"
+  return 0
 }
 trap cleanup EXIT
 
@@ -486,18 +490,14 @@ ok "release $RELEASE_ID staged"
 
 step "Runtime configuration"
 
-# 32 bytes of the platform CSPRNG as 64 lowercase hex characters. The enrollment
-# offer is the one secret this installer mints; the Relay owns its setup
-# password and persists it under state/ on first boot. Never substitute $RANDOM,
-# a timestamp, or any other non-CSPRNG source.
+# One named CSPRNG, not a fallback chain: the release's own Node was staged a
+# few lines ago and is the binary this service will run under, so it is always
+# present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
+# Never substitute $RANDOM, a timestamp, or any non-CSPRNG source. The
+# enrollment offer is the one secret this installer mints; the Relay owns its
+# setup password and persists it under state/ on first boot.
 random_hex32() {
-  if [ -x /usr/bin/xxd ]; then
-    /usr/bin/xxd -p -l 32 -c 32 /dev/urandom
-  elif [ -x /usr/bin/openssl ]; then
-    /usr/bin/openssl rand -hex 32
-  else
-    die "no way to generate a high-entropy secret (need /usr/bin/xxd or /usr/bin/openssl)."
-  fi
+  "$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))'
 }
 
 # Which installer-owned keys is the env file $1 missing (absent, or present
@@ -1290,27 +1290,6 @@ if ((fs.statSync(file).mode & 0o777) !== 0o600) process.exit(1);
 ok "candidate generated its setup password in owner-only state"
 probe_cleanup
 
-# ----------------------------------------------------------- switch release --
-
-step "Switching to the new release"
-
-OLD_RELEASE=""
-if [ -L "$CURRENT_LINK" ]; then
-  OLD_RELEASE="$(readlink "$CURRENT_LINK")"
-fi
-
-if [ -n "$OLD_RELEASE" ]; then
-  atomic_symlink "$OLD_RELEASE" "$PREVIOUS_LINK" "$STAGE/runtime/node"
-  detail "previous -> $(basename "$OLD_RELEASE")"
-fi
-atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
-
-# Prove the switch actually landed: a silently unmoved `current` is exactly the
-# failure this step exists to prevent.
-SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
-[ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
-ok "current -> $RELEASE_ID"
-
 # ------------------------------------------------------------- launchagent --
 
 write_plist() {
@@ -1349,6 +1328,33 @@ PLIST_EOF
   chmod 0644 "$PLIST"
   plutil -lint "$PLIST" >/dev/null || die "generated plist failed plutil -lint: $PLIST"
 }
+
+# Before `current` moves, so a plist that fails its lint leaves the running
+# release untouched rather than switched with nothing to roll it back.
+step "Installing the LaunchAgent"
+write_plist
+ok "wrote and linted $PLIST"
+
+# ----------------------------------------------------------- switch release --
+
+step "Switching to the new release"
+
+OLD_RELEASE=""
+if [ -L "$CURRENT_LINK" ]; then
+  OLD_RELEASE="$(readlink "$CURRENT_LINK")"
+fi
+
+if [ -n "$OLD_RELEASE" ]; then
+  atomic_symlink "$OLD_RELEASE" "$PREVIOUS_LINK" "$STAGE/runtime/node"
+  detail "previous -> $(basename "$OLD_RELEASE")"
+fi
+atomic_symlink "$STAGE" "$CURRENT_LINK" "$STAGE/runtime/node"
+
+# Prove the switch actually landed: a silently unmoved `current` is exactly the
+# failure this step exists to prevent.
+SWITCHED_TO="$(readlink "$CURRENT_LINK" 2>/dev/null || echo "")"
+[ "$SWITCHED_TO" = "$STAGE" ] || die "current did not advance to $RELEASE_ID (points at '${SWITCHED_TO:-nothing}')."
+ok "current -> $RELEASE_ID"
 
 rollback_release() {
   warn "restoring the previous release"
@@ -1392,6 +1398,12 @@ rollback_release() {
       warn "the previous release ($old_id) is healthy again."
       return 0
     fi
+    # kickstart cannot load an unloaded label, which is where a failed forward
+    # bootstrap leaves the agent, and launchd refuses a bootstrap while the
+    # outgoing agent is still exiting, so keep offering it until it loads.
+    if [ "$TEST_MODE" != "1" ] && ! launchctl print "gui/$UID/$LABEL" >/dev/null 2>&1; then
+      launchctl bootstrap "gui/$UID" "$PLIST" >/dev/null 2>&1 || true
+    fi
     sleep 0.5
     j=$((j + 1))
   done
@@ -1403,33 +1415,29 @@ rollback_release() {
   return 1
 }
 
-step "Installing the LaunchAgent"
-write_plist
-ok "wrote and linted $PLIST"
-
+step "Loading the LaunchAgent"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping launchctl bootout/bootstrap/kickstart"
 else
-  # The pre-rename agent, if this machine ever ran one. It still holds $PORT and
-  # would race the new label for it, so it is unloaded before we bootstrap ours.
-  # Best-effort: absent is the ordinary case.
-  if launchctl bootout "gui/$UID/$RETIRED_LABEL" 2>/dev/null; then
-    detail "unloaded the retired $RETIRED_LABEL agent"
-  fi
-  rm -f "$HOME/Library/LaunchAgents/$RETIRED_LABEL.plist"
-
   BOOTOUT_OUT="$(launchctl bootout "gui/$UID/$LABEL" 2>&1)" && BOOTOUT_RC=0 || BOOTOUT_RC=$?
   if [ "$BOOTOUT_RC" != "0" ]; then
     case "$BOOTOUT_OUT" in
       *"No such process"*|*"not find"*|*"not currently loaded"*) detail "no previously loaded agent (first install)" ;;
-      *) die "launchctl bootout failed unexpectedly (rc=$BOOTOUT_RC): $BOOTOUT_OUT" ;;
+      *) rollback_release || true; die "launchctl bootout failed unexpectedly (rc=$BOOTOUT_RC): $BOOTOUT_OUT" ;;
     esac
   else
     detail "unloaded the previous agent"
   fi
 
-  launchctl bootstrap "gui/$UID" "$PLIST" || die "launchctl bootstrap failed for $PLIST"
-  launchctl kickstart -k "gui/$UID/$LABEL" || die "launchctl kickstart failed for $LABEL"
+  # `current` has already moved, so every failure from here restores it.
+  if ! launchctl bootstrap "gui/$UID" "$PLIST"; then
+    rollback_release || true
+    die "launchctl bootstrap failed for $PLIST. Rollback was attempted."
+  fi
+  if ! launchctl kickstart -k "gui/$UID/$LABEL"; then
+    rollback_release || true
+    die "launchctl kickstart failed for $LABEL. Rollback was attempted."
+  fi
   ok "LaunchAgent bootstrapped into gui/$UID"
 fi
 

@@ -8,6 +8,8 @@ import {
 } from "dormouse-lib/site/docs-tokens";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 import { foundingTier, HOSTED_YEARLY, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing.ts";
+import type { BillingSummary } from "../server/billing-summary";
+import { planOffers } from "./billing";
 
 /** The Hosted page's plan cards, in a new tab so this one keeps its code. */
 export const HOSTED_PLANS_URL = withHostedRef("https://dormouse.sh/hosted/", HOSTED_REFS.hostedNoPlan, "pricing");
@@ -27,16 +29,20 @@ const NO_LIMIT = "No device limit, no per-device charge";
 export function NoPlanOffer({
   purpose,
   checkoutOpen = false,
+  founding = null,
   foundingLapsed = false,
 }: {
   purpose: "remote" | "voice" | undefined;
   /** Billing is open, so the plans link goes to checkout. */
   checkoutOpen?: boolean;
+  /** The founding cohort checkout sells this account, as the server read it; null once closed or lapsed. */
+  founding?: BillingSummary["founding"];
   /** This account subscribes again at list, so the offer is. */
   foundingLapsed?: boolean;
 }) {
   const voice = purpose === "voice";
-  const tier = foundingLapsed ? HOSTED_YEARLY : foundingTier();
+  // With checkout open, its own first offer, so the price is one it charges.
+  const tier = checkoutOpen ? planOffers(founding)[0]! : foundingLapsed ? HOSTED_YEARLY : foundingTier();
   return (
     <div className={CARD_ACCENT_CLASS}>
       <h2 className="font-display text-xl text-balance">
@@ -61,7 +67,7 @@ export function NoPlanOffer({
         <span className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>{tier.per}</span>
       </p>
       <p className={`mt-1 text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-        {foundingLapsed ? "Yearly" : "Founding price, locked while you stay subscribed"}. Or ${LIST_MONTHLY}/month.
+        {tier === HOSTED_YEARLY ? "Yearly" : "Founding price, locked while you stay subscribed"}. Or ${LIST_MONTHLY}/month.
       </p>
       <a
         className={`mt-5 gap-2 ${ACTION_CLASS}`}
