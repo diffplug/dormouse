@@ -496,6 +496,19 @@ describe('terminal-registry alert behavior', () => {
     write.mockRestore();
   });
 
+  it('runs a restored tool command whose shell reports integration after the ensure window', async () => {
+    const id = 'restored-tool-slow-shell';
+    const received: string[] = [];
+    fakePlatform.setInputHandler(id, (data) => received.push(data));
+
+    restoreTerminal(id, { command: 'pnpm storybook', requireIntegration: true });
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(received).toEqual([]);
+    applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(received).toEqual(['pnpm storybook\r']);
+  });
+
   it.each(['restore', 'split'])('seeds the actual %s launch after a non-integrated shell prompt', async (launch) => {
     const id = 'launch-after-prompt-' + launch;
     const command = 'codex resume 22222222-2222-7222-8222-222222222222';
