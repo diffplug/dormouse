@@ -375,8 +375,9 @@ describe('a paused PTY', { timeout: CASE_MS }, () => {
   it('delivers the tail its program wrote before exiting, then the exit', async () => {
     const side = sidecar();
     // One char past the high watermark, then quiet while the host pauses,
-    // then a tail nothing reads until the program is gone. Over 1 KB, which
-    // macOS discards from an exit it holds unread.
+    // then a tail nothing reads until the program is gone: 1,511 bytes, inside
+    // the 1,025 to 2,048 unread where macOS keeps only the first 1,024 of an
+    // exit it holds. Past 2,048 the write would block, and nothing be lost.
     const tail = `${'T'.repeat(1500)}-end-of-run`;
     side.floodThenTail('a', PTY_HIGH_WATERMARK_CHARS + 1, tail, 300);
     // Its counter reads 0 until the one big write is taken whole.

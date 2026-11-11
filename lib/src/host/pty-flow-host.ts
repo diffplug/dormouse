@@ -61,9 +61,10 @@ export function createPtyFlowControl(
   const inputResumes = platform === 'win32';
   /** PTYs input has resumed past the high watermark, each with its grace timer. */
   const graces = new Map<string, ReturnType<typeof setTimeout>>();
-  // macOS holds an exiting program's close while more than about 1 KB is
-  // unread, then discards it (measured, see the rationale), and nothing shows
-  // the hold. So a paused PTY there is read once every peek, below the ceiling.
+  // macOS holds an exiting program's close while more than 1,024 bytes are
+  // unread, then discards all past the first 1,024 (measured, see the
+  // rationale), and nothing shows the hold. So a paused PTY there is read once
+  // every peek, below the ceiling.
   const peeks = platform === 'darwin';
   const peekTimers = new Map<string, ReturnType<typeof setInterval>>();
   /** Paused PTYs resumed for one read, paused again by the read it delivers. */

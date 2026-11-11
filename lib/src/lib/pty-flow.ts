@@ -33,8 +33,9 @@ export const PTY_INPUT_GRACE_MS = 250;
 /** Neither input nor a peek resumes a PTY owing this many chars or more. */
 export const PTY_INPUT_CEILING_CHARS = 2 * PTY_HIGH_WATERMARK_CHARS;
 /**
- * On macOS a paused PTY is resumed for one read this often: an exiting
- * program with more than about 1 KB unread is held ~600 ms, then loses it.
+ * On macOS a paused PTY is resumed for one read this often: a program exiting
+ * with 1,025 to 2,048 bytes unread is held ~600 ms, then loses all but the
+ * first 1,024.
  */
 export const PTY_PAUSED_PEEK_MS = 150;
 /**
