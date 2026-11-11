@@ -930,9 +930,13 @@ describe('tab context menu', () => {
   });
 
   it('offers Use automatic name only for a user-set name, and Move to new window only from a host that tears out', async () => {
-    await act(async () => { createWorkspace({ id: 'workspace:2', name: 'Deploys' }); });
     const tearOut = vi.fn();
     await render(<WorkspaceStrip onMoveToNewWindow={tearOut} />);
+    // A window's only Workspace has nothing to stay behind, so it never tears out.
+    await rightClick(getWorkspacesSnapshot().workspaces[0].id);
+    expect(itemKeys()).not.toContain('new-window');
+    await act(async () => { document.body.dispatchEvent(pointer('pointerdown', { button: 0 })); });
+    await act(async () => { createWorkspace({ id: 'workspace:2', name: 'Deploys' }); });
     await rightClick('workspace:2');
     expect(itemKeys()).toEqual(['rename', 'auto-name', 'pin', 'copy-id', 'new-window', 'close']);
     await act(async () => { item('auto-name').click(); });

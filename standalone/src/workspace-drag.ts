@@ -5,7 +5,7 @@ import type { StripDragPoint } from "dormouse-lib/components/workspace-strip-dra
 import { currentWindowLabel } from "./window-label";
 import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
-import { isWorkspacePinned } from "dormouse-lib/lib/workspace-store";
+import { getWorkspacesSnapshot, isWorkspacePinned } from "dormouse-lib/lib/workspace-store";
 import { confirmToolEditorsClose } from "dormouse-lib/lib/tool-editor";
 import { randomKillChar } from "dormouse-lib/components/KillConfirm";
 import { cancelPendingConfirmation, requestConfirmation, setWorkspaceMoveError } from "dormouse-lib/lib/workspace-ui-store";
@@ -161,7 +161,7 @@ export function onDragBackInsideStrip(): void {
  * it owns the strip box — and means the live reorder has already committed the
  * move, so there is nothing left to do but drop the caret. Over another window
  * it transfers; over nothing — or over this window but outside its strip — it
- * tears out into a new one.
+ * tears out into a new one, unless it is this window's only Workspace.
  */
 export function onDropOnOtherWindow(
   id: WorkspaceId,
@@ -197,6 +197,10 @@ function moveOutOfWindow(id: WorkspaceId, destination: () => Promise<CursorHit |
   void (async () => {
     const hit = await destination();
     if (!isCurrent()) return;
+    const transfers = !!hit && hit.label !== currentWindowLabel();
+    // A window's only Workspace never tears out: the new window would be this
+    // one rebuilt under another label, `main` included.
+    if (!transfers && getWorkspacesSnapshot().workspaces.length <= 1) return;
     const handle = getWallHandle(id);
     const dirtyEditors = handle?.dirtyToolIds() ?? [];
     if (!await confirmToolEditorsClose(dirtyEditors) || !isCurrent()) return;
@@ -206,7 +210,7 @@ function moveOutOfWindow(id: WorkspaceId, destination: () => Promise<CursorHit |
     const discardedEditors = dirtyEditors.filter(id => handle?.dirtyToolIds().includes(id));
     const move = () => {
       setWorkspaceMoveError(null);
-      const moving = hit && hit.label !== currentWindowLabel()
+      const moving = transfers
         ? transferWorkspaceTo(id, hit.label, { x: hit.x, y: hit.y }, undefined, discardedEditors)
         : tearOutWorkspace(id, grab, discardedEditors);
       void moving.then(outcome => {

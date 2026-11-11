@@ -285,7 +285,9 @@ export function WorkspaceStrip({
           key={menu.id}
           menu={menu}
           workspace={menuWorkspace}
-          onMoveToNewWindow={onMoveToNewWindow}
+          // A window's only Workspace never tears out: that would rebuild
+          // the same window under a new label.
+          onMoveToNewWindow={workspaces.length > 1 ? onMoveToNewWindow : undefined}
         />
       )}
       {/* Rename owns its input until it ends, and the confirmation waits behind
