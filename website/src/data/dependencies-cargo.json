@@ -121,6 +121,16 @@
       ]
     },
     {
+      "name": "tauri-plugin-single-instance",
+      "license": "MIT OR Apache-2.0",
+      "author": "Tauri Programme within The Commons Conservancy",
+      "homepage": "https://github.com/tauri-apps/plugins-workspace",
+      "declaredName": "tauri-plugin-single-instance",
+      "versions": [
+        "2.5.5"
+      ]
+    },
+    {
       "name": "tauri-plugin-updater",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
@@ -194,6 +204,96 @@
       "homepage": "https://github.com/dtolnay/anyhow",
       "versions": [
         "1.0.102"
+      ]
+    },
+    {
+      "name": "async-broadcast",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, Yoshua Wuyts <yoshuawuyts@gmail.com>, Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/smol-rs/async-broadcast",
+      "versions": [
+        "0.7.2"
+      ]
+    },
+    {
+      "name": "async-channel",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>",
+      "homepage": "https://github.com/smol-rs/async-channel",
+      "versions": [
+        "2.5.0"
+      ]
+    },
+    {
+      "name": "async-executor",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>",
+      "homepage": "https://github.com/smol-rs/async-executor",
+      "versions": [
+        "1.14.1"
+      ]
+    },
+    {
+      "name": "async-io",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>",
+      "homepage": "https://github.com/smol-rs/async-io",
+      "versions": [
+        "2.6.0"
+      ]
+    },
+    {
+      "name": "async-lock",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>",
+      "homepage": "https://github.com/smol-rs/async-lock",
+      "versions": [
+        "3.5.0"
+      ]
+    },
+    {
+      "name": "async-process",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>",
+      "homepage": "https://github.com/smol-rs/async-process",
+      "versions": [
+        "2.5.0"
+      ]
+    },
+    {
+      "name": "async-recursion",
+      "license": "MIT OR Apache-2.0",
+      "author": "Robert Usher <266585+dcchut@users.noreply.github.com>",
+      "homepage": "https://github.com/dcchut/async-recursion",
+      "versions": [
+        "1.2.0"
+      ]
+    },
+    {
+      "name": "async-signal",
+      "license": "MIT OR Apache-2.0",
+      "author": "John Nunley <dev@notgull.net>",
+      "homepage": "https://github.com/smol-rs/async-signal",
+      "versions": [
+        "0.2.14"
+      ]
+    },
+    {
+      "name": "async-task",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>",
+      "homepage": "https://github.com/smol-rs/async-task",
+      "versions": [
+        "4.7.1"
+      ]
+    },
+    {
+      "name": "async-trait",
+      "license": "MIT OR Apache-2.0",
+      "author": "David Tolnay <dtolnay@gmail.com>",
+      "homepage": "https://github.com/dtolnay/async-trait",
+      "versions": [
+        "0.1.92"
       ]
     },
     {
@@ -287,6 +387,15 @@
       "homepage": "https://github.com/madsmtm/objc2",
       "versions": [
         "0.6.2"
+      ]
+    },
+    {
+      "name": "blocking",
+      "license": "MIT OR Apache-2.0",
+      "author": "smol-rs contributors",
+      "homepage": "https://github.com/smol-rs/blocking",
+      "versions": [
+        "1.7.0"
       ]
     },
     {
@@ -476,6 +585,15 @@
       "homepage": "https://github.com/Marwes/combine",
       "versions": [
         "4.6.7"
+      ]
+    },
+    {
+      "name": "concurrent-queue",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, Taiki Endo <te316e89@gmail.com>, John Nunley <dev@notgull.net>",
+      "homepage": "https://github.com/smol-rs/concurrent-queue",
+      "versions": [
+        "2.5.0"
       ]
     },
     {
@@ -804,6 +922,33 @@
       ]
     },
     {
+      "name": "endi",
+      "license": "MIT",
+      "author": "Zeeshan Ali Khan <zeenix@gmail.com>",
+      "homepage": "https://github.com/zeenix/endi",
+      "versions": [
+        "1.1.1"
+      ]
+    },
+    {
+      "name": "enumflags2",
+      "license": "MIT OR Apache-2.0",
+      "author": "maik klein <maikklein@googlemail.com>, Maja Kądziołka <maya@compilercrim.es>",
+      "homepage": "https://github.com/meithecatte/enumflags2",
+      "versions": [
+        "0.7.12"
+      ]
+    },
+    {
+      "name": "enumflags2_derive",
+      "license": "MIT OR Apache-2.0",
+      "author": "maik klein <maikklein@googlemail.com>, Maja Kądziołka <maya@compilercrim.es>",
+      "homepage": "https://github.com/meithecatte/enumflags2",
+      "versions": [
+        "0.7.12"
+      ]
+    },
+    {
       "name": "equivalent",
       "license": "MIT OR Apache-2.0",
       "author": "The indexmap contributors",
@@ -828,6 +973,24 @@
       "homepage": "https://github.com/lambda-fairy/rust-errno",
       "versions": [
         "0.3.14"
+      ]
+    },
+    {
+      "name": "event-listener",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>",
+      "homepage": "https://github.com/smol-rs/event-listener",
+      "versions": [
+        "5.4.2"
+      ]
+    },
+    {
+      "name": "event-listener-strategy",
+      "license": "MIT OR Apache-2.0",
+      "author": "John Nunley <dev@notgull.net>",
+      "homepage": "https://github.com/smol-rs/event-listener-strategy",
+      "versions": [
+        "0.5.4"
       ]
     },
     {
@@ -972,6 +1135,15 @@
       "homepage": "https://rust-lang.github.io/futures-rs",
       "versions": [
         "0.3.32"
+      ]
+    },
+    {
+      "name": "futures-lite",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, Contributors to futures-rs",
+      "homepage": "https://github.com/smol-rs/futures-lite",
+      "versions": [
+        "2.6.1"
       ]
     },
     {
@@ -1191,6 +1363,15 @@
       "versions": [
         "0.4.1",
         "0.5.0"
+      ]
+    },
+    {
+      "name": "hermit-abi",
+      "license": "MIT OR Apache-2.0",
+      "author": "hermit-os contributors",
+      "homepage": "https://github.com/hermit-os/hermit-rs",
+      "versions": [
+        "0.5.3"
       ]
     },
     {
@@ -1944,6 +2125,15 @@
       ]
     },
     {
+      "name": "ordered-stream",
+      "license": "MIT OR Apache-2.0",
+      "author": "Daniel De Graaf <code@danieldg.net>, Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/danieldg/ordered-stream",
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
       "name": "os_pipe",
       "license": "MIT",
       "author": "Jack O'Connor",
@@ -1977,6 +2167,15 @@
       "homepage": "https://gtk-rs.org/",
       "versions": [
         "0.18.0"
+      ]
+    },
+    {
+      "name": "parking",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, The Rust Project Developers",
+      "homepage": "https://github.com/smol-rs/parking",
+      "versions": [
+        "2.2.1"
       ]
     },
     {
@@ -2070,6 +2269,15 @@
       ]
     },
     {
+      "name": "piper",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>",
+      "homepage": "https://github.com/smol-rs/piper",
+      "versions": [
+        "0.2.5"
+      ]
+    },
+    {
       "name": "pkg-config",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
@@ -2094,6 +2302,15 @@
       "homepage": "https://github.com/image-rs/image-png",
       "versions": [
         "0.18.1"
+      ]
+    },
+    {
+      "name": "polling",
+      "license": "MIT OR Apache-2.0",
+      "author": "Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>",
+      "homepage": "https://github.com/smol-rs/polling",
+      "versions": [
+        "3.11.0"
       ]
     },
     {
@@ -2577,6 +2794,15 @@
       "homepage": "https://github.com/comex/rust-shlex",
       "versions": [
         "1.3.0"
+      ]
+    },
+    {
+      "name": "signal-hook-registry",
+      "license": "MIT OR Apache-2.0",
+      "author": "Michal 'vorner' Vaner <vorner@vorner.cz>, Masaki Hara <ackie.h.gmai@gmail.com>",
+      "homepage": "https://github.com/vorner/signal-hook",
+      "versions": [
+        "1.4.8"
       ]
     },
     {
@@ -3161,6 +3387,15 @@
       "homepage": "https://github.com/paholg/typenum",
       "versions": [
         "1.20.0"
+      ]
+    },
+    {
+      "name": "uds_windows",
+      "license": "MIT",
+      "author": "Azure IoT Edge Devs, Harald Hoyer <harald@redhat.com>",
+      "homepage": "https://github.com/haraldh/rust_uds_windows",
+      "versions": [
+        "1.2.1"
       ]
     },
     {
@@ -3798,6 +4033,42 @@
       ]
     },
     {
+      "name": "zbus",
+      "license": "MIT",
+      "author": "Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/z-galaxy/zbus/",
+      "versions": [
+        "5.19.0"
+      ]
+    },
+    {
+      "name": "zbus_macros",
+      "license": "MIT",
+      "author": "Marc-André Lureau <marcandre.lureau@redhat.com>, Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/z-galaxy/zbus/",
+      "versions": [
+        "5.19.0"
+      ]
+    },
+    {
+      "name": "zbus_names",
+      "license": "MIT",
+      "author": "Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/z-galaxy/zbus/",
+      "versions": [
+        "4.3.5"
+      ]
+    },
+    {
+      "name": "zcheapstr",
+      "license": "MIT",
+      "author": "Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/z-galaxy/zcheapstr/",
+      "versions": [
+        "1.2.0"
+      ]
+    },
+    {
       "name": "zerofrom",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
@@ -3867,6 +4138,33 @@
       "homepage": "https://github.com/dtolnay/zmij",
       "versions": [
         "1.0.21"
+      ]
+    },
+    {
+      "name": "zvariant",
+      "license": "MIT",
+      "author": "Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/z-galaxy/zbus/",
+      "versions": [
+        "5.15.1"
+      ]
+    },
+    {
+      "name": "zvariant_derive",
+      "license": "MIT",
+      "author": "Zeeshan Ali Khan <zeeshanak@gnome.org>",
+      "homepage": "https://github.com/z-galaxy/zbus/",
+      "versions": [
+        "5.15.1"
+      ]
+    },
+    {
+      "name": "zvariant_utils",
+      "license": "MIT",
+      "author": "Zeeshan Ali Khan <zeeshanak@gnome.org>, turbocooler <turbocooler@cocaine.ninja>",
+      "homepage": "https://github.com/z-galaxy/zbus/",
+      "versions": [
+        "4.2.0"
       ]
     }
   ]

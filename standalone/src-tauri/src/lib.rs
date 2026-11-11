@@ -4697,9 +4697,27 @@ const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 /// Linux `Ctrl+Shift+T` would take a key programs read as `Ctrl+T`.
 const REOPEN_MENU_ITEM_ID: &str = "dormouse-reopen-closed";
 
+/// A second launch's hand-off: bring the running app forward instead.
+fn raise_existing_window(app: &AppHandle) {
+    let window = app
+        .get_webview_window(routing::MAIN_LABEL)
+        .or_else(|| app.webview_windows().into_values().next());
+    if let Some(window) = window {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 pub fn run() {
     panic_policy::abort_on_panic();
     tauri::Builder::default()
+        // First, before any other plugin or `setup` touches the state root: a
+        // second process for this identifier would sweep, merge and write the
+        // same `sessions/`, `ids.json` and `burrow.json` as this one. It hands
+        // off to the running app and exits. The lock is released in
+        // `cleanup_before_exit`, which the relaunch in `RunEvent::Exit` runs
+        // before it starts the successor.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| raise_existing_window(app)))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Replace Tauri's default menu (docs/specs/standalone.md -> Application menu).
@@ -5842,6 +5860,19 @@ mod tests {
         // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
         assert!(delegate.contains("forget_restart(app)"));
         assert!(macos.split("pub fn answer_held(").nth(1).unwrap().split("\n}").next().unwrap().contains("forget_restart(app)"));
+    }
+
+    /// A second launch is turned away before any other plugin or `setup` runs,
+    /// and a relaunch frees the single-instance lock before its successor
+    /// starts, or the successor would hand off to this exiting process.
+    #[test]
+    fn the_single_instance_lock_is_first_and_freed_before_a_relaunch() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let builder = source.split("pub fn run() {").nth(1).unwrap();
+        let first = builder.find(".plugin(").unwrap();
+        assert!(builder[first..].starts_with(".plugin(tauri_plugin_single_instance::init("));
+        let exit = source.split("RunEvent::Exit => {").nth(1).unwrap().split("_ => {}").next().unwrap();
+        assert!(exit.find("app.cleanup_before_exit()").unwrap() < exit.find("tauri::process::restart(").unwrap());
     }
 
     /// docs/specs/standalone.md -> "Restart".

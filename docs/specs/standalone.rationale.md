@@ -2,6 +2,10 @@
 
 > Informative companion to [standalone.md](standalone.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Boot sequence
+
+**Why one instance.** A second process for the same identifier ran the whole boot against the live state root: it swept the first's in-flight snapshot temps, merged and deleted its arrival journal, cold-restored its windows with a second set of shells, and from then on both wrote `sessions/main.json`, minted the same `surface:<n>` and `workspace:<n>` from separately loaded counters, and read-modify-wrote one `burrow.json`. Double-clicking a shortcut does it on Windows and Linux; `open -n` on macOS. `tauri-plugin-single-instance` (2.5) uses a named mutex on Windows, a D-Bus name on Linux, and a Unix socket at `/tmp/<identifier>_si.sock` on macOS, and releases it in `cleanup_before_exit`, which the relaunch in `RunEvent::Exit` calls before `tauri::process::restart` starts the successor (read from the plugin's source, 2026-11; not run).
+
 ## Rust ↔ sidecar bridge
 
 **Why managed-voice audio may ride the pipe when screenshots may not.** A screenshot streams on every settled frame; an utterance is at most one per window at a time, alarms are rare, and a 120-code-point label is well under 300 KB of base64 even at Hosted's 200-character cap. The temp-file path would leave spoken-label audio on disk between the sidecar's write and Rust's read, and an orphan whenever the invoke timed out first.

@@ -24,6 +24,8 @@ flowchart LR
 
 **Must display fatal bootstrap errors with a reload action**, for both Tauri and the browser harness, instead of leaving a blank window.
 
+**A second launch must raise the running `main` and exit before `setup`** (rationale).
+
 Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry the step order and why.
 
 ## Rust ↔ sidecar bridge
@@ -132,7 +134,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 ### Workspace registry
 
-**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list of ids and names on every change; only Rust reads the union.
+**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its ids and names on every change; only Rust reads them.
 
 - **Must mint numbered ids only in Rust**, `workspace:<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`; at boot `boot_reserve_ids`, the Surface block in the same write) so a create mints synchronously; an id never renumbers and never collides across windows. Window labels and Surface ids (`surface_reserve_ids`; `docs/specs/transport.md` → "Surface ids") come off app-wide counters of their own.
 - **Must persist the Workspace and window counters as the Surface counter persists** (`docs/specs/transport.md` → "Surface ids"), all three high-water marks in `<state root>/ids.json`. **Must hand out a window label even when the write fails**, from memory (rationale).
