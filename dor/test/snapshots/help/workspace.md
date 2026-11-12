@@ -44,7 +44,7 @@ JSON output:
 
 FLAGS
      [--force]                                  Close even when the Workspace holds Surfaces Reopen cannot restore.
-     [--json]                                   Print JSON output.
+     [--json]                                   Print a JSON result or error object.
      [--window]                                 move: the window to move to (a label, or "new").
      [--index]                                  move: the 0-based strip position to move to.
      [--dangerously-destroy-iframe-page-state]  move: accept losing every iframe Surface's page state.

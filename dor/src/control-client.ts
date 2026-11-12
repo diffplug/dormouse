@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createConnection } from 'node:net';
+import { CliError } from './commands/errors.js';
 import type { ControlEndpoint } from './commands/types.js';
 import { MethodControlClient } from './control-methods.js';
 import type { DorControlMethod, DorControlResult } from './protocol.js';
@@ -83,6 +84,12 @@ export class SocketControlClient extends MethodControlClient {
       let phase: 'challenge' | 'welcome' | 'response' = 'challenge';
       const nonce = randomBytes(16).toString('hex');
 
+      // Until the request frame is written the host has seen nothing to run, so
+      // a failure means no usable host: CONTROL_UNAVAILABLE. After it, the
+      // request may have run, and the failure is the command's.
+      const failure = (message: string) =>
+        phase === 'response' ? new Error(message) : new CliError('CONTROL_UNAVAILABLE', message);
+
       const settle = (callback: () => void) => {
         if (settled) return;
         settled = true;
@@ -92,7 +99,7 @@ export class SocketControlClient extends MethodControlClient {
       };
 
       const timeout = setTimeout(() => {
-        settle(() => reject(new Error(`timed out waiting for ${method}`)));
+        settle(() => reject(failure(`timed out waiting for ${method}`)));
       }, timeoutMs);
 
       socket.setEncoding('utf8');
@@ -122,12 +129,12 @@ export class SocketControlClient extends MethodControlClient {
           try {
             frame = JSON.parse(line);
           } catch {
-            settle(() => reject(new Error(HANDSHAKE_FAILURE)));
+            settle(() => reject(failure(HANDSHAKE_FAILURE)));
             return;
           }
           if (phase === 'challenge') {
             if (frame?.kind !== 'challenge' || typeof frame.nonce !== 'string' || !frame.nonce) {
-              settle(() => reject(new Error(HANDSHAKE_FAILURE)));
+              settle(() => reject(failure(HANDSHAKE_FAILURE)));
               return;
             }
             // Answering a challenge proves nothing about the challenger, which
@@ -143,7 +150,7 @@ export class SocketControlClient extends MethodControlClient {
               frame?.kind !== 'welcome' ||
               !proofMatches(frame.proof, proveToken(this.token, SERVER_PROOF_DOMAIN, nonce))
             ) {
-              settle(() => reject(new Error(HANDSHAKE_FAILURE)));
+              settle(() => reject(failure(HANDSHAKE_FAILURE)));
               return;
             }
             socket.write(`${JSON.stringify({
@@ -159,7 +166,7 @@ export class SocketControlClient extends MethodControlClient {
         }
       });
       socket.on('error', (error) => {
-        settle(() => reject(error));
+        settle(() => reject(failure(error.message)));
       });
       socket.on('end', () => {
         if (settled) return;
@@ -167,7 +174,7 @@ export class SocketControlClient extends MethodControlClient {
         // answers it wrongly — the server hangs up on a bad hello rather than
         // replying — so report it the same way.
         settle(() =>
-          reject(new Error(phase === 'response' ? `connection closed before ${method} response` : HANDSHAKE_FAILURE)),
+          reject(failure(phase === 'response' ? `connection closed before ${method} response` : HANDSHAKE_FAILURE)),
         );
       });
     });

@@ -1,3 +1,5 @@
+import { printableExact } from './commands/terminal-text.js';
+import { errorCode, type CliFailure } from './commands/errors.js';
 import {
   ArgumentParseError,
   UnexpectedFlagError,
@@ -6,11 +8,10 @@ import {
   help,
   run as runStricli,
   text_en,
-  type ApplicationText,
   type CommandContext,
   type StricliProcess,
 } from '@stricli/core';
-import { MissingValueError, errorLine, errorMessage, fail } from './commands/shared.js';
+import { MissingValueError, errorLine, errorMessage, fail, renderPrintableJson } from './commands/shared.js';
 import { isBrowserProvider } from 'dor-lib-common/browser-providers';
 import { builtinHandler, VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import { agentBrowserCommand } from './commands/agent-browser.js';
@@ -101,6 +102,14 @@ export async function runCli(rawArgv: string[], options: CliOptions): Promise<Cl
   const command = COMMANDS.find((entry) => entry.name === commandName);
   const { args, scannerArgs, flagValues } = prepareFlagValues(rawArgs, command);
   const helpTarget = getHelpTarget(commandName ? [commandName, ...args] : []);
+  const boundary = args.indexOf('--');
+  const json = helpTarget === undefined && (boundary < 0 ? args : args.slice(0, boundary)).some(arg => arg === '--json' || /^--json=true$/i.test(arg));
+  let failure: CliFailure | undefined;
+  const reportFailure = (value: CliFailure) => { failure = value; };
+  const finish = (result: CliResult): CliResult => !json || result.exitCode === 0 ? result : {
+    ...result,
+    stdout: renderPrintableJson({ error: failure ?? { code: 'COMMAND_FAILED', message: 'command failed' } }),
+  };
 
 
   // Some commands need argv validated *before* stricli parses it (the `--` command
@@ -109,24 +118,28 @@ export async function runCli(rawArgv: string[], options: CliOptions): Promise<Cl
   // just dispatch it. A help invocation never runs the command func, so it skips it.
   if (command?.preParse && helpTarget === undefined) {
     const check = command.preParse(args);
-    if (!check.ok) return fail(check.message);
+    if (!check.ok) {
+      reportFailure({ code: 'INVALID_ARGUMENT', message: check.message });
+      return finish(fail(printableExact(check.message)));
+    }
   }
 
   const capture = createCaptureProcess(options.env);
-  await runStricli(createApplication(flagValues), commandName ? [commandName, ...scannerArgs] : [], {
+  await runStricli(createApplication(flagValues, reportFailure), commandName ? [commandName, ...scannerArgs] : [], {
     process: capture.process,
     forCommand: (): DorCommandContext => ({
       process: capture.process,
       options,
       commandArgs: args,
+      reportFailure,
     }),
   });
 
-  return {
+  return finish({
     exitCode: normalizeExitCode(capture.process.exitCode),
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
-  };
+  });
 }
 
 
@@ -320,17 +333,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
 
-const DOR_TEXT: ApplicationText = {
-  ...text_en,
-  commandErrorResult: (error, _ansiColor) => errorLine(error.message),
-  exceptionWhileLoadingCommandContext: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileLoadingCommandFunction: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileParsingArguments: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileRunningCommand: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  noCommandRegisteredForInput: ({ input }) => `Error: unknown command '${input}'`,
-};
-
-function createApplication(flagValues: ReadonlyMap<string, string>) {
+function createApplication(flagValues: ReadonlyMap<string, string>, reportFailure: (failure: CliFailure) => void) {
+  const record = (code: CliFailure['code'], message: string) => {
+    reportFailure({ code, message });
+    return errorLine(printableExact(message));
+  };
   return buildApplication(
     buildRouteMap({
       routes: Object.fromEntries(COMMANDS.map(({ name, command }) => [name, {
@@ -349,7 +356,9 @@ function createApplication(flagValues: ReadonlyMap<string, string>) {
       }])),
       docs: {
         brief: 'control Dormouse from a terminal',
-        fullDescription: 'Dormouse bundles the dor CLI into every terminal it launches.',
+        fullDescription: `Dormouse bundles the dor CLI into every terminal it launches.
+
+First-party --json prints one result object on stdout. Failures print {"error":{"code":"...","message":"..."}} and retain a nonzero exit status; stderr carries diagnostics. Error codes are INVALID_ARGUMENT (parsing), CONTROL_UNAVAILABLE (no host endpoint, or no host answered before the request was sent), COMMAND_FAILED (validation or execution), TIMEOUT, SURFACE_DIED, and CANCELLED (a picker was dismissed). Exit 1 means failure; await uses 2 for timeout and 3 for Surface death. Help stays text. Browser-provider output belongs to the provider.`,
       },
     }),
     {
@@ -363,17 +372,22 @@ function createApplication(flagValues: ReadonlyMap<string, string>) {
       },
       localization: {
         text: {
-          ...DOR_TEXT,
+          ...text_en,
+          commandErrorResult: error => record(errorCode(error), error.message),
+          exceptionWhileLoadingCommandContext: error => record('COMMAND_FAILED', errorMessage(error)),
+          exceptionWhileLoadingCommandFunction: error => record('COMMAND_FAILED', errorMessage(error)),
+          exceptionWhileRunningCommand: error => record('COMMAND_FAILED', errorMessage(error)),
+          noCommandRegisteredForInput: ({ input }) => record('INVALID_ARGUMENT', `unknown command '${input}'`),
           exceptionWhileParsingArguments(error) {
             const value = (input: string) => flagValues.get(input) ?? input;
             if (error instanceof ArgumentParseError && error.exception instanceof MissingValueError) {
-              return errorLine(`--${error.externalFlagNameOrPlaceholder} requires a value`);
+              return record('INVALID_ARGUMENT', `--${error.externalFlagNameOrPlaceholder} requires a value`);
             } else if (error instanceof ArgumentParseError) {
-              return errorLine(`Failed to parse "${value(error.input)}" for ${error.externalFlagNameOrPlaceholder}: ${errorMessage(error.exception)}`);
+              return record('INVALID_ARGUMENT', `Failed to parse "${value(error.input)}" for ${error.externalFlagNameOrPlaceholder}: ${errorMessage(error.exception)}`);
             } else if (error instanceof UnexpectedFlagError) {
-              return errorLine(`Too many arguments for --${error.externalFlagName}, encountered "${value(error.input)}" after "${value(error.previousInput)}"`);
+              return record('INVALID_ARGUMENT', `Too many arguments for --${error.externalFlagName}, encountered "${value(error.input)}" after "${value(error.previousInput)}"`);
             }
-            return errorLine(errorMessage(error));
+            return record('INVALID_ARGUMENT', errorMessage(error));
           },
         },
       },

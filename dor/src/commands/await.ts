@@ -7,6 +7,7 @@
  */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   AwaitCause,
   AwaitSurfaceResponse,
@@ -17,7 +18,6 @@ import type {
 } from './types.js';
 import {
   errorLine,
-  errorMessage,
   parsePositiveInt,
   renderJson,
   requireControlClient,
@@ -78,7 +78,7 @@ JSON output:
     "detail": "output stopped after 10m 15s"
   }
 
-Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing. The JSON above is printed only on a resolution; a timeout or a death reports itself through the exit code and the stderr line, with nothing on stdout.
+Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing. With --json, failures print an error object with a stable code (TIMEOUT or SURFACE_DIED) and message on stdout. The exit status and stderr explanation also report the failure.
 
 Examples:
   dor await surface:3 --until quiet
@@ -105,7 +105,7 @@ export const awaitCommand: Command = {
     },
     parameters: {
       flags: {
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         timeout: { kind: 'parsed', parse: parseTimeoutSeconds, brief: 'Seconds to wait before giving up. Default 600; max 86400.', optional: true, placeholder: 'seconds' },
         until: { kind: 'parsed', parse: parseUntil, brief: 'What to wait for: quiet or exit.', optional: false, placeholder: 'condition' },
         workspace: workspaceFlag,
@@ -137,7 +137,7 @@ async function runAwaitCommand(this: DorCommandContext, flags: AwaitFlags, surfa
       ...workspaceParam(flags.workspace),
     });
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 
   switch (response.outcome) {
@@ -176,6 +176,7 @@ async function runAwaitCommand(this: DorCommandContext, flags: AwaitFlags, surfa
  * (that path is hard-wired to 1).
  */
 function failWith(context: DorCommandContext, exitCode: number, message: string): undefined {
+  context.reportFailure({ code: exitCode === EXIT_TIMED_OUT ? 'TIMEOUT' : 'SURFACE_DIED', message });
   writeStderr(context, `${errorLine(message)}\n`);
   context.process.exitCode = exitCode;
   return undefined;

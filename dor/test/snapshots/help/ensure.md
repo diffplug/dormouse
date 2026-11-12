@@ -43,7 +43,7 @@ JSON output:
 
 FLAGS
      [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
-     [--json]       Print JSON output.
+     [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--restart]    Restart a matching surface in place.
      [--surface]    Surface to split when creating.

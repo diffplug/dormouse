@@ -5,6 +5,7 @@
 
 import { buildCommand } from '@stricli/core';
 import { unsupportedControlMethodMessage, WINDOW_CONTROL_METHODS } from '../protocol.js';
+import { commandError } from './errors.js';
 import type { Command, DorCommandContext, ReopenResponse } from './types.js';
 import { errorMessage, renderJson, requireControlClient, writeStdout } from './shared.js';
 
@@ -32,7 +33,7 @@ JSON output:
     },
     parameters: {
       flags: {
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
       },
       positional: { kind: 'tuple', parameters: [] },
     },
@@ -51,7 +52,7 @@ async function runReopenCommand(this: DorCommandContext, flags: ReopenFlags): Pr
     if (message === unsupportedControlMethodMessage(WINDOW_CONTROL_METHODS.reopen)) {
       return new Error('this Dormouse predates dor reopen');
     }
-    return new Error(message);
+    return commandError(error);
   }
   writeStdout(this, flags.json === true ? renderReopenJson(response) : `reopened ${reopenedId(response)}\n`);
   return undefined;

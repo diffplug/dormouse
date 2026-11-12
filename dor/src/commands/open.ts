@@ -1,7 +1,7 @@
 import { buildCommand } from '@stricli/core';
 import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
 import {
-  callerWorkingDirectory, cwdParser, focusFlag, focusHelp, focusMinimizeConflict, focusParam, requireControlClient, stringParser, workspaceFlag, workspaceParam,
+  callerWorkingDirectory, cwdParser, focusFlag, focusHelp, focusMinimizeConflict, focusParam, pickerCancelled, requireControlClient, stringParser, workspaceFlag, workspaceParam,
 } from './shared.js';
 import { runFilePicker } from './open-picker.js';
 import { dispatchToolSurface, TOOL_TIMEOUT_MS } from './tool.js';
@@ -45,7 +45,7 @@ ${focusHelp({ minimize: true })} --preview turns the default off too.
     parameters: {
       flags: {
         focus: focusFlag,
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Open another instance even when the Tool has a key.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
@@ -69,11 +69,7 @@ ${focusHelp({ minimize: true })} --preview turns the default off too.
       if (file === undefined) {
         const choice = await pickFile(this, cwd, flags);
         if (choice instanceof Error) return choice;
-        // A cancel opens nothing and prints nothing, but is not a success.
-        if (!choice) {
-          this.process.exitCode = 1;
-          return undefined;
-        }
+        if (!choice) return pickerCancelled(this);
         file = listedPath(choice.file);
         tool = choice.tool ?? tool;
       }

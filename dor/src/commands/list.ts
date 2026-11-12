@@ -11,6 +11,7 @@
  */
 
 import { buildCommand, type FlagParametersForType } from '@stricli/core';
+import { commandError } from './errors.js';
 import { cwdPathsEqual } from './cwd.js';
 import type {
   CliOptions,
@@ -29,7 +30,6 @@ import { hasBrowser, hasTerminal, SURFACE_KINDS } from './types.js';
 import {
   callerWorkingDirectory,
   cwdParser,
-  errorMessage,
   parsePositiveInt,
   printable,
   renderPrintableJson,
@@ -115,7 +115,7 @@ function buildListCommand(): Command['command'] {
       optional: true,
       placeholder: 'path',
     },
-    json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+    json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
     kind: {
       kind: 'parsed',
       parse: parseSurfaceKind,
@@ -205,7 +205,7 @@ async function runListCommand(
     writeStdout(context, stdout);
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

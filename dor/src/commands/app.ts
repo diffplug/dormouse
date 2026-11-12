@@ -5,6 +5,7 @@
 
 import { buildCommand } from '@stricli/core';
 import { APP_CONTROL_METHODS, unsupportedControlMethodMessage } from '../protocol.js';
+import { commandError } from './errors.js';
 import type { AppRestartResponse, Command, DorCommandContext } from './types.js';
 import { errorMessage, renderJson, requireControlClient, stringParser, writeStdout } from './shared.js';
 
@@ -40,7 +41,7 @@ JSON output:
     },
     parameters: {
       flags: {
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
       },
       positional: {
         kind: 'array',
@@ -77,7 +78,7 @@ async function runAppCommand(
       && this.options.env?.DORMOUSE_HOST === 'standalone') {
       return new Error('this Dormouse predates dor app restart; quit it and reopen it instead');
     }
-    return new Error(message);
+    return commandError(error);
   }
   if (!response.relaunch) {
     return new Error('a quit is already in progress; Dormouse will quit without relaunching');

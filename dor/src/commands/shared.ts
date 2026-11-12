@@ -1,3 +1,4 @@
+import { CliError } from './errors.js';
 import type {
   CliOptions,
   CliResult,
@@ -26,6 +27,14 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+
+/** A dismissed picker: nothing ran and nothing printed, but the command did
+ *  not succeed, so it exits 1 and `--json` reports `CANCELLED`. */
+export function pickerCancelled(context: DorCommandContext): undefined {
+  context.reportFailure({ code: 'CANCELLED', message: 'cancelled' });
+  context.process.exitCode = 1;
+  return undefined;
+}
 
 export function fail(message: string): CliResult {
   return { exitCode: 1, stdout: '', stderr: `${errorLine(message)}\n` };
@@ -115,7 +124,7 @@ function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseRes
 // to die and respawn). Ignored when a client is injected (tests).
 export function requireControlClient(options: CliOptions, timeoutMs?: number): ControlClient | Error {
   const result = resolveControlClient(options, timeoutMs);
-  return result.ok ? result.value : new Error(result.message);
+  return result.ok ? result.value : new CliError('CONTROL_UNAVAILABLE', result.message);
 }
 
 /** The `--workspace <ref>` flag every action command carries, defined once so

@@ -1,6 +1,7 @@
 /** Private `surface.ensure` wiring for command+cwd idempotency. */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -11,7 +12,6 @@ import type {
 import {
   launchDirectory,
   cwdParser,
-  errorMessage,
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
@@ -139,7 +139,7 @@ JSON output:
     parameters: {
       flags: {
         focus: focusFlag,
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
@@ -177,7 +177,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

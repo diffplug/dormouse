@@ -31,6 +31,8 @@ USAGE
 
 Dormouse bundles the dor CLI into every terminal it launches.
 
+First-party --json prints one result object on stdout. Failures print {"error":{"code":"...","message":"..."}} and retain a nonzero exit status; stderr carries diagnostics. Error codes are INVALID_ARGUMENT (parsing), CONTROL_UNAVAILABLE (no host endpoint, or no host answered before the request was sent), COMMAND_FAILED (validation or execution), TIMEOUT, SURFACE_DIED, and CANCELLED (a picker was dismissed). Exit 1 means failure; await uses 2 for timeout and 3 for Surface death. Help stays text. Browser-provider output belongs to the provider.
+
 FLAGS
   -h --help  Print help information and exit
      --      All subsequent inputs should be interpreted as arguments

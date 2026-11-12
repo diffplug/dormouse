@@ -20,7 +20,7 @@ JSON output:
   }
 
 FLAGS
-     [--json]  Print JSON output.
+     [--json]  Print a JSON result or error object.
   -h  --help   Print help information and exit
       --       All subsequent inputs should be interpreted as arguments
 
