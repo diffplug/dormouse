@@ -85,7 +85,7 @@ FLAGS
      [--minimize]   Create the surface minimized.
      [--fresh]      Ignore a declared key and always create.
      [--from]       Surface to split when creating.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
      [--cwd]        Working directory for the tool file and the command.
      [--list]       List the declared Tools instead of running one.
   -h  --help        Print help information and exit

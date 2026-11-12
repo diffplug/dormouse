@@ -1,0 +1,94 @@
+{
+  "workspaces": [
+    {
+      "input": "workspace:1",
+      "id": "workspace:1",
+      "name": ""
+    },
+    {
+      "input": "workspace:007",
+      "id": "workspace:007",
+      "name": ""
+    },
+    {
+      "input": "workspace:abc",
+      "id": "workspace:abc",
+      "name": ""
+    },
+    {
+      "input": "workspace:",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": "1",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": "build",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": " workspace:1 ",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": "workspace: x",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": "workspace:x\ufeff",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": "workspace:x\u0085",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": "workspace-name:build",
+      "id": "",
+      "name": "build"
+    },
+    {
+      "input": "workspace-name:2",
+      "id": "",
+      "name": "2"
+    },
+    {
+      "input": "workspace-name:007",
+      "id": "",
+      "name": "007"
+    },
+    {
+      "input": "workspace-name: build ",
+      "id": "",
+      "name": " build "
+    },
+    {
+      "input": "workspace-name:",
+      "id": "",
+      "name": ""
+    },
+    {
+      "input": "workspace-name:C:\\tmp\\n",
+      "id": "",
+      "name": "C:\\tmp\\n"
+    },
+    {
+      "input": "workspace-name:\n\ud83d\udc2d",
+      "id": "",
+      "name": "\n\ud83d\udc2d"
+    },
+    {
+      "input": "workspace-name:workspace:1",
+      "id": "",
+      "name": "workspace:1"
+    }
+  ]
+}

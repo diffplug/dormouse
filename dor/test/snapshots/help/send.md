@@ -42,7 +42,7 @@ FLAGS
      [--sequence]   Send an ordered JSON sequence of text and key events.
      [--stdin]      Read text from standard input and send it as text.
      [--text]...    Send literal text; repeat to add another event.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

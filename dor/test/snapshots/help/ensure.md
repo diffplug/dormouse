@@ -55,7 +55,7 @@ FLAGS
      [--restart]    Restart a matching surface in place.
      [--from]       Surface to split when creating.
      [--cwd]        Working directory for matching and for the new command.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

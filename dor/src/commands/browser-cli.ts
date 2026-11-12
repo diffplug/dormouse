@@ -27,7 +27,7 @@ import type {
   ControlClient,
   ParseResult,
 } from './types.js';
-import { BROWSER_UNBOUND_EXIT, callerWorkingDirectory, errorMessage, fail, focusParam, requireControlClient, workspaceParam } from './shared.js';
+import { BROWSER_UNBOUND_EXIT, callerWorkingDirectory, errorMessage, fail, focusParam, requireControlClient, workspaceParam, workspaceRefParser } from './shared.js';
 import { inferredHttpUrl, isSpecialOpenTarget, isSurfaceOpenTarget, resolveSurfaceOpenTarget } from './open-target.js';
 import { callerWslDistro, linuxPathText, windowsPathArgs, type PathArgs } from './wsl-paths.js';
 
@@ -115,6 +115,11 @@ export function extractSessionFlags(
     return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of ${sessionNoun})` };
   }
 
+  const workspaceValue = values.get('--workspace');
+  if (workspaceValue !== undefined) {
+    try { workspaceRefParser(workspaceValue); }
+    catch (error) { return { ok: false, message: errorMessage(error) }; }
+  }
   const workspace = { ...workspaceParam(values.get('--workspace')), ...(values.has('--from') ? { from: values.get('--from')! } : {}), ...focusParam(focus) };
 
   const surface = values.get('--surface');

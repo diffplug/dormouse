@@ -34,7 +34,7 @@ function inlineInputs(args: readonly string[]): Array<SendInputEvent | { stdin: 
   const inputs: Array<SendInputEvent | { stdin: true }> = [];
   for (const arg of args) {
     if (arg === '--') break;
-    if (arg === '--stdin') inputs.push({ stdin: true });
+    if (arg === '--stdin' || /^--stdin=true$/i.test(arg)) inputs.push({ stdin: true });
     else if (arg.startsWith('--text=')) inputs.push({ text: arg.slice(7) });
     else if (arg.startsWith('--key=')) inputs.push({ key: arg.slice(6) });
   }

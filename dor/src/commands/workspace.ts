@@ -24,6 +24,8 @@ import {
   renderPrintableJson,
   requireControlClient,
   stringParser,
+  workspaceRefParser,
+  windowRefParser,
   writeStdout,
 } from './shared.js';
 
@@ -31,6 +33,7 @@ interface WorkspaceFlags {
   readonly force?: boolean;
   readonly json?: boolean;
   readonly window?: string;
+  readonly newWindow?: boolean;
   readonly index?: number;
   readonly dangerouslyDestroyIframePageState?: boolean;
   readonly auto?: boolean;
@@ -87,12 +90,12 @@ const ACTIONS = {
     run: (client, args) => client.switchWorkspace({ workspace: args[0] }),
   },
   move: {
-    usage: '<workspace> [--window <label|new>] [--index <n>] [--dangerously-destroy-iframe-page-state] [--json]',
+    usage: '<workspace> [--window <ref>|--new-window] [--index <n>] [--dangerously-destroy-iframe-page-state] [--json]',
     accepts: (args) => args.length === 1,
     arityError: 'dor workspace move takes one workspace',
     run: (client, args, flags) => client.moveWorkspace({
       workspace: args[0],
-      ...(flags.window === undefined ? {} : { toWindow: flags.window }),
+      ...(flags.newWindow ? { toWindow: 'new' } : flags.window === undefined ? {} : { toWindow: flags.window }),
       ...(flags.index === undefined ? {} : { index: flags.index }),
       dangerouslyDestroyIframePageState: flags.dangerouslyDestroyIframePageState === true,
     }),
@@ -112,7 +115,7 @@ export const workspaceCommand: Command = {
       // actions collapse to the shape they share.
       scope: 'root',
       findReplace: [
-        '  dor workspace [--force] [--json] [--window label] [--index n] [--dangerously-destroy-iframe-page-state] [--auto]<TO-EOL>',
+        '  dor workspace [--force] [--json] [--new-window] [--window ref] [--index n] [--dangerously-destroy-iframe-page-state] [--auto]<TO-EOL>',
         `  dor workspace ${ACTION_NAMES.join('|')} [args...] [flags...]\n`,
       ],
     },
@@ -125,7 +128,7 @@ export const workspaceCommand: Command = {
 
 Manages this Window's Workspaces. Listing them is dor list --workspaces (the overview) and dor list --all (every Workspace's Surfaces); this command only mutates.
 
-A <workspace> target is its id workspace:<n> — a number that a strip reorder or a move between windows never changes — or workspace:<name>, which resolves only when exactly one Workspace carries that name and otherwise fails listing the candidates. Both forms are also accepted bare ("2", "build"). A target in another window is routed there.
+A <workspace> target is its id workspace:<n> — a number that a strip reorder or a move between windows never changes — or workspace-name:<name>, which resolves only when exactly one Workspace carries that name and otherwise fails listing the candidates. Bare references are refused; the name after workspace-name: is literal, including digits and whitespace. A target in another window is routed there.
 
 new creates a Workspace in the background and prints its id: it never moves the user to it. Use dor workspace switch to activate one. Without a name, the Workspace is auto-named: after its terminals' most common git repository and branch ("dormouse @ main"), else their most common directory, and "Workspace N" until one reports a directory. An auto-name follows the terminals, so a script should target the Workspace by its number.
 
@@ -135,7 +138,7 @@ pin pins a Workspace right: its tab joins the group at the strip's right end, af
 
 close kills every Surface in the Workspace. It refuses — raising no confirmation, because the caller is a command rather than someone watching the Wall — when the Workspace holds a Surface the user has typed into or a running command; --force closes it anyway. It refuses a pinned Workspace outright. Closing the last remaining Workspace replaces it with a fresh one.
 
-move puts a Workspace in another window (--window <label>, or --window new to tear it out into its own) and/or at a strip position (--index <n>, 0-based; with --window, a position in that window's strip). The position stays within the Workspace's own group, pinned or not, and a pinned Workspace arrives pinned. Nothing is killed: its terminals travel whole. "moved" is printed only once the target window has adopted the Workspace; one it hands back (it closed mid-transfer, or never answered) is an error naming the reason, and the Workspace stays where it was. The one thing a move between windows cannot carry is a plain iframe's page state — the document cannot leave its webview, so the iframe reopens at its saved URL — and the move is refused when the Workspace holds one unless --dangerously-destroy-iframe-page-state is passed. Agent-browser Surfaces are not affected.
+move puts a Workspace in another window (--window window:<label>, or --new-window to tear it out into its own) and/or at a strip position (--index <n>, 0-based; with --window, a position in that window's strip). The position stays within the Workspace's own group, pinned or not, and a pinned Workspace arrives pinned. Nothing is killed: its terminals travel whole. "moved" is printed only once the target window has adopted the Workspace; one it hands back (it closed mid-transfer, or never answered) is an error naming the reason, and the Workspace stays where it was. The one thing a move between windows cannot carry is a plain iframe's page state — the document cannot leave its webview, so the iframe reopens at its saved URL — and the move is refused when the Workspace holds one unless --dangerously-destroy-iframe-page-state is passed. Agent-browser Surfaces are not affected.
 
 Text output:
   created workspace:2 "build"
@@ -154,7 +157,8 @@ JSON output:
       flags: {
         force: { kind: 'boolean', brief: 'Close even when the Workspace holds Surfaces Reopen cannot restore.', optional: true, withNegated: false },
         json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
-        window: { kind: 'parsed', parse: stringParser, brief: 'move: the window to move to (a label, or "new").', optional: true, placeholder: 'label' },
+        newWindow: { kind: 'boolean', brief: 'move: create a new destination Window.', optional: true, withNegated: false },
+        window: { kind: 'parsed', parse: windowRefParser, brief: 'move: destination window:<label> reference.', optional: true, placeholder: 'ref' },
         index: { kind: 'parsed', parse: (value) => parseNonNegativeInt(value, '--index'), brief: 'move: the 0-based strip position to move to.', optional: true, placeholder: 'n' },
         dangerouslyDestroyIframePageState: { kind: 'boolean', brief: 'move: accept losing every iframe Surface\'s page state.', optional: true, withNegated: false },
         auto: { kind: 'boolean', brief: 'rename: return to the name derived from its terminals.', optional: true, withNegated: false },
@@ -186,13 +190,20 @@ async function runWorkspaceCommand(
     return new Error('--force applies only to dor workspace close');
   }
   if (parsed.value !== 'move') {
+    if (flags.newWindow) return new Error('--new-window applies only to dor workspace move');
     if (flags.window !== undefined) return new Error('--window applies only to dor workspace move');
     if (flags.index !== undefined) return new Error('--index applies only to dor workspace move');
     if (flags.dangerouslyDestroyIframePageState === true) {
       return new Error('--dangerously-destroy-iframe-page-state applies only to dor workspace move');
     }
-  } else if (flags.window === undefined && flags.index === undefined) {
-    return new Error('dor workspace move needs --window, --index, or both');
+  } else if (flags.window === undefined && !flags.newWindow && flags.index === undefined) {
+    return new Error('dor workspace move needs --window, --new-window, or --index');
+  }
+
+  if (flags.newWindow && flags.window !== undefined) return new Error('--new-window and --window are mutually exclusive');
+  if (parsed.value !== 'new') {
+    try { workspaceRefParser(rest[0]); }
+    catch (error) { return commandError(error); }
   }
 
   const client = requireControlClient(this.options);

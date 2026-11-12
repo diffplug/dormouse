@@ -53,17 +53,15 @@ pub fn forget_window(registry: &mut Registry, label: &str) {
     registry.windows.remove(label);
 }
 
-/// What a `dor` target names: the Workspace id it spells, prefix restored,
-/// and the name it reads as unless it reads as a number. Mirrors
-/// `parseWorkspaceRef` in `dor/src/protocol.ts`, `NUMERIC_WORKSPACE_REF` included:
-/// a number is a digit run with no leading zero, so a Workspace named "007"
-/// stays a name rather than routing as `workspace:7`.
+/// Prefixes select exactly one interpretation, matching the CLI and webview.
 fn parse_target(target: &str) -> (String, Option<&str>) {
-    let prefix = crate::ids::Kind::Workspace.prefix();
-    let trimmed = target.trim();
-    let bare = trimmed.strip_prefix(prefix).unwrap_or(trimmed).trim();
-    let numeric = !bare.is_empty() && !bare.starts_with('0') && bare.bytes().all(|b| b.is_ascii_digit());
-    (format!("{prefix}{bare}"), (!numeric).then_some(bare))
+    if let Some(name) = target.strip_prefix("workspace-name:") {
+        return (String::new(), (!name.is_empty()).then_some(name));
+    }
+    let id = target.strip_prefix("workspace:")
+        .filter(|id| !id.is_empty() && !id.chars().any(|c| c.is_whitespace() || c == '\u{feff}'))
+        .map(|_| target.to_string()).unwrap_or_default();
+    (id, None)
 }
 
 /// The window holding the Workspace a `dor` target names, or `None` when no
@@ -130,13 +128,13 @@ mod tests {
             vec![entry("workspace:3", "Build")],
         );
         assert_eq!(window_of(&registry, "workspace:5"), Some("main"));
-        assert_eq!(window_of(&registry, " 3 "), Some("ws-2"));
-        assert_eq!(window_of(&registry, "Docs"), Some("main"));
-        assert_eq!(window_of(&registry, "workspace:Docs"), Some("main"));
+        assert_eq!(window_of(&registry, "workspace:3"), Some("ws-2"));
+        assert_eq!(window_of(&registry, "workspace-name:Docs"), Some("main"));
+        assert_eq!(window_of(&registry, "workspace:Docs"), None);
         // A name two windows use names nothing here: it falls through to the
         // caller's window, which refuses a duplicate of its own and otherwise
         // resolves its own, so a local Workspace wins.
-        assert_eq!(window_of(&registry, "Build"), None);
+        assert_eq!(window_of(&registry, "workspace-name:Build"), None);
         assert_eq!(window_of(&registry, "workspace:9"), None);
         assert_eq!(window_of(&registry, "nope"), None);
     }
@@ -147,14 +145,14 @@ mod tests {
         report(&mut registry, "main", vec![entry("workspace:abc", "2"), entry("workspace:def", "2")]);
         report(&mut registry, "ws-2", vec![entry("workspace:2", "abc")]);
         assert_eq!(window_of(&registry, "workspace:abc"), Some("main"));
-        assert_eq!(window_of(&registry, "def"), Some("main"));
+        assert_eq!(window_of(&registry, "workspace:def"), Some("main"));
         assert_eq!(window_of(&registry, "workspace:2"), Some("ws-2"));
         // The retired spelling names nothing.
         assert_eq!(window_of(&registry, "workspace-2"), None);
     }
 
     #[test]
-    fn a_number_with_a_leading_zero_is_a_name() {
+    fn explicit_names_can_be_numeric() {
         let mut registry = Registry::default();
         report(
             &mut registry,
@@ -162,12 +160,22 @@ mod tests {
             vec![entry("workspace:7", "Build"), entry("workspace:8", "0")],
         );
         report(&mut registry, "ws-2", vec![entry("workspace:9", "007")]);
-        // `NUMERIC_WORKSPACE_REF` reads neither as a number, so each routes to
-        // the window holding the Workspace so named, never to `workspace:7`.
-        assert_eq!(window_of(&registry, "007"), Some("ws-2"));
-        assert_eq!(window_of(&registry, "workspace:007"), Some("ws-2"));
-        assert_eq!(window_of(&registry, "0"), Some("main"));
+        // Names are exact strings, including digits and leading zeroes.
+        assert_eq!(window_of(&registry, "workspace-name:007"), Some("ws-2"));
+        assert_eq!(window_of(&registry, "workspace:007"), None);
+        assert_eq!(window_of(&registry, "workspace-name:0"), Some("main"));
         assert_eq!(window_of(&registry, "+7"), None);
-        assert_eq!(window_of(&registry, "7"), Some("main"));
+        assert_eq!(window_of(&registry, "workspace:7"), Some("main"));
     }
+    #[test]
+    fn workspace_ref_grammar_matches_the_cli() {
+        let cases: JsonValue = serde_json::from_str(include_str!("../../../dor/test/reference-cases.json")).unwrap();
+        for case in cases["workspaces"].as_array().unwrap() {
+            let input = case["input"].as_str().unwrap();
+            let (id, name) = parse_target(input);
+            assert_eq!(id, case["id"].as_str().unwrap(), "id: {input:?}");
+            assert_eq!(name.unwrap_or(""), case["name"].as_str().unwrap(), "name: {input:?}");
+        }
+    }
+
 }

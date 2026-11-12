@@ -39,7 +39,7 @@ FLAGS
      [--minimize]   Create the surface minimized.
      [--fresh]      Open another instance even when the Tool has a key.
      [--from]       Surface to split when creating.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
      [--cwd]        Directory for resolving the path.
      [--tool]       Use a user Tool, builtin:file, builtin:code, or builtin:folder.
      [--preview]    Show it in this Workspace's preview slot.

@@ -45,7 +45,7 @@ FLAGS
      [--json]       Print a JSON result or error object.
      [--minimize]   Create or replace the surface minimized.
      [--from]       Surface to replace or split from.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

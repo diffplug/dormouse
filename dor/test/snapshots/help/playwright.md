@@ -56,7 +56,7 @@ FLAGS
   -s [--session]    Raw playwright session name (native spelling: -s).
      [--surface]    Existing playwright surface handle.
      [--from]       Reference Surface for placement and managed-key Workspace.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
      [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments

@@ -109,13 +109,11 @@ const fixturePortsById = {
   'surface:4': [{ family: 'IPv6', address: '::1', port: 8080, pid: 5151, processName: 'python' }],
 };
 
-/** The Workspace a `workspace:<n|name>` target names in the fixture, the way the
+/** The Workspace an explicit id or name reference targets in the fixture, the way the
  *  host resolves one — its id, bare number, or exact name. */
 function fixtureWorkspace(target) {
-  const bare = String(target).replace(/^workspace:/, '');
-  return fixtureWorkspaces.find((row) => (
-    row.id === `workspace:${bare}` || row.name === bare
-  )) ?? fixtureWorkspaces[0];
+  const text = String(target);
+  return fixtureWorkspaces.find(row => text.startsWith('workspace-name:') ? row.name === text.slice(15) : row.id === text) ?? fixtureWorkspaces[0];
 }
 
 /** The `surface.browser` request a `dor agent-browser` run made, if it opened one at
@@ -287,7 +285,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // so the same key in `build` is another browser entirely.
       if (request.key !== undefined) {
         const workspace = fixtureWorkspaces.find((row) => (
-          request.workspace === row.name || request.workspace === row.id
+          request.workspace === `workspace-name:${row.name}` || request.workspace === row.id
         ));
         // `sessionForKey` scrubs the id's colon: a session name is a socket path.
         return { binding: { session: `dormouse.${workspace ? workspace.id.replace(':', '-') : '1'}.${request.key}`, ...request.proposed } };
@@ -1247,7 +1245,7 @@ test('agent-browser resolves --key to a namespaced session and opens a surface',
 test('agent-browser --key in another Workspace drives that Workspace own session', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['agent-browser', '--workspace', 'build', '--key', 'default', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--workspace', 'workspace-name:build', '--key', 'default', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
   // The same key in another Workspace is another browser: the session name is
   // namespaced by the Workspace's stable id, so nothing here can reach the
   // first Workspace's `dormouse.1.default`.
@@ -1256,10 +1254,10 @@ test('agent-browser --key in another Workspace drives that Workspace own session
     ['agent-browser', '--session', 'dormouse.workspace-2.default', 'stream', 'status', '--json'],
   ]);
   assert.deepEqual(client.requests, [
-    { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'default', proposed: proposedHere, workspace: 'build' } },
+    { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'default', proposed: proposedHere, workspace: 'workspace-name:build' } },
     {
       method: 'browserSurface',
-      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2.default', cwd: process.cwd(), wsPort: 61141, workspace: 'build' },
+      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2.default', cwd: process.cwd(), wsPort: 61141, workspace: 'workspace-name:build' },
     },
   ]);
 });
@@ -1287,7 +1285,7 @@ test('agent-browser raw --session skips key namespacing', async () => {
 test('agent-browser --workspace names the Workspace and never reaches the binary', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['agent-browser', '--workspace', 'build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--workspace', 'workspace-name:build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
   // Intercepted like the identity flags: the browser opens in `build`, the
   // handle resolves there, and agent-browser sees neither the flag nor its value.
   assert.deepEqual(ab.calls, [
@@ -1297,9 +1295,9 @@ test('agent-browser --workspace names the Workspace and never reaches the binary
   // Every host round trip the run makes names it: the session namespace, the
   // handle resolution, and the surface the browser lands in.
   assert.deepEqual(client.requests.map((entry) => [entry.method, entry.request.workspace]), [
-    ['resolveBrowser', 'build'],
-    ['resolveOpenTarget', 'build'],
-    ['browserSurface', 'build'],
+    ['resolveBrowser', 'workspace-name:build'],
+    ['resolveOpenTarget', 'workspace-name:build'],
+    ['browserSurface', 'workspace-name:build'],
   ]);
 });
 
@@ -1794,8 +1792,8 @@ test('list --all keeps the header of a Workspace its filters emptied', async () 
 
 test('list --workspace asks the host for another Workspace', async () => {
   const client = fixtureClient();
-  await runCli(['list', '--workspace', 'build'], { client, env: listEnv });
-  assert.deepEqual(client.requests, [{ includePorts: false, workspace: 'build' }]);
+  await runCli(['list', '--workspace', 'workspace-name:build'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: false, workspace: 'workspace-name:build' }]);
 });
 
 test('list --workspaces prints the overview', async () => {
@@ -1828,25 +1826,25 @@ test('workspace mutation verbs', async () => {
   await snapshot('workspace-new', await runCli(['workspace', 'new', 'build'], { client, env: listEnv }));
   await snapshot('workspace-new-json', await runCli(['workspace', 'new', '--json'], { client, env: listEnv }));
   await snapshot('workspace-rename', await runCli(['workspace', 'rename', 'workspace:2', 'agents'], { client, env: listEnv }));
-  await snapshot('workspace-switch', await runCli(['workspace', 'switch', 'build'], { client, env: listEnv }));
+  await snapshot('workspace-switch', await runCli(['workspace', 'switch', 'workspace-name:build'], { client, env: listEnv }));
   assert.deepEqual(client.requests, [
     { method: 'newWorkspace', request: { name: 'build' } },
     { method: 'newWorkspace', request: {} },
     { method: 'renameWorkspace', request: { workspace: 'workspace:2', name: 'agents' } },
-    { method: 'switchWorkspace', request: { workspace: 'build' } },
+    { method: 'switchWorkspace', request: { workspace: 'workspace-name:build' } },
   ]);
 });
 
 test('workspace pin and unpin send one request each, and take one workspace', async () => {
   const client = fixtureClient();
-  await snapshot('workspace-pin', await runCli(['workspace', 'pin', 'build'], { client, env: listEnv }));
+  await snapshot('workspace-pin', await runCli(['workspace', 'pin', 'workspace-name:build'], { client, env: listEnv }));
   await snapshot('workspace-unpin-json', await runCli(['workspace', 'unpin', 'workspace:2', '--json'], { client, env: listEnv }));
   assert.deepEqual(client.requests, [
-    { method: 'pinWorkspace', request: { workspace: 'build', pinned: true } },
+    { method: 'pinWorkspace', request: { workspace: 'workspace-name:build', pinned: true } },
     { method: 'pinWorkspace', request: { workspace: 'workspace:2', pinned: false } },
   ]);
   await snapshot('workspace-pin-arity', await runCli(['workspace', 'pin'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-unpin-force-misuse', await runCli(['workspace', 'unpin', '2', '--force'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-unpin-force-misuse', await runCli(['workspace', 'unpin', 'workspace:2', '--force'], { client: fixtureClient(), env: listEnv }));
 });
 
 test('workspace close refuses running work until forced', async () => {
@@ -1865,29 +1863,29 @@ test('workspace move sends the window and the index in one request', async () =>
   const client = fixtureClient();
   await snapshot(
     'workspace-move',
-    await runCli(['workspace', 'move', 'build', '--window', 'ws-2', '--index', '0'], { client, env: listEnv }),
+    await runCli(['workspace', 'move', 'workspace-name:build', '--window', 'window:ws-2', '--index', '0'], { client, env: listEnv }),
   );
   assert.deepEqual(client.requests, [{
     method: 'moveWorkspace',
-    request: { workspace: 'build', toWindow: 'ws-2', index: 0, dangerouslyDestroyIframePageState: false },
+    request: { workspace: 'workspace-name:build', toWindow: 'window:ws-2', index: 0, dangerouslyDestroyIframePageState: false },
   }]);
 });
 
 test('workspace move flags are refused off the action, and move needs one of them', async () => {
-  await snapshot('workspace-window-misuse', await runCli(['workspace', 'switch', '2', '--window', 'ws-2'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-index-misuse', await runCli(['workspace', 'switch', '2', '--index', '0'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-destroy-iframe-misuse', await runCli(['workspace', 'switch', '2', '--dangerously-destroy-iframe-page-state'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-move-needs-flag', await runCli(['workspace', 'move', '2'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-invalid-index', await runCli(['workspace', 'move', '2', '--index', 'x'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-window-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--window', 'window:ws-2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-index-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--index', '0'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-destroy-iframe-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--dangerously-destroy-iframe-page-state'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-move-needs-flag', await runCli(['workspace', 'move', 'workspace:2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-invalid-index', await runCli(['workspace', 'move', 'workspace:2', '--index', 'x'], { client: fixtureClient(), env: listEnv }));
 });
 
 test('list --window asks the host for another window', async () => {
   const client = fixtureClient();
-  await runCli(['list', '--window', 'ws-2'], { client, env: listEnv });
-  await runCli(['list', '--workspaces', '--window', 'ws-2'], { client, env: listEnv });
+  await runCli(['list', '--window', 'window:ws-2'], { client, env: listEnv });
+  await runCli(['list', '--workspaces', '--window', 'window:ws-2'], { client, env: listEnv });
   assert.deepEqual(client.requests, [
-    { includePorts: false, window: 'ws-2' },
-    { method: 'listWorkspaces', request: { window: 'ws-2' } },
+    { includePorts: false, window: 'window:ws-2' },
+    { method: 'listWorkspaces', request: { window: 'window:ws-2' } },
   ]);
 });
 
@@ -1896,7 +1894,7 @@ test('workspace usage errors name the action', async () => {
   await snapshot('workspace-unknown-action', await runCli(['workspace', 'destroy', 'x'], { client: fixtureClient(), env: listEnv }));
   await snapshot('workspace-list-action', await runCli(['workspace', 'list'], { client: fixtureClient(), env: listEnv }));
   await snapshot('workspace-rename-arity', await runCli(['workspace', 'rename', 'workspace:2'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-force-misuse', await runCli(['workspace', 'switch', '2', '--force'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-force-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--force'], { client: fixtureClient(), env: listEnv }));
 });
 
 test('app restart asks the host once', async () => {
@@ -1953,19 +1951,19 @@ test('app usage errors name the action', async () => {
 
 test('every action command forwards --workspace to the host', async () => {
   const calls = [
-    [['split', '--workspace', 'build', '--', 'pnpm', 'dev'], 'splitSurface'],
-    [['ensure', '--workspace', 'build', '--', 'pnpm', 'dev'], 'ensureSurface'],
-    [['send', 'surface:1', '--text', 'hi', '--workspace', 'build'], 'sendSurface'],
-    [['read', 'surface:1', '--workspace', 'build'], 'readSurface'],
-    [['kill', 'surface:1', '--confirm-dangerously', '--workspace', 'build'], 'killSurface'],
-    [['iframe', 'http://localhost:5173', '--workspace', 'build'], 'iframeSurface'],
+    [['split', '--workspace', 'workspace-name:build', '--', 'pnpm', 'dev'], 'splitSurface'],
+    [['ensure', '--workspace', 'workspace-name:build', '--', 'pnpm', 'dev'], 'ensureSurface'],
+    [['send', 'surface:1', '--text', 'hi', '--workspace', 'workspace-name:build'], 'sendSurface'],
+    [['read', 'surface:1', '--workspace', 'workspace-name:build'], 'readSurface'],
+    [['kill', 'surface:1', '--confirm-dangerously', '--workspace', 'workspace-name:build'], 'killSurface'],
+    [['iframe', 'http://localhost:5173', '--workspace', 'workspace-name:build'], 'iframeSurface'],
   ];
   for (const [argv, method] of calls) {
     const client = fixtureClient();
     const result = await runCli(argv, { client, env: listEnv });
     assert.equal(result.exitCode, 0, `${argv[0]} should succeed: ${result.stderr}`);
     const call = client.requests.find((entry) => entry.method === method);
-    assert.equal(call.request.workspace, 'build', `${argv[0]} should forward --workspace`);
+    assert.equal(call.request.workspace, 'workspace-name:build', `${argv[0]} should forward --workspace`);
   }
 });
 
@@ -2480,8 +2478,8 @@ test('browser providers read Dormouse options anywhere, as the native CLIs read 
   assert.equal(result.exitCode, 0, result.stderr);
   assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'dormouse.1.app', 'open', 'http://localhost:5173/', '--headed']);
   assert.equal(client.requests[0].request.key, 'app');
-  assert.deepEqual(extractSessionFlags(['snapshot', '-i', '--workspace=build', '--session', 'raw'], { sessionNoun: 'session' }), {
-    ok: true, value: { session: 'raw', rest: ['snapshot', '-i'], workspace: 'build' },
+  assert.deepEqual(extractSessionFlags(['snapshot', '-i', '--workspace=workspace-name:build', '--session', 'raw'], { sessionNoun: 'session' }), {
+    ok: true, value: { session: 'raw', rest: ['snapshot', '-i'], workspace: 'workspace-name:build' },
   });
 });
 
@@ -2667,4 +2665,37 @@ test('browser placement is carried through resolution and binding, never forward
   const forwarded = await runCli(['agent-browser', '--key', 'docs', '--', 'eval', '--from'], { client, execAgentBrowser: ab.exec });
   assert.equal(forwarded.exitCode, 0, forwarded.stderr);
   assert.deepEqual(ab.calls.find(args => args.includes('eval')).slice(-2), ['eval', '--from']);
+});
+
+test('reference prefixes are required before any host mutation', async () => {
+  for (const args of [['list', '--workspace', '2'], ['split', '--workspace', 'build'], ['workspace', 'switch', 'build'], ['move', 'surface:1', '2'], ['list', '--window', 'main'], ['workspace', 'move', 'workspace:2', '--window', 'new']]) {
+    const client = fixtureClient();
+    const result = await runCli(args, { client });
+    assert.equal(result.exitCode, 1, JSON.stringify(args));
+    assert.equal(client.requests.length, 0);
+  }
+  for (const provider of ['agent-browser', 'playwright']) {
+    const client = fixtureClient();
+    const ab = fakeAgentBrowser();
+    const result = await runCli([provider, 'open', ':5173', '--workspace', 'build'], { client, execAgentBrowser: ab.exec, execPlaywright: ab.exec });
+    assert.equal(result.exitCode, 1, provider);
+    assert.match(result.stderr, /invalid Workspace reference 'build'/);
+    assert.equal(ab.calls.length, 0);
+    assert.equal(client.requests.length, 0);
+  }
+  const client = fixtureClient();
+  const result = await runCli(['workspace', 'move', 'workspace-name:2', '--new-window'], { client });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(client.requests[0].request.workspace, 'workspace-name:2');
+  assert.equal(client.requests[0].request.toWindow, 'new');
+  const conflict = fixtureClient();
+  assert.equal((await runCli(['workspace', 'move', 'workspace:2', '--new-window', '--window', 'window:main'], { client: conflict })).exitCode, 1);
+  assert.equal(conflict.requests.length, 0);
+});
+
+test('send --stdin=true keeps its position among ordered events', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['send', 'surface:1', '--text', 'first', '--stdin=true', '--key', 'Enter'], { client, readStdin: async () => 'second' });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(client.requests[0].request.events, [{ text: 'first' }, { text: 'second' }, { key: 'Enter' }]);
 });

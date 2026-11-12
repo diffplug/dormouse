@@ -209,13 +209,13 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 ```sh
 dor list --workspaces                     # the Workspace overview
 dor workspace new build                   # create one, in the background
-dor workspace switch workspace:build      # move the user to it
+dor workspace switch workspace-name:build      # move the user to it
 dor workspace close workspace:2 --force   # close it and everything in it
 ```
 
-A Window holds several Workspaces, each with its own surfaces. You almost never need these: your commands land in the Workspace that currently holds your terminal, and creating one is a change the user sees. When you do, name one by its id `workspace:<n>` or as `workspace:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's id finds it in any Workspace without that flag. `close` refuses a Workspace holding your running work unless you pass `--force`.
+A Window holds several Workspaces, each with its own surfaces. You almost never need these: your commands land in the Workspace that currently holds your terminal, and creating one is a change the user sees. When you do, name one by its id `workspace:<n>` or as `workspace-name:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's id finds it in any Workspace without that flag. `close` refuses a Workspace holding your running work unless you pass `--force`.
 
-`dor move <surface> <workspace>` moves one pane, keeping its id; `--new` creates a Workspace, and `--focus` follows it. A Workspace named `new` remains targetable. If your own terminal moves, unscoped `dor ensure -- pnpm dev` searches only the destination and may duplicate the server you left behind. Keep that server's id, or target its original Workspace with `--workspace`. The moved terminal prints a local notice naming its new Workspace. Iframes require `--dangerously-destroy-iframe-page-state` and reopen at their saved URL; dirty or pending Tools refuse even with that flag.
+`dor move <surface> <workspace>` moves one pane, keeping its id; `--new-workspace` creates a Workspace, and `--focus` follows it. If your own terminal moves, unscoped `dor ensure -- pnpm dev` searches only the destination and may duplicate the server you left behind. Keep that server's id, or target its original Workspace with `--workspace`. The moved terminal prints a local notice naming its new Workspace. Iframes require `--dangerously-destroy-iframe-page-state` and reopen at their saved URL; dirty or pending Tools refuse even with that flag.
 
 ## Recipes
 

@@ -278,7 +278,7 @@ describe('workspace-store', () => {
     expect(DEFAULT_WORKSPACE_ID).toBe('workspace:1');
     // A resolution carries the Workspace, so a caller needs no second lookup.
     expect(resolveWorkspaceRef('workspace:7')).toEqual({ ok: true, id: 'workspace:7', name: 'Workspace 2', nameIsAuto: true });
-    expect(resolveWorkspaceRef('7')).toMatchObject({ ok: true, id: 'workspace:7' });
+    expect(resolveWorkspaceRef('7').ok).toBe(false);
     // The strip position is never a target, nor the retired spelling.
     for (const ref of ['workspace:2', 'workspace:9', 'workspace:0', 'workspace-7', 'nonsense']) {
       expect(resolveWorkspaceRef(ref)).toEqual({ ok: false, message: `unknown workspace target '${ref}'` });
@@ -294,8 +294,8 @@ describe('workspace-store', () => {
     setWorkspaces({ workspaces: [{ id: 'workspace:abc', name: '2', nameIsAuto: false }, { id: 'workspace:def', name: 'abc', nameIsAuto: false }], activeId: 'workspace:abc' });
     expect(resolveWorkspaceRef('workspace:2').ok).toBe(false);
     expect(resolveWorkspaceRef('workspace:abc')).toMatchObject({ ok: true, id: 'workspace:abc' });
-    expect(resolveWorkspaceRef('abc')).toMatchObject({ ok: true, id: 'workspace:abc' });
-    expect(resolveWorkspaceRef('def')).toMatchObject({ ok: true, id: 'workspace:def' });
+    expect(resolveWorkspaceRef('workspace-name:abc')).toMatchObject({ ok: true, id: 'workspace:def' });
+    expect(resolveWorkspaceRef('workspace:def')).toMatchObject({ ok: true, id: 'workspace:def' });
     createWorkspace({ activate: false });
     expect(resolveWorkspaceRef('workspace:7')).toMatchObject({ ok: true, id: 'workspace:7' });
   });
@@ -353,16 +353,25 @@ describe('workspace-store', () => {
   it('resolves a Workspace by name, and refuses an ambiguous one', () => {
     renameWorkspace(DEFAULT_WORKSPACE_ID, 'build');
     createWorkspace({ id: 'workspace:2', name: 'agents' });
-    expect(resolveWorkspaceRef('workspace:agents')).toMatchObject({ ok: true, id: 'workspace:2', name: 'agents' });
-    expect(resolveWorkspaceRef('agents')).toMatchObject({ ok: true, id: 'workspace:2' });
+    expect(resolveWorkspaceRef('workspace-name:agents')).toMatchObject({ ok: true, id: 'workspace:2', name: 'agents' });
+    expect(resolveWorkspaceRef('workspace-name:agents')).toMatchObject({ ok: true, id: 'workspace:2' });
 
     createWorkspace({ id: 'workspace:3', name: 'agents' });
-    expect(resolveWorkspaceRef('agents')).toEqual({
+    expect(resolveWorkspaceRef('workspace-name:agents')).toEqual({
       ok: false,
-      message: 'workspace target \'agents\' matched multiple Workspaces: workspace:2 "agents", workspace:3 "agents"',
+      message: 'workspace target \'workspace-name:agents\' matched multiple Workspaces: workspace:2 "agents", workspace:3 "agents"',
     });
     // A number is never read as a name, even when a Workspace is named for one.
     renameWorkspace('workspace:3', '1');
-    expect(resolveWorkspaceRef('1')).toMatchObject({ ok: true, id: DEFAULT_WORKSPACE_ID });
+    expect(resolveWorkspaceRef('workspace:1')).toMatchObject({ ok: true, id: DEFAULT_WORKSPACE_ID });
+    expect(resolveWorkspaceRef('workspace-name:1')).toMatchObject({ ok: true, id: 'workspace:3' });
   });
+  it('matches literal names without trimming, and never falls back from an id', () => {
+    createWorkspace({ id: 'workspace:2', name: ' 007 ' });
+    expect(resolveWorkspaceRef('workspace-name: 007 ')).toMatchObject({ ok: true, id: 'workspace:2' });
+    expect(resolveWorkspaceRef('workspace-name:007').ok).toBe(false);
+    expect(resolveWorkspaceRef('workspace:007').ok).toBe(false);
+    expect(resolveWorkspaceRef('007').ok).toBe(false);
+  });
+
 });

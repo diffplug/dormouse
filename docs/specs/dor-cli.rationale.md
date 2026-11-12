@@ -42,6 +42,10 @@ The provider CLIs stay on Windows because the dev server, not the browser, is wh
 
 A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a literal percent-delimited environment expression unchanged through simple and npm-shaped global/local batch shims.
 
+## Handle Model
+
+Separate id and name prefixes make a numeric name addressable without letting a rename redirect an id lookup. Preserving name whitespace also lets a caller round-trip the exact name in a listing. Bare labels provided a second grammar that the CLI, webview, and Rust router each had to interpret.
+
 ## Current Implemented Commands
 
 Option values previously passed through two incompatible scanners: help detection scanned every token, while stricli rejected empty or multiline inline values and interpreted leading dashes as options. Consuming declared valued options first makes both spellings equivalent; invocation-local scanner tokens preserve values without introducing an escaping syntax for callers.
