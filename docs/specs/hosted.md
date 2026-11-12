@@ -19,15 +19,15 @@ Every Worker but `dormouse-frames` answers `/api/health` and, but `dormouse-try`
 
 **Must keep serving `/account` on the account origin**: every desktop since v1.2.0 opens it by a hard-coded path.
 
-**Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker that binds one.
+**Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.**
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns and `owner_access` view, the relay inserts approved voice tokens ("Managed voice"), and both add to the daily counts ("Metrics"). **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there. **Must bind each production Worker to its own uncached Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
-**Must install released core, auth, and stripe packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth and billing migrations remain owned by their packages; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never read `pgstencil_billing.accounts` or `checkouts`, or restate its access rule**: `@pgstencil/stripe`'s helpers and `owner_access` view answer those. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
+The pgstencil packages (core, auth, stripe) install from npm: `docs/specs/security-hosted.md` -> "Deployment boundary". The auth and billing migrations are owned by their packages; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never read `pgstencil_billing.accounts` or `checkouts`, or restate its access rule**: `@pgstencil/stripe`'s helpers and `owner_access` view answer those. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
 **Must declare every required peer dependency of the installed packages in `hosted/package.json`'s `dependencies`**, so they share Hosted's copy and Renovate updates them. **Never put an optional peer (pgstencil's tooling) in `dependencies`.**
 
-Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `hosted/server/worker-app.ts`; `verifyPackages` in `hosted/scripts/production.mjs`; `hosted/server/runtime-roles.sql`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/server/tests/runtime-roles.test.ts`.
+Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `hosted/server/worker-app.ts`; `hosted/server/runtime-roles.sql`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/server/tests/runtime-roles.test.ts`.
 
 ## Identity and login
 
@@ -39,7 +39,7 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: `ADMIN_EMAIL` ("Entitlement").
 
-**Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
+**Must enable providers explicitly in `OAUTH_PROVIDERS`.** Checks: `docs/specs/security-hosted.md` -> "Account boundary". Email uses Postmark in production and local capture in development.
 
 **Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter. Cookie reads: `docs/specs/security-hosted.md` -> "Origin boundary".
 
@@ -49,9 +49,9 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must link the account footer to the public Hosted privacy policy and terms.**
 
-**Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets. **`/checkout` keeps only its plan and ref in `sessionStorage`, for ten minutes**, so they survive a provider's sign-in, which returns to `/account`.
+**Must show configured sign-in methods only.** Only public identity fields render. **`/checkout` keeps only its plan and ref in `sessionStorage`, for ten minutes**, so they survive a provider's sign-in, which returns to `/account`.
 
-**Must be built from the dormouse.sh reference pages' own design** (`lib/src/site/`), never a copy of it: their theme and picker, offered without the theme store, the site's Ubuntu faces served from Hosted's own origin, and the site header. It loads no marketing scripts or analytics.
+**Must be built from the dormouse.sh reference pages' own design** (`lib/src/site/`), never a copy of it: their theme and picker, offered without the theme store, the site's Ubuntu faces served from Hosted's own origin, and the site header.
 
 Source of truth: `App` in `hosted/src/App.tsx`; `takeCheckout` in `hosted/src/billing.ts`; `useDocsThemedBody` in `lib/src/site/docs-paint.ts`.
 
@@ -69,7 +69,7 @@ Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` and 
 
 ## Entitlement
 
-**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, resolved with each bearer ("Relay").
+**Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, in the query that resolves each bearer.
 
 - **Must entitle an account only while `@pgstencil/stripe`'s `owner_access` view grants it access**, by the database's clock: exactly one current subscription, `active` before its period end plus `RENEWAL_GRACE` (rationale) or `trialing` before its trial end, never a failed renewal. **Never entitle it while a payment dispute is open** ("Billing").
 - **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, one of the exceptions to "never email" ("Identity and login"); nothing else may key on an address.
@@ -82,7 +82,7 @@ The account Worker bills through `@pgstencil/stripe` (`docs/specs/pricing.md` ->
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, price, active, until, renews, entitled, suspended, founding, foundingLapsed, founder, consent, withdrawal, withdrawn }`; `plan` names a subscription Stripe still holds; closed, 200 `{ closed: true }` |
+| `GET /api/billing` | login cookie | 200 `BillingSummary`, or `BillingClosed` while closed (`hosted/server/billing-summary.ts`) |
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref?, terms, autoRenew, price }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
@@ -109,7 +109,6 @@ Errors are JSON `{ message }`. The cookie routes need no entitlement, answer 401
 - **Never open a founding checkout for an account `foundingLapsed` answers true**, the rule `docs/specs/pricing.md` -> "Checkout and entitlement" states: it answers 409 `PRICE_CHANGED`, so a stale page rereads, and `GET` answers `founding` null beside it.
 - **Must answer `/api/hosted/*` without resolving a login**, each answer reused for `COHORT_CACHE_MS` per isolate; `total` counts founding purchases net of refunds. The site's Worker forwards it from `dormouse.sh` to this origin, so the 421 gate needs no exception. What it answers and fetches: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Must resync, from the account's Cron Trigger, a bounded batch of stale owners** (`reconcileStale`), finish a bounded batch of unsettled withdrawals and closure refunds, reread the least recently checked open disputes from Stripe as their webhook would, and run the notices ("Billing notices"); a failure fails the invocation after every one was tried ("Billing alert").
-- **Must grant the account's role the `pgstencil_billing` schema from `runtime-roles.sql`**, additively: the package's migration creates it.
 
 Source of truth: `billingSetup`, `withBilling`, `stripeHoldsPrice`, `foundingLapsed`, `resyncBilling`, and `END_REASONS` in `hosted/server/billing.ts`; `billingRoutes` and `disputeAction` in `hosted/server/billing-routes.ts`; `withdrawalOffer` and `recordWithdrawal` in `hosted/server/withdrawal.ts`; `cohortRoutes` in `hosted/server/cohort-routes.ts`; `forwardHosted` in `website/public/_worker.js`.
 
@@ -186,7 +185,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 
 **Never name a token, or list computers, on the account page.** It says whether Natural Voice is on, and turning it off asks first.
 
-**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; turning either off preserves the other. The relay's role may insert only the voice token's owner and hash. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
+**Must keep managed voice and remote control independent.** Voice approval mints only a voice token, remote enrollment only a Burrow; turning either off preserves the other. Client controls and disclosure: `docs/specs/alert.md` -> "Settings dialog".
 
 **Speak must answer in this order:**
 
@@ -197,7 +196,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and admi
 5. 429 once the owner's UTC-day counter reaches 500. The atomic increment precedes the upstream call, so failed upstream attempts count.
 6. 502 when ElevenLabs throws or answers non-2xx.
 
-**Never log the text or forward an upstream body or status.** The upstream URL, model, and format (`mp3_44100_128`, so 200 characters stay under a shipped desktop's `MAX_AUDIO_BYTES`) are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is the voice Worker's secret, which production preflight requires there.
+Speak asks ElevenLabs for `mp3_44100_128`, so 200 characters stay under a shipped desktop's `MAX_AUDIO_BYTES`. Logging, forwarding, and the fixed upstream: `docs/specs/security-hosted.md` -> "Account boundary".
 
 **Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only**: one pass shortly after each successful speak, and a Cron Trigger every 5 minutes for what that missed. No retention bound is guaranteed (rationale).
 
@@ -241,7 +240,6 @@ The relay Worker serves the self-host Relay's HTTP API to many accounts: the pat
 A session-gated route answers a session of an account no longer entitled with the expired session's 401 `UNAUTHORIZED_ERROR`, so Pocket returns to sign-in.
 
 - **Must keep the Relay's state in Postgres** (`hosted/server/dormouse-migrations/002_relay.sql`), sessions, challenges, and nonces included, where the self-host Relay holds them in memory.
-- **Must resolve each bearer and its owner's entitlement in one query**, the socket upgrades' query-parameter token included. The entitlement: "Entitlement".
 - **Must cap every table a caller grows, keyed by whoever grows it**, as `docs/specs/relay.md` -> "Guardrails" does: setup tokens and setup challenges per Burrow (`MAX_TOKENS_PER_BURROW`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`), and sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), each evicting its key's own oldest; passkeys per account are refused at the cap (rationale). A capped write prunes, trims, and evicts only its own key's rows.
 - **Must sweep every Relay table's expired rows from the relay's hourly Cron Trigger** (rationale); sign-in challenges, minted unauthenticated and flat, are bounded by it and the per-address limit.
 - **Must answer 429 with `Retry-After` past the per-address limit on `signin/*` (`RELAY_SIGNIN_LIMIT`) and `setup/begin`/`finish` (`RELAY_SETUP_LIMIT`)**, before the body limit and any database read: 30 a minute, a ceremony's two routes sharing one budget (rationale).
@@ -251,7 +249,7 @@ A session-gated route answers a session of an account no longer entitled with th
 
 - **Must keep subscriptions in Postgres** (`hosted/server/dormouse-migrations/003_relay_push.sql`), keyed `(burrowId, deliveryId)`, every field bounded as self-host bounds it, deleted with their Burrow. **Must read the addresses a delivery moves off, drop rows, and prune 404/410 among the account's rows only.**
 - **Must cap subscriptions at `MAX_PUSH_SUBSCRIPTIONS_PER_BURROW` and `MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT`** in place of self-host's file total, evicting the oldest `subscribedAt`, never the row just written (rationale). A subscribe racing its Burrow's removal answers 404.
-- **Must register and fetch only a known Web Push service's endpoint** (`knownPushEndpoint`) in place of the self-host DNS guard: `https:` on the default port, no credentials, at most `MAX_PUSH_ENDPOINT_LENGTH`, and host `fcm.googleapis.com` or `updates.push.services.mozilla.com`, or one under `.push.apple.com` or `.notify.windows.com` (rationale). **Never follow a redirect**: a 3xx is `failed`. A refusal's log keeps at most 1 KiB of its body.
+- **Must register and fetch only a known Web Push service's endpoint** (`knownPushEndpoint`) in place of the self-host DNS guard (rationale); a redirect is never followed, so a 3xx is `failed`.
 - **Must send through `webPushRequest`** (`remote-lib-common/src/remote/web-push.ts`), WebCrypto with no `web-push`: RFC 8291 `aes128gcm` and an RFC 8292 VAPID JWT whose `sub` is the relay's `APP_ORIGIN`, each delivery bounded by `PUSH_SEND_DEADLINE_MS`. **Never hold a Postgres connection across a push service's fetch.**
 - **Push is disabled, not half-working**: without both `RELAY_VAPID_PUBLIC_KEY` and `RELAY_VAPID_PRIVATE_KEY`, with malformed keys (including noncanonical base64url), with a private key that does not sign for its public point, or without an https, non-loopback `APP_ORIGIN` for the subject, the config route answers `null` and subscribe and send 503. The pair is a relay Worker secret; previews derive theirs ("PR previews"), and the dev loop has none.
 
@@ -367,7 +365,7 @@ Hosted's Workers count what they serve in aggregate daily rows; no page or deskt
 | `subscription.canceled` | plan | the webhook processes a purchase's end, unless refunded |
 | `subscription.refunded` | plan | that end's recorded reason was `refund`, or it came within `REFUND_DAYS` |
 
-- **Never count a label off its event's list** (`METRIC_LABELS`): the write throws, and the table's CHECK refuses it. **Must replace that CHECK in a migration when the list gains a label.** Row contents and readers: `docs/specs/security-hosted.md` -> "Account boundary".
+- Row contents and readers: `docs/specs/security-hosted.md` -> "Account boundary".
 - **Never fail or delay the request a metric counts**: the write is unawaited, kept alive by `waitUntil`, and only logs failure. The webhook's counts commit in its transaction under a savepoint of their own, so a redelivery never counts twice and a failed count rolls back alone.
 - Rows are kept forever (rationale). The database's UTC clock dates every row and the account Worker's `/admin/metrics` "today".
 
