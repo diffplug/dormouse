@@ -9,7 +9,7 @@ USAGE
 
 Ensures one surface in the current workspace is running the given command at the given path. It reuses a running or in-flight match, or creates a split and schedules the command. Creation waits for shell integration, not command startup; read command_state before assuming the command started.
 
-Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error. Focusing a minimized match reveals it.
+Focuses the created or reused Surface only with --focus; otherwise focus stays where it is. --focus with --minimize is an error. Focusing a minimized match reveals it.
 
 Matching uses the command each shell reports it is running via Dormouse shell integration (OSC 633), not process inspection. This captures the typed command (`npm run dev`), not the forked child process (`node .../vite`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: `npm run dev` and `npm run dev --host` are different commands and get separate surfaces.
 
@@ -49,7 +49,7 @@ JSON output:
   }
 
 FLAGS
-     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
+     [--focus]      Focus the created or reused Surface.
      [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--restart]    Restart a matching surface in place.

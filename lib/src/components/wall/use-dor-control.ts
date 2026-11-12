@@ -45,10 +45,7 @@ import { stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
-  cliFocusIntent,
   toolTakesOverCaller,
-  typedDorVerb,
-  type FocusIntentFacts,
   type ToolTakeoverGate,
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
@@ -162,9 +159,6 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   /** A click on a terminal link, which asks before a page that runs its own
    *  script. Never set by a control-socket request. */
   terminalLink?: true;
-  /** A request the webview's own UI makes, which keeps its own focus policy
-   *  rather than the CLI's. Never set by a control-socket request. */
-  gui?: true;
   /** The default placement reference when it is not the caller: a helper's
    *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
   placementSurfaceId?: string;
@@ -181,8 +175,6 @@ type EnsureBrowserSurfaceResult =
  *  `dor playwright` command just drove — the surface half of the control plane. */
 type EnsureBrowserSurface = (args: {
   focus: boolean;
-  /** Only an explicit request focuses a browser that is already visible. */
-  explicitFocus: boolean;
   provider: BrowserAutomationProvider;
   headed?: boolean;
   nativeIdentity: string;
@@ -1046,7 +1038,6 @@ export function useDorControl({
 
   const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
     focus,
-    explicitFocus,
     key,
     provider,
     headed,
@@ -1083,7 +1074,7 @@ export function useDorControl({
         ok: true,
         status: 'existing',
         surfaceId: existing.id,
-        minimized: focus && (explicitFocus || existing.minimized) ? !revealSurface(existing.id) : existing.minimized,
+        minimized: focus ? !revealSurface(existing.id) : existing.minimized,
       };
     }
 
@@ -1121,20 +1112,12 @@ export function useDorControl({
   // lives in `dor-control-router.ts`, so exactly one Workspace answers.
   const handleDorControl = useCallback(async (detail: DorControlRequest) => {
     const params = detail.params ?? {};
-    if (booleanParam(params.focus) && booleanParam(params.minimized)) {
+    // Only `--focus` moves focus; the webview's own requests omit it.
+    const focus = booleanParam(params.focus);
+    if (focus && booleanParam(params.minimized)) {
       detail.respond({ ok: false, error: '--focus and --minimize are mutually exclusive' });
       return;
     }
-    // Read at arrival, while `dor` still holds the caller's prompt.
-    const focusFacts: FocusIntentFacts = {
-      focus: params.focus,
-      background: booleanParam(params.minimized) || booleanParam(params.preview),
-      gui: !!detail.gui,
-      typedVerb: detail.surfaceId !== undefined && isPaneOscDriven(detail.surfaceId)
-        ? typedDorVerb(getTerminalPaneState(detail.surfaceId).currentCommand?.rawCommandLine)
-        : null,
-    };
-    const focusIntent = (verb: string): boolean => cliFocusIntent(focusFacts, verb);
 
     // A Workspace being closed takes no new Surfaces: `closeAll` walks its
     // members, and one created behind the walk would ride the Wall's unmount out
@@ -1230,8 +1213,8 @@ export function useDorControl({
         reference: resolved.target,
         // The invoking directory, like `dor ensure`; `--from` only places.
         cwd: stringParam(params.cwd),
-        focusNeutral: !focusIntent('split'),
-        visible: focusIntent('split'),
+        focusNeutral: !focus,
+        visible: focus,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -1339,9 +1322,9 @@ export function useDorControl({
         const openFile = projectEntry ? undefined : historical?.target ?? stringParam(params.file);
         const toolArgs = projectEntry ? [projectEntry.target] : stringArrayParam(params.args) ?? [];
         const opening = openFile !== undefined;
-        const toolFocus = focusIntent(opening ? 'open' : 'tool');
-        // The webview's own requests keep their reveal policy: focus unless quiet.
-        const revealTool = (id: string, quiet = false) => revealSurface(id, { focusNeutral: detail.gui ? quiet : !toolFocus });
+        // The webview's own requests, which alone omit `focus`, focus what they
+        // reveal unless quiet.
+        const revealTool = (id: string, quiet = false) => revealSurface(id, { focusNeutral: params.focus === undefined ? quiet : !focus });
         if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
           detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
           return;
@@ -1563,7 +1546,7 @@ export function useDorControl({
                 visible: true,
                 reference: pendingTarget.target,
                 cwd,
-                focusNeutral: !toolFocus,
+                focusNeutral: !focus,
                 // No shell until a human approves: `createSplitSurface` would
                 // otherwise stage shell opts and, on some paths, spawn the PTY
                 // outright (docs/specs/dor-tool.md -> Trust rule 2).
@@ -1972,9 +1955,9 @@ export function useDorControl({
           reference: toolTarget.target,
           cwd,
           requireIntegration: true,
-          focusNeutral: !toolFocus,
+          focusNeutral: !focus,
           // A preview slot is meant to be seen, even beside a Door reference.
-          visible: previewSignal !== null || toolFocus,
+          visible: previewSignal !== null || focus,
           leafMeta: toolLeafMeta(toolName ?? command, previewSignal ? { ...toolParams, toolPreview: true } : toolParams),
         });
         if (!created.ok) {
@@ -2046,7 +2029,6 @@ export function useDorControl({
         detail.respond({ ok: false, error: 'cwd is required' });
         return;
       }
-      const focus = focusIntent('ensure');
       const existingId = findSurfaceIdRunningCommand(command, cwd);
       if (existingId) {
         const minimized = focus ? !revealSurface(existingId) : doorsRef.current.some((door) => door.id === existingId);
@@ -2259,7 +2241,7 @@ export function useDorControl({
       }
       try {
         const result = await moveSurface(target.id, {
-          destination, focus: booleanParam(params.focus),
+          destination, focus,
           dangerouslyDestroyIframePageState: booleanParam(params.dangerouslyDestroyIframePageState),
         });
         detail.respond({ ok: true, result });
@@ -2333,7 +2315,7 @@ export function useDorControl({
         reference: target.value,
         preserveSource: !!detail.helperParentId,
         title: hostPathDisplay(url, true),
-        focusNeutral: !focusIntent('iframe'),
+        focusNeutral: !focus,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -2625,8 +2607,7 @@ export function useDorControl({
         return;
       }
       const result = ensureBrowserSurface({
-        focus: focusIntent(provider),
-        explicitFocus: params.focus === true,
+        focus,
         provider,
         key,
         session,

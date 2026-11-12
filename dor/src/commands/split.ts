@@ -15,7 +15,6 @@ import {
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
-  focusParam,
   renderJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -170,7 +169,7 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       direction: direction.value,
       cwd: callerWorkingDirectory(undefined, this.options),
       minimized: flags.minimize === true,
-      ...focusParam(flags.focus),
+      focus: flags.focus === true,
       surface: flags.from,
       ...workspaceParam(flags.workspace),
     });

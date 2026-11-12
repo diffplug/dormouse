@@ -13,7 +13,7 @@ The new terminal starts in the directory where you invoke dor split. --from and 
 
 Use -- followed by a command to run an initial command in the new terminal surface. Only split's own options come before --.
 
-Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error.
+Focuses the created or reused Surface only with --focus; otherwise focus stays where it is. --focus with --minimize is an error.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
@@ -45,7 +45,7 @@ JSON output:
 FLAGS
      [--left|--right|--up|--down|--auto]
                   Split direction. Mutually exclusive; default is --auto.
-     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
+     [--focus]      Focus the created or reused Surface.
      [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--from]       Reference Surface for placement.

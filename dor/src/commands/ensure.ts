@@ -16,7 +16,6 @@ import {
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
-  focusParam,
   renderJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -180,7 +179,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     const response = await client.ensureSurface({
       command: commandArgs,
       minimized: flags.minimize === true,
-      ...focusParam(flags.focus),
+      focus: flags.focus === true,
       restart: flags.restart === true,
       surface: flags.from,
       cwd,

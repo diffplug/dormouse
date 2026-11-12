@@ -325,19 +325,14 @@ Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-
 
 ## Focus intent
 
-Whether the Surface `split`, `ensure`, `tool`, `open`, `iframe`, `agent-browser`, or `playwright` creates or reuses takes focus:
+**Must focus the Surface `split`, `ensure`, `tool`, `open`, `iframe`, `agent-browser`, or `playwright` creates or reuses only on `--focus`**; otherwise focus stays where it is, on creation and reuse alike, whoever ran the command (rationale).
 
-1. An explicit `--focus` or `--focus=false` wins.
-2. `--minimize` or `dor open --preview` leaves focus put.
-3. Otherwise it takes focus only when the caller's shell reports `dor <verb>` typed alone (the command-line condition of `docs/specs/dor-tool.md` → "Take-over"); an agent's or script's invocation runs under another command line (rationale).
-
-- **Must focus an already-visible browser only on explicit `--focus`.**
-- **Must send `focus` only when given**, so the host applies the default from the caller's line on arrival. Browser providers intercept `--focus[=true|false]` anywhere before `--`.
-- **Must reject an explicit `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
-- **Never apply the default to the webview's own requests** (link clicks, OSC 367 `open`, document navigation): they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).
+- **Must always send `focus`**, true only for `--focus`. Browser providers intercept `--focus` anywhere before `--`.
+- **Must reject `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
+- **Never send `focus` from the webview's own requests** (link clicks, OSC 367 `open`, document navigation), the only requests without it: they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).
 - Workspace creation stays in the background; activation uses `dor workspace switch`.
 
-Source of truth: `cliFocusIntent` in `lib/src/components/wall/tool-takeover.ts`.
+Source of truth: `handleDorControl` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## Helper callers and targets
 

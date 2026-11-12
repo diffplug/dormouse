@@ -67,8 +67,8 @@ dor intercepts exactly three mutually exclusive identity flags:
 
 It also intercepts --workspace <ref>, which is not an identity: it says which
 Workspace of this Window the browser Surface is opened in and which one a
-handle resolves against (workspace:<id> or workspace-name:<name>); and --focus
-(or --focus=true|false), which says whether that Surface takes focus.
+handle resolves against (workspace:<id> or workspace-name:<name>); and --focus,
+which focuses that Surface.
 
 --from <handle> is a placement reference: the Surface a new browser pane
 splits from, whose Workspace a --key resolves in. It places only a browser
@@ -93,7 +93,7 @@ After a successful command, dor opens the browser surface bound to the session,
 or reuses the one it already has. A playwright browser (render_mode playwright-*) is
 driven with dor playwright --surface instead.
 
-${focusHelp({ minimize: false, browser: true })}
+${focusHelp({ minimize: false })}
 
 ${browserExitHelp('agent-browser')}
 

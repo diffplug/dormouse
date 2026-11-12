@@ -74,7 +74,7 @@ export function commitToolHistory(previous: ToolHistory | null, current: ToolLoc
 
 export function requestToolHistory(id: string, direction: 'back' | 'forward'): void {
   dispatchDorControlRequest({ requestId: `tool-history-${crypto.randomUUID()}`, surfaceId: id, method: SURFACE_CONTROL_METHODS.tool,
-    params: { history: direction, disposition: 'current' } }, () => {}, { gui: true });
+    params: { history: direction, disposition: 'current' } }, () => {});
 }
 
 /** The built-in Markdown editor is the one page exposing a reading position. */
