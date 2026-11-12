@@ -213,8 +213,8 @@ export function startRelay(created) {
 }
 
 /** {@link openFrameSocket}, tracked so a Relay teardown can force it shut. */
-export function wsConnect(url) {
-  const socket = openFrameSocket(url);
+export function wsConnect(url, init) {
+  const socket = openFrameSocket(url, init);
   OPEN_SOCKETS.add(socket.ws);
   socket.ws.addEventListener('close', () => OPEN_SOCKETS.delete(socket.ws));
   return socket;
@@ -238,7 +238,7 @@ export async function ownerSession(app) {
 /** Enroll a burrow and open its `/ws/burrow` socket (awaiting the upgrade). */
 export async function connectBurrow(app, server) {
   const { body } = await enrollBurrow(app);
-  const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${body.burrowToken}`);
+  const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.burrow}`, { headers: { Authorization: `Bearer ${body.burrowToken}` } });
   await socket.ready;
   return { burrow: body, socket };
 }

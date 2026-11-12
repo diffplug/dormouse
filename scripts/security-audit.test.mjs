@@ -140,7 +140,7 @@ function stubGh(dir, seed) {
     const state = fs.existsSync('gh-state.json') ? JSON.parse(fs.readFileSync('gh-state.json', 'utf8')) : {
       public: [], pulls: {},
       embargo: (process.env.GH_LEDGER_OPEN ?? '').split('\\n').filter(Boolean).map((row) => ({
-        number: Number(row.slice(0, row.indexOf(' '))), title: row.slice(row.indexOf(' ') + 1), body: '', labels: [],
+        unindexed: true, number: Number(row.slice(0, row.indexOf(' '))), title: row.slice(row.indexOf(' ') + 1), body: '', labels: [],
         state: 'OPEN', stateReason: '', createdAt: ${JSON.stringify(SEEDED_AT)}, closedAt: null, comments: [] })),
     };
     const save = () => fs.writeFileSync('gh-state.json', JSON.stringify(state));
@@ -155,13 +155,13 @@ function stubGh(dir, seed) {
       const phrase = (String(opt('--search')).match(/in:title "([^"]+)"/) ?? [])[1]?.toLowerCase();
       const fields = opt('--json').split(',');
       const listed = issues.filter((i) => (!want || i.state === want) && (!label || i.labels.includes(label))
-        && (!phrase || i.title.toLowerCase().includes(phrase)))
+        && (!phrase || (!i.unindexed && i.title.toLowerCase().includes(phrase))))
         .map((i) => Object.fromEntries(fields.map((f) => [f, i[f]]))).slice(0, Number(opt('--limit') ?? 30));
       const jq = opt('--jq');
       process.stdout.write(jq === null ? JSON.stringify(listed) : execFileSync('jq', ['-r', jq], { input: JSON.stringify(listed), encoding: 'utf8' }));
     } else if (command === 'issue' && sub === 'create') {
       const number = Math.max(embargo ? 0 : 1000, ...issues.map((i) => i.number)) + 1;
-      issues.push({ number, title: opt('--title'), body, labels: opt('--label') ? [opt('--label')] : [], state: 'OPEN', stateReason: '', createdAt: now, closedAt: null, comments: [] });
+      issues.push({ number, unindexed: true, title: opt('--title'), body, labels: opt('--label') ? [opt('--label')] : [], state: 'OPEN', stateReason: '', createdAt: now, closedAt: null, comments: [] });
       save();
       process.stdout.write('https://github.com/' + repo + '/issues/' + number + '\\n');
     } else if (command === 'issue' && sub === 'comment') {
@@ -461,9 +461,9 @@ test('a ledger or disclosure list that fills its read fails rather than read sho
   assert.match(second.published.stderr, /disclosure list filled its 1000-issue read/);
 });
 
-// The per-run reports share the tracker and are never deleted, so the cap has
-// to count only the ledger issues the reads keep.
-test('a thousand per-run reports do not fill the ledger reads', (t) => {
+// A complete repository listing includes reports: reaching its cap must fail
+// closed, never fall back to an asynchronously indexed title search.
+test('a thousand per-run reports fail the complete ledger read closed', (t) => {
   const { dir, env } = fixture(t);
   const report = (number) => ({ number, title: `[security-audit] FAIL on 2026-10-01 at abcdef${number % 10}`, body: '', labels: [],
     state: 'OPEN', stateReason: '', createdAt: SEEDED_AT, closedAt: null, comments: [] });
@@ -473,9 +473,8 @@ test('a thousand per-run reports do not fill the ledger reads', (t) => {
   writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
   fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
   const { listed, embargoed, read } = runReporting(dir, env);
-  for (const step of [listed, embargoed, read]) assert.equal(step.status, 0, step.stdout + step.stderr);
-  const snapshot = readFileSync(join(dir, 'audit-ledger-snapshot.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-  assert.deepEqual(snapshot.map((row) => row.number), [1001]);
+  for (const step of [listed, embargoed, read]) assert.notEqual(step.status, 0, step.stdout + step.stderr);
+  assert.ok(!existsSync(join(dir, 'audit-ledger-snapshot.jsonl')));
 });
 
 // The private issue carries what did not pass; the PASS ledger stays in the
@@ -537,6 +536,8 @@ test('the ledger opens a new finding and leaves one already open as it is', (t) 
   assert.equal(ledgerCreates.length, 1);
   assert.ok(ledgerCreates[0].body.includes('- BLOCKER: `lib/a.ts:10` `runIt` — new one'));
   assert.ok(!embargoCalls.some(({ args }) => args[1] === 'close' || args[1] === 'edit'));
+  // Search has not indexed either the newly filed issue or the existing key.
+  assert.ok(!embargoCalls.some(({ args }) => args.includes('--search')));
   // The status issue lists what is open privately, this run's new one
   // included, by key, severity, and date, and says nothing else of it.
   const publicBody = statusIssueBody(dir);

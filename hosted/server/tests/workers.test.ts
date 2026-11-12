@@ -39,7 +39,6 @@ import {
   NOT_ENTITLED_ERROR,
   WS_CLOSE_BURROW_REVOKED,
   WS_ROUTES,
-  WS_TOKEN_PARAM,
 } from "remote-lib-common";
 import { rawUpgrade } from "./raw-socket";
 import {
@@ -475,7 +474,7 @@ async function fixture(
     worker,
     /** A relay socket's upgrade, from a Burrow: no Origin. */
     burrowSocket: (burrowToken: string) =>
-      rawUpgrade(url, `${ORIGINS.relay}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrowToken}`, {}),
+      rawUpgrade(url, `${ORIGINS.relay}${WS_ROUTES.burrow}`, { Authorization: `Bearer ${burrowToken}` }),
     provider,
     elevenLabs,
     browser,

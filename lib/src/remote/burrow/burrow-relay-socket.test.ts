@@ -58,10 +58,12 @@ function scriptedProbe(...answers: Array<BurrowStanding | null | 'no-answer'>) {
 describe('BurrowRuntime relay socket policy', () => {
   let clock: ReturnType<typeof createTestClock>;
   let sockets: FakeSocket[];
+  let connects: Array<{ url: string; bearer?: string }>;
   let burrow: BurrowRuntime;
 
   beforeEach(() => {
     clock = createTestClock(1_700_000_000_000);
+    connects = [];
     sockets = [];
   });
 
@@ -70,7 +72,8 @@ describe('BurrowRuntime relay socket policy', () => {
   function makeBurrow(probe?: () => Promise<BurrowStanding | null>): BurrowRuntime {
     burrow = new BurrowRuntime({
       enrollment,
-      createWebSocket: () => {
+      createWebSocket: (url, bearer) => {
+        connects.push({ url, bearer });
         const socket = new FakeSocket();
         sockets.push(socket);
         return socket;
@@ -93,6 +96,16 @@ describe('BurrowRuntime relay socket policy', () => {
     socket.emitError();
     socket.closeWith(1006);
   }
+
+  it('keeps the bearer out of the URL on connect and refused-upgrade retries', () => {
+    makeBurrow();
+    refuse();
+    clock.advance(60_000);
+    expect(connects.length).toBeGreaterThan(1);
+    for (const connection of connects) expect(connection).toEqual({
+      url: ORIGIN.replace(/^http/, 'ws') + '/ws/burrow', bearer: enrollment.burrowToken,
+    });
+  });
 
   it('latches on 4000 and 4001, arming no timer and opening nothing until start()', () => {
     for (const [code, latch] of [

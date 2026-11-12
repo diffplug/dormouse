@@ -155,6 +155,34 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it.each(['0', '1'])('sanitizes pending OSC 99 chunks before completion (encoding %s)', (encoding) => {
+    const parser = new TerminalProtocolParser();
+    const chunk = (part: string, value: string, done = '0') => parser.process(
+      '\x1b]99;i=pending:p=' + part + ':e=' + encoding + ':d=' + done + ';'
+      + (encoding === '1' ? btoa(value) : value) + '\x07',
+    );
+    expect(chunk('title', 'Build\x01\t').events).toEqual([]);
+    expect(chunk('body', 'Finished\x7f ').events).toEqual([]);
+    const pending = parser['osc99Pending'].get('pending')!;
+    expect(pending.title).toBe('Build ');
+    expect(pending.body).toBe('Finished  ');
+    expect(chunk('title', 'successfully').events).toEqual([]);
+    expect(chunk('body', 'today', '1').events).toEqual([{
+      kind: 'notification', notification: { source: 'OSC 99', title: 'Build successfully', body: 'Finished today' },
+    }]);
+    expect(parser['osc99Pending'].size).toBe(0);
+  });
+
+  it('bounds sanitized pending OSC 99 text without splitting code points', () => {
+    const parser = new TerminalProtocolParser();
+    for (const [part, limit] of [['title', 2048], ['body', 16384]] as const) {
+      parser.process('\x1b]99;i=pending:p=' + part + ':d=0;' + '😀'.repeat(limit + 10) + '\x01\x07');
+      const held = parser['osc99Pending'].get('pending')![part];
+      expect(Array.from(held)).toHaveLength(limit);
+      expect(held).toBe('😀'.repeat(limit));
+    }
+  });
+
   it('responds to OSC 99 support queries with title and body support', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('\x1b]99;i=n1:p=?;\x07');

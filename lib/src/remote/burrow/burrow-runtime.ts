@@ -25,7 +25,6 @@ import {
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
   WS_ROUTES,
-  WS_TOKEN_PARAM,
   boundedBurrowLabel,
   constantTimeEqual,
   createNoiseResponder,
@@ -319,7 +318,7 @@ export interface BurrowOptions {
    * The Burrow service's guarded socket factory, with no default: the global
    * would bypass the network policy (`docs/specs/remote-network.md` -> "Policy").
    */
-  createWebSocket: (url: string) => WebSocketLike;
+  createWebSocket: (url: string, bearer?: string) => WebSocketLike;
   /** Build the remote-api handler for an authorized client (`BurrowService.#createApiSession` in `lib/src/host/remote/service.ts`). */
   createSession: (opts: RemoteApiSessionContext) => RemoteApiSessionLike;
   /**
@@ -426,7 +425,7 @@ export class BurrowRuntime {
    */
   readonly #presenceWindows: PresenceWindows;
 
-  readonly #createWebSocket: (url: string) => WebSocketLike;
+  readonly #createWebSocket: (url: string, bearer?: string) => WebSocketLike;
   readonly #createSession: BurrowOptions['createSession'];
   readonly #saveAcl: BurrowOptions['saveAcl'];
   readonly #requestApproval: (pending: Omit<PendingPairing, 'kind'>) => void;
@@ -1004,10 +1003,10 @@ export class BurrowRuntime {
     if (this.#ws || this.#stopped || this.#latched) return;
     this.#status = 'connecting';
     const wsBase = this.#enrollment.relayUrl.replace(/^http/, 'ws');
-    const url = `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${encodeURIComponent(this.#enrollment.burrowToken)}`;
+    const url = `${wsBase}${WS_ROUTES.burrow}`;
     let ws: WebSocketLike;
     try {
-      ws = this.#createWebSocket(url);
+      ws = this.#createWebSocket(url, this.#enrollment.burrowToken);
     } catch (error) {
       // A factory that refuses — the service's transport guard under Nothing
       // (`lib/src/host/remote/service.ts`) — is a socket that closed at once:

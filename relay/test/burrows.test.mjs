@@ -140,7 +140,7 @@ test('GET /api/burrows online flag flips with the burrow socket', async () => {
     assert.deepEqual(await row(), { burrowId, online: false });
 
     const socket = wsConnect(
-      `${server.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${enrolled.body.burrowToken}`,
+      `${server.wsUrl}${WS_ROUTES.burrow}`, { headers: { Authorization: `Bearer ${enrolled.body.burrowToken}` } },
     );
     await socket.ready;
     await until(async () => (await row()).online === true);
@@ -153,11 +153,20 @@ test('GET /api/burrows online flag flips with the burrow socket', async () => {
   }
 });
 
+test('/ws/burrow rejects query credentials, even beside a valid header', async () => {
+  const { app } = await freshApp();
+  const { body } = await enrollBurrow(app);
+  for (const headers of [{}, { Authorization: 'Bearer ' + body.burrowToken }]) {
+    const response = await app.request(WS_ROUTES.burrow + '?token=' + body.burrowToken, { headers });
+    assert.equal(response.status, 401);
+  }
+});
+
 test('/ws/burrow rejects a bad token', async () => {
   const created = await freshApp();
   const server = await startRelay(created);
   try {
-    const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=bogus`);
+    const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.burrow}`, { headers: { Authorization: "Bearer bogus" } });
     await assert.rejects(socket.ready);
   } finally {
     await server.close();
@@ -210,7 +219,7 @@ test('every /ws/burrow connect re-delivers the UV demand first, so one set after
     assert.deepEqual(await socket.take(), { t: 'policy', requireUserVerification: true });
     // A reconnect (the same enrollment) hears it again: the Relay never relies
     // on what the Burrow kept from enrollment.
-    const again = wsConnect(`${onServer.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrow.burrowToken}`);
+    const again = wsConnect(`${onServer.wsUrl}${WS_ROUTES.burrow}`, { headers: { Authorization: `Bearer ${burrow.burrowToken}` } });
     await again.ready;
     assert.deepEqual(await again.take(), { t: 'policy', requireUserVerification: true });
 
@@ -242,7 +251,7 @@ test('only Burrow-enrollment rejection invokes the retained-request delay', asyn
   );
   assert.equal(
     (
-      await app.request(`${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${'A'.repeat(RELAY_BEARER_LENGTH)}`)
+      await app.request(WS_ROUTES.burrow, { headers: { Authorization: `Bearer ${'A'.repeat(RELAY_BEARER_LENGTH)}` } })
     ).status,
     401,
   );

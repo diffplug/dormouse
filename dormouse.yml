@@ -7,39 +7,39 @@ tools:
     run: pnpm storybook
     render: agent-browser-screencast
     port: auto
-    prespawn_dedupe: [storybook, $HERE]
+    prespawn_dedupe: [storybook, $PROJECT_ROOT]
 
   # spawns a standalone Dormouse with the UI backed by agent-browser (frontend HMR, static backend)
   innerdogfood:
     run: pnpm innerdogfood
     render: agent-browser-screencast
     port: announced
-    prespawn_dedupe: [innerdogfood, $HERE]
+    prespawn_dedupe: [innerdogfood, $PROJECT_ROOT]
 
   # HMR for playground / marketing / docs at dormouse.sh
   website:
     run: pnpm dev:website
     render: agent-browser-screencast
     port: auto
-    prespawn_dedupe: [website, $HERE]
+    prespawn_dedupe: [website, $PROJECT_ROOT]
 
   # Selfhost Relay serving Pocket, for testing remote control locally (static build of both, restart to see changes)
   relay:
     run: pnpm dev:relay
     render: agent-browser-screencast
     port: auto
-    prespawn_dedupe: [relay, $HERE]
+    prespawn_dedupe: [relay, $PROJECT_ROOT]
 
   # HMR for the frontend of hosted.dormouse.sh, Burrow approval at /enroll included, plus the relay Worker on localhost:8787 for device-code enrollment (backend needs a restart; needs Docker for Postgres)
   hosted:
     run: pnpm dev:hosted
     render: agent-browser-screencast
     port: auto
-    prespawn_dedupe: [hosted, $HERE]
+    prespawn_dedupe: [hosted, $PROJECT_ROOT]
 
   # One-time connection rendezvous on localhost:8787 + phone page on localhost:8788 (Workers reload on save, page rebuilds on save, no HMR); fixed ports, so one checkout at a time
   one-time:
     run: pnpm dev:one-time
     render: agent-browser-screencast
     port: announced
-    prespawn_dedupe: [one-time, $HERE]
+    prespawn_dedupe: [one-time, $PROJECT_ROOT]
