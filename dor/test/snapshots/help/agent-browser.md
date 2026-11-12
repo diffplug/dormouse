@@ -33,8 +33,9 @@ dor reads these flags anywhere in the arguments, up to an optional bare --,
 which it forwards unchanged. Everything else, and everything after that --, is
 agent-browser's own command surface: subcommands, flags, selectors. Put the --
 after the command, before a value spelled like a dor flag:
-  dor agent-browser fill @e1 -- --focus The binary
-is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
+  dor agent-browser fill @e1 -- --focus
+
+The binary is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
 bundled; install it with:
   npm i -g agent-browser
 

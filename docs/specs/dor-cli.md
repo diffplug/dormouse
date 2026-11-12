@@ -327,7 +327,7 @@ Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-
 
 **Must focus the Surface `split`, `ensure`, `tool`, `open`, `iframe`, `agent-browser`, or `playwright` creates or reuses only on `--focus`**; otherwise focus stays where it is, on creation and reuse alike, whoever ran the command (rationale).
 
-- **Must always send `focus`**, true only for `--focus`. Browser providers intercept `--focus` anywhere before `--`.
+- **Must always send `focus`**, true only for `--focus`.
 - **Must reject `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
 - **Never send `focus` from the webview's own requests** (link clicks, OSC 367 `open`, document navigation), the only requests without it: they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).
 - Workspace creation stays in the background; activation uses `dor workspace switch`.
