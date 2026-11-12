@@ -367,6 +367,6 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `
 
 - **`dor skill` follow-ons** — skill-ecosystem publication (plugin marketplaces, npm) distributes the bootstrap stub, never a copy of the content. A user-level `--global` install variant waits until a story needs it.
 
-- **Cross-Window `--all`.** `dor list --window <label>` lists one other Window and `--workspace` reaches a sibling's Workspace ([Standalone](#standalone)), but `dor list --all` still lists the answering Window alone; a union would read the registry (`docs/specs/standalone.md` → "Workspace registry").
+- **Cross-Window `--all`.** `dor list --window <ref>` lists one other Window and `--workspace` reaches a sibling's Workspace ([Standalone](#standalone)), but `dor list --all` still lists the answering Window alone; a union would read the registry (`docs/specs/standalone.md` → "Workspace registry").
 - **Cross-Workspace listing in VS Code.** Each Workspace is its own webview there, so `dor list --all` would have to aggregate at the extension host rather than in a per-webview control handler; until it does, VS Code refuses the Workspace-spanning requests ([dor workspace](#dor-workspace)).
 - **Additional `dor list` filters** — activity/state filters are deliberately deferred: `--running` as shorthand for `--activity running`, full `--activity unknown|prompt|editing|running|finished`, and possible alert filters such as `--alert` / `--todo`. Add only once a story needs them, each with snapshot-tested help.
