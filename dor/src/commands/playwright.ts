@@ -44,7 +44,7 @@ Launch once with open, then navigate with goto: playwright's open restarts the
 browser, dropping its tabs and cookies, while goto navigates the current tab.
 Chromium sessions can be viewed and controlled in Dormouse.
 
-${focusHelp({ minimize: false })}
+${focusHelp({ minimize: false, browser: true })}
 
 Examples:
   dor playwright --key app open :5173

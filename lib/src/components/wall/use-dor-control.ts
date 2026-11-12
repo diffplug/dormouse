@@ -179,6 +179,8 @@ type EnsureBrowserSurfaceResult =
  *  `dor playwright` command just drove — the surface half of the control plane. */
 type EnsureBrowserSurface = (args: {
   focus: boolean;
+  /** Only an explicit request focuses a browser that is already visible. */
+  explicitFocus: boolean;
   provider: BrowserAutomationProvider;
   headed?: boolean;
   nativeIdentity: string;
@@ -1018,6 +1020,7 @@ export function useDorControl({
 
   const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
     focus,
+    explicitFocus,
     key,
     provider,
     headed,
@@ -1054,7 +1057,7 @@ export function useDorControl({
         ok: true,
         status: 'existing',
         surfaceId: existing.id,
-        minimized: focus ? !revealSurface(existing.id) : existing.minimized,
+        minimized: focus && (explicitFocus || existing.minimized) ? !revealSurface(existing.id) : existing.minimized,
       };
     }
 
@@ -2567,6 +2570,7 @@ export function useDorControl({
       }
       const result = ensureBrowserSurface({
         focus: focusIntent(provider),
+        explicitFocus: params.focus === true,
         provider,
         key,
         session,

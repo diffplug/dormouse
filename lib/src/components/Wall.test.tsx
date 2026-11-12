@@ -4366,6 +4366,49 @@ describe('Wall on the Lath engine', () => {
     expect(focusOf(newId)).toBe('false');
   });
 
+  it.each(['agent-browser', 'playwright'] as const)('keeps visible %s reuse neutral unless focus is explicit', async provider => {
+    hostBrowsers();
+    const onEvent = vi.fn();
+    const selected = () => onEvent.mock.calls.filter(([event]) => event.type === 'selectionChange').at(-1)?.[0]?.id;
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" onEvent={onEvent} />); });
+    await flush();
+    const invoke = async (focus?: boolean) => {
+      let response: { ok: boolean; result?: { surfaceId: string; minimized: boolean } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.browser, surfaceId: 'surface:a',
+          params: { provider, session: 'focus-review', ...(focus === undefined ? {} : { focus }) },
+          respond: (result: typeof response) => { response = result; },
+        } }));
+      });
+      await flush();
+      expect(response?.ok).toBe(true);
+      return response!.result!;
+    };
+    try {
+      reportRunning('surface:a', `dor ${provider} open :5173`);
+      const { surfaceId: browserId } = await invoke();
+      expect(selected()).toBe(browserId);
+      await act(async () => { getWallHandle(DEFAULT_WORKSPACE_ID)!.focusSurface('surface:a', false); });
+      await flush();
+      expect(focusOf('surface:a')).toBe('true');
+      reportRunning('surface:a', `dor ${provider} snapshot`);
+      await invoke();
+      expect(focusOf('surface:a')).toBe('true');
+      await invoke(true);
+      expect(selected()).toBe(browserId);
+      await act(async () => { container.querySelector<HTMLElement>(`[data-lath-leaf="${browserId}"] [aria-label="Minimize"]`)!.click(); });
+      await flush();
+      await act(async () => { getWallHandle(DEFAULT_WORKSPACE_ID)!.focusSurface('surface:a', false); });
+      await flush();
+      expect((await invoke(false)).minimized).toBe(true);
+      expect(focusOf('surface:a')).toBe('true');
+      expect((await invoke()).minimized).toBe(false);
+      expect(selected()).toBe(browserId);
+    } finally { act(() => terminalRegistry.removeTerminalPaneState('surface:a')); }
+  });
+
   it('keeps dor agent-browser focus-neutral but enters passthrough for a user port activation', async () => {
     const defaultSession = sessionForKey('default');
     hostBrowsers();

@@ -324,6 +324,7 @@ Whether the Surface `split`, `ensure`, `tool`, `open`, `iframe`, `agent-browser`
 2. `--minimize` or `dor open --preview` leaves focus put.
 3. Otherwise it takes focus only when the caller's shell reports `dor <verb>` typed alone (the command-line condition of `docs/specs/dor-tool.md` → "Take-over"); an agent's or script's invocation runs under another command line (rationale).
 
+- **Must focus an already-visible browser only on explicit `--focus`.**
 - **Must send `focus` only when given**, so the host applies the default from the caller's line on arrival. Browser providers intercept `--focus[=true|false]` anywhere before `--`.
 - **Must reject an explicit `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
 - **Never apply the default to the webview's own requests** (link clicks, OSC 367 `open`, document navigation): they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).

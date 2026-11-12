@@ -149,8 +149,9 @@ export function focusParam(focus: boolean | undefined): { focus?: boolean } {
 }
 
 /** The focus paragraph of each Surface-producing command's help. */
-export function focusHelp({ minimize }: { minimize: boolean }): string {
+export function focusHelp({ minimize, browser = false }: { minimize: boolean; browser?: boolean }): string {
   return 'Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent\'s or a script\'s invocation leaves focus where it is. --focus or --focus=false decides either way.'
+    + (browser ? ' An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.' : '')
     + (minimize ? ' --minimize turns the default off, and --focus with --minimize is an error.' : '');
 }
 

@@ -275,7 +275,7 @@ dor kill surface:N --confirm-if-read "npm run dev"
 
 ## Rules and pitfalls
 
-- **Your commands leave the user's focus where it is**; only a `dor` command a person types alone at a prompt focuses its result. Pass `--focus` only when the user asks to be taken to the result.
+- **Your commands leave the user's focus where it is**; only a `dor` command a person types alone at a prompt focuses its result. Pass `--focus` only when the user asks to be taken to the result. Browser commands reuse visible panes without taking focus, even when typed at a prompt.
 - **Never pre-quote command tails.** Everything after `--` is forwarded as a raw argv array; Dormouse quotes it correctly for whatever shell the target surface runs (POSIX, cmd, PowerShell). Pass `-- npm test -- --watch`, not `-- "npm test -- --watch"`.
 - **Take ids from responses.** Capture the id that `split`/`ensure`/`tool`/`open` print rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with, including its flags.

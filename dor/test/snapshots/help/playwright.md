@@ -33,7 +33,7 @@ Launch once with open, then navigate with goto: playwright's open restarts the
 browser, dropping its tabs and cookies, while goto navigates the current tab.
 Chromium sessions can be viewed and controlled in Dormouse.
 
-Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way.
+Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.
 
 Examples:
   dor playwright --key app open :5173
