@@ -92,4 +92,48 @@ All 13 lane PRs merged within a day of opening. Still open at close: 12 performa
 - One implementer per lane, kept alive, so a review finding went back to the agent that wrote the fix.
 - Running the device checks before writing the device fixes.
 
-**Use next time.** Worker: Opus 5.5 or its successor. Priority areas last time: mobile UI and Pocket. Digest the undecided findings into classes as soon as the reviews end, leave slack in every spec budget a lane will touch before the lanes start, merge lane PRs one at a time with the canary test in the push gate, and book the device time while the reviews run.
+### Follow-up, 2026-11-11: the tail, three nets, and what a real machine changed
+
+After the two fix waves the maintainer answered the remaining questions one at a time (19 in all), then approved deeper work. Sixteen more PRs merged in two days and three were open when this was written. Opus did all of it for about 7.7M tokens; the figure for one long-lived implementer is approximate, because its counter restarted when its context was compacted.
+
+**Three nets, each built to record what it found, not fix it.** Each suite keeps a `KNOWN` table: a finding runs as an expected failure with its evidence, and the fix lane's job is to delete the entry.
+
+| Net | The class it covers | Caught on its first runs |
+|---|---|---|
+| Real-shell conformance suite, on Linux, macOS and Windows in CI | Native behavior nobody ran (55 of 144 broken) | 6 product bugs, and 3 faults in the suite itself |
+| Adapter contract suite, one set of cases for all five `PlatformAdapter` implementations, and the fake PTY held to the real one | Two implementations of one contract disagree (18), a fake doing what the real system cannot (30) | 4: one adapter, three in the fake |
+| Model test of the alert layer, with the spec's own state diagrams as the oracle | A state machine missing an edge (22) | 7 from 4 causes, in a module the pass had already reviewed |
+
+All 17 are fixed, the last seven in a PR still open when this was written. The model test needs a spec that draws its machine, and only `alert.md` does.
+
+**What a real machine changed.** A Windows laptop reachable over SSH was used throughout: a temporary clone, the repo's own tests, deleted afterwards.
+
+- Output flow control passed every test and a headless Chrome measurement, and was wrong on Windows: Ctrl+C cannot reach a program whose PTY is paused, because the console host takes no input while it is blocked on output. A 150-line probe on the real machine separated that from the two other explanations in one run. The design gained a rule for it.
+- The same work found that macOS discards a dead process's unread output past 1 KB, and that a hidden page parses about 540 chars a second on timers. Each changed the design; none was visible from a test on one OS.
+- The first Windows run of the shell suite took 14 minutes and found the suite did not exit there. CI would have shown a timeout and nothing else.
+
+**What a second agent changed.** Three times an agent with no stake in the work overturned the main session.
+
+- An independent reviewer of flow control found its admitted data loss was wider than stated and that deleting one line left every test green.
+- Asked to choose between three designs with no opinions supplied, an evaluator rejected the small one the main session had offered, with measurements, and proposed the fail-open watchdog that made the large one acceptable.
+- A researcher established that `inert` does not reach a framed document by the standard's own design, which the main session had doubted, and measured a fix the main session had recommended deferring.
+
+The repository's review bot did the same at smaller scale: it found an accounting bug in that watchdog, a known-failure mark wide enough to hide a second bug, and two wrong counts in this file.
+
+**Mistakes the main session made.**
+
+- It asked the maintainer a question from memory of a finding and described it wrongly; his answer rebuilt a bug, which was built and then dropped. Re-read the finding before asking.
+- It said nothing in CI ran PowerShell, when a parse step did.
+- It promised 27 GB from deleting worktrees and freed 6, having counted hard-linked packages once per worktree.
+- It resolved two review threads before its replies had posted.
+- It recommended against merging flow control, then offered a rate cap, before either had been evaluated by anyone but itself.
+
+**What worked and is kept.**
+
+- A net first, then the fix lane: the finding arrives as a failing test with a reproduction, and "done" is an empty table.
+- Findings, not fixes, inside a net's own PR, so the maintainer sees what it caught before anything changes.
+- Design briefs with a written assessment first and a rule for stopping there.
+- The real machine in the loop during the work, not only on a checklist afterwards.
+- Stacked work held as a branch until its base merges.
+
+**Use next time.** Worker: Opus 5.5 or its successor. Priority areas last time: mobile UI and Pocket. Digest the undecided findings into classes as soon as the reviews end, leave slack in every spec budget a lane will touch before the lanes start, merge lane PRs one at a time with the canary test in the push gate, and book the device time while the reviews run. After the fix waves, build a net for each large root-cause class before fixing its findings by hand. Put a real machine for each OS within reach of the lanes. Before merging anything large, give it to an agent that did not write it, with the code and no conclusions.
