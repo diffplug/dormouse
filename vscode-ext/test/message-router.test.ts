@@ -78,6 +78,8 @@ const ptys = vi.hoisted(() => ({
   order: [] as string[],
   /** Called on each PTY write, as the pty host receives it. */
   onWrite: null as ((id: string, data: string) => void) | null,
+  /** What the router told the flow control, in order. */
+  flow: [] as string[],
 }));
 
 vi.mock('../src/pty-manager', async (importOriginal) => ({
@@ -102,6 +104,9 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   },
   write: (id: string, data: string) => ptys.onWrite?.(id, data),
   resize: (id: string) => void ptys.order.push(`resize ${id}`),
+  sentOutput: (id: string, chars: number) => void ptys.flow.push(`sent ${id} ${chars}`),
+  acknowledgeOutput: (id: string, chars: unknown) => void ptys.flow.push(`ack ${id} ${String(chars)}`),
+  resetOutputFlow: (ids: readonly string[]) => void ptys.flow.push(`reset ${ids.join(',')}`),
 }));
 
 vi.mock('../src/burrow', () => ({
@@ -175,6 +180,7 @@ beforeEach(async () => {
   ptys.scrollback.clear();
   ptys.order = [];
   ptys.onWrite = null;
+  ptys.flow = [];
   router = (await import('../src/message-router')) as RouterModule;
 });
 
@@ -343,6 +349,43 @@ it('drops a malformed theme push whole, keeping the last good one', () => {
       '\x1b]11;rgb:1010/2020/3030\x1b\\',
     ]);
   } finally { disposable.dispose(); }
+});
+
+// docs/specs/transport.md -> "Output flow control".
+describe('output flow control', () => {
+  it('counts what it posts the owning webview as `pty:data`, and takes only that webview’s acknowledgement', () => {
+    const owner = fakeWebview();
+    const other = fakeWebview();
+    const disposables = [router.attachRouter(owner.channel, {}), router.attachRouter(other.channel, {})];
+    try {
+      owner.send({ type: 'dormouse:init' });
+      other.send({ type: 'dormouse:init' });
+      owner.send({ type: 'pty:spawn', id: 'pty-flow', options: { cwd: '/repo' } });
+      ptys.flow = [];
+      // The webview's share is the parse's: an OSC it stripped is never owed.
+      ptys.callbacks!.onData('pty-flow', 'hello\x1b]633;A\x07');
+      other.send({ type: 'pty:ack', id: 'pty-flow', chars: 5 });
+      owner.send({ type: 'pty:ack', id: 'pty-flow', chars: 5 });
+      expect(ptys.flow).toEqual(['sent pty-flow 5', 'ack pty-flow 5']);
+    } finally { for (const disposable of disposables) disposable.dispose(); }
+  });
+
+  it('forgives a webview’s PTYs when it re-initializes, and those a view leaves running; a closing panel kills instead', () => {
+    const view = fakeWebview();
+    const panel = fakeWebview();
+    const viewRouter = router.attachRouter(view.channel, {});
+    const panelRouter = router.attachRouter(panel.channel, { killOnDispose: true });
+    view.send({ type: 'dormouse:init' });
+    panel.send({ type: 'dormouse:init' });
+    view.send({ type: 'pty:spawn', id: 'pty-view', options: { cwd: '/repo' } });
+    panel.send({ type: 'pty:spawn', id: 'pty-panel', options: { cwd: '/repo' } });
+    ptys.flow = [];
+    view.send({ type: 'dormouse:init' });
+    viewRouter.dispose();
+    panelRouter.dispose();
+    expect(ptys.flow).toEqual(['reset pty-view', 'reset pty-view']);
+    expect(ptys.order).toContain('kill pty-panel');
+  });
 });
 
 describe('session flush', () => {

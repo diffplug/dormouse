@@ -548,7 +548,13 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
 
     let mut delivered: Option<&str> = None;
     match &delivery {
-        Delivery::Nowhere => {}
+        Delivery::Nowhere => {
+            if let (Some(line), Some(sidecar)) =
+                (dropped_output_ack(event, &data), app.try_state::<SidecarState>())
+            {
+                send_to_sidecar(&sidecar, line);
+            }
+        }
         Delivery::Broadcast => {
             let _ = app.emit(event, &data);
         }
@@ -1001,8 +1007,8 @@ fn finish_window_close(app: &AppHandle, label: &str) {
 
 /// Kill the PTYs a window left behind, and drop their Sessions' alert entries
 /// with them: no window will ever show those Sessions again. A kill, not the
-/// graceful stop: an interactive shell ignores that one's POSIX signal, and
-/// nothing owns these PTYs to send another.
+/// graceful stop: no window is left to wait for that stop's acknowledgement,
+/// and one still tearing down owns its PTYs through `pty_graceful_kill`.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its
@@ -1525,6 +1531,30 @@ fn stamped_message(label: &str, event: &str, mut payload: JsonValue) -> String {
 fn pty_resize(state: tauri::State<'_, SidecarState>, id: String, cols: u16, rows: u16) {
     let msg = sidecar_line("pty:resize", serde_json::json!({ "id": id, "cols": cols, "rows": rows }));
     send_to_sidecar(&state, msg);
+}
+
+/// A window parsed `chars` of `id`'s live output (docs/specs/transport.md ->
+/// "Output flow control"); the sidecar decides whether that resumes the PTY.
+#[tauri::command]
+fn pty_ack(state: tauri::State<'_, SidecarState>, id: String, chars: u64) {
+    send_to_sidecar(&state, pty_ack_line(&id, chars));
+}
+
+fn pty_ack_line(id: &str, chars: u64) -> String {
+    sidecar_line("pty:ack", serde_json::json!({ "id": id, "chars": chars }))
+}
+
+/// A `pty:data` no window will parse — mid-transfer, or owned by none — is
+/// acknowledged here on its renderer's behalf: the sidecar counted it as sent,
+/// and nothing else would ever pay it back. Counted in UTF-16 code units, the
+/// unit the sidecar sent it in.
+fn dropped_output_ack(event: &str, data: &JsonValue) -> Option<String> {
+    if event != "pty:data" {
+        return None;
+    }
+    let id = data.get("id")?.as_str()?;
+    let chars = data.get("data")?.as_str()?.encode_utf16().count() as u64;
+    (chars > 0).then(|| pty_ack_line(id, chars))
 }
 
 // The webview's resolved terminal colors, so the sidecar's parser can answer
@@ -2192,16 +2222,37 @@ fn read_update_log() -> Result<String, String> {
 // so the frontend stays window-agnostic and a second window (`ws-2`, …) persists
 // to its own file without ever rewriting the first window's blob.
 
-fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+/// The folder Windows keeps Dormouse's state in, inside Tauri's local app-data
+/// directory. Tauri hands that directory itself to WebView2, which keeps its
+/// `EBWebView` profile there, and the owner-only lock on Dormouse's state must
+/// never reach WebView2's.
+const WINDOWS_STATE_DIR: &str = "state";
+
+/// Where all of Dormouse's own state lives, and the one place that answers it:
+/// the Burrow's files directly, and the state root below them. Tauri's local
+/// app-data directory, never Windows' Roaming profile, which a domain can copy
+/// to every computer the person signs in to, carrying the Burrow's identity
+/// with it. On macOS and Linux Tauri's app-data and local app-data directories
+/// are one folder.
+fn dormouse_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
-        .app_data_dir()
-        .map_err(|e| format!("app_data_dir unavailable: {e}"))
+        .app_local_data_dir()
+        .map(|dir| data_dir_in(dir, cfg!(windows)))
+        .map_err(|e| format!("app_local_data_dir unavailable: {e}"))
+}
+
+fn data_dir_in(app_local_data: PathBuf, windows: bool) -> PathBuf {
+    if windows {
+        app_local_data.join(WINDOWS_STATE_DIR)
+    } else {
+        app_local_data
+    }
 }
 
 /// Per-build window and recovery state. The supported dev wrapper already uses
 /// a worktree-specific identifier; this subtree also protects raw `tauri dev`
 /// launches that retain the installed identifier. Burrow stores stay at the
-/// identifier's app-data root, not shared across different identifiers.
+/// data directory's root, not shared across different identifiers.
 fn state_root_from(app_data: PathBuf) -> PathBuf {
     if cfg!(debug_assertions) {
         app_data.join("dev")
@@ -2211,7 +2262,7 @@ fn state_root_from(app_data: PathBuf) -> PathBuf {
 }
 
 fn state_root(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(state_root_from(app_data_dir(app)?))
+    Ok(state_root_from(dormouse_data_dir(app)?))
 }
 
 fn sessions_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -4511,10 +4562,10 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
 // hands the sidecar a directory that exists; if it can't be made or locked, the
 // sidecar is told nothing and keeps that state in memory rather than not at all.
 fn burrow_state_dir(app: &AppHandle) -> Option<String> {
-    let dir = match app.path().app_data_dir() {
+    let dir = match dormouse_data_dir(app) {
         Ok(dir) => dir,
         Err(e) => {
-            append_log(format!("[sidecar] app_data_dir unavailable: {e}"));
+            append_log(format!("[sidecar] {e}"));
             return None;
         }
     };
@@ -5066,7 +5117,7 @@ pub fn run() {
             // file nothing will ever read or overwrite; one written before
             // Dormouse stopped storing transcripts carries one
             // (docs/specs/standalone.md §Persistence). Never fatal.
-            match app_data_dir(app.handle()) {
+            match dormouse_data_dir(app.handle()) {
                 Ok(dir) => {
                     for e in sweep_session_roots(&dir) {
                         append_log(format!("[session] {e}"));
@@ -5136,6 +5187,7 @@ pub fn run() {
             pty_spawn,
             pty_write,
             pty_resize,
+            pty_ack,
             pty_theme_colors,
             pty_kill,
             pty_get_cwd,
@@ -5238,7 +5290,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        arrivals_path, discard_other_formats, find_node_binary, forget_arrival_on_disk, geometry_path,
+        arrivals_path, data_dir_in, discard_other_formats, find_node_binary, forget_arrival_on_disk, geometry_path,
         open_ports_many_timeout, read_arrivals_from,
         read_session_from, record_arrival_on_disk, record_workspace_id,
         resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
@@ -5246,7 +5298,7 @@ mod tests {
         sweep_orphan_session_temps, temp_write_path,
         write_session_to, JsonValue, OPEN_PORT_TIMEOUT_MS,
         OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
-        SESSION_VERSION, WINDOW_VERSION,
+        SESSION_VERSION, WINDOWS_STATE_DIR, WINDOW_VERSION,
     };
     use super::routing;
     use super::guard;
@@ -5668,6 +5720,37 @@ mod tests {
         assert_eq!(
             parse_line(&super::pty_input_message("t1", "view\r", None, None, Some(true))),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "view\r", "launch": true } })
+        );
+    }
+
+    /// Every `pty:data` the routing drops is acknowledged to the sidecar, or
+    /// the PTY it came from stays paused on output no window ever saw. The
+    /// dispatch needs a running app, so its wiring is read from the source.
+    #[test]
+    fn dispatch_acknowledges_every_dropped_chunk() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let dispatch = src.split("fn dispatch_sidecar_event(").nth(1).unwrap().split("\n}").next().unwrap();
+        let nowhere = dispatch.split("Delivery::Nowhere =>").nth(1).expect("a Nowhere arm").split("Delivery::Broadcast =>").next().unwrap();
+        let ack = nowhere.find("dropped_output_ack(event, &data)").expect("the drop is acknowledged");
+        assert!(nowhere[ack..].contains("send_to_sidecar(&sidecar, line)"));
+    }
+
+    /// Output no window will parse is acknowledged on its behalf, in the
+    /// sidecar's own unit, a JS string's length: UTF-16 code units.
+    #[test]
+    fn dropped_output_is_acknowledged_in_utf16_code_units() {
+        let chunk = serde_json::json!({ "id": "t1", "data": "a😀é\r\n" });
+        assert_eq!(
+            parse_line(&super::dropped_output_ack("pty:data", &chunk).unwrap()),
+            serde_json::json!({ "event": "pty:ack", "data": { "id": "t1", "chars": 6 } })
+        );
+        // Only output owes anything, and only a nonempty chunk.
+        assert_eq!(super::dropped_output_ack("terminal:semanticEvents", &chunk), None);
+        assert_eq!(super::dropped_output_ack("pty:data", &serde_json::json!({ "id": "t1", "data": "" })), None);
+        assert_eq!(super::dropped_output_ack("pty:data", &serde_json::json!({ "data": "x" })), None);
+        assert_eq!(
+            parse_line(&super::pty_ack_line("t1", 5000)),
+            serde_json::json!({ "event": "pty:ack", "data": { "id": "t1", "chars": 5000 } })
         );
     }
 
@@ -7254,6 +7337,18 @@ mod tests {
                 .unwrap(),
             format!("main{SESSION_TEMP_SUFFIX}"),
         );
+    }
+
+    /// On Windows the state is one folder inside the local app-data directory,
+    /// which never holds the `EBWebView` profile WebView2 keeps beside it, so
+    /// the owner-only lock cannot reach it; elsewhere it is that directory.
+    #[test]
+    fn windows_state_is_one_folder_of_the_local_app_dir_and_others_use_it_whole() {
+        let local = PathBuf::from("/local/sh.dormouse.standalone");
+        let windows = data_dir_in(local.clone(), true);
+        assert_eq!(windows, local.join(WINDOWS_STATE_DIR));
+        assert!(!local.join("EBWebView").starts_with(&windows));
+        assert_eq!(data_dir_in(local.clone(), false), local);
     }
 
     /// Raw debug launches retain the production identifier; the dev wrapper

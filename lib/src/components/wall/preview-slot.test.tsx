@@ -1016,6 +1016,37 @@ describe('a terminal link', () => {
     expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
   });
 
+  it.each(['labelled', 'failed preview'])('asks again for the resolved script target after a %s fallback', async (fallback) => {
+    await mountSlot();
+    let first = true;
+    fake.toolControl = vi.fn(async request => {
+      if (request.op === 'open-handlers') return {
+        status: 'open-handlers' as const,
+        handlers: { handlers: [{ tool: 'viewer', description: 'view', reason: 'open rule' }], config: '/config/dormouse.yml' },
+      };
+      if (fallback === 'failed preview' && first) {
+        first = false;
+        throw new Error('Preview unavailable');
+      }
+      // The host resolves a harmless-looking symlink to a page with scripts.
+      return openLookup('/elsewhere/private page.html');
+    });
+    const uri = 'file:///repo/notes.txt';
+    await act(async () => activateTerminalLink('surface:a', { detail: 1 }, uri, fallback === 'labelled' ? '[Notes]' : 'notes.txt'));
+    await waitUntil(() => getExternalLinkConfirmationSnapshot()?.uri === uri);
+    await waitUntil(() => !dialogButton('Open file').disabled);
+    await act(async () => openFileButton().click());
+    await waitUntil(() => getExternalLinkConfirmationSnapshot()?.uri === '/elsewhere/private page.html');
+    expect(document.body.textContent).toContain('runs its own scripts');
+    expect(typed['surface:a']).toEqual([]);
+    expect(typed['surface:slot']).toEqual([]);
+    await act(async () => dialogButton('Cancel').click());
+    await flush();
+    expect(typed['surface:a']).toEqual([]);
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolTarget: '/repo/a.md' });
+  });
+
   it('reports a closed source instead of opening next to an unrelated terminal', async () => {
     await mountSlot();
     fake.toolControl = vi.fn(async () => ({ status: 'open-handlers' as const, handlers: { handlers: [], config: '/config/dormouse.yml' } }));

@@ -43,7 +43,7 @@ Source of truth: `scripts/stage-dor-cli.mjs`, `dor/bin/dor`, `dor/bin/dor.cmd`, 
 
 ### WSL interop
 
-**Must preserve every variable the CLI reads through `WSLENV` on Windows panes**, including those that start WSL later, preserving unrelated user entries. (rationale)
+**Must forward through `WSLENV` each variable the CLI reads that a Windows pane has, never an unset one**, keeping unrelated user entries. (rationale)
 
 - **Must run the bundled Windows runtime from WSL**, translating only its executable path; script and pipe paths stay opaque. Requires WSL's Windows interop.
 - **Must translate the caller's `PWD` back to Windows for the CLI only**, never for other Windows programs, and forward its distro name.
@@ -275,9 +275,9 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 
 **Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.**
 
-- **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except Dormouse-owned `dor-embed-size` and `dor-diagnostics`, forward arguments, stdout, stderr and exit status. **Must forward stdin only to the requested command**, never preparation or status probes.
+- **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except Dormouse-owned `dor-embed-size` and `dor-diagnostics`, forward arguments and exit status, and stdout and stderr at exit. **Must refuse a form that waits on the terminal or never exits** (`BLOCKING_FORMS`; rationale). **Must forward stdin only to the requested command**, never preparation or status probes.
 - **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.
-- **After a command that may bind succeeds, `surface.browser { provider, key?, surface?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**, routed by any `--surface`: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a launch or close of the browser (rationale). A failure there adds a stderr warning without changing the command's success. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
+- **After a command that may bind succeeds, `surface.browser { provider, key?, surface?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**, routed by any `--surface`: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`** (rationale). A failure there adds a stderr warning without changing the command's success. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle Model](#handle-model)), and the host applies two gates in order:
 

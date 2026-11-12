@@ -1,5 +1,5 @@
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
+import type { OpenPort, PlatformAdapter, PtyDataHandler, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
 import type { ManagedVoicePort } from './managed-voice-types';
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
@@ -12,6 +12,7 @@ import { applyTerminalSemanticEvents } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
+import { PtyDataDispatch } from '../pty-flow';
 
 /** This renderer is its host's one realm. */
 const LOCAL_VIEWER = 'local';
@@ -44,7 +45,7 @@ const DEFAULT_PTY_SIZE: FakePtySize = { cols: 80, rows: 30 };
 export interface FakePtyAdapter extends AlertClientMethods {}
 
 export class FakePtyAdapter implements PlatformAdapter {
-  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
+  private readonly ptyData = new PtyDataDispatch((id, chars) => this.acknowledgePtyData(id, chars));
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
   private spawnHandlers = new Set<(detail: PtySpawnDetail) => void>();
@@ -167,7 +168,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.terminalSizes.clear();
     this.defaultScenario = null;
     this.scenarioMap.clear();
-    this.dataHandlers.clear();
+    this.ptyData.clear();
     this.exitHandlers.clear();
     this.resizeHandlers.clear();
     this.spawnHandlers.clear();
@@ -185,6 +186,10 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: SpawnPtyOptions): void {
+    // A spawn over a live id stops the displaced generation: only the current
+    // one speaks for the id, so its pending output and exit never arrive.
+    this.activeTimers.get(id)?.forEach(clearTimeout);
+    this.activeTimers.delete(id);
     // A new generation starts its alert state over, from what a cold restore
     // persisted, as every host's spawn does.
     this.alertHost.respawn(id, options?.alert);
@@ -291,6 +296,9 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
+    // Only a PTY that is running reports the exit its kill causes; an id with
+    // none stops nothing, and a host reports nothing for it.
+    const running = this.terminals.has(id);
     const timers = this.activeTimers.get(id);
     if (timers) {
       timers.forEach(clearTimeout);
@@ -305,18 +313,22 @@ export class FakePtyAdapter implements PlatformAdapter {
     // The Session is over, so its alert state goes with it.
     this.alertManager.remove(id);
     this.helpers.delete(id);
+    if (!running) return;
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
     }
   }
 
-  onPtyData(handler: (detail: PtyDataDetail) => void): void {
-    this.dataHandlers.add(handler);
+  onPtyData(handler: PtyDataHandler): void {
+    this.ptyData.add(handler);
   }
 
-  offPtyData(handler: (detail: PtyDataDetail) => void): void {
-    this.dataHandlers.delete(handler);
+  offPtyData(handler: PtyDataHandler): void {
+    this.ptyData.delete(handler);
   }
+
+  /** In process, nothing to pause: the fake's scenarios are finite. */
+  acknowledgePtyData(_id: string, _chars: number): void {}
 
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void {
     this.exitHandlers.add(handler);
@@ -449,6 +461,9 @@ export class FakePtyAdapter implements PlatformAdapter {
     if (scenario.exitCode !== undefined) {
       const exitTimer = setTimeout(() => {
         if (!this.terminals.has(id)) return;
+        // The process is gone: a later kill of the id stops nothing and reports
+        // nothing, as a host that forgot the PTY on its exit does.
+        this.terminals.delete(id);
         this.activeTimers.delete(id);
         this.alertManager.onExit(id, scenario.exitCode ?? 0);
         for (const handler of this.exitHandlers) {
@@ -483,9 +498,7 @@ export class FakePtyAdapter implements PlatformAdapter {
       onSemanticEvents: events => applyTerminalSemanticEvents(id, events),
       writeResponse: data => this.inputHandlers.get(id)?.(data),
       onClipboardOffer: text => offerProgramCopy(id, text),
-      onChunk: chunk => {
-        for (const handler of this.dataHandlers) handler({ id, ...chunk });
-      },
+      onChunk: chunk => this.ptyData.deliver({ id, ...chunk }),
     });
   }
 

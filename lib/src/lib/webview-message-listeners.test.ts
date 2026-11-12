@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
  * Scanned rather than trusted: a new listener fails here until it is placed in
  * one list or the other. `lib/src/host/` is Node, not the webview; the shim it
  * injects into framed pages is pinned by `lib/src/host/iframe-proxy-rewrite.test.ts`.
+ * A story runs only in Storybook, never in a shipped webview.
  */
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -65,7 +66,7 @@ function scan(): Record<string, number> {
   const found: Record<string, number> = {};
   for (const root of ['lib/src', 'standalone/src']) {
     for (const entry of readdirSync(join(repo, root), { recursive: true, withFileTypes: true })) {
-      if (!entry.isFile() || !/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) continue;
+      if (!entry.isFile() || !/\.tsx?$/.test(entry.name) || /\.(test|stories)\.tsx?$/.test(entry.name)) continue;
       const rel = relative(repo, join(entry.parentPath, entry.name)).split(sep).join('/');
       if (rel.startsWith('lib/src/host/') || /(^|\/)test-[^/]*$/.test(rel)) continue;
       const count = readFileSync(join(repo, rel), 'utf8').match(LISTENER)?.length ?? 0;

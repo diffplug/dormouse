@@ -15,6 +15,9 @@ export type WebviewMessage =
   | { type: 'pty:spawn'; id: string; options?: SpawnPtyOptions }
   | { type: 'pty:input'; id: string; data: string; paced?: boolean; userInput?: true; launch?: true }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
+  // The webview parsed `chars` of the id's live output (docs/specs/transport.md
+  // -> "Output flow control"). `chars` is validated host-side.
+  | { type: 'pty:ack'; id: string; chars: number }
   | { type: 'pty:kill'; id: string }
   | { type: 'pty:getCwd'; id: string; requestId?: string }
   | { type: 'pty:getCwds'; ids: string[]; requestId?: string }

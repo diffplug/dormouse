@@ -8,7 +8,7 @@ import {
   ITERM2_DEVICE_ATTRIBUTES_RESPONSE,
   TerminalProtocolParser,
 } from './terminal-protocol';
-import { commandWatchKey, createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
+import { MAX_CWD_LENGTH, commandWatchKey, createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
 
 describe('TerminalProtocolParser', () => {
   it('parses and strips standalone terminal bells', () => {
@@ -840,6 +840,16 @@ describe('TerminalProtocolParser', () => {
     expect(remote?.host).toBe('prod');
     expect(remote?.path).toBe('/srv');
     expect(cwdOf(parser, '\x1b]1337;RemoteHost=me@mac-mini\x07\x1b]1337;CurrentDir=/repo\x07')?.isRemote).toBe(false);
+  });
+
+  it('bounds and strips the remembered OSC 1337 host before any CurrentDir report', () => {
+    const parser = new TerminalProtocolParser();
+    const host = 'p\x00\x01\x7f\x80rod'.repeat(MAX_CWD_LENGTH);
+    parser.process(`\x1b]1337;RemoteHost=user@${host}\x07`);
+    // Inspect retention itself: the downstream CWD sanitizer could hide a leak.
+    expect(parser['remoteHost']).toBe('prod'.repeat(MAX_CWD_LENGTH / 4));
+    parser.process('\x1b]1337;RemoteHost=user@next\x07');
+    expect(parser['remoteHost']).toBe('next');
   });
 
   it('responds to iTerm2 extended device attribute queries', () => {

@@ -5,8 +5,8 @@ import { previousWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS, setWorkspaceTransfe
  * Integration smoke for the Wall on the Lath engine: it renders panes through
  * LathHost, splits/kills through the engine, and persists the Lath layout on save.
  * jsdom has no real layout, so this asserts structure (leaf count, save shape), not
- * geometry — the Wall on Lath live acceptance list in
- * TESTING_AND_MODIFICATION_GUIDE.md (§5) is the live gate.
+ * geometry, which the play tests in `lib/src/stories/Wall.stories.tsx` check in a
+ * real browser.
  */
 import { act, type ReactElement } from 'react';
 import { type Root } from 'react-dom/client';
@@ -44,6 +44,7 @@ import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-st
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
+import { clearExternalLinkConfirmation, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
 import { installSurfaceIdPool, resetSurfaceIdPool } from '../lib/surface-ids';
 import { cfg } from '../cfg';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
@@ -299,6 +300,28 @@ describe('Wall on the Lath engine', () => {
       await flushFrame();
       expect(focus).toHaveBeenCalledWith('surface:a', true);
     } finally {
+      focus.mockRestore();
+    }
+  });
+
+  it.each([false, true])('gives the passthrough terminal the keyboard back after the last dialog closes (another field focused: %s)', async (elsewhere) => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    const field = document.body.appendChild(document.createElement('input'));
+    try {
+      await act(async () => { requestExternalLinkConfirmation('https://example.com/'); });
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      focus.mockClear();
+      await act(async () => {
+        clearExternalLinkConfirmation();
+        if (elsewhere) field.focus();
+      });
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      await flushFrame();
+      expect(focus.mock.calls.some(([id, focused]) => id === 'surface:a' && focused)).toBe(!elsewhere);
+    } finally {
+      field.remove();
       focus.mockRestore();
     }
   });
@@ -1152,6 +1175,59 @@ describe('Wall on the Lath engine', () => {
       });
       const selectedParked = onEvent.mock.calls.some(([event]) => event.type === 'selectionChange' && event.id === surfaceId);
       expect(selectedParked).toBe(false);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it.each(['passthrough', 'command'] as const)('takes the keyboard back from a parked page that focuses itself, in %s', async (mode) => {
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />); });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
+      const leaf = container.querySelector<HTMLElement>(`[data-lath-leaf="${surfaceId}"]`)!;
+      await act(async () => { leaf.querySelector<HTMLElement>('[aria-label="Minimize"]')!.click(); });
+      await flush();
+      expect(leaf.dataset.lathParked).toBe('');
+      // Minimizing leaves command mode on the Door; a click on the terminal enters passthrough.
+      if (mode === 'passthrough') {
+        await act(async () => { container.querySelector('[data-session-id="surface:a"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+        await flushFrame();
+      }
+      focus.mockClear();
+
+      const frame = leaf.querySelector('iframe')!;
+      frame.focus();
+      await act(async () => { window.dispatchEvent(new FocusEvent('blur')); });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(document.activeElement).toBe(document.body);
+      await flushFrame();
+      expect(focus.mock.calls.some(([id, focused]) => id === 'surface:a' && focused)).toBe(mode === 'passthrough');
+    } finally {
+      focus.mockRestore();
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('leaves a restored page the focus its restore gave it', async () => {
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />); });
+    await flush();
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      const surfaceId = (await dispatchIframe('http://localhost:5173/')).id;
+      const leaf = container.querySelector<HTMLElement>(`[data-lath-leaf="${surfaceId}"]`)!;
+      await act(async () => { leaf.querySelector<HTMLElement>('[aria-label="Minimize"]')!.click(); });
+      await flush();
+      await act(async () => { container.querySelector<HTMLElement>(`[data-door-id="${surfaceId}"] button`)!.click(); });
+      await flushFrame();
+      expect(leaf.hasAttribute('data-lath-parked')).toBe(false);
+      const frame = leaf.querySelector('iframe')!;
+      expect(document.activeElement).toBe(frame);
+      await act(async () => { window.dispatchEvent(new FocusEvent('blur')); });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+      expect(document.activeElement).toBe(frame);
     } finally {
       untouchedSpy.mockRestore();
     }

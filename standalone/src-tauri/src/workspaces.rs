@@ -8,7 +8,7 @@
 //! seeded above every id on disk — so an id never renumbers and never collides
 //! across windows.
 //!
-//! Pure over its own state, like `routing`; `lib.rs` holds the lock and emits.
+//! Pure over its own state, like `routing`; `lib.rs` holds the lock.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;

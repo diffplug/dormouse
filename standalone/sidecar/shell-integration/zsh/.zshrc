@@ -12,6 +12,12 @@
 
 : ${USER_ZDOTDIR:=$HOME}
 ZDOTDIR=${USER_ZDOTDIR}
+# The compinit wrapper from .zshenv, when no system file called it.
+if [[ ${functions[compinit]-} == *DORMOUSE_ZDOTDIR* ]]; then
+  builtin unfunction compinit
+  if (( __dormouse_had_compinit )); then builtin autoload -Uz compinit; fi
+fi
+builtin unset __dormouse_had_compinit
 if [[ -f ${USER_ZDOTDIR}/.zshrc ]]; then
   builtin source ${USER_ZDOTDIR}/.zshrc
 fi

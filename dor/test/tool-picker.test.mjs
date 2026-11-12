@@ -6,6 +6,8 @@ import { validateToolArgs } from '../dist/commands/tool.js';
 import { fakeTerminal, until } from './fake-terminal.mjs';
 
 const ENV = { PWD: '/work/site', HOME: '/home/me' };
+/** A host on which `--cwd sub`, under ENV's PWD, exists. */
+const anyDirectoryHost = { ...NODE_HOST, isDirectory: () => true };
 
 /** An approved project and a user file whose `storybook` the project hides;
  *  `--global` answers the user file alone, as the host does. */
@@ -39,8 +41,8 @@ function toolClient({ tools } = {}) {
 }
 
 /** Runs `dor tool <argv>` at a terminal and waits for the picker's list. */
-async function startPicker(argv, { terminal = fakeTerminal(), client = toolClient() } = {}) {
-  const result = runCli(['tool', ...argv], { client, terminal, env: ENV });
+async function startPicker(argv, { terminal = fakeTerminal(), client = toolClient(), host } = {}) {
+  const result = runCli(['tool', ...argv], { client, terminal, env: ENV, ...(host ? { host } : {}) });
   await until(() => terminal.output.includes('md'), 'the Tool list');
   return { terminal, client, result };
 }
@@ -51,7 +53,7 @@ const launch = (client) => client.requests.find(r => r.method === 'toolSurface')
 
 test('a pick launches the Tool as dor tool <name> with the same flags would', async () => {
   const flags = ['--fresh', '--minimize', '--surface', 'surface:2', '--workspace', 'workspace:2', '--cwd', 'sub'];
-  const { terminal, client, result } = await startPicker(flags);
+  const { terminal, client, result } = await startPicker(flags, { host: anyDirectoryHost });
   assert.deepEqual(client.requests[0], { method: 'toolList', request: { cwd: launch(await typed(flags, 'harness')).cwd, global: false } });
   terminal.send('harn');
   await until(() => terminal.output.includes('[agent-browser-screencast]'), 'the highlighted Tool');
@@ -68,10 +70,19 @@ test('a pick launches the Tool as dor tool <name> with the same flags would', as
 /** The client a typed `dor tool <flags> <name>` sent. */
 async function typed(flags, name) {
   const client = toolClient();
-  // `--cwd sub` names a directory under ENV's PWD, which exists only here.
-  await runCli(['tool', ...flags, name], { client, env: ENV, host: { ...NODE_HOST, isDirectory: () => true } });
+  await runCli(['tool', ...flags, name], { client, env: ENV, host: anyDirectoryHost });
   return client;
 }
+
+test('a --cwd that names no directory fails before the picker opens, as a typed launch does', async () => {
+  const terminal = fakeTerminal();
+  const client = toolClient();
+  const result = await runCli(['tool', '--cwd', 'sub'], { client, terminal, env: ENV });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /directory '.*sub' does not exist/);
+  assert.deepEqual(client.requests, [], 'neither lists nor launches');
+  assert.equal(terminal.output, '', 'no picker drawn');
+});
 
 test('the list is project Tools then user Tools in file order, a shadowed one marked', async () => {
   const { terminal, result } = await startPicker([]);

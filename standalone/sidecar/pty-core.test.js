@@ -21,6 +21,8 @@ const {
   withConnectAddresses,
   parseNetTcpConnections,
   parseNetstatListening,
+  parseWindowsPortScan,
+  WINDOWS_PORT_SCAN_SCRIPT,
   getListeningPortsForPids,
   shellHasWork,
   getOpenPortsForPids,
@@ -193,7 +195,10 @@ test('Windows panes carry dor context through WSL and back without translating p
       fsModule: { statSync() { throw new Error('ENOENT'); } },
     });
     const entries = config.env.WSLENV.split(':');
-    assert.deepEqual(entries, ['USER_FILES/lp', 'USER_FLAG/u', ...WSL_CLI_ENV]);
+    assert.deepEqual(entries, ['USER_FILES/lp', 'USER_FLAG/u',
+      'DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_SURFACE_ID', 'DORMOUSE_HOST', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
+      // The terminal identity every pane carries, which the distro's programs read too.
+      'TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'LC_TERMINAL', 'LC_TERMINAL_VERSION', 'COLORTERM']);
     for (const key of ['DORMOUSE_NODE', 'DORMOUSE_CLI_JS', 'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN']) {
       assert.equal(config.env[key], env[key]);
     }
@@ -207,10 +212,21 @@ test('Windows panes carry dor context through WSL and back without translating p
 test('WSLENV merges an inherited entry of any casing and leaves the launcher entries to dor/bin/dor', () => {
   const config = resolveSpawnConfig({}, {
     platform: 'win32',
-    env: { WslEnv: 'USER_FLAG/u:PWD/pw:ELECTRON_RUN_AS_NODE/w' },
+    env: { WslEnv: 'USER_FLAG/u:PWD/pw:ELECTRON_RUN_AS_NODE/w:TERM_PROGRAM/u' },
   });
   assert.equal(config.env.WslEnv, undefined);
-  assert.deepEqual(config.env.WSLENV.split(':'), ['USER_FLAG/u', ...WSL_CLI_ENV]);
+  assert.deepEqual(config.env.WSLENV.split(':'), ['USER_FLAG/u', 'DORMOUSE_SURFACE_ID', 'TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'LC_TERMINAL', 'LC_TERMINAL_VERSION', 'COLORTERM']);
+});
+
+test('WSLENV lists no name the pane lacks, which WSL would set empty in the distro', () => {
+  const spawn = (options, env) => resolveSpawnConfig(options, { platform: 'win32', env }).env;
+  const plain = spawn({ shell: 'C:\\Windows\\System32\\wsl.exe', surfaceId: 'surface:1' }, { DORMOUSE_DEHYDRATE: 'inherited', WSLENV: 'DORMOUSE_DEHYDRATE' });
+  assert.equal(plain.DORMOUSE_DEHYDRATE, undefined);
+  for (const name of plain.WSLENV.split(':')) assert.ok(Object.hasOwn(plain, name), `${name} is listed but unset`);
+  assert.ok(!plain.WSLENV.split(':').includes('DORMOUSE_DEHYDRATE'));
+  // A rehydrated pane has the payload, so it crosses.
+  const rehydrated = spawn({ surfaceId: 'surface:2', dehydrate: '{"v":1}' }, {});
+  assert.ok(rehydrated.WSLENV.split(':').includes('DORMOUSE_DEHYDRATE'));
 });
 
 test('WSLENV forwards every DORMOUSE_* variable the dor CLI reads', () => {
@@ -1375,6 +1391,27 @@ test('resolveSpawnConfig injects pwsh integration via -NoExit -Command dot-sourc
   assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
 });
 
+test('resolveSpawnConfig injects pwsh as the login shell on macOS and Linux, keeping -l first', () => {
+  for (const platform of ['darwin', 'linux']) {
+    const config = resolveSpawnConfig(undefined, {
+      platform,
+      env: { SHELL: '/usr/local/bin/pwsh', HOME: '/home/tester', DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/dormouse/shell-integration' },
+      osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+      fsModule: integrationFsModule,
+    });
+    // pwsh honors -l only as its first argument.
+    assert.deepEqual(config.shellArgs, ['-l', '-NoExit', '-Command', ". '/opt/dormouse/shell-integration/pwsh/shellIntegration.ps1'"], platform);
+  }
+  const explicit = (args) => resolveSpawnConfig({ args }, {
+    platform: 'linux',
+    env: { SHELL: '/usr/bin/pwsh', HOME: '/home/tester', DORMOUSE_SHELL_INTEGRATION_DIR: '/opt/d' },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp' },
+    fsModule: integrationFsModule,
+  }).shellArgs;
+  assert.deepEqual(explicit(['-Login', '-NoExit', '-NoLogo']), ['-Login', '-NoExit', '-NoLogo', '-Command', ". '/opt/d/pwsh/shellIntegration.ps1'"]);
+  assert.deepEqual(explicit(['-l', '-Command', 'Get-Process']), ['-l', '-Command', 'Get-Process']);
+});
+
 test('resolveSpawnConfig injects Windows PowerShell (powershell.exe) too', () => {
   const integrationDir = 'C:\\Program Files\\Dormouse\\shell-integration';
   const config = resolveSpawnConfig(
@@ -1547,16 +1584,39 @@ test('resolveSpawnConfig quotes an apostrophe in the integration path for PowerS
   assert.deepEqual(pwsh('O\u2019Brien'), ['-NoExit', '-Command',
     ". 'C:\\Users\\O\u2019\u2019Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration\\pwsh\\shellIntegration.ps1'"]);
 
-  const wsl = resolveSpawnConfig(
-    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
-    runtime("C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration"),
-  ).shellArgs;
-  const detector = wsl[wsl.length - 1];
+  const detector = apostropheWslDetector();
   assert.ok(detector.includes(
     "exec bash --init-file '/mnt/c/Users/O'\\''Brien/AppData/Local/Dormouse Terminal/shell-integration/bash/shellIntegration.bash' -i;;",
   ), detector);
-  // The detector is one sh program, so it must still parse.
-  const parsed = spawnSync('sh', ['-n', '-c', detector], { encoding: 'utf8' });
+});
+
+function apostropheWslDetector() {
+  const wsl = resolveSpawnConfig(
+    { shell: 'C:\\Windows\\System32\\wsl.exe', args: ['-d', 'Ubuntu'] },
+    {
+      platform: 'win32',
+      env: { USERPROFILE: 'C:\\Users\\tester', DORMOUSE_SHELL_INTEGRATION_DIR: "C:\\Users\\O'Brien\\AppData\\Local\\Dormouse Terminal\\shell-integration" },
+      osModule: { homedir: () => 'C:\\Users\\tester', tmpdir: () => 'C:\\Temp' },
+      fsModule: integrationFsModule,
+    },
+  ).shellArgs;
+  return wsl[wsl.length - 1];
+}
+
+// An `sh` to parse with: PATH's, else Git for Windows' copy, since Windows has
+// none of its own.
+const SH = (() => {
+  if (!spawnSync('sh', ['-c', ':']).error) return 'sh';
+  if (process.platform !== 'win32') return null;
+  const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean);
+  return roots.flatMap((root) => ['usr\\bin\\sh.exe', 'bin\\sh.exe'].map((rel) => path.win32.join(root, 'Git', rel)))
+    .find((candidate) => require('node:fs').existsSync(candidate)) ?? null;
+})();
+
+test('the WSL detector with an apostrophe in its path is still one sh program', {
+  skip: SH ? false : 'no sh on PATH or under Git for Windows',
+}, () => {
+  const parsed = spawnSync(SH, ['-n', '-c', apostropheWslDetector()], { encoding: 'utf8' });
   assert.equal(parsed.status, 0, parsed.stderr);
 });
 
@@ -2083,6 +2143,15 @@ const WINDOWS_ENV = { SystemRoot: 'D:\\Win' };
 const POWERSHELL = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const NETSTAT = 'D:\\Win\\System32\\netstat.exe';
 
+/** What `WINDOWS_PORT_SCAN_SCRIPT` prints: each query's JSON behind its tag,
+ *  and no line for one that failed (`undefined`). */
+function windowsTables(processes, sockets) {
+  return [
+    processes === undefined ? null : `P${JSON.stringify(processes)}`,
+    sockets === undefined ? null : `S${JSON.stringify(sockets)}`,
+  ].filter((line) => line !== null).join('\r\n') + '\r\n';
+}
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () => {
   const execFile = (cmd, args) => {
     assert.equal(cmd, POWERSHELL);
@@ -2119,25 +2188,20 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
   const timeouts = [];
   const execFile = (cmd, args, options) => {
     timeouts.push(options.timeout);
-    const script = args.at(-1);
-    if (script.includes('ParentProcessId')) {
+    if (cmd === POWERSHELL) {
+      assert.equal(args.at(-1), WINDOWS_PORT_SCAN_SCRIPT);
       now += OPEN_PORT_TIMEOUT_MS;
-      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }]);
-    }
-    // The process table above already named every pid.
-    if (script.includes('Win32_Process')) assert.fail('second process query');
-    if (script.includes('Get-NetTCPConnection')) {
-      now += 1000;
-      throw new Error('cmdlet failed');
+      // The process table answered; the cmdlet printed nothing.
+      return windowsTables([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }], undefined);
     }
     assert.equal(cmd, NETSTAT);
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
   const result = await getOpenPortsForPids([{ pid: 4242 }], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
-  const budget = openPortScanTimeoutMs(1);
-  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
-  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
+  const budget = OPEN_PORT_TIMEOUT_MS + openPortScanTimeoutMs(1);
+  assert.deepEqual(timeouts, [budget, budget - OPEN_PORT_TIMEOUT_MS]);
+  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 500);
   assert.equal(result.get(4242)[0].processName, 'node.exe');
 });
 
@@ -2216,17 +2280,15 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
   const scripts = [];
   const execFile = (cmd, args) => {
     const script = args[args.length - 1];
-    if (cmd === POWERSHELL && script.includes('Win32_Process')) {
-      return JSON.stringify([
+    if (cmd === POWERSHELL) {
+      return windowsTables([
         [100, 1, 'bash.exe'], [101, 100, 'bash.exe'],
         // `node` exec'd through winpty: its MSYS parent's Windows process is gone.
         [300, 299, 'winpty.exe'], [301, 300, 'winpty-agent.exe'], [302, 301, 'node.exe'],
         [500, 1, 'powershell.exe'], [501, 500, 'wsl.exe'],
         [900, 1, 'node.exe'],
-      ].map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name })));
-    }
-    if (cmd === POWERSHELL && script.includes('Get-NetTCPConnection')) {
-      return JSON.stringify([{ LocalAddress: '::', LocalPort: 3000, OwningProcess: 302 }, { LocalAddress: '::', LocalPort: 9000, OwningProcess: 900 }]);
+      ].map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name })),
+      [{ LocalAddress: '::', LocalPort: 3000, OwningProcess: 302 }, { LocalAddress: '::', LocalPort: 9000, OwningProcess: 900 }]);
     }
     if (cmd === MSYS_PS) {
       return [
@@ -2265,19 +2327,35 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
   assert.match(scripts[0], /DORMOUSE_SURFACE_ID=\(surface:wsl\)/);
 });
 
-test('getOpenPortsForPids (win32) runs neither extra read for a shell that needs none', async () => {
+test('getOpenPortsForPids (win32) starts PowerShell once, and neither extra read for a shell that needs none', async () => {
   const spawns = [];
-  const execFile = (cmd, args) => {
+  const execFile = (cmd) => {
     spawns.push(cmd);
-    const script = args[args.length - 1];
-    if (script.includes('Win32_Process')) return JSON.stringify([{ ProcessId: 100, ParentProcessId: 1, Name: 'cmd.exe' }]);
-    if (script.includes('Get-NetTCPConnection')) return '[]';
+    if (cmd === POWERSHELL) {
+      return windowsTables([{ ProcessId: 100, ParentProcessId: 1, Name: 'cmd.exe' }, { ProcessId: 101, ParentProcessId: 100, Name: 'node.exe' }],
+        { LocalAddress: '127.0.0.1', LocalPort: 3000, OwningProcess: 101 });
+    }
     throw new Error(`unexpected spawn: ${cmd}`);
   };
-  await getOpenPortsForPids([{ pid: 100, shell: 'D:\\Win\\System32\\cmd.exe', surfaceId: 'surface:1' }], {
+  const ports = await getOpenPortsForPids([{ pid: 100, shell: 'D:\\Win\\System32\\cmd.exe', surfaceId: 'surface:1' }], {
     platform: 'win32', env: WINDOWS_ENV, execFile,
   });
-  assert.deepEqual(spawns, [POWERSHELL, POWERSHELL]);
+  assert.deepEqual(spawns, [POWERSHELL]);
+  assert.deepEqual(ports.get(100), [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 3000, pid: 101, processName: 'node.exe' }]);
+});
+
+test('parseWindowsPortScan keeps each answer when the other query failed', () => {
+  const processes = [{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }];
+  const socket = { LocalAddress: '::', LocalPort: 3000, OwningProcess: 4242 };
+  assert.deepEqual(parseWindowsPortScan(windowsTables(processes, socket)), {
+    pairs: [[4242, 1, 'node.exe']],
+    sockets: [{ protocol: 'tcp', family: 'IPv6', address: '::', port: 3000, pid: 4242 }],
+  });
+  assert.deepEqual(parseWindowsPortScan(windowsTables(undefined, [socket])).pairs, null);
+  assert.deepEqual(parseWindowsPortScan(windowsTables(processes, undefined)).sockets, null);
+  // A tag with nothing behind it, as a query whose pipeline was empty prints.
+  assert.deepEqual(parseWindowsPortScan('P\r\nS\r\n'), { pairs: null, sockets: null });
+  assert.deepEqual(parseWindowsPortScan(''), { pairs: null, sockets: null });
 });
 
 test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', async () => {
@@ -2539,9 +2617,12 @@ test('setParentWindow hands node-pty the HWND bytes and never lets a refusal esc
 function fakePtyModule() {
   const listeners = new Map();
   const killed = [];
+  /** Every pause, resume and kill, in order, as `[id, call]`. */
+  const calls = [];
   return {
     listeners,
     killed,
+    calls,
     module: {
       spawn(shell, args, opts) {
         const id = opts?.env?.DORMOUSE_SURFACE_ID;
@@ -2553,12 +2634,79 @@ function fakePtyModule() {
           onExit(handler) { handlers.exit = handler; },
           resize() {},
           write() {},
-          kill(signal) { killed.push([id, signal]); },
+          pause() { calls.push([id, 'pause']); },
+          resume() { calls.push([id, 'resume']); },
+          kill(signal) { killed.push([id, signal]); calls.push([id, 'kill']); },
         };
       },
     },
   };
 }
+
+// Output flow control (docs/specs/transport.md -> "Output flow control"): the
+// host decides; pty-core pauses the generation it names and makes sure a
+// paused one still exits and still stops.
+test('pause and resume reach the current generation once each', () => {
+  const pty = fakePtyModule();
+  const mgr = create(() => {}, pty.module, { processAlive: () => true });
+  mgr.spawn('a');
+  mgr.pause('a');
+  mgr.pause('a');
+  mgr.resume('a');
+  mgr.resume('a');
+  mgr.pause('gone');
+  assert.deepEqual(pty.calls, [['a', 'pause'], ['a', 'resume']]);
+  mgr.killAll();
+});
+
+test('a paused PTY whose process has gone is resumed, so node-pty reads its tail and reports the exit, and never paused again', async () => {
+  const pty = fakePtyModule();
+  let alive = true;
+  const mgr = create(() => {}, pty.module, { processAlive: () => alive });
+  mgr.spawn('a');
+  mgr.pause('a');
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(pty.calls, [['a', 'pause']]);
+  alive = false;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(pty.calls, [['a', 'pause'], ['a', 'resume']]);
+  mgr.pause('a');
+  assert.deepEqual(pty.calls, [['a', 'pause'], ['a', 'resume']]);
+  mgr.killAll();
+});
+
+test('each slice of paced input is reported as it is written, not when it was asked for', async () => {
+  const pty = fakePtyModule();
+  const written = [];
+  const mgr = create(() => {}, pty.module, { onInputWritten: (id) => written.push([id, Date.now()]) });
+  mgr.spawn('a');
+  const asked = Date.now();
+  mgr.write('a', 'x'.repeat(600), { paced: true });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  // 600 bytes in runs of 256: three slices, 10 ms apart.
+  assert.equal(written.length, 3);
+  assert.ok(written[2][1] - asked >= 15, `the last slice reported ${written[2][1] - asked} ms after the write`);
+  mgr.killAll();
+});
+
+test('every stop resumes a paused PTY first, since node-pty finishes its teardown by reading', () => {
+  const pty = fakePtyModule();
+  const mgr = create(() => {}, pty.module, { platform: 'linux', processAlive: () => true });
+  mgr.spawn('a');
+  mgr.pause('a');
+  mgr.kill('a');
+  // A spawn over a paused live generation stops the old one the same way;
+  // the new one starts unpaused.
+  mgr.spawn('b');
+  mgr.pause('b');
+  mgr.spawn('b');
+  mgr.pause('b');
+  assert.deepEqual(pty.calls, [
+    ['a', 'pause'], ['a', 'resume'], ['a', 'kill'],
+    ['b', 'pause'], ['b', 'resume'], ['b', 'kill'], ['b', 'pause'],
+  ]);
+  mgr.killAll();
+});
 
 test('list(ids) lists and replays only those ids, naming the window that asked', () => {
   const events = [];

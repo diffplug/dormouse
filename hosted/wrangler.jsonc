@@ -23,7 +23,12 @@
   "vars": {
     "APP_ORIGIN": "https://hosted.dormouse.sh",
     "EMAIL_FROM": "signin@dormouse.sh",
-    "OAUTH_PROVIDERS": "github,google,microsoft,apple"
+    "OAUTH_PROVIDERS": "github,google,microsoft,apple",
+    // Live Prices, USD; the founding list in `FOUNDING_LADDER` order. Billing
+    // stays closed until the two Stripe secrets are set too.
+    "STRIPE_PRICE_MONTHLY": "price_1UaUBK2BjdKGmhD6Fhvv16dS",
+    "STRIPE_PRICE_YEARLY": "price_1UaUBJ2BjdKGmhD6IormaDVM",
+    "STRIPE_PRICES_FOUNDING": "price_1UaUBJ2BjdKGmhD6clnEL648,price_1UaUBJ2BjdKGmhD6WSuyFBpK,price_1UaUBI2BjdKGmhD6rn0P1HOm,price_1UaUBI2BjdKGmhD6aX4oQrVn,price_1UaUBI2BjdKGmhD6w6t1BXpY"
   },
   "hyperdrive": [
     {

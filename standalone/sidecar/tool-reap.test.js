@@ -1,5 +1,5 @@
 // A reap and rehydrate on a real PTY (docs/specs/dor-tool.md -> Reaping): the
-// PTY core's spawn, the shipped bash integration, and a real Tool process. The
+// PTY core's spawn, the shipped shell integration, and a real Tool process. The
 // renderer half — when to stop, which payload counts — is
 // pinned by lib/src/components/wall/tool-reaper.test.ts; this pins what only a
 // real shell shows: Ctrl+C reaching the Tool through the line discipline, the
@@ -73,7 +73,7 @@ function session(shell = BASH) {
   return {
     home,
     mark: () => output.length,
-    /** A fresh integrated bash under the Tool's id, as a rehydrate spawns it. */
+    /** A fresh integrated shell under the Tool's id, as a rehydrate spawns it. */
     async spawn(dehydrate) {
       const mark = output.length;
       mgr.spawn('tool', {

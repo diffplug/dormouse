@@ -22,9 +22,7 @@ Evidence for `docs/specs/remote-network.md`, keyed by its headings.
 
 **Why the list states only what is built (2026-09-30).** The list is what a person reads to decide which level to trust, so a row for unbuilt behavior promises traffic that never happens, and a missing row hides one that does. The 2026-09-30 prototype listed the whole design; `connectionsFor` now derives rows from the shipped policy and runtime facts, including Hosted enrollment.
 
-**Why the panel fills the LAN prefixes.** `setNetworkPolicy` takes a policy only exactly and answers what it saved; filling in networks there would save something the request did not say. The panel already holds the interfaces the person is looking at, and the switches show at once what was allowed.
-
-**Why the fill keys on the LAN prefixes, not an empty list (2026-11).** A browser pane's warning adds a network under any level, most often a VPN or virtual one — a dev server on another tailnet machine, or in a WSL VM — so a list holding only those says nothing about which networks phones should use. Filling only an empty list left Local networks with no Wi-Fi after such a click. The cost falls on a person who kept only their VPN for phones and later returns to Local networks: the LAN switch comes back on, and they switch it off again.
+**Why no network starts allowed (2026-11).** Choosing Local networks used to allow every `lan` interface's prefixes. But `lan` is only whatever the name list does not recognize, and on Windows an interface is keyed by its connection name, so an OpenVPN, WireGuard, ZeroTier, GlobalProtect or AnyConnect adapter could read as a local network. Choosing Local networks then allowed that VPN's range for phones and, since browser panes read the same list, for framed pages, under a "Local network" label. Allowing only the interface that holds the default route was considered; the maintainer chose to start every row off instead, with no probe and no routing-table command. That costs one switch per network and leaves the label deciding nothing. Policies already saved keep their rows.
 
 ## Local networks
 

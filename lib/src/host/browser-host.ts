@@ -24,7 +24,7 @@ import {
 } from 'dor-lib-common/browser-providers';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { messageOf } from '../lib/errors';
-import { settleAllWithin } from '../lib/settle-within';
+import { settleAllWithin, within } from '../lib/settle-within';
 import {
   BROWSER_CLOSE_MAX_CANCELS,
   BROWSER_REQUEST_TIMEOUT_MS,
@@ -286,14 +286,6 @@ const OPEN_SETTLE_MS = 4_000;
 const DIAGNOSTICS_FIND_MS = 3_000;
 const LAUNCH_CLOSE_RESERVE_MS = OPEN_SETTLE_MS + 4_000;
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-/** `work`, or a failure naming `what` once `ms` pass without it settling. */
-function within<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} timed out`)), Math.max(0, ms));
-  });
-  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
-}
 
 /** A Fixed viewport's size, its ratio only when one was asked for. */
 const fixedSize = ({ width, height, dpr }: { width: number; height: number; dpr?: number }): FixedSize =>

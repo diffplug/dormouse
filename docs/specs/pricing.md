@@ -85,7 +85,7 @@ Source of truth: `withBilling`, `openCohort`, and `foundingLapsed` in `hosted/se
 
 **Scope: hosted-sales** — what remains, in staged order:
 
-1. **Opening checkout** ("Checkout"): production's Stripe bindings, then `CHECKOUT_OPEN`.
+1. **Opening checkout** ("Checkout"): `CHECKOUT_OPEN`.
 2. **Managed voice for members**: one voice per Pane.
 3. **Transfer** ("Transfer").
 
@@ -137,13 +137,12 @@ Part of **hosted-sales**; these remain unimplemented launch gates, not claims ab
 
 EEA/UK representative appointment is excluded from the internal release gate by operator decision; applicable legal obligations remain unchanged (rationale).
 
-- **Must confirm Stripe's receipt emails are on, and that they, the purchase email, and the `/billing` confirmation meet each sales territory's durable-confirmation rule**, before charging; consent at the purchase action is "Checkout and entitlement".
-- **Must turn on cancellation in Stripe's customer portal before charging**, the online cancellation "Checkout and entitlement" relies on.
+- **Must confirm that Stripe's receipt emails, the purchase email, and the `/billing` confirmation meet each sales territory's durable-confirmation rule**, before charging; consent at the purchase action is "Checkout and entitlement".
 - **Must confirm the built notices ("Checkout and entitlement") meet each sales territory's rules beyond California's**, and provide any additional legally required notice or consent process (rationale).
 - **Must send notices other than subscription notices to the account contact email, or show them at sign-in when none exists**, recording delivery or presentation before a notice period starts.
 - **Must give at least 30 days' advance notice of discontinuation, material reductions, or material terms changes**, except urgent legal or security requirements; no retroactive terms changes for disputes. Nothing sends or records these; `hosted/README.md` -> "Notices the first time" is the by-hand path, which cannot reach an account without an email.
 - **Must name the support owner and exercise each of `hosted/README.md` -> "Support runbooks", with a monitored `support@dormouse.sh` and collected post, before charging**: they are written against the code and Terms, not yet run on a release candidate.
-- **Must verify the permitted sales territories and tax setup before accepting payment**, and confirm refund, cancellation, failed-payment (the retry window rechecked in live mode), and founder-lock behavior against the published offer. Stripe Billing does not transfer the seller's tax obligations.
+- **Must verify the permitted sales territories and tax setup before accepting payment**, and confirm refund, cancellation, failed-payment, and founder-lock behavior against the published offer. Stripe Billing does not transfer the seller's tax obligations.
 - **Must support worldwide sales only where lawful**; EEA and UK withdrawal is "Checkout and entitlement".
 - **Must complete the EEA and UK provider privacy arrangements before launch**: execute applicable processor agreements, document provider transfer safeguards and assessments, and publish the applicable contacts and means to obtain the safeguards. **Never claim a transfer certification, contract, or representative that has not been verified** (rationale).
 - **Must recheck ElevenLabs' training opt-out or contractual no-training protection and the applicable processing agreement before enabling paid voices**, and keep the public disclosure consistent with the verified practice. History deletion alone is not evidence of either protection (rationale).

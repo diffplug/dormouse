@@ -15,6 +15,7 @@ import type { GitInfoResult } from './git-types';
 export type { ToolControlResult, ToolHostRequest } from './tool-types';
 export type { GitInfoResult } from './git-types';
 import type { PersistedAlertState, PersistedWindow } from '../session-types';
+import { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from 'dor-lib-common/terminal-context';
 
 export interface PtyInfo {
   helper?: HelperIdentity;
@@ -89,12 +90,7 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 }
 
 
-/**
- * How long the VS Code extension host waits for its pty-host child to answer a
- * terminal-context request (`vscode-ext/src/pty-manager.ts`) before answering
- * the webview with an error. `info` and `promote` inspect the process tree.
- */
-export const TERMINAL_CONTEXT_CHILD_TIMEOUT_MS = 10_000;
+export { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS };
 
 /** The webview's deadline for that answer: the child's bound plus one hop. */
 export const TERMINAL_CONTEXT_TIMEOUT_MS = TERMINAL_CONTEXT_CHILD_TIMEOUT_MS + OPEN_PORT_ROUND_TRIP_MARGIN_MS;
@@ -180,6 +176,16 @@ export interface PtyDataDetail {
   data: string;
   textData?: string;
 }
+
+/**
+ * Takes one live chunk for rendering. The handler that hands the chunk to
+ * xterm calls this and passes what it returns as the write callback, so the
+ * chunk is acknowledged once parsed (`PtyDataDispatch` in `lib/src/lib/pty-flow.ts`).
+ */
+export type PtyDataClaim = () => () => void;
+
+/** An `onPtyData` listener; `claim` is present for live output from a real dispatch. */
+export type PtyDataHandler = (detail: PtyDataDetail, claim?: PtyDataClaim) => void;
 
 /**
  * One host request for an immediate session save. `probeCwd: false` says the
@@ -405,9 +411,18 @@ export interface PlatformAdapter {
   // filesystem, which names every Workspace by directory.
   gitInfo?(paths: string[]): Promise<GitInfoResult>;
 
-  // PTY event listeners
-  onPtyData(handler: (detail: PtyDataDetail) => void): void;
-  offPtyData(handler: (detail: PtyDataDetail) => void): void;
+  // PTY event listeners. Every adapter dispatches live output through
+  // `PtyDataDispatch` (`lib/src/lib/pty-flow.ts`).
+  onPtyData(handler: PtyDataHandler): void;
+  offPtyData(handler: PtyDataHandler): void;
+  /**
+   * The renderer parsed `chars` UTF-16 code units of `id`'s live output, or
+   * dropped them unrendered (`docs/specs/transport.md` -> "Output flow
+   * control"). Only the adapter's own dispatch calls it. Required, so no
+   * adapter can forget it: a host that exerts no backpressure — Pocket, the
+   * fake — makes it a no-op.
+   */
+  acknowledgePtyData(id: string, chars: number): void;
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
 

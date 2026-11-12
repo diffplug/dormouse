@@ -237,15 +237,23 @@ describe('OneTimeClient: the rendezvous socket', () => {
     expect(phoneSocket().closeCode).toBe(1000);
   });
 
-  it('opens no socket for a link already past its expiry', async () => {
+  // The expiry is the computer's clock; this phone's may run an hour ahead.
+  it('joins for a link this phone’s clock reads as an hour expired, and says expired only on the room’s word', async () => {
     const client = makeClient();
     const burrow = await ScriptedBurrow.create();
-    clock.advance(burrow.link.expiry * 1000 + 1 - START);
-    expect(await client.connectOnce(burrow.link, LABEL, () => {})).toEqual({
-      ok: false,
-      message: ONE_TIME_LINK_EXPIRED_MESSAGE,
-    });
-    expect(sockets).toHaveLength(0);
+    clock.jump(burrow.link.expiry * 1000 + 60 * 60 * 1000 - START);
+    const { result } = await connecting(client, burrow);
+    expect(urls).toEqual([`${WS_ORIGIN}/api/one-time/client?room=${burrow.link.roomId}`]);
+    client.close();
+    expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
+
+    sockets = [];
+    const refused = makeClient();
+    const late = await ScriptedBurrow.create();
+    const joined = refused.connectOnce(late.link, LABEL, () => {});
+    await flushUntil(() => (sockets[0]?.readyState === 1 ? true : undefined));
+    phoneSocket().closeWith(WS_CLOSE_ONE_TIME_EXPIRED);
+    expect(await joined).toEqual({ ok: false, message: ONE_TIME_LINK_EXPIRED_MESSAGE });
   });
 
   it('measures a frame against the bound before parsing it', async () => {
@@ -454,9 +462,10 @@ describe('OneTimeClient: the confirmation', () => {
     }
   });
 
-  it('reads the computer leaving past the link’s expiry, with no outcome, as the link expiring', async () => {
+  it('reads the computer leaving with no outcome as the connection ending, whatever this phone’s clock says', async () => {
     // The computer ends a link nobody confirmed at its expiry; a phone it never
-    // answered hears only that the room closed.
+    // answered hears only that the room closed, and its own clock is no
+    // evidence of why.
     for (const code of [WS_CLOSE_ONE_TIME_PEER_GONE, 1006]) {
       sockets = [];
       const refused = makeClient();
@@ -467,7 +476,7 @@ describe('OneTimeClient: the confirmation', () => {
       phoneSocket().closeWith(code);
       expect(await joined, `at the join: ${code}`).toEqual({
         ok: false,
-        message: ONE_TIME_LINK_EXPIRED_MESSAGE,
+        message: ONE_TIME_ENDED_MESSAGE,
       });
 
       sockets = [];
@@ -478,7 +487,7 @@ describe('OneTimeClient: the confirmation', () => {
       phoneSocket().closeWith(code);
       expect(await result, `while confirming: ${code}`).toEqual({
         ok: false,
-        message: ONE_TIME_LINK_EXPIRED_MESSAGE,
+        message: ONE_TIME_ENDED_MESSAGE,
       });
     }
   });

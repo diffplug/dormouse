@@ -47,7 +47,7 @@ export function dispatchDorControlRequest(
       // Set only for a Session's own OSC 367 `open` (`tool-open-requests.ts`);
       // nothing crossing the control socket reaches this argument.
       ...(oscOpen ? { oscOpen: true } : {}),
-      // Set only for a click on a terminal link (`terminal-link-activation.ts`).
+      // Set only for a terminal-link click or its confirmed fallback open.
       ...(terminalLink ? { terminalLink: true } : {}),
       signal: controller.signal,
       respond: (response: DorControlResult) => {

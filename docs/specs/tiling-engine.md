@@ -104,14 +104,14 @@ Source of truth: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`.
 
 ## Parked leaves
 
-A parked leaf is mounted by the adapter but absent from the split tree: its DOM survives while it lays out nothing, paints nothing, and takes no input. It exists for Surfaces whose state lives in the DOM — an `<iframe>`'s document, a screencast canvas — where a plain remove turns reattach into a reload. A parked leaf still carries a token: parking decides whether DOM survives, the token where it lands.
+A parked leaf is mounted by the adapter but absent from the split tree: its DOM survives while it lays out nothing, paints nothing, and takes no pointer input. It exists for Surfaces whose state lives in the DOM — an `<iframe>`'s document, a screencast canvas — where a plain remove turns reattach into a reload. A parked leaf still carries a token: parking decides whether DOM survives, the token where it lands.
 
 - **Every minimize doors, whatever the Surface kind; only a park also keeps the DOM.** **Must park browser and Tool Surfaces** (`shouldParkOnMinimize`), unlike terminals, whose persistent xterm instance remounts without replay ([glossary.md → View](glossary.md#view)). A Surface may also be born as a Door (`dor split` / `dor ensure` targeting another Door), with no pane to detach.
 - **Parking must be one commit**: an id absent from both the tree and the parked set for even one render unmounts the leaf and loses its DOM state, so every re-admitting op unparks in the same commit.
 - **One `leafMeta` map holds every leaf the Wall owns**, laid out or Doored, so **no Door record carries a metadata copy that can go stale**: title and params writes reach a Doored leaf by the same path as a visible one, and every reader goes through `lath.getMeta(id)` (rationale).
-- **A parked leaf keeps its last rect** and renders there hidden and inert, so the guest never sees a zero-extent viewport (rationale).
-- **Parked is a visibility signal**: it reaches the body as `PaneProps.parked` ([Pane props contract](#pane-props-contract)), so a minimized `agent-browser-screencast` releases viewer resources while keeping its daemon session.
-- **Never evict parked browser or Tool DOM to enforce a count limit** — retention is unbounded until reattach or Surface destruction (rationale). Parking covers minimized browser and Tool Surfaces only: a hidden Workspace parks nothing (`docs/specs/layout.md` → Workspace lifecycle).
+- **A parked leaf keeps its last rect**, hidden, never zero-extent to its guest (rationale). **Must never let a parked leaf's page keep the keyboard** or select its Surface: focus landing there returns to the Wall (rationale).
+- **Parked is a visibility signal**, reaching the body as `PaneProps.parked` ([Pane props contract](#pane-props-contract)).
+- **Never evict parked browser or Tool DOM to enforce a count limit** — retention is unbounded until reattach or Surface destruction (rationale). A hidden Workspace parks nothing (`docs/specs/layout.md` → Workspace lifecycle).
 
 Source of truth: `minimizePane` in `lib/src/components/Wall.tsx`; `doorLeaf` in `lib/src/components/wall/lath-wall-store.ts`.
 

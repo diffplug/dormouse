@@ -175,7 +175,7 @@ export function AdminMetricsPage({
         <p role="status">Loading metrics…</p>
       ) : state.kind === "signed-out" ? (
         <p>
-          <a className={LINK_CLASS} href="/login?signin">Sign in</a> to see this page.
+          <a className={LINK_CLASS} href="/login">Sign in</a> to see this page.
         </p>
       ) : state.kind === "failed" ? (
         <div className={STATUS_BAD_TEXT_CLASS} role="alert">

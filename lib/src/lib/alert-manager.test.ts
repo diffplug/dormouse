@@ -135,6 +135,23 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(HELPER).status).toBe('ALERT_RINGING');
     });
 
+    it('never rings a completion held before it became a helper: the hold coming due drops it, as a fresh one is', () => {
+      manager.onData(HELPER);
+      engage(manager, HELPER);
+      manager.notifyFromProtocol(HELPER, REPORT);
+      leave(manager);
+      // A failed placement hands the Session back to its parent as a helper.
+      manager.setHelper(HELPER, true);
+      vi.advanceTimersByTime(cfg.alert.leaveGrace);
+
+      manager.setHelper(HELPER, false);
+      expect(manager.getState(HELPER)).toMatchObject({ status: 'WATCHING_DISABLED', episode: null, todo: true, notification: REPORT });
+      // Nothing is left held to ring later either.
+      engage(manager, HELPER);
+      goIdle(manager, HELPER);
+      expect(manager.getState(HELPER).status).toBe('WATCHING_DISABLED');
+    });
+
     it('takes back what a Session published when a failed placement demotes it', () => {
       manager.setHelper(HELPER, true);
       manager.setHelper(HELPER, false);

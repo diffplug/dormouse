@@ -188,7 +188,7 @@ A Workspace may leave the Window for another: `docs/specs/standalone.md` -> "Tra
 
 Persisted containers: `docs/specs/transport.md`; standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". The union projection: `docs/specs/alert.md` → Workspace union.
 
-Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `requestConfirmation` in `lib/src/lib/workspace-ui-store.ts`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`.
+Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; the hidden-Wall mount gate in `lib/src/components/TerminalPane.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `requestConfirmation` in `lib/src/lib/workspace-ui-store.ts`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`.
 
 ## Modes
 

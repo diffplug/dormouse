@@ -44,7 +44,7 @@ Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri
 
 The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1 — runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow side"): the same `BurrowService` the VS Code extension host runs, bundled to `sidecar/burrow.cjs`.
 
-**State.** Rust creates the app-data directory owner-only and passes it as `DORMOUSE_STATE_DIR` (§Persistence); `FileBurrowStateStore` keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic rename (rationale), with the network policy beside it (`docs/specs/remote-network.md` → "Policy"). `burrowToken` is a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
+**State.** In `DORMOUSE_STATE_DIR` (§Persistence), `FileBurrowStateStore` keeps enrollment and ACL as **one** `burrow.json`, so a write is one atomic rename (rationale), with the network policy beside it (`docs/specs/remote-network.md` → "Policy"). `burrowToken` is a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
 
 - **Reads fail closed.** Only `ENOENT` and an unparseable file answer empty — but the network policy's unparseable file reads as Nothing (`docs/specs/remote-network.md` → "Policy"). Any other read error is neither answered nor memoized: the load rejects, taking the save behind it (rationale).
 - **The in-memory view advances only after the rename succeeds.**
@@ -164,7 +164,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the window going away, and reassigned by a transfer. **Never dropped by an exit, nor does an exit end a transfer's marking phase** (rationale). Minting clears any suppression left under that id. `pty_kill` drops the owner before the sidecar removes the Session's alert entry, so the removal's state reaches no window.
-- **A PTY event no window owns is dropped, and the shell is reaped** (rationale). `Destroyed` sends `pty:reap` for whatever the departing window still owned; the sidecar removes their alert entries and kills them: shells can ignore the graceful stop (`docs/specs/transport.md` -> "Graceful shutdown"). **The quit teardown's `pty:gracefulKill` removes no entry**: windows still show those PTYs.
+- **A PTY event no window owns is dropped, and the shell is reaped** (rationale). `Destroyed` sends `pty:reap` for whatever the departing window still owned; the sidecar removes their alert entries and kills them. **The quit teardown's `pty:gracefulKill` removes no entry**: windows still show those PTYs.
 - **A `dor` request naming a Surface no window owns is answered with an error**, never handed to a sibling.
 - **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target the invoking window's own PTYs and take no ids**: a window tearing down must never touch a sibling's terminals. Each also excludes what an arrival claims (§Arrival queue).
 - **Every webview listener names its own window**: Tauri delivers an `emit_to` event to any listener with the default `Any` target (rationale). `listenToWindow` in `standalone/src/window-label.ts` is the only caller of the event API, pinned by `standalone/scripts/window-listeners.test.mjs`.
@@ -332,13 +332,13 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 - **Window identity is implicit**: each command keys by the invoking window's label, so the frontend stays window-agnostic.
 - Only §Per-window close, the boot merge (§Arrival queue), the discard above, and a failed Reopen delete a snapshot.
 
-**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory.
+**Must keep all state in `dormouse_data_dir`**: `app_local_data_dir`, on Windows its `state` folder, never Roaming nor around WebView2's `EBWebView` (rationale). **Must root debug state at `<data dir>/dev`, release state at the data directory** (rationale), Burrow state directly under it. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, the data directory) and `DORMOUSE_RECOVERY_DIR` (the state root; rationale). The browser-dev harness sets both to its per-run temp directory.
 
 **The session store is owner-only before any bytes are written** (`docs/specs/security-local.md` -> "Persisted state"; rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory.
 
 **Must await the store pipeline before exiting**, under the quit timeout (§Quit flow; rationale).
 
-Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`; `restoreWindowOrFresh` in `standalone/src/window-restore.ts`; `TauriSessionStore` in `standalone/src/tauri-session-store.ts`; `discard_other_formats` / `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`; `restoreWindowOrFresh` in `standalone/src/window-restore.ts`; `TauriSessionStore` in `standalone/src/tauri-session-store.ts`; `discard_other_formats` / `dormouse_data_dir` / `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
 
 ### Agent recovery
 

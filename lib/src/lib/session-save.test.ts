@@ -38,6 +38,7 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     readClipboardImageAsFilePath: vi.fn(async () => null),
     onPtyData: () => {},
     offPtyData: () => {},
+    acknowledgePtyData: () => {},
     onPtyExit: () => {},
     offPtyExit: () => {},
     requestInit: () => {},

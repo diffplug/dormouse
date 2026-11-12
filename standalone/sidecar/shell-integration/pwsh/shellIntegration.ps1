@@ -33,9 +33,13 @@ function Global:__dormouse_633_osc([string]$body) {
 }
 
 # A rehydrated Tool's payload belongs to its first command alone
-# (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
+# (docs/specs/dor-tool.md -> Reaping); no later command inherits it. Ignore,
+# not SilentlyContinue: every later prompt finds it gone, and SilentlyContinue
+# still records that in the user's $Error.
 function Global:__dormouse_633_clear_dehydrate {
-	Remove-Item Env:DORMOUSE_DEHYDRATE -ErrorAction SilentlyContinue
+	Remove-Item Env:DORMOUSE_DEHYDRATE -ErrorAction Ignore
+	# WSL sets every name WSLENV lists in the distro, a missing one as empty.
+	if ($env:WSLENV) { $env:WSLENV = (@($env:WSLENV -split ':') | Where-Object { ($_ -split '/')[0] -ne 'DORMOUSE_DEHYDRATE' }) -join ':' }
 }
 
 # Preserve the user's prompt so we can chain to it. `$function:prompt` is the
@@ -53,6 +57,14 @@ $Global:__dormouse_633_command_running = $false
 # the next prompt knows whether a new command actually ran. -1 = nothing reported
 # yet, so the genuine first prompt emits no D.
 $Global:__dormouse_633_last_history_id = -1
+# Note $LASTEXITCODE and the newest error as each prompt finishes, so the next
+# prompt can tell whether the command since then set either (see `prompt`).
+function Global:__dormouse_633_note_status {
+	$Global:__dormouse_633_exit_before = $global:LASTEXITCODE
+	$Global:__dormouse_633_error_before = $null
+	if ($Global:Error.Count -gt 0) { $Global:__dormouse_633_error_before = $Global:Error[0] }
+}
+__dormouse_633_note_status
 
 # Escape a value for OSC 633 transport. The parser splits the E command field on
 # the first raw ';' then decodes \\ and \xNN, so backslash and semicolon must be
@@ -100,8 +112,10 @@ function Global:__dormouse_633_hook_readline {
 		$commandLine = $Global:__dormouse_633_original_readline.Invoke()
 		# Skip blank submissions (bare Enter, Ctrl+C) — no command runs, so no D.
 		if (-not [string]::IsNullOrWhiteSpace($commandLine)) {
-			[Console]::Write((__dormouse_633_osc "E;$(__dormouse_633_escape $commandLine)"))
-			[Console]::Write((__dormouse_633_osc 'C'))
+			# Through the host, as the prompt's own text goes, never [Console]::Write:
+			# on Windows that encodes in the console's output code page (OEM), which
+			# turns most of Unicode into '?'.
+			$Host.UI.Write((__dormouse_633_osc "E;$(__dormouse_633_escape $commandLine)") + (__dormouse_633_osc 'C'))
 			$Global:__dormouse_633_command_running = $true
 		}
 		return $commandLine
@@ -117,14 +131,19 @@ function Global:prompt() {
 	$succeeded = $?
 	$nativeExit = $global:LASTEXITCODE
 
-	# $? only distinguishes success from failure; fall back to a native exit code
-	# when a failing external command set one, else a generic 1.
-	if ($succeeded) {
-		$exitCode = 0
-	} elseif ($null -ne $nativeExit -and $nativeExit -ne 0) {
-		$exitCode = $nativeExit
-	} else {
+	# $? only distinguishes success from failure, so a failure reports a generic 1
+	# unless $LASTEXITCODE is the command's own: it changed since the last prompt,
+	# or it is non-zero and the command recorded no PowerShell error (a native
+	# command that exits the same code again). A cmdlet that fails after a native
+	# command leaves that command's stale code there and an error in $Error.
+	$exitCode = 0
+	if (-not $succeeded) {
 		$exitCode = 1
+		$exitChanged = -not [object]::Equals($nativeExit, $Global:__dormouse_633_exit_before)
+		$newError = $Global:Error.Count -gt 0 -and -not [object]::ReferenceEquals($Global:Error[0], $Global:__dormouse_633_error_before)
+		if ($null -ne $nativeExit -and $nativeExit -ne 0 -and ($exitChanged -or -not $newError)) {
+			$exitCode = $nativeExit
+		}
 	}
 
 	__dormouse_633_hook_readline
@@ -181,5 +200,7 @@ function Global:prompt() {
 	}
 	$result += $Global:__dormouse_633_original_prompt.Invoke()
 	$result += __dormouse_633_osc 'B'
+	# After the user's prompt, which may run a native command of its own.
+	__dormouse_633_note_status
 	return $result
 }

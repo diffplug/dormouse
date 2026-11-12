@@ -68,14 +68,19 @@ function bashArgsAreInjectable(shellArgs) {
 // that command, so its environment is set up first and our prompt wrapper
 // installs after it. A non-interactive one-off (a -Command/-File/-EncodedCommand
 // without -NoExit) is returned as null so we don't alter it.
+//
+// A leading `-l` / `-Login` (pwsh as the login shell on macOS and Linux, which
+// `resolveLoginArg` adds) stays first, the only position pwsh honors it in, and
+// the rest is judged as if it were absent.
 function powerShellIntegratedArgs(shellArgs, script) {
   const dotSource = `. '${script.replace(/['\u2018-\u201b]/g, (c) => c + c)}'`;
   const args = [...(shellArgs || [])];
+  const is = (arg, ...names) => names.includes(arg.toLowerCase());
+  const login = args.length > 0 && is(args[0], '-l', '-login') ? [args.shift()] : [];
 
   // No args at all → a plain interactive REPL; add our own dot-source.
-  if (args.length === 0) return ['-NoExit', '-Command', dotSource];
+  if (args.length === 0) return [...login, '-NoExit', '-Command', dotSource];
 
-  const is = (arg, ...names) => names.includes(arg.toLowerCase());
   // Only augment interactive sessions; without -NoExit a command/file runs and
   // exits, so there's no prompt to wrap.
   if (!args.some((a) => is(a, '-noexit', '-noe'))) return null;
@@ -85,10 +90,10 @@ function powerShellIntegratedArgs(shellArgs, script) {
   const cmdIdx = args.findIndex((a) => is(a, '-command', '-c'));
   if (cmdIdx !== -1 && cmdIdx + 1 < args.length) {
     args[cmdIdx + 1] = `${args[cmdIdx + 1]}; ${dotSource}`;
-    return args;
+    return [...login, ...args];
   }
   // Interactive but no inline command (e.g. just `-NoExit`); add ours.
-  return [...args, '-Command', dotSource];
+  return [...login, ...args, '-Command', dotSource];
 }
 
 function resolveLoginArg(shell, platform = process.platform) {
@@ -291,19 +296,25 @@ const WSL_CLI_ENV = [
   'DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN',
   'DORMOUSE_AGENT_BROWSER_BIN', 'DORMOUSE_PLAYWRIGHT_BIN', 'DORMOUSE_DEHYDRATE',
 ];
+// The terminal identity every pane gets (docs/specs/transport.md -> "iTerm2
+// identity"), which programs in the distro read as much as Windows ones do.
+const WSL_IDENTITY_ENV = ['TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'LC_TERMINAL', 'LC_TERMINAL_VERSION', 'COLORTERM'];
 // dor/bin/dor adds its own return-only entries for these, so other Windows
 // programs started from WSL never see them.
 const WSL_LAUNCHER_ENV = ['ELECTRON_RUN_AS_NODE', 'PWD', 'WSL_DISTRO_NAME'];
-const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_LAUNCHER_ENV]);
+const WSL_MANAGED_NAMES = new Set([...WSL_CLI_ENV, ...WSL_IDENTITY_ENV, ...WSL_LAUNCHER_ENV]);
 
 // Replace conflicting flags inherited from a parent host, preserve user vars.
 // Windows env names ignore case, so an inherited `WslEnv` is the same variable.
+// Only names this pane has are listed: WSL sets every name WSLENV lists in the
+// distro, one the pane lacks as an empty variable.
 function withWslCliEnv(env) {
+  const names = new Set(Object.keys(env).map((name) => name.toUpperCase()));
   const key = Object.keys(env).find((name) => name.toUpperCase() === 'WSLENV');
   const inherited = key ? env[key].split(':').filter((entry) =>
     entry && !WSL_MANAGED_NAMES.has(entry.split('/')[0].toUpperCase())) : [];
   if (key) delete env[key];
-  env.WSLENV = [...inherited, ...WSL_CLI_ENV].join(':');
+  env.WSLENV = [...inherited, ...[...WSL_CLI_ENV, ...WSL_IDENTITY_ENV].filter((name) => names.has(name))].join(':');
 }
 
 // Directory holding the per-shell OSC 633 integration scripts. Shipped next to
@@ -957,19 +968,54 @@ async function readProcessTable(runtime) {
       return parsePsPairs(out);
     }
 
-    if (platform === 'win32') {
-      const rows = await runPowerShellJson(
-        'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress',
-        runtime,
-      );
-      return rows
-        .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId), r.Name == null ? undefined : String(r.Name)])
-        .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid));
-    }
+    if (platform === 'win32') return windowsProcessRows(JSON.parse(await runPowerShell(WINDOWS_PROCESS_QUERY, runtime)));
   } catch {
     return null;
   }
   return null;
+}
+
+const WINDOWS_PROCESS_QUERY = 'Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress';
+const WINDOWS_LISTENER_QUERY = 'Get-NetTCPConnection -State Listen -ErrorAction Stop | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress';
+// A port scan's two queries in ONE Windows PowerShell 5.1 start, since the
+// start costs more than either query (about 595 ms for both in one start
+// against 810 ms as two, Windows 11, 2026-11-10). Each answer prints on its
+// own line behind its tag; a query that fails prints nothing, leaving the
+// other's answer intact. `Get-NetTCPConnection` fails when nothing listens,
+// as it does alone, which sends the scan to `netstat`.
+const WINDOWS_PORT_SCAN_SCRIPT = `try { 'P' + (${WINDOWS_PROCESS_QUERY}) } catch {}; try { 'S' + (${WINDOWS_LISTENER_QUERY}) } catch {}`;
+module.exports.WINDOWS_PORT_SCAN_SCRIPT = WINDOWS_PORT_SCAN_SCRIPT;
+
+/** `[pid, ppid, name]` rows of `WINDOWS_PROCESS_QUERY`'s parsed JSON. */
+function windowsProcessRows(parsed) {
+  return normalizeJsonArray(parsed)
+    .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId), r.Name == null ? undefined : String(r.Name)])
+    .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid));
+}
+
+/** `{ pairs, sockets }` from `WINDOWS_PORT_SCAN_SCRIPT` output: the process
+ *  table as `readProcessTable` gives it, and `parseNetTcpConnections` rows;
+ *  each null when its query answered nothing usable. */
+function parseWindowsPortScan(output) {
+  let pairs = null;
+  let sockets = null;
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    try {
+      if (line.startsWith('P')) pairs = windowsProcessRows(JSON.parse(line.slice(1)));
+      else if (line.startsWith('S')) sockets = parseNetTcpConnections(line.slice(1));
+    } catch { /* this query's answer is unusable; the other's stands */ }
+  }
+  return { pairs, sockets };
+}
+module.exports.parseWindowsPortScan = parseWindowsPortScan;
+
+/** Both tables a Windows port scan needs, from one PowerShell start; what it
+ *  printed before failing or timing out still counts. */
+async function readWindowsPortTables(runtime, timeout) {
+  const output = await runPowerShell(WINDOWS_PORT_SCAN_SCRIPT, runtime, timeout)
+    .catch((err) => (typeof err?.stdout === 'string' ? err.stdout : ''));
+  return parseWindowsPortScan(output);
 }
 
 /** Format a Linux /proc/net hex IPv4 address (little-endian per byte). */
@@ -1217,11 +1263,6 @@ function runPowerShell(script, runtime, timeout = OPEN_PORT_TIMEOUT_MS) {
   return runText(runtime, windowsPowerShellPath(runtime.env || process.env), ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
 }
 
-/** Run a `... | ConvertTo-Json` script and return its rows as an array. */
-async function runPowerShellJson(script, runtime, timeout) {
-  return normalizeJsonArray(JSON.parse(await runPowerShell(script, runtime, timeout)));
-}
-
 /** Milliseconds left of `budgetMs` from now, for each step of a scan in turn;
  *  throws once none remain. */
 function scanDeadline(runtime, budgetMs) {
@@ -1234,16 +1275,16 @@ function scanDeadline(runtime, budgetMs) {
   };
 }
 
+/** `runtime.netTcpConnections` holds the rows a port scan already read beside
+ *  its process table (`readWindowsPortTables`), or null when that query
+ *  failed there; absent, the cmdlet runs here. `runtime.scanRemaining` is the
+ *  port scan's deadline, when one already runs. */
 async function windowsListeningPorts(runtime = {}, names) {
-  const remaining = scanDeadline(runtime, runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
+  const remaining = runtime.scanRemaining || scanDeadline(runtime, runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
   let ports;
   try {
-    const json = await runPowerShell(
-      'Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress',
-      runtime,
-      remaining(),
-    );
-    ports = parseNetTcpConnections(json);
+    if (runtime.netTcpConnections === null) throw new Error('Get-NetTCPConnection failed');
+    ports = runtime.netTcpConnections || parseNetTcpConnections(await runPowerShell(WINDOWS_LISTENER_QUERY, runtime, remaining()));
   } catch {
     try {
       const netstat = windowsSystemPath(runtime.env || process.env, 'System32', 'netstat.exe');
@@ -1408,10 +1449,9 @@ function parseWslPortScan(output) {
   ]).filter((port) => surfaceOf.has(port.pid)).map((port) => ({ ...port, processName: names.get(port.pid), surfaceId: surfaceOf.get(port.pid) }));
 }
 
-/** Listening ports inside every running distro for `surfaceIds`, inside the
- *  socket scan's budget; [] on any failure. */
-async function wslListeningPorts(surfaceIds, runtime, budgetMs) {
-  const remaining = scanDeadline(runtime, budgetMs);
+/** Listening ports inside every running distro for `surfaceIds`, before the
+ *  port scan's deadline (`remaining`); [] on any failure. */
+async function wslListeningPorts(surfaceIds, runtime, remaining) {
   const env = runtime.env || process.env;
   const wsl = windowsSystemPath(env, 'System32', 'wsl.exe');
   // UTF-8 output: plain wsl.exe listings are UTF-16.
@@ -1434,12 +1474,14 @@ async function wslListeningPorts(surfaceIds, runtime, budgetMs) {
  *
  * Batched at this layer for the same reason `getCwdsForPids` is: `dor list --all
  * --ports` asks about every terminal of every Workspace at once, and each step is
- * a subprocess — two spawns for N terminals instead of 2N. Returns [] per pid on
- * any platform failure rather than throwing.
+ * a subprocess — two spawns for N terminals instead of 2N, and on Windows one
+ * PowerShell start answering both. Returns [] per pid on any platform failure
+ * rather than throwing.
  *
  * Each root is `{ pid, shell, surfaceId }`: on Windows its shell and Surface
- * drive the Git Bash and WSL reads above. Each runs beside a step the scan
- * already waits for, never after it.
+ * drive the Git Bash and WSL reads above. Git Bash's runs beside the tables'
+ * read; WSL's, needing that read's process names, in the step after it, where
+ * the other platforms scan sockets.
  */
 async function getOpenPortsForPids(rootList, runtime = {}) {
   const byRoot = new Map();
@@ -1453,13 +1495,22 @@ async function getOpenPortsForPids(rootList, runtime = {}) {
   const roots = [...shellOf.keys()];
   if (roots.length === 0) return byRoot;
   const windows = (runtime.platform || process.platform) === 'win32';
+  // The socket scan's budget scales with the request (`budgetCount` when
+  // coalesced requests share this scan); the process-table read's does not,
+  // its cost being the whole table either way.
+  const scanTimeoutMs = openPortScanTimeoutMs(runtime.budgetCount ?? roots.length);
+  // Windows reads the socket table in the same start as the process table,
+  // so that start and the reads after it (the netstat fallback, WSL) share
+  // one deadline: both steps' budgets.
+  const scanRemaining = windows ? scanDeadline(runtime, OPEN_PORT_TIMEOUT_MS + scanTimeoutMs) : undefined;
 
   let msysPs;
   if (windows) for (const shell of shellOf.values()) if ((msysPs = msysPsFor(shell, runtime.fsModule))) break;
-  const [pairs, msysRows] = await Promise.all([
-    readProcessTable(runtime),
+  const [tables, msysRows] = await Promise.all([
+    windows ? readWindowsPortTables(runtime, scanRemaining()) : readProcessTable(runtime).then((pairs) => ({ pairs })),
     msysPs ? runTextLenient(runtime, msysPs, ['-a'], { timeout: OPEN_PORT_TIMEOUT_MS }).then(parseMsysPs) : [],
   ]);
+  const { pairs } = tables;
   // A failed scan is tolerated here (unlike helper-work inspection): each root
   // then owns only itself.
   const children = pairs ? childrenIndex(pairs) : new Map();
@@ -1478,13 +1529,9 @@ async function getOpenPortsForPids(rootList, runtime = {}) {
     }
   }
 
-  // The socket scan's budget scales with the request (`budgetCount` when
-  // coalesced requests share this scan); the process-table read above does
-  // not, its cost being the whole table either way.
-  const scanTimeoutMs = openPortScanTimeoutMs(runtime.budgetCount ?? roots.length);
   const [ports, wslPorts] = await Promise.all([
-    getListeningPortsForPids([...union], { ...runtime, scanTimeoutMs }, names),
-    wslSurfaces.size > 0 ? wslListeningPorts([...new Set(wslSurfaces.values())], runtime, scanTimeoutMs) : [],
+    getListeningPortsForPids([...union], { ...runtime, scanTimeoutMs, scanRemaining, netTcpConnections: tables.sockets }, names),
+    wslSurfaces.size > 0 ? wslListeningPorts([...new Set(wslSurfaces.values())], runtime, scanRemaining) : [],
   ]);
   for (const [root, pids] of owned) {
     const surfaceId = wslSurfaces.get(root);
@@ -1582,6 +1629,18 @@ function pacedInputSegments(data) {
 }
 module.exports.pacedInputSegments = pacedInputSegments;
 
+/** Whether `pid` still runs. An unknown pid reads as running: ConPTY names its
+ *  shell's only once connected. EPERM is a process this one may not signal. */
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
 /**
  * Shared PTY manager — the single place where node-pty processes are managed.
  *
@@ -1606,11 +1665,16 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
 //
+// `onInputWritten(id)` hears each slice of input `write` queued (paced, or
+// behind paced input) as it is written, which can be long after the call: on
+// Windows a paused PTY must be read for input to arrive, and the host's flow
+// control decides when.
+//
 // `canonicalDirectory(path)` validates a directory to open, injected for the
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })), processAlive = isProcessAlive, onInputWritten = () => {} } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1678,6 +1742,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         // no caller to catch it and would take down every PTY in the process.
         cancelInput(id);
         return;
+      }
+      try {
+        onInputWritten(id);
+      } catch (error) {
+        console.error(`[pty-core] onInputWritten failed for ${id}:`, error.message);
       }
       // Every write paces what follows it; only paced text settles a key. An
       // unpaced step drains in the same millisecond as the paced one before
@@ -1792,6 +1861,8 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     });
 
     p.onExit(({ exitCode, signal }) => {
+      unpausable.add(p);
+      resumePty(p);
       session.exitCode = exitCode;
       // A generation replaced under the id never reports: once a reaped Tool
       // respawns, the killed shell's late exit would end the new Session
@@ -1908,6 +1979,56 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     return ptys.has(id);
   }
 
+  // Output flow control (docs/specs/transport.md -> "Output flow control"):
+  // the host pauses a PTY whose renderer has fallen behind, so the kernel
+  // buffer fills and the program's own writes block. Keyed by the PTY object,
+  // as `closingPtys` is: a spawn reusing the id starts unpaused.
+  const pausedPtys = new Map(); // pty.IPty -> its exit watch
+  // Exited or being stopped, so never paused again. node-pty never reads a
+  // paused socket to its end: on POSIX it destroys the socket, unread tail and
+  // all, 200 ms after the child exits; on Windows it reports no exit until the
+  // socket closes. A stop (kill, graceful stop, displacement) needs the same
+  // reading to finish its teardown, which is what an unpaused PTY does today.
+  const unpausable = new WeakSet();
+  // node-pty reports no exit while the socket is paused, so a paused PTY's own
+  // process is watched instead; well inside POSIX's 200 ms.
+  const PAUSED_EXIT_WATCH_MS = 25;
+
+  function pause(id) {
+    const p = ptys.get(id);
+    if (!p || pausedPtys.has(p) || unpausable.has(p)) return;
+    try {
+      p.pause();
+    } catch (error) {
+      console.error(`[pty-core] pausing ${id} failed:`, error.message);
+      return;
+    }
+    const watch = setInterval(() => {
+      if (processAlive(p.pid)) return;
+      unpausable.add(p);
+      resumePty(p);
+    }, PAUSED_EXIT_WATCH_MS);
+    watch.unref?.();
+    pausedPtys.set(p, watch);
+  }
+
+  function resume(id) {
+    const p = ptys.get(id);
+    if (p) resumePty(p);
+  }
+
+  function resumePty(p) {
+    const watch = pausedPtys.get(p);
+    if (watch === undefined) return;
+    clearInterval(watch);
+    pausedPtys.delete(p);
+    try {
+      p.resume();
+    } catch (error) {
+      console.error('[pty-core] resuming a PTY failed:', error.message);
+    }
+  }
+
   // ConPTY closes asynchronously. Calling the pinned addon's native kill twice
   // before onExit can crash the owner, so graceful shutdown and later cleanup
   // share a guard keyed by the PTY object (never by a reusable Session id).
@@ -1915,6 +2036,8 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   // On POSIX, node-pty's default SIGHUP: an interactive bash or zsh ignores
   // SIGTERM, and honours the hangup a closing terminal sends.
   function stopPty(p) {
+    unpausable.add(p);
+    resumePty(p);
     if (platform !== 'win32') {
       p.kill();
       return;
@@ -2118,14 +2241,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     if (requestId !== undefined) send('interruptDone', { requestId });
   }
 
-  /**
-   * Stop `ids` with the platform's shutdown request and wait for their exits.
-   *
-   * Always an explicit set, never a blanket kill: one window of several tears
-   * down alone, and killing a sibling's terminals is unrecoverable. The host
-   * names the window's own PTYs (`pty_graceful_kill` in
-   * standalone/src-tauri/src/lib.rs).
-   */
   /** How long the acknowledgement waits, after the deadline's SIGKILL, for a
    *  killed target's exit. node-pty reports one when its master socket closes,
    *  and on Linux a child still holding the PTY's slave keeps it open until
@@ -2134,6 +2249,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
    *  24.04, node-pty 1.2.0-beta.18, 2026-11-10). Must stay above that fallback. */
   const SIGKILL_EXIT_WAIT_MS = 500;
 
+  /**
+   * Stop `ids` with the platform's shutdown request and wait for their exits.
+   *
+   * Always an explicit set, never a blanket kill: one window of several tears
+   * down alone, and killing a sibling's terminals is unrecoverable. The host
+   * names the window's own PTYs (`pty_graceful_kill` in
+   * standalone/src-tauri/src/lib.rs).
+   */
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
@@ -2189,7 +2312,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     send('shells', { shells: await detectAvailableShells(), requestId });
   }
 
-  return { spawn, setParentWindow, write, resize, hasPty, kill, killAll, list, context,
+  return { spawn, setParentWindow, write, resize, pause, resume, hasPty, kill, killAll, list, context,
     getHelperParentId: (id) => helpers.get(id)?.parentId,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };

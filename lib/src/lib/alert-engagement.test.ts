@@ -272,6 +272,19 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: true });
   });
 
+  it('counts a click while the holding viewer is leaving as answering the hold, so a follow-up report never summons', () => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    leave(manager);
+    manager.acknowledge(PANE, { input: false });
+
+    manager.notifyFromProtocol(PANE, { source: 'OSC 99', title: 'Claude Code', body: 'Claude is waiting for your input' });
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE).todo).toBe(true);
+  });
+
   it.each([
     ['report', 'quiet', 'bell', (id: string) => manager.notifyFromProtocol(id, PERMISSION)],
     ['exit', 'exit', 'exit', (id: string) => { runCommand(manager, id, 'pnpm build'); finishCommand(manager, id, 0, { promptStart: true }); }],
@@ -382,6 +395,14 @@ describe('echo window', () => {
     await Promise.resolve();
     expect(outcome).toBeUndefined();
     handle.cancel();
+  });
+
+  it('opens on the first keystroke into a Session that has printed nothing yet', () => {
+    press(manager, PANE);
+    vi.advanceTimersByTime(5);
+    manager.notifyFromProtocol(PANE, BELL);
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
   });
 
   it('counts output once the window has passed', () => {

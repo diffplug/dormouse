@@ -22,6 +22,8 @@ function jpegWidth(jpeg: Uint8Array): number {
 }
 
 // Opt-in: tests the user's real CLI and matching Chromium, with a private session.
+// No CI job sets the variable; run it by hand after changing the provider, with
+// `DORMOUSE_PLAYWRIGHT_TEST_BIN` naming the CLI's binary.
 const binaryPath = process.env.DORMOUSE_PLAYWRIGHT_TEST_BIN;
 test.skipIf(!binaryPath)('real CLI: GUI launch, viewer sockets, native tabs, input, crisp captures, relaunch and close', async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'dor-pw-test-'));

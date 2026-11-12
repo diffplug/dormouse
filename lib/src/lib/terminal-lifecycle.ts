@@ -12,7 +12,8 @@ import { TerminalWebglRenderer } from './terminal-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import { isMacSelectAll } from './select-all';
-import type { PtyDataDetail } from './platform/types';
+import { parseOnArrival } from './parse-on-arrival';
+import type { PtyDataHandler } from './platform/types';
 import type { HelperIdentity } from './terminal-context-types';
 import type { PersistedAlertState } from './session-types';
 import { DIM, RESET } from './ansi';
@@ -230,12 +231,26 @@ function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal;
 /** PTY data/exit listeners. Returns the unsubscribe pair. */
 function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const platform = getPlatform();
-  const handleData = (detail: PtyDataDetail) => {
-    if (detail.id === id) {
-      // The parser already told us which bytes are text; `textData` is omitted
-      // when it would equal `data`.
-      recordTerminalOutput(id, detail.textData ?? detail.data);
-      terminal.write(detail.data);
+  let reportedDiscard = false;
+  const write = parseOnArrival(terminal);
+  const handleData: PtyDataHandler = (detail, claim) => {
+    if (detail.id !== id) return;
+    // The parser already told us which bytes are text; `textData` is omitted
+    // when it would equal `data`.
+    recordTerminalOutput(id, detail.textData ?? detail.data);
+    // Acknowledged from the write callback, once xterm has parsed the chunk,
+    // so the host paces its PTY to the parse.
+    const parsed = claim?.();
+    try {
+      write(detail.data, parsed);
+    } catch (error) {
+      // xterm discards a chunk once 50M chars wait unparsed. The host's flow
+      // control keeps it far below that; a host without it (Pocket) can reach
+      // it. The throw must not escape into the adapter's dispatch, and the
+      // discarded chunk is still acknowledged, or its PTY would stay paused.
+      if (!reportedDiscard) console.error(`[terminal] ${id} dropped output:`, error);
+      reportedDiscard = true;
+      parsed?.();
     }
   };
   const handleExit = (detail: { id: string; exitCode: number }) => {

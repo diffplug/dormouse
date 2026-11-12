@@ -8,6 +8,7 @@ import type { DorControlCancelPayload, DorControlRequestPayload, DorControlRespo
 import type { OpenPort, WritePtyOptions } from '../../lib/src/lib/platform/types';
 import { openPortRequestTimeoutMs, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
 import { sliceSince } from '../../lib/src/host/replay-buffer';
+import { createPtyFlowControl } from '../../lib/src/host/pty-flow-host';
 
 export interface PtyCallbacks {
   onData(id: string, data: string): void;
@@ -273,6 +274,9 @@ function ensureChild(extensionPath: string): ChildProcess {
     } else if (msg.type === 'exit') {
       bufferExit(msg.id, msg.exitCode);
       for (const cb of callbackSet) cb.onExit(msg.id, msg.exitCode);
+    } else if (msg.type === 'inputWritten') {
+      // A queued slice of input written late, as a paced `dor send` writes.
+      outputFlow.input(msg.id);
     } else if (msg.type === 'error') {
       log.error(`PTY error for ${msg.id}:`, msg.message);
     } else if (msg.type === 'dor:controlRequest') {
@@ -362,12 +366,47 @@ function sendToChild(msg: any): void {
   }
 }
 
+/**
+ * Output flow control (docs/specs/transport.md -> "Output flow control"),
+ * counted here, where the webview's share of each chunk is posted, and carried
+ * out in the child, where node-pty runs. A child that is gone has nothing to
+ * pause, and is never forked for it.
+ */
+const outputFlow = createPtyFlowControl({
+  pause: (id) => sendToLiveChild({ type: 'pause', id }),
+  resume: (id) => sendToLiveChild({ type: 'resume', id }),
+});
+
+function sendToLiveChild(msg: { type: string; id: string }): void {
+  if (!child?.connected) return;
+  if (childReady) child.send(msg);
+  else pendingMessages.push(msg);
+}
+
+/** `chars` of `id`'s live output were just posted to its webview as `pty:data`. */
+export function sentOutput(id: string, chars: number): void {
+  outputFlow.sent(id, chars);
+}
+
+/** The owning webview's acknowledgement; malformed counts are ignored. */
+export function acknowledgeOutput(id: string, chars: unknown): void {
+  outputFlow.acknowledge(id, chars);
+}
+
+/** Forgive what `ids`' webview owes and resume them: it re-initialized or went away. */
+export function resetOutputFlow(ids: readonly string[]): void {
+  outputFlow.reset(ids);
+}
+
 export const helperPtys = new Map<string, HelperIdentity>();
 
 export function spawn(id: string, options?: PtySpawnOptions): void {
   if (options?.helper) helperPtys.set(id, options.helper);
   else helperPtys.delete(id);
   killedPtyIds.delete(id);
+  // What the id owed was the replaced generation's, which stays live if the
+  // spawn fails.
+  outputFlow.reset([id]);
   ptyBuffers.set(id, createBufferEntry(true, undefined, options?.shell));
   const dorEnv = getDorRuntimeEnv(extensionPath_);
   sendToChild({
@@ -481,6 +520,8 @@ export function getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort
 }
 
 export function write(id: string, data: string, options: WritePtyOptions = {}): void {
+  // On Windows a paused PTY must be read for its input to arrive.
+  outputFlow.input(id);
   sendToChild({ type: 'input', id, data, paced: options.paced });
 }
 
@@ -492,6 +533,7 @@ export function kill(id: string): void {
   helperPtys.delete(id);
   killedPtyIds.add(id);
   ptyBuffers.delete(id);
+  outputFlow.forget(id);
   sendToChild({ type: 'kill', id });
 }
 
@@ -540,6 +582,9 @@ function awaitChildAck(msg: Record<string, unknown>, ackType: string, timeoutMs:
  * press destroys codex's hint (docs/specs/transport.md).
  */
 export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
+  // The recovery capture reads what each agent prints here, and VS Code may
+  // already be tearing the webviews down: none may hold its PTY paused.
+  outputFlow.reset(ids);
   return awaitChildAck({ type: 'interrupt', ids }, 'interruptDone', timeoutMs);
 }
 
