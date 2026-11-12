@@ -24,7 +24,7 @@ Workspace of this Window the browser Surface is opened in and which one a
 handle resolves against (workspace:<n> or workspace:<name>).
 
 dor reads these flags anywhere in the arguments, up to an optional bare --,
-which it drops. Everything else, and everything after that --, is
+which it forwards unchanged. Everything else, and everything after that --, is
 agent-browser's own command surface: subcommands, flags, selectors. The binary
 is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
 bundled; install it with:

@@ -2448,15 +2448,15 @@ test('browser providers read Dormouse options anywhere, as the native CLIs read 
   });
 });
 
-test('a bare -- ends interception, is dropped, and forwards the rest verbatim', async () => {
+test('a bare -- ends interception and forwards with the rest verbatim', async () => {
   const tail = ['eval', '--surface', '--key', '--workspace=x', '--', '', 'a\nb'];
   assert.deepEqual(extractSessionFlags(['--key', 'app', '--', ...tail], { sessionNoun: 'session' }), {
-    ok: true, value: { key: 'app', rest: tail },
+    ok: true, value: { key: 'app', rest: ['--', ...tail] },
   });
   const ab = fakeAgentBrowser();
   const result = await runCli(['agent-browser', 'eval', '--session', 'raw', '--', ...tail.slice(1)], { execAgentBrowser: ab.exec, env: {} });
   assert.equal(result.exitCode, 0, result.stderr);
-  assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'raw', ...tail]);
+  assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'raw', tail[0], '--', ...tail.slice(1)]);
 });
 
 test('only a lone --help is Dormouse help; any other goes to the provider', async () => {
@@ -2467,7 +2467,7 @@ test('only a lone --help is Dormouse help; any other goes to the provider', asyn
   for (const argv of [['agent-browser', 'open', '--help'], ['agent-browser', '--', '--help']]) {
     const native = fakeAgentBrowser();
     await runCli(argv, { execAgentBrowser: native.exec, env: {} });
-    assert.deepEqual(native.calls[0], ['agent-browser', '--session', 'dormouse.1.default', ...argv.slice(1).filter((arg) => arg !== '--')]);
+    assert.deepEqual(native.calls[0], ['agent-browser', '--session', 'dormouse.1.default', ...argv.slice(1)]);
   }
 });
 
@@ -2493,6 +2493,18 @@ test('empty browser identities fail before a provider or host request', async ()
         assert.deepEqual(invoked, []);
         assert.deepEqual(client.requests, []);
       }
+    }
+  }
+});
+
+test('native browser option terminators survive before dash-leading values', async () => {
+  for (const provider of ['agent-browser', 'playwright']) {
+    for (const tail of [['fill', '@e1', '--', '-5'], ['fill', '@e1', '--', '--session'], ['--', 'snapshot']]) {
+      const calls = [];
+      const exec = async (binary, args) => { calls.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
+      const result = await runCli([provider, '--session', 'raw', ...tail], { execAgentBrowser: exec, execPlaywright: exec, env: {} });
+      assert.equal(result.exitCode, 0, JSON.stringify(result));
+      assert.deepEqual(calls[0], [...(provider === 'playwright' ? ['--session=raw'] : ['--session', 'raw']), ...tail]);
     }
   }
 });

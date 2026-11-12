@@ -16,7 +16,7 @@ The first command fixes its working directory; later commands, including relativ
 file paths, run there. --session (or -s) selects a native session instead.
 --surface drives an existing playwright pane, including one opened from the GUI.
 These three identities are mutually exclusive. dor reads them and --workspace
-anywhere in the arguments, up to an optional bare --, which it drops; everything
+anywhere in the arguments, up to an optional bare --, which it forwards unchanged; everything
 else, and everything after that --, belongs to playwright.
 
 Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
