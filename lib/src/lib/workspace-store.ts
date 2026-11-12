@@ -304,11 +304,10 @@ export function currentWindowRef(): string {
   return windowRef;
 }
 
-/** Whether `ref` names **this** Window — its full ref, or the bare label. A ref
+/** Whether `ref` names **this** Window — its full canonical ref. A ref
  *  naming another Window is not one this Window can act on. */
 export function isWindowRef(ref: string): boolean {
-  const trimmed = ref.trim();
-  return trimmed === windowRef || `window:${trimmed}` === windowRef;
+  return ref === windowRef;
 }
 
 /** A Workspace a target named. */
@@ -317,9 +316,8 @@ export type WorkspaceRefResolution =
   | { ok: false; message: string };
 
 /**
- * Resolve a `workspace:<n|name>` target (`docs/specs/dor-cli.md` → "Handle
- * Model"): the exact id it names, else an unambiguous name; a number is never
- * a name.
+ * Resolve a `workspace:<id>` or `workspace-name:<name>` target (`docs/specs/dor-cli.md` → "Handle
+ * Model"): the prefix chooses exactly one interpretation.
  */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
   const { target, id, name } = parseWorkspaceRef(ref);

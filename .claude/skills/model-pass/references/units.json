@@ -50,7 +50,7 @@
       "focus": [
         "Moving a Surface between Workspaces: the id must stay stable, the PTY must survive, alerts and TODO state must follow, dirty or pending Tools and iframes must be refused or handled as the spec says. Look for a path where a move drops or duplicates a surface, or leaves it in two Workspaces.",
         "Closing or killing a Workspace that holds running work, the active Workspace, or the last Workspace; what `--force` paths skip; what Reopen restores.",
-        "Workspace ids: `workspace:<n>` counters must be durable and never reused. Name collisions (`workspace:<name>`, a Workspace literally named `new`).",
+        "Workspace ids: `workspace:<n>` counters must be durable and never reused. Name collisions (`workspace-name:<name>`, a numeric name, a Workspace literally named `new`).",
         "Strip drag-reorder and tab tweens: cancel paths, stale indices after a concurrent change, listeners and animation frames left behind.",
         "Auto-naming: when it runs, what it reads, and whether it can overwrite a user's rename.",
         "The window session aggregator (standalone has several windows): ordering, a window closing mid-aggregate, work repeated per change.",
@@ -237,7 +237,7 @@
       "focus": [
         "The method table: every method the CLI can send has a handler, and every handler has a CLI caller. List methods on one side only.",
         "Reply discipline: every request gets exactly one reply on every path, including thrown errors, a surface killed mid-request, a Workspace closed mid-request, and a client that disconnects while waiting. Find hung requests and double replies.",
-        "Handle resolution: `surface:N`, `surface:self`, `surface:focused`, `title:<exact>`, `workspace:<n>`, `workspace:<name>`. Look for a stale or reused id retargeting a destructive verb (`kill`, `send`), helper terminals leaking into listings or matching, and Workspace scoping mistakes (`--workspace`, `--all`).",
+        "Handle resolution: `surface:N`, `surface:self`, `surface:focused`, `title:<exact>`, `workspace:<n>`, `workspace-name:<name>`, `window:<label>`. Look for a stale or reused id retargeting a destructive verb (`kill`, `send`), helper terminals leaking into listings or matching, and Workspace scoping mistakes (`--workspace`, `--all`).",
         "`ensure`: the command + cwd identity key, matching against live commands, `--restart` keeping layout place, races between two simultaneous `ensure` calls creating duplicates.",
         "`await`: `--until quiet` and `--until exit` semantics, waiter cleanup on kill or disconnect, alert absorption, timeouts.",
         "`send`: text, key, stdin, and sequence modes; pacing; what happens to a queue when the target dies.",

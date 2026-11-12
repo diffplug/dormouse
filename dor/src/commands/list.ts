@@ -37,6 +37,7 @@ import {
   stringParser,
   workspaceFlag,
   workspaceParam,
+  windowRefParser,
   writeStdout,
 } from './shared.js';
 
@@ -65,7 +66,7 @@ Filters are ANDed. --command is an exact match against the running command line 
 
 JSON output (--json) gives each row its id, has_terminal (a PTY), and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. A named Tool's row adds tool_name and tool_scope (project, user, or builtin), and a project or user Tool's adds tool_origin.file, the dormouse.yml that declares it. It adds top-level caller_surface_id and focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_id, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
---workspace <ref> lists another Workspace instead, in this window or another: its id workspace:<n> or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
+--workspace <ref> lists another Workspace instead, in this window or another: its id workspace:<id> or workspace-name:<name>, which resolves only when exactly one Workspace carries that name. Bare references are refused. --window <ref> lists another window's Surfaces or Workspaces (window:main, window:ws-2).
 
 --all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Ids are unique across the groups, and a row from another Workspace is targeted by its id as it stands. Only the active Workspace's selection carries the focus marker; each JSON row adds workspace_id, and the payload adds a workspaces array plus caller_workspace_id/focused_workspace_id.
 
@@ -81,8 +82,8 @@ Text output:
     workspace:2  build        [ringing]  [attention 1]`;
 
 const LIST_USAGE = [
-  `[--workspace ref|--all] [--window label] [--kind ${SURFACE_KINDS.join('|')}] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]`,
-  '--workspaces [--window label] [--json]',
+  `[--workspace ref|--all] [--window ref] [--kind ${SURFACE_KINDS.join('|')}] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]`,
+  '--workspaces [--window ref] [--json]',
 ];
 
 export const listCommand: Command = {
@@ -152,10 +153,10 @@ function buildListCommand(): Command['command'] {
     },
     window: {
       kind: 'parsed',
-      parse: stringParser,
-      brief: "Another window to list, by its label (window:main, ws-2).",
+      parse: windowRefParser,
+      brief: "Another window to list, by its window:<label> reference (window:main, window:ws-2).",
       optional: true,
-      placeholder: 'label',
+      placeholder: 'ref',
     },
   };
 

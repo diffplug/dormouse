@@ -143,29 +143,27 @@ export function spansWorkspaces(method: string, params?: Record<string, unknown>
     || (method === SURFACE_CONTROL_METHODS.list && params?.scope === 'all');
 }
 
-/** The two readings of a `workspace:<n|name>` target (`docs/specs/dor-cli.md` →
- *  "Handle Model"). Both spellings are accepted bare. */
+/** An explicit Workspace id or exact name; invalid refs have neither. */
 export interface ParsedWorkspaceRef {
-  /** The target as written, trimmed — what an error message quotes back. */
   target: string;
-  /** The Workspace id the target names exactly, prefix restored. */
   id: string;
-  /** The Workspace name it reads as otherwise; empty when it is numeric. */
   name: string;
 }
 
 const SURFACE_PREFIX = 'surface:';
 const WORKSPACE_PREFIX = 'workspace:';
 const BARE_NUMBER = /^\d+$/;
-const NUMERIC_WORKSPACE_REF = /^[1-9]\d*$/;
 
-/** Split a `workspace:<n|name>` target into its readings. A target that reads
- *  as a number is a number, never a name. */
-export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
-  const target = ref.trim();
-  const bare = (target.startsWith(WORKSPACE_PREFIX) ? target.slice(WORKSPACE_PREFIX.length) : target).trim();
-  const numeric = NUMERIC_WORKSPACE_REF.test(bare);
-  return { target, id: WORKSPACE_PREFIX + bare, name: numeric ? '' : bare };
+/** Prefixes choose identity or name; never trim a literal name or fall back. */
+export function parseWorkspaceRef(target: string): ParsedWorkspaceRef {
+  if (target.startsWith('workspace-name:')) {
+    return { target, id: '', name: target.slice('workspace-name:'.length) };
+  }
+  return { target, id: /^workspace:[^\s\u0085]+$/.test(target) ? target : '', name: '' };
+}
+
+export function isCanonicalWindowRef(target: string): boolean {
+  return /^window:[^\s\u0085]+$/.test(target);
 }
 
 /** The number in a counter-minted `<prefix><n>` id, else null: ASCII digits

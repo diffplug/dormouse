@@ -2255,7 +2255,7 @@ export function useDorControl({
       if (!target) return;
       const destination = moveDestinationParam(params.destination);
       if (!destination) {
-        detail.respond({ ok: false, error: 'Specify exactly one destination Workspace or --new' }); return;
+        detail.respond({ ok: false, error: 'Specify exactly one destination Workspace or --new-workspace' }); return;
       }
       try {
         const result = await moveSurface(target.id, {

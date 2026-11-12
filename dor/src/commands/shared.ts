@@ -1,3 +1,4 @@
+import { parseWorkspaceRef, isCanonicalWindowRef } from '../protocol.js';
 import { CliError } from './errors.js';
 import type {
   CliOptions,
@@ -128,12 +129,23 @@ export function requireControlClient(options: CliOptions, timeoutMs?: number): C
   return result.ok ? result.value : new CliError('CONTROL_UNAVAILABLE', result.message);
 }
 
+export function workspaceRefParser(input: string): string {
+  const { id, name } = parseWorkspaceRef(input);
+  if (!id && !name) throw new SyntaxError(`invalid Workspace reference '${input}'; use workspace:<id> or workspace-name:<name>`);
+  return input;
+}
+
+export function windowRefParser(input: string): string {
+  if (!isCanonicalWindowRef(input)) throw new SyntaxError(`invalid Window reference '${input}'; use window:<label>`);
+  return input;
+}
+
 /** The `--workspace <ref>` flag every action command carries, defined once so
  *  its wording cannot drift (`docs/specs/dor-cli.md` → "Handle Model"). */
 export const workspaceFlag = {
   kind: 'parsed',
-  parse: stringParser,
-  brief: "Workspace to act in, instead of the caller's.",
+  parse: workspaceRefParser,
+  brief: "Workspace id or exact workspace-name: reference.",
   optional: true,
   placeholder: 'ref',
 } as const;

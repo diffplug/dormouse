@@ -216,7 +216,7 @@ export interface SwitchWorkspaceRequest {
   workspace: string;
 }
 
-/** Move a Workspace: to another Window (`toWindow`, a label or `new` for a
+/** Move a Workspace: to another Window (`toWindow`, `window:<label>` or `new` for a
  *  torn-out one), to a strip position (`index`, 0-based), or both. */
 export interface MoveWorkspaceRequest {
   workspace: string;

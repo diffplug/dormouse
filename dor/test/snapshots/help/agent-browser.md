@@ -21,7 +21,7 @@ dor intercepts exactly three mutually exclusive identity flags:
 
 It also intercepts --workspace <ref>, which is not an identity: it says which
 Workspace of this Window the browser Surface is opened in and which one a
-handle resolves against (workspace:<n> or workspace:<name>); and --focus
+handle resolves against (workspace:<id> or workspace-name:<name>); and --focus
 (or --focus=true|false), which says whether that Surface takes focus.
 
 --from <handle> is a placement reference: the Surface a new browser pane
@@ -77,7 +77,7 @@ FLAGS
      [--session]    Raw agent-browser session name (mutually exclusive with --key/--surface).
      [--surface]    Surface handle whose bound session to drive (mutually exclusive with --key/--session).
      [--from]       Reference Surface for placement and managed-key Workspace.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
      [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments

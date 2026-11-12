@@ -1057,7 +1057,7 @@ describe('Surface moves between Workspaces', () => {
     const kill = vi.spyOn(fake, 'killPty');
     const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
     let result;
-    await act(async () => { result = await moveSurface('surface:3', request({ workspace: 'new' })); });
+    await act(async () => { result = await moveSurface('surface:3', request({ workspace: 'workspace-name:new' })); });
     expect(result).toMatchObject({ surfaceId: 'surface:3', workspaceId: 'workspace:2' });
     expect(getWallHandle(source)!.surfaceIds()).toEqual(['surface:b']);
     expect(getWallHandle('workspace:2')!.surfaceIds()).toEqual(['pane-x', 'surface:3']);
@@ -1516,10 +1516,10 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(getPendingKills().map(kill => [kill.kind, kill.id, kill.title])).toEqual([['workspace', 'workspace:2', 'build']]);
     const listed = await new Promise<{ ok: boolean; error?: string }>(resolve => {
       act(() => { window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.list, params: { workspace: 'build' }, respond: resolve,
+        method: SURFACE_CONTROL_METHODS.list, params: { workspace: 'workspace-name:build' }, respond: resolve,
       } })); });
     });
-    expect(listed).toEqual({ ok: false, error: "workspace 'build' is a pending kill" });
+    expect(listed).toEqual({ ok: false, error: "workspace 'workspace-name:build' is a pending kill" });
   });
 
   it('refuses dor commands into its hidden Wall, by a member\'s id or from a member', async () => {

@@ -44,7 +44,7 @@ FLAGS
      [--json]       Print a JSON result or error object.
      [--timeout]    Seconds to wait before giving up. Default 600; max 86400.
       --until       What to wait for: quiet or exit.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

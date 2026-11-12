@@ -67,7 +67,7 @@ dor intercepts exactly three mutually exclusive identity flags:
 
 It also intercepts --workspace <ref>, which is not an identity: it says which
 Workspace of this Window the browser Surface is opened in and which one a
-handle resolves against (workspace:<n> or workspace:<name>); and --focus
+handle resolves against (workspace:<id> or workspace-name:<name>); and --focus
 (or --focus=true|false), which says whether that Surface takes focus.
 
 --from <handle> is a placement reference: the Surface a new browser pane
