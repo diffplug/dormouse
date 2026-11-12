@@ -194,9 +194,6 @@ export type CompletionEvent =
     }
   | { kind: 'notification'; notification: ActivityNotification };
 
-/** Return true to claim the event. A claimed event never reaches the ring rules. */
-export type CompletionClaimant = (event: CompletionEvent) => boolean;
-
 /** How much evidence of completion a parked `dor await` will accept. */
 export type AwaitUntil = 'quiet' | 'exit';
 
@@ -242,12 +239,6 @@ interface AwaitWaiter {
   /** The Session's PTY exited or the Session was removed. */
   die(): void;
   cancel(): void;
-}
-
-/** Every await parked on one Session, plus the single claimant they share. */
-interface AwaitGroup {
-  waiters: Set<AwaitWaiter>;
-  unregister: () => void;
 }
 
 export interface AlertState {
@@ -309,8 +300,7 @@ export class AlertManager {
   /** Blocks anything the killed generation still emits from recreating a
    * removed entry. Only `restart` — a new PTY generation — clears one. */
   private removed = new Set<string>();
-  private claimants = new Map<string, Set<CompletionClaimant>>();
-  private awaits = new Map<string, AwaitGroup>();
+  private awaits = new Map<string, Set<AwaitWaiter>>();
   /** Each present viewer's focus. An absent viewer engages nothing, so it is not kept. */
   private viewers = new Map<string, string | null>();
   private listeners = new Set<(id: string, state: AlertState) => void>();
@@ -476,39 +466,21 @@ export class AlertManager {
   // --- Completion events ---
 
   /**
-   * Watch every completion on one Session before any suppression runs — the
-   * seam `dor await` waits on. Claimants are offered events in registration
-   * order and the first to return `true` claims it, so it never rings, never
-   * sets TODO, and never stores a notification. Returns the unregister function.
-   */
-  registerCompletionClaimant(id: string, claimant: CompletionClaimant): () => void {
-    let claimants = this.claimants.get(id);
-    if (!claimants) {
-      claimants = new Set();
-      this.claimants.set(id, claimants);
-    }
-    claimants.add(claimant);
-    return () => {
-      const current = this.claimants.get(id);
-      if (!current) return;
-      current.delete(claimant);
-      if (current.size === 0) this.claimants.delete(id);
-    };
-  }
-
-  /**
    * Observe -> claim -> ring rule, for every ring source. Every ring rule lives
    * here and nowhere else, so an emit site only has to describe what happened;
-   * the decision to bother a human is made once, after the claimants have
-   * passed on it. Returns whether a claimant took the event.
+   * the decision to bother a human is made once, after the Session's awaits
+   * have passed on it. Returns whether an await claimed the event, so it
+   * never rings, never sets TODO, and never stores a notification.
    */
   private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): boolean {
     // A helper's completion reaches no one, and is not kept for promotion.
     if (this.helpers.has(id)) return false;
-    // Snapshot: a claimant may unregister itself (or register another) while
-    // being offered this very event.
-    const claimants = [...(this.claimants.get(id) ?? [])];
-    if (claimants.some((claimant) => claimant(event))) return true;
+    // Every await is offered the event, not only the first to take it.
+    let claimed = false;
+    this.eachWaiter(id, (waiter) => {
+      if (waiter.offer(event)) claimed = true;
+    });
+    if (claimed) return true;
 
     // A completion inside the echo window answers the keystroke that opened
     // it — a bell on Tab, the exit `Ctrl-C` caused — so it neither rings nor
@@ -678,40 +650,22 @@ export class AlertManager {
   }
 
   private addWaiter(id: string, waiter: AwaitWaiter): void {
-    let group = this.awaits.get(id);
-    if (!group) {
-      // One claimant covers every await on the Session, so a completion is
-      // delivered to all of them rather than only to whoever registered first
-      // — the claimant seam itself stops at the first claim.
-      const waiters = new Set<AwaitWaiter>();
-      group = {
-        waiters,
-        unregister: this.registerCompletionClaimant(id, (event) => {
-          let claimed = false;
-          for (const parked of [...waiters]) {
-            if (parked.offer(event)) claimed = true;
-          }
-          return claimed;
-        }),
-      };
-      this.awaits.set(id, group);
+    let waiters = this.awaits.get(id);
+    if (!waiters) {
+      waiters = new Set();
+      this.awaits.set(id, waiters);
     }
-    group.waiters.add(waiter);
+    waiters.add(waiter);
   }
 
   private dropWaiter(id: string, waiter: AwaitWaiter): void {
-    const group = this.awaits.get(id);
-    if (!group || !group.waiters.delete(waiter)) return;
-    if (group.waiters.size > 0) return;
-    this.awaits.delete(id);
-    group.unregister();
+    const waiters = this.awaits.get(id);
+    if (waiters?.delete(waiter) && waiters.size === 0) this.awaits.delete(id);
   }
 
   private eachWaiter(id: string, visit: (waiter: AwaitWaiter) => void): void {
-    const group = this.awaits.get(id);
-    if (!group) return;
     // Snapshot: settling removes the waiter from the set being walked.
-    for (const waiter of [...group.waiters]) visit(waiter);
+    for (const waiter of [...(this.awaits.get(id) ?? [])]) visit(waiter);
   }
 
   // --- Terminal reports ---
@@ -768,7 +722,7 @@ export class AlertManager {
   /**
    * A pending end counts now: its grace ran out, or something proved it real.
    * The cycle is over whether or not anyone claims the event, so it is cleared
-   * *before* dispatch — a claimant that suppresses the ring must not leave the
+   * *before* dispatch — an await that claims the end must not leave the
    * Session stuck at `OSC_NOTIF_BUSY`.
    */
   private settleProgressEnd(id: string, entry: AlertEntry): void {
@@ -1159,7 +1113,7 @@ export class AlertManager {
       watchingEnabled: this.isWatching(entry),
       todo: entry.todo,
       notification: entry.ring?.detail ?? entry.notification,
-      awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
+      awaited: this.awaits.has(id),
       episode: entry.ring?.episode ?? null,
     };
   }
@@ -1213,9 +1167,6 @@ export class AlertManager {
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
     this.eachWaiter(id, (waiter) => waiter.die());
-    // Claimants go with the Session, entry or not — a dead Session dispatches
-    // nothing, so holding their closures would only leak them.
-    this.claimants.delete(id);
     const entry = this.entries.get(id);
     if (entry) {
       this.disposeEntry(entry);
@@ -1251,7 +1202,6 @@ export class AlertManager {
     this.removed.clear();
     this.helpers.clear();
     this.awaits.clear();
-    this.claimants.clear();
     this.viewers.clear();
     this.listeners.clear();
     this.removeListeners.clear();

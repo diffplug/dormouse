@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, AWAIT_GRACE_MS, DEFAULT_ALERT_STATE, MAX_AWAIT_TIMEOUT_MS } from './alert-manager';
-import type { ActivityNotification, AwaitHandle, AwaitOutcome, CompletionEvent } from './alert-manager';
+import type { ActivityNotification, AwaitHandle, AwaitOutcome } from './alert-manager';
 import {
   applyTerminalEvents,
   collectTerminalSemanticEvents,
@@ -38,7 +38,6 @@ describe('AlertManager in isolation', () => {
     it('alerts no one, publishes nothing, and accepts no report or control until promoted', () => {
       const states: string[] = [];
       manager.onStateChange((id) => states.push(id));
-      const seen = recordingClaimant(HELPER, true);
       manager.setHelper(HELPER, true);
       runWatchedCommand(HELPER);
       driveToBusy(manager, HELPER);
@@ -57,7 +56,6 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(10_000);
 
       expect(states).toEqual([]);
-      expect(seen).toEqual([]);
       expect(manager.getState(HELPER)).toEqual(DEFAULT_ALERT_STATE);
       expect(manager.getAllStates().has(HELPER)).toBe(false);
       // Removing a helper that never published tells subscribers nothing either.
@@ -171,16 +169,6 @@ describe('AlertManager in isolation', () => {
   });
 
   // --- Boolean TODO tests ---
-
-  /** Register a claimant that records every event it is offered and answers `claims`. */
-  function recordingClaimant(id: string, claims: boolean): CompletionEvent[] {
-    const seen: CompletionEvent[] = [];
-    manager.registerCompletionClaimant(id, (event) => {
-      seen.push(event);
-      return claims;
-    });
-    return seen;
-  }
 
   function driveToRinging(id: string): void {
     runWatchedCommand(id);
@@ -535,27 +523,35 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('never reaches the next PTY generation when the Session restarts during the grace', () => {
+    it('never reaches the next PTY generation when the Session restarts during the grace', async () => {
       const id = 'end-restarted';
       active(id);
       end(id);
       manager.restart(id);
-      const seen = recordingClaimant(id, false);
+      // A running command keeps the await out of its idle grace.
+      runCommand(manager, id);
+      let outcome: AwaitOutcome | undefined;
+      void manager.awaitCompletion(id, { until: 'quiet', timeoutMs: 600_000 }).promise.then((value) => { outcome = value; });
       vi.advanceTimersByTime(GRACE);
-      expect(seen).toEqual([]);
+      await Promise.resolve();
+      expect(outcome).toBeUndefined();
     });
 
-    it('is answered by typing inside the grace: no ring and no TODO, though an await still hears it', () => {
+    it('is answered by typing inside the grace: no ring and no TODO, though an await still hears it', async () => {
       const id = 'end-typed-over';
-      const seen = recordingClaimant(id, false);
       engage(manager, id);
       active(id);
       end(id);
       manager.acknowledge(id, { input: true });
-      expect(seen).toHaveLength(1);
       vi.advanceTimersByTime(GRACE);
-      expect(seen).toHaveLength(1);
       expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null, episode: null });
+
+      const awaited = 'end-typed-over-awaited';
+      const handle = manager.awaitCompletion(awaited, { until: 'quiet', timeoutMs: 600_000 });
+      active(awaited);
+      end(awaited);
+      manager.acknowledge(awaited, { input: true });
+      expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'bell', waitedMs: 0 });
     });
 
     it('waits out a click: the look at the pane is no answer to it', () => {
@@ -845,22 +841,21 @@ describe('AlertManager in isolation', () => {
 
   // --- The always-on detector vs. the rule set as pure policy ---
 
-  it.each(['promptStart', 'promptEnd'] as const)('resets unwatched output history on %s without a command watch', (type) => {
+  it.each(['promptStart', 'promptEnd'] as const)('resets unwatched output history on %s without a command watch', async (type) => {
     const id = `prompt-boundary-${type}`;
-    const completions: CompletionEvent[] = [];
-    manager.registerCompletionClaimant(id, (event) => {
-      completions.push(event);
-      return false;
-    });
+    let outcome: AwaitOutcome | undefined;
+    void manager.awaitCompletion(id, { until: 'quiet', timeoutMs: 600_000 }).promise.then((value) => { outcome = value; });
     driveToBusy(manager, id);
     manager.applyTerminalSemanticEvents(id, [{ type }]);
     settle();
-    expect(completions).toEqual([]);
+    await Promise.resolve();
+    expect(outcome).toBeUndefined();
 
     // The prompt reset forgets old work but keeps observing subsequent output.
     driveToBusy(manager, id);
     settle();
-    expect(completions).toEqual([{ kind: 'settled' }]);
+    await Promise.resolve();
+    expect(outcome).toMatchObject({ kind: 'resolved', cause: 'quiet' });
   });
 
   it('dismissing a WATCHING ring keeps the tail of its run from ringing again', () => {
@@ -991,25 +986,6 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).not.toBe('OSC_NOTIF_BUSY');
       expect(seen).not.toEqual([]);
     });
-
-    it('offers a completion once and keeps nothing when a claimant takes it', () => {
-      const id = 'claimed';
-      driveToBusy(manager, id);
-      const seen = recordingClaimant(id, true);
-
-      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
-      vi.advanceTimersByTime(60_000);
-
-      expect(seen).toEqual([
-        { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Done' } },
-        { kind: 'settled' },
-      ]);
-      expect(manager.getState(id)).toMatchObject({
-        status: 'WATCHING_DISABLED',
-        todo: false,
-        notification: null,
-      });
-    });
   });
 
   // --- Ordered ingestion ---
@@ -1040,32 +1016,27 @@ describe('AlertManager in isolation', () => {
   // --- Completion events (`docs/specs/alert.md` -> Completion events) ---
 
   describe('completion events', () => {
-    it('declining a settle rings exactly as if no claimant existed', () => {
+    it('rings a settle an await declines exactly as if none were parked', async () => {
       const id = 'decline-settle';
-      const seen = recordingClaimant(id, false);
-
       runWatchedCommand(id);
+      let outcome: AwaitOutcome | undefined;
+      void manager.awaitCompletion(id, { until: 'exit', timeoutMs: 600_000 }).promise.then((value) => { outcome = value; });
+
       driveToBusy(manager, id);
       settle();
 
-      expect(seen).toEqual([{ kind: 'settled' }]);
+      await Promise.resolve();
+      expect(outcome).toBeUndefined();
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('reports an engaged command finish the ring rule holds', () => {
+    it('holds an engaged command finish', () => {
       const id = 'observe-engaged-command';
-      const seen = recordingClaimant(id, false);
 
       engage(manager, id);
       runCommand(manager, id, 'npm test');
       finishCommand(manager, id);
 
-      expect(seen).toEqual([{
-        kind: 'commandFinished',
-        displayCommand: 'npm test',
-        exitCode: 0,
-        seen: true,
-      }]);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
         todo: true,
@@ -1073,21 +1044,16 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('claiming a seen command finish suppresses the COMMAND_EXIT ring', () => {
+    it('claiming a seen command finish suppresses the COMMAND_EXIT ring', async () => {
       const id = 'claim-command-exit';
-      const seen = recordingClaimant(id, true);
 
       armCommandExit(manager, id);
       expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
+      const handle = manager.awaitCompletion(id, { until: 'exit', timeoutMs: 600_000 });
 
       finishCommand(manager, id);
 
-      expect(seen).toEqual([{
-        kind: 'commandFinished',
-        displayCommand: 'pnpm build',
-        exitCode: 0,
-        seen: true,
-      }]);
+      expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'exit' });
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
         todo: false,
@@ -1095,76 +1061,18 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('stops delivering after unregister and never crosses Sessions', () => {
-      const a = 'claimant-session-a';
-      const b = 'claimant-session-b';
-      const seen: CompletionEvent[] = [];
-      const unregister = manager.registerCompletionClaimant(a, (event) => {
-        seen.push(event);
-        return true;
-      });
+    it('dispatches the command finish on PTY exit before any ring rule runs', async () => {
+      const claimed = 'pty-exit-claimed';
+      armCommandExit(manager, claimed);
+      const handle = manager.awaitCompletion(claimed, { until: 'exit', timeoutMs: 600_000 });
+      manager.onExit(claimed, 1);
+      expect(await handle.promise).toMatchObject({ kind: 'resolved', cause: 'exit' });
+      expect(manager.getState(claimed)).toMatchObject({ todo: false, notification: null, episode: null });
 
-      manager.notifyFromProtocol(b, { source: 'OSC 9', title: null, body: 'not yours' });
-      expect(seen).toEqual([]);
-      expect(manager.getState(b).status).toBe('ALERT_RINGING');
-
-      manager.notifyFromProtocol(a, { source: 'OSC 9', title: null, body: 'yours' });
-      expect(seen).toHaveLength(1);
-      expect(manager.getState(a).status).toBe('WATCHING_DISABLED');
-
-      unregister();
-      manager.notifyFromProtocol(a, { source: 'OSC 9', title: null, body: 'after unregister' });
-      expect(seen).toHaveLength(1);
-      expect(manager.getState(a).status).toBe('ALERT_RINGING');
-    });
-
-    it('offers claimants in registration order and stops at the first claim', () => {
-      const id = 'claimant-order';
-      const calls: string[] = [];
-      manager.registerCompletionClaimant(id, () => {
-        calls.push('first');
-        return false;
-      });
-      manager.registerCompletionClaimant(id, () => {
-        calls.push('second');
-        return true;
-      });
-      manager.registerCompletionClaimant(id, () => {
-        calls.push('third');
-        return true;
-      });
-
-      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-
-      expect(calls).toEqual(['first', 'second']);
-      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-    });
-
-    it('dispatches the command finish on PTY exit before any ring rule runs', () => {
+      // Unclaimed, the ring rule runs afterwards.
       const id = 'pty-exit-dispatch';
-      const seen: Array<{ event: CompletionEvent; ringing: boolean; todo: boolean }> = [];
-      manager.registerCompletionClaimant(id, (event) => {
-        const state = manager.getState(id);
-        seen.push({ event, ringing: state.status === 'ALERT_RINGING', todo: state.todo });
-        return false;
-      });
-
       armCommandExit(manager, id);
-      expect(manager.getState(id).status).toBe('COMMAND_EXIT_ARMED');
-
       manager.onExit(id, 1);
-
-      expect(seen).toEqual([{
-        event: {
-          kind: 'commandFinished',
-          displayCommand: 'pnpm build',
-          exitCode: 1,
-          seen: true,
-        },
-        ringing: false,
-        todo: false,
-      }]);
-      // Declined, so the ring rule still ran afterwards.
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
         todo: false,
