@@ -522,6 +522,8 @@ const due = (s: Step) => time(s) && s.post.now >= s.delivery!.dueAt;
 const blocked = (s: Step) => s.delivery!.sink === 'speech' ? s.post.engaged : s.post.viewers.size > 0;
 /** The episode is one Ringing stretch of the Ring. */
 const episodeEnded = (s: Step) => s.post.ring?.episode !== s.delivery!.episode;
+/** The Session was made a helper (Pane Header), which ends no episode. */
+const demoted = (s: Step) => s.ev.k === 'helper' && s.ev.on && !s.pre.helper;
 
 // ---------------------------------------------------------------------------
 // Every drawn edge, by its exact text, and the step that fires it.
@@ -657,15 +659,15 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Delivery: [*] --> Pending: the episode opens, the sink on': (s) => opening(s) && s.delivery!.onAtOpen,
       'Delivery: [*] --> Spent: the episode opens, the sink off': (s) => opening(s) && !s.delivery!.onAtOpen,
       'Delivery: Pending --> Delivered: due, not blocked': (s) => due(s) && !blocked(s),
-      'Delivery: Pending --> Spent: due while blocked (speech while Engaged, push while any viewer is Present), the sink turned off, or the episode ends': (s) =>
-        (due(s) && blocked(s)) || sinkTurnedOff(s) || episodeEnded(s),
+      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends': (s) =>
+        (due(s) && blocked(s)) || sinkTurnedOff(s) || demoted(s) || episodeEnded(s),
       'Delivery: Delivered --> [*]': always,
       'Delivery: Spent --> [*]': always,
     },
     // Pending and Spent read alike, so every trigger out of Pending is exact.
     exact: new Set([
       'Delivery: Pending --> Delivered: due, not blocked',
-      'Delivery: Pending --> Spent: due while blocked (speech while Engaged, push while any viewer is Present), the sink turned off, or the episode ends',
+      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends',
     ]),
   },
   Await: {

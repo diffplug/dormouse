@@ -52,45 +52,7 @@ interface Known {
   why: string;
 }
 
-const KNOWN: readonly Known[] = [
-  {
-    key: 'soundness: Delivery: Pending -> Pending|Spent',
-    seed: 100_084,
-    events: [
-      { k: 'settings', speak: true, push: true, speakDelayMs: 1_000, pushDelayMs: 4_000 },
-      { k: 'report', source: 'OSC 9' }, { k: 'helper', on: true }, { k: 'wait', ms: 1_600 },
-    ],
-    expected: "Pending -> Delivered when due and not blocked: the Ring's episode never ended",
-    got: "Pending -> Pending|Spent on { k: 'wait', ms: 1600 }: spent",
-    side: 'spec',
-    why: 'A demotion publishes the default state and the scheduler takes the episode as ended. Spending is what a helper\'s "no speech, push" asks; the Delivery diagram draws no such trigger.',
-  },
-  {
-    key: 'soundness: Delivery: Spent -> Delivered',
-    seed: 100_084,
-    events: [
-      { k: 'settings', speak: true, push: true, speakDelayMs: 1_000, pushDelayMs: 4_000 },
-      { k: 'report', source: 'OSC 9' }, { k: 'helper', on: true }, { k: 'wait', ms: 1_600 }, { k: 'tick' },
-      { k: 'helper', on: false }, { k: 'wait', ms: 2_000 },
-    ],
-    expected: 'a spent delivery stays spent ("Enabling must never replay an episode")',
-    got: "Spent -> Delivered on { k: 'wait', ms: 2000 }",
-    side: 'code',
-    why: 'Promotion publishes the same episode again and `createAlertDeliveryScheduler` arms it as new, its deadline already past, so it is delivered at once.',
-  },
-  {
-    key: 'invariant: Alarm settings: at most one delivery per sink per episode',
-    seed: 142,
-    events: [
-      { k: 'settings', speak: true, push: true, speakDelayMs: 4_000, pushDelayMs: 20_000 }, { k: 'report', source: 'BEL' },
-      { k: 'wait', ms: 180_100 }, { k: 'helper', on: true }, { k: 'helper', on: false }, { k: 'wait', ms: 1_600 },
-    ],
-    expected: 'one speech and one push per episode',
-    got: "speech delivered 2 times on { k: 'wait', ms: 1600 }",
-    side: 'code',
-    why: 'The previous entry\'s re-arming, after both sinks had delivered: a demotion and promotion speaks and pushes the same episode again.',
-  },
-];
+const KNOWN: readonly Known[] = [];
 
 function suite(source = machines): ModelSuite {
   return { machines: source, coverage: new Map() };

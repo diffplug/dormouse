@@ -309,7 +309,7 @@ stateDiagram-v2
     [*] --> Pending: the episode opens, the sink on
     [*] --> Spent: the episode opens, the sink off
     Pending --> Delivered: due, not blocked
-    Pending --> Spent: due while blocked (speech while Engaged, push while any viewer is Present), the sink turned off, or the episode ends
+    Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends
     Delivered --> [*]
     Spent --> [*]
   }
@@ -554,8 +554,8 @@ Application alarm defaults live beside the WATCHING rule set, edited in Settings
 
 **The host must decide when to deliver, in `createAlertHost` beside the manager** (rationale):
 
-- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing, and a sink turned off or a ring cleared first consumes it. Due but blocked also consumes it: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
-- **Enabling must never replay an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
+- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing; a sink turned off, a ring cleared, or a demotion to helper first consumes it. Due but blocked also consumes it: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
+- **Enabling or promotion must never replay an episode**, one that began disabled included (rationale). Delay edits never move a deadline; speech reads the current voice at engine admission.
 - **Each realm must publish every Session it shows** — Pane label and Workspace overrides — as one `sessions` op, label changes throttled (rationale).
 - **A publication must overwrite each Session it names, whichever realm published it last, and never drop one the manager holds state for**; one its realm omits with none is forgotten (rationale). The host keeps each Session's entry until the Session is removed, through its realm's end and a respawn under its id; an unpublished Session uses the defaults.
 
