@@ -425,14 +425,14 @@ const progressReport = (s: Step) => (time(s) || boundary(s)) && s.pre.state.Prog
 /** Held sources going back to Dispatch: an idle lapse, or the leave grace with no viewer present. */
 const escalated = (s: Step) => (s.ev.k === 'idle' && s.pre.state.Hold === 'Held')
   || (time(s) && s.pre.state.Hold === 'Leaving' && s.post.viewers.size === 0);
-/** A completion Dispatch may ring or hold: a settle while watched, a command
- *  finish from Seen, or a report (`docs/specs/alert.md` -> Completion events),
- *  past the helper gate; or a held source going back to Dispatch, which the
- *  Hold diagram re-enters at Engaged?, after that gate. */
-const completion = (s: Step) => escalated(s) || (!s.pre.helper && (
-  (settled(s) && watched(s.pre))
+/** A completion Dispatch may ring or hold, past the helper gate: a settle
+ *  while watched, a command finish from Seen, or a report
+ *  (`docs/specs/alert.md` -> Completion events); or a held source going back
+ *  to Dispatch, which passes that gate and goes on at Engaged?. */
+const completion = (s: Step) => !s.pre.helper && (escalated(s)
+  || (settled(s) && watched(s.pre))
   || (is(s, 'finish', 'prompt', 'exit') && s.pre.state.Command === 'Seen')
-  || s.ev.k === 'report' || progressReport(s)));
+  || s.ev.k === 'report' || progressReport(s));
 const awaitsSettledNow = (s: Step) => s.world.awaits.filter((record) => record.settledStep === s.index);
 /** Withdraw: an await consumes a source, an await claims a settle, or a rule stops covering `watching`'s key. */
 const withdraw = (s: Step) => (s.ev.k === 'await' && s.world.awaits[s.world.awaits.length - 1]?.outcome?.kind === 'resolved')
@@ -622,13 +622,13 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Hold: [*] --> NoHold': always,
       'Hold: NoHold --> Held: hold': hold,
       'Hold: Held --> Held: hold, detail only if richer, or withdraw leaving other sources': (s) => (hold(s) || withdraw(s)) && latchMoved(s, 'held'),
-      'Hold: Held --> NoHold: Engagement idle — each source back to Dispatch at Engaged?': (s) => disengaged(s, 'idle'),
+      'Hold: Held --> NoHold: Engagement idle — each source back to Dispatch': (s) => disengaged(s, 'idle'),
       'Hold: Held --> NoHold: Engagement focus moves on, or a verb': (s) => disengaged(s, 'focus') || verb(s),
       'Hold: Held --> NoHold: withdraw of its last source': withdraw,
       'Hold: Held --> Leaving: Engagement leave': (s) => disengaged(s, 'leave'),
       'Hold: Leaving --> Held: Engaged again': engagedAgain,
       'Hold: Leaving --> Leaving: withdraw leaving other sources': (s) => withdraw(s) && latchMoved(s, 'held'),
-      'Hold: Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch at Engaged?': (s) => time(s) && s.post.viewers.size === 0,
+      'Hold: Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch': (s) => time(s) && s.post.viewers.size === 0,
       'Hold: Leaving --> NoHold: the leave grace elapses with a viewer Present, a verb, or withdraw of its last source': (s) => (time(s) && s.post.viewers.size > 0) || verb(s) || withdraw(s),
     },
   },

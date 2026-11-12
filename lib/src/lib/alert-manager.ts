@@ -1177,12 +1177,15 @@ export class AlertManager {
 
   /**
    * The user went idle, or left the host: each held source takes the path it
-   * would have taken unengaged, with the richest held detail.
+   * would have taken unengaged, with the richest held detail. A Session made a
+   * helper since the hold drops them, as `dispatchCompletion` drops a helper's
+   * fresh completion: a helper never rings.
    */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
     if (held === null) return;
     entry.held = null;
+    if (this.helpers.has(id)) return;
     eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail, held.arrived));
   }
 

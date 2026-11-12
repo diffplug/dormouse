@@ -115,7 +115,7 @@ flowchart TD
   L -- "episode" --> DEL["Delivery and speech"]
 ```
 
-Dispatch also reads Engagement, the echo window, the Foreground command, Acknowledged, and each Await, by the states its questions name. Terms:
+Dispatch's questions read Engagement, the echo window, the Foreground command, Acknowledged, and each Await. Terms:
 
 - **input** — a PTY write but a terminal reply or a mouse report: a keystroke, a paste, a drop, a `dor send`, a launch. A wheel tick is input only when sent as keys; sent as a mouse report it is still a gesture with input.
 - **gesture** — an acknowledging gesture (Engagement), *with input* or *without*.
@@ -135,7 +135,9 @@ Dispatch — each completion takes the first exit that applies:
 ```mermaid
 flowchart TD
   C["settle, command finish (seen or unseen), or report"] --> H{"a helper Session?"}
+  HS["a held source"] --> H
   H -- yes --> X["dropped"]
+  H -- "no, held" --> G
   H -- no --> A{"an await in Grace or Parked accepts it?"}
   A -- yes --> W["claimed"]
   A -- no --> E{"echo window Open?"}
@@ -267,13 +269,13 @@ stateDiagram-v2
     [*] --> NoHold
     NoHold --> Held: hold
     Held --> Held: hold, detail only if richer, or withdraw leaving other sources
-    Held --> NoHold: Engagement idle — each source back to Dispatch at Engaged?
+    Held --> NoHold: Engagement idle — each source back to Dispatch
     Held --> NoHold: Engagement focus moves on, or a verb
     Held --> NoHold: withdraw of its last source
     Held --> Leaving: Engagement leave
     Leaving --> Held: Engaged again
     Leaving --> Leaving: withdraw leaving other sources
-    Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch at Engaged?
+    Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch
     Leaving --> NoHold: the leave grace elapses with a viewer Present, a verb, or withdraw of its last source
   }
 ```

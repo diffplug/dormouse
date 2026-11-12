@@ -180,6 +180,8 @@ Disconnect failure (2026-10): the atomic writer can fail while the old token rem
 
 **Why a helper tracks its command before promotion.** A helper dropped every semantic event, so one promoted while running `claude` had no command watch until its next command: no WATCHING, and no command-exit arm (audit, 2026-09-23). Command state alerts no one by itself; only dispatch and publishing have to wait for promotion.
 
+**Why a hold coming due on a helper is dropped.** A failed placement's restore, or a detached helper put back, makes a helper of a Session that may hold a completion from while it was promoted. Its leave grace then escalated the hold straight to Engaged?, past the helper gate, and rang a helper; the ring showed once it was promoted again (model test, 2026-11-11). A helper never rings, however the ring would arise (decision, 2026-11-11), so a held source re-enters Dispatch at the helper gate and is dropped as a fresh one is, leaving the TODO the hold set.
+
 ## Text And Security
 
 **Why the cold-restore path is not re-sanitized.** Reaching it requires a corrupted or hand-edited session store, and the text is rendered as plain text everywhere, so the residual exposure is layout — a very long or control-bearing string in a preview — rather than markup.

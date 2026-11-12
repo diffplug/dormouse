@@ -54,27 +54,6 @@ interface Known {
 
 const KNOWN: readonly Known[] = [
   {
-    key: 'invariant: Pane Header: a helper never rings or holds',
-    seed: 100_868,
-    events: [{ k: 'present', viewer: 'V1', focus: 'S' }, { k: 'report', source: 'OSC 9' }, { k: 'leave', viewer: 'V1' }, { k: 'helper', on: true }, { k: 'wait', ms: 1_000 }],
-    expected: 'no ring on a helper (Pane Header: no completion dispatch, ring included)',
-    got: "a helper rang on { k: 'wait', ms: 1000 }",
-    side: 'code',
-    why: 'A hold made before a demotion escalates at the leave grace or an idle lapse: `escalateHeld` calls `holdOrDeliver`, past the helper gate, as the Hold diagram draws ("back to Dispatch at Engaged?"). Reached by `setHelper(id, true)` on a holding Session, a failed placement\'s `promote` with `restore`.',
-  },
-  {
-    key: 'soundness: Delivery: [*] -> Pending|Spent',
-    seed: 103_834,
-    events: [
-      { k: 'settings', speak: false, push: true, speakDelayMs: 1_000, pushDelayMs: 1_000 }, { k: 'present', viewer: 'V1', focus: 'S' },
-      { k: 'report', source: 'OSC 9' }, { k: 'leave', viewer: 'V1' }, { k: 'helper', on: true }, { k: 'wait', ms: 2_000 },
-    ],
-    expected: "the helper's escalated ring opens an episode whose push is delivered when due, no viewer present",
-    got: "[*] -> Pending|Spent on { k: 'wait', ms: 2000 }: never delivered",
-    side: 'code',
-    why: 'The previous entry\'s ring: the scheduler follows published episodes, and a helper publishes none.',
-  },
-  {
     key: 'soundness: Delivery: Pending -> Pending|Spent',
     seed: 100_084,
     events: [
