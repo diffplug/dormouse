@@ -39,7 +39,7 @@ const TOOL_COMMAND_STATES: ReadonlyArray<readonly [CommandState, string]> = [
   ['running', 'the shell reported the command running'],
   ['awaiting_approval', 'the pane waits for you to approve the project dormouse.yml; nothing has run'],
   ['queued', 'not started yet: a takeover, answered before its command is typed so dor can exit and free the shell, or a reused Tool whose re-run has not started'],
-  ['ended', 'the new Surface\'s command already ended, perhaps with a nonzero exit'],
+  ['ended', 'the new or restarted command already ended, perhaps with a nonzero exit'],
 ];
 
 interface ToolFlags {

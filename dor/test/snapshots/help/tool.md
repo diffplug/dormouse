@@ -37,7 +37,7 @@ command_state, the [tag] in text output, says what the reply proves about the co
   running            the shell reported the command running
   awaiting_approval  the pane waits for you to approve the project dormouse.yml; nothing has run
   queued             not started yet: a takeover, answered before its command is typed so dor can exit and free the shell, or a reused Tool whose re-run has not started
-  ended              the new Surface's command already ended, perhaps with a nonzero exit
+  ended              the new or restarted command already ended, perhaps with a nonzero exit
 
 Text output:
   created surface:3  [unconfirmed]  "pnpm storybook"

@@ -3483,7 +3483,7 @@ describe('Wall on the Lath engine', () => {
         act(() => finish(command));
       }
       await waitUntil(() => respond.mock.calls.length > 0);
-      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', surfaceId: id }) }));
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', commandState: 'ended', surfaceId: id }) }));
       expect(typed).toEqual(['\x03', `${command}\r`]);
       expect(terminalRegistry.getTerminalPaneState(id).currentCommand).toBeNull();
       expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).not.toBe(oldRun);

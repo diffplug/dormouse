@@ -208,7 +208,7 @@ Source of truth: `dor/src/cli-core.ts`, `dor/src/commands/`, `buildShellCommandF
 
 ## Command state
 
-**Must report a launch's `command_state` separately from its creation/reuse `status`, from evidence present when replying.** Shell integration alone proves neither command startup nor application readiness; a completed earlier run never proves a new retarget or restart. A new Surface may already have ended its first command when acknowledged. `CommandState` in `dor/src/commands/types.ts` owns the values, each response type narrows them to what its command can report, and each command's help lists only those.
+**Must report a launch's `command_state` separately from its creation/reuse `status`, from evidence present when replying.** Shell integration alone proves neither command startup nor application readiness; a completed earlier run never proves a new retarget or restart. A new or restarted command may already have ended when acknowledged. `CommandState` in `dor/src/commands/types.ts` owns the values, each response type narrows them to what its command can report, and each command's help lists only those.
 
 **Must acknowledge caller takeover before injecting its command**, so the foreground CLI can exit and free its shell. A successful request or approval-pending response never promises later execution; app restart likewise acknowledges only its request. Input delivery follows [dor send](#dor-send).
 
