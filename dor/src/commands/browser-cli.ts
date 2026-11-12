@@ -65,11 +65,7 @@ export function extractSessionFlags(
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
     // The providers take their options after the command, so dor's are read
-    // anywhere until a bare `--`; it and the rest forward verbatim.
-    if (arg === '--') {
-      rest.push(...args.slice(index));
-      break;
-    }
+    // anywhere; everything else, a bare `--` included, forwards in place.
     // The one boolean: `--focus`, or `--focus=true|false`, never a separate value.
     if (arg === '--focus' || arg.startsWith('--focus=')) {
       const value = arg === '--focus' ? 'true' : arg.slice('--focus='.length);
