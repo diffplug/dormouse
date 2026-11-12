@@ -27,7 +27,7 @@ const {
   openPortScanTimeoutMs,
   OPEN_PORT_TIMEOUT_MS,
   OPEN_PORT_TIMEOUT_PER_ID_MS,
-  pacedInputSegments,
+  pacedTextRuns,
   DEHYDRATE_LIMIT,
   WSL_CLI_ENV,
 } = require('./pty-core');
@@ -763,36 +763,18 @@ for (const retire of ['exit', 'kill', 'killAll', 'replace']) {
   });
 }
 
-test('pacedInputSegments splits text by UTF-8 bytes and keeps keys whole', () => {
-  const segments = pacedInputSegments(`${'a'.repeat(255)}é\tline\n😀\r\x1b[B\x1bOP\x1bx\x7f\x03\x1b[1`);
-  assert.deepEqual(segments, [
-    { data: 'a'.repeat(255), key: false }, // é would be byte 257
-    { data: 'é\tline\n😀', key: false },
-    { data: '\r', key: true },
-    { data: '\x1b[B', key: true },
-    { data: '\x1bOP', key: true },
-    { data: '\x1bx', key: true },
-    { data: '\x7f', key: true },
-    { data: '\x03', key: true },
-    { data: '\x1b[1', key: true },
+test('pacedTextRuns splits text by UTF-8 bytes and never cuts a code point or reads a key', () => {
+  assert.deepEqual(pacedTextRuns(`${'a'.repeat(255)}é\tline\n😀\r\x1b[B\x7f\x03`), [
+    'a'.repeat(255), // é would be byte 257
+    'é\tline\n😀\r\x1b[B\x7f\x03',
   ]);
-  assert.deepEqual(pacedInputSegments('\x1b[200~hi\x1b[201~'), [
-    { data: '\x1b[200~', key: true },
-    { data: 'hi', key: false },
-    { data: '\x1b[201~', key: true },
-  ]);
-  assert.deepEqual(pacedInputSegments('😀'.repeat(65)).map(({ data }) => data), ['😀'.repeat(64), '😀']);
-  assert.deepEqual(pacedInputSegments('\x1b'), [{ data: '\x1b', key: true }]);
-  assert.deepEqual(pacedInputSegments('\x1b[1\ra'), [
-    { data: '\x1b[1', key: true },
-    { data: '\r', key: true },
-    { data: 'a', key: false },
-  ]);
+  assert.deepEqual(pacedTextRuns('😀'.repeat(65)), ['😀'.repeat(64), '😀']);
+  assert.deepEqual(pacedTextRuns(''), []);
 });
 
-test('paced input writes bounded text runs apart and settles before a key', (t) => {
+test('paced input writes bounded text runs apart and settles before a key', async (t) => {
   const { mgr, writes } = ptyHarness(t);
-  mgr.write('pane-1', `${'a'.repeat(600)}\r`, { paced: true });
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'a'.repeat(600) }, { kind: 'key', data: '\r' }]);
   assert.deepEqual(writes, ['a'.repeat(256)]);
   t.mock.timers.tick(10);
   t.mock.timers.tick(10);
@@ -800,64 +782,48 @@ test('paced input writes bounded text runs apart and settles before a key', (t) 
   t.mock.timers.tick(99);
   assert.equal(writes.length, 3);
   t.mock.timers.tick(1);
+  await sent;
   assert.equal(writes.at(-1), '\r');
 });
 
-test('input written during a pace joins it in order', (t) => {
+test('input written during a pace joins it in order', async (t) => {
   const { mgr, writes } = ptyHarness(t);
-  mgr.write('pane-1', 'b'.repeat(300), { paced: true });
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'b'.repeat(300) }]);
   mgr.write('pane-1', 'typed');
   assert.deepEqual(writes, ['b'.repeat(256)]);
   t.mock.timers.tick(10);
+  await sent;
   assert.deepEqual(writes, ['b'.repeat(256), 'b'.repeat(44), 'typed']);
   mgr.write('pane-1', 'free');
   assert.equal(writes.at(-1), 'free');
 });
 
-test('a PTY that throws mid-drain drops the rest instead of throwing from the timer', (t) => {
+test('a PTY that throws mid-drain drops the rest instead of throwing from the timer', async (t) => {
   const { mgr, writes, dead } = ptyHarness(t);
-  mgr.write('pane-1', `${'f'.repeat(300)}\r`, { paced: true });
+  const sent = assert.rejects(mgr.sendInput('pane-1', [{ kind: 'text', data: 'f'.repeat(300) }, { kind: 'key', data: '\r' }]), /cancelled/);
   assert.deepEqual(writes, ['f'.repeat(256)]);
   dead.add(1);
   t.mock.timers.tick(1000);
+  await sent;
   assert.deepEqual(writes, ['f'.repeat(256)]);
   dead.delete(1);
   mgr.write('pane-1', 'after');
   assert.deepEqual(writes, ['f'.repeat(256), 'after'], 'the dropped queue leaves later input unblocked');
 });
 
-test('a key sent by a later paced write still settles after earlier text', (t) => {
+test('a key sent by a later request still settles after earlier text', async (t) => {
   const { mgr, writes } = ptyHarness(t);
-  mgr.write('pane-1', 'prompt', { paced: true });
+  await mgr.sendInput('pane-1', [{ kind: 'text', data: 'prompt' }]);
   t.mock.timers.tick(50);
-  mgr.write('pane-1', '\r', { paced: true });
+  const key = mgr.sendInput('pane-1', [{ kind: 'key', data: '\r' }]);
   assert.deepEqual(writes, ['prompt']);
   t.mock.timers.tick(50);
+  await key;
   assert.deepEqual(writes, ['prompt', '\r']);
   t.mock.timers.tick(1000);
-  mgr.write('pane-1', 'next', { paced: true });
+  await mgr.sendInput('pane-1', [{ kind: 'text', data: 'next' }]);
   assert.equal(writes.at(-1), 'next');
 });
-
-for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed ^C', 'dor send --key ctrl-c']) {
-  test(`pending paced input is discarded on ${retire}`, (t) => {
-    const { mgr, writes, exits } = ptyHarness(t);
-    mgr.write('pane-1', `${'c'.repeat(300)}\r`, { paced: true });
-    if (retire === 'exit') exits[0]({ exitCode: 0 });
-    else if (retire === 'replace') mgr.spawn('pane-1');
-    else if (retire === 'interrupt') mgr.interrupt(['pane-1']);
-    else if (retire === 'typed ^C') mgr.write('pane-1', '\x03');
-    else if (retire === 'dor send --key ctrl-c') mgr.write('pane-1', '\x03', { paced: true });
-    else mgr[retire]('pane-1');
-    t.mock.timers.tick(1000);
-    if (retire === 'replace') mgr.write('pane-1', '\r', { paced: true });
-    assert.deepEqual(writes, [
-      'c'.repeat(256),
-      ...(retire.includes('^C') || retire.includes('ctrl-c') || retire === 'interrupt' ? ['\x03'] : []),
-      ...(retire === 'replace' ? ['2:\r'] : []),
-    ]);
-  });
-}
 
 test('create forwards PTY data and observes natural exit', () => {
   const events = [];
@@ -2661,8 +2627,7 @@ test('each slice of paced input is reported as it is written, not when it was as
   const mgr = create(() => {}, pty.module, { onInputWritten: (id) => written.push([id, Date.now()]) });
   mgr.spawn('a');
   const asked = Date.now();
-  mgr.write('a', 'x'.repeat(600), { paced: true });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await mgr.sendInput('a', [{ kind: 'text', data: 'x'.repeat(600) }]);
   // 600 bytes in runs of 256: three slices, 10 ms apart.
   assert.equal(written.length, 3);
   assert.ok(written[2][1] - asked >= 15, `the last slice reported ${written[2][1] - asked} ms after the write`);
@@ -2945,3 +2910,87 @@ test('PTY owner streams only the current generation and stops the one a spawn di
   mgr.killAll();
 });
 
+test('send receipt waits for the final PTY write and keeps batches together', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  let delivered = false;
+  const first = mgr.sendInput('pane-1', [{ kind: 'text', data: 'x'.repeat(300) }, { kind: 'key', data: '\r' }]).then(() => { delivered = true; });
+  const second = mgr.sendInput('pane-1', [{ kind: 'text', data: 'next' }]);
+  mgr.write('pane-1', 'human');
+  await Promise.resolve();
+  assert.equal(delivered, false);
+  assert.deepEqual(writes, ['x'.repeat(256)]);
+  t.mock.timers.tick(10);
+  t.mock.timers.tick(99);
+  assert.equal(delivered, false);
+  t.mock.timers.tick(1);
+  await first;
+  assert.deepEqual(writes, ['x'.repeat(256), 'x'.repeat(44), '\r']);
+  t.mock.timers.tick(10);
+  await second;
+  assert.deepEqual(writes.slice(-2), ['next', 'human']);
+});
+
+test('named Tab settles as a key while a literal tab stays text', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'a\t' }, { kind: 'key', data: '\t' }]);
+  assert.deepEqual(writes, ['a\t']);
+  t.mock.timers.tick(99);
+  assert.deepEqual(writes, ['a\t']);
+  t.mock.timers.tick(1);
+  await sent;
+  assert.deepEqual(writes, ['a\t', '\t']);
+});
+
+for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed ^C', 'dor send --key ctrl-c', 'write failure']) {
+  test(`pending send input fails after partial delivery on ${retire}`, async (t) => {
+    const { mgr, writes, exits, dead } = ptyHarness(t);
+    const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'c'.repeat(300) }, { kind: 'key', data: '\r' }]);
+    const rejected = assert.rejects(sent, /cancelled.*some input may have been delivered/);
+    if (retire === 'exit') exits[0]({ exitCode: 0 });
+    else if (retire === 'replace') mgr.spawn('pane-1');
+    else if (retire === 'interrupt') mgr.interrupt(['pane-1']);
+    else if (retire === 'typed ^C') mgr.write('pane-1', '\x03');
+    else if (retire === 'dor send --key ctrl-c') await mgr.sendInput('pane-1', [{ kind: 'key', data: '\x03' }]);
+    else if (retire === 'write failure') dead.add(1);
+    else mgr[retire]('pane-1');
+    t.mock.timers.tick(1000);
+    if (retire === 'replace') await mgr.sendInput('pane-1', [{ kind: 'key', data: '\r' }]);
+    assert.deepEqual(writes, [
+      'c'.repeat(256),
+      ...(retire.includes('^C') || retire.includes('ctrl-c') || retire === 'interrupt' ? ['\x03'] : []),
+      ...(retire === 'replace' ? ['2:\r'] : []),
+    ]);
+    await rejected;
+  });
+}
+
+test('ctrl-c inside a batch remains ordered and does not cancel its tail', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'hello' }, { kind: 'key', data: '\x03' }, { kind: 'text', data: 'after' }]);
+  t.mock.timers.tick(100);
+  t.mock.timers.tick(10);
+  await sent;
+  assert.deepEqual(writes, ['hello', '\x03', 'after']);
+});
+
+test('invalid send batches and missing PTYs fail before writing', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  await assert.rejects(mgr.sendInput('pane-1', [{ kind: 'text', data: 'first' }, { kind: 'invalid', data: 'last' }]), /invalid/);
+  await assert.rejects(mgr.sendInput('absent', [{ kind: 'text', data: 'first' }]), /not running/);
+  assert.deepEqual(writes, []);
+});
+
+test('disconnect cancels only its own remaining batch, including a cancellation arriving first', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  const first = mgr.sendInput('pane-1', [{ kind: 'text', data: 'a'.repeat(300) }], 'first');
+  const cancelled = assert.rejects(first, /cancelled/);
+  const second = mgr.sendInput('pane-1', [{ kind: 'text', data: 'second' }], 'second');
+  mgr.write('pane-1', 'human');
+  mgr.cancelSendInput('pane-1', 'first');
+  t.mock.timers.tick(10);
+  await Promise.all([cancelled, second]);
+  assert.deepEqual(writes, ['a'.repeat(256), 'second', 'human']);
+  mgr.cancelSendInput('pane-1', 'before');
+  await assert.rejects(mgr.sendInput('pane-1', [{ kind: 'text', data: 'never' }], 'before'), /cancelled before/);
+  assert.equal(writes.includes('never'), false);
+});

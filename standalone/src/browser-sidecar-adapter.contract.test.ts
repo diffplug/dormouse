@@ -21,12 +21,14 @@ adapterContract("harness", async () => {
   const calls: Array<[string, Record<string, any> | undefined]> = [];
   let emit: (event: BrowserSidecarEvent) => void = () => {};
   let failing = false;
+  let finishInput: (result: unknown) => void = () => {};
   vi.spyOn(host, "init").mockResolvedValue(undefined);
   vi.spyOn(host, "onReconnect").mockReturnValue(() => {});
   vi.spyOn(host, "onEvent").mockImplementation((listener) => { emit = listener; return () => {}; });
   vi.spyOn(host, "send").mockImplementation((command, args) => void calls.push([command, args]));
   vi.spyOn(host, "invoke").mockImplementation(async (command, args) => {
     calls.push([command, args]);
+    if (command === "pty_send_input") return new Promise(resolve => { finishInput = resolve; }) as never;
     if (failing) throw new Error(`${command}: the sidecar answered an error`);
     return sidecarAnswer(command) as never;
   });
@@ -38,6 +40,7 @@ adapterContract("harness", async () => {
   const deliver = (event: string, data: unknown) => emit({ event, data });
   return {
     adapter,
+    completeInput: (error) => finishInput(error ? { error } : { delivered: true }),
     data: (id, data, textData) => deliver("pty:data", { id, data, textData }),
     exit: (id, exitCode) => deliver("pty:exit", { id, exitCode }),
     list: (detail) => deliver("pty:list", detail),

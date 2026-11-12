@@ -608,10 +608,20 @@ export function attachRouter(
         ptyManager.spawn(msg.id, spawnOptions);
         break;
       }
+      case 'pty:cancelInput':
+        ptyManager.cancelSendInput(msg.id, msg.inputId);
+        break;
+      case 'pty:sendInput':
+        for (const event of msg.events) alertManager.onWrite(msg.id, event.data);
+        void ptyManager.sendInput(msg.id, msg.events, msg.inputId).then(
+          () => post({ type: 'pty:inputDone', requestId: msg.requestId, delivered: true } satisfies ExtensionMessage),
+          error => post({ type: 'pty:inputDone', requestId: msg.requestId, error: String(error?.message ?? error) } satisfies ExtensionMessage),
+        );
+        break;
       case 'pty:input':
         // Armed before the bytes reach the shell that will report the run.
         if (msg.launch === true) getOwnerPtyStream(msg.id).armLaunch(msg.data);
-        alertedPtys.write(msg.id, msg.data, { paced: msg.paced, userInput: msg.userInput === true });
+        alertedPtys.write(msg.id, msg.data, { userInput: msg.userInput === true });
         break;
       case 'pty:resize':
         ptyManager.resize(msg.id, msg.cols, msg.rows);

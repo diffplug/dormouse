@@ -1,3 +1,4 @@
+import type { SendInputEvent } from '../input-events.js';
 import type {
   Command as StricliCommand,
   CommandContext,
@@ -425,8 +426,7 @@ export interface OpenHandlersResponse {
 
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {
   surface: string;
-  input: string;
-  inputCount: number;
+  events: SendInputEvent[];
 }
 
 export interface SendSurfaceResponse {

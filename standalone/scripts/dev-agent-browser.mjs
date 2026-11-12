@@ -116,8 +116,8 @@ const HARNESS_WINDOW = 'main';
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
   // `userInput` and `launch` ride the write, as `pty_write` in src-tauri/src/lib.rs carries them.
-  pty_write: ({ id, data, paced, userInput, launch }) => writeSidecar('pty:input', {
-    id, data, paced, ...(userInput === true ? { userInput: true } : {}), ...(launch === true ? { launch: true } : {}),
+  pty_write: ({ id, data, userInput, launch }) => writeSidecar('pty:input', {
+    id, data, ...(userInput === true ? { userInput: true } : {}), ...(launch === true ? { launch: true } : {}),
   }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_ack: ({ id, chars }) => writeSidecar('pty:ack', { id, chars }),
@@ -143,6 +143,8 @@ const invokeMap = {
   // BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts.
   browser_request: ({ request }) => requestSidecar('browser:request', { request }, 'browser:result', (data) => data.result, 40000),
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
+  pty_cancel_input: ({ id, inputId }) => writeSidecar('pty:cancelInput', { id, inputId }),
+  pty_send_input: ({ id, events, inputId }) => requestSidecar('pty:sendInput', { id, events, inputId }, 'pty:inputDone', data => data, 24 * 60 * 60 * 1000),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),
   pty_context: ({ request }) => requestSidecar('pty:context', request, 'pty:context', data => data),

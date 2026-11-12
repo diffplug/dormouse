@@ -4,12 +4,12 @@ Expect: lib/src/lib/tool-launch-latch.ts
 Source: reverses #1061 (a later start reporting the launched command line was read as the launched run)
 
 diff --git a/lib/src/host/remote/sidecar-entry.test.ts b/lib/src/host/remote/sidecar-entry.test.ts
-index b02173d21..4218840d6 100644
+index e40787ae9..58b518403 100644
 --- a/lib/src/host/remote/sidecar-entry.test.ts
 +++ b/lib/src/host/remote/sidecar-entry.test.ts
-@@ -805,7 +805,6 @@ describe('the sidecar host', () => {
+@@ -830,7 +830,6 @@ describe('the sidecar host', () => {
      host.handleCommand('pty:input', { id: 'pty-1', data: 'view /a\r', launch: true });
-     expect(calls.at(-1)).toMatchObject({ op: 'write', args: ['pty-1', 'view /a\r', undefined] });
+     expect(calls.at(-1)).toMatchObject({ op: 'write', args: ['pty-1', 'view /a\r'] });
      host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/launched')}` });
 -    host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/after')}` });
      expect(opens()).toEqual(['/launched']);
@@ -87,10 +87,10 @@ index e4df26691..f5e8db9d9 100644
            break;
          case 'commandFinish':
 diff --git a/vscode-ext/test/message-router.test.ts b/vscode-ext/test/message-router.test.ts
-index 749bbe3c8..f9dd6f13d 100644
+index b42643f2d..35243095d 100644
 --- a/vscode-ext/test/message-router.test.ts
 +++ b/vscode-ext/test/message-router.test.ts
-@@ -234,7 +234,6 @@ it('forwards an OSC 367 open only from the run a launch write started', () => {
+@@ -283,7 +283,6 @@ it('forwards an OSC 367 open only from the run a launch write started', () => {
      ptys.callbacks!.onData('tool-open', `${run}${open('/forged')}`);
      owner.send({ type: 'pty:input', id: 'tool-open', data: 'view /a\r', launch: true });
      ptys.callbacks!.onData('tool-open', `${run}${open('/launched')}`);

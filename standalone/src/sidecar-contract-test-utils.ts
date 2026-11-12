@@ -7,6 +7,7 @@ import type { SentRecord } from "dormouse-lib/lib/platform/adapter-contract-test
  */
 export const SIDECAR_WIRE: Record<string, (args: Record<string, any>) => SentRecord> = {
   pty_spawn: ({ id, options }) => ({ op: "spawn", id, options }),
+  pty_send_input: ({ id, events }) => ({ op: "sendInput", id, events }),
   pty_write: ({ id, data }) => ({ op: "write", id, data }),
   pty_resize: ({ id, cols, rows }) => ({ op: "resize", id, cols, rows }),
   pty_kill: ({ id }) => ({ op: "kill", id }),

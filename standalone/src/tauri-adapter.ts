@@ -1,3 +1,5 @@
+import { deliverPtyInput } from '../../lib/src/lib/platform/pty-input-delivery';
+import type { PtyInputEvent } from '../../dor/src/input-events';
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
 import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
@@ -312,7 +314,11 @@ export class TauriAdapter implements PlatformAdapter {
   /** `userInput` rides the write itself: the sidecar acknowledges it and opens
    *  the echo window before writing (docs/specs/alert.md → Engagement). */
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    invoke("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput, launch: options?.launch });
+    invoke("pty_write", { id, data, userInput: options?.userInput, launch: options?.launch });
+  }
+
+  sendPtyInput(id: string, events: readonly PtyInputEvent[], signal?: AbortSignal): Promise<void> {
+    return deliverPtyInput(inputId => rawInvoke<{ delivered?: boolean; error?: string }>('pty_send_input', { id, events, inputId }), inputId => invoke('pty_cancel_input', { id, inputId }), signal);
   }
 
   resizePty(id: string, cols: number, rows: number): void {

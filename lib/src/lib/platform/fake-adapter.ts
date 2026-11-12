@@ -1,3 +1,4 @@
+import type { PtyInputEvent } from '../../../../dor/src/input-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { OpenPort, PlatformAdapter, PtyDataHandler, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
 import type { ManagedVoicePort } from './managed-voice-types';
@@ -278,6 +279,12 @@ export class FakePtyAdapter implements PlatformAdapter {
       return;
     }
     this.emitPtyData(id, data);
+  }
+
+  async sendPtyInput(id: string, events: readonly PtyInputEvent[], signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw new Error('PTY input cancelled');
+    if (!this.terminals.has(id)) throw new Error('PTY is not running');
+    for (const event of events) this.writePty(id, event.data);
   }
 
   resizePty(id: string, cols: number, rows: number): void {

@@ -1462,16 +1462,25 @@ fn start_console_parent_recovery(app: &AppHandle) {
 #[cfg(not(windows))]
 fn start_console_parent_recovery(_app: &AppHandle) {}
 
+#[tauri::command(async)]
+fn pty_send_input(state: tauri::State<'_, SidecarState>, id: String, events: JsonValue, input_id: String) -> Result<JsonValue, String> {
+    request_from_sidecar_timeout(&state, "pty:sendInput", serde_json::json!({ "id": id, "events": events, "inputId": input_id }), Duration::from_secs(24 * 60 * 60))
+}
+
+#[tauri::command]
+fn pty_cancel_input(state: tauri::State<'_, SidecarState>, id: String, input_id: String) {
+    send_to_sidecar(&state, sidecar_line("pty:cancelInput", serde_json::json!({ "id": id, "inputId": input_id })));
+}
+
 #[tauri::command]
 fn pty_write(
     state: tauri::State<'_, SidecarState>,
     id: String,
     data: String,
-    paced: Option<bool>,
     user_input: Option<bool>,
     launch: Option<bool>,
 ) {
-    send_to_sidecar(&state, pty_input_message(&id, &data, paced, user_input, launch));
+    send_to_sidecar(&state, pty_input_message(&id, &data, user_input, launch));
 }
 
 /// One `pty:input` line. **Human input carries `userInput` on the write itself**,
@@ -1483,7 +1492,6 @@ fn pty_write(
 fn pty_input_message(
     id: &str,
     data: &str,
-    paced: Option<bool>,
     user_input: Option<bool>,
     launch: Option<bool>,
 ) -> String {
@@ -1492,8 +1500,6 @@ fn pty_input_message(
     struct PtyInput<'a> {
         id: &'a str,
         data: &'a str,
-        #[serde(skip_serializing_if = "std::ops::Not::not")]
-        paced: bool,
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         user_input: bool,
         #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -1504,7 +1510,6 @@ fn pty_input_message(
         PtyInput {
             id,
             data,
-            paced: paced == Some(true),
             user_input: user_input == Some(true),
             launch: launch == Some(true),
         },
@@ -5186,6 +5191,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pty_spawn,
             pty_write,
+            pty_send_input,
+            pty_cancel_input,
             pty_resize,
             pty_ack,
             pty_theme_colors,
@@ -5710,15 +5717,15 @@ mod tests {
     #[test]
     fn user_input_rides_the_write_it_describes() {
         assert_eq!(
-            parse_line(&super::pty_input_message("t1", "y", None, Some(true), None)),
+            parse_line(&super::pty_input_message("t1", "y", Some(true), None)),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "y", "userInput": true } })
         );
         assert_eq!(
-            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(true), Some(false), Some(false))),
-            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "\x1b[I", "paced": true } })
+            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(false), Some(false))),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "\x1b[I" } })
         );
         assert_eq!(
-            parse_line(&super::pty_input_message("t1", "view\r", None, None, Some(true))),
+            parse_line(&super::pty_input_message("t1", "view\r", None, Some(true))),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "view\r", "launch": true } })
         );
     }

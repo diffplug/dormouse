@@ -62,16 +62,18 @@ Source of truth: `PtyDataDispatch` in `lib/src/lib/pty-flow.ts`; `parseOnArrival
 
 ### Paced input
 
-`writePty(id, data, { paced: true })` delivers input the way a person types it; every host carries the flag to `pty-core.write`. `surface.send` (`dor send`) is the only paced writer — every other write is one burst.
+`sendPtyInput` carries local automation’s typed input events to the PTY owner and returns its delivery receipt. Remote adapters do not expose this local control operation.
 
 - **Must write paced text in runs of at most 256 UTF-8 bytes, 10 ms apart** (rationale).
-- **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). A key is one escape sequence, DEL, or a C0 control other than tab and line feed; tab and line feed are text.
-- **Never split a code point or an escape sequence across writes.**
-- **Must queue any write that arrives while paced input is pending**, so input keeps its order.
-- **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on any lone `^C`** — typed, `interrupt`, or the `dor send --key ctrl-c` that `dor/skill.md` teaches — which is then written at once.
+- **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). Events keep their kind: a named Tab is a key; a tab in text is text.
+- **Never split a code point within text or a named key across writes.**
+- **Must queue each event batch atomically and queue any other write that arrives while input is pending**, so batches cannot interleave.
+- **Must acknowledge a batch only after its last successful PTY write, and reject it on write failure or cancellation**, including partial delivery. **Never retry a batch automatically.**
+- **Must cancel only that request’s remaining events when its caller disconnects**, leaving other batches and human input queued.
+- **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on a lone interrupt key** — human `^C`, `interrupt`, or a single named Ctrl-C event — which is then written at once. A Ctrl-C inside a larger event batch stays ordered.
 - **Never pace in the webview**; the PTY owner paces (rationale).
 
-Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
+Source of truth: `sendInput` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
 
 ### iTerm2 identity
 

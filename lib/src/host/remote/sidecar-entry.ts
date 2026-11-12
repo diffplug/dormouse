@@ -40,7 +40,7 @@ import {
 
 /** The slice of `pty-core`'s manager the Burrow drives. */
 export interface SidecarPtyManager {
-  write(id: string, data: string, options?: { paced?: boolean }): void;
+  write(id: string, data: string): void;
   resize(id: string, cols: number, rows: number, repaint?: boolean): void;
   /** Whether the current PTY generation still has a live process. */
   hasPty(id: string): boolean;
@@ -524,9 +524,9 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const flow = createPtyFlowControl({ pause: (id) => mgr.pause(id), resume: (id) => mgr.resume(id) });
   const writer: SidecarHostPtyManager = {
     ...mgr,
-    write(id, data, options) {
+    write(id, data) {
       flow.input(id);
-      mgr.write(id, data, options);
+      mgr.write(id, data);
     },
   };
   const bridge = createSidecarSurfaceBridge({ send, mgr: writer, alerts, flow });
@@ -604,10 +604,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           return true;
         case 'pty:input':
           if (detail.launch === true && isString(id) && isString(detail.data)) bridge.onPtyLaunch(id, detail.data);
-          pty.write(id as string, detail.data as string, {
-            paced: detail.paced === true,
-            userInput: detail.userInput === true,
-          });
+          pty.write(id as string, detail.data as string, { userInput: detail.userInput === true });
           return true;
         case 'pty:resize':
           mgr.resize(id as string, detail.cols as number, detail.rows as number);

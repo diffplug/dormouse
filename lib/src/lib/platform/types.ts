@@ -1,3 +1,4 @@
+import type { PtyInputEvent } from '../../../../dor/src/input-events';
 import type { BrowserAutomationProvider, BrowserRequest, BrowserResult } from './browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
@@ -216,8 +217,6 @@ export interface SpawnPtyOptions {
 }
 
 export interface WritePtyOptions {
-  /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
-  paced?: boolean;
   /** A human typed, pasted, or dropped this: the host acknowledges it with
    *  input before writing (`docs/specs/alert.md` -> Engagement). */
   userInput?: true;
@@ -252,6 +251,8 @@ export interface PlatformAdapter {
    */
   spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
+  /** Local automation: resolves after the final PTY write, rejects on interrupted delivery. */
+  sendPtyInput?(id: string, events: readonly PtyInputEvent[], signal?: AbortSignal): Promise<void>;
   resizePty(id: string, cols: number, rows: number): void;
   /** A host delivers no `onPtyExit` for a PTY this webview killed: VS Code
    *  releases its ownership first and standalone routes the exit nowhere.

@@ -235,7 +235,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       return {
         status: 'sent',
         surfaceId: request.surface === 'surface:2' ? 'surface:2' : 'surface:1',
-        inputCount: request.inputCount,
+        inputCount: request.events.length,
       };
     },
     async readSurface(request) {
@@ -802,15 +802,14 @@ test('send json output', async () => {
   );
 });
 
-test('send sends escaped text to the host', async () => {
+test('send sends literal text to the host', async () => {
   const client = fixtureClient();
   await runCli(['send', 'surface:1', '--text', 'echo hello\\n'], { client });
   assert.deepEqual(client.requests, [{
     method: 'sendSurface',
     request: {
       surface: 'surface:1',
-      input: 'echo hello\n',
-      inputCount: 1,
+      events: [{ text: 'echo hello\\n' }],
     },
   }]);
 });
@@ -822,8 +821,7 @@ test('send sends key input to the host', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:2',
-      input: '\x03',
-      inputCount: 1,
+      events: [{ key: 'ctrl-c' }],
     },
   }]);
 });
@@ -835,8 +833,7 @@ test('send combines text then key input', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:2',
-      input: 'npm test\r',
-      inputCount: 2,
+      events: [{ text: 'npm test' }, { key: 'enter' }],
     },
   }]);
 });
@@ -869,8 +866,7 @@ test('send sequence sends ordered input to the host', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:1',
-      input: 'npm test\r',
-      inputCount: 2,
+      events: [{ text: 'npm test' }, { key: 'enter' }],
     },
   }]);
 });
@@ -882,8 +878,7 @@ test('send stdin sends standard input to the host', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:1',
-      input: 'cat from stdin\n',
-      inputCount: 1,
+      events: [{ text: 'cat from stdin\n' }],
     },
   }]);
 });
@@ -892,19 +887,21 @@ test('send stdin keeps backslash sequences literal', async () => {
   const client = fixtureClient();
   const script = 'printf "a\\tb\\n" C:\\\\tmp\n';
   await runCli(['send', 'surface:1', '--stdin'], { client, readStdin: async () => script });
-  assert.equal(client.requests[0].request.input, script);
+  assert.deepEqual(client.requests[0].request.events, [{ text: script }]);
 });
 
 test('send sequence text is not escape-decoded a second time', async () => {
   const client = fixtureClient();
   await runCli(['send', 'surface:1', '--sequence', '[{"text":"a\\\\tb"},{"text":"c\\td"}]'], { client });
-  assert.equal(client.requests[0].request.input, 'a\\tbc\td');
+  assert.deepEqual(client.requests[0].request.events, [{ text: 'a\\tb' }, { text: 'c\td' }]);
 });
 
-test('send raw text keeps backslash sequences literal', async () => {
+test('send refuses the retired raw flag', async () => {
   const client = fixtureClient();
-  await runCli(['send', 'surface:1', '--raw', '--text', 'a\\tb'], { client });
-  assert.equal(client.requests[0].request.input, 'a\\tb');
+  const result = await runCli(['send', 'surface:1', '--raw', '--text', 'a\\tb'], { client });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /--raw was removed/);
+  assert.deepEqual(client.requests, []);
 });
 
 test('send missing input output', async () => {
@@ -2396,9 +2393,9 @@ test('valued options preserve literal arguments in separate and equals forms', a
   for (const value of ['', '--help', '-h', '--text', '--', 'a=b', 'first\nsecond', '🐭']) {
     for (const option of [['--text', value], [`--text=${value}`]]) {
       const client = fixtureClient();
-      const result = await runCli(['send', 'surface:1', '--raw', ...option, '--key', 'enter'], { client });
+      const result = await runCli(['send', 'surface:1', ...option, '--key', 'enter'], { client });
       assert.equal(result.exitCode, 0, JSON.stringify({ option, result }));
-      assert.equal(client.requests[0].request.input, value + '\r');
+      assert.deepEqual(client.requests[0].request.events, [{ text: value }, { key: 'enter' }]);
     }
   }
 });
@@ -2507,4 +2504,34 @@ test('native browser option terminators survive before dash-leading values', asy
       assert.deepEqual(calls[0], [...(provider === 'playwright' ? ['--session=raw'] : ['--session', 'raw']), ...tail]);
     }
   }
+});
+
+test('send preserves repeated event order and inserts stdin without changing its text', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['send', 'surface:1', '--key', 'escape', '--text', 'C:\\tmp\\n', '--stdin', '--key', 'enter', '--text=last'], { client, readStdin: async () => 'line\r\nnext\t🐭' });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(client.requests[0].request.events, [{ key: 'escape' }, { text: 'C:\\tmp\\n' }, { text: 'line\r\nnext\t🐭' }, { key: 'enter' }, { text: 'last' }]);
+});
+
+test('send validates all events before reading stdin or contacting the host', async () => {
+  for (const args of [['--stdin', '--key', 'not-a-key'], ['--sequence', '[{"text":"first"},{"key":"bad"}]'], ['--sequence', '[{"text":"first","extra":true}]'], ['--sequence', '[{"text":"first"}]', '--stdin'], ['--stdin', '--stdin']]) {
+    const client = fixtureClient();
+    const result = await runCli(['send', 'surface:1', ...args], { client, readStdin: () => assert.fail('must validate before reading stdin') });
+    assert.equal(result.exitCode, 1, args.join(' '));
+    assert.deepEqual(client.requests, []);
+  }
+});
+
+test('send does not claim success until host delivery and never retries a failed batch', async () => {
+  let finish;
+  let calls = 0;
+  let completed = false;
+  const pending = runCli(['send', 'surface:1', '--text', 'hello'], { client: { sendSurface: () => { calls++; return new Promise((_resolve, reject) => { finish = reject; }); } } }).then(result => { completed = true; return result; });
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(completed, false);
+  finish(new Error('PTY died after partial delivery'));
+  const result = await pending;
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /partial delivery/);
+  assert.equal(calls, 1);
 });
