@@ -2103,14 +2103,15 @@ export function Wall({
   }, [returnPassthroughFocus]);
   dialogsClosedRef.current = refocusPassthroughTerminal;
 
-  // A parked leaf's page can still focus itself and take every key; the visible
-  // Wall takes the keyboard back while it holds one, with no frame's wait,
-  // during which typed keys would reach `<body>` and be lost.
+  // A page in a parked leaf or a hidden Workspace can still focus itself and take
+  // every key; the visible Wall takes the keyboard back while either exists, with
+  // no frame's wait, during which typed keys would reach `<body>` and be lost.
   const hasParked = useSyncExternalStore(lath.store.subscribe, () => lath.store.getSnapshot().parked.size > 0);
+  const hasHiddenWorkspace = useSyncExternalStore(subscribeToWorkspaces, () => getWorkspacesSnapshot().workspaces.length > 1);
   useEffect(() => {
-    if (!active || !hasParked) return;
+    if (!active || !(hasParked || hasHiddenWorkspace)) return;
     return watchParkedFocus((id) => lath.store.getSnapshot().parked.has(id), returnPassthroughFocus);
-  }, [active, hasParked, lath, returnPassthroughFocus]);
+  }, [active, hasParked, hasHiddenWorkspace, lath, returnPassthroughFocus]);
 
   // --- Wall actions (for tab buttons) ---
 

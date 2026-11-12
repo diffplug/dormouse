@@ -1,24 +1,27 @@
 /**
- * A parked leaf is hidden, but no style and no `inert` stops a framed page inside
- * it from focusing itself, and every key then goes to a page nobody can see.
- * While anything is parked, the Wall runs this watch to take the keyboard back.
+ * A parked leaf and a hidden Workspace are hidden, but no style and no `inert`
+ * stops a framed page inside either from focusing itself, and every key then goes
+ * to a page nobody can see. While anything is parked or a Workspace is hidden,
+ * the active Wall runs this watch to take the keyboard back.
  */
 
-/** How often to look while something is parked: focus moving from one frame
+/** How often to look while something is parked or hidden: focus moving from one frame
  *  into another fires nothing in this document, so only a look catches it. */
 export const PARKED_FOCUS_POLL_MS = 250;
 
-/** The element holding DOM focus inside a leaf `isParked` names, or null. A leaf
- *  the store has already unparked (a restore focusing its page) does not count. */
+/** The element holding DOM focus inside a hidden Workspace or a leaf `isParked`
+ *  names, or null. A leaf the store has already unparked (a restore focusing its
+ *  page) does not count. */
 export function parkedFocusHolder(isParked: (leafId: string) => boolean): HTMLElement | null {
   const active = document.activeElement;
   if (!(active instanceof HTMLElement)) return null;
+  if (active.closest('[data-workspace-active="false"]')) return active;
   const leafId = active.closest<HTMLElement>('[data-lath-parked]')?.dataset.lathLeaf;
   return leafId !== undefined && isParked(leafId) ? active : null;
 }
 
 /**
- * Take DOM focus out of a parked leaf whenever it lands there, then let `refocus`
+ * Take DOM focus out of a parked leaf or a hidden Workspace whenever it lands there, then let `refocus`
  * place it for the current mode. Returns the teardown.
  *
  * Cost against a page refocusing itself in a loop: at most one deferred check is
