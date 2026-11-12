@@ -9,9 +9,12 @@
 // and the pane's environment is Dormouse's, with the host's own left behind.
 //
 // Shells and cases are tables below: a shell, or a hostile command line, is one
-// row. A shell that is not installed skips by name; a leg that lists it in
-// DORMOUSE_REQUIRE_SHELLS fails instead (TESTING_AND_MODIFICATION_GUIDE.md).
-// A case the product gets wrong is listed in KNOWN and runs as a `todo`.
+// row. A shell that is not installed skips by name; each CI leg (Linux in
+// Build & Test, macOS and Windows in Standalone Platform Check) lists the shells
+// it installs in DORMOUSE_REQUIRE_SHELLS, and a listed shell that is missing
+// fails instead. A case the product gets wrong is listed in KNOWN and runs as a
+// `todo` until the fix deletes the entry. Run it alone from this directory:
+// `node --test shell-conformance.test.js`.
 //
 // Cases already run elsewhere on the same OS are not repeated here: an idle
 // bash's stop on POSIX (graceful-kill-posix.test.js) and an idle cmd.exe's on

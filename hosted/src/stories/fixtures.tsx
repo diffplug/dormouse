@@ -1,3 +1,12 @@
+/**
+ * Hosted stories render `HostedPage`, the rendering seam (`App.tsx` owns the
+ * state and handlers and passes them through), in `HostedFrame`, inside lib's
+ * shared Storybook. Snapshot them from the repo root with
+ * `pnpm --filter dormouse-lib test:argos ../hosted/src/stories`. The
+ * walkthroughs in `docs/stories/` render stories inline, which runs no `play`:
+ * one whose pictured state comes from its `play` needs `autoplay` there, unless
+ * it is an `inline: false` story, which plays in its own frame.
+ */
 import { useRef, useState } from "react";
 import { HostedPage, type HostedPageProps } from "../HostedPage";
 import { HostedFrame } from "./HostedFrame";

@@ -1,3 +1,7 @@
+// Hosted's Vitest global setup: one pgstencil root per invocation, shared by
+// its workers and child processes. Teardown removes that run's containers,
+// network, and volumes, after failures too (watch mode: when the watcher
+// exits), and never touches a development stack or another live run.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";

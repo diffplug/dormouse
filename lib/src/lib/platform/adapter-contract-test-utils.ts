@@ -18,6 +18,11 @@
  * implementations have it and what pins it. It is typed over every key of the
  * interface, so a new member does not compile until each implementation is
  * answered for, and the `members` case checks the answer against each adapter.
+ *
+ * A new implementation adds its letter to `Impl` and to every `MEMBERS` row,
+ * then a harness file. A harness only fakes the transport: past about 80 lines
+ * its seam is in the wrong place. A case never branches on the implementation;
+ * a difference goes in `DIFFERENCES`.
  */
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ALERT_SETTINGS } from '../alert-settings-model';

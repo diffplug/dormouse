@@ -12,6 +12,16 @@ pnpm build       # typecheck lib; build vscode extension, Pocket, frame origin, 
 
 **Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`. The Tool shows the harness in its own pane and prints the command to drive it (`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
+**Tests.** `pnpm test` at the root runs CI's two test jobs (`pnpm test:checks`: the repo checks alone); in a package, its type check and tests. Always run through `pnpm`, which supplies the pinned Node. A package's `pretest` builds the upstream `dist`s its Node suites import: run it once before `pnpm exec vitest` or `node --test` on one file (`dor`: `pnpm build`).
+
+| Where | Not obvious |
+|---|---|
+| `lib` | `tsc -b`; `tsc -p tsconfig.json` checks nothing. Stories: `pnpm test:argos <dir>` |
+| `website`, `vscode-ext` | `pnpm test` is their only type check |
+| `hosted` | its database suites need Docker; root `pnpm test` skips them |
+| `standalone/src-tauri` | `cargo test` needs `DORMOUSE_NODE_BINARY`: a self-contained Node at the `devEngines` pin, such as the main checkout's `binaries/node-*`. **Never this worktree's own**: the build script copies it onto itself, truncating it to 0 bytes |
+| `innerdogfood`, `pnpm dev:standalone` | restart to re-stage sidecar, `dor`, or host edits |
+
 ## Worktrees
 
 - **Must stack with `wt switch --create <branch> --base @`**, never `git switch -c` in an existing worktree; other sessions need its branch and path intact. Set the GitHub PR base separately.

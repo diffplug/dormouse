@@ -26,6 +26,8 @@ The harness:
 
 Port and session overrides are documented in `docs/specs/standalone.md` → "Standalone browser-dev harness".
 
+The harness simulates one window: Workspace transfer, tear-out, quit voting, and cross-window `dor` routing run only in Tauri (`pnpm dev:standalone`). To QC a Tool, follow `docs/testing/dor-tool-qc.md`, which drives the harness with a real-process fixture.
+
 ## Freshness
 
 Close only the browser session your test owns when you need a fresh page:
