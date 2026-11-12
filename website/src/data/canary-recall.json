@@ -1,10 +1,49 @@
 {
-  "asOf": "2026-10-20",
+  "asOf": "2026-11-11",
   "windowDays": 30,
   "runsUrl": "https://github.com/diffplug/dormouse/actions/workflows/security-audit.yaml?query=branch%3Amain",
-  "seeded": 68,
-  "caught": 52,
+  "seeded": 80,
+  "caught": 68,
   "runs": [
+    {
+      "at": "2026-11-08T13:33:07Z",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/42485500855",
+      "seeded": 8,
+      "caught": 7,
+      "unfinished": 0,
+      "codex": {
+        "url": "https://github.com/diffplug/dormouse/actions/runs/42784373577",
+        "caught": 6,
+        "either": null,
+        "unfinished": 0
+      }
+    },
+    {
+      "at": "2026-11-01T13:32:20Z",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/41311739870",
+      "seeded": 8,
+      "caught": 8,
+      "unfinished": 0,
+      "codex": {
+        "url": "https://github.com/diffplug/dormouse/actions/runs/41607082577",
+        "caught": 6,
+        "either": null,
+        "unfinished": 0
+      }
+    },
+    {
+      "at": "2026-10-25T11:39:37Z",
+      "url": "https://github.com/diffplug/dormouse/actions/runs/40189789474",
+      "seeded": 8,
+      "caught": 8,
+      "unfinished": 0,
+      "codex": {
+        "url": "https://github.com/diffplug/dormouse/actions/runs/40659054227",
+        "caught": 6,
+        "either": null,
+        "unfinished": 0
+      }
+    },
     {
       "at": "2026-10-20T03:12:17Z",
       "url": "https://github.com/diffplug/dormouse/actions/runs/39363050489",
@@ -52,20 +91,6 @@
       "url": "https://github.com/diffplug/dormouse/actions/runs/38958719196",
       "seeded": 8,
       "caught": 6,
-      "unfinished": 0
-    },
-    {
-      "at": "2026-10-11T16:18:17Z",
-      "url": "https://github.com/diffplug/dormouse/actions/runs/38154893086",
-      "seeded": 6,
-      "caught": 3,
-      "unfinished": 0
-    },
-    {
-      "at": "2026-10-08T02:59:55Z",
-      "url": "https://github.com/diffplug/dormouse/actions/runs/37720586893",
-      "seeded": 6,
-      "caught": 4,
       "unfinished": 0
     }
   ],

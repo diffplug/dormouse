@@ -354,7 +354,7 @@ Source of truth: `dispatchCompletion` in `lib/src/lib/alert-manager.ts`. Pinned 
 
 ## Await
 
-An await parks on one Session until it finishes what it is doing, then reports why the wait ended — the claimant the Completion events seam exists for.
+An await parks on one Session until it finishes what it is doing, then reports why the wait ended.
 
 `until` (`dor await`'s required `--until`) names how much evidence of completion the caller accepts — a permissiveness ladder.
 
@@ -388,7 +388,7 @@ An await's grace and settle windows derive from `cfg.alert`; its ceiling is `dor
 - The ceiling's bound, `MAX_AWAIT_TIMEOUT_MS`: `docs/specs/dor-cli.md` -> "Deadlines And Cancellation".
 - **Must reject a non-finite, non-positive, or over-ceiling request rather than clamping it** — it settles `cancelled`, absorbing nothing; the webview handler rejects the same values with a visible error.
 
-**Several awaits may park on one Session**, sharing one claimant: a completion goes to every await whose condition it satisfies, each resolving on the first qualifying signal after it registered.
+**Several awaits may park on one Session**: a completion goes to every await whose condition it satisfies, each resolving on the first qualifying signal after it registered.
 
 An await crosses from the renderer to the host process that holds the manager, and the wait itself never leaves the host:
 
@@ -483,7 +483,7 @@ Source of truth: `dispatchCompletion` in `lib/src/lib/alert-manager.ts`; `resolv
 
 `todo` is a boolean reminder. **A ring must never set it**: a look at a ring without typing turns it into a TODO carrying the ring's detail, a completion the user was already looking at is one at once (Completion events), and dealing with it — typing, the pill — clears it (rationale). `notification` is the unresolved ring's detail, else the TODO's.
 
-Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a hold, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale). **An escalated hold must keep its completion's arrival**: its detail ties against a newer one as the older, and it never updates a receipt, the hold having set its TODO already.
+Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) > `COMMAND_EXIT` > `OSC 9;4` > `WATCHING` > `BEL`. A new ring shows its own detail; a source joining an active ring, a hold, and an acknowledged receipt each replace the detail only at an equal or higher rank (rationale). **An escalated hold must never update a receipt**, the hold having set its TODO already.
 
 | Verb | Effect |
 |---|---|

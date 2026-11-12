@@ -44,25 +44,9 @@ const DETAIL_RANK: Record<ActivityNotificationSource, number> = {
   BEL: 0,
 };
 
-/** `next`, unless `current` says more: equal ranks take the newer detail. */
+/** `next`, unless `current` says more: at equal rank the later call wins. */
 function richer(current: ActivityNotification | null, next: ActivityNotification): ActivityNotification {
   return current !== null && DETAIL_RANK[current.source] > DETAIL_RANK[next.source] ? current : next;
-}
-
-/** A detail and when it arrived, so a hold rung late never passes its own for
- *  news newer than what rang meanwhile. */
-interface Dated {
-  detail: ActivityNotification;
-  /** Arrival order (`AlertManager.arrivals`). */
-  arrived: number;
-}
-
-/** Keep the richer detail, the later arrival among equals. */
-function takeRicher(into: Dated, detail: ActivityNotification, arrived: number): void {
-  const gain = DETAIL_RANK[detail.source] - DETAIL_RANK[into.detail.source];
-  if (gain < 0 || (gain === 0 && arrived < into.arrived)) return;
-  into.detail = detail;
-  into.arrived = arrived;
 }
 
 export type ProtocolProgressState = 'clear' | 'normal' | 'warning' | 'indeterminate' | 'error';
@@ -143,7 +127,7 @@ function dropWatching(set: SourceSet): boolean {
 }
 
 /** The one ring latch a Session holds (`docs/specs/alert.md` -> Public State). */
-interface Ring extends SourceSet, Dated {
+interface Ring extends SourceSet {
   episode: AlertEpisode;
   /** What it shows, and what the TODO a look turns it into keeps. */
   detail: ActivityNotification;
@@ -154,7 +138,9 @@ interface Ring extends SourceSet, Dated {
  * TODO (`docs/specs/alert.md` -> Completion events): the sources they would
  * raise if the user goes idle or leaves the host, and the richest detail among them.
  */
-interface HeldCompletion extends SourceSet, Dated {}
+interface HeldCompletion extends SourceSet {
+  detail: ActivityNotification;
+}
 
 interface CommandExitWatch {
   displayCommand: string;
@@ -208,9 +194,6 @@ export type CompletionEvent =
     }
   | { kind: 'notification'; notification: ActivityNotification };
 
-/** Return true to claim the event. A claimed event never reaches the ring rules. */
-export type CompletionClaimant = (event: CompletionEvent) => boolean;
-
 /** How much evidence of completion a parked `dor await` will accept. */
 export type AwaitUntil = 'quiet' | 'exit';
 
@@ -256,12 +239,6 @@ interface AwaitWaiter {
   /** The Session's PTY exited or the Session was removed. */
   die(): void;
   cancel(): void;
-}
-
-/** Every await parked on one Session, plus the single claimant they share. */
-interface AwaitGroup {
-  waiters: Set<AwaitWaiter>;
-  unregister: () => void;
 }
 
 export interface AlertState {
@@ -323,16 +300,13 @@ export class AlertManager {
   /** Blocks anything the killed generation still emits from recreating a
    * removed entry. Only `restart` — a new PTY generation — clears one. */
   private removed = new Set<string>();
-  private claimants = new Map<string, Set<CompletionClaimant>>();
-  private awaits = new Map<string, AwaitGroup>();
+  private awaits = new Map<string, Set<AwaitWaiter>>();
   /** Each present viewer's focus. An absent viewer engages nothing, so it is not kept. */
   private viewers = new Map<string, string | null>();
   private listeners = new Set<(id: string, state: AlertState) => void>();
   private removeListeners = new Set<(id: string) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
-  /** Counts completions as they arrive; a hold keeps its own count when rung. */
-  private arrivals = 0;
   /** Helper Sessions alert no one until promotion (docs/specs/alert.md → Pane
    *  Header). They still build command state and feed the detector, so one
    *  promoted mid-command knows what it is running; everything else — reports,
@@ -492,39 +466,21 @@ export class AlertManager {
   // --- Completion events ---
 
   /**
-   * Watch every completion on one Session before any suppression runs — the
-   * seam `dor await` waits on. Claimants are offered events in registration
-   * order and the first to return `true` claims it, so it never rings, never
-   * sets TODO, and never stores a notification. Returns the unregister function.
-   */
-  registerCompletionClaimant(id: string, claimant: CompletionClaimant): () => void {
-    let claimants = this.claimants.get(id);
-    if (!claimants) {
-      claimants = new Set();
-      this.claimants.set(id, claimants);
-    }
-    claimants.add(claimant);
-    return () => {
-      const current = this.claimants.get(id);
-      if (!current) return;
-      current.delete(claimant);
-      if (current.size === 0) this.claimants.delete(id);
-    };
-  }
-
-  /**
    * Observe -> claim -> ring rule, for every ring source. Every ring rule lives
    * here and nowhere else, so an emit site only has to describe what happened;
-   * the decision to bother a human is made once, after the claimants have
-   * passed on it. Returns whether a claimant took the event.
+   * the decision to bother a human is made once, after the Session's awaits
+   * have passed on it. Returns whether an await claimed the event, so it
+   * never rings, never sets TODO, and never stores a notification.
    */
   private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): boolean {
     // A helper's completion reaches no one, and is not kept for promotion.
     if (this.helpers.has(id)) return false;
-    // Snapshot: a claimant may unregister itself (or register another) while
-    // being offered this very event.
-    const claimants = [...(this.claimants.get(id) ?? [])];
-    if (claimants.some((claimant) => claimant(event))) return true;
+    // Every await is offered the event, not only the first to take it.
+    let claimed = false;
+    this.eachWaiter(id, (waiter) => {
+      if (waiter.offer(event)) claimed = true;
+    });
+    if (claimed) return true;
 
     // A completion inside the echo window answers the keystroke that opened
     // it — a bell on Tab, the exit `Ctrl-C` caused — so it neither rings nor
@@ -559,27 +515,25 @@ export class AlertManager {
    * The path from a completion that may ring to the ring: a live one and an
    * escalated hold alike. Engaged, it is held — a TODO at once, rung if the
    * user goes idle or leaves the host; otherwise a report goes through the acknowledged-state
-   * check, and anything else rings. Publishes. An escalated hold passes
-   * `held`, the arrival it kept.
+   * check, and anything else rings. Publishes.
    */
   private holdOrDeliver(
     id: string,
     entry: AlertEntry,
     source: ListedRingSource | WatchingSource,
     detail: ActivityNotification,
-    held?: number,
+    escalated = false,
   ): void {
-    const arrived = held ?? ++this.arrivals;
     if (this.isEngaged(id)) {
-      this.hold(entry, source, detail, arrived);
+      this.hold(entry, source, detail);
     } else if (source === 'report' && Date.now() < entry.ackedUntil) {
       // A receipt: a report about the state the user just acknowledged never
       // summons, and only enriches a TODO still on, so one the user cleared
       // stays cleared. A hold already put its detail on the TODO, which may
       // have moved on since.
-      if (held === undefined && entry.todo) entry.notification = richer(entry.notification, detail);
+      if (!escalated && entry.todo) entry.notification = richer(entry.notification, detail);
     } else {
-      this.raiseRing(entry, source, detail, arrived);
+      this.raiseRing(entry, source, detail);
     }
     this.notify(id);
   }
@@ -696,40 +650,22 @@ export class AlertManager {
   }
 
   private addWaiter(id: string, waiter: AwaitWaiter): void {
-    let group = this.awaits.get(id);
-    if (!group) {
-      // One claimant covers every await on the Session, so a completion is
-      // delivered to all of them rather than only to whoever registered first
-      // — the claimant seam itself stops at the first claim.
-      const waiters = new Set<AwaitWaiter>();
-      group = {
-        waiters,
-        unregister: this.registerCompletionClaimant(id, (event) => {
-          let claimed = false;
-          for (const parked of [...waiters]) {
-            if (parked.offer(event)) claimed = true;
-          }
-          return claimed;
-        }),
-      };
-      this.awaits.set(id, group);
+    let waiters = this.awaits.get(id);
+    if (!waiters) {
+      waiters = new Set();
+      this.awaits.set(id, waiters);
     }
-    group.waiters.add(waiter);
+    waiters.add(waiter);
   }
 
   private dropWaiter(id: string, waiter: AwaitWaiter): void {
-    const group = this.awaits.get(id);
-    if (!group || !group.waiters.delete(waiter)) return;
-    if (group.waiters.size > 0) return;
-    this.awaits.delete(id);
-    group.unregister();
+    const waiters = this.awaits.get(id);
+    if (waiters?.delete(waiter) && waiters.size === 0) this.awaits.delete(id);
   }
 
   private eachWaiter(id: string, visit: (waiter: AwaitWaiter) => void): void {
-    const group = this.awaits.get(id);
-    if (!group) return;
     // Snapshot: settling removes the waiter from the set being walked.
-    for (const waiter of [...group.waiters]) visit(waiter);
+    for (const waiter of [...(this.awaits.get(id) ?? [])]) visit(waiter);
   }
 
   // --- Terminal reports ---
@@ -786,7 +722,7 @@ export class AlertManager {
   /**
    * A pending end counts now: its grace ran out, or something proved it real.
    * The cycle is over whether or not anyone claims the event, so it is cleared
-   * *before* dispatch — a claimant that suppresses the ring must not leave the
+   * *before* dispatch — an await that claims the end must not leave the
    * Session stuck at `OSC_NOTIF_BUSY`.
    */
   private settleProgressEnd(id: string, entry: AlertEntry): void {
@@ -899,15 +835,14 @@ export class AlertManager {
     entry: AlertEntry,
     source: ListedRingSource | WatchingSource,
     detail: ActivityNotification,
-    arrived: number,
   ): void {
     let ring = entry.ring;
     if (ring === null) {
-      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail, arrived };
+      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail };
       entry.ring = ring;
       entry.ackedUntil = 0;
     } else {
-      takeRicher(ring, detail, arrived);
+      ring.detail = richer(ring.detail, detail);
     }
     addSource(ring, source);
   }
@@ -1086,9 +1021,9 @@ export class AlertManager {
   }
 
   /** The user is looking: the completion is a TODO already, kept to ring if they go idle or leave the host. */
-  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification, arrived: number): void {
-    const held = entry.held ??= { sources: [], watching: null, detail, arrived };
-    takeRicher(held, detail, arrived);
+  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
+    const held = entry.held ??= { sources: [], watching: null, detail };
+    held.detail = richer(held.detail, detail);
     addSource(held, source);
     // Unlike a receipt, a hold turns the TODO on: the user is looking at it.
     entry.todo = true;
@@ -1128,7 +1063,7 @@ export class AlertManager {
     if (held === null) return;
     entry.held = null;
     if (this.helpers.has(id)) return;
-    eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail, held.arrived));
+    eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail, true));
   }
 
   // --- Alert controls ---
@@ -1178,7 +1113,7 @@ export class AlertManager {
       watchingEnabled: this.isWatching(entry),
       todo: entry.todo,
       notification: entry.ring?.detail ?? entry.notification,
-      awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
+      awaited: this.awaits.has(id),
       episode: entry.ring?.episode ?? null,
     };
   }
@@ -1232,9 +1167,6 @@ export class AlertManager {
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
     this.eachWaiter(id, (waiter) => waiter.die());
-    // Claimants go with the Session, entry or not — a dead Session dispatches
-    // nothing, so holding their closures would only leak them.
-    this.claimants.delete(id);
     const entry = this.entries.get(id);
     if (entry) {
       this.disposeEntry(entry);
@@ -1247,22 +1179,15 @@ export class AlertManager {
   }
 
   /**
-   * Seed alert state from a persisted session (cold-start restore). Only the
-   * TODO reminder and its notification detail survive a restart — WATCHING is
-   * re-derived from the rule set at the next command start, and restore must
-   * never resurrect a ring or an in-flight progress cycle.
+   * Seed a new PTY generation from a persisted session (cold-start restore),
+   * straight after `restart`: only the TODO reminder and its notification
+   * detail survive, and the fresh entry holds nothing else to resurrect.
    */
   seed(id: string, state: { todo: unknown; notification?: unknown }): void {
     if (this.helpers.has(id)) return;
     const entry = this.getOrCreateEntry(id);
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
-    entry.ring = null;
-    entry.held = null;
-    entry.ackedUntil = 0;
-    entry.commandExitWatch = null;
-    entry.pendingCommandLine = null;
-    this.endRun(entry);
     this.notify(id);
   }
 
@@ -1277,7 +1202,6 @@ export class AlertManager {
     this.removed.clear();
     this.helpers.clear();
     this.awaits.clear();
-    this.claimants.clear();
     this.viewers.clear();
     this.listeners.clear();
     this.removeListeners.clear();
