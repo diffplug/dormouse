@@ -29,7 +29,7 @@ The guide addresses a VS Code user; the standalone app gets one section pointing
 
 Content invariants, checked by review unless a check is named:
 
-- The alert explanation matches [alert.md](alert.md): notification protocols and unattended command exit ring with zero configuration, independent of WATCHING; command exit needs `OSC 633` / `OSC 133` boundaries, and WATCHING the reported command line (`docs/specs/alert.md` → WATCHING Track). The guide must not promise that every quiet Pane is automatically marked done after a fixed interval.
+- The alert explanation matches [alert.md](alert.md): notification protocols and unattended command exit ring with zero configuration, independent of WATCHING; command exit needs `OSC 633` / `OSC 133` boundaries (`docs/specs/alert.md` → Command-exit Track), and WATCHING the reported command line (`docs/specs/alert.md` → WATCHING Track). The guide must not promise that every quiet Pane is automatically marked done after a fixed interval.
 - Pocket is described only as shipped or explicitly in development.
 - Browser Surfaces are explained to match [dor-browser.md](dor-browser.md) without exposing persisted params, controller registries, proxy plumbing, or future renderers.
 - VS Code command names in getting started exist in `vscode-ext/package.json` (`checkVsCodeCommands`).
