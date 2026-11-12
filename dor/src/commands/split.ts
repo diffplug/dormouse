@@ -105,7 +105,7 @@ ${focusHelp({ minimize: true })}
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
---from selects the reference Surface for placement. If it is minimized, the new Surface is created minimized too and inserted immediately to the right of its Door. If --from is omitted, Dormouse uses the caller's Surface, or an auxiliary helper's source Surface. When --workspace selects another Workspace, placement defaults to that Workspace's focused Surface.
+--from selects the reference Surface for placement. If it is minimized, the new Surface is created minimized too and inserted immediately to the right of its Door, unless --focus lays it out from the Door's place instead. If --from is omitted, Dormouse uses the caller's Surface, or an auxiliary helper's source Surface. When --workspace selects another Workspace, placement defaults to that Workspace's focused Surface.
 
 From an auxiliary helper, split creates a separate terminal and leaves the helper in place. Helpers cannot be explicit Surface targets, including surface:self.
 
