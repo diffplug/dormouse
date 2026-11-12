@@ -425,14 +425,14 @@ const progressReport = (s: Step) => (time(s) || boundary(s)) && s.pre.state.Prog
 /** Held sources going back to Dispatch: an idle lapse, or the leave grace with no viewer present. */
 const escalated = (s: Step) => (s.ev.k === 'idle' && s.pre.state.Hold === 'Held')
   || (time(s) && s.pre.state.Hold === 'Leaving' && s.post.viewers.size === 0);
-/** A completion Dispatch may ring or hold: a settle while watched, a command
- *  finish from Seen, or a report (`docs/specs/alert.md` -> Completion events),
- *  past the helper gate; or a held source going back to Dispatch, which the
- *  Hold diagram re-enters at Engaged?, after that gate. */
-const completion = (s: Step) => escalated(s) || (!s.pre.helper && (
-  (settled(s) && watched(s.pre))
+/** A completion Dispatch may ring or hold, past the helper gate: a settle
+ *  while watched, a command finish from Seen, or a report
+ *  (`docs/specs/alert.md` -> Completion events); or a held source going back
+ *  to Dispatch, which passes that gate and goes on at Engaged?. */
+const completion = (s: Step) => !s.pre.helper && (escalated(s)
+  || (settled(s) && watched(s.pre))
   || (is(s, 'finish', 'prompt', 'exit') && s.pre.state.Command === 'Seen')
-  || s.ev.k === 'report' || progressReport(s)));
+  || s.ev.k === 'report' || progressReport(s));
 const awaitsSettledNow = (s: Step) => s.world.awaits.filter((record) => record.settledStep === s.index);
 /** Withdraw: an await consumes a source, an await claims a settle, or a rule stops covering `watching`'s key. */
 const withdraw = (s: Step) => (s.ev.k === 'await' && s.world.awaits[s.world.awaits.length - 1]?.outcome?.kind === 'resolved')
@@ -522,6 +522,8 @@ const due = (s: Step) => time(s) && s.post.now >= s.delivery!.dueAt;
 const blocked = (s: Step) => s.delivery!.sink === 'speech' ? s.post.engaged : s.post.viewers.size > 0;
 /** The episode is one Ringing stretch of the Ring. */
 const episodeEnded = (s: Step) => s.post.ring?.episode !== s.delivery!.episode;
+/** The Session was made a helper (Pane Header), which ends no episode. */
+const demoted = (s: Step) => s.ev.k === 'helper' && s.ev.on && !s.pre.helper;
 
 // ---------------------------------------------------------------------------
 // Every drawn edge, by its exact text, and the step that fires it.
@@ -622,13 +624,13 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Hold: [*] --> NoHold': always,
       'Hold: NoHold --> Held: hold': hold,
       'Hold: Held --> Held: hold, detail only if richer, or withdraw leaving other sources': (s) => (hold(s) || withdraw(s)) && latchMoved(s, 'held'),
-      'Hold: Held --> NoHold: Engagement idle — each source back to Dispatch at Engaged?': (s) => disengaged(s, 'idle'),
+      'Hold: Held --> NoHold: Engagement idle — each source back to Dispatch': (s) => disengaged(s, 'idle'),
       'Hold: Held --> NoHold: Engagement focus moves on, or a verb': (s) => disengaged(s, 'focus') || verb(s),
       'Hold: Held --> NoHold: withdraw of its last source': withdraw,
       'Hold: Held --> Leaving: Engagement leave': (s) => disengaged(s, 'leave'),
       'Hold: Leaving --> Held: Engaged again': engagedAgain,
       'Hold: Leaving --> Leaving: withdraw leaving other sources': (s) => withdraw(s) && latchMoved(s, 'held'),
-      'Hold: Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch at Engaged?': (s) => time(s) && s.post.viewers.size === 0,
+      'Hold: Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch': (s) => time(s) && s.post.viewers.size === 0,
       'Hold: Leaving --> NoHold: the leave grace elapses with a viewer Present, a verb, or withdraw of its last source': (s) => (time(s) && s.post.viewers.size > 0) || verb(s) || withdraw(s),
     },
   },
@@ -646,7 +648,8 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
   Acked: {
     accept: {
       'Acked: [*] --> Fresh': always,
-      'Acked: Fresh --> Yes: a verb while Ringing or Held': (s) => verb(s) && (s.pre.state.Ring === 'Ringing' || s.pre.state.Hold === 'Held'),
+      'Acked: Fresh --> Yes: a verb while Ringing, Held, or Leaving': (s) => verb(s)
+        && (s.pre.state.Ring === 'Ringing' || s.pre.state.Hold === 'Held' || s.pre.state.Hold === 'Leaving'),
       'Acked: Yes --> Fresh: work, ring, a command start, or three minutes': (s) => work(s) || ringOpened(s) || s.ev.k === 'start'
         || (time(s) && s.post.now >= s.pre.ackedUntil),
     },
@@ -656,15 +659,15 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Delivery: [*] --> Pending: the episode opens, the sink on': (s) => opening(s) && s.delivery!.onAtOpen,
       'Delivery: [*] --> Spent: the episode opens, the sink off': (s) => opening(s) && !s.delivery!.onAtOpen,
       'Delivery: Pending --> Delivered: due, not blocked': (s) => due(s) && !blocked(s),
-      'Delivery: Pending --> Spent: due while blocked (speech while Engaged, push while any viewer is Present), the sink turned off, or the episode ends': (s) =>
-        (due(s) && blocked(s)) || sinkTurnedOff(s) || episodeEnded(s),
+      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends': (s) =>
+        (due(s) && blocked(s)) || sinkTurnedOff(s) || demoted(s) || episodeEnded(s),
       'Delivery: Delivered --> [*]': always,
       'Delivery: Spent --> [*]': always,
     },
     // Pending and Spent read alike, so every trigger out of Pending is exact.
     exact: new Set([
       'Delivery: Pending --> Delivered: due, not blocked',
-      'Delivery: Pending --> Spent: due while blocked (speech while Engaged, push while any viewer is Present), the sink turned off, or the episode ends',
+      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends',
     ]),
   },
   Await: {

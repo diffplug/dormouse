@@ -115,7 +115,7 @@ flowchart TD
   L -- "episode" --> DEL["Delivery and speech"]
 ```
 
-Dispatch also reads Engagement, the echo window, the Foreground command, Acknowledged, and each Await, by the states its questions name. Terms:
+Dispatch's questions read Engagement, the echo window, the Foreground command, Acknowledged, and each Await. Terms:
 
 - **input** — a PTY write but a terminal reply or a mouse report: a keystroke, a paste, a drop, a `dor send`, a launch. A wheel tick is input only when sent as keys; sent as a mouse report it is still a gesture with input.
 - **gesture** — an acknowledging gesture (Engagement), *with input* or *without*.
@@ -135,7 +135,9 @@ Dispatch — each completion takes the first exit that applies:
 ```mermaid
 flowchart TD
   C["settle, command finish (seen or unseen), or report"] --> H{"a helper Session?"}
+  HS["a held source"] --> H
   H -- yes --> X["dropped"]
+  H -- "no, held" --> G
   H -- no --> A{"an await in Grace or Parked accepts it?"}
   A -- yes --> W["claimed"]
   A -- no --> E{"echo window Open?"}
@@ -267,13 +269,13 @@ stateDiagram-v2
     [*] --> NoHold
     NoHold --> Held: hold
     Held --> Held: hold, detail only if richer, or withdraw leaving other sources
-    Held --> NoHold: Engagement idle — each source back to Dispatch at Engaged?
+    Held --> NoHold: Engagement idle — each source back to Dispatch
     Held --> NoHold: Engagement focus moves on, or a verb
     Held --> NoHold: withdraw of its last source
     Held --> Leaving: Engagement leave
     Leaving --> Held: Engaged again
     Leaving --> Leaving: withdraw leaving other sources
-    Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch at Engaged?
+    Leaving --> NoHold: the leave grace elapses with no viewer Present — each source back to Dispatch
     Leaving --> NoHold: the leave grace elapses with a viewer Present, a verb, or withdraw of its last source
   }
 ```
@@ -294,7 +296,7 @@ stateDiagram-v2
   state "Acknowledged" as Acked {
     state "Acknowledged" as Yes
     [*] --> Fresh
-    Fresh --> Yes: a verb while Ringing or Held
+    Fresh --> Yes: a verb while Ringing, Held, or Leaving
     Yes --> Fresh: work, ring, a command start, or three minutes
   }
 ```
@@ -307,7 +309,7 @@ stateDiagram-v2
     [*] --> Pending: the episode opens, the sink on
     [*] --> Spent: the episode opens, the sink off
     Pending --> Delivered: due, not blocked
-    Pending --> Spent: due while blocked (speech while Engaged, push while any viewer is Present), the sink turned off, or the episode ends
+    Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends
     Delivered --> [*]
     Spent --> [*]
   }
@@ -520,7 +522,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | a rule stops covering the `watching` key | withdraws `watching` |
 
 - **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears the ring and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report within three minutes and before any work only updates an existing TODO (the Acknowledged machine in Completion events; rationale).
+- **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report within three minutes and before any work only updates an existing TODO (the Acknowledged machine; rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.
 - Destroying the Session clears all alert, TODO, notification, held, progress, and command-exit state.
@@ -552,8 +554,8 @@ Application alarm defaults live beside the WATCHING rule set, edited in Settings
 
 **The host must decide when to deliver, in `createAlertHost` beside the manager** (rationale):
 
-- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing, and a sink turned off or a ring cleared first consumes it. Due but blocked also consumes it: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
-- **Enabling must never replay an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
+- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing; a sink turned off, a ring cleared, or a demotion to helper first consumes it. Due but blocked also consumes it: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
+- **Enabling or promotion must never replay an episode**, one that began disabled included (rationale). Delay edits never move a deadline; speech reads the current voice at engine admission.
 - **Each realm must publish every Session it shows** — Pane label and Workspace overrides — as one `sessions` op, label changes throttled (rationale).
 - **A publication must overwrite each Session it names, whichever realm published it last, and never drop one the manager holds state for**; one its realm omits with none is forgotten (rationale). The host keeps each Session's entry until the Session is removed, through its realm's end and a respawn under its id; an unpublished Session uses the defaults.
 

@@ -31,6 +31,17 @@ const machines = extractStateMachines(SPEC, 'docs/specs/alert.md');
 /** CI runs these seeds; `ALERT_MODEL_SOAK=<seconds>` (at most 120) adds fresh seeds, twice as long, for that long. */
 const SEEDS = Array.from({ length: 1_000 }, (_, i) => i + 1);
 const LENGTH = 80;
+
+/**
+ * Soak seeds that reach a path `SEEDS` never does, each at the length that
+ * found it, run beside them so a regression there fails CI too.
+ */
+const REGRESSION_SEEDS: ReadonlyArray<{ seed: number; length: number }> = [
+  // A completion held, its viewer gone, then the Session made a helper before the leave grace elapses.
+  { seed: 100_868, length: LENGTH },
+  // The same with push on, so a helper's escalated ring would also open an episode no realm sees.
+  { seed: 103_834, length: 120 },
+];
 const SOAK_SECONDS = Math.min(120, Number(process.env.ALERT_MODEL_SOAK ?? 0) || 0);
 
 /**
@@ -52,84 +63,7 @@ interface Known {
   why: string;
 }
 
-const KNOWN: readonly Known[] = [
-  {
-    key: 'soundness: Acked: Fresh -> Yes',
-    seed: 100_006,
-    events: [{ k: 'present', viewer: 'V1', focus: 'S' }, { k: 'report', source: 'OSC 9' }, { k: 'leave', viewer: 'V1' }, { k: 'click' }],
-    expected: 'Acknowledged moves Fresh -> Yes only on a verb while Ringing or Held',
-    got: "Fresh -> Yes on { k: 'click' }, the Hold Leaving",
-    side: 'spec',
-    why: 'Leaving still holds the completion: the Hold diagram draws a verb out of Leaving, and Clearing And TODO acknowledges a verb that drops a hold. The Acked label names Held alone.',
-  },
-  {
-    key: 'invariant: Engagement: user input opens the echo window',
-    seed: 22,
-    events: [{ k: 'key' }],
-    expected: 'the echo window Open after a keystroke',
-    got: "echo window shut after input on { k: 'key' }",
-    side: 'code',
-    why: "`onWrite` acknowledges before `streamEntry` creates the entry for `expectWork`, so the first keystroke on a Session that has emitted nothing opens no echo window, and its echo may count as output. Only before a generation's first output; one candidate chunk at most.",
-  },
-  {
-    key: 'invariant: Pane Header: a helper never rings or holds',
-    seed: 100_868,
-    events: [{ k: 'present', viewer: 'V1', focus: 'S' }, { k: 'report', source: 'OSC 9' }, { k: 'leave', viewer: 'V1' }, { k: 'helper', on: true }, { k: 'wait', ms: 1_000 }],
-    expected: 'no ring on a helper (Pane Header: no completion dispatch, ring included)',
-    got: "a helper rang on { k: 'wait', ms: 1000 }",
-    side: 'code',
-    why: 'A hold made before a demotion escalates at the leave grace or an idle lapse: `escalateHeld` calls `holdOrDeliver`, past the helper gate, as the Hold diagram draws ("back to Dispatch at Engaged?"). Reached by `setHelper(id, true)` on a holding Session, a failed placement\'s `promote` with `restore`.',
-  },
-  {
-    key: 'soundness: Delivery: [*] -> Pending|Spent',
-    seed: 103_834,
-    events: [
-      { k: 'settings', speak: false, push: true, speakDelayMs: 1_000, pushDelayMs: 1_000 }, { k: 'present', viewer: 'V1', focus: 'S' },
-      { k: 'report', source: 'OSC 9' }, { k: 'leave', viewer: 'V1' }, { k: 'helper', on: true }, { k: 'wait', ms: 2_000 },
-    ],
-    expected: "the helper's escalated ring opens an episode whose push is delivered when due, no viewer present",
-    got: "[*] -> Pending|Spent on { k: 'wait', ms: 2000 }: never delivered",
-    side: 'code',
-    why: 'The previous entry\'s ring: the scheduler follows published episodes, and a helper publishes none.',
-  },
-  {
-    key: 'soundness: Delivery: Pending -> Pending|Spent',
-    seed: 100_084,
-    events: [
-      { k: 'settings', speak: true, push: true, speakDelayMs: 1_000, pushDelayMs: 4_000 },
-      { k: 'report', source: 'OSC 9' }, { k: 'helper', on: true }, { k: 'wait', ms: 1_600 },
-    ],
-    expected: "Pending -> Delivered when due and not blocked: the Ring's episode never ended",
-    got: "Pending -> Pending|Spent on { k: 'wait', ms: 1600 }: spent",
-    side: 'spec',
-    why: 'A demotion publishes the default state and the scheduler takes the episode as ended. Spending is what a helper\'s "no speech, push" asks; the Delivery diagram draws no such trigger.',
-  },
-  {
-    key: 'soundness: Delivery: Spent -> Delivered',
-    seed: 100_084,
-    events: [
-      { k: 'settings', speak: true, push: true, speakDelayMs: 1_000, pushDelayMs: 4_000 },
-      { k: 'report', source: 'OSC 9' }, { k: 'helper', on: true }, { k: 'wait', ms: 1_600 }, { k: 'tick' },
-      { k: 'helper', on: false }, { k: 'wait', ms: 2_000 },
-    ],
-    expected: 'a spent delivery stays spent ("Enabling must never replay an episode")',
-    got: "Spent -> Delivered on { k: 'wait', ms: 2000 }",
-    side: 'code',
-    why: 'Promotion publishes the same episode again and `createAlertDeliveryScheduler` arms it as new, its deadline already past, so it is delivered at once.',
-  },
-  {
-    key: 'invariant: Alarm settings: at most one delivery per sink per episode',
-    seed: 142,
-    events: [
-      { k: 'settings', speak: true, push: true, speakDelayMs: 4_000, pushDelayMs: 20_000 }, { k: 'report', source: 'BEL' },
-      { k: 'wait', ms: 180_100 }, { k: 'helper', on: true }, { k: 'helper', on: false }, { k: 'wait', ms: 1_600 },
-    ],
-    expected: 'one speech and one push per episode',
-    got: "speech delivered 2 times on { k: 'wait', ms: 1600 }",
-    side: 'code',
-    why: 'The previous entry\'s re-arming, after both sinks had delivered: a demotion and promotion speaks and pushes the same episode again.',
-  },
-];
+const KNOWN: readonly Known[] = [];
 
 function suite(source = machines): ModelSuite {
   return { machines: source, coverage: new Map() };
@@ -184,6 +118,9 @@ describe('the alert model (docs/specs/alert.md -> State machines)', () => {
   it('makes only drawn transitions, keeps every stated invariant, and reaches every drawn edge', async () => {
     const model = suite();
     const first = await explore(model, SOAK_SECONDS ? soakSeeds() : SEEDS, SOAK_SECONDS ? 2 * LENGTH : LENGTH);
+    for (const { seed, length } of REGRESSION_SEEDS) {
+      for (const [key, found] of await explore(model, [seed], length)) if (!first.has(key)) first.set(key, found);
+    }
     const reports: string[] = [];
     for (const [key, { seed, events }] of first) {
       if (!KNOWN.some((known) => known.key === key)) reports.push(`${key}\n  seed ${seed}\n${await reproduce(key, events)}`);
