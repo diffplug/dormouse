@@ -64,7 +64,7 @@ Windows PowerShell 5.1 and PowerShell 7.6.7 (measured on Windows, 2026-10) remov
 
 ## Browser Surface Addressing
 
-**Why Dormouse's options are read anywhere.** Drop-in parity: both providers document `<command> [args] [options]`, options after the command, so a provider command line must work unchanged after `dor`. The intercepted names are Dormouse-only except `--session`, which means the same thing natively. A provider value spelled like one of them cannot be passed through, an accepted cost: a `--` that ended interception would be a second rule for one rare case.
+**Why Dormouse's options are read anywhere.** Drop-in parity: both providers document `<command> [args] [options]`, options after the command, so a provider command line must work unchanged after `dor`. The intercepted names are Dormouse-only except `--session`, which means the same thing natively; a provider value spelled like one of them goes after `--`, which is the only way to pass one: shell quoting reaches `dor` as the same argument. Keeping that delimiter preserves native dash-leading positional values. Removing it (#1758) made such a value impossible to pass, and was reverted.
 
 **Why the bind waits past the host's browser request timeout.** `surface.browser` answers only once the host has asked the browser where it streams, and that `attach` queues behind any launch, relaunch or close of the same browser, which can take the host's whole budget. At the client's default 5 s deadline, a command run just after a pop-out printed "could not open the Dormouse browser surface … timed out" and the pane bound anyway; agents read stderr, so the warning misled them (review of #777, 2026-09).
 
