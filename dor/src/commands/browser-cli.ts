@@ -38,8 +38,9 @@ const KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 const IDENTITY_FLAGS = ['--key', '--session', '--surface'] as const;
 
 /** Every flag dor takes out of the forwarded argv: the identities plus the
- *  container, which names a Workspace rather than a browser. */
-const INTERCEPTED_FLAGS = [...IDENTITY_FLAGS, '--workspace'] as const;
+ *  container and the placement reference, which name a Workspace and a
+ *  neighbor rather than a browser. */
+const INTERCEPTED_FLAGS = [...IDENTITY_FLAGS, '--workspace', '--from'] as const;
 type InterceptedFlag = (typeof INTERCEPTED_FLAGS)[number];
 
 /** How the browser was named: a raw session known CLI-side, a managed `--key`
@@ -47,7 +48,7 @@ type InterceptedFlag = (typeof INTERCEPTED_FLAGS)[number];
  *  resolves — exactly one of the three, by construction. `key` rides along only
  *  when it named the session: a raw or surface-addressed session may be
  *  GUI-minted, which no key names. */
-export type ResolvedSessionFlags = { rest: string[]; workspace?: string; focus?: boolean } & (
+export type ResolvedSessionFlags = { rest: string[]; workspace?: string; focus?: boolean; from?: string } & (
   | { session: string; key?: undefined; surface?: undefined }
   | { key: string; session?: undefined; surface?: undefined }
   | { surface: string; session?: undefined; key?: undefined }
@@ -114,9 +115,10 @@ export function extractSessionFlags(
     return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of ${sessionNoun})` };
   }
 
-  const workspace = { ...workspaceParam(values.get('--workspace')), ...focusParam(focus) };
+  const workspace = { ...workspaceParam(values.get('--workspace')), ...(values.has('--from') ? { from: values.get('--from')! } : {}), ...focusParam(focus) };
 
   const surface = values.get('--surface');
+  if (surface !== undefined && values.has('--from')) return { ok: false, message: '--from and --surface are mutually exclusive' };
   if (surface !== undefined) return { ok: true, value: { surface, rest, ...workspace } };
 
   const session = values.get('--session');
@@ -550,6 +552,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       const blank = await run([...sessionArgs, ...navigation.blank], launchEnv);
       if (blank.exitCode !== 0) return fail(`Could not prepare the playwright viewport before navigation: ${blank.stderr.trim() || `playwright exited ${blank.exitCode}`}`);
       const preparedSurface = await client.browserSurface({
+        ...(flags.from !== undefined ? { from: flags.from } : {}),
         ...focusParam(flags.focus),
         provider: d.provider, key: flags.key, ...surfaceParam(flags.surface), session: binding.session, cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}), ...(fresh && initialViewport ? { initialViewport } : {}),
@@ -592,6 +595,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       const statusArgs = d.streamStatus?.(binding.session, mode);
       const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...nativeLaunchOptions])).stdout);
       await client.browserSurface({
+        ...(flags.from !== undefined ? { from: flags.from } : {}),
         ...focusParam(flags.focus),
         provider: d.provider,
         key: flags.key,
@@ -684,9 +688,9 @@ async function runEmbedSize(provider: BrowserAutomationProvider, flags: Resolved
 }
 
 /** The one identity flag `flags` carries, as a request names it. */
-function identityOf(flags: ResolvedSessionFlags): BrowserIdentity {
-  if (flags.key !== undefined) return { key: flags.key };
-  return flags.surface !== undefined ? { surface: flags.surface } : { session: flags.session! };
+function identityOf(flags: ResolvedSessionFlags): BrowserIdentity & { from?: string } {
+  if (flags.key !== undefined) return { ...(flags.from !== undefined ? { from: flags.from } : {}), key: flags.key };
+  return { ...(flags.from !== undefined ? { from: flags.from } : {}), ...(flags.surface !== undefined ? { surface: flags.surface } : { session: flags.session! }) };
 }
 
 /** `dor-diagnostics`: the webview's and the host's record of the browser
@@ -743,6 +747,7 @@ async function resolveBinding(
   }
   try {
     const response = await client.resolveBrowser({
+      ...(flags.from !== undefined ? { from: flags.from } : {}),
       provider: d.provider,
       ...(flags.key === undefined ? { surface: flags.surface } : { key: flags.key, ...(proposed ? { proposed } : {}) }),
       ...workspaceParam(flags.workspace),

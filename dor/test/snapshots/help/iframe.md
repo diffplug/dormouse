@@ -4,7 +4,7 @@ Invocation: `dor iframe --help`
 
 ```text
 USAGE
-  dor iframe [--focus] [--json] [--minimize] [--surface handle] [--workspace ref] <target>
+  dor iframe [--focus] [--json] [--minimize] [--from handle] [--workspace ref] <target>
   dor iframe --help
 
 Opens an http:// page in a high-fidelity iframe surface for a human to look at.
@@ -44,7 +44,7 @@ FLAGS
      [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
      [--json]       Print a JSON result or error object.
      [--minimize]   Create or replace the surface minimized.
-     [--surface]    Surface to replace or split from.
+     [--from]       Surface to replace or split from.
      [--workspace]  Workspace to act in, instead of the caller's.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments

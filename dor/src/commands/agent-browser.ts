@@ -43,14 +43,14 @@ export const agentBrowserCommand: Command = {
   helpPatches: [
     {
       scope: 'root',
-      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [--workspace ref] [--focus] [args...]\n'],
+      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]\n'],
     },
     {
       scope: 'command-usage',
-      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [--workspace ref] [--focus] [args...]\n'],
+      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]\n'],
     },
   ],
-  command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string; focus?: boolean }, [...args: string[]], DorCommandContext>({
+  command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string; focus?: boolean; from?: string }, [...args: string[]], DorCommandContext>({
     docs: {
       brief: 'Drive a browser surface via your agent-browser install.',
       fullDescription: `Forwards all arguments verbatim to your own agent-browser binary and binds the session to a Dormouse browser surface.
@@ -69,6 +69,11 @@ It also intercepts --workspace <ref>, which is not an identity: it says which
 Workspace of this Window the browser Surface is opened in and which one a
 handle resolves against (workspace:<n> or workspace:<name>); and --focus
 (or --focus=true|false), which says whether that Surface takes focus.
+
+--from <handle> is a placement reference: the Surface a new browser pane
+splits from, whose Workspace a --key resolves in. It places only a browser
+this command creates; a reused one stays where it is. It cannot be combined
+with --surface, which names the existing browser to drive.
 
 dor reads these flags anywhere in the arguments, up to an optional bare --,
 which it forwards unchanged. Everything else, and everything after that --, is
@@ -113,6 +118,7 @@ Examples:
         key: { kind: 'parsed', parse: stringParser, brief: 'Workspace-scoped browser key (default "default").', optional: true, placeholder: 'name' },
         session: { kind: 'parsed', parse: stringParser, brief: 'Raw agent-browser session name (mutually exclusive with --key/--surface).', optional: true, placeholder: 'name' },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface handle whose bound session to drive (mutually exclusive with --key/--session).', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Reference Surface for placement and managed-key Workspace.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
         focus: focusFlag,
       },
@@ -122,7 +128,7 @@ Examples:
         minimum: 0,
       },
     },
-    func: async function (this: DorCommandContext, _flags: { key?: string; session?: string; surface?: string; workspace?: string; focus?: boolean }, ..._args: string[]): Promise<void | Error> {
+    func: async function (this: DorCommandContext, _flags: { key?: string; session?: string; surface?: string; workspace?: string; focus?: boolean; from?: string }, ..._args: string[]): Promise<void | Error> {
       // runCli intercepts every non-help agent-browser invocation before
       // stricli; reaching this func means that interception regressed.
       return new Error('internal: agent-browser passthrough was not intercepted');

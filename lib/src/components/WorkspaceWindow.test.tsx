@@ -801,7 +801,7 @@ describe('WorkspaceWindow', () => {
     await render();
     await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await flush();
-    const bind = async (workspaceId: string) => {
+    const bind = async (workspaceId: string, extra: Record<string, unknown> = {}) => {
       const handle = getWallHandle(workspaceId)!;
       const respond = vi.fn();
       await act(async () => {
@@ -809,7 +809,7 @@ describe('WorkspaceWindow', () => {
           requestId: `bind-${workspaceId}`,
           method: SURFACE_CONTROL_METHODS.browser,
           surfaceId: handle.surfaceIds()[0],
-          params: { provider: 'playwright', session: 'shared', cwd: '/repo' },
+          params: { provider: 'playwright', session: 'shared', cwd: '/repo', ...extra },
           respond,
         });
       });
@@ -827,6 +827,11 @@ describe('WorkspaceWindow', () => {
     expect(again.ok).toBe(true);
     expect(again.result.status).toBe('existing');
     expect(again.result.surfaceId).toBe(created.result.surfaceId);
+    expect(getWallHandle(first)!.surfaceIds()).toHaveLength(before);
+
+    // A `--from` here routes the request here; the holder answers it without placing anything.
+    const placed = await bind(first, { from: getWallHandle(first)!.surfaceIds()[0] });
+    expect(placed).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: created.result.surfaceId } });
     expect(getWallHandle(first)!.surfaceIds()).toHaveLength(before);
   });
 

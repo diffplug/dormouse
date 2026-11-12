@@ -49,7 +49,7 @@ interface ToolFlags {
   readonly global?: boolean;
   readonly minimize?: boolean;
   readonly fresh?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
   readonly cwd?: string;
   readonly workspace?: string;
 }
@@ -61,15 +61,15 @@ interface ToolFlags {
 export const TOOL_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
-const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
+const FLAGS_WITH_VALUES = new Set(['--cwd', '--from', '--workspace']);
 const BOOLEAN_FLAGS = new Set(['--focus', '--list', '--json', '--minimize', '--fresh', '--global']);
 
 /** stricli's usage line, which the help replaces with one per form. */
-const STRICLI_USAGE = '  dor tool [--focus] [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>';
-const LAUNCH_FLAGS = '[--global] [--focus] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]';
+const STRICLI_USAGE = '  dor tool [--focus] [--global] [--json] [--minimize] [--fresh] [--from handle] [--workspace ref] [--cwd path]<TO-EOL>';
+const LAUNCH_FLAGS = '[--global] [--focus] [--json] [--minimize] [--fresh] [--from handle] [--cwd path] [--workspace ref]';
 const USAGE = [
   `  dor tool ${LAUNCH_FLAGS} <name> [args...]`,
-  '  dor tool [--focus] [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...',
+  '  dor tool [--focus] [--json] [--minimize] [--from handle] [--cwd path] [--workspace ref] -- <command>...',
   `  dor tool ${LAUNCH_FLAGS}`,
   '  dor tool --list [--global] [--cwd path] [--json]',
 ].map(line => `${line}\n`).join('');
@@ -138,7 +138,7 @@ A project dormouse.yml is repo-controlled and its entries execute, so it is iner
 
 Approving an upstream covers any folder whose git config names that upstream, every worktree and clone of the repo included. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
 
-Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --surface, --cwd elsewhere — splits and prints the new surface's handle. Once the command exits the pane is a plain terminal again; a later invocation from its prompt takes it over afresh. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
+Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --from, --cwd elsewhere — splits and prints the new surface's handle. Once the command exits the pane is a plain terminal again; a later invocation from its prompt takes it over afresh. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
 
 ${focusHelp({ minimize: true })}
 
@@ -146,7 +146,7 @@ ${focusHelp({ minimize: true })}
 
 --list runs nothing: it prints the Tools \`dor tool <name>\` would find from the working directory — the nearest project dormouse.yml and whether you have approved it, then the user file. Each Tool shows its command, render, port strategy, and whether it has a key, then the comment block directly above its entry, which is where a Tool is documented. A user Tool that a project Tool of the same name hides is marked shadowed. A user Tool imported from another dormouse.yml shows that file, and one that does not resolve is marked broken with the reason. --global lists only user Tools.
 
-Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --focus, --minimize, --fresh, --surface, or --workspace asks for a launch.
+Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --focus, --minimize, --fresh, --from, or --workspace asks for a launch.
 
 ${commandStateHelp(TOOL_COMMAND_STATES)}
 
@@ -196,7 +196,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Ignore a declared key and always create.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: cwdParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
         list: { kind: 'boolean', brief: 'List the declared Tools instead of running one.', optional: true, withNegated: false },
@@ -215,7 +215,7 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
   const conflict = focusMinimizeConflict(flags);
   if (conflict) return conflict;
   // A listing resolves like a launch but places nothing.
-  const placing = flags.focus !== undefined || flags.minimize || flags.fresh || flags.surface !== undefined || flags.workspace !== undefined;
+  const placing = flags.focus !== undefined || flags.minimize || flags.fresh || flags.from !== undefined || flags.workspace !== undefined;
   if (flags.list === true) {
     if (placing) return new Error('--list takes only --global, --cwd, and --json');
     return listTools(this, flags);
@@ -240,7 +240,7 @@ function launchPlacement(context: DorCommandContext, flags: ToolFlags) {
     fresh: flags.fresh === true,
     minimized: flags.minimize === true,
     ...focusParam(flags.focus),
-    surface: flags.surface,
+    surface: flags.from,
     cwd,
   };
 }

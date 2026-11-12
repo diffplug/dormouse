@@ -64,7 +64,7 @@ export function isNakedToolInvocation(rawCommandLine: string | null | undefined,
 export interface ToolTakeoverGate {
   /** The `dor` verb the request came from. */
   verb: 'tool' | 'open';
-  /** `--surface`: an explicit placement, which take-over must not override. */
+  /** `--from`: an explicit placement, which take-over must not override. */
   explicitSurface: boolean;
   /** `--minimize`: a request for a background Surface, which the caller is not. */
   minimized: boolean;

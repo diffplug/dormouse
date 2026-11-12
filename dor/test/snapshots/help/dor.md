@@ -4,13 +4,13 @@ Invocation: `dor --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--focus] [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]
-  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
-  dor tool [--global] [--focus] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]
-  dor tool [--focus] [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
-  dor tool [--global] [--focus] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]
+  dor split [--left|--right|--up|--down|--auto] [--focus] [--json] [--minimize] [--from handle] [--workspace ref] [-- <command>...]
+  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...
+  dor tool [--global] [--focus] [--json] [--minimize] [--fresh] [--from handle] [--cwd path] [--workspace ref] <name> [args...]
+  dor tool [--focus] [--json] [--minimize] [--from handle] [--cwd path] [--workspace ref] -- <command>...
+  dor tool [--global] [--focus] [--json] [--minimize] [--fresh] [--from handle] [--cwd path] [--workspace ref]
   dor tool --list [--global] [--cwd path] [--json]
-  dor open [--focus] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
+  dor open [--focus] [--json] [--minimize] [--fresh] [--from handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
   dor version [--json]
   dor skill [--install] [--json]
   dor send <surface> (--text value | --key name | --stdin)... [--json] [--workspace ref]
@@ -20,9 +20,9 @@ USAGE
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
   dor reopen [--json]
   dor move <surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]
-  dor iframe [--focus] [--json] [--minimize] [--surface handle] [--workspace ref] <target>
-  dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [--focus] [args...]
-  dor playwright [--key name|--session name|--surface handle] [--workspace ref] [--focus] [args...]
+  dor iframe [--focus] [--json] [--minimize] [--from handle] [--workspace ref] <target>
+  dor agent-browser [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]
+  dor playwright [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]
   dor list [--workspace ref|--all] [--window label] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]
   dor list --workspaces [--window label] [--json]
   dor workspace new|rename|pin|unpin|close|switch|move [args...] [flags...]

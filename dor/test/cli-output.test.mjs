@@ -617,7 +617,7 @@ test('ensure and tool refuse a --cwd that names no directory, launching nothing'
 
 test('ensure and tool accept --flag=value before --, as stricli does', async () => {
   const ensure = fixtureClient();
-  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' }, host: anyDirectoryHost });
+  const ensured = await runCli(['ensure', '--cwd=/work/other', '--from=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' }, host: anyDirectoryHost });
   assert.equal(ensured.exitCode, 0, ensured.stderr);
   assert.equal(smudgeWindowsPaths(ensure.requests[0].request.cwd), '/work/other');
   assert.equal(ensure.requests[0].request.surface, 'surface:3');
@@ -1117,7 +1117,7 @@ test('kill short confirm-if-read output', async () => {
 test('iframe text output', async () => {
   await snapshot(
     'iframe-text',
-    await runCli(['iframe', '--surface', 'surface:1', 'https://localhost:5173'], { client: fixtureClient() }),
+    await runCli(['iframe', '--from', 'surface:1', 'https://localhost:5173'], { client: fixtureClient() }),
   );
 });
 
@@ -2219,7 +2219,7 @@ test('bare tool without a terminal prints the listing --list prints', async () =
 });
 
 test('bare tool without a terminal refuses a placement flag', async () => {
-  for (const flag of [['--minimize'], ['--fresh'], ['--surface', 'surface:2'], ['--workspace', 'workspace:2']]) {
+  for (const flag of [['--minimize'], ['--fresh'], ['--from', 'surface:2'], ['--workspace', 'workspace:2']]) {
     const client = fixtureClient();
     const result = await runCli(['tool', ...flag], { client });
     assert.equal(result.exitCode, 1, flag.join(' '));
@@ -2361,7 +2361,7 @@ test('tool routes named and anonymous launches to an explicit Workspace', async 
 
 test('open forwards one file, explicit handler, placement, and Workspace to Tool dispatch', async () => {
   const client = fixtureClient();
-  const result = await runCli(['open', '--json', '--tool', 'markdown', '--workspace', 'workspace:2', '--fresh', '--minimize', '--surface', 'surface:4', 'a b.md'], { client, env: { PWD: '/repo' } });
+  const result = await runCli(['open', '--json', '--tool', 'markdown', '--workspace', 'workspace:2', '--fresh', '--minimize', '--from', 'surface:4', 'a b.md'], { client, env: { PWD: '/repo' } });
   assert.equal(result.exitCode, 0);
   client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
   assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
@@ -2519,7 +2519,7 @@ test('named Tool arguments need -- only when they begin with a dash', async () =
 
 test('empty browser identities fail before a provider or host request', async () => {
   for (const provider of ['agent-browser', 'playwright']) {
-    for (const flag of ['--session', '--key', '--surface', '--workspace', ...(provider === 'playwright' ? ['-s'] : [])]) {
+    for (const flag of ['--session', '--key', '--surface', '--workspace', '--from', ...(provider === 'playwright' ? ['-s'] : [])]) {
       for (const args of [[flag, ''], [`${flag}=`]]) {
         const client = fixtureClient();
         const invoked = [];
@@ -2635,4 +2635,36 @@ test('agent-browser exits 4 when its successful command cannot bind a pane', asy
   assert.match(result.stderr, /pane unavailable/);
   assert.match(result.stderr, /already ran; do not repeat it blindly/);
   assert.equal(ab.calls.filter(args => args.includes('open')).length, 1);
+});
+
+test('creation uses --from and rejects the old --surface spelling before host calls', async () => {
+  for (const args of [['split'], ['ensure', '--', 'echo'], ['tool', '--', 'echo'], ['open', 'a.md'], ['iframe', ':5173']]) {
+    const client = fixtureClient();
+    const result = await runCli([args[0], '--from', 'surface:8', ...args.slice(1)], { client });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(client.requests.at(-1).request.surface, 'surface:8');
+    const rejected = fixtureClient();
+    const old = await runCli([args[0], '--surface', 'surface:8', ...args.slice(1)], { client: rejected });
+    assert.equal(old.exitCode, 1);
+    assert.equal(rejected.requests.length, 0);
+  }
+});
+
+test('browser placement is carried through resolution and binding, never forwarded', async () => {
+  const client = fixtureClient();
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['agent-browser', 'open', ':5173', '--from', 'surface:8', '--key', 'docs'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(client.requests.find(r => r.method === 'resolveBrowser').request.from, 'surface:8');
+  assert.equal(client.requests.find(r => r.method === 'browserSurface').request.from, 'surface:8');
+  assert.equal(ab.calls.some(args => args.includes('--from')), false);
+  const before = ab.calls.length;
+  const bad = await runCli(['agent-browser', 'open', ':5173', '--from', 'surface:8', '--surface', 'surface:3'], { client, execAgentBrowser: ab.exec });
+  assert.equal(bad.exitCode, 1);
+  assert.match(bad.stderr, /--from and --surface are mutually exclusive/);
+  assert.equal(ab.calls.length, before);
+  // After the bare `--`, a --from is the provider's.
+  const forwarded = await runCli(['agent-browser', '--key', 'docs', '--', 'eval', '--from'], { client, execAgentBrowser: ab.exec });
+  assert.equal(forwarded.exitCode, 0, forwarded.stderr);
+  assert.deepEqual(ab.calls.find(args => args.includes('eval')).slice(-2), ['eval', '--from']);
 });

@@ -339,7 +339,7 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 ### Splitting from a Door
 
-**`dor split --surface <minimized-id>` and `dor ensure --surface <minimized-id>` must create the new terminal Surface directly as a Door**, immediately to the right of the reference Door, and report `minimized: true` even without `--minimize`. Its restore token's neighbor tier points at the reference Door, and `--auto` resolves to `right` — there is no visible pane geometry to inspect.
+**Must create the new terminal directly as a Door when `dor split` or `dor ensure` references a minimized Surface, unless it takes focus** (`docs/specs/dor-cli.md` → "Focus intent"). The Door is immediately to the reference Door's right and reports `minimized: true` even without `--minimize`. Its restore token's neighbor tier points at the reference Door, and `--auto` resolves to `right` — there is no visible pane geometry to inspect.
 
 ## Inline rename
 

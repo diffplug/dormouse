@@ -114,3 +114,11 @@ async function assertSnapshotInventory(snapshotNames) {
 
   assert.deepEqual(actual, expected, 'help snapshot files should match global help commands');
 }
+
+test('root split help retains grouped directions and its command boundary', async () => {
+  const { stdout } = await runCli(['--help']);
+  const split = stdout.split('\n').find(line => line.startsWith('  dor split '));
+  assert.match(split, /--left\|--right\|--up\|--down\|--auto/);
+  assert.match(split, /\[--from handle\]/);
+  assert.match(split, /\[-- <command>\.\.\.\]/);
+});

@@ -20,7 +20,7 @@ interface OpenFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly fresh?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
   readonly cwd?: string;
   readonly tool?: string;
   readonly preview?: boolean;
@@ -45,7 +45,7 @@ builtin:code opens any text file, Markdown and HTML included, as source in the c
 
 The selected Tool receives the canonical absolute path as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
 
-Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
+Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --from, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
 
 ${focusHelp({ minimize: true })} --preview turns the default off too.
 
@@ -59,7 +59,7 @@ ${commandStateHelp(OPEN_COMMAND_STATES)}
         json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Open another instance even when the Tool has a key.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: cwdParser, brief: 'Directory for resolving the path.', optional: true, placeholder: 'path' },
         tool: { kind: 'parsed', parse: stringParser, brief: 'Use a user Tool, builtin:file, builtin:code, or builtin:folder.', optional: true, placeholder: 'name' },
@@ -91,7 +91,7 @@ ${commandStateHelp(OPEN_COMMAND_STATES)}
         fresh: flags.fresh === true,
         minimized: flags.minimize === true,
         ...focusParam(flags.focus),
-        surface: flags.surface,
+        surface: flags.from,
         cwd,
         ...(flags.preview ? { preview: true } : {}),
       }, flags.json === true);
