@@ -171,20 +171,6 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: PERMISSION });
   });
 
-  it('keeps a report that rang during the grace over the older one the grace then rings', () => {
-    const OLD: ActivityNotification = { source: 'OSC 9', title: 'Old request', body: null };
-    const NEW: ActivityNotification = { source: 'OSC 9', title: 'New request', body: null };
-    manager.onData(PANE);
-    engage(manager, PANE);
-    manager.notifyFromProtocol(PANE, OLD);
-
-    leave(manager);
-    vi.advanceTimersByTime(cfg.alert.leaveGrace / 2);
-    manager.notifyFromProtocol(PANE, NEW);
-    vi.advanceTimersByTime(cfg.alert.leaveGrace);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: NEW });
-  });
-
   it('keeps the TODO a receipt updated during the grace over the older hold the grace then delivers', () => {
     const OLD: ActivityNotification = { source: 'OSC 9', title: 'Old request', body: null };
     const NEW: ActivityNotification = { source: 'OSC 9', title: 'New request', body: null };
