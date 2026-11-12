@@ -1,6 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
-import type { TodoState } from '../lib/terminal-registry';
 import { getTodoSpotlight, subscribeToTodoSpotlight } from '../lib/todo-spotlight';
 import { animationClockStyle } from './alert-ring';
 
@@ -24,13 +23,13 @@ export const TODO_PILL_BODY: ReactNode = (
  * Returns `flourishing: true` briefly after a TODO clears so the
  * caller can set `data-flourishing="true"` on its pill shell.
  */
-export function useTodoPillContent(todo: TodoState): {
+export function useTodoPillContent(todo: boolean): {
   visible: boolean;
   flourishing: boolean;
   body: ReactNode;
 } {
   const [flourishing, setFlourishing] = useState(false);
-  const prevRef = useRef<TodoState>(todo);
+  const prevRef = useRef<boolean>(todo);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {

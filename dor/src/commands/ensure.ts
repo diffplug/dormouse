@@ -16,7 +16,6 @@ import {
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
-  focusParam,
   renderJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -129,7 +128,7 @@ Two surfaces running the same command in different working directories are disti
 
 --restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
 
---from selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+--from selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door, unless --focus lays it out from the door's place instead. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
 ${commandStateHelp(ENSURE_COMMAND_STATES)}
 
@@ -180,7 +179,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     const response = await client.ensureSurface({
       command: commandArgs,
       minimized: flags.minimize === true,
-      ...focusParam(flags.focus),
+      focus: flags.focus === true,
       restart: flags.restart === true,
       surface: flags.from,
       cwd,

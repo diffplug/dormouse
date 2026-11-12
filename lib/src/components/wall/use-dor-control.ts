@@ -45,10 +45,7 @@ import { stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
-  cliFocusIntent,
   toolTakesOverCaller,
-  typedDorVerb,
-  type FocusIntentFacts,
   type ToolTakeoverGate,
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
@@ -162,9 +159,6 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   /** A click on a terminal link, which asks before a page that runs its own
    *  script. Never set by a control-socket request. */
   terminalLink?: true;
-  /** A request the webview's own UI makes, which keeps its own focus policy
-   *  rather than the CLI's. Never set by a control-socket request. */
-  gui?: true;
   /** The default placement reference when it is not the caller: a helper's
    *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
   placementSurfaceId?: string;
@@ -181,8 +175,6 @@ type EnsureBrowserSurfaceResult =
  *  `dor playwright` command just drove — the surface half of the control plane. */
 type EnsureBrowserSurface = (args: {
   focus: boolean;
-  /** Only an explicit request focuses a browser that is already visible. */
-  explicitFocus: boolean;
   provider: BrowserAutomationProvider;
   headed?: boolean;
   nativeIdentity: string;
@@ -217,23 +209,6 @@ function matchesTarget(
   }
 }
 
-function renderSurfaceForError(surface: DorSurface): string {
-  return `${surface.id} ${JSON.stringify(surface.title)}`;
-}
-
-// Resolve exactly one match: ok for a single hit, an ambiguity error for many,
-// null for none (each caller supplies its own not-found / fallback tail).
-function pickSingleMatch(matches: DorSurface[], resolvedTarget: string): ParseResult<DorSurface> | null {
-  if (matches.length === 1) return { ok: true, value: matches[0] };
-  if (matches.length > 1) {
-    return {
-      ok: false,
-      message: `surface target '${resolvedTarget}' matched multiple surfaces: ${matches.map(renderSurfaceForError).join(', ')}`,
-    };
-  }
-  return null;
-}
-
 function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
@@ -247,8 +222,11 @@ function resolveSurfaceTarget(
   const classified = parseSurfaceTarget(resolvedTarget);
   if (classified.kind === 'invalid') return { ok: false, message: classified.message };
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
-  const single = pickSingleMatch(matches, resolvedTarget);
-  if (single) return single;
+  if (matches.length === 1) return { ok: true, value: matches[0] };
+  if (matches.length > 1) {
+    const listed = matches.map((surface) => `${surface.id} ${JSON.stringify(surface.title)}`).join(', ');
+    return { ok: false, message: `surface target '${resolvedTarget}' matched multiple surfaces: ${listed}` };
+  }
   // A title names a Surface the user can see; there is no falling back to
   // another one when it names none.
   if (classified.kind === 'title') {
@@ -273,12 +251,6 @@ function numberParam(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function limitLines(text: string, lines: number | undefined): string {
-  if (lines === undefined) return text;
-  const parts = text.split('\n');
-  return parts.slice(-lines).join('\n');
-}
-
 function readSurfaceText(surfaceId: string, lines: number | undefined, scrollback: boolean): string {
   const terminal = getTerminalInstance(surfaceId);
   if (!terminal) return '';
@@ -295,7 +267,8 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
     collected.push(buffer.getLine(row)?.translateToString(true) ?? '');
   }
 
-  return limitLines(collected.join('\n').replace(/\n+$/, ''), lines);
+  const text = collected.join('\n').replace(/\n+$/, '');
+  return lines === undefined ? text : text.split('\n').slice(-lines).join('\n');
 }
 
 // `dor ensure --restart` blocks the CLI while we interrupt a live command and
@@ -708,10 +681,7 @@ export function useDorControl({
   answeringWorkspaceId,
   workspaceScope,
 }: {
-  /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
-   *  split resolution (`autoEdgeFor`), and per-leaf param writes. */
   lath: LathWallEngine;
-  /** The navigation/query seam; the handler only needs `hasPane`. */
   nav: WallNav;
   doorsRef: MutableRefObject<DooredItem[]>;
   /** The visible panes + active surface projection, shared with wallActions. */
@@ -727,15 +697,8 @@ export function useDorControl({
     cwd?: string;
     requireIntegration?: boolean;
     focusNeutral?: boolean;
-    /** Leaf metadata for the new Surface; defaults to a plain terminal. `dor
-     *  tool` passes a tool leaf, which is a shell-hosted PTY exactly like a
-     *  terminal but renders both capabilities. */
     leafMeta?: LeafMeta;
-    /** Create the leaf but stage no shell and spawn no PTY — a pane awaiting
-     *  approval (docs/specs/dor-tool.md -> Trust rule 2). */
     deferTerminal?: boolean;
-    /** Lay the leaf out even beside a Door reference, which otherwise makes
-     *  it a Door. */
     visible?: boolean;
   }) => ParseResult<{ id: string; minimized: boolean }>;
   createContentSurface: (args: {
@@ -760,9 +723,7 @@ export function useDorControl({
   /** This Wall's preview slot pinning (`docs/specs/dor-tool.md` -> Preview slot). */
   previewSlot: PreviewSlotPin;
   /** This Wall's Workspace id, reported by `dor list` so a caller learns which
-   *  Workspace answered (docs/specs/dor-cli.md → "Handle Model").
-   *  The Window's own ref rides beside it, so `dor list` says which Window
-   *  answered too (`currentWindowRef`). */
+   *  Workspace answered (docs/specs/dor-cli.md → "Handle Model"). */
   answeringWorkspaceId: string;
   /** This Wall's Workspace id, which namespaces the managed browser `--key`
    *  sessions it answers for; `undefined` on a bare Wall, which mints a scope
@@ -772,10 +733,6 @@ export function useDorControl({
   /** The live surface (visible pane or minimized door) whose params match, or
    *  null. Shared with the context's port launches in Wall.tsx. */
   findSurfaceByParams: (isMatch: (params: unknown) => boolean) => { id: string; minimized: boolean } | null;
-  /** Fold a params patch onto a surface (visible pane or minimized door) — the
-   *  one write path `dor` uses to hand an existing pane its refreshed
-   *  `binaryPath`. */
-  updateSurfaceParams: (id: string, patch: Record<string, unknown>) => void;
   /** Run one `dor` request against this Wall. `dor-control-router.ts` owns the
    *  window listener that chooses which Wall's handler runs. */
   handleDorControl: (detail: DorControlRequest) => void | Promise<void>;
@@ -948,14 +905,6 @@ export function useDorControl({
     return bareWallScope.current ??= `w${crypto.randomUUID().slice(0, 8)}`;
   }, [workspaceScope]);
 
-  // Fold a params patch onto a surface, pane or door alike — the store holds both,
-  // so there is one write path. Shared by `ensureBrowserSurface`'s reuse arm and
-  // the context's port launches in Wall.tsx. A no-op on an empty patch.
-  const updateSurfaceParams = useCallback((id: string, patch: Record<string, unknown>) => {
-    if (Object.keys(patch).length === 0) return;
-    lath.store.updateParams(id, patch);
-  }, [lath]);
-
   const browserReservations = useRef(new BrowserBindingReservations());
 
   // The newest preview's ticket. A newer preview aborts it, and so does the
@@ -1046,7 +995,6 @@ export function useDorControl({
 
   const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
     focus,
-    explicitFocus,
     key,
     provider,
     headed,
@@ -1077,13 +1025,13 @@ export function useDorControl({
       // Reuse: hand over the stream port (OS-assigned, churns across session
       // restarts) so the pane reconnects to the live stream, and refresh the
       // resolved binary path.
-      updateSurfaceParams(existing.id, refreshedParams);
+      lath.store.updateParams(existing.id, refreshedParams);
       handOver(existing.id);
       return {
         ok: true,
         status: 'existing',
         surfaceId: existing.id,
-        minimized: focus && (explicitFocus || existing.minimized) ? !revealSurface(existing.id) : existing.minimized,
+        minimized: focus ? !revealSurface(existing.id) : existing.minimized,
       };
     }
 
@@ -1114,27 +1062,16 @@ export function useDorControl({
       surfaceId: result.value.id,
       minimized: false,
     };
-  }, [createContentSurface, findBrowserSurface, updateSurfaceParams, lath, revealSurface]);
+  }, [createContentSurface, findBrowserSurface, lath, revealSurface]);
 
-
-  // The request handler itself. The window listener that picks WHICH Wall runs it
-  // lives in `dor-control-router.ts`, so exactly one Workspace answers.
   const handleDorControl = useCallback(async (detail: DorControlRequest) => {
     const params = detail.params ?? {};
-    if (booleanParam(params.focus) && booleanParam(params.minimized)) {
+    // Only `--focus` moves focus; the webview's own requests omit it.
+    const focus = booleanParam(params.focus);
+    if (focus && booleanParam(params.minimized)) {
       detail.respond({ ok: false, error: '--focus and --minimize are mutually exclusive' });
       return;
     }
-    // Read at arrival, while `dor` still holds the caller's prompt.
-    const focusFacts: FocusIntentFacts = {
-      focus: params.focus,
-      background: booleanParam(params.minimized) || booleanParam(params.preview),
-      gui: !!detail.gui,
-      typedVerb: detail.surfaceId !== undefined && isPaneOscDriven(detail.surfaceId)
-        ? typedDorVerb(getTerminalPaneState(detail.surfaceId).currentCommand?.rawCommandLine)
-        : null,
-    };
-    const focusIntent = (verb: string): boolean => cliFocusIntent(focusFacts, verb);
 
     // A Workspace being closed takes no new Surfaces: `closeAll` walks its
     // members, and one created behind the walk would ride the Wall's unmount out
@@ -1173,16 +1110,13 @@ export function useDorControl({
 
     // Resolve the split reference surface across listed Surfaces. A minimized
     // reference is valid: the Wall creates the new split as a sibling Door.
-    const resolveSplitTarget = () => {
+    const resolveSplitTarget = (): DorSurface | null => {
       const target = resolvePlacement(resolveListedSurface);
-      if (!target.ok) {
-        detail.respond({ ok: false, error: target.message });
-        return null;
-      }
-      return { target: target.value };
+      if (target.ok) return target.value;
+      detail.respond({ ok: false, error: target.message });
+      return null;
     };
 
-    // The `direction: 'auto'` aspect-ratio split resolution.
     const autoDorDirection = (surface: DorSurface): DorResolvedSplitDirection =>
       nav.hasPane(surface.id) ? dorDirectionForEdge(lath.store.autoEdgeFor(surface.id)) : 'right';
 
@@ -1211,7 +1145,7 @@ export function useDorControl({
       const resolved = resolveSplitTarget();
       if (!resolved) return;
       const direction = directionParam === 'auto'
-        ? autoDorDirection(resolved.target)
+        ? autoDorDirection(resolved)
         : directionParam;
       const argv = stringArrayParam(params.command);
       if (argv?.some(hasShellInputControls)) {
@@ -1227,11 +1161,11 @@ export function useDorControl({
         command,
         direction,
         minimized: booleanParam(params.minimized),
-        reference: resolved.target,
+        reference: resolved,
         // The invoking directory, like `dor ensure`; `--from` only places.
         cwd: stringParam(params.cwd),
-        focusNeutral: !focusIntent('split'),
-        visible: focusIntent('split'),
+        focusNeutral: !focus,
+        visible: focus,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -1339,9 +1273,9 @@ export function useDorControl({
         const openFile = projectEntry ? undefined : historical?.target ?? stringParam(params.file);
         const toolArgs = projectEntry ? [projectEntry.target] : stringArrayParam(params.args) ?? [];
         const opening = openFile !== undefined;
-        const toolFocus = focusIntent(opening ? 'open' : 'tool');
-        // The webview's own requests keep their reveal policy: focus unless quiet.
-        const revealTool = (id: string, quiet = false) => revealSurface(id, { focusNeutral: detail.gui ? quiet : !toolFocus });
+        // The webview's own requests, which alone omit `focus`, focus what they
+        // reveal unless quiet.
+        const revealTool = (id: string, quiet = false) => revealSurface(id, { focusNeutral: params.focus === undefined ? quiet : !focus });
         if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
           detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
           return;
@@ -1408,7 +1342,6 @@ export function useDorControl({
           };
         };
         const findPreviewSlot = () => findSurfaceByParams(isPreviewSlotParams);
-        /** Where a Tool Surface runs: its shell's directory, else its own. */
         const runDirectory = (id: string) =>
           getTerminalPaneState(id).cwd?.path ?? stringParam(lath.getMeta(id)?.params?.cwd) ?? cwd;
         /** Answer with a Tool Surface as it stands: by default the command its
@@ -1557,13 +1490,13 @@ export function useDorControl({
                 upstreamUrl: lookup.upstreamUrl,
               };
               const pending = createSplitSurface({
-                direction: autoDorDirection(pendingTarget.target),
+                direction: autoDorDirection(pendingTarget),
                 minimized: false,
                 // Beside a Door reference too.
                 visible: true,
-                reference: pendingTarget.target,
+                reference: pendingTarget,
                 cwd,
-                focusNeutral: !toolFocus,
+                focusNeutral: !focus,
                 // No shell until a human approves: `createSplitSurface` would
                 // otherwise stage shell opts and, on some paths, spawn the PTY
                 // outright (docs/specs/dor-tool.md -> Trust rule 2).
@@ -1963,18 +1896,18 @@ export function useDorControl({
         const lastPinned = previewSlot.lastPinned.current;
         const pinnedReference = previewSignal && stringParam(params.surface) === undefined && lastPinned
           && nav.hasPane(lastPinned) && isTargetable(lastPinned) ? resolveListedSurface(lastPinned, detail.surfaceId) : null;
-        const toolTarget = pinnedReference?.ok ? { target: pinnedReference.value } : resolveSplitTarget();
+        const toolTarget = pinnedReference?.ok ? pinnedReference.value : resolveSplitTarget();
         if (!toolTarget) return;
         const created = createSplitSurface({
           command,
-          direction: autoDorDirection(toolTarget.target),
+          direction: autoDorDirection(toolTarget),
           minimized: booleanParam(params.minimized),
-          reference: toolTarget.target,
+          reference: toolTarget,
           cwd,
           requireIntegration: true,
-          focusNeutral: !toolFocus,
+          focusNeutral: !focus,
           // A preview slot is meant to be seen, even beside a Door reference.
-          visible: previewSignal !== null || toolFocus,
+          visible: previewSignal !== null || focus,
           leafMeta: toolLeafMeta(toolName ?? command, previewSignal ? { ...toolParams, toolPreview: true } : toolParams),
         });
         if (!created.ok) {
@@ -2046,35 +1979,23 @@ export function useDorControl({
         detail.respond({ ok: false, error: 'cwd is required' });
         return;
       }
-      const focus = focusIntent('ensure');
       const existingId = findSurfaceIdRunningCommand(command, cwd);
       if (existingId) {
         const minimized = focus ? !revealSurface(existingId) : doorsRef.current.some((door) => door.id === existingId);
         // A launch still on its way starts fresh already; only a running command restarts.
-        if (booleanParam(params.restart) && surfaceRunsCommand(getTerminalPaneState(existingId), command, cwd)) {
+        const restart = booleanParam(params.restart) && surfaceRunsCommand(getTerminalPaneState(existingId), command, cwd);
+        if (restart) {
           const restarted = await restartSurfaceInPlace(existingId, command, cwd, detail.signal);
           if (!restarted.ok) {
             detail.respond({ ok: false, error: `surface '${existingId}' ${restarted.message}` });
             return;
           }
-          detail.respond({
-            ok: true,
-            result: {
-              status: 'restarted',
-              commandState: 'running',
-              surfaceId: existingId,
-              command,
-              cwd,
-              minimized,
-            },
-          });
-          return;
         }
         detail.respond({
           ok: true,
           result: {
-            status: 'existing',
-            commandState: observedCommandState(false, existingId, command, cwd),
+            status: restart ? 'restarted' : 'existing',
+            commandState: restart ? 'running' : observedCommandState(false, existingId, command, cwd),
             surfaceId: existingId,
             command,
             cwd,
@@ -2095,12 +2016,12 @@ export function useDorControl({
       }
       const resolved = resolveSplitTarget();
       if (!resolved) return;
-      const direction = autoDorDirection(resolved.target);
+      const direction = autoDorDirection(resolved);
       const result = createSplitSurface({
         command,
         direction,
         minimized: booleanParam(params.minimized),
-        reference: resolved.target,
+        reference: resolved,
         cwd,
         requireIntegration: true,
         focusNeutral: !focus,
@@ -2111,12 +2032,9 @@ export function useDorControl({
         return;
       }
       ensureLaunches.current.set(`${cwd}\0${command}`, result.value.id);
-      // ensure is only useful if the new shell reports OSC 633 — otherwise it
-      // can never be matched or restarted. A non-cmd shell can still lack
-      // integration (misconfigured, exotic); wait for the signal, and if it
-      // never arrives kill the throwaway split and fail cleanly rather than
-      // half-run an untrackable command. typeCommandWhenPromptReady drops the
-      // command in the same case, so nothing executes.
+      // A non-cmd shell can still lack integration (misconfigured, exotic):
+      // wait for the signal, and if it never arrives kill the throwaway split
+      // and fail. typeCommandWhenPromptReady drops the command then too.
       const integrated = await waitForTerminalState(
         result.value.id,
         () => isPaneOscDriven(result.value.id),
@@ -2259,7 +2177,7 @@ export function useDorControl({
       }
       try {
         const result = await moveSurface(target.id, {
-          destination, focus: booleanParam(params.focus),
+          destination, focus,
           dangerouslyDestroyIframePageState: booleanParam(params.dangerouslyDestroyIframePageState),
         });
         detail.respond({ ok: true, result });
@@ -2333,7 +2251,7 @@ export function useDorControl({
         reference: target.value,
         preserveSource: !!detail.helperParentId,
         title: hostPathDisplay(url, true),
-        focusNeutral: !focusIntent('iframe'),
+        focusNeutral: !focus,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -2531,7 +2449,7 @@ export function useDorControl({
             const changed = await browser.viewport(setting.width, setting.height, setting.dpr);
             if (!changed.ok) throw new Error(changed.error ?? 'Could not resize browser viewport');
           } else throw new Error('pane-sync requires a mounted screencast pane');
-          updateSurfaceParams(targetId, { browserViewport: setting });
+          lath.store.updateParams(targetId, { browserViewport: setting });
         }
         const measured = await browser.measure();
         if (!measured.ok && setting) throw new Error(measured.error ?? 'Could not measure browser viewport');
@@ -2543,7 +2461,7 @@ export function useDorControl({
           const stored = (lath.getMeta(targetId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
           if (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync') {
             if (controller) controller.adoptMeasuredViewport(measured.viewport);
-            else updateSurfaceParams(targetId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, measured.viewport) });
+            else lath.store.updateParams(targetId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, measured.viewport) });
           }
         }
         const stored = (lath.getMeta(targetId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
@@ -2625,8 +2543,7 @@ export function useDorControl({
         return;
       }
       const result = ensureBrowserSurface({
-        focus: focusIntent(provider),
-        explicitFocus: params.focus === true,
+        focus,
         provider,
         key,
         session,
@@ -2650,7 +2567,7 @@ export function useDorControl({
         if (observed.ok && observed.viewport && (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync')) {
           const controller = getAgentBrowserSurfaceController(result.surfaceId);
           if (controller) controller.adoptMeasuredViewport(observed.viewport);
-          else updateSurfaceParams(result.surfaceId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, observed.viewport) });
+          else lath.store.updateParams(result.surfaceId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, observed.viewport) });
         }
       }
       // Bound: later commands for the key resolve to this Surface.
@@ -2680,9 +2597,6 @@ export function useDorControl({
       } catch {
         ports = [];
       }
-      // Group every TCP listener into one openable URL per distinct port
-      // (loopback-reachable bind wins localhost; otherwise the bound
-      // LAN/Tailnet address). Shared with the pane context menu's port list.
       const entries = listenerUrlsByPort(ports);
       if (entries.length === 0) {
         detail.respond({ ok: false, error: `surface '${target.id}' is not serving any port` });
@@ -2709,5 +2623,5 @@ export function useDorControl({
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
   }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireProvider, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, lath, nav, answeringWorkspaceId, workspaceScope]);
 
-  return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
+  return { findSurfaceByParams, handleDorControl };
 }

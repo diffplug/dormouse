@@ -844,6 +844,30 @@ describe('enrollOffer', () => {
 });
 
 describe('start', () => {
+  it('sends the enrolled bearer as a header through the default host socket', async () => {
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((resolve) => server.on('listening', resolve));
+    const { port } = server.address() as { port: number };
+    const origin = 'http://127.0.0.1:' + port;
+    const upgrades: Array<{ url?: string; authorization?: string; origin?: string }> = [];
+    server.on('connection', (_socket, request) => upgrades.push({
+      url: request.url, authorization: request.headers.authorization, origin: request.headers.origin,
+    }));
+    try {
+      createService({ enrollment: { ...ENROLLMENT, relayUrl: origin, origin } }, {
+        relay: { origin, mode: 'self-host' }, createWebSocket: undefined,
+      });
+      await service.start();
+      await vi.waitFor(() => expect(upgrades).toEqual([{
+        url: '/ws/burrow', authorization: 'Bearer ' + ENROLLMENT.burrowToken, origin: undefined,
+      }]));
+    } finally {
+      service.dispose();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it('retries a start whose store read failed before answering status', async () => {
     // A store that refuses one read (a locked keychain, a busy file) leaves the
     // enrollment unread, not absent: "not enrolled" would offer an enrollment
@@ -3230,7 +3254,7 @@ describe('network policy', () => {
     createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON }, { createDirectPeer: answererTo('192.168.1.3', handed) });
     await service.start();
     expect(sockets).toHaveLength(1);
-    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow\?/);
+    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow$/);
     expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'connecting' });
     const { createPeer, pathPolicy } = handedTransport.directPeering!;
     expect(pathPolicy).toBeDefined();
@@ -3715,7 +3739,7 @@ describe('Hosted enrollment', () => {
     // Local networks runs the persistent Burrow on the enrollment's own Relay,
     // and polling is over.
     expect(sockets).toHaveLength(1);
-    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow\?/);
+    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow$/);
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
     expect(pollRequests()).toHaveLength(2);
   });

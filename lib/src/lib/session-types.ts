@@ -6,16 +6,12 @@ import type { SessionStatus } from './alert-manager';
 import type { WorkspaceMeta } from './workspace-store';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import type { ToolOrigin } from 'dor/commands/types';
-import {
-  ACTIVITY_NOTIFICATION_SOURCES,
-  type ActivityNotification,
-  type TodoState,
-} from './alert-manager';
+import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification } from './alert-manager';
 
 /** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
 export interface PersistedAlertState {
   status: SessionStatus;
-  todo: TodoState;
+  todo: boolean;
   notification?: ActivityNotification | null;
 }
 

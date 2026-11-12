@@ -1074,7 +1074,8 @@ function decodeBase64(input: string): string | null {
 }
 
 function appendLimited(existing: string, next: string, limit: number): string {
-  return truncateText(`${existing}${next}`, limit);
+  // Keep boundary whitespace until completion: trimming each chunk joins words.
+  return truncateText(`${existing}${next}`.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' '), limit);
 }
 
 const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>0', '\x1b[>', '\x1b[', '\x1b', '\x9b>0', '\x9b>', '\x9b'];

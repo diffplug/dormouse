@@ -67,8 +67,8 @@ dor intercepts exactly three mutually exclusive identity flags:
 
 It also intercepts --workspace <ref>, which is not an identity: it says which
 Workspace of this Window the browser Surface is opened in and which one a
-handle resolves against (workspace:<id> or workspace-name:<name>); and --focus
-(or --focus=true|false), which says whether that Surface takes focus.
+handle resolves against (workspace:<id> or workspace-name:<name>); and --focus,
+which focuses that Surface.
 
 --from <handle> is a placement reference: the Surface a new browser pane
 splits from, whose Workspace a --key resolves in. It places only a browser
@@ -77,8 +77,11 @@ with --surface, which names the existing browser to drive.
 
 dor reads these flags anywhere in the arguments, up to an optional bare --,
 which it forwards unchanged. Everything else, and everything after that --, is
-agent-browser's own command surface: subcommands, flags, selectors. The binary
-is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
+agent-browser's own command surface: subcommands, flags, selectors. Put the --
+after the command, before a value spelled like a dor flag:
+  dor agent-browser fill @e1 -- --focus
+
+The binary is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
 bundled; install it with:
   ${INSTALL_HINT}
 
@@ -93,7 +96,7 @@ After a successful command, dor opens the browser surface bound to the session,
 or reuses the one it already has. A playwright browser (render_mode playwright-*) is
 driven with dor playwright --surface instead.
 
-${focusHelp({ minimize: false, browser: true })}
+${focusHelp({ minimize: false })}
 
 ${browserExitHelp('agent-browser')}
 

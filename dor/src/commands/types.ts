@@ -129,10 +129,10 @@ export interface WorkspaceScopedRequest {
   workspace?: string;
 }
 
-/** A Surface-producing request's `--focus`, present only when given: absent,
- *  the host applies the default (`docs/specs/dor-cli.md` → "Focus intent"). */
+/** A Surface-producing request's `--focus`, always sent: only the webview's
+ *  own requests omit it (`docs/specs/dor-cli.md` → "Focus intent"). */
 export interface FocusIntentRequest {
-  focus?: boolean;
+  focus: boolean;
 }
 
 /** The parsed `--workspace <ref>` flag behind it (`workspaceFlag` in

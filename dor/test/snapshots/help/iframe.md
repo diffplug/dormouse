@@ -15,7 +15,7 @@ A page from another machine opens only from a private network you allow, from it
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
 
-Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error.
+Focuses the created or reused Surface only with --focus; otherwise focus stays where it is. --focus with --minimize is an error.
 
 The target is one of:
   <url>          An absolute http:// URL.
@@ -41,7 +41,7 @@ JSON output:
   }
 
 FLAGS
-     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
+     [--focus]      Focus the created or reused Surface.
      [--json]       Print a JSON result or error object.
      [--minimize]   Create or replace the surface minimized.
      [--from]       Surface to replace or split from.

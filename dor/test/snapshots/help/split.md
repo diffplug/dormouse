@@ -13,11 +13,11 @@ The new terminal starts in the directory where you invoke dor split. --from and 
 
 Use -- followed by a command to run an initial command in the new terminal surface. Only split's own options come before --.
 
-Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error.
+Focuses the created or reused Surface only with --focus; otherwise focus stays where it is. --focus with --minimize is an error.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
---from selects the reference Surface for placement. If it is minimized, the new Surface is created minimized too and inserted immediately to the right of its Door. If --from is omitted, Dormouse uses the caller's Surface, or an auxiliary helper's source Surface. When --workspace selects another Workspace, placement defaults to that Workspace's focused Surface.
+--from selects the reference Surface for placement. If it is minimized, the new Surface is created minimized too and inserted immediately to the right of its Door, unless --focus lays it out from the Door's place instead. If --from is omitted, Dormouse uses the caller's Surface, or an auxiliary helper's source Surface. When --workspace selects another Workspace, placement defaults to that Workspace's focused Surface.
 
 From an auxiliary helper, split creates a separate terminal and leaves the helper in place. Helpers cannot be explicit Surface targets, including surface:self.
 
@@ -45,7 +45,7 @@ JSON output:
 FLAGS
      [--left|--right|--up|--down|--auto]
                   Split direction. Mutually exclusive; default is --auto.
-     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
+     [--focus]      Focus the created or reused Surface.
      [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--from]       Reference Surface for placement.

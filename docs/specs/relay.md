@@ -117,7 +117,7 @@ Paths and shapes are `API_ROUTES` / `WS_ROUTES` and their types in `remote-lib-c
 | `GET /ws/client` | session token | A Client's relay socket |
 | `GET /*` | — | The built Pocket app, registered last; cache policy and SPA fallback: `docs/specs/pocket-app.md` |
 
-The device-code routes `burrowEnrollBegin` / `burrowEnrollPoll` are Hosted's (`docs/specs/hosted.md` -> "Burrow enrollment"); here they 404. The Relay emits no cross-origin grant (`docs/specs/security-remote.md` -> "Cross-origin access"). **WS auth rides the `token` query param**, browsers being unable to set WebSocket headers.
+The device-code routes `burrowEnrollBegin` / `burrowEnrollPoll` are Hosted's (`docs/specs/hosted.md` -> "Burrow enrollment"); here they 404. The Relay emits no cross-origin grant (`docs/specs/security-remote.md` -> "Cross-origin access"). **Must authenticate Burrow sockets with an `Authorization: Bearer` header and reject a `token` query parameter, even beside a valid header.** **Must keep the Burrow credential out of socket URLs on every connection and retry, without a query-token fallback.** Browser Client sockets use the `token` query parameter. **Must update the Relay and desktop together when upgrading from query-authenticated Burrows**; older desktops must be updated before reconnecting to a header-only Relay.
 
 **Every request body is bounded at `MAX_REQUEST_BODY_BYTES` before any route or credential gate runs** (rationale), so a correct credential in an over-long body is still 413. **Only `/api/push/send` is exempt**, at `MAX_PUSH_SEND_BODY_BYTES`, derived from what a maximal fan-out costs.
 

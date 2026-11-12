@@ -21,9 +21,6 @@ export type SessionStatus =
   | 'OSC_NOTIF_BUSY'
   | 'COMMAND_EXIT_ARMED';
 
-/** Boolean TODO state: on (true) or off (false). */
-export type TodoState = boolean;
-
 export const ACTIVITY_NOTIFICATION_SOURCES = ['OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL', 'COMMAND_EXIT', 'WATCHING'] as const;
 export type ActivityNotificationSource = typeof ACTIVITY_NOTIFICATION_SOURCES[number];
 
@@ -94,8 +91,7 @@ interface PendingProgressEnd {
   timer: ReturnType<typeof setTimeout>;
 }
 
-/** A progress title by outcome: after the running command, or on its own
- *  (`docs/specs/alert.md` -> Terminal reports). */
+/** A progress title by outcome: after the running command, or on its own. */
 const PROGRESS_TITLES: Record<ProgressOutcome, { afterCommand: string; alone: string }> = {
   complete: { afterCommand: 'finished', alone: 'Progress complete' },
   warning: { afterCommand: 'finished with a warning', alone: 'Progress warning' },
@@ -195,7 +191,6 @@ export function normalizeActivityNotification(value: unknown): ActivityNotificat
 }
 
 function normalizeNotificationTextField(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
@@ -275,7 +270,7 @@ export interface AlertState {
   status: SessionStatus;
   watchingEnabled: boolean;
   /** Set by a look at a ring or by hand, never by a ring opening. */
-  todo: TodoState;
+  todo: boolean;
   /** The ring's detail while ringing, else the TODO's. */
   notification: ActivityNotification | null;
   /** At least one `dor await` is parked on this Session. Never persisted. */
@@ -310,7 +305,7 @@ interface AlertEntry {
   progress: ActiveProtocolProgress | null;
   commandExitWatch: CommandExitWatch | null;
   pendingCommandLine: string | null;
-  todo: TodoState;
+  todo: boolean;
   /** The TODO's detail: null without one. A ring shows its own instead. */
   notification: ActivityNotification | null;
   /** Completions withheld while engaged, already shown as TODO: rung if the user goes idle or leaves the host (`setViewer`), dropped if focus moves on. */
@@ -345,7 +340,6 @@ export class AlertManager {
    *  marks the id once instead of guarding each call. */
   private helpers = new Set<string>();
 
-  /** Mark (or, on promotion, unmark) a helper Session. */
   setHelper(id: string, helper: boolean): void {
     if (helper) this.helpers.add(id);
     else this.helpers.delete(id);
@@ -401,7 +395,7 @@ export class AlertManager {
     // The command-exit dispatch above already resolved anything waiting on the
     // run that just ended; whatever is still parked is waiting on a Session
     // that no longer exists.
-    this.settleWaiters(id, 'died');
+    this.eachWaiter(id, (waiter) => waiter.die());
   }
 
   /**
@@ -430,13 +424,15 @@ export class AlertManager {
     if (next.size === this.watchedCommands.size && [...next].every((name) => this.watchedCommands.has(name))) return;
     this.watchedCommands = next;
     for (const [id, entry] of this.entries) {
-      this.withdrawUncoveredWatchingRing(entry);
+      // Dropping a rule is an explicit "stop alerting on this": it silences the
+      // `watching` source that rule raised, unless another rule still covers its
+      // key, which the source keeps past command exit for exactly this.
+      this.invalidateWatching(entry, (key) => watchRuleFor(this.watchedCommands, key) === null);
       // WATCHING is derived from the rule set, so every entry may have changed.
       this.notify(id);
     }
   }
 
-  /** Apply one command-rule mutation without replacing unrelated rules. */
   setCommandWatched(name: string, watched: boolean): void {
     const trimmed = name.trim();
     if (!trimmed || this.watchedCommands.has(trimmed) === watched) return;
@@ -446,7 +442,6 @@ export class AlertManager {
     this.setWatchedCommands([...next]);
   }
 
-  /** Sorted snapshot used by hosts that mirror the rule set to renderers. */
   getWatchedCommands(): string[] {
     return [...this.watchedCommands].sort();
   }
@@ -467,16 +462,6 @@ export class AlertManager {
       onChange: () => this.notify(id),
       onSettled: () => this.onSettled(id),
     });
-  }
-
-  /**
-   * Dropping a rule is an explicit "stop alerting on this", so it also silences
-   * the `watching` source that rule raised — unless another rule still covers
-   * it. The source keeps its key after command exit precisely so this still
-   * works at a prompt.
-   */
-  private withdrawUncoveredWatchingRing(entry: AlertEntry): void {
-    this.invalidateWatching(entry, (key) => watchRuleFor(this.watchedCommands, key) === null);
   }
 
   /**
@@ -543,11 +528,8 @@ export class AlertManager {
 
     // A completion inside the echo window answers the keystroke that opened
     // it — a bell on Tab, the exit `Ctrl-C` caused — so it neither rings nor
-    // holds. A cleared progress cycle still publishes (see below).
-    if (this.inEchoWindow(entry)) {
-      this.notify(id);
-      return false;
-    }
+    // holds.
+    if (this.inEchoWindow(entry)) return false;
 
     switch (event.kind) {
       case 'settled': {
@@ -577,9 +559,8 @@ export class AlertManager {
    * The path from a completion that may ring to the ring: a live one and an
    * escalated hold alike. Engaged, it is held — a TODO at once, rung if the
    * user goes idle or leaves the host; otherwise a report goes through the acknowledged-state
-   * check, and anything else rings. Publishes, including a progress cycle
-   * the caller cleared before dispatch. An escalated hold passes `held`, the
-   * arrival it kept.
+   * check, and anything else rings. Publishes. An escalated hold passes
+   * `held`, the arrival it kept.
    */
   private holdOrDeliver(
     id: string,
@@ -592,20 +573,15 @@ export class AlertManager {
     if (this.isEngaged(id)) {
       this.hold(entry, source, detail, arrived);
     } else if (source === 'report' && Date.now() < entry.ackedUntil) {
-      // A hold already put its detail on the TODO, which may have moved on since.
-      if (held === undefined) this.updateReceipt(entry, detail);
+      // A receipt: a report about the state the user just acknowledged never
+      // summons, and only enriches a TODO still on, so one the user cleared
+      // stays cleared. A hold already put its detail on the TODO, which may
+      // have moved on since.
+      if (held === undefined && entry.todo) entry.notification = richer(entry.notification, detail);
     } else {
       this.raiseRing(entry, source, detail, arrived);
     }
     this.notify(id);
-  }
-
-  /**
-   * A report about the state the user just acknowledged: it never summons, and
-   * only enriches a TODO still on, so one the user cleared stays cleared.
-   */
-  private updateReceipt(entry: AlertEntry, detail: ActivityNotification): void {
-    if (entry.todo) entry.notification = richer(entry.notification, detail);
   }
 
   // --- Await ---
@@ -621,11 +597,7 @@ export class AlertManager {
    * no TODO and clears none.
    */
   awaitCompletion(id: string, options: AwaitOptions): AwaitHandle {
-    if (this.inert(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
-    // The ceiling starts life as a CLI argument a process away and ends up in
-    // `setTimeout`, so nonsense is rejected here rather than trusted from one
-    // caller away. A rejected request settles `cancelled` — it absorbs nothing
-    // and parks nothing.
+    if (this.helpers.has(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
     if (
       !Number.isFinite(options.timeoutMs)
       || options.timeoutMs <= 0
@@ -641,7 +613,8 @@ export class AlertManager {
     const entry = this.getOrCreateEntry(id);
     const startedAt = Date.now();
 
-    const ringingCause = this.consumeAwaitableRing(entry, options.until);
+    const ringingCause = this.consumeAwaitableSource(entry, 'ring', options.until)
+      ?? this.consumeAwaitableSource(entry, 'held', options.until);
     if (ringingCause !== null) {
       this.notify(id);
       return settledAwait({ kind: 'resolved', cause: ringingCause, waitedMs: 0 });
@@ -652,23 +625,14 @@ export class AlertManager {
     const promise = new Promise<AwaitOutcome>((resolve) => {
       resolveOutcome = resolve;
     });
-    let graceTimer: ReturnType<typeof setTimeout> | null = null;
-    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const clearGrace = (): void => {
-      if (graceTimer === null) return;
-      clearTimeout(graceTimer);
-      graceTimer = null;
-    };
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
     const settle = (outcome: AwaitOutcome): void => {
       if (settled) return;
       settled = true;
-      clearGrace();
-      if (timeoutTimer !== null) {
-        clearTimeout(timeoutTimer);
-        timeoutTimer = null;
-      }
+      clearTimeout(graceTimer);
+      clearTimeout(timeoutTimer);
       this.dropWaiter(id, waiter);
       resolveOutcome(outcome);
       // `awaited` may have just gone false.
@@ -683,15 +647,11 @@ export class AlertManager {
         return true;
       },
       onOutput: () => {
-        if (options.until === 'quiet') clearGrace();
+        if (options.until === 'quiet') clearTimeout(graceTimer);
       },
-      // A foreground command is the strongest possible answer to "is there
-      // anything to wait for", so it cancels the grace window under *either*
-      // condition. Under `quiet` the window's usual test is output, but a
-      // command that starts silently is still running — resolving `idle`
-      // ("nothing was running") on it would contradict the rule right above,
-      // which parks with no grace window whenever `commandExitWatch` is set.
-      onCommandStart: () => clearGrace(),
+      // Under either condition: a command that starts silently is still
+      // running, so `idle` ("nothing was running") would be wrong.
+      onCommandStart: () => clearTimeout(graceTimer),
       die: () => settle({ kind: 'died', waitedMs: Date.now() - startedAt }),
       cancel: () => settle({ kind: 'cancelled', waitedMs: Date.now() - startedAt }),
     };
@@ -703,13 +663,11 @@ export class AlertManager {
     // doing something, and call it `idle` if nothing arrives.
     if (entry.commandExitWatch === null) {
       graceTimer = setTimeout(() => {
-        graceTimer = null;
         settle({ kind: 'resolved', cause: 'idle', waitedMs: Date.now() - startedAt });
       }, AWAIT_GRACE_MS);
     }
 
     timeoutTimer = setTimeout(() => {
-      timeoutTimer = null;
       settle({ kind: 'timeout', waitedMs: Date.now() - startedAt });
     }, options.timeoutMs);
 
@@ -718,18 +676,14 @@ export class AlertManager {
   }
 
   /**
-   * Consume the source an await arriving right now would resolve on, if any:
-   * from the ring, else from a hold, so a completion the user happened to be
-   * looking at answers a program the same as one nobody saw. Only that source
-   * is withdrawn. Gated because a latch outlives the fact a source describes
-   * (`docs/specs/alert.md` -> Await, rationale): `exit` only with nothing
-   * running, `watching` only with no output since it joined, a report always.
+   * Consume the source an await arriving right now would resolve on from one
+   * latch, if any: the ring first, else a hold, so a completion the user
+   * happened to be looking at answers a program the same as one nobody saw.
+   * Only that source is withdrawn. Gated because a latch outlives the fact a
+   * source describes (`docs/specs/alert.md` -> Await, rationale): `exit` only
+   * with nothing running, `watching` only with no output since it joined, a
+   * report always.
    */
-  private consumeAwaitableRing(entry: AlertEntry, until: AwaitUntil): AwaitCause | null {
-    return this.consumeAwaitableSource(entry, 'ring', until)
-      ?? this.consumeAwaitableSource(entry, 'held', until);
-  }
-
   private consumeAwaitableSource(entry: AlertEntry, latch: 'ring' | 'held', until: AwaitUntil): AwaitCause | null {
     if (until === 'quiet' && this.withdrawRingSource(entry, 'report', latch)) return 'bell';
     if (entry.commandExitWatch === null && this.withdrawRingSource(entry, 'exit', latch)) return 'exit';
@@ -778,14 +732,10 @@ export class AlertManager {
     for (const waiter of [...group.waiters]) visit(waiter);
   }
 
-  private settleWaiters(id: string, how: 'died' | 'cancelled'): void {
-    this.eachWaiter(id, (waiter) => (how === 'died' ? waiter.die() : waiter.cancel()));
-  }
-
   // --- Terminal reports ---
 
   notifyFromProtocol(id: string, notification: ActivityNotification): void {
-    if (this.inert(id)) return;
+    if (this.helpers.has(id)) return;
     const entry = this.streamEntry(id);
     if (!entry) return;
     const normalized = normalizeActivityNotification(notification);
@@ -796,7 +746,7 @@ export class AlertManager {
 
   /** `OSC 9;4`: active updates move the cycle; its end is a report completion. */
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
-    if (this.inert(id)) return;
+    if (this.helpers.has(id)) return;
     const entry = this.streamEntry(id);
     if (!entry) return;
     const { progress: live } = entry;
@@ -845,7 +795,7 @@ export class AlertManager {
     // The end completed the turn, so a turn ending mid-run must not settle
     // again five seconds later.
     this.endRun(entry);
-    const claimed = this.dispatchCompletion(id, entry, {
+    this.dispatchCompletion(id, entry, {
       kind: 'notification',
       notification: {
         source: 'OSC 9;4',
@@ -853,9 +803,6 @@ export class AlertManager {
         body: end.percent === null ? null : `Progress ${Math.round(end.percent)}%`,
       },
     });
-    // Clearing the cycle is publicly visible (`OSC_NOTIF_BUSY` falls back); the
-    // ring rules publish it themselves, a claim stops before they run.
-    if (claimed) this.notify(id);
   }
 
   // --- Command-exit ---
@@ -920,8 +867,7 @@ export class AlertManager {
     entry: AlertEntry,
     exitCode: number | undefined,
   ): boolean {
-    // Covers commandFinish, promptStart/End, and PTY exit.
-    const endedProgress = this.endRunAtBoundary(id, entry);
+    this.endRunAtBoundary(id, entry);
     const watch = entry.commandExitWatch;
     entry.commandExitWatch = null;
     entry.pendingCommandLine = null;
@@ -940,7 +886,7 @@ export class AlertManager {
     // Clearing the watch turns WATCHING off, which flips `watchingEnabled` and
     // the status even when command-exit never armed, so subscribers must hear
     // about any finish — `notify` dedupes if nothing is visible.
-    return watch !== null || endedProgress;
+    return watch !== null;
   }
 
   /**
@@ -1034,13 +980,10 @@ export class AlertManager {
   /**
    * A command boundary. A pending end counts first, under the command it ended:
    * the program said it was done and has now stopped, so that end was real.
-   * Returns whether it ended a cycle silently, which the caller must publish.
    */
-  private endRunAtBoundary(id: string, entry: AlertEntry): boolean {
+  private endRunAtBoundary(id: string, entry: AlertEntry): void {
     this.settleProgressEnd(id, entry);
-    const silent = entry.progress !== null;
     this.endRun(entry);
-    return silent;
   }
 
   /** Stop everything that could still fire for an entry on its way out. */
@@ -1082,7 +1025,7 @@ export class AlertManager {
 
     for (const { id, was } of touched) {
       const entry = this.entries.get(id);
-      if (!entry || this.inert(id) || this.isEngaged(id) === was) continue;
+      if (!entry || this.helpers.has(id) || this.isEngaged(id) === was) continue;
       if (!was) {
         this.endLeaveGrace(entry);
         this.markSeen(entry);
@@ -1105,7 +1048,6 @@ export class AlertManager {
     this.setViewer(viewerId, { present: false, focusId: null }, 'leave');
   }
 
-  /** Every present viewer. An absent one engages nothing, so it is not kept. */
   viewerIds(): string[] {
     return [...this.viewers.keys()];
   }
@@ -1204,21 +1146,21 @@ export class AlertManager {
   // --- Todo controls ---
 
   toggleTodo(id: string): void {
-    if (this.inert(id)) return;
+    if (this.helpers.has(id)) return;
     const entry = this.streamEntry(id);
     if (!entry) return;
     this.setTodoForUser(id, entry, !entry.todo);
   }
 
   clearTodo(id: string): void {
-    if (this.inert(id)) return;
+    if (this.helpers.has(id)) return;
     const entry = this.streamEntry(id);
     if (entry) this.setTodoForUser(id, entry, false);
   }
 
   /** A TODO verb: the ring goes, on keeps the ring's detail, and off drops the
    *  notification. `notify` dedupes unchanged state. */
-  private setTodoForUser(id: string, entry: AlertEntry, todo: TodoState): void {
+  private setTodoForUser(id: string, entry: AlertEntry, todo: boolean): void {
     const ring = this.clearRingForUser(entry);
     if (todo) this.ringToTodo(entry, ring);
     entry.todo = todo;
@@ -1271,7 +1213,6 @@ export class AlertManager {
     this.notify(id);
   }
 
-  /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
     this.discard(id);
     for (const listener of this.removeListeners) listener(id);
@@ -1290,7 +1231,7 @@ export class AlertManager {
   private discard(id: string): void {
     this.removed.add(id);
     // Nobody parked here has anything left to wait for.
-    this.settleWaiters(id, 'died');
+    this.eachWaiter(id, (waiter) => waiter.die());
     // Claimants go with the Session, entry or not — a dead Session dispatches
     // nothing, so holding their closures would only leak them.
     this.claimants.delete(id);
@@ -1312,7 +1253,7 @@ export class AlertManager {
    * never resurrect a ring or an in-flight progress cycle.
    */
   seed(id: string, state: { todo: unknown; notification?: unknown }): void {
-    if (this.inert(id)) return;
+    if (this.helpers.has(id)) return;
     const entry = this.getOrCreateEntry(id);
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
@@ -1325,16 +1266,10 @@ export class AlertManager {
     this.notify(id);
   }
 
-  /** Whether `id` drops reports, controls and awaits: a helper. The output and
-   *  command-state feeds, which a helper keeps, never check it. */
-  private inert(id: string): boolean {
-    return this.helpers.has(id);
-  }
-
   dispose(): void {
     // Settled first, while listeners are still attached: a parked caller that
     // never hears an outcome absorbed a completion it never delivered.
-    for (const id of [...this.awaits.keys()]) this.settleWaiters(id, 'cancelled');
+    for (const id of [...this.awaits.keys()]) this.eachWaiter(id, (waiter) => waiter.cancel());
     for (const entry of this.entries.values()) {
       this.disposeEntry(entry);
     }

@@ -27,12 +27,24 @@ for (const source of [
   '+++\ntitle = "x"\n+++\n',
   '## Tight\nbody\n\n## Loose\n\nbody\n',
   '## First\n## Second\nbody\n',
+  '## A *b*\nbody\n\n## C\n\nbody\n\n## D\n\nbody\n',
+  '## `x` y\nbody\n\n## C\n\nbody\n\n## D\n\nbody\n',
+  '## See [the *docs*](/d) and ![a logo](/l.png)\nbody\n\n## C\n\nbody\n\n## D\n\nbody\n',
   'Claim.[^1]\n\n[^1]: The source of the claim.\n',
 ]) {
   test(`preserves issue 1254 formatting: ${JSON.stringify(source)}`, () => {
     assert.equal(roundtrip(source), source);
   });
 }
+
+test('a tight heading stays tight when the serializer rewrites its syntax', () => {
+  // The stock serializer drops an ATX closing sequence and a needless escape;
+  // the heading's own spacing must still survive against a loose majority.
+  for (const [source, heading] of [['## A ##', '## A'], ['## Issue \\#1', '## Issue #1']]) {
+    const saved = roundtrip(`${source}\nbody\n\n## C\n\nbody\n\n## D\n\nbody\n`);
+    assert.equal(saved, `${heading}\nbody\n\n## C\n\nbody\n\n## D\n\nbody\n`);
+  }
+});
 
 test('a real edit keeps surrounding labels, entities, and heading spacing', () => {
   const source = '## [Unreleased]\nold &lt;your relay>\n\n## [1.3.0] - 2026-10-20\n\nprevious\n';

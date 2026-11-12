@@ -200,7 +200,7 @@ test('dor o picks a file, shows why its handler opens it, and opens another hand
     assert.equal(stdout, 'created surface:9  [unconfirmed]  "viewer docs/README.md"\n');
     assert.deepEqual(client.requests.find(r => r.method === 'openHandlers').request, { target: 'docs/README.md', cwd: dir });
     assert.deepEqual(client.requests.find(r => r.method === 'toolSurface').request, {
-      file: 'docs/README.md', tool: 'builtin:code', fresh: false, minimized: false, surface: undefined, cwd: dir,
+      file: 'docs/README.md', tool: 'builtin:code', fresh: false, minimized: false, focus: false, surface: undefined, cwd: dir,
     });
     assert.equal(terminal.listening, false);
     assert.ok(terminal.output.endsWith('\x1b[?1049l'), 'leaves the alternate screen');

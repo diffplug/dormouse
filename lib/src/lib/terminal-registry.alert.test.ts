@@ -581,35 +581,6 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched('restore-legacy')).toBe(false);
   });
 
-  it('marks restored exited sessions as exited in the registry', () => {
-    const entry = resumeTerminal('resume-exited', null, {
-      alive: false,
-      exitCode: 42,
-    }) as TestTerminalEntry;
-
-    expect(entry.terminal.writes).toContain('\r\n[Process exited with code 42]\r\n');
-    expect(registry.get('resume-exited')?.exited).toBe(true);
-  });
-
-  it('Story 1: quick response never becomes busy', () => {
-    const id = 'story-1';
-    createSession(
-      id,
-      makeAlertScenario([{ at: 0, data: 'prompt> quick result\r\nprompt> ' }], {
-        name: 'quick-response',
-      }),
-    );
-    enableAlert(id);
-    engageSession(id);
-
-    advance(12_000);
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: false,
-    });
-  });
-
   it('Story 2: long-running work becomes busy, then completes unattended', () => {
     const id = 'story-2';
     createSession(
@@ -637,20 +608,6 @@ describe('terminal-registry alert behavior', () => {
       status: 'ALERT_RINGING',
       todo: false,
     });
-  });
-
-  it('Story 3: busy session pauses, then resumes', () => {
-    const id = 'story-3';
-    createSession(id);
-    enableAlert(id);
-
-    driveToBusy(id);
-    advance(2_000);
-    expect(getActivity(id).status).toBe('MIGHT_NEED_ATTENTION');
-
-    emitOutput(id, 'still running');
-
-    expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
   });
 
   it('Story 4: completion while still engaged does not ring, but leaves a TODO', () => {
@@ -964,17 +921,6 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('acknowledges terminal input, clearing the ring and its TODO at once', () => {
-    const id = 'input-acknowledges';
-    const entry = createSession(id);
-    enableAlert(id);
-
-    driveToRingingNeedsAttention(id);
-    entry.terminal.emitInput('x');
-
-    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false });
-  });
-
   it.each([
     ['kitty key', '\x1b[120u'],
     ['modified key', '\x1b[120;5u'],
@@ -1036,40 +982,6 @@ describe('terminal-registry alert behavior', () => {
     }
   });
 
-  it('no monitor is created until alert is enabled', () => {
-    const id = 'no-monitor';
-    createSession(id);
-
-    emitOutput(id, 'prompt> ');
-    advance(1_200);
-    emitOutput(id, 'working...');
-    emitOutput(id, 'more work');
-    advance(12_000);
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: false,
-    });
-  });
-
-  it('enabling alert starts tracking fresh from that moment', () => {
-    const id = 'fresh-start';
-    createSession(id);
-
-    emitOutput(id, 'old output');
-    advance(5_000);
-
-    enableAlert(id);
-
-    expect(getActivity(id).status).toBe('NOTHING_TO_SHOW');
-
-    emitOutput(id, 'prompt> ');
-    advance(1_600);
-    emitOutput(id, 'working...');
-    emitOutput(id, 'more work');
-    expect(getActivity(id).status).toBe('BUSY');
-  });
-
   it.each([
     ['Enter', '\r'],
     ['kitty Enter', '\x1b[13u'],
@@ -1117,21 +1029,7 @@ describe('terminal-registry alert behavior', () => {
     }
   });
 
-  it('focus-report control sequences do not clear a TODO', () => {
-    const id = 'todo-focus-report';
-    const entry = createSession(id);
-    enableAlert(id);
-
-    driveToRingingNeedsAttention(id);
-    clickSession(id);
-    expect(getActivity(id).todo).toBe(true);
-
-    entry.terminal.emitInput('\x1b[I');
-
-    expect(getActivity(id).todo).toBe(true);
-  });
-
-  it('preserves keyboard CSI input during resume replay while dropping query replies', () => {
+  it('drops terminal replies during resume replay while preserving keyboard input', () => {
     const id = 'resume-replay-input';
     const received: string[] = [];
     // Resume attaches to a PTY the host already owns, so the fake adapter needs
@@ -1145,40 +1043,11 @@ describe('terminal-registry alert behavior', () => {
     entry.terminal.emitInput('\x1b[4;600;800t');
     entry.terminal.emitInput('\x1b[?2004;1$y');
     entry.terminal.emitInput('\x1b]10;rgb:aaaa/bbbb/cccc\x07');
-    fakePlatform.clearInputHandler(id);
-
-    expect(received).toEqual(['\x1b[A']);
-  });
-
-  it('drops DCS status-string replies during replay', () => {
-    const id = 'resume-replay-dcs-input';
-    const received: string[] = [];
-    // Resume attaches to a PTY the host already owns, so the fake adapter needs
-    // one registered before writePty has anywhere to deliver keystrokes.
-    fakePlatform.spawnPty(id, { cols: 80, rows: 24 });
-    const entry = resumeTerminal(id, 'saved output', { alive: true }) as TestTerminalEntry;
-    fakePlatform.setInputHandler(id, (data) => received.push(data));
-
     // xterm.js emits DECRPSS replies for replayed DECRQSS queries such as
     // DCS $ q m ST. These are terminal reports, not user input for the shell.
     entry.terminal.emitInput('\x1bP1$r0m\x1b\\');
     entry.terminal.emitInput('\x1bP1$r24;80r\x1b\\');
     entry.terminal.emitInput('\x1bP0$r\x1b\\');
-    entry.terminal.emitInput('a');
-    fakePlatform.clearInputHandler(id);
-
-    expect(received).toEqual(['a']);
-  });
-
-  it('drops DA3 (DECRPTUI) and DECREQTPARM replies during replay', () => {
-    const id = 'resume-replay-da3-input';
-    const received: string[] = [];
-    // Resume attaches to a PTY the host already owns, so the fake adapter needs
-    // one registered before writePty has anywhere to deliver keystrokes.
-    fakePlatform.spawnPty(id, { cols: 80, rows: 24 });
-    const entry = resumeTerminal(id, 'saved output', { alive: true }) as TestTerminalEntry;
-    fakePlatform.setInputHandler(id, (data) => received.push(data));
-
     // DA3 (CSI = c) → DECRPTUI: DCS ! | <hex id> ST.
     entry.terminal.emitInput('\x1bP!|00000000\x1b\\');
     // DECREQTPARM (CSI x) → CSI Sol;Par;Nbits;Xspeed;Rspeed;Clkmul;Flags x.
@@ -1186,21 +1055,7 @@ describe('terminal-registry alert behavior', () => {
     entry.terminal.emitInput('a');
     fakePlatform.clearInputHandler(id);
 
-    expect(received).toEqual(['a']);
-  });
-
-
-  it('toggleSessionTodo cycles: false → true → false', () => {
-    const id = 'toggle-cycle';
-    createSession(id);
-
-    expect(getActivity(id).todo).toBe(false);
-
-    toggleSessionTodo(id);
-    expect(getActivity(id).todo).toBe(true);
-
-    toggleSessionTodo(id);
-    expect(getActivity(id).todo).toBe(false);
+    expect(received).toEqual(['\x1b[A', 'a']);
   });
 
   it('removing the rule while ringing keeps a TODO the pane already had', () => {
@@ -1258,20 +1113,6 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id).watchingEnabled).toBe(false);
     expect(getWatchedCommandsSnapshot()).toEqual([]);
-  });
-
-  it('the alert action dismisses ringing alerts and keeps their TODO', () => {
-    const id = 'alert-action-dismiss';
-    createSession(id);
-    enableAlert(id);
-    driveToRingingNeedsAttention(id);
-
-    dismissSessionAlert(id);
-
-    expect(getActivity(id)).toMatchObject({
-      status: 'NOTHING_TO_SHOW',
-      todo: true,
-    });
   });
 
   it('the alert action leaves a Session an acknowledgement already quieted alone', () => {

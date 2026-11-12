@@ -27,7 +27,7 @@ import type {
   ControlClient,
   ParseResult,
 } from './types.js';
-import { BROWSER_UNBOUND_EXIT, callerWorkingDirectory, errorMessage, fail, focusParam, requireControlClient, workspaceParam, workspaceRefParser } from './shared.js';
+import { BROWSER_UNBOUND_EXIT, callerWorkingDirectory, errorMessage, fail, requireControlClient, workspaceParam, workspaceRefParser } from './shared.js';
 import { inferredHttpUrl, isSpecialOpenTarget, isSurfaceOpenTarget, resolveSurfaceOpenTarget } from './open-target.js';
 import { callerWslDistro, linuxPathText, windowsPathArgs, type PathArgs } from './wsl-paths.js';
 
@@ -120,7 +120,7 @@ export function extractSessionFlags(
     try { workspaceRefParser(workspaceValue); }
     catch (error) { return { ok: false, message: errorMessage(error) }; }
   }
-  const workspace = { ...workspaceParam(values.get('--workspace')), ...(values.has('--from') ? { from: values.get('--from')! } : {}), ...focusParam(focus) };
+  const workspace = { ...workspaceParam(values.get('--workspace')), ...(values.has('--from') ? { from: values.get('--from')! } : {}), ...(focus === undefined ? {} : { focus }) };
 
   const surface = values.get('--surface');
   if (surface !== undefined && values.has('--from')) return { ok: false, message: '--from and --surface are mutually exclusive' };
@@ -429,6 +429,13 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   if (!parsed.ok) return fail(parsed.message);
   const flags = parsed.value;
 
+  // A `--` before the provider's command hides that command from dor, so no
+  // pane would bind (playwright-cli accepts the `--`; agent-browser refuses it).
+  const delimiter = flags.rest.indexOf('--');
+  if (delimiter >= 0 && firstPositional(d.provider, flags.rest.slice(0, delimiter)) === undefined) {
+    return fail(`put -- after the ${d.provider} command, before the values it protects: dor ${d.provider} fill ${d.provider === 'playwright' ? 'e1' : '@e1'} -- --focus`);
+  }
+
   if (flags.rest[0] === 'dor-embed-size') return runEmbedSize(d.provider, flags, options);
   if (flags.rest[0] === 'dor-diagnostics') return runDiagnostics(d.provider, flags, options);
 
@@ -558,7 +565,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       if (blank.exitCode !== 0) return fail(`Could not prepare the playwright viewport before navigation: ${blank.stderr.trim() || `playwright exited ${blank.exitCode}`}`);
       const preparedSurface = await client.browserSurface({
         ...(flags.from !== undefined ? { from: flags.from } : {}),
-        ...focusParam(flags.focus),
+        focus: flags.focus === true,
         provider: d.provider, key: flags.key, ...surfaceParam(flags.surface), session: binding.session, cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}), ...(fresh && initialViewport ? { initialViewport } : {}),
         ...workspaceParam(flags.workspace),
@@ -601,7 +608,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...nativeLaunchOptions])).stdout);
       await client.browserSurface({
         ...(flags.from !== undefined ? { from: flags.from } : {}),
-        ...focusParam(flags.focus),
+        focus: flags.focus === true,
         provider: d.provider,
         key: flags.key,
         ...surfaceParam(flags.surface),

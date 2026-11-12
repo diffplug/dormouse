@@ -8,6 +8,7 @@ import {
   WS_ROUTES,
   WS_TOKEN_PARAM,
   isRelayBearer,
+  parseBearer,
 } from "remote-lib-common";
 import type { RelayEnv } from "./bindings";
 import { burrowByToken, sessionByToken, type Client } from "./relay-auth";
@@ -27,7 +28,9 @@ export function relaySocketRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     // handshake, so refusing any keeps web pages off the Burrow socket.
     if (c.req.raw.headers.has("origin")) return c.json({ error: "forbidden" }, 403);
     if (!isUpgrade(c)) return upgradeRequired(c, "error");
-    const burrow = await lookup(c, burrowByToken);
+    const token = c.req.query(WS_TOKEN_PARAM) === undefined
+      ? parseBearer(c.req.header("Authorization")) : null;
+    const burrow = await lookup(c, burrowByToken, token);
     if (!burrow) return c.json({ error: UNKNOWN_BURROW_TOKEN_ERROR }, 401);
     if (!burrow.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
     return forward(c, WS_ROUTES.burrow, burrow.userId, {
@@ -42,7 +45,7 @@ export function relaySocketRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     if (!isUpgrade(c)) return upgradeRequired(c, "error");
     // An expired, unknown, or de-entitled session is one 401, which Pocket's
     // probe of `GET /api/burrows` then reads as expiry.
-    const session = await lookup(c, sessionByToken);
+    const session = await lookup(c, sessionByToken, c.req.query(WS_TOKEN_PARAM));
     if (!session?.entitled) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
     return forward(c, WS_ROUTES.client, session.userId, {
       [RELAY_ROOM_PARAMS.expiresAt]: String(session.expiresAt),
@@ -51,12 +54,12 @@ export function relaySocketRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   });
 }
 
-/** What the token query parameter names, refused by shape before any database read. */
+/** The route's bearer, refused by shape before any database read. */
 async function lookup<Found>(
   c: SocketContext,
   find: (db: Client, token: string) => Promise<Found | null>,
+  token: string | null | undefined,
 ): Promise<Found | null> {
-  const token = c.req.query(WS_TOKEN_PARAM);
   if (!isRelayBearer(token)) return null;
   return withClient(c.env.HYPERDRIVE.connectionString, (db: Client) => find(db, token));
 }

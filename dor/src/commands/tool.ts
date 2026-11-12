@@ -18,7 +18,6 @@ import {
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
-  focusParam,
   pickerCancelled,
   renderPrintableJson,
   requireControlClient,
@@ -239,7 +238,7 @@ function launchPlacement(context: DorCommandContext, flags: ToolFlags) {
     ...workspaceParam(flags.workspace),
     fresh: flags.fresh === true,
     minimized: flags.minimize === true,
-    ...focusParam(flags.focus),
+    focus: flags.focus === true,
     surface: flags.from,
     cwd,
   };

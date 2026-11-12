@@ -40,6 +40,32 @@ describe('parked focus', () => {
     expect(parkedFocusHolder(isParked)).toBeNull();
   });
 
+  it('names a focused element inside a hidden Workspace, parked or not', () => {
+    const hidden = document.body.appendChild(document.createElement('div'));
+    hidden.dataset.workspaceActive = 'false';
+    const frame = hidden.appendChild(document.createElement('iframe'));
+    frame.focus();
+    expect(parkedFocusHolder(isParked)).toBe(frame);
+    hidden.dataset.workspaceActive = 'true';
+    expect(parkedFocusHolder(isParked)).toBeNull();
+  });
+
+  it('takes focus out of a frame in a hidden Workspace on its poll', () => {
+    const refocus = vi.fn();
+    const hidden = document.body.appendChild(document.createElement('div'));
+    hidden.dataset.workspaceActive = 'false';
+    const frame = hidden.appendChild(document.createElement('iframe'));
+    const stop = watchParkedFocus(isParked, refocus);
+    try {
+      frame.focus();
+      vi.advanceTimersByTime(PARKED_FOCUS_POLL_MS);
+      expect(document.activeElement).toBe(document.body);
+      expect(refocus).toHaveBeenCalledOnce();
+    } finally {
+      stop();
+    }
+  });
+
   it('takes focus out of a parked frame one task after the window blurs, never inside the handler', () => {
     const refocus = vi.fn();
     const stop = watchParkedFocus(isParked, refocus);

@@ -12,7 +12,6 @@ import {
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
-  focusParam,
   renderJson,
   requireControlClient,
   stringParser,
@@ -108,7 +107,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
   try {
     const response = await client.iframeSurface({
       minimized: flags.minimize === true,
-      ...focusParam(flags.focus),
+      focus: flags.focus === true,
       surface: flags.from,
       url,
       ...workspaceParam(flags.workspace),

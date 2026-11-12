@@ -493,18 +493,19 @@ test('split sends command argv to the host', async () => {
       direction: 'auto',
       cwd: process.cwd(),
       minimized: false,
+      focus: false,
       surface: undefined,
     },
   }]);
 });
 
-test('Surface-producing commands send focus only when --focus is given', async () => {
+test('Surface-producing commands always send focus, true only with --focus', async () => {
   for (const args of [['split'], ['split', '--'], ['split', '--', 'echo', 'hi'], ['ensure', '--', 'echo', 'hi'], ['iframe', ':5173'], ['tool', '--', 'echo'], ['open', 'a.md']]) {
-    // Absent, the host applies its typed-at-a-prompt default.
+    // Absent, it is sent false: only the webview's own requests omit it.
     const unstated = fixtureClient();
     const result = await runCli(args, { client: unstated });
     assert.equal(result.exitCode, 0, JSON.stringify(result));
-    assert.equal('focus' in unstated.requests.at(-1).request, false, args.join(' '));
+    assert.equal(unstated.requests.at(-1).request.focus, false, args.join(' '));
     for (const [flag, focus] of [['--focus', true], ['--focus=true', true], ['--focus=false', false]]) {
       const stated = fixtureClient();
       const statedResult = await runCli([args[0], flag, ...args.slice(1)], { client: stated });
@@ -554,6 +555,7 @@ test('ensure sends command argv and caller cwd to the host', async () => {
     request: {
       command: ['pnpm', 'dev'],
       minimized: false,
+      focus: false,
       restart: false,
       surface: undefined,
       cwd: '/work/site',
@@ -1126,6 +1128,7 @@ test('iframe sends request to the host', async () => {
     method: 'iframeSurface',
     request: {
       minimized: true,
+      focus: false,
       surface: undefined,
       url: 'https://example.com/docs?x=1',
     },
@@ -1151,7 +1154,7 @@ test('iframe resolves a surface handle to its dev-server URL', async () => {
   // The handle is resolved to a URL, then the iframe surface is created with it.
   assert.deepEqual(client.requests, [
     { method: 'resolveOpenTarget', request: { surface: 'surface:1' } },
-    { method: 'iframeSurface', request: { minimized: false, surface: undefined, url: 'http://localhost:5173/' } },
+    { method: 'iframeSurface', request: { focus: false, minimized: false, surface: undefined, url: 'http://localhost:5173/' } },
   ]);
 });
 
@@ -1159,7 +1162,7 @@ test('iframe sugars a bare :port to a localhost URL without a host round trip', 
   const client = fixtureClient();
   await runCli(['iframe', ':5173'], { client });
   assert.deepEqual(client.requests, [
-    { method: 'iframeSurface', request: { minimized: false, surface: undefined, url: 'http://localhost:5173/' } },
+    { method: 'iframeSurface', request: { focus: false, minimized: false, surface: undefined, url: 'http://localhost:5173/' } },
   ]);
 });
 
@@ -1172,7 +1175,7 @@ test('iframe defaults a schemeless host:port to http (localhost, LAN, Tailnet)',
     const client = fixtureClient();
     await runCli(['iframe', target], { client });
     assert.deepEqual(client.requests, [
-      { method: 'iframeSurface', request: { minimized: false, surface: undefined, url } },
+      { method: 'iframeSurface', request: { focus: false, minimized: false, surface: undefined, url } },
     ]);
   }
 });
@@ -1200,7 +1203,7 @@ test('agent-browser passthrough output', async () => {
 
 test('browser --focus belongs to dor anywhere before --, and is not forwarded to the provider', async () => {
   for (const [argv, focus] of [
-    [['open', ':5173'], undefined],
+    [['open', ':5173'], false],
     [['--focus', 'open', ':5173'], true],
     [['open', ':5173', '--focus'], true],
     [['open', ':5173', '--focus=true'], true],
@@ -1216,7 +1219,7 @@ test('browser --focus belongs to dor anywhere before --, and is not forwarded to
   // After a bare --, it is the provider's.
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['agent-browser', '--', 'fill', '#q', '--focus'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', 'fill', '#q', '--', '--focus'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls.some(args => args.includes('--focus')), true);
   for (const argv of [['--focus=yes', 'open', ':5173'], ['--focus', 'open', ':5173', '--focus=false']]) {
     const refused = await runCli(['agent-browser', ...argv], { client: fixtureClient(), execAgentBrowser: fakeAgentBrowser().exec });
@@ -1238,7 +1241,7 @@ test('agent-browser resolves --key to a namespaced session and opens a surface',
     // The host names the session, because only the Workspace that will hold the
     // browser can namespace a key.
     { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'storybook', proposed: proposedHere } },
-    { method: 'browserSurface', request: { provider: 'agent-browser', key: 'storybook', session: 'dormouse.1.storybook', cwd: process.cwd(), wsPort: 61141 } },
+    { method: 'browserSurface', request: { focus: false, provider: 'agent-browser', key: 'storybook', session: 'dormouse.1.storybook', cwd: process.cwd(), wsPort: 61141 } },
   ]);
 });
 
@@ -1257,7 +1260,7 @@ test('agent-browser --key in another Workspace drives that Workspace own session
     { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'default', proposed: proposedHere, workspace: 'workspace-name:build' } },
     {
       method: 'browserSurface',
-      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2.default', cwd: process.cwd(), wsPort: 61141, workspace: 'workspace-name:build' },
+      request: { focus: false, provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2.default', cwd: process.cwd(), wsPort: 61141, workspace: 'workspace-name:build' },
     },
   ]);
 });
@@ -1267,7 +1270,7 @@ test('agent-browser defaults to --key default', async () => {
   const client = fixtureClient();
   await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client, execAgentBrowser: ab.exec });
   assert.equal(ab.calls[0][2], 'dormouse.1.default');
-  assert.deepEqual(client.requests[1].request, { provider: 'agent-browser', key: 'default', session: 'dormouse.1.default', cwd: process.cwd(), wsPort: 61141 });
+  assert.deepEqual(client.requests[1].request, { focus: false, provider: 'agent-browser', key: 'default', session: 'dormouse.1.default', cwd: process.cwd(), wsPort: 61141 });
 });
 
 test('agent-browser raw --session skips key namespacing', async () => {
@@ -1278,7 +1281,7 @@ test('agent-browser raw --session skips key namespacing', async () => {
   // A raw session is already the session: nothing is asked of the host but the
   // surface it binds to.
   assert.deepEqual(client.requests, [
-    { method: 'browserSurface', request: { provider: 'agent-browser', key: undefined, session: 'mine', cwd: process.cwd(), wsPort: 61141 } },
+    { method: 'browserSurface', request: { focus: false, provider: 'agent-browser', key: undefined, session: 'mine', cwd: process.cwd(), wsPort: 61141 } },
   ]);
 });
 
@@ -1421,7 +1424,7 @@ test('agent-browser --surface drives the session the host says the surface is bo
   // No `key`: a surface-addressed session is not necessarily a managed one.
   assert.deepEqual(client.requests[1], {
     method: 'browserSurface',
-    request: { provider: 'agent-browser', key: undefined, surface: 'surface:3', session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
+    request: { focus: false, provider: 'agent-browser', key: undefined, surface: 'surface:3', session: 'dormouse.1.gui-a1b2c3', cwd: process.cwd(), wsPort: 61141 },
   });
 });
 
@@ -2154,6 +2157,7 @@ test('tool sends the name, never a command', async () => {
       global: false,
       fresh: false,
       minimized: false,
+      focus: false,
       surface: undefined,
       cwd: '/work/site',
     },
@@ -2179,6 +2183,7 @@ test('tool -- sends argv as a command, never a name', async () => {
       command: ['pnpm', 'dev'],
       fresh: false,
       minimized: false,
+      focus: false,
       surface: undefined,
       cwd: '/work/site',
     },
@@ -2364,7 +2369,7 @@ test('open forwards one file, explicit handler, placement, and Workspace to Tool
   client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
   assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
     file: 'a b.md', tool: 'markdown', cwd: '/repo',
-    workspace: 'workspace:2', fresh: true, minimized: true, surface: 'surface:4',
+    workspace: 'workspace:2', fresh: true, minimized: true, focus: false, surface: 'surface:4',
   } });
   assert.equal(JSON.parse(result.stdout).surface_id, 'surface:4');
 });
@@ -2413,7 +2418,7 @@ test('open forwards a folder to Tool dispatch as it forwards a file', async () =
   assert.equal(result.exitCode, 0);
   client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
   assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
-    file: 'docs/', cwd: '/repo', fresh: false, minimized: false, surface: undefined, tool: undefined, preview: true,
+    file: 'docs/', cwd: '/repo', fresh: false, minimized: false, focus: false, surface: undefined, tool: undefined, preview: true,
   } });
 });
 
@@ -2499,7 +2504,7 @@ test('only a lone --help is Dormouse help; any other goes to the provider', asyn
   const help = await runCli(['agent-browser', '--help'], { execAgentBrowser: ab.exec });
   assert.match(help.stdout, /USAGE/);
   assert.deepEqual(ab.calls, []);
-  for (const argv of [['agent-browser', 'open', '--help'], ['agent-browser', '--', '--help']]) {
+  for (const argv of [['agent-browser', 'open', '--help'], ['agent-browser', 'snapshot', '--', '--help']]) {
     const native = fakeAgentBrowser();
     await runCli(argv, { execAgentBrowser: native.exec, env: {} });
     assert.deepEqual(native.calls[0], ['agent-browser', '--session', 'dormouse.1.default', ...argv.slice(1)]);
@@ -2534,12 +2539,27 @@ test('empty browser identities fail before a provider or host request', async ()
 
 test('native browser option terminators survive before dash-leading values', async () => {
   for (const provider of ['agent-browser', 'playwright']) {
-    for (const tail of [['fill', '@e1', '--', '-5'], ['fill', '@e1', '--', '--session'], ['--', 'snapshot']]) {
+    for (const tail of [['fill', '@e1', '--', '-5'], ['fill', '@e1', '--', '--session'], ['fill', '@e1', '--', '--focus']]) {
       const calls = [];
       const exec = async (binary, args) => { calls.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
       const result = await runCli([provider, '--session', 'raw', ...tail], { execAgentBrowser: exec, execPlaywright: exec, env: {} });
       assert.equal(result.exitCode, 0, JSON.stringify(result));
       assert.deepEqual(calls[0], [...(provider === 'playwright' ? ['--session=raw'] : ['--session', 'raw']), ...tail]);
+    }
+  }
+});
+
+test('a -- before the provider command is refused before anything runs', async () => {
+  for (const provider of ['agent-browser', 'playwright']) {
+    for (const argv of [['--', 'open', ':5173'], ['--key', 'app', '--', 'open', ':5173'], ['--', 'dor-embed-size']]) {
+      const calls = [];
+      const exec = async (binary, args) => { calls.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
+      const client = fixtureClient();
+      const result = await runCli([provider, ...argv], { client, execAgentBrowser: exec, execPlaywright: exec, env: {} });
+      assert.equal(result.exitCode, 1, JSON.stringify(argv));
+      assert.match(result.stderr, /put -- after the .* command/);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(client.requests, []);
     }
   }
 });
@@ -2662,9 +2682,9 @@ test('browser placement is carried through resolution and binding, never forward
   assert.match(bad.stderr, /--from and --surface are mutually exclusive/);
   assert.equal(ab.calls.length, before);
   // After the bare `--`, a --from is the provider's.
-  const forwarded = await runCli(['agent-browser', '--key', 'docs', '--', 'eval', '--from'], { client, execAgentBrowser: ab.exec });
+  const forwarded = await runCli(['agent-browser', '--key', 'docs', 'eval', '--', '--from'], { client, execAgentBrowser: ab.exec });
   assert.equal(forwarded.exitCode, 0, forwarded.stderr);
-  assert.deepEqual(ab.calls.find(args => args.includes('eval')).slice(-2), ['eval', '--from']);
+  assert.deepEqual(ab.calls.find(args => args.includes('eval')).slice(-3), ['eval', '--', '--from']);
 });
 
 test('reference prefixes are required before any host mutation', async () => {

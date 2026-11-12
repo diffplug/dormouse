@@ -155,26 +155,19 @@ export function workspaceParam(workspace: string | undefined): { workspace?: str
   return workspace === undefined ? {} : { workspace };
 }
 
-/** The `--focus` flag every Surface-producing command carries; `--focus=false`
- *  states the default off (`docs/specs/dor-cli.md` → "Focus intent"). */
+/** The `--focus` flag every Surface-producing command carries
+ *  (`docs/specs/dor-cli.md` → "Focus intent"). */
 export const focusFlag = {
   kind: 'boolean',
-  brief: 'Focus the created or reused Surface (default: only when typed alone at a prompt).',
+  brief: 'Focus the created or reused Surface.',
   optional: true,
   withNegated: false,
 } as const;
 
-/** The `focus` field of a request, present only when the flag was given, so
- *  the host can apply its default. */
-export function focusParam(focus: boolean | undefined): { focus?: boolean } {
-  return focus === undefined ? {} : { focus };
-}
-
 /** The focus paragraph of each Surface-producing command's help. */
-export function focusHelp({ minimize, browser = false }: { minimize: boolean; browser?: boolean }): string {
-  return 'Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent\'s or a script\'s invocation leaves focus where it is. --focus or --focus=false decides either way.'
-    + (browser ? ' An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.' : '')
-    + (minimize ? ' --minimize turns the default off, and --focus with --minimize is an error.' : '');
+export function focusHelp({ minimize }: { minimize: boolean }): string {
+  return 'Focuses the created or reused Surface only with --focus; otherwise focus stays where it is.'
+    + (minimize ? ' --focus with --minimize is an error.' : '');
 }
 
 /** An explicit `--focus` cannot apply to a Surface `--minimize` hides. */
