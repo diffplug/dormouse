@@ -31,6 +31,17 @@ const machines = extractStateMachines(SPEC, 'docs/specs/alert.md');
 /** CI runs these seeds; `ALERT_MODEL_SOAK=<seconds>` (at most 120) adds fresh seeds, twice as long, for that long. */
 const SEEDS = Array.from({ length: 1_000 }, (_, i) => i + 1);
 const LENGTH = 80;
+
+/**
+ * Soak seeds that reach a path `SEEDS` never does, each at the length that
+ * found it, run beside them so a regression there fails CI too.
+ */
+const REGRESSION_SEEDS: ReadonlyArray<{ seed: number; length: number }> = [
+  // A completion held, its viewer gone, then the Session made a helper before the leave grace elapses.
+  { seed: 100_868, length: LENGTH },
+  // The same with push on, so a helper's escalated ring would also open an episode no realm sees.
+  { seed: 103_834, length: 120 },
+];
 const SOAK_SECONDS = Math.min(120, Number(process.env.ALERT_MODEL_SOAK ?? 0) || 0);
 
 /**
@@ -107,6 +118,9 @@ describe('the alert model (docs/specs/alert.md -> State machines)', () => {
   it('makes only drawn transitions, keeps every stated invariant, and reaches every drawn edge', async () => {
     const model = suite();
     const first = await explore(model, SOAK_SECONDS ? soakSeeds() : SEEDS, SOAK_SECONDS ? 2 * LENGTH : LENGTH);
+    for (const { seed, length } of REGRESSION_SEEDS) {
+      for (const [key, found] of await explore(model, [seed], length)) if (!first.has(key)) first.set(key, found);
+    }
     const reports: string[] = [];
     for (const [key, { seed, events }] of first) {
       if (!KNOWN.some((known) => known.key === key)) reports.push(`${key}\n  seed ${seed}\n${await reproduce(key, events)}`);
