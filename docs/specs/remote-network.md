@@ -1,14 +1,14 @@
 # Network policy and remote transport
 
 > - See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
-> - Owns the network policy — the one setting that decides every connection Dormouse opens on its own — the transport each level allows, and Settings → Network, where it is chosen. Authorization belongs to `docs/specs/remote-security-model.md`, the wire to `docs/specs/remote-api.md`, the one-time runtime to `docs/specs/one-time.md`, and the updater to `docs/specs/auto-update.md`.
+> - Owns the network policy — the one setting that decides every connection Dormouse initiates on its own — the transport each level allows, and Settings → Network, where it is chosen. The host/runtime boundary belongs to `docs/specs/security.md` -> "What is not defended". Authorization belongs to `docs/specs/remote-security-model.md`, the wire to `docs/specs/remote-api.md`, the one-time runtime to `docs/specs/one-time.md`, and the updater to `docs/specs/auto-update.md`.
 > - Read `docs/specs/remote-security-model.md` -> "Direct path" first.
 
 ## Policy
 
 **The policy is one record, `{ level, allowed, autoUpdate }`, held host-side** in the Burrow state store: `dormouse.burrow.network-policy` in VS Code's `globalState`, and the sidecar's own `network-policy.json` beside `burrow.json`, protected by the credential-directory boundary (`docs/specs/security-remote.md` -> "Credentials at rest"). **Never keep it in `burrow.json`**, which a build from before the policy rewrites without it, letting the default recompute. **Never take it from a Client, Relay, or Hosted response**; the webview reads it with `networkPolicy` and writes it with `setNetworkPolicy`, and the Burrow service is its only writer.
 
-| Level | Offered in | What Dormouse opens on its own |
+| Level | Offered in | What Dormouse initiates on its own |
 |---|---|---|
 | `nothing` (Nowhere) | every build | nothing |
 | `local` (Local networks only) | Hosted builds | one-time links, the relay socket once enrolled and push through it, managed voice |
@@ -24,7 +24,7 @@
 - **Must end the live one-time link or session with `user-ended`, and rest an ended one, on a change to the level, or a network removed from `allowed` under `local`, and start, stop, or restart the relay socket to match** (`narrowsPaths`); a narrowed policy never leaves an old path exempt. **A network added, the allowed networks under any other level, and `autoUpdate` end nothing**; a live runtime's hold reads an addition (rationale).
 - **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, the path refusal held ("Local networks"), and this machine's interfaces with their canonical prefixes, loopback and link-local left out, each `lan`, `vpn`, or `virtual`. **A Tailscale interface — named `tailscale*`, or carrying an `fd7a:115c:a1e0::/48` address — offers a host route as its tailnet range**, `100.64.0.0/10` or `fd7a:115c:a1e0::/48`; any other host route is offered as reported (rationale).
 
-**Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
+**Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. Under `nothing`:
 
 - **The Burrow service's socket factory, fetch, and direct-peer factory refuse at the call while the level is `nothing` or unread, and once the service is disposed**, so a path that forgets its own check still opens nothing. Everything the service opens, the enrollment exchange included, goes through them; the per-command checks below stay, for the error a person reads.
 - **The Burrow service never opens the relay socket**, the enrollment held as above, so push, the device list, and setup codes make no request.
