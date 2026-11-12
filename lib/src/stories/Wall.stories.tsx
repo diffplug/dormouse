@@ -392,6 +392,9 @@ export const ParkedPageGetsNoKeys: Story = {
     await wait(200);
     if (page.keys !== 0) throw new Error(`the parked page received ${page.keys} of ${typed.length} keys`);
     if (page.focuses <= focusesAtTyping) throw new Error('the parked page stopped taking focus while the keys were typed');
+    // The page keeps stealing focus during capture. Disabling cursor blink alone
+    // cannot freeze the resulting block/outline changes; keep both states solid.
+    getTerminalInstance('surface:1')!.options.cursorInactiveStyle = 'block';
     await settleTerminals();
   },
 };
