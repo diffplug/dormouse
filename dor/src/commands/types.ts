@@ -546,7 +546,7 @@ export interface ResolveOpenTargetResponse {
  *  handle, or a managed `--key`, which only the answering Workspace can
  *  namespace (`docs/specs/dor-browser.md` → Managed identity). Never both — a
  *  key names no Surface, and a Surface's session was minted long ago. */
-export type ResolveBrowserRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & (
+export type ResolveBrowserRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider; from?: string } & (
   | {
     /** A Surface handle (surface:N, surface:self, surface:focused,
      *  title:<title>) naming the browser Surface to drive. */
@@ -580,6 +580,7 @@ export interface ResolveBrowserResponse {
 /** After a browser command succeeds: open or reuse the Surface bound to its
  *  session. The binding fields are what the command ran with. */
 export interface BrowserSurfaceRequest extends WorkspaceScopedRequest, FocusIntentRequest {
+  from?: string;
   provider: BrowserAutomationProvider;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;

@@ -4,7 +4,7 @@ Invocation: `dor open --help`
 
 ```text
 USAGE
-  dor open [--focus] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
+  dor open [--focus] [--json] [--minimize] [--fresh] [--from handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
   dor open --help
 
 Opens one existing local file or folder. `dor o` is the same command. Relative paths resolve from the caller's directory (or --cwd); symlink aliases resolve to the same path. A file: URL naming this machine is accepted as its path; other URLs and Surface handles are not.
@@ -21,7 +21,7 @@ builtin:code opens any text file, Markdown and HTML included, as source in the c
 
 The selected Tool receives the canonical absolute path as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
 
-Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
+Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --from, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
 
 Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error. --preview turns the default off too.
 
@@ -38,7 +38,7 @@ FLAGS
      [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--fresh]      Open another instance even when the Tool has a key.
-     [--surface]    Surface to split when creating.
+     [--from]       Surface to split when creating.
      [--workspace]  Workspace to act in, instead of the caller's.
      [--cwd]        Directory for resolving the path.
      [--tool]       Use a user Tool, builtin:file, builtin:code, or builtin:folder.

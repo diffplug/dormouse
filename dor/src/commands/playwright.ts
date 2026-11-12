@@ -10,14 +10,14 @@ export const playwrightCommand: Command = {
   helpPatches: [
     {
       scope: 'root',
-      findReplace: ['playwright [--key name] [--session name] [--surface handle]<TO-EOL>', 'playwright [--key name|--session name|--surface handle] [--workspace ref] [--focus] [args...]\n'],
+      findReplace: ['playwright [--key name] [--session name] [--surface handle]<TO-EOL>', 'playwright [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]\n'],
     },
     {
       scope: 'command-usage',
-      findReplace: ['playwright [--key name] [--session name] [--surface handle]<TO-EOL>', 'playwright [--key name|--session name|--surface handle] [--workspace ref] [--focus] [args...]\n'],
+      findReplace: ['playwright [--key name] [--session name] [--surface handle]<TO-EOL>', 'playwright [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]\n'],
     },
   ],
-  command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string; focus?: boolean }, string[], DorCommandContext>({
+  command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string; focus?: boolean; from?: string }, string[], DorCommandContext>({
     docs: {
       brief: 'Drive a browser surface via your playwright CLI install.',
       fullDescription: `Forwards native playwright-cli commands to your installed @playwright/cli.
@@ -28,9 +28,12 @@ Override the executable with DORMOUSE_PLAYWRIGHT_BIN.
 The first command fixes its working directory; later commands, including relative
 file paths, run there. --session (or -s) selects a native session instead.
 --surface drives an existing playwright pane, including one opened from the GUI.
-These three identities are mutually exclusive. dor reads them, --workspace,
-and --focus (or --focus=true|false) anywhere in the arguments, up to an optional bare --, which it forwards unchanged; everything
-else, and everything after that --, belongs to playwright.
+These three identities are mutually exclusive. --from <handle> is a placement
+reference: the Surface a new playwright pane splits from, whose Workspace a
+--key resolves in. It places only a pane this command creates, and cannot be
+combined with --surface. dor reads these, --workspace, and --focus (or
+--focus=true|false) anywhere in the arguments, up to an optional bare --, which
+it forwards unchanged; everything else, and everything after that --, belongs to playwright.
 
 Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
   dor playwright dor-embed-size --json
@@ -62,6 +65,7 @@ Examples:
         key: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Workspace browser key (default "default").', placeholder: 'name' },
         session: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Raw playwright session name (native spelling: -s).', placeholder: 'name' },
         surface: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Existing playwright surface handle.', placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Reference Surface for placement and managed-key Workspace.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
         focus: focusFlag,
       },

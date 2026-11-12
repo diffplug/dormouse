@@ -39,7 +39,7 @@ interface EnsureFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly restart?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
   readonly cwd?: string;
 }
 
@@ -57,7 +57,7 @@ const ENSURE_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
 const BOOLEAN_FLAGS = new Set(['--focus', '--json', '--minimize', '--restart']);
-const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
+const FLAGS_WITH_VALUES = new Set(['--cwd', '--from', '--workspace']);
 
 // stricli treats a bare `--` as "rest are positionals", but it can't express
 // "everything after `--` is one required command tail, and only these flags may
@@ -92,15 +92,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
@@ -129,7 +129,7 @@ Two surfaces running the same command in different working directories are disti
 
 --restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
 
---surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+--from selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
 ${commandStateHelp(ENSURE_COMMAND_STATES)}
 
@@ -154,7 +154,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         cwd: { kind: 'parsed', parse: cwdParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
         workspace: workspaceFlag,
       },
@@ -182,7 +182,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
       minimized: flags.minimize === true,
       ...focusParam(flags.focus),
       restart: flags.restart === true,
-      surface: flags.surface,
+      surface: flags.from,
       cwd,
       ...workspaceParam(flags.workspace),
     });

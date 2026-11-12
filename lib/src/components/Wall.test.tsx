@@ -2691,7 +2691,7 @@ describe('Wall on the Lath engine', () => {
   it.each([
     { line: 'dor open a.md', explicitSurface: false, status: 'takeover' },
     { line: 'claude', explicitSurface: false, status: 'created' },
-    { line: 'dor open --surface surface:self a.md', explicitSurface: true, status: 'created' },
+    { line: 'dor open --from surface:self a.md', explicitSurface: true, status: 'created' },
   ])('dispatches open through the user host with $status placement for $line', async ({ line, explicitSurface, status }) => {
     const controller = new AbortController();
     let toolId: string | undefined;
@@ -4407,6 +4407,77 @@ describe('Wall on the Lath engine', () => {
       expect((await invoke()).minimized).toBe(false);
       expect(selected()).toBe(browserId);
     } finally { act(() => terminalRegistry.removeTerminalPaneState('surface:a')); }
+  });
+
+  it('uses browser --from as placement and refuses an unavailable reference before attaching', async () => {
+    const { requests } = hostBrowsers();
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />); });
+    await flush();
+    const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation(id => id === 'surface:b');
+    try {
+      const failed = await dispatchAgentBrowserResponse({ session: 'placement', from: 'surface:missing' });
+      expect(failed?.ok).toBe(false);
+      expect(requests('attach')).toEqual([]);
+      const id = await dispatchAgentBrowser({ session: 'placement', from: 'surface:b' });
+      expect(container.querySelector('[data-lath-leaf="surface:a"]')).not.toBeNull();
+      expect(container.querySelector('[data-lath-leaf="surface:b"]')).toBeNull();
+      expect(container.querySelector(`[data-lath-leaf="${id}"]`)).not.toBeNull();
+    } finally { untouched.mockRestore(); }
+  });
+
+  it('ignores a minimized or stale browser --from when the browser already has a Surface', async () => {
+    const { requests } = hostBrowsers();
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />); });
+    await flush();
+    const bySession = await dispatchAgentBrowser({ session: 'placed', from: 'surface:b' });
+    const byKey = await dispatchAgentBrowser({ key: 'docs', session: 'dormouse.test.docs', from: 'surface:b' });
+    // The agent's own terminal goes to the Door row, so its `--from surface:self` names no visible Surface.
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:b"] [aria-label="Minimize"]')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-door-id="surface:b"]')).not.toBeNull();
+    const attaches = requests('attach').length;
+    for (const from of ['surface:b', 'surface:missing']) {
+      expect(await dispatchAgentBrowserResponse({ session: 'placed', from })).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: bySession } });
+      expect(await dispatchAgentBrowserResponse({ key: 'docs', session: 'dormouse.test.docs', from })).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: byKey } });
+    }
+    expect(requests('attach').length).toBeGreaterThan(attaches);
+    // A browser it would create still refuses the reference before attaching.
+    const before = requests('attach').length;
+    expect(await dispatchAgentBrowserResponse({ session: 'unplaced', from: 'surface:b' })).toMatchObject({ ok: false });
+    expect(requests('attach')).toHaveLength(before);
+  });
+
+  it('refuses browser --from on resolution only for a binding command that finds no Surface, and never on diagnostics or viewport', async () => {
+    hostBrowsers();
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />); });
+    await flush();
+    const control = async (method: string, params: Record<string, unknown>) => {
+      let response: { ok: boolean; result?: { binding?: { session: string }; surfaceId?: string }; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method, params: { provider: 'agent-browser', key: 'docs', ...params }, respond: (r: typeof response) => { response = r; },
+        } }));
+      });
+      await flush();
+      return response;
+    };
+    const resolve = (params: Record<string, unknown>) => control(SURFACE_CONTROL_METHODS.resolveBrowser, params);
+    // No Surface holds the key: a command that may bind would place one, so it is refused before the provider runs.
+    expect(await resolve({ from: 'surface:missing', proposed: { cwd: '/repo' } })).toMatchObject({ ok: false });
+    // An informational command places nothing.
+    expect(await resolve({ from: 'surface:missing' })).toMatchObject({ ok: true });
+    const session = (await resolve({ from: 'surface:b', proposed: { cwd: '/repo' } }))?.result?.binding?.session;
+    expect(session).toEqual(expect.any(String));
+    const id = await dispatchAgentBrowser({ key: 'docs', session, cwd: '/repo', from: 'surface:b' });
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:b"] [aria-label="Minimize"]')!.click(); });
+    await flush();
+    for (const from of ['surface:b', 'surface:missing']) {
+      expect(await resolve({ from, proposed: { cwd: '/repo' } })).toMatchObject({ ok: true, result: { binding: { session } } });
+      expect(await control(SURFACE_CONTROL_METHODS.browserDiagnostics, { from })).toMatchObject({ ok: true, result: { surfaceId: id } });
+      expect(await control(SURFACE_CONTROL_METHODS.browserViewport, { from })).toMatchObject({ ok: true });
+    }
   });
 
   it('keeps dor agent-browser focus-neutral but enters passthrough for a user port activation', async () => {

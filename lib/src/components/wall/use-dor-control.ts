@@ -121,6 +121,7 @@ export type DorControlParams = {
   includePorts?: unknown;
   session?: unknown;
   surface?: unknown;
+  from?: unknown;
   url?: unknown;
   // Container refs arrive unvalidated like every other param; the router types
   // them before use (`dor-control-router.ts`).
@@ -1147,7 +1148,7 @@ export function useDorControl({
     // else focus. A source that is hidden, or disappears while lookup waits,
     // fails rather than falling back to focus, as does a closing target.
     const resolvePlacement = (resolve: typeof resolveListedSurface): ParseResult<DorSurface> => {
-      const explicit = stringParam(params.surface);
+      const explicit = stringParam(params.from) ?? stringParam(params.surface);
       const result = resolve(explicit ?? detail.placementSurfaceId, detail.surfaceId);
       if (!result.ok && explicit === undefined && detail.placementSurfaceId) {
         return { ok: false, message: 'The helper source Surface is not available for placement' };
@@ -1156,6 +1157,18 @@ export function useDorControl({
         return { ok: false, message: 'The placement Surface is closing' };
       }
       return result;
+    };
+
+    // Browser `--from` places only a Surface the request will create, so it is
+    // checked only then, before anything attaches: a reference gone stale,
+    // minimized, or in another Workspace must not fail a command whose browser
+    // already has a Surface. True once the caller is answered.
+    const refuseBrowserPlacement = (): boolean => {
+      if (params.from === undefined) return false;
+      const reference = resolvePlacement(resolveVisibleSurface);
+      if (reference.ok) return false;
+      detail.respond({ ok: false, error: reference.message });
+      return true;
     };
 
     // Resolve the split reference surface across listed Surfaces. A minimized
@@ -1215,7 +1228,7 @@ export function useDorControl({
         direction,
         minimized: booleanParam(params.minimized),
         reference: resolved.target,
-        // The invoking directory, like `dor ensure`; `--surface` only places.
+        // The invoking directory, like `dor ensure`; `--from` only places.
         cwd: stringParam(params.cwd),
         focusNeutral: !focusIntent('split'),
         visible: focusIntent('split'),
@@ -1946,7 +1959,7 @@ export function useDorControl({
         // leaf that renders both capabilities.
         if (refuseCmdShell()) return;
         // A new preview slot splits from the slot pinned last while it is still
-        // a visible pane, unless `--surface` names a reference.
+        // a visible pane, unless `--from` names a reference.
         const lastPinned = previewSlot.lastPinned.current;
         const pinnedReference = previewSignal && stringParam(params.surface) === undefined && lastPinned
           && nav.hasPane(lastPinned) && isTargetable(lastPinned) ? resolveListedSurface(lastPinned, detail.surfaceId) : null;
@@ -2368,6 +2381,9 @@ export function useDorControl({
       // own session in this Workspace, its first commands pinned to one cwd
       // and executable (docs/specs/dor-browser.md → Managed identity).
       const found = findBrowserSurface(provider, { key });
+      // A command that may bind and finds no Surface creates one after it runs:
+      // refuse its placement before the provider runs, not after.
+      if (!found && params.proposed !== undefined && refuseBrowserPlacement()) return;
       const foundParams = found ? lath.getMeta(found.id)?.params as { browserViewport?: unknown; renderMode?: unknown } | undefined : undefined;
       const binding = (found ? browserBindingFromParams(foundParams) : null)
         ?? browserReservations.current.resolve(provider, key, browserKeyScope(), params.proposed,
@@ -2583,6 +2599,9 @@ export function useDorControl({
       // The command asks only after it succeeded, so the key's session exists
       // even when no viewer can attach below (a non-Chromium Playwright).
       if (key) browserReservations.current.confirm(provider, key);
+      const shown = self?.browserSessions(provider).includes(session)
+        || findBrowserSurface(provider, key !== undefined ? { key } : { nativeIdentity: session });
+      if (!shown && refuseBrowserPlacement()) return;
       const browser = browserHandle(provider, { session, cwd, binaryPath });
       if (!browser) {
         detail.respond({ ok: false, error: providerUnavailable(provider) });

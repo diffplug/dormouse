@@ -77,7 +77,10 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
   if (isWindowControlMethod(detail.method)) return { kind: 'reopen' };
   const params: WindowControlParams = detail.params ?? {};
-  const target = typeof params.surface === 'string' ? parseSurfaceTarget(params.surface) : null;
+  if (params.from !== undefined && params.surface !== undefined) return { kind: 'error', message: '--from and --surface are mutually exclusive' };
+  const reference = params.surface ?? params.from;
+  const target = typeof reference === 'string' ? parseSurfaceTarget(reference) : null;
+  if (reference !== undefined && typeof reference !== 'string') return { kind: 'error', message: 'Surface reference must be a string' };
   // A malformed handle names nothing anywhere, so no Wall need answer it.
   if (target?.kind === 'invalid') return { kind: 'error', message: target.message };
   if ((target?.kind === 'self' && detail.helperParentId)

@@ -302,7 +302,7 @@ flowchart TD
 - **Must retarget in place**: interrupt the slot's command with Ctrl+C, then type the new Tool's command, quoted for the slot's shell, in the slot's directory, retaining the Session id, Surface id, terminal, and a user rename; the new Tool may differ. The old command's browser, announcements, and unsaved state retire at once ([Serving](#serving)); a Door slot reattaches. Slot Tools should exit on Ctrl+C (`less -K`, `glow`).
 - **Must pin a slot whose occupant outlives a short grace after the interrupt** and place the launch as if there were no slot (rationale); a slot pinned meanwhile gets its previous command typed again, and the launch is placed likewise unless superseded.
 - **Must let the newest preview in a Workspace supersede older ones** not yet past lookup or interrupt, which answer `superseded` with the slot's handle, or an error while there is no slot (rationale). A kept slot, or a run an abandoned retarget interrupted and nothing replaced, gets its command typed again when its prompt comes late (rationale). **Never retype a Surface the user has typed into since the interrupt**, one a newer command or retarget has taken, or one going away with its Workspace.
-- **Never let a preview take over its caller or become a Door.** A new slot splits from `--surface` when given, else from the slot pinned last while it is a visible pane of the Workspace, else from the caller (rationale). `--preview` rejects `--fresh` and `--minimize`.
+- **Never let a preview take over its caller or become a Door.** A new slot splits from `--from` when given, else from the slot pinned last while it is a visible pane of the Workspace, else from the caller (rationale). `--preview` rejects `--fresh` and `--minimize`.
 - **Must exclude a marked slot from keyed dedupe.** It keeps its key, which counts once pinned, so pinning only clears the mark.
 - **Must pin at once when the slot's Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)); clean and unreported state never pin. A double-click on its Pane header, or Keep open in its terminal context, pins too (`docs/specs/layout.md` → Pane header). **Never pin on keyboard input or focus** (rationale).
 - **Must pin without restarting when a launch without `--preview` resolves the slot's running Tool and target.**
@@ -338,7 +338,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 | Caller | Visible pane of the active Workspace; integrated plain terminal (not an existing Tool); not closing or dying |
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
-| Placement | Neither `--surface` nor `--minimize` supplied |
+| Placement | Neither `--from` nor `--minimize` supplied |
 | Helper | No existing auxiliary helper; preserve it by splitting |
 | Quoting | A cmd or PowerShell caller's argv has a Windows-portable form |
 

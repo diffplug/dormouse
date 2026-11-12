@@ -88,7 +88,7 @@ dor split --minimize -- ./watch.sh
 dor split --                   # blank terminal, focus stays with you
 ```
 
-Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <id>` picks which surface to split from; the new terminal starts in your current directory. An initial command goes after `--`.
+Direction flags `--left|--right|--up|--down` (default `--auto`). `--from <id>` picks which surface to split from; the new terminal starts in your current directory. An initial command goes after `--`.
 
 ### `dor send` — type into a terminal
 
@@ -139,6 +139,8 @@ Each command names its browser one way; the flags are mutually exclusive:
 - `--key <name>` (default `default`) — a browser this Workspace knows by name. One key is one browser, reused across commands; use distinct keys for independent browsers at once. agent-browser and Playwright keys are separate.
 - `--surface <handle>` — the browser a handle names; prefer it whenever you hold an id. It is the only way to reach a browser the user opened from the GUI or a Tool's browser, and it fails on a terminal or an `iframe` surface.
 - `--session <name>` (Playwright also takes `-s`) — a raw native session by its literal name.
+
+`--from <handle>` is not an identity: as on `split`, `ensure`, `tool`, `open`, and `iframe`, it says where a new pane goes. It places only a pane the command creates; a browser that already has one stays where it is. A `--key` belongs to the `--from` Surface's Workspace, so a later command for a key you placed in another Workspace needs the same `--from` or `--workspace`. It cannot be combined with `--surface`.
 
 Navigation verbs (`open`, `goto`, agent-browser's `navigate`) also accept Dormouse targets: `host:port` and `:port` default to `http://`, and a terminal handle (`surface:3`) opens the dev-server port that terminal owns.
 

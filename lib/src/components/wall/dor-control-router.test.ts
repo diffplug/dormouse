@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
@@ -204,6 +205,18 @@ describe('dor control routing', () => {
     for (const surface of ['pane:2', 'surface-2', '2']) {
       expect(resolveDorControlRoute(request({ surfaceId: 'surface:1', params: { surface } })))
         .toEqual({ kind: 'error', message: `'${surface}' is not a Surface handle; use surface:2` });
+    }
+  });
+
+  it('routes browser placement before resolving the managed key', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'workspace:2' });
+    handleFor(first, ['surface:1']);
+    const owner = handleFor('workspace:2', ['surface:2']);
+    for (const method of [SURFACE_CONTROL_METHODS.resolveBrowser, SURFACE_CONTROL_METHODS.browser]) {
+      expect(resolveDorControlRoute(request({ method, surfaceId: 'surface:1', params: { from: 'surface:2', key: 'app' } })))
+        .toEqual({ kind: 'handle', handle: owner });
+      expect(resolveDorControlRoute(request({ method, params: { from: 'surface:2', surface: 'surface:1' } }))).toMatchObject({ kind: 'error' });
     }
   });
 

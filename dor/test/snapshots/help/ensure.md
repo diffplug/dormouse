@@ -4,7 +4,7 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
+  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...
   dor ensure --help
 
 Ensures one surface in the current workspace is running the given command at the given path. It reuses a running or in-flight match, or creates a split and schedules the command. Creation waits for shell integration, not command startup; read command_state before assuming the command started.
@@ -25,7 +25,7 @@ Two surfaces running the same command in different working directories are disti
 
 --restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
 
---surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+--from selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
 command_state, the [tag] in text output, says what the reply proves about the command; status says how the Surface was found or made. Neither promises a successful exit or a ready service: check readiness separately. It is one of:
   unconfirmed  a new Surface whose shell is ready; its command is scheduled but not yet seen starting
@@ -53,7 +53,7 @@ FLAGS
      [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--restart]    Restart a matching surface in place.
-     [--surface]    Surface to split when creating.
+     [--from]       Surface to split when creating.
      [--cwd]        Working directory for matching and for the new command.
      [--workspace]  Workspace to act in, instead of the caller's.
   -h  --help        Print help information and exit

@@ -30,7 +30,7 @@ interface IframeFlags extends WorkspaceScopedFlags {
   readonly focus?: boolean;
   readonly json?: boolean;
   readonly minimize?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
 }
 
 export const iframeCommand: Command = {
@@ -76,7 +76,7 @@ JSON output:
         focus: focusFlag,
         json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
       },
       positional: {
@@ -109,7 +109,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
     const response = await client.iframeSurface({
       minimized: flags.minimize === true,
       ...focusParam(flags.focus),
-      surface: flags.surface,
+      surface: flags.from,
       url,
       ...workspaceParam(flags.workspace),
     });

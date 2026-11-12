@@ -33,7 +33,7 @@ interface SplitFlags extends WorkspaceScopedFlags {
   readonly left?: boolean;
   readonly minimize?: boolean;
   readonly right?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
   readonly up?: boolean;
 }
 
@@ -45,7 +45,7 @@ export const splitCommand: Command = {
     const delimiter = args.indexOf('--');
     const scan = scanPreDelimiterArgs(delimiter < 0 ? args : args.slice(0, delimiter), {
       booleans: new Set(['--focus', '--auto', '--down', '--up', '--left', '--right', '--json', '--minimize']),
-      valued: new Set(['--surface', '--workspace']),
+      valued: new Set(['--from', '--workspace']),
       positionals: 'reject',
     });
     return scan.ok ? { ok: true, value: undefined } : scan;
@@ -62,8 +62,8 @@ export const splitCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        `  dor split ${groupedSplitDirectionUsage} [--focus] [--json] [--minimize] [--surface handle] [--workspace ref]<TO-EOL>`,
-        `  dor split ${groupedSplitDirectionUsage} [--focus] [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]\n`,
+        `  dor split ${groupedSplitDirectionUsage} [--focus] [--json] [--minimize] [--from handle] [--workspace ref]<TO-EOL>`,
+        `  dor split ${groupedSplitDirectionUsage} [--focus] [--json] [--minimize] [--from handle] [--workspace ref] [-- <command>...]\n`,
       ],
     },
     {
@@ -73,8 +73,8 @@ export const splitCommand: Command = {
         `${groupedSplitDirectionUsage}`,
         // <TO-EOL> swallows the flags this patch is about to remove, so the
         // tail is rewritten whole rather than matched around them.
-        '[--surface handle]<TO-EOL>',
-        '[--surface handle] [--workspace ref] [-- <command>...]\n',
+        '[--from handle]<TO-EOL>',
+        '[--from handle] [--workspace ref] [-- <command>...]\n',
       ],
       remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
@@ -98,7 +98,7 @@ export const splitCommand: Command = {
       brief: 'Create a new terminal surface by splitting an existing surface.',
       fullDescription: `If no direction is provided, --auto is used. --auto chooses right when the target surface is wide, down when it is narrow, and right when the target is minimized.
 
-The new terminal starts in the directory where you invoke dor split. --surface and --workspace control placement; they do not change the working directory.
+The new terminal starts in the directory where you invoke dor split. --from and --workspace control placement; they do not change the working directory.
 
 Use -- followed by a command to run an initial command in the new terminal surface. Only split's own options come before --.
 
@@ -106,7 +106,7 @@ ${focusHelp({ minimize: true })}
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
---surface selects the reference Surface for placement. If it is minimized, the new Surface is created minimized too and inserted immediately to the right of its Door. If --surface is omitted, Dormouse uses the caller's Surface, or an auxiliary helper's source Surface. When --workspace selects another Workspace, placement defaults to that Workspace's focused Surface.
+--from selects the reference Surface for placement. If it is minimized, the new Surface is created minimized too and inserted immediately to the right of its Door. If --from is omitted, Dormouse uses the caller's Surface, or an auxiliary helper's source Surface. When --workspace selects another Workspace, placement defaults to that Workspace's focused Surface.
 
 From an auxiliary helper, split creates a separate terminal and leaves the helper in place. Helpers cannot be explicit Surface targets, including surface:self.
 
@@ -140,7 +140,7 @@ JSON output:
         left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Reference Surface for placement.', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Reference Surface for placement.', optional: true, placeholder: 'handle' },
         up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true, withNegated: false },
         workspace: workspaceFlag,
       },
@@ -171,7 +171,7 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       cwd: callerWorkingDirectory(undefined, this.options),
       minimized: flags.minimize === true,
       ...focusParam(flags.focus),
-      surface: flags.surface,
+      surface: flags.from,
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderSplitResponse(response, flags.json === true));
