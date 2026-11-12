@@ -2,7 +2,7 @@ import { type PointerEvent as ReactPointerEvent } from 'react';
 import { TOOL_DIRTY_LABEL, ToolDirtyIndicator } from './ToolDirtyIndicator';
 import { clsx } from 'clsx';
 import { SpeakerHighIcon } from '@phosphor-icons/react';
-import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
+import type { AlertSpeechState, SessionStatus } from '../lib/terminal-registry';
 import type { BrowserDisplayMode } from './wall/agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { useTodoPillContent } from './TodoPillBody';
@@ -28,7 +28,7 @@ export interface DoorProps {
   /** The Workspace's preview slot (`docs/specs/dor-tool.md` -> Preview slot). */
   preview?: boolean;
   status?: SessionStatus;
-  todo?: TodoState;
+  todo?: boolean;
   speechState?: AlertSpeechState;
   /** `ActivityState.episode` — the Session's unresolved summons, retained during
    *  pauses. A new one replays the alarm ring's arrival burst. */
