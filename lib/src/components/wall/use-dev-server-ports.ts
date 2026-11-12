@@ -56,6 +56,12 @@ const DEBOUNCE_MS = 600;
 // is settled and not rescanned until a reload, navigation, its owner's
 // command ending, or Wall change.
 export const PENDING_REFRESH_MS = [4000, 8000, 16000, 32000, 60000];
+// A command starting in any terminal wakes the loop, so nearly every such wake
+// is an `ls` or a `git status`, not the server; each host scan is a `ps` +
+// `lsof` or a PowerShell start. A command wake takes only this many back-off
+// steps (a dev server binds within seconds), and a reload or navigation the
+// whole back-off, which a command wake never cuts short.
+export const COMMAND_WAKE_STEPS = 1;
 // Upper bound on how long the idle scan may be deferred before it's forced.
 const IDLE_TIMEOUT_MS = 2000;
 
@@ -126,6 +132,8 @@ function startCorrelationLoop(): () => void {
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let idleHandle: number | undefined;
   let misses = 0;
+  // Back-off steps the current wake allows.
+  let steps = 0;
 
   const resolveOnce = async (): Promise<ResolveOutcome> => {
     if (cancelled || running) return 'busy';
@@ -196,7 +204,9 @@ function startCorrelationLoop(): () => void {
         if (cancelled) return;
         // 'busy' → an in-flight scan paces itself; 'idle' → all matched (or
         // nothing wanted) so stop until reload/navigation wakes us.
-        const step = PENDING_REFRESH_MS[misses++];
+        if (outcome === 'idle') steps = 0;
+        const step = misses < steps ? PENDING_REFRESH_MS[misses] : undefined;
+        misses++;
         if (outcome === 'pending' && step) scheduleRefresh(step);
       });
     });
@@ -204,8 +214,9 @@ function startCorrelationLoop(): () => void {
 
   // Coalesce wakes: debounce, then scan at idle, restarting the back-off. Never
   // scans synchronously on the triggering event (tab open / navigation / reload).
-  const scheduleScan = (delay: number) => {
+  const scheduleScan = (delay: number, wakeSteps = PENDING_REFRESH_MS.length) => {
     if (cancelled) return;
+    steps = Math.max(wakeSteps, steps - misses);
     misses = 0;
     if (refreshTimer) clearTimeout(refreshTimer);
     if (debounceTimer) clearTimeout(debounceTimer);
@@ -239,7 +250,7 @@ function startCorrelationLoop(): () => void {
     if (!run) { runs.delete(id); return; }
     if (runs.get(id) === run) return;
     runs.set(id, run);
-    if (getWantedDevServerPorts().some((port) => !settled.has(port))) scheduleScan(DEBOUNCE_MS);
+    if (getWantedDevServerPorts().some((port) => !settled.has(port))) scheduleScan(DEBOUNCE_MS, COMMAND_WAKE_STEPS);
   });
   scheduleScan(DEBOUNCE_MS);
 

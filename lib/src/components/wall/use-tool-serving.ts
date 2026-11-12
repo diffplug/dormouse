@@ -32,6 +32,13 @@ import { isReportedCommandLine } from '../../lib/osc-sanitize';
 // the command runs. Each poll shells out (lsof / PowerShell) for one batched
 // scan, so the cadence is slow and only tools without a URL are scanned.
 const POLL_MS = 1500;
+// A Tool whose scans have found nothing for this long is polled less often,
+// the wait doubling up to `MAX_POLL_MS`: a cold boot binds within it, while a
+// watcher or TUI that never serves would otherwise cost a host scan (a
+// PowerShell start on Windows) every poll for as long as it runs. A scan that
+// finds a listener, a new announcement, or a new run polls it at `POLL_MS`.
+export const BACKOFF_AFTER_MS = 30_000;
+export const MAX_POLL_MS = 15_000;
 
 const neverPaused = () => false;
 
@@ -101,14 +108,25 @@ export function useToolServing({
   // A prompt and same-command restart can both happen between polls. Seed the
   // first observed run without retiring an imported live Workspace binding.
   const observedRuns = useRef<Map<string, string | null>>(new Map());
+  // Per leaf whose scans keep finding nothing: since when, the current wait,
+  // and when the poll next scans it.
+  const quiet = useRef<Map<string, { since: number; wait: number; next: number }>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
+
+    const foundNothing = (id: string, now: number) => {
+      const state = quiet.current.get(id) ?? { since: now, wait: POLL_MS, next: 0 };
+      if (now - state.since >= BACKOFF_AFTER_MS) state.wait = Math.min(state.wait * 2, MAX_POLL_MS);
+      state.next = now + state.wait;
+      quiet.current.set(id, state);
+    };
 
     /** One scan pass over every tool leaf, or over `only` — the leaves an
      *  announcement named, leaving every other leaf's settle state alone. */
     const tick = async (only?: ReadonlySet<string>) => {
       if (paused()) return;
+      const now = Date.now();
       const leaves = toolLeaves(lath, doorsRef.current);
       // A killed tool never reaches the exit branch below, so prune by absence.
       const live = new Set(leaves.map((leaf) => leaf.id));
@@ -117,6 +135,9 @@ export function useToolServing({
       }
       for (const id of observedRuns.current.keys()) {
         if (!live.has(id)) observedRuns.current.delete(id);
+      }
+      for (const id of quiet.current.keys()) {
+        if (!live.has(id)) quiet.current.delete(id);
       }
 
       // Pass one, synchronous: fold in whatever the running commands announced
@@ -154,7 +175,10 @@ export function useToolServing({
         // behind, and the next run's first tick would compare equal to it and
         // commit immediately — framing whichever port bound earliest, which is
         // the regression the settle window exists to prevent.
-        if (!running || runChanged) seenPorts.current.delete(leaf.id);
+        if (!running || runChanged) {
+          seenPorts.current.delete(leaf.id);
+          quiet.current.delete(leaf.id);
+        }
 
         if ((!running || runChanged) && retireToolBrowser(lath, leaf.id, leaf.params)) continue;
         // An announcement outranks whatever autobind decided, framed or
@@ -180,6 +204,9 @@ export function useToolServing({
       }
 
       if (scanning.length === 0 || cancelled || paused()) return;
+      // A poll scans once any Tool is due, and then scans them all, since the
+      // batched scan costs the same; half a poll of slack absorbs timer jitter.
+      if (!only && scanning.every(({ leaf }) => (quiet.current.get(leaf.id)?.next ?? 0) - POLL_MS / 2 > now)) return;
       // One batched scan for every leaf: each scan shells out (lsof /
       // PowerShell), so one per tool would multiply that cost on every poll.
       const portsById = await openPortsByTerminal(scanning.map(({ leaf }) => leaf.id));
@@ -189,11 +216,11 @@ export function useToolServing({
       // moved, or handed a different command.
       for (let index = 0; index < scanning.length; index += 1) {
         if (cancelled || paused()) return;
-        // A scan that fails is a scan that finds nothing yet.
-        const ports = portsById[scanning[index].leaf.id];
-        if (!ports) continue;
         const { leaf, run, announcedPort, announcedPath } = scanning[index];
         if (!isToolParams(lath.getMeta(leaf.id)?.params) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) continue;
+        // A scan that fails is a scan that finds nothing yet.
+        const ports = portsById[leaf.id];
+        if (!ports) { foundNothing(leaf.id, now); continue; }
         const entries = listenerUrlsByPort(ports);
         let entry;
 
@@ -201,7 +228,7 @@ export function useToolServing({
           // The announcement disambiguates; the scan supplies the number, so an
           // announced port that nothing bound frames nothing.
           entry = entries.find((candidate) => candidate.port === announcedPort);
-          if (!entry) continue;
+          if (!entry) { foundNothing(leaf.id, now); continue; }
         } else {
           // Autobind. Do not commit on first sighting: ports appear one at a
           // time during boot, so framing the first one seen would frame
@@ -211,7 +238,9 @@ export function useToolServing({
           const found = entries.map((candidate) => candidate.port);
           const previous = seenPorts.current.get(leaf.id);
           seenPorts.current.set(leaf.id, found);
-          if (found.length === 0) continue;
+          if (found.length === 0) { foundNothing(leaf.id, now); continue; }
+          // Settling takes the next poll.
+          quiet.current.delete(leaf.id);
           if (!previous || previous.length !== found.length
             || previous.some((port, index) => port !== found[index])) {
             continue; // Still settling; re-check next tick.
@@ -284,6 +313,7 @@ export function useToolServing({
     // in that chunk (a command start) can retire it.
     const unsubscribe = subscribeToToolAnnounces((id) => {
       if (!toolLeaves(lath, doorsRef.current).some((leaf) => leaf.id === id)) return;
+      quiet.current.delete(id);
       pending.add(id);
       queueMicrotask(() => void runTick(false));
     });

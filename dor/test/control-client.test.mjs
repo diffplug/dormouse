@@ -76,6 +76,25 @@ test('a browser bind waits past the host\'s browser request timeout, not the cli
   });
 });
 
+test('a surface kill waits past the client default, as the host inspects the helper', skipOnWindows, async () => {
+  await withTempSocket(async (socketPath) => {
+    const server = createDorControlServer({
+      socketPath,
+      token: 'shared-secret',
+      send(event, data) {
+        if (event === 'dor:controlRequest') setTimeout(() => server.respond({ requestId: data.requestId, ok: true, result: { status: 'killed' } }), 200);
+      },
+    });
+    await server.ready;
+    try {
+      const client = new SocketControlClient({ socketPath, token: 'shared-secret', timeoutMs: 50 });
+      assert.deepEqual(await client.killSurface({ surface: 'surface:1', confirmation: { mode: 'dangerously' } }), { status: 'killed' });
+    } finally {
+      server.close();
+    }
+  });
+});
+
 test('a dor client refuses a host whose token does not match', skipOnWindows, async () => {
   await withTempSocket(async (socketPath) => {
     const server = createDorControlServer({ socketPath, token: 'shared-secret', send() {} });

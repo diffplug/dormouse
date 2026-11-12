@@ -29,6 +29,9 @@ async function fixture(t) {
     createInterface({ input: process.stdin }).on('line', line => {
       const { event, data } = JSON.parse(line);
       if (event === 'alert:command' || event === 'pty:input') console.error('SIDECAR_LINE ' + line);
+      // pty-core reports an exit for a PTY it killed; a resize stands in for
+      // one ending on its own.
+      if (event === 'pty:kill' || event === 'pty:resize') console.log(JSON.stringify({ event: 'pty:exit', data: { id: data.id, exitCode: 0 } }));
       if (event === 'pty:getCwd') console.log(JSON.stringify({
         event: 'pty:cwd', data: { requestId: data.requestId, cwd: process.env.VITE_DORMOUSE_BROWSER_DEV_HOST || process.cwd() }
       }));
@@ -110,6 +113,43 @@ async function send(run, cmd, args) {
     body: JSON.stringify({ cmd, args }),
     signal: AbortSignal.timeout(5000),
   });
+}
+
+/** The page's event stream: everything read so far, and a wait for a pattern in it. */
+async function events(t, run) {
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const response = await fetch(`${run.bridge}/__dormouse_dev_host/events?t=${run.token}`, {
+    headers: { origin: run.app }, signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  const stream = { text: '' };
+  const waiters = new Set();
+  (async () => {
+    const decoder = new TextDecoder();
+    try {
+      for await (const chunk of response.body) {
+        stream.text += decoder.decode(chunk, { stream: true });
+        for (const check of [...waiters]) check();
+      }
+    } catch { /* aborted at the end of the test */ }
+  })();
+  stream.wait = (pattern, ms = 10000) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      waiters.delete(check);
+      reject(new Error(`no ${pattern} in ${JSON.stringify(stream.text)}`));
+    }, ms);
+    const check = () => {
+      const match = pattern.exec(stream.text);
+      if (!match) return;
+      clearTimeout(timer);
+      waiters.delete(check);
+      resolve(match);
+    };
+    waiters.add(check);
+    check();
+  });
+  return stream;
 }
 
 async function assertClosed(run) {
@@ -199,6 +239,21 @@ test('stamps its one window on alert commands and carries userInput and launch o
   assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*"launch".*\})/), {
     event: 'pty:input', data: { id: 'p1', data: 'view\r', launch: true },
   });
+});
+
+// As Rust's `pty_kill` forgets the owner, so the exit pty-core reports for a
+// killed PTY reaches no window; a later spawn of the same id owns it again.
+test('a PTY the page killed delivers no exit, until a spawn reuses its id', { timeout: 60000 }, async t => {
+  const run = await (await fixture(t)).start().ready();
+  const stream = await events(t, run);
+  await stream.wait(/dev:connected/);
+  assert.equal((await send(run, 'pty_kill', { id: 'killed' })).status, 200);
+  assert.equal((await send(run, 'pty_resize', { id: 'live', cols: 80, rows: 24 })).status, 200);
+  await stream.wait(/"event":"pty:exit","data":\{"id":"live"/);
+  assert.doesNotMatch(stream.text, /"id":"killed"/);
+  assert.equal((await send(run, 'pty_spawn', { id: 'killed' })).status, 200);
+  assert.equal((await send(run, 'pty_resize', { id: 'killed', cols: 80, rows: 24 })).status, 200);
+  await stream.wait(/"event":"pty:exit","data":\{"id":"killed"/);
 });
 
 test('explicit ports and raw browser sessions are honored; occupied ports fail without adopting a peer', { timeout: 60000 }, async t => {
