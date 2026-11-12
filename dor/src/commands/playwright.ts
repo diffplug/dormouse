@@ -31,9 +31,8 @@ file paths, run there. --session (or -s) selects a native session instead.
 These three identities are mutually exclusive. --from <handle> is a placement
 reference: the Surface a new playwright pane splits from, whose Workspace a
 --key resolves in. It places only a pane this command creates, and cannot be
-combined with --surface. dor reads these, --workspace, and --focus (or
---focus=true|false) anywhere in the arguments, up to an optional bare --, which
-it forwards unchanged; everything else, and everything after that --, belongs to playwright.
+combined with --surface. dor reads these, --workspace, and --focus anywhere in
+the arguments; everything else belongs to playwright.
 
 Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
   dor playwright dor-embed-size --json
@@ -47,7 +46,7 @@ Launch once with open, then navigate with goto: playwright's open restarts the
 browser, dropping its tabs and cookies, while goto navigates the current tab.
 Chromium sessions can be viewed and controlled in Dormouse.
 
-${focusHelp({ minimize: false, browser: true })}
+${focusHelp({ minimize: false })}
 
 ${browserExitHelp('playwright')}
 

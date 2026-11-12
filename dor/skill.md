@@ -85,7 +85,7 @@ Prefer `ensure` over `split` for anything with a natural identity ("the dev serv
 ```sh
 dor split -- npm test          # runs beside you; focus stays with you
 dor split --minimize -- ./watch.sh
-dor split --                   # blank terminal, focus stays with you
+dor split                      # blank terminal, focus stays with you
 ```
 
 Direction flags `--left|--right|--up|--down` (default `--auto`). `--from <id>` picks which surface to split from; the new terminal starts in your current directory. An initial command goes after `--`.
@@ -128,7 +128,7 @@ dor kill surface:3 --confirm-dangerously          # only when already validated
 
 ## Browsers
 
-Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything but the Dormouse flags, which may come anywhere, is that CLI's own command set; a bare `--` and everything after it are forwarded unchanged. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`.
+Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything but the Dormouse flags, which may come anywhere, is that CLI's own command set. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`.
 
 `dor list` shows each browser's `render_mode`, which says what drives it: `agent-browser-*` takes `dor agent-browser --surface <id>`, `playwright-*` takes `dor playwright --surface <id>`, and `iframe` takes neither — open its URL with `dor agent-browser open <url>` instead. `screencast` renders in the pane; `popout` is a separate window the pane stands in for.
 
@@ -277,7 +277,7 @@ dor kill surface:N --confirm-if-read "npm run dev"
 
 ## Rules and pitfalls
 
-- **Your commands leave the user's focus where it is**; only a `dor` command a person types alone at a prompt focuses its result. Pass `--focus` only when the user asks to be taken to the result. Browser commands reuse visible panes without taking focus, even when typed at a prompt.
+- **Your commands leave the user's focus where it is.** Pass `--focus` only when the user asks to be taken to the result.
 - **Never pre-quote command tails.** Everything after `--` is forwarded as a raw argv array; Dormouse quotes it correctly for whatever shell the target surface runs (POSIX, cmd, PowerShell). Pass `-- npm test -- --watch`, not `-- "npm test -- --watch"`.
 - **Take ids from responses.** Capture the id that `split`/`ensure`/`tool`/`open` print rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with, including its flags.

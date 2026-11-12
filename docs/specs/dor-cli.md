@@ -291,10 +291,10 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 
 **Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.**
 
-- **Must read Dormouse's options anywhere in the provider argv**, up to an optional bare `--` that ends interception and is forwarded unchanged (rationale). Only a lone `--help`/`-h` is `dor`'s help; any other is the provider's.
+- **Must read Dormouse's options anywhere in the provider argv, after a `--` too**; a bare `--` is an ordinary provider argument, forwarded in place (rationale). Only a lone `--help`/`-h` is `dor`'s help; any other is the provider's.
 - **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace` and optional placement `--from`; any two identities fail. Except Dormouse-owned `dor-embed-size` and `dor-diagnostics`, forward arguments and exit status, and stdout and stderr at exit. **Must refuse a form that waits on the terminal or never exits** (`BLOCKING_FORMS`; rationale). **Must forward stdin only to the requested command**, never preparation or status probes.
 - **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, from?, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.
-- **After a command that may bind succeeds, `surface.browser { provider, key?, surface?, from?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**, routed by its browser target or placement reference: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`** (rationale). **Must exit 4 (`BROWSER_UNBOUND_EXIT`) when binding fails after a successful provider command**, keeping the provider's output and stating on stderr that the command already ran; never retry it. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
+- **After a command that may bind succeeds, `surface.browser { provider, key?, surface?, from?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**, routed by its browser target or placement reference: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`** (rationale). **Must exit 4 (`BROWSER_UNBOUND_EXIT`) when binding fails after a successful provider command** (rationale), keeping the provider's output and stating on stderr that the command already ran; never retry it. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
 - **Browser `--from` must fail only a placement the request would make**: `surface.resolveBrowser` checks it before the provider runs when a command that may bind finds no Surface for its key, and `surface.browser` before attaching when no Surface here shows the key or session. A stale, minimized, or other-Workspace reference never fails a reuse.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle Model](#handle-model)), and the host applies two gates in order:
@@ -325,19 +325,14 @@ Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-
 
 ## Focus intent
 
-Whether the Surface `split`, `ensure`, `tool`, `open`, `iframe`, `agent-browser`, or `playwright` creates or reuses takes focus:
+**Must focus the Surface `split`, `ensure`, `tool`, `open`, `iframe`, `agent-browser`, or `playwright` creates or reuses only on `--focus`**; otherwise focus stays where it is, on creation and reuse alike, whoever ran the command (rationale).
 
-1. An explicit `--focus` or `--focus=false` wins.
-2. `--minimize` or `dor open --preview` leaves focus put.
-3. Otherwise it takes focus only when the caller's shell reports `dor <verb>` typed alone (the command-line condition of `docs/specs/dor-tool.md` → "Take-over"); an agent's or script's invocation runs under another command line (rationale).
-
-- **Must focus an already-visible browser only on explicit `--focus`.**
-- **Must send `focus` only when given**, so the host applies the default from the caller's line on arrival. Browser providers intercept `--focus[=true|false]` anywhere before `--`.
-- **Must reject an explicit `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
-- **Never apply the default to the webview's own requests** (link clicks, OSC 367 `open`, document navigation): they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).
+- **Must always send `focus`**, true only for `--focus`.
+- **Must reject `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
+- **Never send `focus` from the webview's own requests** (link clicks, OSC 367 `open`, document navigation), the only requests without it: they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).
 - Workspace creation stays in the background; activation uses `dor workspace switch`.
 
-Source of truth: `cliFocusIntent` in `lib/src/components/wall/tool-takeover.ts`.
+Source of truth: `handleDorControl` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## Helper callers and targets
 

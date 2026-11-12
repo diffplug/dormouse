@@ -3495,16 +3495,14 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  // docs/specs/dor-cli.md -> "Focus intent": typed alone at the caller's prompt
-  // focuses, an agent's invocation does not, an explicit --focus wins either
-  // way, and the webview's own requests keep focusing what they reveal.
+  // docs/specs/dor-cli.md -> "Focus intent": a CLI request focuses only with
+  // --focus, even typed alone at the caller's prompt; the webview's own
+  // requests, which send no focus, keep focusing what they reveal.
   it.each([
-    { line: 'dor tool storybook', focus: undefined, gui: false, focused: true },
-    { line: 'claude', focus: undefined, gui: false, focused: false },
-    { line: 'dor tool storybook', focus: false, gui: false, focused: false },
-    { line: 'claude', focus: true, gui: false, focused: true },
-    { line: 'claude', focus: undefined, gui: true, focused: true },
-  ])('reveals a minimized Tool from $line with focus $focus (gui $gui): focused $focused', async ({ line, focus, gui, focused }) => {
+    { line: 'dor tool storybook', focus: false, focused: false },
+    { line: 'claude', focus: true, focused: true },
+    { line: 'claude', focus: undefined, focused: true },
+  ])('reveals a minimized Tool from $line with focus $focus: focused $focused', async ({ line, focus, focused }) => {
     const toolId = 'surface:tool-door';
     terminalRegistry.applyTerminalSemanticEvents(toolId, [
       // The match runs in its own directory, not the caller's: the response has
@@ -3550,7 +3548,6 @@ describe('Wall on the Lath engine', () => {
             method: SURFACE_CONTROL_METHODS.tool,
             surfaceId: 'surface:a',
             params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false, ...(focus === undefined ? {} : { focus }) },
-            ...(gui ? { gui: true } : {}),
             respond: (result: typeof response) => { response = result; },
           },
         }));
@@ -4313,14 +4310,10 @@ describe('Wall on the Lath engine', () => {
     expect(focusOf('surface:a')).toBe('false');
   });
 
-  // docs/specs/dor-cli.md -> "Focus intent", read from the caller's own line.
+  // docs/specs/dor-cli.md -> "Focus intent": only --focus, never the caller's line.
   it.each([
-    { line: 'dor split', params: {}, focused: true },
-    { line: 'dor split -- pnpm dev', params: { command: ['pnpm', 'dev'] }, focused: true },
-    { line: 'claude', params: {}, focused: false },
-    { line: 'dor split && ls', params: {}, focused: false },
-    { line: 'dor ensure -- pnpm dev', params: {}, focused: false },
     { line: 'dor split', params: { focus: false }, focused: false },
+    { line: 'dor split -- pnpm dev', params: { command: ['pnpm', 'dev'], focus: false }, focused: false },
     { line: 'claude', params: { focus: true }, focused: true },
   ])('dor split from $line with $params focuses the new surface: $focused', async ({ line, params, focused }) => {
     await act(async () => {
@@ -4366,19 +4359,19 @@ describe('Wall on the Lath engine', () => {
     expect(focusOf(newId)).toBe('false');
   });
 
-  it.each(['agent-browser', 'playwright'] as const)('keeps visible %s reuse neutral unless focus is explicit', async provider => {
+  it.each(['agent-browser', 'playwright'] as const)('focuses the %s Surface, created or reused, only with --focus', async provider => {
     hostBrowsers();
     const onEvent = vi.fn();
     const selected = () => onEvent.mock.calls.filter(([event]) => event.type === 'selectionChange').at(-1)?.[0]?.id;
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     await act(async () => { root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" onEvent={onEvent} />); });
     await flush();
-    const invoke = async (focus?: boolean) => {
+    const invoke = async (focus: boolean) => {
       let response: { ok: boolean; result?: { surfaceId: string; minimized: boolean } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
           method: SURFACE_CONTROL_METHODS.browser, surfaceId: 'surface:a',
-          params: { provider, session: 'focus-review', ...(focus === undefined ? {} : { focus }) },
+          params: { provider, session: 'focus-review', focus },
           respond: (result: typeof response) => { response = result; },
         } }));
       });
@@ -4387,14 +4380,11 @@ describe('Wall on the Lath engine', () => {
       return response!.result!;
     };
     try {
+      // Typed alone at the caller's prompt, neither creation nor reuse focuses.
       reportRunning('surface:a', `dor ${provider} open :5173`);
-      const { surfaceId: browserId } = await invoke();
-      expect(selected()).toBe(browserId);
-      await act(async () => { getWallHandle(DEFAULT_WORKSPACE_ID)!.focusSurface('surface:a', false); });
-      await flush();
+      const { surfaceId: browserId } = await invoke(false);
       expect(focusOf('surface:a')).toBe('true');
-      reportRunning('surface:a', `dor ${provider} snapshot`);
-      await invoke();
+      await invoke(false);
       expect(focusOf('surface:a')).toBe('true');
       await invoke(true);
       expect(selected()).toBe(browserId);
@@ -4404,7 +4394,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       expect((await invoke(false)).minimized).toBe(true);
       expect(focusOf('surface:a')).toBe('true');
-      expect((await invoke()).minimized).toBe(false);
+      expect((await invoke(true)).minimized).toBe(false);
       expect(selected()).toBe(browserId);
     } finally { act(() => terminalRegistry.removeTerminalPaneState('surface:a')); }
   });

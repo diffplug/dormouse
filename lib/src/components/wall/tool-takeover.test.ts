@@ -1,48 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   callerStillPlaceable,
-  cliFocusIntent,
   isNakedToolInvocation,
   toolTakesOverCaller,
-  typedDorVerb,
   type ToolTakeoverGate,
 } from './tool-takeover';
-
-describe('typedDorVerb', () => {
-  it('names the verb of any `dor` line typed alone, its alias resolved', () => {
-    expect(typedDorVerb('dor split -- pnpm dev')).toBe('split');
-    expect(typedDorVerb('dor agent-browser open :5173')).toBe('agent-browser');
-    expect(typedDorVerb('dor o README.md')).toBe('open');
-  });
-
-  it('is null for anything else', () => {
-    expect(typedDorVerb('dor')).toBeNull();
-    expect(typedDorVerb('claude')).toBeNull();
-    expect(typedDorVerb('dor split && ls')).toBeNull();
-    expect(typedDorVerb(undefined)).toBeNull();
-  });
-});
-
-describe('cliFocusIntent', () => {
-  const typed = { focus: undefined, background: false, gui: false, typedVerb: 'split' };
-
-  it('focuses a command typed alone at the prompt, and nothing an agent or script runs', () => {
-    expect(cliFocusIntent(typed, 'split')).toBe(true);
-    expect(cliFocusIntent({ ...typed, typedVerb: null }, 'split')).toBe(false);
-    // The caller typed another verb, which is not this request's.
-    expect(cliFocusIntent({ ...typed, typedVerb: 'ensure' }, 'split')).toBe(false);
-  });
-
-  it('lets an explicit --focus win either way', () => {
-    expect(cliFocusIntent({ ...typed, focus: false }, 'split')).toBe(false);
-    expect(cliFocusIntent({ ...typed, typedVerb: null, focus: true }, 'split')).toBe(true);
-  });
-
-  it('turns the default off for --minimize, --preview, and the webview\'s own requests', () => {
-    expect(cliFocusIntent({ ...typed, background: true }, 'split')).toBe(false);
-    expect(cliFocusIntent({ ...typed, gui: true }, 'split')).toBe(false);
-  });
-});
 
 describe('isNakedToolInvocation', () => {
   it('accepts a `dor tool` line typed on its own', () => {

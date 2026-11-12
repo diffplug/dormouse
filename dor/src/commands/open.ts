@@ -1,7 +1,7 @@
 import { buildCommand } from '@stricli/core';
 import type { Command, CommandState, DorCommandContext, WorkspaceScopedFlags } from './types.js';
 import {
-  callerWorkingDirectory, commandStateHelp, cwdParser, focusFlag, focusHelp, focusMinimizeConflict, focusParam, pickerCancelled, requireControlClient, stringParser, workspaceFlag, workspaceParam,
+  callerWorkingDirectory, commandStateHelp, cwdParser, focusFlag, focusHelp, focusMinimizeConflict, pickerCancelled, requireControlClient, stringParser, workspaceFlag, workspaceParam,
 } from './shared.js';
 import { runFilePicker } from './open-picker.js';
 import { dispatchToolSurface, TOOL_TIMEOUT_MS } from './tool.js';
@@ -47,7 +47,7 @@ The selected Tool receives the canonical absolute path as one argument. Configur
 
 Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --from, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
 
-${focusHelp({ minimize: true })} --preview turns the default off too.
+${focusHelp({ minimize: true })}
 
 ${commandStateHelp(OPEN_COMMAND_STATES)}
 
@@ -90,7 +90,7 @@ ${commandStateHelp(OPEN_COMMAND_STATES)}
         ...workspaceParam(flags.workspace),
         fresh: flags.fresh === true,
         minimized: flags.minimize === true,
-        ...focusParam(flags.focus),
+        focus: flags.focus === true,
         surface: flags.from,
         cwd,
         ...(flags.preview ? { preview: true } : {}),

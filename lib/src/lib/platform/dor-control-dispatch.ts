@@ -31,7 +31,7 @@ const inFlight = new Map<string, AbortController>();
 export function dispatchDorControlRequest(
   payload: DorControlRequestPayload,
   respond: (response: DorControlResult) => void,
-  { oscOpen = false, terminalLink = false, gui = oscOpen || terminalLink }: { oscOpen?: boolean; terminalLink?: boolean; gui?: boolean } = {},
+  { oscOpen = false, terminalLink = false }: { oscOpen?: boolean; terminalLink?: boolean } = {},
 ): void {
   const { requestId } = payload;
   const controller = new AbortController();
@@ -49,8 +49,6 @@ export function dispatchDorControlRequest(
       ...(oscOpen ? { oscOpen: true } : {}),
       // Set only for a terminal-link click or its confirmed fallback open.
       ...(terminalLink ? { terminalLink: true } : {}),
-      // Set for every request the webview's own UI makes, those two included.
-      ...(gui ? { gui: true } : {}),
       signal: controller.signal,
       respond: (response: DorControlResult) => {
         inFlight.delete(requestId);

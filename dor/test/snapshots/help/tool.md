@@ -24,7 +24,7 @@ Approving an upstream covers any folder whose git config names that upstream, ev
 
 Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --from, --cwd elsewhere — splits and prints the new surface's handle. Once the command exits the pane is a plain terminal again; a later invocation from its prompt takes it over afresh. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
 
-Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error.
+Focuses the created or reused Surface only with --focus; otherwise focus stays where it is. --focus with --minimize is an error.
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
@@ -79,7 +79,7 @@ JSON output:
   }
 
 FLAGS
-     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
+     [--focus]      Focus the created or reused Surface.
      [--global]     Resolve only user-global tools.
      [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
