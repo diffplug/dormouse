@@ -1,10 +1,19 @@
 import { buildCommand } from '@stricli/core';
-import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
+import type { Command, CommandState, DorCommandContext, WorkspaceScopedFlags } from './types.js';
 import {
-  callerWorkingDirectory, cwdParser, focusFlag, focusHelp, focusMinimizeConflict, focusParam, pickerCancelled, requireControlClient, stringParser, workspaceFlag, workspaceParam,
+  callerWorkingDirectory, commandStateHelp, cwdParser, focusFlag, focusHelp, focusMinimizeConflict, focusParam, pickerCancelled, requireControlClient, stringParser, workspaceFlag, workspaceParam,
 } from './shared.js';
 import { runFilePicker } from './open-picker.js';
 import { dispatchToolSurface, TOOL_TIMEOUT_MS } from './tool.js';
+
+/** Every state `dor open` reports, in help order. It runs only user Tools and
+ *  built-ins, which need no approval. */
+const OPEN_COMMAND_STATES: ReadonlyArray<readonly [CommandState, string]> = [
+  ['unconfirmed', 'a new Surface; its command is not yet seen starting'],
+  ['running', 'the shell reported the command running'],
+  ['queued', 'not started yet: a takeover, answered before its command is typed so dor can exit and free the shell, or a reused or retargeted Tool whose run has not started'],
+  ['ended', 'the command already ended, perhaps with a nonzero exit, or a newer preview superseded this one'],
+];
 
 interface OpenFlags extends WorkspaceScopedFlags {
   readonly focus?: boolean;
@@ -39,6 +48,8 @@ The selected Tool receives the canonical absolute path as one argument. Configur
 Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
 
 ${focusHelp({ minimize: true })} --preview turns the default off too.
+
+${commandStateHelp(OPEN_COMMAND_STATES)}
 
 --preview shows the file or folder in this Workspace's preview slot: one reusable pane, marked by an italic label, that each preview retargets in place — reporting "retargeted", or "superseded" when a newer preview replaced it first. Opening what the slot shows without --preview keeps it open, as do double-clicking its pane header, Keep open in its terminal context, and the Tool reporting unsaved changes; the next preview then gets a new slot. A retarget interrupts the slot with Ctrl+C, so preview Tools should exit on it (less -K, glow); a slot still running a second later is kept open instead. A preview never takes over the calling pane, and a Tool already kept open for it is revealed instead.`,
     },

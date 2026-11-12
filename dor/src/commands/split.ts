@@ -115,6 +115,8 @@ split creates terminal Surfaces. Compose browser content commands through the in
   dor split --right -- dor iframe :5173
   dor split --auto -- dor agent-browser open https://example.com
 
+split answers once the Surface exists, without waiting for an initial command to start, so its JSON command_state is always unconfirmed; check readiness separately.
+
 Text output:
   created surface:2  [right]
   created surface:3  [down]  [minimized]  "pnpm dev"
@@ -122,6 +124,7 @@ Text output:
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:2",
     "direction": "right",
     "minimized": false,
@@ -197,6 +200,7 @@ function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): str
   if (json) {
     return renderJson({
       status: response.status,
+      command_state: response.commandState,
       surface_id: response.surfaceId,
       direction: response.direction,
       minimized: response.minimized,

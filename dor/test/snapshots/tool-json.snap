@@ -2,6 +2,7 @@ exitCode: 0
 stdout:
 {
   "status": "existing",
+  "command_state": "running",
   "surface_id": "surface:4",
   "command": "pnpm storybook",
   "cwd": "/work/site",

@@ -258,7 +258,15 @@ export interface SplitSurfaceRequest extends WorkspaceScopedRequest, FocusIntent
   surface?: string;
 }
 
+/** What the reply can prove about the launched command, independent of the
+ * Surface's creation/reuse `status`. `ended` observes the command ending, not a
+ * successful exit or service readiness; for `superseded`, it means the replaced
+ * request is settled. JSON output spells it `command_state`. */
+export type CommandState = 'unconfirmed' | 'running' | 'awaiting_approval' | 'queued' | 'ended';
+
 export interface SplitSurfaceResponse {
+  /** Split never waits for an initial command to start. */
+  commandState: 'unconfirmed';
   status: 'created';
   surfaceId: string;
   direction: ResolvedSplitDirection;
@@ -278,6 +286,8 @@ export interface EnsureSurfaceRequest extends WorkspaceScopedRequest, FocusInten
 }
 
 export interface EnsureSurfaceResponse {
+  /** ensure runs no approval gate. */
+  commandState: Exclude<CommandState, 'awaiting_approval'>;
   status: 'created' | 'existing' | 'restarted';
   surfaceId: string;
   command: string;
@@ -315,6 +325,7 @@ export interface ToolSurfaceRequest extends WorkspaceScopedRequest, FocusIntentR
 }
 
 export interface ToolSurfaceResponse {
+  commandState: CommandState;
   /**
    * `existing` is a key match on a live tool: the redundant spawn never
    * started. `adopted` is a key match on a Tool the host had stopped — reaped

@@ -10,6 +10,7 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
+  commandStateHelp,
   launchDirectory,
   cwdParser,
   focusFlag,
@@ -24,6 +25,14 @@ import {
   workspaceParam,
   writeStdout,
 } from './shared.js';
+
+/** Every state ensure reports, in help order; it has no approval gate. */
+const ENSURE_COMMAND_STATES: ReadonlyArray<readonly [EnsureSurfaceResponse['commandState'], string]> = [
+  ['unconfirmed', 'a new Surface whose shell is ready; its command is scheduled but not yet seen starting'],
+  ['running', 'the shell reported the command running (always so after --restart)'],
+  ['queued', 'the match is a launch still on its way; its command has not started'],
+  ['ended', 'the new Surface\'s command already ended, perhaps with a nonzero exit'],
+];
 
 interface EnsureFlags extends WorkspaceScopedFlags {
   readonly focus?: boolean;
@@ -102,7 +111,7 @@ export const ensureCommand: Command = {
   command: buildCommand<EnsureFlags, string[], DorCommandContext>({
     docs: {
       brief: 'Ensure one surface is running a command.',
-      fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
+      fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. It reuses a running or in-flight match, or creates a split and schedules the command. Creation waits for shell integration, not command startup; read command_state before assuming the command started.
 
 ${focusHelp({ minimize: true })} Focusing a minimized match reveals it.
 
@@ -122,14 +131,17 @@ Two surfaces running the same command in different working directories are disti
 
 --surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
+${commandStateHelp(ENSURE_COMMAND_STATES)}
+
 Text output:
-  created surface:3  "npm run dev"
-  existing surface:3  "npm run dev"
-  restarted surface:3  "npm run dev"
+  created surface:3  [unconfirmed]  "npm run dev"
+  existing surface:3  [running]  "npm run dev"
+  restarted surface:3  [running]  "npm run dev"
 
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:3",
     "command": "npm run dev",
     "cwd": "/Users/me/projects/site",
@@ -185,6 +197,7 @@ function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): s
   if (json) {
     return renderJson({
       status: response.status,
+      command_state: response.commandState,
       surface_id: response.surfaceId,
       command: response.command,
       cwd: response.cwd,
@@ -192,5 +205,5 @@ function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): s
     });
   }
 
-  return `${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}\n`;
+  return `${response.status} ${response.surfaceId}  [${response.commandState}]  ${JSON.stringify(response.command)}\n`;
 }

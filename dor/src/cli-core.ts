@@ -358,7 +358,7 @@ function createApplication(flagValues: ReadonlyMap<string, string>, reportFailur
         brief: 'control Dormouse from a terminal',
         fullDescription: `Dormouse bundles the dor CLI into every terminal it launches.
 
-First-party --json prints one result object on stdout. Failures print {"error":{"code":"...","message":"..."}} and retain a nonzero exit status; stderr carries diagnostics. Error codes are INVALID_ARGUMENT (parsing), CONTROL_UNAVAILABLE (no host endpoint, or no host answered before the request was sent), COMMAND_FAILED (validation or execution), TIMEOUT, SURFACE_DIED, and CANCELLED (a picker was dismissed). Exit 1 means failure; await uses 2 for timeout and 3 for Surface death. Help stays text. Browser-provider output belongs to the provider.`,
+First-party --json prints one result object on stdout. Failures print {"error":{"code":"...","message":"..."}} and retain a nonzero exit status; stderr carries diagnostics. Error codes are INVALID_ARGUMENT (parsing), CONTROL_UNAVAILABLE (no host endpoint, or no host answered before the request was sent), COMMAND_FAILED (validation or execution), TIMEOUT, SURFACE_DIED, and CANCELLED (a picker was dismissed). Exit 1 means failure; await uses 2 for timeout and 3 for Surface death. Help stays text. Browser-provider output and exit status belong to the provider, except exit 4: the provider command succeeded but its browser Surface could not be opened, so do not repeat it blindly.`,
       },
     }),
     {

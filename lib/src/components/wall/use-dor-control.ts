@@ -15,6 +15,7 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
+  EnsureSurfaceResponse,
   ToolOrigin,
   ToolSurfaceResponse,
 } from 'dor/commands/types';
@@ -398,6 +399,29 @@ export function waitForNewToolCommand(id: string, command: string, cwd: string, 
   return waitForTerminalState(id, state => surfaceRunsCommand(state, command, cwd)
     || completedCommandMatches(state, command, cwd),
   COMMAND_START_TIMEOUT_MS, signal);
+}
+
+/** What the pane shows of a launched command when replying: only evidence
+ * available now. A previous completed run cannot prove a retarget/restart;
+ * only a new Surface has no such history. */
+export function observedCommandState(
+  newSurface: boolean, id: string, command: string, cwd: string,
+): EnsureSurfaceResponse['commandState'] {
+  const state = getTerminalPaneState(id);
+  if (surfaceRunsCommand(state, command, cwd)) return 'running';
+  if (newSurface) return completedCommandMatches(state, command, cwd) ? 'ended' : 'unconfirmed';
+  return 'queued';
+}
+
+/** A Tool reply's command state: an approval, a takeover, and a superseded
+ * preview are settled by their status alone. */
+export function toolCommandState(
+  status: ToolSurfaceResponse['status'], id: string, command: string, cwd: string,
+): ToolSurfaceResponse['commandState'] {
+  if (status === 'pending') return 'awaiting_approval';
+  if (status === 'takeover') return 'queued';
+  if (status === 'superseded') return 'ended';
+  return observedCommandState(status === 'created', id, command, cwd);
 }
 
 /** A terminal-only Tool is ready once its output has been quiet this long. */
@@ -1203,6 +1227,7 @@ export function useDorControl({
         ok: true,
         result: {
           status: 'created',
+          commandState: 'unconfirmed',
           surfaceId: result.value.id,
           direction,
           minimized: result.value.minimized,
@@ -1339,6 +1364,7 @@ export function useDorControl({
           ok: true,
           result: {
             status,
+            commandState: toolCommandState(status, surface.surfaceId, surface.command, surface.cwd),
             surfaceId: surface.surfaceId,
             command: surface.command,
             cwd: surface.cwd,
@@ -2014,6 +2040,7 @@ export function useDorControl({
             ok: true,
             result: {
               status: 'restarted',
+              commandState: 'running',
               surfaceId: existingId,
               command,
               cwd,
@@ -2026,6 +2053,7 @@ export function useDorControl({
           ok: true,
           result: {
             status: 'existing',
+            commandState: observedCommandState(false, existingId, command, cwd),
             surfaceId: existingId,
             command,
             cwd,
@@ -2086,6 +2114,7 @@ export function useDorControl({
         ok: true,
         result: {
           status: 'created',
+          commandState: observedCommandState(true, result.value.id, command, cwd),
           surfaceId: result.value.id,
           command,
           cwd,

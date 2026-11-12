@@ -2,6 +2,7 @@ exitCode: 0
 stdout:
 {
   "status": "created",
+  "command_state": "unconfirmed",
   "surface_id": "surface:3",
   "direction": "right",
   "minimized": false,

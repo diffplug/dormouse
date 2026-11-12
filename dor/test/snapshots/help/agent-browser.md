@@ -46,6 +46,11 @@ driven with dor playwright --surface instead.
 
 Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.
 
+The exit status is agent-browser's own; 1 when dor refuses the command or fails
+before running it; or 4 when agent-browser succeeded but dor could not open
+or reuse its browser Surface. The command already ran and its output is printed,
+so do not repeat it blindly: check the page first.
+
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
 http:// rather than agent-browser's https://, and a terminal Surface handle

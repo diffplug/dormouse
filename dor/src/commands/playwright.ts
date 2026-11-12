@@ -3,7 +3,7 @@ import { buildCommand } from '@stricli/core';
 import { BROWSER_PROVIDERS, PLAYWRIGHT_BIN_ENV, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import type { BrowserCliDescriptor } from './browser-cli.js';
 import type { Command, DorCommandContext } from './types.js';
-import { diagnosticsHelp, focusFlag, focusHelp, stringParser, workspaceFlag } from './shared.js';
+import { browserExitHelp, diagnosticsHelp, focusFlag, focusHelp, stringParser, workspaceFlag } from './shared.js';
 
 export const playwrightCommand: Command = {
   name: 'playwright' satisfies BrowserAutomationProvider,
@@ -45,6 +45,8 @@ browser, dropping its tabs and cookies, while goto navigates the current tab.
 Chromium sessions can be viewed and controlled in Dormouse.
 
 ${focusHelp({ minimize: false, browser: true })}
+
+${browserExitHelp('playwright')}
 
 Examples:
   dor playwright --key app open :5173

@@ -1,5 +1,5 @@
 exitCode: 0
 stdout:
-existing surface:3  "pnpm dev:workspace"
+existing surface:3  [running]  "pnpm dev:workspace"
 
 stderr:
