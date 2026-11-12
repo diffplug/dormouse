@@ -193,6 +193,8 @@ jobs:
           export GH_CONFIG_DIR GH_HOST=github.com
           # Paginate the repository connection, not the asynchronous search index.
           # Reports do not impose a lifetime cap; a failed page fails the read.
+          # GraphQL variables are expanded by GitHub, not the shell.
+          # shellcheck disable=SC2016
           OPEN=$(gh api graphql --paginate -F owner="${EMBARGO_REPO%/*}" -F name="${EMBARGO_REPO#*/}" \
                        -f query='query($owner: String!, $name: String!, $endCursor: String) {
                          repository(owner: $owner, name: $name) {
@@ -531,6 +533,8 @@ jobs:
             fail no-report "No findings ledger was composed."
           # Paginate the repository connection, not the asynchronous search index.
           # Reports do not impose a lifetime cap; a failed page fails the read.
+          # GraphQL variables are expanded by GitHub, not the shell.
+          # shellcheck disable=SC2016
           OPEN=$(gh api graphql --paginate -F owner="${EMBARGO_REPO%/*}" -F name="${EMBARGO_REPO#*/}" \
                        -f query='query($owner: String!, $name: String!, $endCursor: String) {
                          repository(owner: $owner, name: $name) {
@@ -620,6 +624,8 @@ jobs:
           export GH_CONFIG_DIR GH_HOST=github.com
           # Paginate the repository connection, not the asynchronous search index.
           # Reports do not impose a lifetime cap; a failed page fails the read.
+          # GraphQL variables are expanded by GitHub, not the shell.
+          # shellcheck disable=SC2016
           SNAPSHOT=$(gh api graphql --paginate -F owner="${EMBARGO_REPO%/*}" -F name="${EMBARGO_REPO#*/}" \
                        -f query='query($owner: String!, $name: String!, $endCursor: String) {
                          repository(owner: $owner, name: $name) {
