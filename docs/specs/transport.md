@@ -62,7 +62,7 @@ Source of truth: `PtyDataDispatch` in `lib/src/lib/pty-flow.ts`; `parseOnArrival
 
 ### Paced input
 
-`sendPtyInput` carries local automation’s typed input events to the PTY owner and returns its delivery receipt. Remote adapters do not expose this local control operation.
+`sendPtyInput` carries local automation’s input events to the PTY owner and acknowledges delivery. Remote adapters do not expose this local control operation. **Never block host async workers while awaiting input delivery.**
 
 - **Must write paced text in runs of at most 256 UTF-8 bytes, 10 ms apart** (rationale).
 - **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). Events keep their kind: a named Tab is a key; a tab in text is text.

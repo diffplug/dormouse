@@ -1339,7 +1339,8 @@ fn deliver_sidecar_exit(app: &AppHandle) {
 /// `BROWSER_REQUEST_TIMEOUT` (40s) for a hung browser host, and a visible ~3s
 /// freeze on a cold `agent-browser open`, which is long enough to look like a
 /// pane that never appeared. `(async)` moves the same blocking body onto a
-/// runtime worker, so the UI keeps rendering while the sidecar works.
+/// runtime worker, so the UI keeps rendering while the sidecar works. Long
+/// delivery waits such as `pty_send_input` must use the blocking pool instead.
 
 fn request_from_sidecar_timeout(
     state: &SidecarState,
@@ -1462,9 +1463,14 @@ fn start_console_parent_recovery(app: &AppHandle) {
 #[cfg(not(windows))]
 fn start_console_parent_recovery(_app: &AppHandle) {}
 
-#[tauri::command(async)]
-fn pty_send_input(state: tauri::State<'_, SidecarState>, id: String, events: JsonValue, input_id: String) -> Result<JsonValue, String> {
-    request_from_sidecar_timeout(&state, "pty:sendInput", serde_json::json!({ "id": id, "events": events, "inputId": input_id }), Duration::from_secs(24 * 60 * 60))
+#[tauri::command]
+async fn pty_send_input(app: AppHandle, id: String, events: JsonValue, input_id: String) -> Result<JsonValue, String> {
+    // A queued batch can take hours to deliver. Waiting on a runtime worker
+    // would starve unrelated commands, including the command that cancels it.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<SidecarState>();
+        request_from_sidecar_timeout(&state, "pty:sendInput", serde_json::json!({ "id": id, "events": events, "inputId": input_id }), Duration::from_secs(24 * 60 * 60))
+    }).await.map_err(|error| format!("PTY input wait failed: {error}"))?
 }
 
 #[tauri::command]
