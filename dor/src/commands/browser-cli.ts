@@ -65,7 +65,11 @@ export function extractSessionFlags(
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
     // The providers take their options after the command, so dor's are read
-    // anywhere; everything else, a bare `--` included, forwards in place.
+    // anywhere until a bare `--`; it and the rest forward verbatim.
+    if (arg === '--') {
+      rest.push(...args.slice(index));
+      break;
+    }
     // The one boolean: `--focus`, or `--focus=true|false`, never a separate value.
     if (arg === '--focus' || arg.startsWith('--focus=')) {
       const value = arg === '--focus' ? 'true' : arg.slice('--focus='.length);
@@ -424,6 +428,13 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   const parsed = extractSessionFlags(args, d);
   if (!parsed.ok) return fail(parsed.message);
   const flags = parsed.value;
+
+  // A `--` before the provider's command hides that command from dor, so no
+  // pane would bind (playwright-cli accepts the `--`; agent-browser refuses it).
+  const delimiter = flags.rest.indexOf('--');
+  if (delimiter >= 0 && firstPositional(d.provider, flags.rest.slice(0, delimiter)) === undefined) {
+    return fail(`put -- after the ${d.provider} command, before the values it protects: dor ${d.provider} fill ${d.provider === 'playwright' ? 'e1' : '@e1'} -- --focus`);
+  }
 
   if (flags.rest[0] === 'dor-embed-size') return runEmbedSize(d.provider, flags, options);
   if (flags.rest[0] === 'dor-diagnostics') return runDiagnostics(d.provider, flags, options);

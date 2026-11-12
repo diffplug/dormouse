@@ -75,9 +75,13 @@ splits from, whose Workspace a --key resolves in. It places only a browser
 this command creates; a reused one stays where it is. It cannot be combined
 with --surface, which names the existing browser to drive.
 
-dor reads these flags anywhere in the arguments. Everything else is
-agent-browser's own command surface: subcommands, flags, selectors. The binary
-is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
+dor reads these flags anywhere in the arguments, up to an optional bare --,
+which it forwards unchanged. Everything else, and everything after that --, is
+agent-browser's own command surface: subcommands, flags, selectors. Put the --
+after the command, before a value spelled like a dor flag:
+  dor agent-browser fill @e1 -- --focus
+
+The binary is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
 bundled; install it with:
   ${INSTALL_HINT}
 

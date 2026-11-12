@@ -1201,14 +1201,13 @@ test('agent-browser passthrough output', async () => {
   );
 });
 
-test('browser --focus belongs to dor anywhere, and is not forwarded to the provider', async () => {
+test('browser --focus belongs to dor anywhere before --, and is not forwarded to the provider', async () => {
   for (const [argv, focus] of [
     [['open', ':5173'], false],
     [['--focus', 'open', ':5173'], true],
     [['open', ':5173', '--focus'], true],
     [['open', ':5173', '--focus=true'], true],
     [['open', '--focus=false', ':5173'], false],
-    [['open', ':5173', '--', '--focus'], true],
   ]) {
     const ab = fakeAgentBrowser();
     const client = fixtureClient();
@@ -1217,6 +1216,11 @@ test('browser --focus belongs to dor anywhere, and is not forwarded to the provi
     assert.equal(client.requests.find(r => r.method === 'browserSurface').request.focus, focus, argv.join(' '));
     assert.equal(ab.calls.some(args => args.some(arg => arg.startsWith('--focus'))), false, argv.join(' '));
   }
+  // After a bare --, it is the provider's.
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', 'fill', '#q', '--', '--focus'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls.some(args => args.includes('--focus')), true);
   for (const argv of [['--focus=yes', 'open', ':5173'], ['--focus', 'open', ':5173', '--focus=false']]) {
     const refused = await runCli(['agent-browser', ...argv], { client: fixtureClient(), execAgentBrowser: fakeAgentBrowser().exec });
     assert.equal(refused.exitCode, 1, argv.join(' '));
@@ -2484,12 +2488,23 @@ test('browser providers read Dormouse options anywhere, as the native CLIs read 
   });
 });
 
+test('a bare -- ends interception and forwards with the rest verbatim', async () => {
+  const tail = ['eval', '--surface', '--key', '--workspace=x', '--', '', 'a\nb'];
+  assert.deepEqual(extractSessionFlags(['--key', 'app', '--', ...tail], { sessionNoun: 'session' }), {
+    ok: true, value: { key: 'app', rest: ['--', ...tail] },
+  });
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['agent-browser', 'eval', '--session', 'raw', '--', ...tail.slice(1)], { execAgentBrowser: ab.exec, env: {} });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'raw', tail[0], '--', ...tail.slice(1)]);
+});
+
 test('only a lone --help is Dormouse help; any other goes to the provider', async () => {
   const ab = fakeAgentBrowser();
   const help = await runCli(['agent-browser', '--help'], { execAgentBrowser: ab.exec });
   assert.match(help.stdout, /USAGE/);
   assert.deepEqual(ab.calls, []);
-  for (const argv of [['agent-browser', 'open', '--help'], ['agent-browser', '--', '--help']]) {
+  for (const argv of [['agent-browser', 'open', '--help'], ['agent-browser', 'snapshot', '--', '--help']]) {
     const native = fakeAgentBrowser();
     await runCli(argv, { execAgentBrowser: native.exec, env: {} });
     assert.deepEqual(native.calls[0], ['agent-browser', '--session', 'dormouse.1.default', ...argv.slice(1)]);
@@ -2522,15 +2537,29 @@ test('empty browser identities fail before a provider or host request', async ()
   }
 });
 
-test('native browser option terminators forward in place, and Dormouse options after them are still read', async () => {
-  const tail = ['fill', '@e1', '--', '-5'];
+test('native browser option terminators survive before dash-leading values', async () => {
   for (const provider of ['agent-browser', 'playwright']) {
-    for (const argv of [['--session', 'raw', ...tail], [...tail, '--session', 'raw']]) {
+    for (const tail of [['fill', '@e1', '--', '-5'], ['fill', '@e1', '--', '--session'], ['fill', '@e1', '--', '--focus']]) {
       const calls = [];
       const exec = async (binary, args) => { calls.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
-      const result = await runCli([provider, ...argv], { execAgentBrowser: exec, execPlaywright: exec, env: {} });
+      const result = await runCli([provider, '--session', 'raw', ...tail], { execAgentBrowser: exec, execPlaywright: exec, env: {} });
       assert.equal(result.exitCode, 0, JSON.stringify(result));
-      assert.deepEqual(calls[0], [...(provider === 'playwright' ? ['--session=raw'] : ['--session', 'raw']), ...tail], argv.join(' '));
+      assert.deepEqual(calls[0], [...(provider === 'playwright' ? ['--session=raw'] : ['--session', 'raw']), ...tail]);
+    }
+  }
+});
+
+test('a -- before the provider command is refused before anything runs', async () => {
+  for (const provider of ['agent-browser', 'playwright']) {
+    for (const argv of [['--', 'open', ':5173'], ['--key', 'app', '--', 'open', ':5173'], ['--', 'dor-embed-size']]) {
+      const calls = [];
+      const exec = async (binary, args) => { calls.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
+      const client = fixtureClient();
+      const result = await runCli([provider, ...argv], { client, execAgentBrowser: exec, execPlaywright: exec, env: {} });
+      assert.equal(result.exitCode, 1, JSON.stringify(argv));
+      assert.match(result.stderr, /put -- after the .* command/);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(client.requests, []);
     }
   }
 });
@@ -2652,6 +2681,10 @@ test('browser placement is carried through resolution and binding, never forward
   assert.equal(bad.exitCode, 1);
   assert.match(bad.stderr, /--from and --surface are mutually exclusive/);
   assert.equal(ab.calls.length, before);
+  // After the bare `--`, a --from is the provider's.
+  const forwarded = await runCli(['agent-browser', '--key', 'docs', 'eval', '--', '--from'], { client, execAgentBrowser: ab.exec });
+  assert.equal(forwarded.exitCode, 0, forwarded.stderr);
+  assert.deepEqual(ab.calls.find(args => args.includes('eval')).slice(-3), ['eval', '--', '--from']);
 });
 
 test('reference prefixes are required before any host mutation', async () => {
