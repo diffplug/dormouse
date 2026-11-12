@@ -91,8 +91,7 @@ interface PendingProgressEnd {
   timer: ReturnType<typeof setTimeout>;
 }
 
-/** A progress title by outcome: after the running command, or on its own
- *  (`docs/specs/alert.md` -> Terminal reports). */
+/** A progress title by outcome: after the running command, or on its own. */
 const PROGRESS_TITLES: Record<ProgressOutcome, { afterCommand: string; alone: string }> = {
   complete: { afterCommand: 'finished', alone: 'Progress complete' },
   warning: { afterCommand: 'finished with a warning', alone: 'Progress warning' },
