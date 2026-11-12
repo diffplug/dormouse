@@ -133,7 +133,7 @@ function stubGh(dir, seed) {
     const args = process.argv.slice(2);
     const opt = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
     const body = opt('--body-file') !== null ? fs.readFileSync(opt('--body-file'), 'utf8') : opt('--body');
-    const embargo = args.includes(${JSON.stringify(EMBARGO_REPO)}) || (args[2] ?? '').includes(${JSON.stringify(EMBARGO_REPO)});
+    const embargo = args.includes(${JSON.stringify('name=' + EMBARGO_REPO.split('/')[1])}) || args.includes(${JSON.stringify(EMBARGO_REPO)}) || (args[2] ?? '').includes(${JSON.stringify(EMBARGO_REPO)});
     fs.appendFileSync('gh-calls.jsonl', JSON.stringify({ args, token: process.env.GH_TOKEN, body, embargo }) + '\\n');
     if (embargo && process.env.GH_FAIL_EMBARGO) process.exit(1);
     const now = new Date().toISOString().replace(/\\.\\d+Z$/, 'Z');
@@ -149,7 +149,18 @@ function stubGh(dir, seed) {
     const target = () => issues.find((i) => i.number === Number(String(args[2]).match(/(\\d+)$/)[1]));
     const comment = (issue, text) => issue.comments.push({ author: { login: 'fixture-token-owner' }, authorAssociation: 'MEMBER', body: text });
     const [command, sub] = args;
-    if (command === 'issue' && sub === 'list') {
+    if (command === 'api' && sub === 'graphql') {
+      const query = opt('-f');
+      if (!query.includes('pageInfo { hasNextPage endCursor }') || !query.includes('$endCursor')) process.exit(3);
+      const rows = issues.filter((i) => !query.includes('states: OPEN') || i.state === 'OPEN');
+      const count = args.includes('--paginate') ? rows.length : Math.min(100, rows.length);
+      for (let offset = 0; offset < Math.max(1, count); offset += 100) {
+        if (Number(process.env.GH_FAIL_EMBARGO_PAGE) === offset / 100 + 1) process.exit(1);
+        const nodes = rows.slice(offset, offset + 100).map((i) => ({ ...i, comments: { nodes: i.comments.slice(0, 100) } }));
+        const page = { data: { repository: { issues: { nodes, pageInfo: { hasNextPage: offset + 100 < rows.length, endCursor: String(offset + 100) } } } } };
+        process.stdout.write(execFileSync('jq', ['-r', opt('--jq')], { input: JSON.stringify(page), encoding: 'utf8' }));
+      }
+    } else if (command === 'issue' && sub === 'list') {
       const want = { open: 'OPEN', closed: 'CLOSED' }[opt('--state') ?? 'open'];
       const label = opt('--label');
       const phrase = (String(opt('--search')).match(/in:title "([^"]+)"/) ?? [])[1]?.toLowerCase();
@@ -432,26 +443,14 @@ test('an INFO off the grammar is an anomaly that leaves a PASS and files nothing
   const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
   assert.ok(body.includes(`- \`${SUPPLY}\`: an \`INFO\` line off the grammar, which changes no verdict: ${loose}\n`), body);
   assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), '');
-  assert.ok(!ghCalls(dir).some(({ embargo, args }) => embargo && args[1] !== 'list'), JSON.stringify(ghCalls(dir)));
+  assert.ok(!ghCalls(dir).some(({ embargo, args }) => embargo && args[0] === 'issue' && args[1] !== 'list'), JSON.stringify(ghCalls(dir)));
   assert.ok(!statusIssueBody(dir).includes('pinned tarball'));
 });
 
-// `gh issue list` reads at most its `--limit`: a list that fills it may have
-// left an open finding or a disclosure out, so every read that relies on
-// being whole fails instead of reading short.
-test('a ledger or disclosure list that fills its read fails rather than read short', (t) => {
-  const { dir, env } = fixture(t);
-  stubGh(dir);
-  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
-  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
-  const full = Array.from({ length: 1000 }, (_, i) => `${i + 1} [audit-finding ${String(i).padStart(12, '0')}] WARNING: old\n`).join('');
-  const { listed, embargoed, read, published } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: full } });
-  for (const step of [listed, embargoed, read]) assert.notEqual(step.status, 0, step.stdout);
-  assert.match(read.stdout, /Reading the findings ledger failed/);
-  assert.notEqual(published.status, 0);
-
+// Public disclosure listing still has a bounded read and must fail closed.
+test('a disclosure list that fills its read fails rather than read short', (t) => {
   const again = fixture(t);
-  stubGh(again.dir, { public: Array.from({ length: 1000 }, (_, i) => ({ number: i + 1, title: `[audit-disclosure ${String(i).padStart(12, '0')}/${i + 1}] WARNING finding`,
+  stubGh(again.dir, { public: Array.from({ length: 1000 }, (_, i) => ({ number: i + 1, title: '[audit-disclosure ' + String(i).padStart(12, '0') + '/' + (i + 1) + '] WARNING finding',
     body: '', labels: [DISCLOSURE_LABEL], state: 'CLOSED', stateReason: 'COMPLETED', createdAt: SEEDED_AT, closedAt: SEEDED_AT, comments: [] })) });
   writeFileSync(join(again.dir, 'audit-status.txt'), 'PASS');
   fragments.forEach((f) => writeFileSync(join(again.dir, f), fragmentText(f)));
@@ -461,20 +460,29 @@ test('a ledger or disclosure list that fills its read fails rather than read sho
   assert.match(second.published.stderr, /disclosure list filled its 1000-issue read/);
 });
 
-// A complete repository listing includes reports: reaching its cap must fail
-// closed, never fall back to an asynchronously indexed title search.
-test('a thousand per-run reports fail the complete ledger read closed', (t) => {
+// Reports and unindexed findings span multiple pages of the authoritative connection.
+test('a thousand per-run reports do not hide an unindexed ledger finding', (t) => {
   const { dir, env } = fixture(t);
   const report = (number) => ({ number, title: `[security-audit] FAIL on 2026-10-01 at abcdef${number % 10}`, body: '', labels: [],
     state: 'OPEN', stateReason: '', createdAt: SEEDED_AT, closedAt: null, comments: [] });
-  const ledger = { number: 1001, title: '[audit-finding 0123456789ab] WARNING: old', body: '', labels: [],
+  const ledger = { number: 1001, unindexed: true, title: '[audit-finding 0123456789ab] WARNING: old', body: '', labels: [],
     state: 'OPEN', stateReason: '', createdAt: SEEDED_AT, closedAt: null, comments: [] };
   stubGh(dir, { embargo: [...Array.from({ length: 1000 }, (_, i) => report(i + 1)), ledger] });
   writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
   fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
   const { listed, embargoed, read } = runReporting(dir, env);
-  for (const step of [listed, embargoed, read]) assert.notEqual(step.status, 0, step.stdout + step.stderr);
-  assert.ok(!existsSync(join(dir, 'audit-ledger-snapshot.jsonl')));
+  for (const step of [listed, embargoed, read]) assert.equal(step.status, 0, step.stdout + step.stderr);
+  const snapshot = readFileSync(join(dir, 'audit-ledger-snapshot.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(snapshot.map((row) => row.number), [1001]);
+
+  // A later failed page cannot turn a partial listing into a successful read.
+  const failed = fixture(t);
+  stubGh(failed.dir, { embargo: [...Array.from({ length: 100 }, (_, i) => report(i + 1)), ledger] });
+  writeFileSync(join(failed.dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(failed.dir, f), fragmentText(f)));
+  const partial = runReporting(failed.dir, failed.env, { embargoEnv: { GH_FAIL_EMBARGO_PAGE: '2' } });
+  for (const step of [partial.listed, partial.embargoed, partial.read, partial.published]) assert.notEqual(step.status, 0);
+  assert.ok(!existsSync(join(failed.dir, 'audit-ledger-snapshot.jsonl')));
 });
 
 // The private issue carries what did not pass; the PASS ledger stays in the
@@ -594,7 +602,7 @@ test('a passing run files its WARNINGs in the ledger and nothing else', (t) => {
   const { published, outputs } = runReporting(dir, env);
   assert.equal(outputs.compose.status, 'PASS');
   assert.equal(published.status, 0, published.stderr);
-  const embargoCalls = ghCalls(dir).filter(({ embargo, args }) => embargo && args[1] !== 'list');
+  const embargoCalls = ghCalls(dir).filter(({ embargo, args }) => embargo && args[0] === 'issue' && args[1] !== 'list');
   assert.equal(embargoCalls.length, 1);
   assert.ok(embargoCalls[0].args[embargoCalls[0].args.indexOf('--title') + 1].startsWith('[audit-finding '));
   // Listed on the status issue like any open finding, and nothing is disclosed yet.
@@ -1450,7 +1458,7 @@ test('the list step writes the open titles to one file and logs only their count
     `[audit-finding 0123456789ab] FAIL: secret detail ${EXPLOIT}\n[audit-finding manual-example-gate] FAIL security-ci.md GitHub Actions Policies: more detail\n`);
   assert.deepEqual(readdirSync(dir).filter((f) => !before.has(f)).sort(), ['gh-calls.jsonl', OPEN_FINDINGS].sort());
   assert.equal(`${result.stdout}${result.stderr}`, '2 open finding(s) for the domains to re-verify.\n');
-  assert.ok(ghCalls(dir).every(({ args, embargo }) => embargo && args.slice(0, 2).join(' ') === 'issue list'));
+  assert.ok(ghCalls(dir).every(({ args, embargo }) => embargo && args.slice(0, 2).join(' ') === 'api graphql' && args.includes('--paginate')));
   // Without the token it reads nothing and writes no file, which holds every domain at INCONCLUSIVE.
   rmSync(join(dir, OPEN_FINDINGS));
   rmSync(join(dir, 'gh-calls.jsonl'));
