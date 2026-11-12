@@ -62,6 +62,12 @@ export function extractSessionFlags(
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
+    // The providers take their options after the command, so dor's are read
+    // anywhere until a bare `--`; it and the rest forward verbatim.
+    if (arg === '--') {
+      rest.push(...args.slice(index));
+      break;
+    }
     const spells = (name: string) => arg === name || arg.startsWith(`${name}=`);
     const flag = INTERCEPTED_FLAGS.find(spells) ?? (sessionAliases.some(spells) ? '--session' : undefined);
     if (!flag) {

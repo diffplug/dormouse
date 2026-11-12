@@ -23,9 +23,11 @@ It also intercepts --workspace <ref>, which is not an identity: it says which
 Workspace of this Window the browser Surface is opened in and which one a
 handle resolves against (workspace:<n> or workspace:<name>).
 
-Everything else — subcommands, flags, selectors — is agent-browser's own
-command surface. The binary is resolved from PATH (override with
-DORMOUSE_AGENT_BROWSER_BIN) and is never bundled; install it with:
+dor reads these flags anywhere in the arguments, up to an optional bare --,
+which it forwards unchanged. Everything else, and everything after that --, is
+agent-browser's own command surface: subcommands, flags, selectors. The binary
+is resolved from PATH (override with DORMOUSE_AGENT_BROWSER_BIN) and is never
+bundled; install it with:
   npm i -g agent-browser
 
 Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:

@@ -121,3 +121,12 @@ test('identity flags are mutually exclusive', async () => {
   assert.equal((await runCli(['playwright', '--key', 'app', '-s', 'raw', 'snapshot'], options)).exitCode, 1);
   assert.deepEqual(calls, []);
 });
+
+test('native -s is read anywhere, and consumes a help-looking value', async () => {
+  for (const argv of [['playwright', '-s', '--help', 'snapshot'], ['playwright', 'snapshot', '-s', '--help']]) {
+    const { options, calls } = fixture();
+    const result = await runCli(argv, options);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(calls.find(c => c[0] === 'exec')[2], ['--session=--help', 'snapshot']);
+  }
+});

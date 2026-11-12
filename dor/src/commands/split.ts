@@ -14,6 +14,7 @@ import {
   errorMessage,
   renderJson,
   requireControlClient,
+  scanPreDelimiterArgs,
   stringParser,
   workspaceFlag,
   workspaceParam,
@@ -35,6 +36,15 @@ const groupedSplitDirectionUsage = '[--left|--right|--up|--down|--auto]';
 
 export const splitCommand: Command = {
   name: 'split',
+  preParse(args) {
+    const delimiter = args.indexOf('--');
+    const scan = scanPreDelimiterArgs(delimiter < 0 ? args : args.slice(0, delimiter), {
+      booleans: new Set(['--auto', '--down', '--up', '--left', '--right', '--json', '--minimize']),
+      valued: new Set(['--surface', '--workspace']),
+      positionals: 'reject',
+    });
+    return scan.ok ? { ok: true, value: undefined } : scan;
+  },
   helpPatches: [
     {
       scope: 'root',
@@ -85,9 +95,9 @@ export const splitCommand: Command = {
 
 The new terminal starts in the directory where you invoke dor split. --surface and --workspace control placement; they do not change the working directory.
 
-Use -- followed by a command to run an initial command in the new terminal surface.
+Use -- followed by a command to run an initial command in the new terminal surface. Only split's own options come before --.
 
-Supplying -- or an initial command leaves focus unchanged. "dor split -- <command>" runs the command in the new terminal, and "dor split --" opens a blank terminal. Without -- or an initial command, dor split focuses the new surface.
+Supplying -- leaves focus unchanged: "dor split -- <command>" runs the command in the new terminal, and "dor split --" opens a blank terminal. Without --, dor split focuses the new surface.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
@@ -150,10 +160,10 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       cwd: callerWorkingDirectory(undefined, this.options),
       minimized: flags.minimize === true,
       surface: flags.surface,
-      // Only a bare `dor split` (no `--`, no command) steals focus; a `--` tail
-      // and an initial command alike leave it on the caller. The CLI owns the
-      // whole decision so the host can honor the field as sent.
-      focusNeutral: this.commandArgs.includes('--') || command !== undefined,
+      // An initial command needs `--`, so `--` alone decides: a bare `dor split`
+      // steals focus, and any `--`, empty or not, leaves it on the caller. The
+      // CLI owns the whole decision so the host can honor the field as sent.
+      focusNeutral: this.commandArgs.includes('--'),
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderSplitResponse(response, flags.json === true));

@@ -28,7 +28,9 @@ Override the executable with DORMOUSE_PLAYWRIGHT_BIN.
 The first command fixes its working directory; later commands, including relative
 file paths, run there. --session (or -s) selects a native session instead.
 --surface drives an existing playwright pane, including one opened from the GUI.
-These three identities are mutually exclusive. Other flags belong to playwright.
+These three identities are mutually exclusive. dor reads them and --workspace
+anywhere in the arguments, up to an optional bare --, which it forwards unchanged; everything
+else, and everything after that --, belongs to playwright.
 
 Dormouse intercepts dor-embed-size to query or set the pane's browser viewport:
   dor playwright dor-embed-size --json
@@ -51,6 +53,7 @@ Examples:
   dor playwright --surface surface:4 goto :5173`,
     },
     parameters: {
+      aliases: { s: 'session' },
       flags: {
         key: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Workspace browser key (default "default").', placeholder: 'name' },
         session: { kind: 'parsed', parse: stringParser, optional: true, brief: 'Raw playwright session name (native spelling: -s).', placeholder: 'name' },
