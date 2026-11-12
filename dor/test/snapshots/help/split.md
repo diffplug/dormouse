@@ -11,9 +11,9 @@ If no direction is provided, --auto is used. --auto chooses right when the targe
 
 The new terminal starts in the directory where you invoke dor split. --surface and --workspace control placement; they do not change the working directory.
 
-Use -- followed by a command to run an initial command in the new terminal surface.
+Use -- followed by a command to run an initial command in the new terminal surface. Only split's own options come before --.
 
-Supplying -- or an initial command leaves focus unchanged. "dor split -- <command>" runs the command in the new terminal, and "dor split --" opens a blank terminal. Without -- or an initial command, dor split focuses the new surface.
+Supplying -- leaves focus unchanged: "dor split -- <command>" runs the command in the new terminal, and "dor split --" opens a blank terminal. Without --, dor split focuses the new surface.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
