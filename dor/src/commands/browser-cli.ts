@@ -76,7 +76,7 @@ export function extractSessionFlags(
       value = args[index + 1];
       index += 1;
     }
-    if (!value || value.startsWith('-')) {
+    if (value === undefined || value === '') {
       return { ok: false, message: `${flag} requires a value` };
     }
     // As stricli refuses a repeated flag: which one wins is never a question.

@@ -11,6 +11,17 @@ export { errorLine, printable, renderJson, renderPrintableJson } from './termina
 
 export const stringParser = (input: string): string => input;
 
+/** Thrown by a flag parser whose flag got an empty value; `cli-core.ts` reports
+ *  it as `--flag requires a value`. */
+export class MissingValueError extends Error {}
+
+/** Flag parser for `--cwd`: an empty value (`--cwd "$UNSET"`) is missing, never
+ *  the caller's directory, so a command never silently runs somewhere else. */
+export function cwdParser(input: string): string {
+  if (input === '') throw new MissingValueError();
+  return input;
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -62,12 +73,11 @@ export function scanPreDelimiterArgs(head: readonly string[], spec: PreDelimiter
     // stricli also takes `--flag=value`.
     const equals = arg.indexOf('=');
     if (arg.startsWith('--') && equals > 0 && spec.valued.has(arg.slice(0, equals))) {
-      if (equals === arg.length - 1) return { ok: false, message: `${arg.slice(0, equals)} requires a value` };
       continue;
     }
     if (spec.valued.has(arg)) {
       const value = head[index + 1];
-      if (!value || value.startsWith('-')) return { ok: false, message: `${arg} requires a value` };
+      if (value === undefined) return { ok: false, message: `${arg} requires a value` };
       index += 1;
       continue;
     }

@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import {
   callerWorkingDirectory,
+  cwdParser,
   launchDirectory,
   errorMessage,
   renderPrintableJson,
@@ -172,7 +173,7 @@ JSON output:
         fresh: { kind: 'boolean', brief: 'Ignore a declared key and always create.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
-        cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
+        cwd: { kind: 'parsed', parse: cwdParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
         list: { kind: 'boolean', brief: 'List the declared Tools instead of running one.', optional: true, withNegated: false },
       },
       positional: {

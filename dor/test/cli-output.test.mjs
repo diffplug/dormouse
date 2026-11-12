@@ -9,6 +9,7 @@ import { runCli } from '../dist/cli.js';
 import { NODE_HOST } from '../dist/node-host.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
 import { browserBinaryIsMissing as agentBrowserIsMissing, binaryCandidateNames, isExecutableFile } from 'dor-lib-common';
+import { extractSessionFlags } from '../dist/commands/browser-cli.js';
 import { msysToWindowsCwd } from '../dist/commands/shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -612,13 +613,23 @@ test('ensure and tool accept --flag=value before --, as stricli does', async () 
     assert.equal(client.requests[0].request.workspace, 'workspace:2');
   }
 
-  for (const argv of [['ensure', '--cwd=', '--', 'pnpm', 'dev'], ['tool', '--cwd=', 'storybook']]) {
-    const result = await runCli(argv, { client: fixtureClient(), env: { PWD: '/work/site' } });
-    assert.equal(result.exitCode, 1, argv.join(' '));
-    assert.equal(result.stderr, 'Error: --cwd requires a value\n');
-  }
   const boolean = await runCli(['ensure', '--json=true', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } });
   assert.equal(boolean.stderr, "Error: unknown option '--json=true'\n");
+});
+
+test('an empty --cwd is a missing value, never the caller\'s directory', async () => {
+  // `dor ensure --cwd "$BUILD_DIR" -- make clean` with BUILD_DIR unset must not run in PWD.
+  const commands = [['ensure', '--', 'pnpm', 'dev'], ['tool', 'storybook'], ['tool', '--list'], ['open', 'notes.md'], ['list']];
+  for (const [name, ...rest] of commands) {
+    for (const cwd of [['--cwd='], ['--cwd', '']]) {
+      const argv = [name, ...cwd, ...rest];
+      const client = fixtureClient();
+      const result = await runCli(argv, { client, env: { PWD: '/work/site' }, host: anyDirectoryHost });
+      assert.equal(result.stderr, 'Error: --cwd requires a value\n', JSON.stringify(argv));
+      assert.equal(result.exitCode, 1, JSON.stringify(argv));
+      assert.deepEqual(client.requests, [], JSON.stringify(argv));
+    }
+  }
 });
 
 test('ensure json output', async () => {
@@ -1437,8 +1448,7 @@ test('agent-browser rejects an intercepted flag given twice', async () => {
 });
 
 test('agent-browser rejects a valueless identity flag, whichever one it is', async () => {
-  // The three flags share one parse loop; a trailing flag has no value and a
-  // following flag is never one, so neither may be swallowed as the value.
+  // Only an absent argument is a missing value; a leading dash is literal.
   for (const args of [['agent-browser', 'reload', '--key'], ['agent-browser', 'reload', '--session'], ['agent-browser', 'reload', '--surface']]) {
     const ab = fakeAgentBrowser();
     const result = await runCli(args, { client: fixtureClient(), execAgentBrowser: ab.exec });
@@ -1446,11 +1456,7 @@ test('agent-browser rejects a valueless identity flag, whichever one it is', asy
     assert.equal(result.stderr, `Error: ${args[2]} requires a value\n`);
     assert.deepEqual(ab.calls, []);
   }
-  const ab = fakeAgentBrowser();
-  const result = await runCli(['agent-browser', '--surface', '--json', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec });
-  assert.equal(result.exitCode, 1);
-  assert.equal(result.stderr, 'Error: --surface requires a value\n');
-  assert.deepEqual(ab.calls, []);
+
 });
 
 test('agent-browser key/session conflict output', async () => {
@@ -2374,5 +2380,66 @@ test('open requires exactly one file', async () => {
     const result = await runCli(args, { client });
     assert.equal(result.exitCode, 1);
     assert.equal(client.requests.length, 0);
+  }
+});
+
+
+test('valued options preserve literal arguments in separate and equals forms', async () => {
+  for (const value of ['', '--help', '-h', '--text', '--', 'a=b', 'first\nsecond', '🐭']) {
+    for (const option of [['--text', value], [`--text=${value}`]]) {
+      const client = fixtureClient();
+      const result = await runCli(['send', 'surface:1', '--raw', ...option, '--key', 'enter'], { client });
+      assert.equal(result.exitCode, 0, JSON.stringify({ option, result }));
+      assert.equal(client.requests[0].request.input, value + '\r');
+    }
+  }
+});
+
+test('a valued option containing help does not suppress validation or later real help', async () => {
+  const client = fixtureClient();
+  const invalid = await runCli(['send', 'surface:1', '--text', '--help', '--wat'], { client });
+  assert.equal(invalid.exitCode, 1);
+  assert.equal(client.requests.length, 0);
+  const help = await runCli(['send', '--text', '--help', '--help'], { client });
+  assert.equal(help.exitCode, 0);
+  assert.match(help.stdout, /USAGE/);
+  assert.equal(client.requests.length, 0);
+});
+
+
+test('argument errors report original values, never scanner transport tokens', async () => {
+  const client = fixtureClient();
+  const duplicate = await runCli(['read', 'surface:1', '--lines', '2', '--lines', '3'], { client });
+  assert.match(duplicate.stderr, /encountered "3" after "2"/);
+  const invalid = await runCli(['read', 'surface:1', '--lines', '--help'], { client });
+  assert.match(invalid.stderr, /invalid --lines '--help'/);
+  assert.equal(client.requests.length, 0);
+});
+
+
+test('browser identity values use the same literal option contract', () => {
+  for (const value of ['--help', '--json', '--', 'first\nsecond']) {
+    for (const args of [['--session', value], [`--session=${value}`]]) {
+      assert.deepEqual(extractSessionFlags([...args, 'snapshot'], { sessionNoun: 'session' }), {
+        ok: true, value: { session: value, rest: ['snapshot'] },
+      });
+    }
+  }
+});
+
+test('empty browser identities fail before a provider or host request', async () => {
+  for (const provider of ['agent-browser', 'playwright']) {
+    for (const flag of ['--session', '--key', '--surface', '--workspace', ...(provider === 'playwright' ? ['-s'] : [])]) {
+      for (const args of [[flag, ''], [`${flag}=`]]) {
+        const client = fixtureClient();
+        const invoked = [];
+        const exec = async (...args) => { invoked.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
+        const result = await runCli([provider, ...args, 'click', '@e3'], { client, execAgentBrowser: exec, execPlaywright: exec });
+        assert.equal(result.exitCode, 1, JSON.stringify({ provider, args, result }));
+        assert.match(result.stderr, /requires a value/);
+        assert.deepEqual(invoked, []);
+        assert.deepEqual(client.requests, []);
+      }
+    }
   }
 });
