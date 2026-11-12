@@ -1,8 +1,9 @@
 /**
- * The shared token bucket. Its two consumers — the Burrow's crypto budget
- * (`lib/src/remote/burrow/burrow-runtime.ts`) and the Relay's Burrow-enrollment
- * admission (`relay/src/app.ts`) — pin their own wiring; what this file pins
- * is the refill arithmetic both rely on.
+ * The shared token bucket. Its consumers — the Burrow's crypto budgets
+ * (`lib/src/remote/burrow/burrow-runtime.ts`,
+ * `lib/src/remote/burrow/one-time-runtime.ts`) and the Relay's
+ * Burrow-enrollment admission (`relay/src/app.ts`) — pin their own wiring;
+ * what this file pins is the refill arithmetic they all rely on.
  */
 
 import { test } from 'node:test';

@@ -43,8 +43,8 @@ test('a presence window lives no longer than the relay session that reaches the 
   assert.ok(PRESENCE_WINDOW_MAX_MS <= RELAY_SESSION_TTL_MS);
 });
 
-// The three numbers the spec names in prose, so a bound cannot move without the
-// text that documents it (`docs/specs/remote-security-model.md` -> Burrow bounds).
+// The bounds the spec names, so a bound cannot move without the text that
+// documents it (`docs/specs/remote-security-model.md` -> Burrow bounds).
 test('the values the spec names are the values that ship', () => {
   assert.equal(MAX_ESTABLISHED_E2E_SESSIONS, 16);
   assert.equal(E2E_KEEPALIVE_INTERVAL_MS, 30_000);

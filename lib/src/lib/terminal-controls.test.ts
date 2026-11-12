@@ -184,7 +184,7 @@ describe('stripTerminalControls', () => {
   });
   it.each(Array.from({ length: 32 }, (_, index) => index + 0x40)
     .filter(final => ![0x50, 0x58, 0x5b, 0x5d, 0x5e, 0x5f].includes(final)))
-  ('standalone C1 and ESC Fe counterpart 0x%s preserve the same boundary', final => {
+  ('standalone C1 and ESC Fe counterpart with final byte %i preserve the same boundary', final => {
     const esc = '\x1b' + String.fromCharCode(final);
     const c1 = String.fromCharCode(final + 0x40);
     for (const control of [esc, c1]) {
