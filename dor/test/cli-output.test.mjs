@@ -2418,11 +2418,28 @@ test('argument errors report original values, never scanner transport tokens', a
 
 
 test('browser identity values use the same literal option contract', () => {
-  for (const value of ['', '--help', '--json', '--', 'first\nsecond']) {
+  for (const value of ['--help', '--json', '--', 'first\nsecond']) {
     for (const args of [['--session', value], [`--session=${value}`]]) {
       assert.deepEqual(extractSessionFlags([...args, 'snapshot'], { sessionNoun: 'session' }), {
         ok: true, value: { session: value, rest: ['snapshot'] },
       });
+    }
+  }
+});
+
+test('empty browser identities fail before a provider or host request', async () => {
+  for (const provider of ['agent-browser', 'playwright']) {
+    for (const flag of ['--session', '--key', '--surface', '--workspace', ...(provider === 'playwright' ? ['-s'] : [])]) {
+      for (const args of [[flag, ''], [`${flag}=`]]) {
+        const client = fixtureClient();
+        const invoked = [];
+        const exec = async (...args) => { invoked.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
+        const result = await runCli([provider, ...args, 'click', '@e3'], { client, execAgentBrowser: exec, execPlaywright: exec });
+        assert.equal(result.exitCode, 1, JSON.stringify({ provider, args, result }));
+        assert.match(result.stderr, /requires a value/);
+        assert.deepEqual(invoked, []);
+        assert.deepEqual(client.requests, []);
+      }
     }
   }
 });

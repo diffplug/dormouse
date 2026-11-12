@@ -174,7 +174,7 @@ Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` and `parseSur
 
 ## Current Implemented Commands
 
-**Must consume each declared valued option’s next argument literally**, including an empty string, a leading dash, `--help`, or `--`; `--option=value` is equivalent, including multiline values. **Must recognize help and the forwarding delimiter only outside consumed values.** Command-specific semantic validation still applies (rationale). **Must reject an empty `--cwd`** as a missing value, never the caller's directory.
+**Must consume each declared valued option’s next argument literally**, including an empty string, a leading dash, `--help`, or `--`; `--option=value` is equivalent, including multiline values. **Must recognize help and the forwarding delimiter only outside consumed values.** Command-specific semantic validation still applies (rationale). **Must reject empty `--cwd` and intercepted browser option values**, never silently selecting the caller's directory or a default browser session.
 
 Implemented commands call private `surface.*` control methods, **enumerated once in `dor/src/protocol.ts`** so the emitting client and the dispatching webview cannot drift.
 
