@@ -3495,7 +3495,16 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('reports a reused minimized tool as visible after reattaching it', async () => {
+  // docs/specs/dor-cli.md -> "Focus intent": typed alone at the caller's prompt
+  // focuses, an agent's invocation does not, an explicit --focus wins either
+  // way, and the webview's own requests keep focusing what they reveal.
+  it.each([
+    { line: 'dor tool storybook', focus: undefined, gui: false, focused: true },
+    { line: 'claude', focus: undefined, gui: false, focused: false },
+    { line: 'dor tool storybook', focus: false, gui: false, focused: false },
+    { line: 'claude', focus: true, gui: false, focused: true },
+    { line: 'claude', focus: undefined, gui: true, focused: true },
+  ])('reveals a minimized Tool from $line with focus $focus (gui $gui): focused $focused', async ({ line, focus, gui, focused }) => {
     const toolId = 'surface:tool-door';
     terminalRegistry.applyTerminalSemanticEvents(toolId, [
       // The match runs in its own directory, not the caller's: the response has
@@ -3532,19 +3541,23 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
+      reportRunning('surface:a', line);
 
       let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean; cwd: string } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
             method: SURFACE_CONTROL_METHODS.tool,
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            surfaceId: 'surface:a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false, ...(focus === undefined ? {} : { focus }) },
+            ...(gui ? { gui: true } : {}),
             respond: (result: typeof response) => { response = result; },
           },
         }));
       });
       await flush();
 
+      expect(container.querySelector(`[data-lath-leaf="${toolId}"] [data-focused="true"]`) !== null).toBe(focused);
       expect(response).toMatchObject({
         ok: true,
         result: { status: 'existing', surfaceId: toolId, minimized: false, cwd: '/repo/packages/ui' },
@@ -3552,7 +3565,10 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
       expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
     } finally {
-      act(() => terminalRegistry.removeTerminalPaneState(toolId));
+      act(() => {
+        terminalRegistry.removeTerminalPaneState(toolId);
+        terminalRegistry.removeTerminalPaneState('surface:a');
+      });
     }
   });
 
@@ -4096,19 +4112,20 @@ describe('Wall on the Lath engine', () => {
   const focusOf = (id: string): string | null =>
     container.querySelector(`[data-session-id="${id}"]`)?.getAttribute('data-focused') ?? null;
 
-  async function dispatchSplit(params: Record<string, unknown>): Promise<string> {
+  async function dispatchSplit(params: Record<string, unknown>, surfaceId?: string): Promise<string> {
     let response: { ok: boolean; result?: { surfaceId?: string } } | undefined;
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
           method: SURFACE_CONTROL_METHODS.split,
+          ...(surfaceId === undefined ? {} : { surfaceId }),
           params,
           respond: (r: typeof response) => { response = r; },
         },
       }));
     });
     await flush();
-    expect(response?.ok).toBe(true);
+    expect(response?.ok, JSON.stringify(response)).toBe(true);
     return response!.result!.surfaceId!;
   }
 
@@ -4281,7 +4298,7 @@ describe('Wall on the Lath engine', () => {
     });
   });
 
-  it('dor split transfers focus to the new surface (passthrough)', async () => {
+  it('dor split --focus transfers focus to the new surface (passthrough)', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
     });
@@ -4289,11 +4306,35 @@ describe('Wall on the Lath engine', () => {
     // The seeded pane starts focused (passthrough + selected).
     expect(focusOf('surface:a')).toBe('true');
 
-    const newId = await dispatchSplit({ direction: 'right' });
+    const newId = await dispatchSplit({ direction: 'right', focus: true });
 
     // Focus moves to the freshly split surface; the caller is no longer focused.
     expect(focusOf(newId)).toBe('true');
     expect(focusOf('surface:a')).toBe('false');
+  });
+
+  // docs/specs/dor-cli.md -> "Focus intent", read from the caller's own line.
+  it.each([
+    { line: 'dor split', params: {}, focused: true },
+    { line: 'dor split -- pnpm dev', params: { command: ['pnpm', 'dev'] }, focused: true },
+    { line: 'claude', params: {}, focused: false },
+    { line: 'dor split && ls', params: {}, focused: false },
+    { line: 'dor ensure -- pnpm dev', params: {}, focused: false },
+    { line: 'dor split', params: { focus: false }, focused: false },
+    { line: 'claude', params: { focus: true }, focused: true },
+  ])('dor split from $line with $params focuses the new surface: $focused', async ({ line, params, focused }) => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
+    });
+    await flush();
+    reportRunning('surface:a', line);
+    try {
+      const newId = await dispatchSplit({ direction: 'right', ...params }, 'surface:a');
+      expect(focusOf('surface:a')).toBe(focused ? 'false' : 'true');
+      expect(focusOf(newId)).toBe(focused ? 'true' : 'false');
+    } finally {
+      act(() => terminalRegistry.removeTerminalPaneState('surface:a'));
+    }
   });
 
   it('a split mints its id from the host pool', async () => {
@@ -4316,9 +4357,8 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(focusOf('surface:a')).toBe('true');
 
-    // The CLI marks a `-- <command>` split focus-neutral (it always sends
-    // focusNeutral when `--` or a command is present).
-    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'], focusNeutral: true });
+    // Explicit false preserves focus regardless of the initial command.
+    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'], focus: false });
 
     // The initial command runs in the background: the caller keeps focus and the
     // new surface is not focused.
@@ -4422,9 +4462,8 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(focusOf('surface:a')).toBe('true');
 
-    // No command, but focusNeutral marks the `--` tail: a blank terminal that
-    // does not grab the user's keystrokes (unlike a bare `dor split`).
-    const newId = await dispatchSplit({ direction: 'right', focusNeutral: true });
+    // A blank split also preserves focus.
+    const newId = await dispatchSplit({ direction: 'right', focus: false });
 
     expect(focusOf('surface:a')).toBe('true');
     expect(focusOf(newId)).toBe('false');
@@ -5343,7 +5382,7 @@ describe('engagement', () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
             method: SURFACE_CONTROL_METHODS.tool,
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false, focus: true },
             respond: () => {},
           },
         }));
@@ -5444,7 +5483,7 @@ describe('dor from helper terminals', () => {
   it('splits from the source using the helper directory, while helpers remain absent from discovery', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} />));
     terminalRegistry.seedTerminalManualCwd('surface:a', '/source');
-    const response = await issue('surface.split', { direction: 'right', cwd: '/helper', focusNeutral: true });
+    const response = await issue('surface.split', { direction: 'right', cwd: '/helper', focus: false });
     const created = response.mock.calls[0][0].result.surfaceId;
     expect(pendingShellOpts.get(created)?.cwd).toBe('/helper');
     expect(leafCount()).toBe(3);
@@ -5545,7 +5584,7 @@ it('starts a split in the invoking directory, inheriting its reference only with
   for (const [cwd, expected] of [['/invoked', '/invoked'], [undefined, '/source']] as const) {
     const respond = vi.fn();
     await act(async () => dispatchDorControlRequest({ requestId: `split-${expected}`, surfaceId: 'surface:a',
-      method: 'surface.split', params: { direction: 'right', cwd, surface: 'surface:a', focusNeutral: true } }, respond));
+      method: 'surface.split', params: { direction: 'right', cwd, surface: 'surface:a', focus: false } }, respond));
     await flush();
     expect(pendingShellOpts.get(respond.mock.calls[0][0].result.surfaceId)?.cwd).toBe(expected);
   }

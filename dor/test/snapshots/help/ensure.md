@@ -4,12 +4,12 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
+  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
   dor ensure --help
 
 Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
 
-ensure never changes focus. Whether it reuses a match, restarts one, or creates a new split, the surface you ran it from keeps focus — a newly created surface (visible or minimized) starts in the background.
+Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error. Focusing a minimized match reveals it.
 
 Matching uses the command each shell reports it is running via Dormouse shell integration (OSC 633), not process inspection. This captures the typed command (`npm run dev`), not the forked child process (`node .../vite`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: `npm run dev` and `npm run dev --host` are different commands and get separate surfaces.
 
@@ -42,6 +42,7 @@ JSON output:
   }
 
 FLAGS
+     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
      [--json]       Print JSON output.
      [--minimize]   Create the surface minimized.
      [--restart]    Restart a matching surface in place.

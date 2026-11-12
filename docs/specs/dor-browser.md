@@ -32,7 +32,7 @@ Source of truth: `resolveRenderMode` and `launchFallbackFromParams` in `lib/src/
 
 **Must share one placement rule across browser entry points**: replace an untouched, helper-less terminal caller in place, else split next to the reference surface. **Never replace a reference that already has a browser.** A replacement is a new Surface (`docs/specs/glossary.md` → "Invariants" I10). The pane context menu never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)); helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
 
-**Must open focus-neutrally**, like `dor ensure`, except a Pane Context Menu placement and `docs/specs/layout.md` corner case #6.
+CLI focus follows `docs/specs/dor-cli.md` → "Focus intent"; Pane Context Menu placement and `docs/specs/layout.md` corner case #6 retain their GUI focus behavior.
 
 - **Must unpark a doored pane before killing it**, so its DOM dies with the Surface.
 - **Must kill an automated pane, or swap away from its renderer, through `closeBrowserSurface`**: it closes the session and releases every client resource; the Surface's work in flight never outlives the close ([Browser Host](#browser-host)).

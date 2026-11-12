@@ -12,6 +12,10 @@ import {
   launchDirectory,
   cwdParser,
   errorMessage,
+  focusFlag,
+  focusHelp,
+  focusMinimizeConflict,
+  focusParam,
   renderJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -22,6 +26,7 @@ import {
 } from './shared.js';
 
 interface EnsureFlags extends WorkspaceScopedFlags {
+  readonly focus?: boolean;
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly restart?: boolean;
@@ -42,7 +47,7 @@ const RESTART_TIMEOUT_MS = 60_000;
 const ENSURE_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
-const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--restart']);
+const BOOLEAN_FLAGS = new Set(['--focus', '--json', '--minimize', '--restart']);
 const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
 
 // stricli treats a bare `--` as "rest are positionals", but it can't express
@@ -78,15 +83,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
@@ -99,7 +104,7 @@ export const ensureCommand: Command = {
       brief: 'Ensure one surface is running a command.',
       fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
 
-ensure never changes focus. Whether it reuses a match, restarts one, or creates a new split, the surface you ran it from keeps focus — a newly created surface (visible or minimized) starts in the background.
+${focusHelp({ minimize: true })} Focusing a minimized match reveals it.
 
 Matching uses the command each shell reports it is running via Dormouse shell integration (OSC 633), not process inspection. This captures the typed command (\`npm run dev\`), not the forked child process (\`node .../vite\`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: \`npm run dev\` and \`npm run dev --host\` are different commands and get separate surfaces.
 
@@ -133,6 +138,7 @@ JSON output:
     },
     parameters: {
       flags: {
+        focus: focusFlag,
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
@@ -151,6 +157,8 @@ JSON output:
 };
 
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
+  const conflict = focusMinimizeConflict(flags);
+  if (conflict) return conflict;
   const client = requireControlClient(this.options, flags.restart === true ? RESTART_TIMEOUT_MS : ENSURE_TIMEOUT_MS);
   if (client instanceof Error) return client;
   const cwd = launchDirectory(flags.cwd, this.options);
@@ -160,6 +168,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     const response = await client.ensureSurface({
       command: commandArgs,
       minimized: flags.minimize === true,
+      ...focusParam(flags.focus),
       restart: flags.restart === true,
       surface: flags.surface,
       cwd,

@@ -316,6 +316,21 @@ Agents **discover the target Surface with `dor list` (filtered), then act on it 
 
 Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-identical to `dor/skill.md` by `dor/test/cli-output.test.mjs`.
 
+## Focus intent
+
+Whether the Surface `split`, `ensure`, `tool`, `open`, `iframe`, `agent-browser`, or `playwright` creates or reuses takes focus:
+
+1. An explicit `--focus` or `--focus=false` wins.
+2. `--minimize` or `dor open --preview` leaves focus put.
+3. Otherwise it takes focus only when the caller's shell reports `dor <verb>` typed alone (the command-line condition of `docs/specs/dor-tool.md` → "Take-over"); an agent's or script's invocation runs under another command line (rationale).
+
+- **Must send `focus` only when given**, so the host applies the default from the caller's line on arrival. Browser providers intercept `--focus[=true|false]` anywhere before `--`.
+- **Must reject an explicit `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
+- **Never apply the default to the webview's own requests** (link clicks, OSC 367 `open`, document navigation): they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).
+- Workspace creation stays in the background; activation uses `dor workspace switch`.
+
+Source of truth: `cliFocusIntent` in `lib/src/components/wall/tool-takeover.ts`.
+
 ## Helper callers and targets
 
 **Must derive helper-origin metadata from the PTY host before routing across Windows**, preserving the actual caller Session id. **Never accept that metadata from a control-socket client.**

@@ -1549,10 +1549,8 @@ export function Wall({
       return { ok: true, value: { id: newId, minimized: true } };
     }
 
-    // The split is inherently background: `dor split` (not focus-neutral) selects
-    // the new pane — in passthrough mode selection carries DOM focus, so the user
-    // types straight into it; `dor split -- <command>` and `dor ensure`
-    // (focus-neutral) leave selection put.
+    // The caller supplies focus intent independently of the initial command.
+    // In passthrough mode selection also carries DOM focus.
     const edge = edgeForDorDirection(direction);
     lath.store.addLeaf(newId, leafMeta ?? terminalLeafMeta(), { refId: referenceId, edge });
     const selectedNew = settleAddSelection(!!focusNeutral, false, newId);

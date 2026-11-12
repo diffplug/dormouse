@@ -494,27 +494,33 @@ test('split sends command argv to the host', async () => {
       cwd: process.cwd(),
       minimized: false,
       surface: undefined,
-      focusNeutral: true,
     },
   }]);
 });
 
-test('bare split is focus-stealing; an empty -- tail is not', async () => {
-  const bare = fixtureClient();
-  await runCli(['split'], { client: bare });
-  assert.equal(bare.requests[0].request.focusNeutral, false);
-  assert.equal(bare.requests[0].request.command, undefined);
-
-  // `dor split --` opens a blank terminal without stealing focus: no command to
-  // run, but the `--` marks it focus-neutral, distinct from a bare `dor split`.
-  const emptyTail = fixtureClient();
-  await runCli(['split', '--'], { client: emptyTail });
-  assert.equal(emptyTail.requests[0].request.focusNeutral, true);
-  assert.equal(emptyTail.requests[0].request.command, undefined);
-
-  const withCommand = fixtureClient();
-  await runCli(['split', '--', 'echo', 'hi'], { client: withCommand });
-  assert.equal(withCommand.requests[0].request.focusNeutral, true);
+test('Surface-producing commands send focus only when --focus is given', async () => {
+  for (const args of [['split'], ['split', '--'], ['split', '--', 'echo', 'hi'], ['ensure', '--', 'echo', 'hi'], ['iframe', ':5173'], ['tool', '--', 'echo'], ['open', 'a.md']]) {
+    // Absent, the host applies its typed-at-a-prompt default.
+    const unstated = fixtureClient();
+    const result = await runCli(args, { client: unstated });
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
+    assert.equal('focus' in unstated.requests.at(-1).request, false, args.join(' '));
+    for (const [flag, focus] of [['--focus', true], ['--focus=true', true], ['--focus=false', false]]) {
+      const stated = fixtureClient();
+      const statedResult = await runCli([args[0], flag, ...args.slice(1)], { client: stated });
+      assert.equal(statedResult.exitCode, 0, JSON.stringify(statedResult));
+      assert.equal(stated.requests.at(-1).request.focus, focus, `${flag} ${args.join(' ')}`);
+    }
+    // Only an explicit --focus contradicts --minimize; --focus=false agrees with it.
+    const conflict = fixtureClient();
+    const refused = await runCli([args[0], '--focus', '--minimize', ...args.slice(1)], { client: conflict });
+    assert.equal(refused.exitCode, 1);
+    assert.match(refused.stderr, /--focus and --minimize are mutually exclusive/);
+    assert.equal(conflict.requests.length, 0);
+    const agreed = fixtureClient();
+    assert.equal((await runCli([args[0], '--focus=false', '--minimize', ...args.slice(1)], { client: agreed })).exitCode, 0);
+    assert.equal(agreed.requests.at(-1).request.focus, false);
+  }
 });
 
 test('split takes its initial command only after --, before any request', async () => {
@@ -621,8 +627,14 @@ test('ensure and tool accept --flag=value before --, as stricli does', async () 
     assert.equal(client.requests[0].request.workspace, 'workspace:2');
   }
 
-  const boolean = await runCli(['ensure', '--json=true', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } });
-  assert.equal(boolean.stderr, "Error: unknown option '--json=true'\n");
+  // A boolean's value too, which `--focus=false` needs; stricli parses it.
+  for (const head of [['ensure', '--json=true'], ['tool', '--json=true', 'storybook']]) {
+    const boolean = await runCli([...head, ...(head[0] === 'ensure' ? ['--', 'pnpm', 'dev'] : [])], { client: fixtureClient(), env: { PWD: '/work/site' } });
+    assert.equal(boolean.exitCode, 0, boolean.stderr);
+    assert.match(boolean.stdout, /^\{/, head.join(' '));
+  }
+  const unknown = await runCli(['ensure', '--jsn=true', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } });
+  assert.equal(unknown.stderr, "Error: unknown option '--jsn=true'\n");
 });
 
 test('an empty --cwd is a missing value, never the caller\'s directory', async () => {
@@ -1184,6 +1196,32 @@ test('agent-browser passthrough output', async () => {
     'agent-browser-passthrough',
     await runCli(['agent-browser', 'open', 'http://localhost:5173'], { client: fixtureClient(), execAgentBrowser: ab.exec }),
   );
+});
+
+test('browser --focus belongs to dor anywhere before --, and is not forwarded to the provider', async () => {
+  for (const [argv, focus] of [
+    [['open', ':5173'], undefined],
+    [['--focus', 'open', ':5173'], true],
+    [['open', ':5173', '--focus'], true],
+    [['open', ':5173', '--focus=true'], true],
+    [['open', '--focus=false', ':5173'], false],
+  ]) {
+    const ab = fakeAgentBrowser();
+    const client = fixtureClient();
+    const result = await runCli(['agent-browser', ...argv], { client, execAgentBrowser: ab.exec });
+    assert.equal(result.exitCode, 0, argv.join(' '));
+    assert.equal(client.requests.find(r => r.method === 'browserSurface').request.focus, focus, argv.join(' '));
+    assert.equal(ab.calls.some(args => args.some(arg => arg.startsWith('--focus'))), false, argv.join(' '));
+  }
+  // After a bare --, it is the provider's.
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', '--', 'fill', '#q', '--focus'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls.some(args => args.includes('--focus')), true);
+  for (const argv of [['--focus=yes', 'open', ':5173'], ['--focus', 'open', ':5173', '--focus=false']]) {
+    const refused = await runCli(['agent-browser', ...argv], { client: fixtureClient(), execAgentBrowser: fakeAgentBrowser().exec });
+    assert.equal(refused.exitCode, 1, argv.join(' '));
+  }
 });
 
 test('agent-browser resolves --key to a namespaced session and opens a surface', async () => {
