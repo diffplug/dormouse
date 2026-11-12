@@ -1247,22 +1247,15 @@ export class AlertManager {
   }
 
   /**
-   * Seed alert state from a persisted session (cold-start restore). Only the
-   * TODO reminder and its notification detail survive a restart — WATCHING is
-   * re-derived from the rule set at the next command start, and restore must
-   * never resurrect a ring or an in-flight progress cycle.
+   * Seed a new PTY generation from a persisted session (cold-start restore),
+   * straight after `restart`: only the TODO reminder and its notification
+   * detail survive, and the fresh entry holds nothing else to resurrect.
    */
   seed(id: string, state: { todo: unknown; notification?: unknown }): void {
     if (this.helpers.has(id)) return;
     const entry = this.getOrCreateEntry(id);
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
-    entry.ring = null;
-    entry.held = null;
-    entry.ackedUntil = 0;
-    entry.commandExitWatch = null;
-    entry.pendingCommandLine = null;
-    this.endRun(entry);
     this.notify(id);
   }
 

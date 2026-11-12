@@ -512,14 +512,11 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it.each([
-      ['a host interrupt', (id: string) => manager.silenceRun(id)],
-      ['a restore', (id: string) => manager.seed(id, { todo: false })],
-    ] as const)('is dropped by %s', (_how, drop) => {
-      const id = `end-dropped-${_how}`;
+    it('is dropped by a host interrupt', () => {
+      const id = 'end-dropped';
       active(id);
       end(id);
-      drop(id);
+      manager.silenceRun(id);
       vi.advanceTimersByTime(GRACE);
       expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null, episode: null });
     });

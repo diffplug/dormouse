@@ -168,13 +168,12 @@ describe('owed alerts during resumed output', () => {
     driveToBusy(manager, ID);
     expect(toPersistedAlertState(manager.getState(ID))).toMatchObject({ todo: true, notification: REPORT });
   });
-  it.each(['acknowledge', 'dismiss', 'clearTodo', 'remove', 'seed'] as const)('clears a ring on %s without stale delivery', (action) => {
+  it.each(['acknowledge', 'dismiss', 'clearTodo', 'remove'] as const)('clears a ring on %s without stale delivery', (action) => {
     manager.setWatchedCommands([]); // Isolate report delivery from a later WATCHING settle.
     ring('report');
     driveToBusy(manager, ID);
     if (action === 'acknowledge') manager.acknowledge(ID, { input: false });
     else if (action === 'dismiss') manager.dismissAlert(ID);
-    else if (action === 'seed') manager.seed(ID, { todo: false });
     else manager[action](ID);
     vi.advanceTimersByTime(60_000);
     expect(manager.getState(ID).episode).toBeNull();
