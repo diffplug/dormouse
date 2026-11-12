@@ -44,7 +44,7 @@ const DETAIL_RANK: Record<ActivityNotificationSource, number> = {
   BEL: 0,
 };
 
-/** `next`, unless `current` says more: equal ranks take the newer detail. */
+/** `next`, unless `current` says more: at equal rank the later call wins. */
 function richer(current: ActivityNotification | null, next: ActivityNotification): ActivityNotification {
   return current !== null && DETAIL_RANK[current.source] > DETAIL_RANK[next.source] ? current : next;
 }
