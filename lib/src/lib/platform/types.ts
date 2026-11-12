@@ -1,3 +1,4 @@
+import type { PtyInputEvent } from '../../../../dor/src/input-events';
 import type { BrowserAutomationProvider, BrowserRequest, BrowserResult } from './browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
@@ -15,6 +16,7 @@ import type { GitInfoResult } from './git-types';
 export type { ToolControlResult, ToolHostRequest } from './tool-types';
 export type { GitInfoResult } from './git-types';
 import type { PersistedAlertState, PersistedWindow } from '../session-types';
+import { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from 'dor-lib-common/terminal-context';
 
 export interface PtyInfo {
   helper?: HelperIdentity;
@@ -89,12 +91,7 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 }
 
 
-/**
- * How long the VS Code extension host waits for its pty-host child to answer a
- * terminal-context request (`vscode-ext/src/pty-manager.ts`) before answering
- * the webview with an error. `info` and `promote` inspect the process tree.
- */
-export const TERMINAL_CONTEXT_CHILD_TIMEOUT_MS = 10_000;
+export { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS };
 
 /** The webview's deadline for that answer: the child's bound plus one hop. */
 export const TERMINAL_CONTEXT_TIMEOUT_MS = TERMINAL_CONTEXT_CHILD_TIMEOUT_MS + OPEN_PORT_ROUND_TRIP_MARGIN_MS;
@@ -216,8 +213,6 @@ export interface SpawnPtyOptions {
 }
 
 export interface WritePtyOptions {
-  /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
-  paced?: boolean;
   /** A human typed, pasted, or dropped this: the host acknowledges it with
    *  input before writing (`docs/specs/alert.md` -> Engagement). */
   userInput?: true;
@@ -252,6 +247,8 @@ export interface PlatformAdapter {
    */
   spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
+  /** Local automation: resolves after the final PTY write, rejects on interrupted delivery. */
+  sendPtyInput?(id: string, events: readonly PtyInputEvent[], signal?: AbortSignal): Promise<void>;
   resizePty(id: string, cols: number, rows: number): void;
   /** A host delivers no `onPtyExit` for a PTY this webview killed: VS Code
    *  releases its ownership first and standalone routes the exit nowhere.

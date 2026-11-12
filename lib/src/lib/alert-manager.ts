@@ -410,9 +410,12 @@ export class AlertManager {
    * send` or a launch as much as a keystroke (`QuiesceDetector.expectWork`).
    */
   onWrite(id: string, data: string, { userInput = false }: { userInput?: boolean } = {}): void {
+    // Same reasoning as `onData`: the first keystroke can beat any output. The
+    // entry comes first, since acknowledging creates none and the echo window
+    // it opens must cover that keystroke's echo too.
+    const entry = inputCanStartWork(data, { userInput }) ? this.streamEntry(id) : null;
     if (userInput) this.acknowledge(id, { input: true });
-    // Same reasoning as `onData`: the first keystroke can beat any output.
-    if (inputCanStartWork(data, { userInput })) this.streamEntry(id)?.detector.expectWork();
+    entry?.detector.expectWork();
   }
 
   // --- WATCHING rule set ---
@@ -1174,12 +1177,15 @@ export class AlertManager {
 
   /**
    * The user went idle, or left the host: each held source takes the path it
-   * would have taken unengaged, with the richest held detail.
+   * would have taken unengaged, with the richest held detail. A Session made a
+   * helper since the hold drops them, as `dispatchCompletion` drops a helper's
+   * fresh completion: a helper never rings.
    */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
     if (held === null) return;
     entry.held = null;
+    if (this.helpers.has(id)) return;
     eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail, held.arrived));
   }
 

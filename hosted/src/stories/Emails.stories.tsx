@@ -9,7 +9,8 @@ import { signInEmail } from "./email-fixtures";
 /**
  * Every email Hosted sends, one representative each. A new billing notice
  * fails to compile until `EVERY_NOTICE` names its story; any other new email
- * gets a story here in the same change.
+ * gets a story here in the same change. `server/tests/workers.test.ts` holds
+ * the sign-in story to the email actually sent.
  */
 const meta = {
   title: "Hosted/Emails",

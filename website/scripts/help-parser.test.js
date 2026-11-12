@@ -85,9 +85,8 @@ describe('semantic extraction', () => {
     const snaps = await allSnapshots();
     const split = snaps.find((s) => s.file === 'split.md');
     const flags = parseHelp(split.raw).find((n) => n.kind === 'flags');
-    const [first] = definitionRows(flags);
-    expect(first.term).toBe('[--left|--right|--up|--down|--auto]');
-    expect(first.description).toBe('Split direction. Mutually exclusive; default is --auto.');
+    const direction = definitionRows(flags).find(row => row.term === '[--left|--right|--up|--down|--auto]');
+    expect(direction?.description).toBe('Split direction. Mutually exclusive; default is --auto.');
   });
 
   it('never leaves a definition row without a description', async () => {

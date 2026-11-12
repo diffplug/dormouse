@@ -40,7 +40,14 @@ let dorControlEnv = null;
 process.on('message', (msg) => {
   switch (msg.type) {
     case 'spawn':   mgr.spawn(msg.id, { cols: msg.cols, rows: msg.rows, cwd: msg.cwd, shell: msg.shell, args: msg.args, helper: msg.helper, dehydrate: msg.dehydrate, env: { ...msg.env, ...dorControlEnv } }); break;
-    case 'input':   mgr.write(msg.id, msg.data, { paced: msg.paced === true }); break;
+    case 'cancelInput': mgr.cancelSendInput(msg.id, msg.inputId); break;
+    case 'sendInput':
+      mgr.sendInput(msg.id, msg.events, msg.inputId).then(
+        () => process.send({ type: 'inputDone', requestId: msg.requestId, delivered: true }),
+        error => process.send({ type: 'inputDone', requestId: msg.requestId, error: error.message }),
+      );
+      break;
+    case 'input':   mgr.write(msg.id, msg.data); break;
     case 'resize':  mgr.resize(msg.id, msg.cols, msg.rows, msg.repaint); break;
     case 'pause':   mgr.pause(msg.id); break;
     case 'resume':  mgr.resume(msg.id); break;

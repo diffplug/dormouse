@@ -1,8 +1,10 @@
 /** `dor tool` — run a command as a Dor Tool (`docs/specs/dor-tool.md`). */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
+  CommandState,
   DorCommandContext,
   ParseResult,
   ToolListResponse,
@@ -10,8 +12,14 @@ import type {
 } from './types.js';
 import {
   callerWorkingDirectory,
+  commandStateHelp,
+  cwdParser,
   launchDirectory,
-  errorMessage,
+  focusFlag,
+  focusHelp,
+  focusMinimizeConflict,
+  focusParam,
+  pickerCancelled,
   renderPrintableJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -24,13 +32,24 @@ import {
 import { approvalTag, printableExact, renderToolResponse, toolRunText, toolTags } from './terminal-text.js';
 import { runToolPicker } from './tool-picker.js';
 
+/** Every state `dor tool` reports, in help order. Only a preview, which
+ *  `dor tool` never asks for, is superseded or retargeted. */
+const TOOL_COMMAND_STATES: ReadonlyArray<readonly [CommandState, string]> = [
+  ['unconfirmed', 'a new Surface; its command is not yet seen starting'],
+  ['running', 'the shell reported the command running'],
+  ['awaiting_approval', 'the pane waits for you to approve the project dormouse.yml; nothing has run'],
+  ['queued', 'not started yet: a takeover, answered before its command is typed so dor can exit and free the shell, or a reused Tool whose re-run has not started'],
+  ['ended', 'the new or restarted command already ended, perhaps with a nonzero exit'],
+];
+
 interface ToolFlags {
   readonly list?: boolean;
+  readonly focus?: boolean;
   readonly json?: boolean;
   readonly global?: boolean;
   readonly minimize?: boolean;
   readonly fresh?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
   readonly cwd?: string;
   readonly workspace?: string;
 }
@@ -42,15 +61,15 @@ interface ToolFlags {
 export const TOOL_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
-const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
-const BOOLEAN_FLAGS = new Set(['--list', '--json', '--minimize', '--fresh', '--global']);
+const FLAGS_WITH_VALUES = new Set(['--cwd', '--from', '--workspace']);
+const BOOLEAN_FLAGS = new Set(['--focus', '--list', '--json', '--minimize', '--fresh', '--global']);
 
 /** stricli's usage line, which the help replaces with one per form. */
-const STRICLI_USAGE = '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>';
-const LAUNCH_FLAGS = '[--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]';
+const STRICLI_USAGE = '  dor tool [--focus] [--global] [--json] [--minimize] [--fresh] [--from handle] [--workspace ref] [--cwd path]<TO-EOL>';
+const LAUNCH_FLAGS = '[--global] [--focus] [--json] [--minimize] [--fresh] [--from handle] [--cwd path] [--workspace ref]';
 const USAGE = [
   `  dor tool ${LAUNCH_FLAGS} <name> [args...]`,
-  '  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...',
+  '  dor tool [--focus] [--json] [--minimize] [--from handle] [--cwd path] [--workspace ref] -- <command>...',
   `  dor tool ${LAUNCH_FLAGS}`,
   '  dor tool --list [--global] [--cwd path] [--json]',
 ].map(line => `${line}\n`).join('');
@@ -119,18 +138,23 @@ A project dormouse.yml is repo-controlled and its entries execute, so it is iner
 
 Approving an upstream covers any folder whose git config names that upstream, every worktree and clone of the repo included. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
 
-Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --surface, --cwd elsewhere — splits without taking focus and prints the new surface's handle. Once the command exits the pane is a plain terminal again; a later invocation from its prompt takes it over afresh. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
+Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --from, --cwd elsewhere — splits and prints the new surface's handle. Once the command exits the pane is a plain terminal again; a later invocation from its prompt takes it over afresh. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
+
+${focusHelp({ minimize: true })}
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
 --list runs nothing: it prints the Tools \`dor tool <name>\` would find from the working directory — the nearest project dormouse.yml and whether you have approved it, then the user file. Each Tool shows its command, render, port strategy, and whether it has a key, then the comment block directly above its entry, which is where a Tool is documented. A user Tool that a project Tool of the same name hides is marked shadowed. A user Tool imported from another dormouse.yml shows that file, and one that does not resolve is marked broken with the reason. --global lists only user Tools.
 
-Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --minimize, --fresh, --surface, or --workspace asks for a launch.
+Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --focus, --minimize, --fresh, --from, or --workspace asks for a launch.
+
+${commandStateHelp(TOOL_COMMAND_STATES)}
 
 Text output:
-  created surface:3  "pnpm storybook"
-  existing surface:3  "pnpm storybook"
-  takeover surface:1  "pnpm storybook"
+  created surface:3  [unconfirmed]  "pnpm storybook"
+  existing surface:3  [running]  "pnpm storybook"
+  takeover surface:1  [queued]  "pnpm storybook"
+  pending surface:3  [awaiting_approval]  "pnpm storybook"
 
   project  /Users/me/projects/site/dormouse.yml  [approved]
     storybook  "pnpm storybook"  [iframe]  [port auto]  [keyed]
@@ -140,6 +164,7 @@ Text output:
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:3",
     "command": "pnpm storybook",
     "cwd": "/Users/me/projects/site",
@@ -166,13 +191,14 @@ JSON output:
     },
     parameters: {
       flags: {
+        focus: focusFlag,
         global: { kind: 'boolean', brief: 'Resolve only user-global tools.', optional: true, withNegated: false },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Ignore a declared key and always create.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
-        cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
+        cwd: { kind: 'parsed', parse: cwdParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
         list: { kind: 'boolean', brief: 'List the declared Tools instead of running one.', optional: true, withNegated: false },
       },
       positional: {
@@ -186,8 +212,10 @@ JSON output:
 };
 
 async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest: string[]): Promise<void | Error> {
+  const conflict = focusMinimizeConflict(flags);
+  if (conflict) return conflict;
   // A listing resolves like a launch but places nothing.
-  const placing = flags.minimize || flags.fresh || flags.surface !== undefined || flags.workspace !== undefined;
+  const placing = flags.focus !== undefined || flags.minimize || flags.fresh || flags.from !== undefined || flags.workspace !== undefined;
   if (flags.list === true) {
     if (placing) return new Error('--list takes only --global, --cwd, and --json');
     return listTools(this, flags);
@@ -211,7 +239,8 @@ function launchPlacement(context: DorCommandContext, flags: ToolFlags) {
     ...workspaceParam(flags.workspace),
     fresh: flags.fresh === true,
     minimized: flags.minimize === true,
-    surface: flags.surface,
+    ...focusParam(flags.focus),
+    surface: flags.from,
     cwd,
   };
 }
@@ -236,11 +265,7 @@ async function pickTool(context: DorCommandContext, flags: ToolFlags, placing: b
   }
   // The launch prints the chosen Tool's own warnings.
   const choice = await runToolPicker({ terminal, listing, home: context.options.env?.HOME ?? context.options.host.homedir() });
-  // A cancel runs nothing and prints nothing, but is not a success.
-  if (!choice) {
-    context.process.exitCode = 1;
-    return undefined;
-  }
+  if (!choice) return pickerCancelled(context);
   return dispatchToolSurface(context, {
     // A shadowed user Tool is the one chosen, so the project's must not run.
     name: choice.name, args: [], global: flags.global === true || choice.shadowed,
@@ -262,8 +287,7 @@ export async function dispatchToolSurface(
     writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
-    // Host errors can echo paths and repo text.
-    return new Error(printableExact(errorMessage(error)));
+    return commandError(error);
   }
 }
 
@@ -281,7 +305,7 @@ async function readToolList(context: DorCommandContext, flags: ToolFlags): Promi
   try {
     return await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options), global: flags.global === true });
   } catch (error) {
-    return new Error(printableExact(errorMessage(error)));
+    return commandError(error);
   }
 }
 

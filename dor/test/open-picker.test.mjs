@@ -89,7 +89,7 @@ function pickerClient({ handlers = async () => ({ handlers: HANDLERS, config: '/
     },
     async toolSurface(request) {
       this.requests.push({ method: 'toolSurface', request });
-      return { status: 'created', surfaceId: 'surface:9', command: `viewer ${request.file}`, cwd: request.cwd, minimized: false, key: null };
+      return { status: 'created', commandState: 'unconfirmed', surfaceId: 'surface:9', command: `viewer ${request.file}`, cwd: request.cwd, minimized: false, key: null };
     },
   };
 }
@@ -197,7 +197,7 @@ test('dor o picks a file, shows why its handler opens it, and opens another hand
     terminal.send('\t\r');
     const { exitCode, stdout } = await result;
     assert.equal(exitCode, 0);
-    assert.equal(stdout, 'created surface:9  "viewer docs/README.md"\n');
+    assert.equal(stdout, 'created surface:9  [unconfirmed]  "viewer docs/README.md"\n');
     assert.deepEqual(client.requests.find(r => r.method === 'openHandlers').request, { target: 'docs/README.md', cwd: dir });
     assert.deepEqual(client.requests.find(r => r.method === 'toolSurface').request, {
       file: 'docs/README.md', tool: 'builtin:code', fresh: false, minimized: false, surface: undefined, cwd: dir,
@@ -245,6 +245,17 @@ test('cancelling exits 1 silently and opens nothing', async () => {
     terminal.send('\x03');
     assert.deepEqual(await result, { exitCode: 1, stdout: '', stderr: '' });
     assert.equal(client.requests.some(r => r.method === 'toolSurface'), false);
+  });
+});
+
+test('a cancel under --json is a CANCELLED error object', async () => {
+  await withTree(async (dir) => {
+    const { terminal, result } = await startPicker(dir, ['o', '--json']);
+    terminal.send('\x03');
+    const { exitCode, stdout, stderr } = await result;
+    assert.equal(exitCode, 1);
+    assert.equal(stderr, '');
+    assert.equal(JSON.parse(stdout).error.code, 'CANCELLED');
   });
 });
 

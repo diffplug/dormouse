@@ -11,7 +11,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { recordToolEvents } from '../../lib/tool-events';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
-import { useToolServing } from './use-tool-serving';
+import { BACKOFF_AFTER_MS, MAX_POLL_MS, useToolServing } from './use-tool-serving';
 import { surfaceKindFromParams } from './browser-surface';
 import { retargetToolLeaf } from './preview-slot';
 import { captureToolParams } from './tool-transfer';
@@ -363,6 +363,38 @@ describe('port: auto (autobind)', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
     expect(state.params.toolPortConflict).toBeUndefined();
     expect(updateParams).toHaveBeenCalledWith('tool-1', expect.objectContaining({ toolPortConflict: undefined }));
+  });
+});
+
+describe('a Tool whose scans keep finding nothing', () => {
+  const auto = { surfaceType: 'tool', command: 'x', toolPort: 'auto' };
+  const announce = (port: number | null) => ({ port, name: null, key: null, dehydrate: false, persist: null });
+
+  it('is polled less often, yet still framed once it serves', async () => {
+    let listening: OpenPort[] = [];
+    const { state, platform } = await run(auto, [[]]);
+    vi.mocked(platform.getOpenPorts).mockImplementation(async () => listening);
+    const scans = () => vi.mocked(platform.getOpenPorts).mock.calls.length;
+
+    // Every poll while a cold boot could still bind.
+    await act(async () => { await vi.advanceTimersByTimeAsync(BACKOFF_AFTER_MS - POLL_MS); });
+    expect(scans()).toBe(BACKOFF_AFTER_MS / POLL_MS);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); });
+    const backedOff = scans();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); });
+    expect(scans() - backedOff).toBe(5 * 60_000 / MAX_POLL_MS);
+
+    // A new announcement scans at once, and the poll retries it at its own pace.
+    await act(async () => { recordToolAnnounce('tool-1', announce(9999)); });
+    expect(scans()).toBe(backedOff + 5 * 60_000 / MAX_POLL_MS + 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(scans()).toBe(backedOff + 5 * 60_000 / MAX_POLL_MS + 2);
+
+    act(() => recordToolAnnounce('tool-1', announce(null)));
+    listening = [tcp(6006)];
+    await act(async () => { await vi.advanceTimersByTimeAsync(MAX_POLL_MS + POLL_MS); });
+    expect(state.params.url).toBe('http://127.0.0.1:6006/');
   });
 });
 

@@ -4,31 +4,34 @@ Invocation: `dor --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]
-  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
-  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]
-  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
-  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref]
+  dor split [--left|--right|--up|--down|--auto] [--focus] [--json] [--minimize] [--from handle] [--workspace ref] [-- <command>...]
+  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...
+  dor tool [--global] [--focus] [--json] [--minimize] [--fresh] [--from handle] [--cwd path] [--workspace ref] <name> [args...]
+  dor tool [--focus] [--json] [--minimize] [--from handle] [--cwd path] [--workspace ref] -- <command>...
+  dor tool [--global] [--focus] [--json] [--minimize] [--fresh] [--from handle] [--cwd path] [--workspace ref]
   dor tool --list [--global] [--cwd path] [--json]
-  dor open [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
+  dor open [--focus] [--json] [--minimize] [--fresh] [--from handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
   dor version [--json]
   dor skill [--install] [--json]
-  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]
+  dor send <surface> (--text value | --key name | --stdin)... [--json] [--workspace ref]
+  dor send <surface> --sequence json [--json] [--workspace ref]
   dor read <surface> [--json] [--lines count] [--scrollback] [--workspace ref]
   dor await <surface> --until condition [--json] [--timeout seconds] [--workspace ref]
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
   dor reopen [--json]
-  dor move <surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]
-  dor iframe [--json] [--minimize] [--surface handle] [--workspace ref] <target>
-  dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
-  dor playwright [--key name|--session name|--surface handle] [--workspace ref] [args...]
-  dor list [--workspace ref|--all] [--window label] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]
-  dor list --workspaces [--window label] [--json]
+  dor move <surface> <workspace>|--new-workspace [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]
+  dor iframe [--focus] [--json] [--minimize] [--from handle] [--workspace ref] <target>
+  dor agent-browser [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]
+  dor playwright [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]
+  dor list [--workspace ref|--all] [--window ref] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]
+  dor list --workspaces [--window ref] [--json]
   dor workspace new|rename|pin|unpin|close|switch|move [args...] [flags...]
   dor app restart [--json]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.
+
+First-party --json prints one result object on stdout. Failures print {"error":{"code":"...","message":"..."}} and retain a nonzero exit status; stderr carries diagnostics. Error codes are INVALID_ARGUMENT (parsing), CONTROL_UNAVAILABLE (no host endpoint, or no host answered before the request was sent), COMMAND_FAILED (validation or execution), TIMEOUT, SURFACE_DIED, and CANCELLED (a picker was dismissed). Exit 1 means failure; await uses 2 for timeout and 3 for Surface death. Help stays text. Browser-provider output and exit status belong to the provider, except exit 4: the provider command succeeded but its browser Surface could not be opened, so do not repeat it blindly.
 
 FLAGS
   -h --help  Print help information and exit

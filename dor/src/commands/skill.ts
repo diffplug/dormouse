@@ -54,7 +54,7 @@ JSON output:
     parameters: {
       flags: {
         install: { kind: 'boolean', brief: 'Install the bootstrap stub into the project\'s agent instructions file.', optional: true, withNegated: false },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
       },
     },
     func: runSkillCommand,

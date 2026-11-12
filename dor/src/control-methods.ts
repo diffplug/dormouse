@@ -56,6 +56,7 @@ import {
   type DorControlMethod,
 } from './protocol.js';
 import { BROWSER_REQUEST_TIMEOUT_MS } from 'dor-lib-common/browser-providers';
+import { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from 'dor-lib-common/terminal-context';
 
 /** `dor workspace close` tears down every member Surface. Also covers moves:
  *  must exceed `ARRIVAL_MAX` in
@@ -123,8 +124,14 @@ export abstract class MethodControlClient implements ControlClient {
     return this.request<MoveSurfaceResponse>(SURFACE_CONTROL_METHODS.move, request);
   }
 
+  // A terminal's close first asks the host whether its helper runs work, which
+  // inspects the process tree: the webview waits that child's bound plus a hop.
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
-    return this.request<KillSurfaceResponse>(SURFACE_CONTROL_METHODS.kill, request);
+    return this.request<KillSurfaceResponse>(
+      SURFACE_CONTROL_METHODS.kill,
+      request,
+      { timeoutMs: TERMINAL_CONTEXT_CHILD_TIMEOUT_MS + 5_000 },
+    );
   }
 
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse> {

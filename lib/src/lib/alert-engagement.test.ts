@@ -272,6 +272,19 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: true });
   });
 
+  it('counts a click while the holding viewer is leaving as answering the hold, so a follow-up report never summons', () => {
+    manager.onData(PANE);
+    engage(manager, PANE);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    leave(manager);
+    manager.acknowledge(PANE, { input: false });
+
+    manager.notifyFromProtocol(PANE, { source: 'OSC 99', title: 'Claude Code', body: 'Claude is waiting for your input' });
+    vi.advanceTimersByTime(cfg.alert.leaveGrace);
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE).todo).toBe(true);
+  });
+
   it.each([
     ['report', 'quiet', 'bell', (id: string) => manager.notifyFromProtocol(id, PERMISSION)],
     ['exit', 'exit', 'exit', (id: string) => { runCommand(manager, id, 'pnpm build'); finishCommand(manager, id, 0, { promptStart: true }); }],
@@ -384,6 +397,14 @@ describe('echo window', () => {
     handle.cancel();
   });
 
+  it('opens on the first keystroke into a Session that has printed nothing yet', () => {
+    press(manager, PANE);
+    vi.advanceTimersByTime(5);
+    manager.notifyFromProtocol(PANE, BELL);
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+  });
+
   it('counts output once the window has passed', () => {
     manager.setWatchedCommands(['claude']);
     runCommand(manager, PANE, 'claude');
@@ -443,7 +464,7 @@ describe('the work-start gate', () => {
   it('hears each write before it reaches the PTY', () => {
     const order: string[] = [];
     vi.spyOn(manager, 'onWrite').mockImplementation((_id, data) => void order.push(`alerts ${data}`));
-    alertedPty(manager, { write: (_id, data) => void order.push(`pty ${data}`) }).write(PANE, 'hi\r', { paced: true });
+    alertedPty(manager, { write: (_id, data) => void order.push(`pty ${data}`) }).write(PANE, 'hi\r');
     expect(order).toEqual(['alerts hi\r', 'pty hi\r']);
   });
 
@@ -464,7 +485,7 @@ describe('the work-start gate', () => {
     vi.advanceTimersByTime(10_000);
     expect(ringing(PANE)).toBe(false);
 
-    pty().write(PANE, 'hi\r', { paced: true });
+    pty().write(PANE, 'hi\r');
     output(PANE, 3_000);
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE)).toMatchObject({

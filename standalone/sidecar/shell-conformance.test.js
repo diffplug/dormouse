@@ -9,9 +9,12 @@
 // and the pane's environment is Dormouse's, with the host's own left behind.
 //
 // Shells and cases are tables below: a shell, or a hostile command line, is one
-// row. A shell that is not installed skips by name; a leg that lists it in
-// DORMOUSE_REQUIRE_SHELLS fails instead (TESTING_AND_MODIFICATION_GUIDE.md).
-// A case the product gets wrong is listed in KNOWN and runs as a `todo`.
+// row. A shell that is not installed skips by name; each CI leg (Linux in
+// Build & Test, macOS and Windows in Standalone Platform Check) lists the shells
+// it installs in DORMOUSE_REQUIRE_SHELLS, and a listed shell that is missing
+// fails instead. A case the product gets wrong is listed in KNOWN and runs as a
+// `todo` until the fix deletes the entry. Run it alone from this directory:
+// `node --test shell-conformance.test.js`.
 //
 // Cases already run elsewhere on the same OS are not repeated here: an idle
 // bash's stop on POSIX (graceful-kill-posix.test.js) and an idle cmd.exe's on
@@ -314,7 +317,7 @@ function freshHome(row, files = {}) {
  * Spawn `row`'s shell as a pane through pty-core, feeding its output to the
  * owner's parse and answering the queries xterm.js would. Killed after the test.
  */
-function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {} } = {}) {
+function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}, dehydrate } = {}) {
   const id = `surface:conformance-${++paneCount}`;
   const spawned = [];
   const ptyModule = {
@@ -483,7 +486,7 @@ function openPane(t, row, located, { home = freshHome(row), cwd = home, env = {}
   };
   pane.hasPty = () => mgr.hasPty(id);
 
-  const spawnOptions = { cwd, shell: located.path, args: located.args, cols: COLS, rows: ROWS };
+  const spawnOptions = { cwd, shell: located.path, args: located.args, cols: COLS, rows: ROWS, dehydrate };
   // HOME is where POSIX shells, fish and pwsh look for the user's files; Git
   // Bash reads it too. Windows PowerShell and WSL do not (see the profile case).
   spawnOptions.env = !WIN || row.msys ? { HOME: home, ...env } : env;
@@ -854,6 +857,23 @@ shellCase('the pane environment reaches the WSL distro', (row) => row.wsl, async
       .map(([key]) => `${key}=${env[key]}`);
     assert.deepEqual(wrong, [], `${row.name}: the distro lacks Dormouse's identity`);
   });
+});
+
+// ── 7. A rehydrate payload ends with the first command ────────────────────
+// docs/specs/dor-tool.md -> Reaping. Every later prompt finds it already gone,
+// and saying so must leave nothing in the user's $Error. On Windows WSLENV
+// stops naming it too, or `wsl` would hand the distro an empty one.
+shellCase('a rehydrate payload clears quietly', (row) => row.family === 'pwsh', async (t, row, located) => {
+  const pane = openPane(t, row, located, { dehydrate: 'conformance' });
+  await pane.run('$Error.Clear()');
+  await pane.run('echo second');
+  const out = path.join(SCRATCH, `${pane.id.replace(/\W/g, '-')}-dehydrate.json`);
+  await pane.run(`[IO.File]::WriteAllText('${out}', (@{ errors = ($Error | ForEach-Object { "$_" }) -join ' | '; payload = $env:DORMOUSE_DEHYDRATE; wslenv = $env:WSLENV } | ConvertTo-Json -Compress))`, 'the dump');
+  const seen = JSON.parse(fs.readFileSync(out, 'utf8'));
+  assert.equal(seen.payload, null, `${row.name}: the payload outlived the first command`);
+  assert.equal(seen.errors, '', `${row.name}: the user's $Error holds what the integration did`);
+  const forwarded = (seen.wslenv ?? '').split(':').filter((entry) => entry.split('/')[0].toUpperCase() === 'DORMOUSE_DEHYDRATE');
+  assert.deepEqual(forwarded, [], `${row.name}: WSLENV still forwards the payload: ${seen.wslenv}`);
 });
 
 // ── Last: nothing left running ────────────────────────────────────────────

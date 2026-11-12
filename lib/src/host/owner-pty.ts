@@ -93,7 +93,7 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
 
 /** The slice of a host's PTY manager that input reaches. */
 export interface PtyWriteTarget {
-  write(id: string, data: string, options?: { paced?: boolean }): void;
+  write(id: string, data: string): void;
 }
 
 /**
@@ -103,9 +103,9 @@ export interface PtyWriteTarget {
  * (`docs/specs/alert.md` → Engagement).
  */
 export function alertedPty(alerts: AlertManager, pty: PtyWriteTarget) {
-  const write = (id: string, data: string, options: { paced?: boolean; userInput?: boolean } = {}): void => {
+  const write = (id: string, data: string, options: { userInput?: boolean } = {}): void => {
     alerts.onWrite(id, data, options);
-    pty.write(id, data, options.paced ? { paced: true } : undefined);
+    pty.write(id, data);
   };
   return {
     write,

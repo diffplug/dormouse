@@ -1,3 +1,6 @@
+// Help snapshots. After changing any help text, refresh them from dor/:
+// `pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then `node --test` again,
+// and commit test/snapshots/.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -111,3 +114,11 @@ async function assertSnapshotInventory(snapshotNames) {
 
   assert.deepEqual(actual, expected, 'help snapshot files should match global help commands');
 }
+
+test('root split help retains grouped directions and its command boundary', async () => {
+  const { stdout } = await runCli(['--help']);
+  const split = stdout.split('\n').find(line => line.startsWith('  dor split '));
+  assert.match(split, /--left\|--right\|--up\|--down\|--auto/);
+  assert.match(split, /\[--from handle\]/);
+  assert.match(split, /\[-- <command>\.\.\.\]/);
+});

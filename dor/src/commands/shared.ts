@@ -1,5 +1,8 @@
+import { parseWorkspaceRef, isCanonicalWindowRef } from '../protocol.js';
+import { CliError } from './errors.js';
 import type {
   CliOptions,
+  CommandState,
   CliResult,
   ControlClient,
   DorCommandContext,
@@ -11,10 +14,29 @@ export { errorLine, printable, renderJson, renderPrintableJson } from './termina
 
 export const stringParser = (input: string): string => input;
 
+/** Thrown by a flag parser whose flag got an empty value; `cli-core.ts` reports
+ *  it as `--flag requires a value`. */
+export class MissingValueError extends Error {}
+
+/** Flag parser for `--cwd`: an empty value (`--cwd "$UNSET"`) is missing, never
+ *  the caller's directory, so a command never silently runs somewhere else. */
+export function cwdParser(input: string): string {
+  if (input === '') throw new MissingValueError();
+  return input;
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+
+/** A dismissed picker: nothing ran and nothing printed, but the command did
+ *  not succeed, so it exits 1 and `--json` reports `CANCELLED`. */
+export function pickerCancelled(context: DorCommandContext): undefined {
+  context.reportFailure({ code: 'CANCELLED', message: 'cancelled' });
+  context.process.exitCode = 1;
+  return undefined;
+}
 
 export function fail(message: string): CliResult {
   return { exitCode: 1, stdout: '', stderr: `${errorLine(message)}\n` };
@@ -40,7 +62,7 @@ export function parseNonNegativeInt(input: string, flag: string): number {
 
 
 export interface PreDelimiterArgSpec {
-  /** Flags taking no value. */
+  /** Boolean flags, bare or as `--name=value` for stricli to parse. */
   readonly booleans: ReadonlySet<string>;
   /** Flags consuming the next argument. */
   readonly valued: ReadonlySet<string>;
@@ -59,15 +81,15 @@ export function scanPreDelimiterArgs(head: readonly string[], spec: PreDelimiter
   for (let index = 0; index < head.length; index += 1) {
     const arg = head[index];
     if (spec.booleans.has(arg)) continue;
-    // stricli also takes `--flag=value`.
+    // stricli also takes `--flag=value`, a boolean's value included.
     const equals = arg.indexOf('=');
-    if (arg.startsWith('--') && equals > 0 && spec.valued.has(arg.slice(0, equals))) {
-      if (equals === arg.length - 1) return { ok: false, message: `${arg.slice(0, equals)} requires a value` };
+    const name = arg.slice(0, equals);
+    if (arg.startsWith('--') && equals > 0 && (spec.valued.has(name) || spec.booleans.has(name))) {
       continue;
     }
     if (spec.valued.has(arg)) {
       const value = head[index + 1];
-      if (!value || value.startsWith('-')) return { ok: false, message: `${arg} requires a value` };
+      if (value === undefined) return { ok: false, message: `${arg} requires a value` };
       index += 1;
       continue;
     }
@@ -104,15 +126,26 @@ function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseRes
 // to die and respawn). Ignored when a client is injected (tests).
 export function requireControlClient(options: CliOptions, timeoutMs?: number): ControlClient | Error {
   const result = resolveControlClient(options, timeoutMs);
-  return result.ok ? result.value : new Error(result.message);
+  return result.ok ? result.value : new CliError('CONTROL_UNAVAILABLE', result.message);
+}
+
+export function workspaceRefParser(input: string): string {
+  const { id, name } = parseWorkspaceRef(input);
+  if (!id && !name) throw new SyntaxError(`invalid Workspace reference '${input}'; use workspace:<id> or workspace-name:<name>`);
+  return input;
+}
+
+export function windowRefParser(input: string): string {
+  if (!isCanonicalWindowRef(input)) throw new SyntaxError(`invalid Window reference '${input}'; use window:<label>`);
+  return input;
 }
 
 /** The `--workspace <ref>` flag every action command carries, defined once so
  *  its wording cannot drift (`docs/specs/dor-cli.md` → "Handle Model"). */
 export const workspaceFlag = {
   kind: 'parsed',
-  parse: stringParser,
-  brief: "Workspace to act in, instead of the caller's.",
+  parse: workspaceRefParser,
+  brief: "Workspace id or exact workspace-name: reference.",
   optional: true,
   placeholder: 'ref',
 } as const;
@@ -120,6 +153,33 @@ export const workspaceFlag = {
 /** The `workspace` field of a request, present only when the flag was given. */
 export function workspaceParam(workspace: string | undefined): { workspace?: string } {
   return workspace === undefined ? {} : { workspace };
+}
+
+/** The `--focus` flag every Surface-producing command carries; `--focus=false`
+ *  states the default off (`docs/specs/dor-cli.md` → "Focus intent"). */
+export const focusFlag = {
+  kind: 'boolean',
+  brief: 'Focus the created or reused Surface (default: only when typed alone at a prompt).',
+  optional: true,
+  withNegated: false,
+} as const;
+
+/** The `focus` field of a request, present only when the flag was given, so
+ *  the host can apply its default. */
+export function focusParam(focus: boolean | undefined): { focus?: boolean } {
+  return focus === undefined ? {} : { focus };
+}
+
+/** The focus paragraph of each Surface-producing command's help. */
+export function focusHelp({ minimize, browser = false }: { minimize: boolean; browser?: boolean }): string {
+  return 'Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent\'s or a script\'s invocation leaves focus where it is. --focus or --focus=false decides either way.'
+    + (browser ? ' An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.' : '')
+    + (minimize ? ' --minimize turns the default off, and --focus with --minimize is an error.' : '');
+}
+
+/** An explicit `--focus` cannot apply to a Surface `--minimize` hides. */
+export function focusMinimizeConflict(flags: { readonly focus?: boolean; readonly minimize?: boolean }): Error | undefined {
+  return flags.focus === true && flags.minimize === true ? new Error('--focus and --minimize are mutually exclusive') : undefined;
 }
 
 export function writeStdout(context: DorCommandContext, stdout: string): void {
@@ -168,4 +228,25 @@ export function diagnosticsHelp(command: string): string {
   return `and dor-diagnostics to print, as JSON, what the pane and the host know about
 its stream — for a pane that froze, or never showed its page:
   ${command} --surface surface:3 dor-diagnostics`;
+}
+
+/** The exit status of a browser-provider command that succeeded when its
+ *  Surface could not be opened: distinct from 1, so a caller never retries a
+ *  command that already ran. */
+export const BROWSER_UNBOUND_EXIT = 4;
+
+/** The exit-status paragraph both browser commands' help gives. */
+export function browserExitHelp(provider: string): string {
+  return `The exit status is ${provider}'s own; 1 when dor refuses the command or fails
+before running it; or ${BROWSER_UNBOUND_EXIT} when ${provider} succeeded but dor could not open
+or reuse its browser Surface. The command already ran and its output is printed,
+so do not repeat it blindly: check the page first.`;
+}
+
+/** The command_state paragraph of a launching command's help, listing only the
+ *  states that command can report, each with what it means there. */
+export function commandStateHelp(states: ReadonlyArray<readonly [CommandState, string]>): string {
+  const width = Math.max(...states.map(([state]) => state.length)) + 2;
+  return `command_state, the [tag] in text output, says what the reply proves about the command; status says how the Surface was found or made. Neither promises a successful exit or a ready service: check readiness separately. It is one of:
+${states.map(([state, meaning]) => `  ${state.padEnd(width)}${meaning}`).join('\n')}`;
 }

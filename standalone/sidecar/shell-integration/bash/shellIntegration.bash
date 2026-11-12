@@ -81,20 +81,26 @@ fi
 # Set $? to $1 without the fork of `( exit "$1" )`.
 __dormouse_633_status() { return "$1"; }
 
-# precmd: runs via PROMPT_COMMAND just before each prompt. Reports the previous
-# command's exit (D), the cwd (P), and the prompt start (A). Disarms first so its
-# own commands — and the user's PROMPT_COMMAND — don't trip the preexec trap, and
-# re-arms last so the trap fires for the next interactive command.
-__dormouse_633_prompt() {
-  local exit_code=$?
-  __dormouse_633_armed=
+# The previous command's exit (D) if one ran, with $1 its status; the cwd (P);
+# and the prompt start (A).
+__dormouse_633_report() {
   # A rehydrated Tool's payload belongs to its first command alone
   # (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
-  if [ -n "$__dormouse_633_ran" ]; then printf '\033]633;D;%s\007' "$exit_code"; unset DORMOUSE_DEHYDRATE; fi
+  if [ -n "$__dormouse_633_ran" ]; then printf '\033]633;D;%s\007' "$1"; unset DORMOUSE_DEHYDRATE; fi
   __dormouse_633_ran=
   __dormouse_633_safe_cwd "$PWD"
   printf '\033]633;P;Cwd=%s\007' "$__dormouse_633_out"
   printf '\033]633;A\007'
+}
+
+# precmd: runs via PROMPT_COMMAND just before each prompt. Reports, then runs the
+# user's PROMPT_COMMAND. Disarms first so its own commands — and the user's
+# PROMPT_COMMAND — don't trip the preexec trap, and re-arms last so the trap
+# fires for the next interactive command.
+__dormouse_633_prompt() {
+  local exit_code=$?
+  __dormouse_633_armed=
+  __dormouse_633_report "$exit_code"
   local __dormouse_633_pc
   for __dormouse_633_pc in "${__dormouse_633_user_pcs[@]}"; do
     [ -n "$__dormouse_633_pc" ] || continue
@@ -134,6 +140,15 @@ __dormouse_633_command_line() {
   return 0
 }
 
+# The submitted line (E) and the command start (C); $1 the line, when the caller has it.
+__dormouse_633_start() {
+  __dormouse_633_ran=1
+  if [ $# -gt 0 ]; then __dormouse_633_out=$1; else __dormouse_633_command_line; fi
+  __dormouse_633_escape "$__dormouse_633_out"
+  printf '\033]633;E;%s\007' "$__dormouse_633_out"
+  printf '\033]633;C\007'
+}
+
 # preexec: the DEBUG trap fires before every command; emit E/C once per line.
 # The trap passes "$_" as its last word because bash leaves $_ set to the trap
 # command's last word; bash itself restores $?.
@@ -146,16 +161,38 @@ __dormouse_633_preexec() {
   # docs/specs/terminal-state.rationale.md -> Shell-integration injection).
   [ -n "${READLINE_LINE+x}" ] && [ "${BASH_VERSINFO[0]}" -ge 4 ] && return
   __dormouse_633_armed=
-  __dormouse_633_ran=1
-  __dormouse_633_command_line
-  __dormouse_633_escape "$__dormouse_633_out"
-  printf '\033]633;E;%s\007' "$__dormouse_633_out"
-  printf '\033]633;C\007'
+  __dormouse_633_start
 }
 
-trap '__dormouse_633_preexec "$_"' DEBUG
-unset PROMPT_COMMAND                        # an array keeps its other elements through a plain assignment
-PROMPT_COMMAND='__dormouse_633_prompt'
+if [ -n "${bash_preexec_imported:-}${__bp_imported:-}" ]; then
+  # bash-preexec (Atuin's, starship's, other terminals' integrations) takes the
+  # DEBUG trap and PROMPT_COMMAND at its first prompt and runs the hooks
+  # registered with it, a DEBUG trap the profile set included, once per line
+  # and with the command's $?. Ours go first, so A precedes what the user's
+  # precmd prints and C what their preexec prints.
+  __dormouse_633_bp_precmd() { __dormouse_633_report "$?"; }
+  # From its DEBUG trap (bash < 5.3) $BASH_COMMAND is the line's first command,
+  # which our own history reading checks, so a line history kept out is never
+  # reported as the entry before it. From its PS0 hook (5.3+) no trap runs and
+  # $BASH_COMMAND is the statement executing here; only the line bash-preexec
+  # read from history, $1, is left.
+  __dormouse_633_bp_preexec() {
+    local trapped=$BASH_COMMAND
+    if [ "$trapped" = 'local trapped=$BASH_COMMAND' ]; then __dormouse_633_start "$1"; else __dormouse_633_start; fi
+  }
+  precmd_functions=(__dormouse_633_bp_precmd "${precmd_functions[@]}")
+  preexec_functions=(__dormouse_633_bp_preexec "${preexec_functions[@]}")
+else
+  # A DEBUG trap the profile set (a title setter, a timer) keeps running, ahead
+  # of ours so it sees the $? and $_ it would have without us.
+  __dormouse_633_trap_body() { __dormouse_633_out=${2-}; }
+  __dormouse_633_out=$(trap -p DEBUG)
+  eval "__dormouse_633_trap_body ${__dormouse_633_out#trap }"
+  if [ -n "$__dormouse_633_out" ]; then __dormouse_633_out+=$'\n'; fi
+  trap -- "$__dormouse_633_out"'__dormouse_633_preexec "$_"' DEBUG
+  unset PROMPT_COMMAND                      # an array keeps its other elements through a plain assignment
+  PROMPT_COMMAND='__dormouse_633_prompt'
+fi
 # Prompt-end / input-start (B) at the tail of PS1, wrapped in \[ \] so bash counts
 # it as zero width. Best-effort: a prompt rebuilt every render loses B, but
 # A/C/D/E/P still come from the hooks.

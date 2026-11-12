@@ -1,4 +1,4 @@
-import { isWorkspaceControlMethod, unsupportedControlMethodMessage, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
+import { isCanonicalWindowRef, isWorkspaceControlMethod, unsupportedControlMethodMessage, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
 import type { DorControlResult } from 'dor/protocol';
 import type {
   GroupedSurface,
@@ -253,7 +253,15 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     }
 
     case WORKSPACE_CONTROL_METHODS.move: {
-      const toWindow = stringParam(params.toWindow)?.trim();
+      const toWindow = stringParam(params.toWindow);
+      if (toWindow !== undefined && toWindow !== 'new' && !isCanonicalWindowRef(toWindow)) {
+        detail.respond({ ok: false, error: 'Window target must use window:<label>' });
+        return;
+      }
+      if (toWindow === 'window:new') {
+        detail.respond({ ok: false, error: "unknown window target 'window:new'; use --new-window to create one" });
+        return;
+      }
       const isCurrent = toWindow !== undefined && !isWindowRef(toWindow) ? cancelPendingConfirmation() : () => true;
       const target = requireWorkspace(detail);
       if (!target) return;

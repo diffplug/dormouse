@@ -71,6 +71,8 @@ const ptys = vi.hoisted(() => ({
   cwd: null as string | null,
   cwdAsked: [] as string[],
   cwdWait: null as Promise<void> | null,
+  sendInput: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  cancelSendInput: vi.fn(),
   buffered: new Map<string, { alive: boolean }>(),
   /** What the pty host retains for each PTY. */
   scrollback: new Map<string, string>(),
@@ -92,6 +94,8 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   getBufferedPtys: () => new Map(ptys.buffered),
   getScrollback: (id: string) => ptys.scrollback.get(id) ?? null,
   ptyIds: () => ptys.buffered.keys(),
+  sendInput: ptys.sendInput,
+  cancelSendInput: ptys.cancelSendInput,
   getCwds: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, ptys.cwd])),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
@@ -194,6 +198,26 @@ it('answers a voice command under its request id, null where the window has no m
   try {
     webview.send({ type: 'voice:command', payload: { op: 'status' }, requestId: 'req-7' });
     await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'voice:result', requestId: 'req-7', result: null }));
+  } finally { disposable.dispose(); }
+});
+
+it('answers send only after the PTY receipt and preserves delivery failures', async () => {
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    let delivered!: () => void;
+    ptys.sendInput.mockImplementationOnce(() => new Promise(resolve => { delivered = resolve; }));
+    const events = [{ kind: 'text' as const, data: 'hello' }];
+    webview.send({ type: 'pty:sendInput', id: 'pty-1', events, inputId: 'batch-1', requestId: 'req-1' });
+    expect(ptys.sendInput).toHaveBeenCalledWith('pty-1', events, 'batch-1');
+    expect(webview.posted.some(message => message.type === 'pty:inputDone')).toBe(false);
+    delivered();
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'pty:inputDone', requestId: 'req-1', delivered: true }));
+    ptys.sendInput.mockRejectedValueOnce(new Error('partial delivery'));
+    webview.send({ type: 'pty:sendInput', id: 'pty-1', events, inputId: 'batch-2', requestId: 'req-2' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'pty:inputDone', requestId: 'req-2', error: 'partial delivery' }));
+    webview.send({ type: 'pty:cancelInput', id: 'pty-1', inputId: 'batch-2' });
+    expect(ptys.cancelSendInput).toHaveBeenCalledWith('pty-1', 'batch-2');
   } finally { disposable.dispose(); }
 });
 
@@ -978,7 +1002,7 @@ describe('alert state follows the PTY', () => {
       webview.send({ type: 'pty:spawn', id: 'pty-sent', options: { cwd: '/repo' } });
       ptys.callbacks!.onData('pty-sent', REPORT);
       alert(webview, { op: 'dismiss', id: 'pty-sent' });
-      webview.send({ type: 'pty:input', id: 'pty-sent', data: 'hi\r', paced: true });
+      webview.send({ type: 'pty:input', id: 'pty-sent', data: 'hi\r' });
       for (let t = 0; t < 2_000; t += 100) {
         vi.advanceTimersByTime(100);
         ptys.callbacks!.onData('pty-sent', 'frame');

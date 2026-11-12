@@ -33,9 +33,13 @@ function Global:__dormouse_633_osc([string]$body) {
 }
 
 # A rehydrated Tool's payload belongs to its first command alone
-# (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
+# (docs/specs/dor-tool.md -> Reaping); no later command inherits it. Ignore,
+# not SilentlyContinue: every later prompt finds it gone, and SilentlyContinue
+# still records that in the user's $Error.
 function Global:__dormouse_633_clear_dehydrate {
-	Remove-Item Env:DORMOUSE_DEHYDRATE -ErrorAction SilentlyContinue
+	Remove-Item Env:DORMOUSE_DEHYDRATE -ErrorAction Ignore
+	# WSL sets every name WSLENV lists in the distro, a missing one as empty.
+	if ($env:WSLENV) { $env:WSLENV = (@($env:WSLENV -split ':') | Where-Object { ($_ -split '/')[0] -ne 'DORMOUSE_DEHYDRATE' }) -join ':' }
 }
 
 # Preserve the user's prompt so we can chain to it. `$function:prompt` is the

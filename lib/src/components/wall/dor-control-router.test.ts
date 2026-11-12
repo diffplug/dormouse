@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
@@ -162,7 +163,7 @@ describe('dor control routing', () => {
     createWorkspace({ id: 'workspace:2' });
     const target = handleFor('workspace:2');
     handleFor(first, ['pane-a']);
-    for (const value of ['workspace:2', '2']) {
+    for (const value of ['workspace:2']) {
       expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { workspace: value } })))
         .toEqual({ kind: 'handle', handle: target });
     }
@@ -173,16 +174,16 @@ describe('dor control routing', () => {
     createWorkspace({ id: 'workspace:2', name: 'build' });
     const target = handleFor('workspace:2');
     handleFor(first, ['pane-a']);
-    for (const value of ['workspace:build', 'build']) {
+    for (const value of ['workspace-name:build']) {
       expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { workspace: value } })))
         .toEqual({ kind: 'handle', handle: target });
     }
     createWorkspace({ id: 'workspace:3', name: 'build' });
     handleFor('workspace:3');
-    expect(resolveDorControlRoute(request({ params: { workspace: 'build' } })))
+    expect(resolveDorControlRoute(request({ params: { workspace: 'workspace-name:build' } })))
       .toEqual({
         kind: 'error',
-        message: 'workspace target \'build\' matched multiple Workspaces: workspace:2 "build", workspace:3 "build"',
+        message: 'workspace target \'workspace-name:build\' matched multiple Workspaces: workspace:2 "build", workspace:3 "build"',
       });
   });
 
@@ -207,6 +208,18 @@ describe('dor control routing', () => {
     }
   });
 
+  it('routes browser placement before resolving the managed key', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'workspace:2' });
+    handleFor(first, ['surface:1']);
+    const owner = handleFor('workspace:2', ['surface:2']);
+    for (const method of [SURFACE_CONTROL_METHODS.resolveBrowser, SURFACE_CONTROL_METHODS.browser]) {
+      expect(resolveDorControlRoute(request({ method, surfaceId: 'surface:1', params: { from: 'surface:2', key: 'app' } })))
+        .toEqual({ kind: 'handle', handle: owner });
+      expect(resolveDorControlRoute(request({ method, params: { from: 'surface:2', surface: 'surface:1' } }))).toMatchObject({ kind: 'error' });
+    }
+  });
+
   it('answers the container verbs and --all at the Window, with no Wall involved', () => {
     handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
     for (const method of ['workspace.list', 'workspace.new', 'workspace.close']) {
@@ -228,9 +241,9 @@ describe('dor control routing', () => {
       .toEqual({ kind: 'error', message: "unknown workspace target 'workspace:9'" });
     expect(resolveDorControlRoute(request({ params: { window: 'window:2' } })))
       .toEqual({ kind: 'error', message: "unknown window target 'window:2'" });
-    // A Window that never names itself is `window:1`, in both spellings.
+    // A Window that never names itself is `window:1`; a bare label is refused.
     expect(resolveDorControlRoute(request({ params: { window: 'window:1' } })).kind).toBe('handle');
-    expect(resolveDorControlRoute(request({ params: { window: '1' } })).kind).toBe('handle');
+    expect(resolveDorControlRoute(request({ params: { window: '1' } })).kind).toBe('error');
   });
 
   it('answers to the label the host gave it, and to no other Window', () => {
@@ -240,7 +253,7 @@ describe('dor control routing', () => {
     setWindowLabel('ws-3');
     expect(currentWindowRef()).toBe('window:ws-3');
     expect(resolveDorControlRoute(request({ params: { window: 'window:ws-3' } })).kind).toBe('handle');
-    expect(resolveDorControlRoute(request({ params: { window: 'ws-3' } })).kind).toBe('handle');
+    expect(resolveDorControlRoute(request({ params: { window: 'ws-3' } })).kind).toBe('error');
     // Another Window's ref is not this Window's to act on — including the one
     // this Window answered to before it was named.
     expect(resolveDorControlRoute(request({ params: { window: 'window:main' } })))
@@ -339,7 +352,7 @@ describe('dor control routing', () => {
       // `dor workspace new build && dor split --workspace build`: the Workspace
       // is in the store, its Wall is one effect away.
       createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
-      const detail = request({ surfaceId: 'pane-a', params: { workspace: 'build' } });
+      const detail = request({ surfaceId: 'pane-a', params: { workspace: 'workspace-name:build' } });
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
       expect(detail.respond).not.toHaveBeenCalled();
       const target = handleFor('workspace:2');
@@ -350,10 +363,10 @@ describe('dor control routing', () => {
       // One that never registers is answered — not left as "no such Workspace",
       // which it is not, and not left unanswered, which blocks the caller.
       createWorkspace({ id: 'workspace:3', name: 'agents', activate: false });
-      const never = request({ params: { workspace: 'agents' } });
+      const never = request({ params: { workspace: 'workspace-name:agents' } });
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: never }));
       await vi.advanceTimersByTimeAsync(10);
-      expect(never.respond).toHaveBeenCalledWith({ ok: false, error: "workspace 'agents' is still mounting" });
+      expect(never.respond).toHaveBeenCalledWith({ ok: false, error: "workspace 'workspace-name:agents' is still mounting" });
       release();
     } finally {
       vi.useRealTimers();
@@ -392,7 +405,7 @@ describe('dor control routing', () => {
     // `dor split --workspace build` from pane-a: the caller belongs to another
     // Workspace, so the answering Wall is handed no caller and falls back to
     // its own focused Surface.
-    const foreign = request({ surfaceId: 'pane-a', params: { workspace: 'build' } });
+    const foreign = request({ surfaceId: 'pane-a', params: { workspace: 'workspace-name:build' } });
     window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: foreign }));
     expect(target.handleDorControl).toHaveBeenCalledWith({ ...foreign, surfaceId: undefined });
 

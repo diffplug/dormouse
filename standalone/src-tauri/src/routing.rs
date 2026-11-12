@@ -180,10 +180,10 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
                 .and_then(|params| params.get("window"))
                 .and_then(JsonValue::as_str)
             {
-                let label = target.trim();
-                let label = label.strip_prefix("window:").unwrap_or(label).trim();
-                if let Some((label, _)) = view.registry.windows.get_key_value(label) {
-                    return Route::EmitTo(label.as_str());
+                if let Some(label) = target.strip_prefix("window:") {
+                    if let Some((label, _)) = view.registry.windows.get_key_value(label) {
+                        return Route::EmitTo(label.as_str());
+                    }
                 }
             }
             let Some(surface_id) = str_field(data, "surfaceId") else {
@@ -635,7 +635,7 @@ mod tests {
             Route::EmitTo("ws-2")
         );
         assert_eq!(
-            route("dor:controlRequest", &from_main(json!({ "workspace": "Docs" })), &view),
+            route("dor:controlRequest", &from_main(json!({ "workspace": "workspace-name:Docs" })), &view),
             Route::EmitTo("ws-2")
         );
         assert_eq!(
@@ -644,7 +644,7 @@ mod tests {
         );
         // The Workspace wins over the window when both are named.
         assert_eq!(
-            route("dor:controlRequest", &from_main(json!({ "workspace": "workspace:2", "window": "ws-2" })), &view),
+            route("dor:controlRequest", &from_main(json!({ "workspace": "workspace:2", "window": "window:ws-2" })), &view),
             Route::EmitTo("main")
         );
         // Unknown: the caller's own window answers, and refuses by name.
@@ -653,7 +653,7 @@ mod tests {
             Route::EmitTo("main")
         );
         assert_eq!(
-            route("dor:controlRequest", &from_main(json!({ "window": "ws-9" })), &view),
+            route("dor:controlRequest", &from_main(json!({ "window": "window:ws-9" })), &view),
             Route::EmitTo("main")
         );
     }

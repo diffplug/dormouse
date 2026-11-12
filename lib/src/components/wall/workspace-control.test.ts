@@ -100,13 +100,13 @@ describe('workspace mutation verbs', () => {
   it('renames and switches by id or name', async () => {
     createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
 
-    const renamed = request('workspace.rename', { workspace: 'workspace:build', name: 'agents' });
+    const renamed = request('workspace.rename', { workspace: 'workspace-name:build', name: 'agents' });
     await handleWorkspaceControl(renamed);
     expect(answer(renamed)).toEqual({
       status: 'renamed', workspaceId: 'workspace:2', name: 'agents',
     });
 
-    const switched = request('workspace.switch', { workspace: 'agents' });
+    const switched = request('workspace.switch', { workspace: 'workspace-name:agents' });
     await handleWorkspaceControl(switched);
     expect(answer(switched)).toMatchObject({ status: 'active', workspaceId: 'workspace:2' });
     expect(getWorkspacesSnapshot().activeId).toBe('workspace:2');
@@ -124,11 +124,11 @@ describe('workspace mutation verbs', () => {
     renameWorkspace(getWorkspacesSnapshot().workspaces[0].id, 'build');
     createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
 
-    const detail = request('workspace.switch', { workspace: 'build' });
+    const detail = request('workspace.switch', { workspace: 'workspace-name:build' });
     await handleWorkspaceControl(detail);
 
     expect(answer(detail)).toBe(
-      'workspace target \'build\' matched multiple Workspaces: workspace:1 "build", workspace:2 "build"',
+      'workspace target \'workspace-name:build\' matched multiple Workspaces: workspace:1 "build", workspace:2 "build"',
     );
   });
 
@@ -154,10 +154,10 @@ describe('workspace.pin', () => {
     expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).toEqual(['workspace:2', first]);
     expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['workspace:2', false], [first, true]]);
 
-    const again = request('workspace.pin', { workspace: 'build', pinned: true });
+    const again = request('workspace.pin', { workspace: 'workspace-name:build', pinned: true });
     await handleWorkspaceControl(again);
     expect(answer(again)).toMatchObject({ status: 'pinned', workspaceId: 'workspace:2' });
-    const unpin = request('workspace.pin', { workspace: 'build', pinned: false });
+    const unpin = request('workspace.pin', { workspace: 'workspace-name:build', pinned: false });
     await handleWorkspaceControl(unpin);
     expect(answer(unpin)).toMatchObject({ status: 'unpinned', workspaceId: 'workspace:2' });
     expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['workspace:2', false], [first, true]]);
@@ -167,12 +167,12 @@ describe('workspace.pin', () => {
     createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     setWorkspaceTransferPending('workspace:2', true);
     try {
-      const pin = request('workspace.pin', { workspace: 'build', pinned: true });
+      const pin = request('workspace.pin', { workspace: 'workspace-name:build', pinned: true });
       await handleWorkspaceControl(pin);
       expect(answer(pin)).toBe("workspace 'workspace:2' was not pinned: Workspace is transferring");
       expect(workspaceRows().find((row) => row.id === 'workspace:2')?.pinned).toBe(false);
       for (const params of [{ name: 'deploys' }, { auto: true }]) {
-        const rename = request('workspace.rename', { workspace: 'build', ...params });
+        const rename = request('workspace.rename', { workspace: 'workspace-name:build', ...params });
         await handleWorkspaceControl(rename);
         expect(answer(rename)).toBe("workspace 'workspace:2' was not renamed: Workspace is transferring");
       }
@@ -204,7 +204,7 @@ describe('workspace.move', () => {
     expect(getWorkspacesSnapshot().workspaces[0].id).toBe(second);
 
     setPlatform({} as unknown as PlatformAdapter);
-    const across = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
+    const across = request('workspace.move', { workspace: 'workspace:7', toWindow: 'window:ws-2' });
     await handleWorkspaceControl(across);
     expect(answer(across)).toMatch(/one window/);
 
@@ -271,7 +271,7 @@ describe('workspace.move', () => {
     const transferWorkspace = vi.fn(async () => {});
     setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
 
-    const both = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2', index: 0 });
+    const both = request('workspace.move', { workspace: 'workspace:7', toWindow: 'window:ws-2', index: 0 });
     await handleWorkspaceControl(both);
     expect(transferWorkspace).toHaveBeenCalledWith(second, 'ws-2', { index: 0 });
     expect(answer(both)).toMatchObject({ status: 'moved' });
@@ -287,7 +287,7 @@ describe('workspace.move', () => {
     const transferWorkspace = vi.fn(() => new Promise<void>((resolve) => { adopt = resolve; }));
     setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
 
-    const pending = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
+    const pending = request('workspace.move', { workspace: 'workspace:7', toWindow: 'window:ws-2' });
     const running = handleWorkspaceControl(pending);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(transferWorkspace).toHaveBeenCalled();
@@ -298,7 +298,7 @@ describe('workspace.move', () => {
     expect(answer(pending)).toMatchObject({ status: 'moved' });
 
     transferWorkspace.mockRejectedValueOnce(new Error('the target window closed mid-arrival'));
-    const handedBack = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
+    const handedBack = request('workspace.move', { workspace: 'workspace:7', toWindow: 'window:ws-2' });
     await handleWorkspaceControl(handedBack);
     expect(answer(handedBack)).toBe("workspace 'workspace:7' was not moved: the target window closed mid-arrival");
   });
@@ -354,7 +354,7 @@ describe('workspace.close', () => {
     setWorkspacePinned(second, true);
 
     for (const force of [false, true]) {
-      const refused = request('workspace.close', { workspace: 'build', force });
+      const refused = request('workspace.close', { workspace: 'workspace-name:build', force });
       await handleWorkspaceControl(refused);
       expect(answer(refused)).toBe("workspace 'workspace:2' was not closed: workspace is pinned; unpin it to close");
     }

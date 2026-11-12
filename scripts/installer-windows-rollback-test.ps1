@@ -143,9 +143,15 @@ function Get-ListeningRelease {
   return $script:Serving
 }
 
+# With $script:PointerWriteFails the write does not land, and, like the
+# installer's Die, ends the run unless the caller asked for -WarnOnFailure.
 function Set-ReleasePointer {
-  param([string]$ReleaseId, [string]$PointerPath, [string]$NodeBin)
+  param([string]$ReleaseId, [string]$PointerPath, [string]$NodeBin, [switch]$WarnOnFailure)
   $script:Calls.Add("Set-ReleasePointer $(Split-Path -Leaf $PointerPath)=$ReleaseId with $NodeBin")
+  if ($script:PointerWriteFails) {
+    if ($WarnOnFailure) { Write-Warn2 "stub: could not write $PointerPath"; return }
+    throw "stub: Die (exit 1) on the failed write of $PointerPath"
+  }
   [IO.File]::WriteAllText($PointerPath, "$ReleaseId`n")
 }
 
@@ -194,6 +200,7 @@ function Reset-Stub {
   $script:TaskRegistered = $Registered
   $script:StartRefused = $Refused
   $script:Serving = 'old'
+  $script:PointerWriteFails = $false
 }
 
 # Runs one function with stderr captured. Result is its pipeline output joined
@@ -265,7 +272,7 @@ function Invoke-RollbackCase {
 }
 
 function Invoke-RestoreCase {
-  param([string]$CaseDir, [bool]$Refused = $false)
+  param([string]$CaseDir, [bool]$Refused = $false, [bool]$WriteFails = $false)
   $script:INSTALL_ROOT = New-InstallTree -CaseDir $CaseDir -TargetRuntime $true
   $script:CURRENT_POINTER = Join-Path $script:INSTALL_ROOT 'current.txt'
   $script:PREVIOUS_POINTER = Join-Path $script:INSTALL_ROOT 'previous.txt'
@@ -275,8 +282,10 @@ function Invoke-RestoreCase {
   $script:STAGED_NODE = Join-Path $script:INSTALL_ROOT 'releases\new\runtime\node.exe'
   $script:OLD_RELEASE = 'old'
   Reset-Stub -Registered $true -Refused $Refused
+  $script:PointerWriteFails = $WriteFails
   $run = Invoke-Captured { Restore-PreviousRelease }
   $run | Add-Member -NotePropertyName Current -NotePropertyValue (Get-PointerText $script:CURRENT_POINTER)
+  $run | Add-Member -NotePropertyName Previous -NotePropertyValue (Get-PointerText $script:PREVIOUS_POINTER)
   $run | Add-Member -NotePropertyName ClaimedHealthy -NotePropertyValue ($run.Said -match 'healthy again')
   return $run
 }
@@ -342,6 +351,18 @@ try {
     (Compare-Expectation 'current.txt' 'old' $r.Current),
     (Compare-Expectation 'task starts' 1 $r.Starts),
     (Compare-Expectation 'health waits after the failed start' 0 $r.Waits),
+    (Compare-Expectation 'printed "healthy again"' $false $r.ClaimedHealthy)
+  )
+
+  # The caller prints "update FAILED" only if the restore returns, so a failed
+  # pointer write must not end the run, and previous.txt is the only way back.
+  $case = 'install restore: a pointer write that does not land returns, keeps previous.txt, and fails'
+  $r = Invoke-RestoreCase -CaseDir 'restore-write-fails' -WriteFails $true
+  Write-CaseResult $case $r @(
+    (Compare-Expectation 'result' 'False' $r.Result),
+    (Compare-Expectation 'current.txt' 'new' $r.Current),
+    (Compare-Expectation 'previous.txt' 'old' $r.Previous),
+    (Compare-Expectation 'task starts' 0 $r.Starts),
     (Compare-Expectation 'printed "healthy again"' $false $r.ClaimedHealthy)
   )
 } finally {

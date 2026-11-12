@@ -1,5 +1,11 @@
 exitCode: 2
 stdout:
+{
+  "error": {
+    "code": "TIMEOUT",
+    "message": "timed out after 600s waiting for surface:3 to go quiet"
+  }
+}
 
 stderr:
 Error: timed out after 600s waiting for surface:3 to go quiet

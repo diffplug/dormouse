@@ -13,7 +13,7 @@ import { PAIRING_CODE_LABEL } from '../remote/pocket-app/views';
 import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL, SETUP_BUTTON } from '../remote/setup-copy';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
-import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, openPortRequestTimeoutMs } from './platform/types';
+import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, openPortRequestTimeoutMs, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from './platform/types';
 import { DEFAULT_RECOVERY_WAIT_MS } from '../host/recovery-capture';
 import { TOOL_PAYLOAD_LIMIT } from 'dor-tools-lib/osc';
 
@@ -325,6 +325,16 @@ describe('quit teardown budget mirrors', () => {
       expect(Number(margin)).toBe(valueOf('SIDECAR_ROUND_TRIP_MARGIN_MS'));
     },
   );
+});
+
+// `dor`'s surface kill and the webview size their deadlines from the shared
+// terminal-context bound, which standalone's Rust backend spells as a literal.
+describe('terminal-context bound mirrors', () => {
+  it('matches the Rust pty_context timeout', () => {
+    const body = extract(rsSrc, rs, /\nfn pty_context\(([^]*?)\n}/);
+    const seconds = extract(body, `${rs} (pty_context)`, /Duration::from_secs\((\d+)\)/);
+    expect(Number(seconds) * 1000).toBe(TERMINAL_CONTEXT_CHILD_TIMEOUT_MS);
+  });
 });
 
 // docs/specs/transport.md -> "Port scan deadlines"

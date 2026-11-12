@@ -5,8 +5,8 @@ import { previousWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS, setWorkspaceTransfe
  * Integration smoke for the Wall on the Lath engine: it renders panes through
  * LathHost, splits/kills through the engine, and persists the Lath layout on save.
  * jsdom has no real layout, so this asserts structure (leaf count, save shape), not
- * geometry — the Wall on Lath live acceptance list in
- * TESTING_AND_MODIFICATION_GUIDE.md (§5) is the live gate.
+ * geometry, which the play tests in `lib/src/stories/Wall.stories.tsx` check in a
+ * real browser.
  */
 import { act, type ReactElement } from 'react';
 import { type Root } from 'react-dom/client';
@@ -2691,7 +2691,7 @@ describe('Wall on the Lath engine', () => {
   it.each([
     { line: 'dor open a.md', explicitSurface: false, status: 'takeover' },
     { line: 'claude', explicitSurface: false, status: 'created' },
-    { line: 'dor open --surface surface:self a.md', explicitSurface: true, status: 'created' },
+    { line: 'dor open --from surface:self a.md', explicitSurface: true, status: 'created' },
   ])('dispatches open through the user host with $status placement for $line', async ({ line, explicitSurface, status }) => {
     const controller = new AbortController();
     let toolId: string | undefined;
@@ -2994,7 +2994,7 @@ describe('Wall on the Lath engine', () => {
         method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'surface:a', params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond: first,
       } })));
       await flush();
-      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created', commandState: 'unconfirmed' }) }));
       const second = vi.fn();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
         method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'surface:a', params: { name: finishesBeforeWait ? 'probe' : 'storybook', cwd: '/repo' }, signal: controller.signal, respond: second,
@@ -3432,7 +3432,7 @@ describe('Wall on the Lath engine', () => {
 
     expect(response).toMatchObject({
       ok: true,
-      result: { status: 'pending', surfaceId: toolId, minimized: false },
+      result: { status: 'pending', commandState: 'awaiting_approval', surfaceId: toolId, minimized: false },
     });
     expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
     expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
@@ -3483,7 +3483,7 @@ describe('Wall on the Lath engine', () => {
         act(() => finish(command));
       }
       await waitUntil(() => respond.mock.calls.length > 0);
-      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', surfaceId: id }) }));
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', commandState: 'ended', surfaceId: id }) }));
       expect(typed).toEqual(['\x03', `${command}\r`]);
       expect(terminalRegistry.getTerminalPaneState(id).currentCommand).toBeNull();
       expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).not.toBe(oldRun);
@@ -3495,7 +3495,16 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('reports a reused minimized tool as visible after reattaching it', async () => {
+  // docs/specs/dor-cli.md -> "Focus intent": typed alone at the caller's prompt
+  // focuses, an agent's invocation does not, an explicit --focus wins either
+  // way, and the webview's own requests keep focusing what they reveal.
+  it.each([
+    { line: 'dor tool storybook', focus: undefined, gui: false, focused: true },
+    { line: 'claude', focus: undefined, gui: false, focused: false },
+    { line: 'dor tool storybook', focus: false, gui: false, focused: false },
+    { line: 'claude', focus: true, gui: false, focused: true },
+    { line: 'claude', focus: undefined, gui: true, focused: true },
+  ])('reveals a minimized Tool from $line with focus $focus (gui $gui): focused $focused', async ({ line, focus, gui, focused }) => {
     const toolId = 'surface:tool-door';
     terminalRegistry.applyTerminalSemanticEvents(toolId, [
       // The match runs in its own directory, not the caller's: the response has
@@ -3532,19 +3541,23 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
+      reportRunning('surface:a', line);
 
       let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean; cwd: string } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
             method: SURFACE_CONTROL_METHODS.tool,
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            surfaceId: 'surface:a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false, ...(focus === undefined ? {} : { focus }) },
+            ...(gui ? { gui: true } : {}),
             respond: (result: typeof response) => { response = result; },
           },
         }));
       });
       await flush();
 
+      expect(container.querySelector(`[data-lath-leaf="${toolId}"] [data-focused="true"]`) !== null).toBe(focused);
       expect(response).toMatchObject({
         ok: true,
         result: { status: 'existing', surfaceId: toolId, minimized: false, cwd: '/repo/packages/ui' },
@@ -3552,7 +3565,10 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
       expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
     } finally {
-      act(() => terminalRegistry.removeTerminalPaneState(toolId));
+      act(() => {
+        terminalRegistry.removeTerminalPaneState(toolId);
+        terminalRegistry.removeTerminalPaneState('surface:a');
+      });
     }
   });
 
@@ -3576,7 +3592,7 @@ describe('Wall on the Lath engine', () => {
         params: { command: ['pnpm', 'dev'], cwd: '/repo' }, signal: controller.signal, respond,
       } })));
       await waitUntil(() => respond.mock.calls.length > 0);
-      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover', commandState: 'queued' }) }));
       if (change === 'cancelled') controller.abort();
       if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a' } : undefined);
       if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('surface:a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
@@ -3593,15 +3609,18 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('writes dor send input paced', async () => {
+  it('preserves dor send event kinds through the adapter', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:4']} />));
     await flush();
-    const write = vi.spyOn(fake, 'writePty');
+    let delivered!: () => void;
+    const write = vi.spyOn(fake, 'sendPtyInput').mockImplementation(() => new Promise(resolve => { delivered = resolve; }));
     const respond = vi.fn();
     await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-      method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', input: '/simplify\r', inputCount: 2 }, respond,
+      method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', events: [{ text: '/simplify' }, { key: 'enter' }] }, respond,
     } })));
-    expect(write.mock.calls).toEqual([['surface:4', '/simplify\r', { paced: true }]]);
+    expect(write.mock.calls).toEqual([['surface:4', [{ kind: 'text', data: '/simplify' }, { kind: 'key', data: '\r' }], undefined]]);
+    expect(respond).not.toHaveBeenCalled();
+    await act(async () => delivered());
     expect(respond).toHaveBeenCalledWith({
       ok: true, result: { status: 'sent', surfaceId: 'surface:4', inputCount: 2 },
     });
@@ -3615,7 +3634,7 @@ describe('Wall on the Lath engine', () => {
       const write = vi.spyOn(fake, 'writePty');
       const respond = vi.fn();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', input: 'ls\r' }, respond,
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', events: [{ text: 'ls' }, { key: 'enter' }] }, respond,
       } })));
       expect(write).not.toHaveBeenCalled();
       expect(respond).toHaveBeenCalledWith({ ok: false, error: "surface 'surface:4' has no running shell" });
@@ -3630,7 +3649,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
       await flush();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:a', input: 'export X=1\r' }, respond: vi.fn(),
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:a', events: [{ text: 'export X=1' }, { key: 'enter' }] }, respond: vi.fn(),
       } })));
       await act(async () => {
         container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -3807,7 +3826,7 @@ describe('Wall on the Lath engine', () => {
         method: SURFACE_CONTROL_METHODS.tool, surfaceId: id, params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond: first,
       } })));
       await waitUntil(() => first.mock.calls.length > 0);
-      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover', commandState: 'queued' }) }));
       act(() => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
       await waitUntil(() => typed.length > 0);
       const previousRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;
@@ -4093,19 +4112,20 @@ describe('Wall on the Lath engine', () => {
   const focusOf = (id: string): string | null =>
     container.querySelector(`[data-session-id="${id}"]`)?.getAttribute('data-focused') ?? null;
 
-  async function dispatchSplit(params: Record<string, unknown>): Promise<string> {
+  async function dispatchSplit(params: Record<string, unknown>, surfaceId?: string): Promise<string> {
     let response: { ok: boolean; result?: { surfaceId?: string } } | undefined;
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
           method: SURFACE_CONTROL_METHODS.split,
+          ...(surfaceId === undefined ? {} : { surfaceId }),
           params,
           respond: (r: typeof response) => { response = r; },
         },
       }));
     });
     await flush();
-    expect(response?.ok).toBe(true);
+    expect(response?.ok, JSON.stringify(response)).toBe(true);
     return response!.result!.surfaceId!;
   }
 
@@ -4278,7 +4298,7 @@ describe('Wall on the Lath engine', () => {
     });
   });
 
-  it('dor split transfers focus to the new surface (passthrough)', async () => {
+  it('dor split --focus transfers focus to the new surface (passthrough)', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
     });
@@ -4286,11 +4306,35 @@ describe('Wall on the Lath engine', () => {
     // The seeded pane starts focused (passthrough + selected).
     expect(focusOf('surface:a')).toBe('true');
 
-    const newId = await dispatchSplit({ direction: 'right' });
+    const newId = await dispatchSplit({ direction: 'right', focus: true });
 
     // Focus moves to the freshly split surface; the caller is no longer focused.
     expect(focusOf(newId)).toBe('true');
     expect(focusOf('surface:a')).toBe('false');
+  });
+
+  // docs/specs/dor-cli.md -> "Focus intent", read from the caller's own line.
+  it.each([
+    { line: 'dor split', params: {}, focused: true },
+    { line: 'dor split -- pnpm dev', params: { command: ['pnpm', 'dev'] }, focused: true },
+    { line: 'claude', params: {}, focused: false },
+    { line: 'dor split && ls', params: {}, focused: false },
+    { line: 'dor ensure -- pnpm dev', params: {}, focused: false },
+    { line: 'dor split', params: { focus: false }, focused: false },
+    { line: 'claude', params: { focus: true }, focused: true },
+  ])('dor split from $line with $params focuses the new surface: $focused', async ({ line, params, focused }) => {
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />);
+    });
+    await flush();
+    reportRunning('surface:a', line);
+    try {
+      const newId = await dispatchSplit({ direction: 'right', ...params }, 'surface:a');
+      expect(focusOf('surface:a')).toBe(focused ? 'false' : 'true');
+      expect(focusOf(newId)).toBe(focused ? 'true' : 'false');
+    } finally {
+      act(() => terminalRegistry.removeTerminalPaneState('surface:a'));
+    }
   });
 
   it('a split mints its id from the host pool', async () => {
@@ -4313,14 +4357,127 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(focusOf('surface:a')).toBe('true');
 
-    // The CLI marks a `-- <command>` split focus-neutral (it always sends
-    // focusNeutral when `--` or a command is present).
-    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'], focusNeutral: true });
+    // Explicit false preserves focus regardless of the initial command.
+    const newId = await dispatchSplit({ direction: 'right', command: ['echo', 'hi'], focus: false });
 
     // The initial command runs in the background: the caller keeps focus and the
     // new surface is not focused.
     expect(focusOf('surface:a')).toBe('true');
     expect(focusOf(newId)).toBe('false');
+  });
+
+  it.each(['agent-browser', 'playwright'] as const)('keeps visible %s reuse neutral unless focus is explicit', async provider => {
+    hostBrowsers();
+    const onEvent = vi.fn();
+    const selected = () => onEvent.mock.calls.filter(([event]) => event.type === 'selectionChange').at(-1)?.[0]?.id;
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" onEvent={onEvent} />); });
+    await flush();
+    const invoke = async (focus?: boolean) => {
+      let response: { ok: boolean; result?: { surfaceId: string; minimized: boolean } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.browser, surfaceId: 'surface:a',
+          params: { provider, session: 'focus-review', ...(focus === undefined ? {} : { focus }) },
+          respond: (result: typeof response) => { response = result; },
+        } }));
+      });
+      await flush();
+      expect(response?.ok).toBe(true);
+      return response!.result!;
+    };
+    try {
+      reportRunning('surface:a', `dor ${provider} open :5173`);
+      const { surfaceId: browserId } = await invoke();
+      expect(selected()).toBe(browserId);
+      await act(async () => { getWallHandle(DEFAULT_WORKSPACE_ID)!.focusSurface('surface:a', false); });
+      await flush();
+      expect(focusOf('surface:a')).toBe('true');
+      reportRunning('surface:a', `dor ${provider} snapshot`);
+      await invoke();
+      expect(focusOf('surface:a')).toBe('true');
+      await invoke(true);
+      expect(selected()).toBe(browserId);
+      await act(async () => { container.querySelector<HTMLElement>(`[data-lath-leaf="${browserId}"] [aria-label="Minimize"]`)!.click(); });
+      await flush();
+      await act(async () => { getWallHandle(DEFAULT_WORKSPACE_ID)!.focusSurface('surface:a', false); });
+      await flush();
+      expect((await invoke(false)).minimized).toBe(true);
+      expect(focusOf('surface:a')).toBe('true');
+      expect((await invoke()).minimized).toBe(false);
+      expect(selected()).toBe(browserId);
+    } finally { act(() => terminalRegistry.removeTerminalPaneState('surface:a')); }
+  });
+
+  it('uses browser --from as placement and refuses an unavailable reference before attaching', async () => {
+    const { requests } = hostBrowsers();
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />); });
+    await flush();
+    const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation(id => id === 'surface:b');
+    try {
+      const failed = await dispatchAgentBrowserResponse({ session: 'placement', from: 'surface:missing' });
+      expect(failed?.ok).toBe(false);
+      expect(requests('attach')).toEqual([]);
+      const id = await dispatchAgentBrowser({ session: 'placement', from: 'surface:b' });
+      expect(container.querySelector('[data-lath-leaf="surface:a"]')).not.toBeNull();
+      expect(container.querySelector('[data-lath-leaf="surface:b"]')).toBeNull();
+      expect(container.querySelector(`[data-lath-leaf="${id}"]`)).not.toBeNull();
+    } finally { untouched.mockRestore(); }
+  });
+
+  it('ignores a minimized or stale browser --from when the browser already has a Surface', async () => {
+    const { requests } = hostBrowsers();
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />); });
+    await flush();
+    const bySession = await dispatchAgentBrowser({ session: 'placed', from: 'surface:b' });
+    const byKey = await dispatchAgentBrowser({ key: 'docs', session: 'dormouse.test.docs', from: 'surface:b' });
+    // The agent's own terminal goes to the Door row, so its `--from surface:self` names no visible Surface.
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:b"] [aria-label="Minimize"]')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-door-id="surface:b"]')).not.toBeNull();
+    const attaches = requests('attach').length;
+    for (const from of ['surface:b', 'surface:missing']) {
+      expect(await dispatchAgentBrowserResponse({ session: 'placed', from })).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: bySession } });
+      expect(await dispatchAgentBrowserResponse({ key: 'docs', session: 'dormouse.test.docs', from })).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: byKey } });
+    }
+    expect(requests('attach').length).toBeGreaterThan(attaches);
+    // A browser it would create still refuses the reference before attaching.
+    const before = requests('attach').length;
+    expect(await dispatchAgentBrowserResponse({ session: 'unplaced', from: 'surface:b' })).toMatchObject({ ok: false });
+    expect(requests('attach')).toHaveLength(before);
+  });
+
+  it('refuses browser --from on resolution only for a binding command that finds no Surface, and never on diagnostics or viewport', async () => {
+    hostBrowsers();
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    await act(async () => { root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />); });
+    await flush();
+    const control = async (method: string, params: Record<string, unknown>) => {
+      let response: { ok: boolean; result?: { binding?: { session: string }; surfaceId?: string }; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method, params: { provider: 'agent-browser', key: 'docs', ...params }, respond: (r: typeof response) => { response = r; },
+        } }));
+      });
+      await flush();
+      return response;
+    };
+    const resolve = (params: Record<string, unknown>) => control(SURFACE_CONTROL_METHODS.resolveBrowser, params);
+    // No Surface holds the key: a command that may bind would place one, so it is refused before the provider runs.
+    expect(await resolve({ from: 'surface:missing', proposed: { cwd: '/repo' } })).toMatchObject({ ok: false });
+    // An informational command places nothing.
+    expect(await resolve({ from: 'surface:missing' })).toMatchObject({ ok: true });
+    const session = (await resolve({ from: 'surface:b', proposed: { cwd: '/repo' } }))?.result?.binding?.session;
+    expect(session).toEqual(expect.any(String));
+    const id = await dispatchAgentBrowser({ key: 'docs', session, cwd: '/repo', from: 'surface:b' });
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="surface:b"] [aria-label="Minimize"]')!.click(); });
+    await flush();
+    for (const from of ['surface:b', 'surface:missing']) {
+      expect(await resolve({ from, proposed: { cwd: '/repo' } })).toMatchObject({ ok: true, result: { binding: { session } } });
+      expect(await control(SURFACE_CONTROL_METHODS.browserDiagnostics, { from })).toMatchObject({ ok: true, result: { surfaceId: id } });
+      expect(await control(SURFACE_CONTROL_METHODS.browserViewport, { from })).toMatchObject({ ok: true });
+    }
   });
 
   it('keeps dor agent-browser focus-neutral but enters passthrough for a user port activation', async () => {
@@ -4419,9 +4576,8 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(focusOf('surface:a')).toBe('true');
 
-    // No command, but focusNeutral marks the `--` tail: a blank terminal that
-    // does not grab the user's keystrokes (unlike a bare `dor split`).
-    const newId = await dispatchSplit({ direction: 'right', focusNeutral: true });
+    // A blank split also preserves focus.
+    const newId = await dispatchSplit({ direction: 'right', focus: false });
 
     expect(focusOf('surface:a')).toBe('true');
     expect(focusOf(newId)).toBe('false');
@@ -5340,7 +5496,7 @@ describe('engagement', () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
             method: SURFACE_CONTROL_METHODS.tool,
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false, focus: true },
             respond: () => {},
           },
         }));
@@ -5441,7 +5597,7 @@ describe('dor from helper terminals', () => {
   it('splits from the source using the helper directory, while helpers remain absent from discovery', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} />));
     terminalRegistry.seedTerminalManualCwd('surface:a', '/source');
-    const response = await issue('surface.split', { direction: 'right', cwd: '/helper', focusNeutral: true });
+    const response = await issue('surface.split', { direction: 'right', cwd: '/helper', focus: false });
     const created = response.mock.calls[0][0].result.surfaceId;
     expect(pendingShellOpts.get(created)?.cwd).toBe('/helper');
     expect(leafCount()).toBe(3);
@@ -5542,7 +5698,7 @@ it('starts a split in the invoking directory, inheriting its reference only with
   for (const [cwd, expected] of [['/invoked', '/invoked'], [undefined, '/source']] as const) {
     const respond = vi.fn();
     await act(async () => dispatchDorControlRequest({ requestId: `split-${expected}`, surfaceId: 'surface:a',
-      method: 'surface.split', params: { direction: 'right', cwd, surface: 'surface:a', focusNeutral: true } }, respond));
+      method: 'surface.split', params: { direction: 'right', cwd, surface: 'surface:a', focus: false } }, respond));
     await flush();
     expect(pendingShellOpts.get(respond.mock.calls[0][0].result.surfaceId)?.cwd).toBe(expected);
   }

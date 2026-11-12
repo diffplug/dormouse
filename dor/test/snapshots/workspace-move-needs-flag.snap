@@ -2,4 +2,4 @@ exitCode: 1
 stdout:
 
 stderr:
-Error: dor workspace move needs --window, --index, or both
+Error: dor workspace move needs --window, --new-window, or --index

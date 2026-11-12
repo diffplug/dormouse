@@ -1,8 +1,9 @@
 /** Target normalization shared by `dor iframe` and `dor agent-browser open`; see
  * docs/specs/dor-cli.md → "Browser Open Target Resolution". */
 
-import { errorMessage, workspaceParam } from './shared.js';
-import type { ControlClient, ParseResult } from './types.js';
+import { commandError } from './errors.js';
+import { workspaceParam } from './shared.js';
+import type { ControlClient } from './types.js';
 
 // A bare `:port` (optionally trailed by a path/query/hash) — localhost sugar.
 const BARE_PORT = /^:\d{1,5}(?:[/?#].*)?$/;
@@ -79,17 +80,16 @@ export function normalizeConcreteOpenUrl(target: string): string {
  * Resolve a Surface-handle open target to its dev-server URL via the host port
  * scan (`surface.resolveOpen`). The host groups listening records by port and
  * fails clearly on zero or multiple candidate ports; that failure surfaces here
- * as the returned message.
+ * as the returned error.
  */
 export async function resolveSurfaceOpenTarget(
   target: string,
   client: ControlClient,
   workspace?: string,
-): Promise<ParseResult<string>> {
+): Promise<string | Error> {
   try {
-    const { url } = await client.resolveOpenTarget({ surface: target, ...workspaceParam(workspace) });
-    return { ok: true, value: url };
+    return (await client.resolveOpenTarget({ surface: target, ...workspaceParam(workspace) })).url;
   } catch (error) {
-    return { ok: false, message: errorMessage(error) };
+    return commandError(error);
   }
 }

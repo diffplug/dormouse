@@ -8,7 +8,7 @@ describe('dorWorkspaceRefusal', () => {
     expect(dorWorkspaceRefusal('surface.list', { scope: 'workspace' })).toBeNull();
     // Positionally, and by the name a bare Wall registers — a caller that read
     // the name out of `dor list` hands it straight back.
-    for (const workspace of ['workspace:1', '1', ' workspace:1 ', 'Workspace 1', 'workspace:Workspace 1']) {
+    for (const workspace of ['workspace:1', 'workspace-name:Workspace 1']) {
       expect(dorWorkspaceRefusal('surface.kill', { workspace })).toBeNull();
     }
   });

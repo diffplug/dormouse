@@ -53,8 +53,9 @@ interface Published {
 export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOptions): AlertDeliveryScheduler {
   const { manager } = options;
   let defaults = DEFAULT_ALERT_SETTINGS;
-  /** Each sink's deadline timer, fixed at its episode's start; a sink missing
-   *  from `pending` is consumed. */
+  /** Each Session's last episode and its sinks' deadline timers, fixed at its
+   *  start; a sink missing from `pending` is consumed. Kept after the episode
+   *  stops showing, so it is never armed twice. */
   const episodes = new Map<string, { episodeId: string; pending: Map<AlertSink, ReturnType<typeof setTimeout>> }>();
   /** Each Session's last publication, and the realm that made it. */
   const published = new Map<string, Published>();
@@ -100,11 +101,14 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
   function onState(id: string, state: AlertState): void {
     const { episode } = state;
     const current = episodes.get(id);
-    // Every sink is armed once, as its episode opens.
+    // Every sink is armed once, as its episode first shows. An episode that
+    // stops showing consumes what it had pending, whether it ended or its
+    // Session was made a helper; a promotion showing it again is no new
+    // episode, so it delivers nothing twice.
     if (current?.episodeId === episode?.id) return;
     if (current) {
       current.pending.forEach(clearTimeout);
-      episodes.delete(id);
+      current.pending.clear();
     }
     if (!episode) return;
     const effective = policy(id);
@@ -125,7 +129,10 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     manager.onStateChange(onState),
     // Only a Session gone for good: a respawn under the same id keeps what its
     // realm published, which the realm never sends again unchanged.
-    manager.onRemove((id) => void published.delete(id)),
+    manager.onRemove((id) => {
+      published.delete(id);
+      episodes.delete(id);
+    }),
   ];
 
   return {

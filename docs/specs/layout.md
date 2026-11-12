@@ -153,7 +153,7 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 ### Moving Surfaces between Workspaces
 
 - **Must move a Pane or Door on release over another Workspace tab**, inserting beside the destination's last selected live pane. **Never activate on hover.** A header or Door press owns a pane drag; a tab press owns reorder and cross-Window tear-out. A drop on a strip gap, the source tab, or a disabled target moves nothing; Escape and pointer cancellation change nothing.
-- **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Otherwise disable both, and refuse CLI `--new`.
+- **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Otherwise disable both, and refuse CLI `--new-workspace`.
 - **Must offer Move to workspace in terminal and Tool context.** **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
 - **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. **Never close a departing Session.** A moved preview slot is pinned, and a moved browser drops its `--key`, reachable by id.
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with the typed-letter Workspace confirmation ([Workspace lifecycle](#workspace-lifecycle)): the Surface reopens at its last-known saved URL, possibly losing page state. Doors remain minimized while waiting. CLI consent: `docs/specs/dor-cli.md` → dor move.
@@ -188,7 +188,7 @@ A Workspace may leave the Window for another: `docs/specs/standalone.md` -> "Tra
 
 Persisted containers: `docs/specs/transport.md`; standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". The union projection: `docs/specs/alert.md` → Workspace union.
 
-Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `requestConfirmation` in `lib/src/lib/workspace-ui-store.ts`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`.
+Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; the hidden-Wall mount gate in `lib/src/components/TerminalPane.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `requestConfirmation` in `lib/src/lib/workspace-ui-store.ts`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`.
 
 ## Modes
 
@@ -339,7 +339,7 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 ### Splitting from a Door
 
-**`dor split --surface <minimized-id>` and `dor ensure --surface <minimized-id>` must create the new terminal Surface directly as a Door**, immediately to the right of the reference Door, and report `minimized: true` even without `--minimize`. Its restore token's neighbor tier points at the reference Door, and `--auto` resolves to `right` — there is no visible pane geometry to inspect.
+**Must create the new terminal directly as a Door when `dor split` or `dor ensure` references a minimized Surface, unless it takes focus** (`docs/specs/dor-cli.md` → "Focus intent"). The Door is immediately to the reference Door's right and reports `minimized: true` even without `--minimize`. Its restore token's neighbor tier points at the reference Door, and `--auto` resolves to `right` — there is no visible pane geometry to inspect.
 
 ## Inline rename
 
@@ -480,7 +480,7 @@ A store commit that empties the tree (last pane killed or minimized) spawns one 
 > Numbers are cited from other specs and code: never renumber; leave a retired one retired.
 
 - #2 — A focused iframe surface is not a window blur: it blurs the window while `document.hasFocus()` stays true, so presence ends (`docs/specs/alert.md` → Engagement), and a pane or sash drag cancels, only on a real blur. Source of truth: `isRealBlur` in `lib/src/lib/window-focus.ts`.
-- #6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor agent-browser`): unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`); the create never re-parents the caller's subtree, steals activation, or selects. The one exception: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Any completed teardown preserves the caller's live selection.
+- #6 — Focus-neutral surface creation (a CLI creation `docs/specs/dor-cli.md` → "Focus intent" leaves unfocused): the create never re-parents the caller's subtree, steals activation, or selects. The one exception: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Any completed teardown preserves the caller's live selection.
 
 ## Future
 

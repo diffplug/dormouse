@@ -4,7 +4,7 @@ Invocation: `dor iframe --help`
 
 ```text
 USAGE
-  dor iframe [--json] [--minimize] [--surface handle] [--workspace ref] <target>
+  dor iframe [--focus] [--json] [--minimize] [--from handle] [--workspace ref] <target>
   dor iframe --help
 
 Opens an http:// page in a high-fidelity iframe surface for a human to look at.
@@ -14,6 +14,8 @@ Agents cannot read or drive an iframe surface, and it drops the page's cookies, 
 A page from another machine opens only from a private network you allow, from its warning or Settings → Network; a page on the internet never does.
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
+
+Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error.
 
 The target is one of:
   <url>          An absolute http:// URL.
@@ -39,10 +41,11 @@ JSON output:
   }
 
 FLAGS
-     [--json]       Print JSON output.
+     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
+     [--json]       Print a JSON result or error object.
      [--minimize]   Create or replace the surface minimized.
-     [--surface]    Surface to replace or split from.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--from]       Surface to replace or split from.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

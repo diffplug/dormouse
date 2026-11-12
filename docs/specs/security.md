@@ -18,7 +18,7 @@ A Client reaches a terminal only once you approve it at the Burrow, typing there
 
 ## Features
 
-Every feature is opt-in: one you do not use adds none of its risk. With none on, where a new install starts at Settings → Network → Nowhere, Dormouse opens nothing on its own, and you trust only the build you installed, its dependencies, and its release pipeline. One Hosted build can offer both a One-time link and a Hosted phone. The guarantees below are grouped by the features they come with, and each undefended edge and known gap names the features it concerns; one naming none holds for every install. No Relay or rendezvous can read terminal content or grant access; what each still sees is under [What is not defended](#what-is-not-defended), and what each Settings → Network level connects to under [Policy](./remote-network.md#policy).
+Every feature is opt-in: one you do not use adds none of its risk. A new install starts at Settings → Network → Nowhere ([Network policy](./security-local.md#network-policy)); you trust the build you installed, its dependencies, and its release pipeline. One Hosted build can offer both a One-time link and a Hosted phone. The guarantees below are grouped by the features they come with, and each undefended edge and known gap names the features it concerns; one naming none holds for every install. No Relay or rendezvous can read terminal content or grant access; what each still sees is under [What is not defended](#what-is-not-defended), and what each Settings → Network level connects to under [Policy](./remote-network.md#policy).
 
 | Feature | What Dormouse opens on its own | What you trust beyond this computer |
 | --- | --- | --- |
@@ -46,6 +46,7 @@ Source of truth: root scripts in `package.json`; native jobs in `.github/workflo
 
 ## What is not defended
 
+- **Independent host and operating-system traffic.** Nowhere governs network requests initiated by Dormouse, including requests it delegates to dependencies. It is not a machine-wide firewall: VS Code, the operating system, and the embedded web runtime (WebView2 on Windows) can independently make background requests under their own settings and policies. The same boundary applies to the no-usage-telemetry promise. Accepted: their independent activity is outside Dormouse’s control; requests Dormouse initiates through them remain covered ([Network policy](./security-local.md#network-policy)).
 - **A process running as you.** `dor`, its socket, and every file mode bound other local accounts, never a program already running under your own account; an agent holding `dor` has exactly the power of the person at the keyboard, and the Tool trust prompt is no boundary against it ([The dor control socket](./security-local.md#the-dor-control-socket)).
 - **The Windows `dor` pipe carries no ACL of ours.** A named pipe has no directory to harden, so an unguessable name and the token handshake are the whole of it ([The dor control socket](./security-local.md#the-dor-control-socket)).
 - *One-time link, Hosted phone, Self-hosted Relay.* **Another Windows account can hold a dead VS Code broker's pipe name silently while one of its processes reuses that broker's pid**, which keeps windows waiting for a broker that is gone ([The VS Code peer link](./security-local.md#the-vs-code-peer-link)).

@@ -801,7 +801,7 @@ describe('WorkspaceWindow', () => {
     await render();
     await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await flush();
-    const bind = async (workspaceId: string) => {
+    const bind = async (workspaceId: string, extra: Record<string, unknown> = {}) => {
       const handle = getWallHandle(workspaceId)!;
       const respond = vi.fn();
       await act(async () => {
@@ -809,7 +809,7 @@ describe('WorkspaceWindow', () => {
           requestId: `bind-${workspaceId}`,
           method: SURFACE_CONTROL_METHODS.browser,
           surfaceId: handle.surfaceIds()[0],
-          params: { provider: 'playwright', session: 'shared', cwd: '/repo' },
+          params: { provider: 'playwright', session: 'shared', cwd: '/repo', ...extra },
           respond,
         });
       });
@@ -827,6 +827,11 @@ describe('WorkspaceWindow', () => {
     expect(again.ok).toBe(true);
     expect(again.result.status).toBe('existing');
     expect(again.result.surfaceId).toBe(created.result.surfaceId);
+    expect(getWallHandle(first)!.surfaceIds()).toHaveLength(before);
+
+    // A `--from` here routes the request here; the holder answers it without placing anything.
+    const placed = await bind(first, { from: getWallHandle(first)!.surfaceIds()[0] });
+    expect(placed).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: created.result.surfaceId } });
     expect(getWallHandle(first)!.surfaceIds()).toHaveLength(before);
   });
 
@@ -1052,7 +1057,7 @@ describe('Surface moves between Workspaces', () => {
     const kill = vi.spyOn(fake, 'killPty');
     const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
     let result;
-    await act(async () => { result = await moveSurface('surface:3', request({ workspace: 'new' })); });
+    await act(async () => { result = await moveSurface('surface:3', request({ workspace: 'workspace-name:new' })); });
     expect(result).toMatchObject({ surfaceId: 'surface:3', workspaceId: 'workspace:2' });
     expect(getWallHandle(source)!.surfaceIds()).toEqual(['surface:b']);
     expect(getWallHandle('workspace:2')!.surfaceIds()).toEqual(['pane-x', 'surface:3']);
@@ -1511,10 +1516,10 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(getPendingKills().map(kill => [kill.kind, kill.id, kill.title])).toEqual([['workspace', 'workspace:2', 'build']]);
     const listed = await new Promise<{ ok: boolean; error?: string }>(resolve => {
       act(() => { window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.list, params: { workspace: 'build' }, respond: resolve,
+        method: SURFACE_CONTROL_METHODS.list, params: { workspace: 'workspace-name:build' }, respond: resolve,
       } })); });
     });
-    expect(listed).toEqual({ ok: false, error: "workspace 'build' is a pending kill" });
+    expect(listed).toEqual({ ok: false, error: "workspace 'workspace-name:build' is a pending kill" });
   });
 
   it('refuses dor commands into its hidden Wall, by a member\'s id or from a member', async () => {

@@ -16,6 +16,7 @@ const TOKEN = 'contract-host-token';
 /** Each webview message the contract observes, in its words. */
 const WIRE: Record<string, (message: Record<string, any>) => SentRecord> = {
   'pty:spawn': ({ id, options }) => ({ op: 'spawn', id, options }),
+  'pty:sendInput': ({ id, events }) => ({ op: 'sendInput', id, events }),
   'pty:input': ({ id, data }) => ({ op: 'write', id, data }),
   'pty:resize': ({ id, cols, rows }) => ({ op: 'resize', id, cols, rows }),
   'pty:kill': ({ id }) => ({ op: 'kill', id }),
@@ -48,6 +49,7 @@ adapterContract('vscode', async () => {
     void window.dispatchEvent(new MessageEvent('message', { data: { ...data, [HOST_MESSAGE_TOKEN_FIELD]: TOKEN } }));
   return {
     adapter,
+    completeInput: (error) => host({ type: 'pty:inputDone', requestId: posted.at(-1)!.requestId, ...(error ? { error } : { delivered: true }) }),
     data: (id, data, textData) => host({ type: 'pty:data', id, data, textData }),
     exit: (id, exitCode) => host({ type: 'pty:exit', id, exitCode }),
     list: ({ ptys, requestId }) => host({ type: 'pty:list', ptys, requestId }),

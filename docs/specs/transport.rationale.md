@@ -47,6 +47,8 @@ In a real webview (the browser-dev harness, its Chrome rendering with WebGL, sam
 
 ## Paced input
 
+The old `dor send` response was emitted in the webview before the PTY queue drained, so it could report success for input later discarded on exit. A per-batch receipt makes that failure observable. Keeping event kinds also distinguishes a named Tab from a tab character in a file without interpreting the text a second time.
+
 Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue #679).
 
 **One burst splits on macOS.** While the program has not drained its tty, a pty master write stops at 1022 bytes (`TTYHOG` − 2); node-pty retries the remainder, so a 1600-byte `dor send` reached Claude Code as reads of 1022 and 578 bytes. Linux queues about 4 KB, so the same burst arrives as one read there.
@@ -55,7 +57,7 @@ Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue 
 
 **Codex turns Enter inside a burst into a newline.** 300 bytes plus CR in one write did not submit; with the CR 20 ms later it did. After 512-byte runs 10 ms apart, a 10 ms gap before CR did not submit and 50 ms did; after 256-byte runs, 20–80 ms all submitted. 100 ms leaves margin for coarse timers (about 15.6 ms on Windows) and busier programs.
 
-**Why 256 bytes and 10 ms.** Runs of that size arrived as typed text in both programs, including while Claude Code streamed a response, and 1600 bytes take about 70 ms. Timers cannot see the reader: a program that stalls for more than about 30 ms can still read several runs as one read over 800 bytes. 512-byte runs cross the threshold after one missed gap. Unpaced 256-byte writes merged into a paste. Every CR waits for the settle, so a CRLF file sent with `--stdin` pays 100 ms per line; LF is text.
+**Why 256 bytes and 10 ms.** Runs of that size arrived as typed text in both programs, including while Claude Code streamed a response, and 1600 bytes take about 70 ms. Timers cannot see the reader: a program that stalls for more than about 30 ms can still read several runs as one read over 800 bytes. 512-byte runs cross the threshold after one missed gap. Unpaced 256-byte writes merged into a paste. The removed byte-inferred pacing treated every CR as a key, so CRLF stdin paid 100 ms per line. Typed events keep literal text as text and reserve the settle interval for named keys.
 
 **Bracketed paste was rejected.** Wrapping the text delivered all of it and submitted, but Claude Code collapses a paste over 800 bytes into a placeholder and then does not recognize a leading slash command (`/context …` went to the model as plain text); the same text paced ran the command. It would also stop a shell running `--stdin` scripts line by line.
 
@@ -136,6 +138,8 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 ## Port scan deadlines
 
 **Why coalesce without queueing.** Independent callers (a Dev-Server Chip pass, a Tool-serving tick, `dor list --ports`, the terminal context panel) can land port requests in the same tick; one scan per microtask batch keeps that to one set of subprocesses. A queue behind the in-flight scan would make a request wait for two scans, past the per-request budget the formula grants. Budgeting the batch for its smallest request keeps each caller's own deadline true.
+
+**Why one PowerShell start.** Measured on Windows 11 with Windows PowerShell 5.1, 2026-11-10: the two queries as two starts in sequence took about 810 ms (500 + 315), as one start about 595 ms, and an empty start 155 ms, so the start dominates; one start also spawns one process where two concurrent starts would spawn two. WSL needs the process names to know which panes run `wsl.exe`, so its scan follows that start, as the socket scan once did.
 
 ## Universal invariants
 

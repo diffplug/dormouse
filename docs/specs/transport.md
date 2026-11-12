@@ -62,16 +62,18 @@ Source of truth: `PtyDataDispatch` in `lib/src/lib/pty-flow.ts`; `parseOnArrival
 
 ### Paced input
 
-`writePty(id, data, { paced: true })` delivers input the way a person types it; every host carries the flag to `pty-core.write`. `surface.send` (`dor send`) is the only paced writer — every other write is one burst.
+`sendPtyInput` carries local automation’s input events to the PTY owner and acknowledges delivery. Remote adapters do not expose this local control operation. **Never block host async workers while awaiting input delivery.**
 
 - **Must write paced text in runs of at most 256 UTF-8 bytes, 10 ms apart** (rationale).
-- **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). A key is one escape sequence, DEL, or a C0 control other than tab and line feed; tab and line feed are text.
-- **Never split a code point or an escape sequence across writes.**
-- **Must queue any write that arrives while paced input is pending**, so input keeps its order.
-- **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on any lone `^C`** — typed, `interrupt`, or the `dor send --key ctrl-c` that `dor/skill.md` teaches — which is then written at once.
+- **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). Events keep their kind: a named Tab is a key; a tab in text is text.
+- **Never split a code point within text or a named key across writes.**
+- **Must queue each event batch atomically and queue any other write that arrives while input is pending**, so batches cannot interleave.
+- **Must acknowledge a batch only after its last successful PTY write, and reject it on write failure or cancellation**, including partial delivery. **Never retry a batch automatically.**
+- **Must cancel only that request’s remaining events when its caller disconnects**, leaving other batches and human input queued.
+- **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on a lone interrupt key** — human `^C`, `interrupt`, or a single named Ctrl-C event — which is then written at once. A Ctrl-C inside a larger event batch stays ordered.
 - **Never pace in the webview**; the PTY owner paces (rationale).
 
-Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
+Source of truth: `sendInput` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
 
 ### iTerm2 identity
 
@@ -306,7 +308,7 @@ Source of truth: `OpenPort` in `lib/src/lib/platform/types.ts`; `getOpenPortsFor
 
 **Never queue a port request behind another scan**, so each request's own budget holds (rationale).
 
-**Must budget port requests for both serial scans and an IPC margin per hop**: `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`. VS Code's child request uses one hop; its webview request uses two. Tauri's sidecar request uses one. **Must share the Windows socket-scan allowance across `Get-NetTCPConnection` and its `netstat` fallback**, starting none after exhaustion. **Must run Git Bash's MSYS `ps` beside the process-table read, and the WSL scan beside the socket scan within its allowance**, never as another serial step. The constants are mirrored across TypeScript, the sidecar, and Rust, pinned by `lib/src/lib/mirrored-constants.test.ts`.
+**Must budget port requests for both serial scans and an IPC margin per hop**: `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`. VS Code's child request uses one hop; its webview request uses two. Tauri's sidecar request uses one. **Must read Windows' process and socket tables in one PowerShell start**, with Git Bash's MSYS `ps` beside it; the `netstat` fallback and the WSL scan follow within the same deadline, starting none after exhaustion (rationale). The constants are mirrored across TypeScript, the sidecar, and Rust, pinned by `lib/src/lib/mirrored-constants.test.ts`.
 
 Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`; `open_ports_many_timeout` in `standalone/src-tauri/src/lib.rs`; `createPortScanner` in `standalone/sidecar/port-scanner.js`.
 

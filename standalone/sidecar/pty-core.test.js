@@ -21,13 +21,15 @@ const {
   withConnectAddresses,
   parseNetTcpConnections,
   parseNetstatListening,
+  parseWindowsPortScan,
+  WINDOWS_PORT_SCAN_SCRIPT,
   getListeningPortsForPids,
   shellHasWork,
   getOpenPortsForPids,
   openPortScanTimeoutMs,
   OPEN_PORT_TIMEOUT_MS,
   OPEN_PORT_TIMEOUT_PER_ID_MS,
-  pacedInputSegments,
+  pacedTextRuns,
   DEHYDRATE_LIMIT,
   WSL_CLI_ENV,
 } = require('./pty-core');
@@ -763,36 +765,18 @@ for (const retire of ['exit', 'kill', 'killAll', 'replace']) {
   });
 }
 
-test('pacedInputSegments splits text by UTF-8 bytes and keeps keys whole', () => {
-  const segments = pacedInputSegments(`${'a'.repeat(255)}é\tline\n😀\r\x1b[B\x1bOP\x1bx\x7f\x03\x1b[1`);
-  assert.deepEqual(segments, [
-    { data: 'a'.repeat(255), key: false }, // é would be byte 257
-    { data: 'é\tline\n😀', key: false },
-    { data: '\r', key: true },
-    { data: '\x1b[B', key: true },
-    { data: '\x1bOP', key: true },
-    { data: '\x1bx', key: true },
-    { data: '\x7f', key: true },
-    { data: '\x03', key: true },
-    { data: '\x1b[1', key: true },
+test('pacedTextRuns splits text by UTF-8 bytes and never cuts a code point or reads a key', () => {
+  assert.deepEqual(pacedTextRuns(`${'a'.repeat(255)}é\tline\n😀\r\x1b[B\x7f\x03`), [
+    'a'.repeat(255), // é would be byte 257
+    'é\tline\n😀\r\x1b[B\x7f\x03',
   ]);
-  assert.deepEqual(pacedInputSegments('\x1b[200~hi\x1b[201~'), [
-    { data: '\x1b[200~', key: true },
-    { data: 'hi', key: false },
-    { data: '\x1b[201~', key: true },
-  ]);
-  assert.deepEqual(pacedInputSegments('😀'.repeat(65)).map(({ data }) => data), ['😀'.repeat(64), '😀']);
-  assert.deepEqual(pacedInputSegments('\x1b'), [{ data: '\x1b', key: true }]);
-  assert.deepEqual(pacedInputSegments('\x1b[1\ra'), [
-    { data: '\x1b[1', key: true },
-    { data: '\r', key: true },
-    { data: 'a', key: false },
-  ]);
+  assert.deepEqual(pacedTextRuns('😀'.repeat(65)), ['😀'.repeat(64), '😀']);
+  assert.deepEqual(pacedTextRuns(''), []);
 });
 
-test('paced input writes bounded text runs apart and settles before a key', (t) => {
+test('paced input writes bounded text runs apart and settles before a key', async (t) => {
   const { mgr, writes } = ptyHarness(t);
-  mgr.write('pane-1', `${'a'.repeat(600)}\r`, { paced: true });
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'a'.repeat(600) }, { kind: 'key', data: '\r' }]);
   assert.deepEqual(writes, ['a'.repeat(256)]);
   t.mock.timers.tick(10);
   t.mock.timers.tick(10);
@@ -800,64 +784,48 @@ test('paced input writes bounded text runs apart and settles before a key', (t) 
   t.mock.timers.tick(99);
   assert.equal(writes.length, 3);
   t.mock.timers.tick(1);
+  await sent;
   assert.equal(writes.at(-1), '\r');
 });
 
-test('input written during a pace joins it in order', (t) => {
+test('input written during a pace joins it in order', async (t) => {
   const { mgr, writes } = ptyHarness(t);
-  mgr.write('pane-1', 'b'.repeat(300), { paced: true });
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'b'.repeat(300) }]);
   mgr.write('pane-1', 'typed');
   assert.deepEqual(writes, ['b'.repeat(256)]);
   t.mock.timers.tick(10);
+  await sent;
   assert.deepEqual(writes, ['b'.repeat(256), 'b'.repeat(44), 'typed']);
   mgr.write('pane-1', 'free');
   assert.equal(writes.at(-1), 'free');
 });
 
-test('a PTY that throws mid-drain drops the rest instead of throwing from the timer', (t) => {
+test('a PTY that throws mid-drain drops the rest instead of throwing from the timer', async (t) => {
   const { mgr, writes, dead } = ptyHarness(t);
-  mgr.write('pane-1', `${'f'.repeat(300)}\r`, { paced: true });
+  const sent = assert.rejects(mgr.sendInput('pane-1', [{ kind: 'text', data: 'f'.repeat(300) }, { kind: 'key', data: '\r' }]), /cancelled/);
   assert.deepEqual(writes, ['f'.repeat(256)]);
   dead.add(1);
   t.mock.timers.tick(1000);
+  await sent;
   assert.deepEqual(writes, ['f'.repeat(256)]);
   dead.delete(1);
   mgr.write('pane-1', 'after');
   assert.deepEqual(writes, ['f'.repeat(256), 'after'], 'the dropped queue leaves later input unblocked');
 });
 
-test('a key sent by a later paced write still settles after earlier text', (t) => {
+test('a key sent by a later request still settles after earlier text', async (t) => {
   const { mgr, writes } = ptyHarness(t);
-  mgr.write('pane-1', 'prompt', { paced: true });
+  await mgr.sendInput('pane-1', [{ kind: 'text', data: 'prompt' }]);
   t.mock.timers.tick(50);
-  mgr.write('pane-1', '\r', { paced: true });
+  const key = mgr.sendInput('pane-1', [{ kind: 'key', data: '\r' }]);
   assert.deepEqual(writes, ['prompt']);
   t.mock.timers.tick(50);
+  await key;
   assert.deepEqual(writes, ['prompt', '\r']);
   t.mock.timers.tick(1000);
-  mgr.write('pane-1', 'next', { paced: true });
+  await mgr.sendInput('pane-1', [{ kind: 'text', data: 'next' }]);
   assert.equal(writes.at(-1), 'next');
 });
-
-for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed ^C', 'dor send --key ctrl-c']) {
-  test(`pending paced input is discarded on ${retire}`, (t) => {
-    const { mgr, writes, exits } = ptyHarness(t);
-    mgr.write('pane-1', `${'c'.repeat(300)}\r`, { paced: true });
-    if (retire === 'exit') exits[0]({ exitCode: 0 });
-    else if (retire === 'replace') mgr.spawn('pane-1');
-    else if (retire === 'interrupt') mgr.interrupt(['pane-1']);
-    else if (retire === 'typed ^C') mgr.write('pane-1', '\x03');
-    else if (retire === 'dor send --key ctrl-c') mgr.write('pane-1', '\x03', { paced: true });
-    else mgr[retire]('pane-1');
-    t.mock.timers.tick(1000);
-    if (retire === 'replace') mgr.write('pane-1', '\r', { paced: true });
-    assert.deepEqual(writes, [
-      'c'.repeat(256),
-      ...(retire.includes('^C') || retire.includes('ctrl-c') || retire === 'interrupt' ? ['\x03'] : []),
-      ...(retire === 'replace' ? ['2:\r'] : []),
-    ]);
-  });
-}
 
 test('create forwards PTY data and observes natural exit', () => {
   const events = [];
@@ -2141,6 +2109,15 @@ const WINDOWS_ENV = { SystemRoot: 'D:\\Win' };
 const POWERSHELL = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const NETSTAT = 'D:\\Win\\System32\\netstat.exe';
 
+/** What `WINDOWS_PORT_SCAN_SCRIPT` prints: each query's JSON behind its tag,
+ *  and no line for one that failed (`undefined`). */
+function windowsTables(processes, sockets) {
+  return [
+    processes === undefined ? null : `P${JSON.stringify(processes)}`,
+    sockets === undefined ? null : `S${JSON.stringify(sockets)}`,
+  ].filter((line) => line !== null).join('\r\n') + '\r\n';
+}
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () => {
   const execFile = (cmd, args) => {
     assert.equal(cmd, POWERSHELL);
@@ -2177,25 +2154,20 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
   const timeouts = [];
   const execFile = (cmd, args, options) => {
     timeouts.push(options.timeout);
-    const script = args.at(-1);
-    if (script.includes('ParentProcessId')) {
+    if (cmd === POWERSHELL) {
+      assert.equal(args.at(-1), WINDOWS_PORT_SCAN_SCRIPT);
       now += OPEN_PORT_TIMEOUT_MS;
-      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }]);
-    }
-    // The process table above already named every pid.
-    if (script.includes('Win32_Process')) assert.fail('second process query');
-    if (script.includes('Get-NetTCPConnection')) {
-      now += 1000;
-      throw new Error('cmdlet failed');
+      // The process table answered; the cmdlet printed nothing.
+      return windowsTables([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }], undefined);
     }
     assert.equal(cmd, NETSTAT);
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
   const result = await getOpenPortsForPids([{ pid: 4242 }], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
-  const budget = openPortScanTimeoutMs(1);
-  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
-  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
+  const budget = OPEN_PORT_TIMEOUT_MS + openPortScanTimeoutMs(1);
+  assert.deepEqual(timeouts, [budget, budget - OPEN_PORT_TIMEOUT_MS]);
+  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 500);
   assert.equal(result.get(4242)[0].processName, 'node.exe');
 });
 
@@ -2274,17 +2246,15 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
   const scripts = [];
   const execFile = (cmd, args) => {
     const script = args[args.length - 1];
-    if (cmd === POWERSHELL && script.includes('Win32_Process')) {
-      return JSON.stringify([
+    if (cmd === POWERSHELL) {
+      return windowsTables([
         [100, 1, 'bash.exe'], [101, 100, 'bash.exe'],
         // `node` exec'd through winpty: its MSYS parent's Windows process is gone.
         [300, 299, 'winpty.exe'], [301, 300, 'winpty-agent.exe'], [302, 301, 'node.exe'],
         [500, 1, 'powershell.exe'], [501, 500, 'wsl.exe'],
         [900, 1, 'node.exe'],
-      ].map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name })));
-    }
-    if (cmd === POWERSHELL && script.includes('Get-NetTCPConnection')) {
-      return JSON.stringify([{ LocalAddress: '::', LocalPort: 3000, OwningProcess: 302 }, { LocalAddress: '::', LocalPort: 9000, OwningProcess: 900 }]);
+      ].map(([ProcessId, ParentProcessId, Name]) => ({ ProcessId, ParentProcessId, Name })),
+      [{ LocalAddress: '::', LocalPort: 3000, OwningProcess: 302 }, { LocalAddress: '::', LocalPort: 9000, OwningProcess: 900 }]);
     }
     if (cmd === MSYS_PS) {
       return [
@@ -2323,19 +2293,35 @@ test('getOpenPortsForPids (win32) follows Git Bash across MSYS execs and finds W
   assert.match(scripts[0], /DORMOUSE_SURFACE_ID=\(surface:wsl\)/);
 });
 
-test('getOpenPortsForPids (win32) runs neither extra read for a shell that needs none', async () => {
+test('getOpenPortsForPids (win32) starts PowerShell once, and neither extra read for a shell that needs none', async () => {
   const spawns = [];
-  const execFile = (cmd, args) => {
+  const execFile = (cmd) => {
     spawns.push(cmd);
-    const script = args[args.length - 1];
-    if (script.includes('Win32_Process')) return JSON.stringify([{ ProcessId: 100, ParentProcessId: 1, Name: 'cmd.exe' }]);
-    if (script.includes('Get-NetTCPConnection')) return '[]';
+    if (cmd === POWERSHELL) {
+      return windowsTables([{ ProcessId: 100, ParentProcessId: 1, Name: 'cmd.exe' }, { ProcessId: 101, ParentProcessId: 100, Name: 'node.exe' }],
+        { LocalAddress: '127.0.0.1', LocalPort: 3000, OwningProcess: 101 });
+    }
     throw new Error(`unexpected spawn: ${cmd}`);
   };
-  await getOpenPortsForPids([{ pid: 100, shell: 'D:\\Win\\System32\\cmd.exe', surfaceId: 'surface:1' }], {
+  const ports = await getOpenPortsForPids([{ pid: 100, shell: 'D:\\Win\\System32\\cmd.exe', surfaceId: 'surface:1' }], {
     platform: 'win32', env: WINDOWS_ENV, execFile,
   });
-  assert.deepEqual(spawns, [POWERSHELL, POWERSHELL]);
+  assert.deepEqual(spawns, [POWERSHELL]);
+  assert.deepEqual(ports.get(100), [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 3000, pid: 101, processName: 'node.exe' }]);
+});
+
+test('parseWindowsPortScan keeps each answer when the other query failed', () => {
+  const processes = [{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }];
+  const socket = { LocalAddress: '::', LocalPort: 3000, OwningProcess: 4242 };
+  assert.deepEqual(parseWindowsPortScan(windowsTables(processes, socket)), {
+    pairs: [[4242, 1, 'node.exe']],
+    sockets: [{ protocol: 'tcp', family: 'IPv6', address: '::', port: 3000, pid: 4242 }],
+  });
+  assert.deepEqual(parseWindowsPortScan(windowsTables(undefined, [socket])).pairs, null);
+  assert.deepEqual(parseWindowsPortScan(windowsTables(processes, undefined)).sockets, null);
+  // A tag with nothing behind it, as a query whose pipeline was empty prints.
+  assert.deepEqual(parseWindowsPortScan('P\r\nS\r\n'), { pairs: null, sockets: null });
+  assert.deepEqual(parseWindowsPortScan(''), { pairs: null, sockets: null });
 });
 
 test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', async () => {
@@ -2661,8 +2647,7 @@ test('each slice of paced input is reported as it is written, not when it was as
   const mgr = create(() => {}, pty.module, { onInputWritten: (id) => written.push([id, Date.now()]) });
   mgr.spawn('a');
   const asked = Date.now();
-  mgr.write('a', 'x'.repeat(600), { paced: true });
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await mgr.sendInput('a', [{ kind: 'text', data: 'x'.repeat(600) }]);
   // 600 bytes in runs of 256: three slices, 10 ms apart.
   assert.equal(written.length, 3);
   assert.ok(written[2][1] - asked >= 15, `the last slice reported ${written[2][1] - asked} ms after the write`);
@@ -2945,3 +2930,87 @@ test('PTY owner streams only the current generation and stops the one a spawn di
   mgr.killAll();
 });
 
+test('send receipt waits for the final PTY write and keeps batches together', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  let delivered = false;
+  const first = mgr.sendInput('pane-1', [{ kind: 'text', data: 'x'.repeat(300) }, { kind: 'key', data: '\r' }]).then(() => { delivered = true; });
+  const second = mgr.sendInput('pane-1', [{ kind: 'text', data: 'next' }]);
+  mgr.write('pane-1', 'human');
+  await Promise.resolve();
+  assert.equal(delivered, false);
+  assert.deepEqual(writes, ['x'.repeat(256)]);
+  t.mock.timers.tick(10);
+  t.mock.timers.tick(99);
+  assert.equal(delivered, false);
+  t.mock.timers.tick(1);
+  await first;
+  assert.deepEqual(writes, ['x'.repeat(256), 'x'.repeat(44), '\r']);
+  t.mock.timers.tick(10);
+  await second;
+  assert.deepEqual(writes.slice(-2), ['next', 'human']);
+});
+
+test('named Tab settles as a key while a literal tab stays text', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'a\t' }, { kind: 'key', data: '\t' }]);
+  assert.deepEqual(writes, ['a\t']);
+  t.mock.timers.tick(99);
+  assert.deepEqual(writes, ['a\t']);
+  t.mock.timers.tick(1);
+  await sent;
+  assert.deepEqual(writes, ['a\t', '\t']);
+});
+
+for (const retire of ['exit', 'kill', 'killAll', 'replace', 'interrupt', 'typed ^C', 'dor send --key ctrl-c', 'write failure']) {
+  test(`pending send input fails after partial delivery on ${retire}`, async (t) => {
+    const { mgr, writes, exits, dead } = ptyHarness(t);
+    const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'c'.repeat(300) }, { kind: 'key', data: '\r' }]);
+    const rejected = assert.rejects(sent, /cancelled.*some input may have been delivered/);
+    if (retire === 'exit') exits[0]({ exitCode: 0 });
+    else if (retire === 'replace') mgr.spawn('pane-1');
+    else if (retire === 'interrupt') mgr.interrupt(['pane-1']);
+    else if (retire === 'typed ^C') mgr.write('pane-1', '\x03');
+    else if (retire === 'dor send --key ctrl-c') await mgr.sendInput('pane-1', [{ kind: 'key', data: '\x03' }]);
+    else if (retire === 'write failure') dead.add(1);
+    else mgr[retire]('pane-1');
+    t.mock.timers.tick(1000);
+    if (retire === 'replace') await mgr.sendInput('pane-1', [{ kind: 'key', data: '\r' }]);
+    assert.deepEqual(writes, [
+      'c'.repeat(256),
+      ...(retire.includes('^C') || retire.includes('ctrl-c') || retire === 'interrupt' ? ['\x03'] : []),
+      ...(retire === 'replace' ? ['2:\r'] : []),
+    ]);
+    await rejected;
+  });
+}
+
+test('ctrl-c inside a batch remains ordered and does not cancel its tail', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  const sent = mgr.sendInput('pane-1', [{ kind: 'text', data: 'hello' }, { kind: 'key', data: '\x03' }, { kind: 'text', data: 'after' }]);
+  t.mock.timers.tick(100);
+  t.mock.timers.tick(10);
+  await sent;
+  assert.deepEqual(writes, ['hello', '\x03', 'after']);
+});
+
+test('invalid send batches and missing PTYs fail before writing', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  await assert.rejects(mgr.sendInput('pane-1', [{ kind: 'text', data: 'first' }, { kind: 'invalid', data: 'last' }]), /invalid/);
+  await assert.rejects(mgr.sendInput('absent', [{ kind: 'text', data: 'first' }]), /not running/);
+  assert.deepEqual(writes, []);
+});
+
+test('disconnect cancels only its own remaining batch, including a cancellation arriving first', async t => {
+  const { mgr, writes } = ptyHarness(t);
+  const first = mgr.sendInput('pane-1', [{ kind: 'text', data: 'a'.repeat(300) }], 'first');
+  const cancelled = assert.rejects(first, /cancelled/);
+  const second = mgr.sendInput('pane-1', [{ kind: 'text', data: 'second' }], 'second');
+  mgr.write('pane-1', 'human');
+  mgr.cancelSendInput('pane-1', 'first');
+  t.mock.timers.tick(10);
+  await Promise.all([cancelled, second]);
+  assert.deepEqual(writes, ['a'.repeat(256), 'second', 'human']);
+  mgr.cancelSendInput('pane-1', 'before');
+  await assert.rejects(mgr.sendInput('pane-1', [{ kind: 'text', data: 'never' }], 'before'), /cancelled before/);
+  assert.equal(writes.includes('never'), false);
+});

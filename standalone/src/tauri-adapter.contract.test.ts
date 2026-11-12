@@ -26,8 +26,10 @@ adapterContract("tauri", async () => {
   }) as never);
   const calls: Array<[string, Record<string, any> | undefined]> = [];
   let failing = false;
+  let finishInput: (result: unknown) => void = () => {};
   vi.mocked(invoke).mockImplementation((async (command: string, args?: Record<string, any>) => {
     calls.push([command, args]);
+    if (command === "pty_send_input") return new Promise(resolve => { finishInput = resolve; }) as never;
     return failing ? Promise.reject(`${command}: the sidecar answered an error`) : sidecarAnswer(command);
   }) as never);
   const adapter = new TauriAdapter();
@@ -36,6 +38,7 @@ adapterContract("tauri", async () => {
   const deliver = (event: string, payload: unknown) => listeners.get(event)!({ payload });
   return {
     adapter,
+    completeInput: (error) => finishInput(error ? { error } : { delivered: true }),
     data: (id, data, textData) => deliver("pty:data", { id, data, textData }),
     exit: (id, exitCode) => deliver("pty:exit", { id, exitCode }),
     list: (detail) => deliver("pty:list", detail),

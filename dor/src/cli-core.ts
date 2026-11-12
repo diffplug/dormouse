@@ -1,13 +1,17 @@
+import { printableExact } from './commands/terminal-text.js';
+import { errorCode, type CliFailure } from './commands/errors.js';
 import {
+  ArgumentParseError,
+  UnexpectedFlagError,
   buildApplication,
   buildRouteMap,
   help,
   run as runStricli,
   text_en,
-  type ApplicationText,
+  type CommandContext,
   type StricliProcess,
 } from '@stricli/core';
-import { errorLine, errorMessage, fail } from './commands/shared.js';
+import { MissingValueError, errorLine, errorMessage, fail, renderPrintableJson } from './commands/shared.js';
 import { isBrowserProvider } from 'dor-lib-common/browser-providers';
 import { builtinHandler, VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import { agentBrowserCommand } from './commands/agent-browser.js';
@@ -94,35 +98,83 @@ export async function runCli(rawArgv: string[], options: CliOptions): Promise<Cl
     return { stdout: await runErrorViewer(argv[1], argv[2]), stderr: '', exitCode: 0 };
   }
 
-  const helpTarget = getHelpTarget(argv);
-  const [commandName, ...args] = rewriteHelpArgv(argv);
+  const [commandName, ...rawArgs] = rewriteHelpArgv(argv);
+  const command = COMMANDS.find((entry) => entry.name === commandName);
+  const { args, scannerArgs, flagValues } = prepareFlagValues(rawArgs, command);
+  const helpTarget = getHelpTarget(commandName ? [commandName, ...args] : []);
+  const boundary = args.indexOf('--');
+  const json = helpTarget === undefined && (boundary < 0 ? args : args.slice(0, boundary)).some(arg => arg === '--json' || /^--json=true$/i.test(arg));
+  let failure: CliFailure | undefined;
+  const reportFailure = (value: CliFailure) => { failure = value; };
+  const finish = (result: CliResult): CliResult => !json || result.exitCode === 0 ? result : {
+    ...result,
+    stdout: renderPrintableJson({ error: failure ?? { code: 'COMMAND_FAILED', message: 'command failed' } }),
+  };
 
 
   // Some commands need argv validated *before* stricli parses it (the `--` command
   // tail in `dor ensure`, `dor send`'s input-flag ordering). Each owns that check
   // as `Command.preParse`, defined next to its flags in the command module; here we
   // just dispatch it. A help invocation never runs the command func, so it skips it.
-  const command = commandName ? COMMANDS.find((entry) => entry.name === commandName) : undefined;
   if (command?.preParse && helpTarget === undefined) {
     const check = command.preParse(args);
-    if (!check.ok) return fail(check.message);
+    if (!check.ok) {
+      reportFailure({ code: 'INVALID_ARGUMENT', message: check.message });
+      return finish(fail(printableExact(check.message)));
+    }
   }
 
   const capture = createCaptureProcess(options.env);
-  await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
+  await runStricli(createApplication(flagValues, reportFailure), commandName ? [commandName, ...scannerArgs] : [], {
     process: capture.process,
     forCommand: (): DorCommandContext => ({
       process: capture.process,
       options,
       commandArgs: args,
+      reportFailure,
     }),
   });
 
-  return {
+  return finish({
     exitCode: normalizeExitCode(capture.process.exitCode),
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
-  };
+  });
+}
+
+
+/** Consume option values before detecting help or delimiters. stricli's inline
+ * value scanner rejects empty/multiline strings, so only its private input uses
+ * tokens. The command's validators and parsers still see the original values.
+ * Tokens are invocation-local and only generated for declared valued flags. */
+function prepareFlagValues(raw: string[], command: Command | undefined) {
+  const valued = new Set(Object.entries(command?.command.parameters.flags ?? {})
+    .filter(([, flag]) => flag.kind === 'parsed')
+    .flatMap(([name]) => [`--${name}`, `--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`]));
+  const args: string[] = [];
+  const scannerArgs: string[] = [];
+  const flagValues = new Map<string, string>();
+  for (let index = 0; index < raw.length; index++) {
+    const arg = raw[index];
+    if (arg === '--') {
+      args.push(...raw.slice(index));
+      scannerArgs.push(...raw.slice(index));
+      break;
+    }
+    const equals = arg.indexOf('=');
+    const name = equals < 0 ? arg : arg.slice(0, equals);
+    if (valued.has(name) && (equals >= 0 || index + 1 < raw.length)) {
+      const value = equals >= 0 ? arg.slice(equals + 1) : raw[++index];
+      const token = `dor-value-${flagValues.size}`;
+      flagValues.set(token, value);
+      args.push(`${name}=${value}`);
+      scannerArgs.push(`${name}=${token}`);
+    } else {
+      args.push(arg);
+      scannerArgs.push(arg);
+    }
+  }
+  return { args, scannerArgs, flagValues };
 }
 
 
@@ -281,60 +333,89 @@ function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
 
-const DOR_TEXT: ApplicationText = {
-  ...text_en,
-  commandErrorResult: (error, _ansiColor) => errorLine(error.message),
-  exceptionWhileLoadingCommandContext: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileLoadingCommandFunction: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileParsingArguments: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileRunningCommand: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  noCommandRegisteredForInput: ({ input }) => `Error: unknown command '${input}'`,
-};
+function createApplication(flagValues: ReadonlyMap<string, string>, reportFailure: (failure: CliFailure) => void) {
+  const record = (code: CliFailure['code'], message: string) => {
+    reportFailure({ code, message });
+    return errorLine(printableExact(message));
+  };
+  return buildApplication(
+    buildRouteMap({
+      routes: Object.fromEntries(COMMANDS.map(({ name, command }) => [name, {
+        ...command,
+        parameters: {
+          ...command.parameters,
+          flags: Object.fromEntries(Object.entries(command.parameters.flags ?? {}).map(([name, flag]) => [name,
+            flag.kind !== 'parsed' ? flag : {
+              ...flag,
+              parse(this: CommandContext, input: string) {
+                return flag.parse.call(this, flagValues.get(input) ?? input);
+              },
+            },
+          ])),
+        },
+      }])),
+      docs: {
+        brief: 'control Dormouse from a terminal',
+        fullDescription: `Dormouse bundles the dor CLI into every terminal it launches.
 
-const APPLICATION = buildApplication(
-  buildRouteMap({
-    routes: Object.fromEntries(COMMANDS.map((command) => [command.name, command.command])),
-    docs: {
-      brief: 'control Dormouse from a terminal',
-      fullDescription: 'Dormouse bundles the dor CLI into every terminal it launches.',
-    },
-  }),
-  {
-    name: 'dor',
-    scanner: {
-      allowArgumentEscapeSequence: true,
-      caseStyle: 'allow-kebab-for-camel',
-    },
-    documentation: {
-      disableAnsiColor: true,
-    },
-    localization: {
-      text: DOR_TEXT,
-    },
-  },
-  // Replaces stricli's default integration set, which also registers
-  // `--help-all`/`-H`. That flag bypasses the `helpPatches` in `applyHelpPatches`
-  // (which only fire for `--help`/`-h`), so it printed raw generated usage lines
-  // that contradict what the commands accept — `dor ensure ... <command>...`
-  // without the `--` that `validateEnsureDelimiter` requires, and the
-  // mutually-exclusive `split`/`send` flags shown as freely combinable. Dropping
-  // it leaves `--help` as the single documented help surface.
-  {
-    help: help({
-      brief: text_en.briefs.help,
-      alias: 'h',
-      defaultForRouteMap: true,
-      includeHidden: false,
-      // stricli would derive these from `documentation`, but an explicit
-      // integration set opts out of that defaulting, so restate them.
-      formatting: {
-        useAliasInUsageLine: false,
-        onlyRequiredInUsageLine: false,
-        caseStyle: 'convert-camel-to-kebab',
+First-party --json prints one result object on stdout. Failures print {"error":{"code":"...","message":"..."}} and retain a nonzero exit status; stderr carries diagnostics. Error codes are INVALID_ARGUMENT (parsing), CONTROL_UNAVAILABLE (no host endpoint, or no host answered before the request was sent), COMMAND_FAILED (validation or execution), TIMEOUT, SURFACE_DIED, and CANCELLED (a picker was dismissed). Exit 1 means failure; await uses 2 for timeout and 3 for Surface death. Help stays text. Browser-provider output and exit status belong to the provider, except exit 4: the provider command succeeded but its browser Surface could not be opened, so do not repeat it blindly.`,
       },
     }),
-  },
-);
+    {
+      name: 'dor',
+      scanner: {
+        allowArgumentEscapeSequence: true,
+        caseStyle: 'allow-kebab-for-camel',
+      },
+      documentation: {
+        disableAnsiColor: true,
+      },
+      localization: {
+        text: {
+          ...text_en,
+          commandErrorResult: error => record(errorCode(error), error.message),
+          exceptionWhileLoadingCommandContext: error => record('COMMAND_FAILED', errorMessage(error)),
+          exceptionWhileLoadingCommandFunction: error => record('COMMAND_FAILED', errorMessage(error)),
+          exceptionWhileRunningCommand: error => record('COMMAND_FAILED', errorMessage(error)),
+          noCommandRegisteredForInput: ({ input }) => record('INVALID_ARGUMENT', `unknown command '${input}'`),
+          exceptionWhileParsingArguments(error) {
+            const value = (input: string) => flagValues.get(input) ?? input;
+            if (error instanceof ArgumentParseError && error.exception instanceof MissingValueError) {
+              return record('INVALID_ARGUMENT', `--${error.externalFlagNameOrPlaceholder} requires a value`);
+            } else if (error instanceof ArgumentParseError) {
+              return record('INVALID_ARGUMENT', `Failed to parse "${value(error.input)}" for ${error.externalFlagNameOrPlaceholder}: ${errorMessage(error.exception)}`);
+            } else if (error instanceof UnexpectedFlagError) {
+              return record('INVALID_ARGUMENT', `Too many arguments for --${error.externalFlagName}, encountered "${value(error.input)}" after "${value(error.previousInput)}"`);
+            }
+            return record('INVALID_ARGUMENT', errorMessage(error));
+          },
+        },
+      },
+    },
+    // Replaces stricli's default integration set, which also registers
+    // `--help-all`/`-H`. That flag bypasses the `helpPatches` in `applyHelpPatches`
+    // (which only fire for `--help`/`-h`), so it printed raw generated usage lines
+    // that contradict what the commands accept — `dor ensure ... <command>...`
+    // without the `--` that `validateEnsureDelimiter` requires, and the
+    // mutually-exclusive `split`/`send` flags shown as freely combinable. Dropping
+    // it leaves `--help` as the single documented help surface.
+    {
+      help: help({
+        brief: text_en.briefs.help,
+        alias: 'h',
+        defaultForRouteMap: true,
+        includeHidden: false,
+        // stricli would derive these from `documentation`, but an explicit
+        // integration set opts out of that defaulting, so restate them.
+        formatting: {
+          useAliasInUsageLine: false,
+          onlyRequiredInUsageLine: false,
+          caseStyle: 'convert-camel-to-kebab',
+        },
+      }),
+    },
+  );
+}
 
 interface CaptureProcess extends StricliProcess {
   readonly stdout: {

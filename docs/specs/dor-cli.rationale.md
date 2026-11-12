@@ -42,7 +42,13 @@ The provider CLIs stay on Windows because the dev server, not the browser, is wh
 
 A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a literal percent-delimited environment expression unchanged through simple and npm-shaped global/local batch shims.
 
+## Handle Model
+
+Separate id and name prefixes make a numeric name addressable without letting a rename redirect an id lookup. Preserving name whitespace also lets a caller round-trip the exact name in a listing. Bare labels provided a second grammar that the CLI, webview, and Rust router each had to interpret.
+
 ## Current Implemented Commands
+
+Option values previously passed through two incompatible scanners: help detection scanned every token, while stricli rejected empty or multiline inline values and interpreted leading dashes as options. Consuming declared valued options first makes both spellings equivalent; invocation-local scanner tokens preserve values without introducing an escaping syntax for callers.
 
 **What `dor list` replaced.** Two retired cmux-shaped commands, `list-panes` and `list-pane-surfaces`, plus `dor identify`, whose whole output became the top-level identity block of `dor list --json`. Collapsing all three into one listing is why new selection power goes into `dor list`'s filters rather than a second enumeration command.
 
@@ -57,6 +63,8 @@ A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a lit
 Windows PowerShell 5.1 and PowerShell 7.6.7 (measured on Windows, 2026-10) remove quotes around a no-space argument before invoking `dor.cmd`: `"C:\repo\a&rem.md"` reaches the CLI as `C:\repo\a`, and `"C:\repo\a^b.md"` loses the caret. Empty arguments disappear in legacy native binding, and a quoted trailing backslash escapes the closing quote in native argv parsing. Testing a PowerShell function alone observes none of these failures; the portable-form tests now also invoke the shipped batch launcher with an argv recorder.
 
 ## Browser Surface Addressing
+
+**Why Dormouse's options are read anywhere.** Drop-in parity: both providers document `<command> [args] [options]`, options after the command, so a provider command line must work unchanged after `dor`. The intercepted names are Dormouse-only except `--session`, which means the same thing natively; a provider value spelled like one of them goes after `--`. Keeping that delimiter preserves native dash-leading positional values.
 
 **Why the bind waits past the host's browser request timeout.** `surface.browser` answers only once the host has asked the browser where it streams, and that `attach` queues behind any launch, relaunch or close of the same browser, which can take the host's whole budget. At the client's default 5 s deadline, a command run just after a pop-out printed "could not open the Dormouse browser surface … timed out" and the pane bound anyway; agents read stderr, so the warning misled them (review of #777, 2026-09).
 
@@ -75,3 +83,7 @@ On macOS in November 2026, a Dormouse website Tool owned `*:5173` while an older
 **The pointer-only stub was tried and was too soft.** A stub that only said "run `dor skill`" left agents skipping it and falling back to native subprocesses and their own browser tools — the two behaviors needing redirection *before* an agent would think to read the skill. Hence the same two directives in the stub itself and again at the top of `dor/skill.md`, so an agent that does run `dor skill` meets them up front.
 
 **Why exactly those two directives and no more.** `dor ensure` and `dor agent-browser` are foundational command names, the least likely `dor` facts to drift, so a stub built only from them stays correct without maintenance — the point of committing it to a repo nobody will revisit. Every extra fact is one more thing that can go stale in every clone.
+
+## Focus intent
+
+The default follows who is typing. A bare `dor split` used to take focus while `dor split --` did not, so an agent that forgot the `--` moved the user's keyboard into its pane mid-keystroke, and a person who typed `dor ensure` or `dor tool` at a prompt then had to click over to the result. The shell's reported command line already separates the two for take-over: a person's `dor` runs as the pane's own command, an agent's runs under the agent's. Reading that line costs the agent nothing and needs no new detector; a forged line can only move focus, which `--focus` already allows any caller. The preview slot stays put because it is a glance pane the next preview replaces.

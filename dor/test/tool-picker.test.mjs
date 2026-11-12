@@ -35,7 +35,7 @@ function toolClient({ tools } = {}) {
     },
     async toolSurface(request) {
       this.requests.push({ method: 'toolSurface', request });
-      return { status: 'created', surfaceId: 'surface:4', command: `run ${request.name}`, cwd: request.cwd, minimized: request.minimized, key: null };
+      return { status: 'created', commandState: 'unconfirmed', surfaceId: 'surface:4', command: `run ${request.name}`, cwd: request.cwd, minimized: request.minimized, key: null };
     },
   };
 }
@@ -52,7 +52,7 @@ const plain = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 const launch = (client) => client.requests.find(r => r.method === 'toolSurface')?.request;
 
 test('a pick launches the Tool as dor tool <name> with the same flags would', async () => {
-  const flags = ['--fresh', '--minimize', '--surface', 'surface:2', '--workspace', 'workspace:2', '--cwd', 'sub'];
+  const flags = ['--fresh', '--minimize', '--from', 'surface:2', '--workspace', 'workspace:2', '--cwd', 'sub'];
   const { terminal, client, result } = await startPicker(flags, { host: anyDirectoryHost });
   assert.deepEqual(client.requests[0], { method: 'toolList', request: { cwd: launch(await typed(flags, 'harness')).cwd, global: false } });
   terminal.send('harn');
@@ -60,7 +60,7 @@ test('a pick launches the Tool as dor tool <name> with the same flags would', as
   terminal.send('\r');
   const { exitCode, stdout, stderr } = await result;
   assert.equal(exitCode, 0);
-  assert.equal(stdout, 'created surface:4  "run harness"\n');
+  assert.equal(stdout, 'created surface:4  [unconfirmed]  "run harness"\n');
   assert.equal(stderr, '', 'the listing warnings stay out; the launch prints its own');
   assert.deepEqual(launch(client), launch(await typed(flags, 'harness')));
   assert.equal(terminal.listening, false);
@@ -227,7 +227,7 @@ test('an imported Tool shows its file, and a broken import its reason, both esca
 });
 
 test('validateToolArgs accepts the bare form with any flag; the -- form still needs its command', () => {
-  for (const argv of [[], ['--global'], ['--minimize'], ['--json', '--cwd', 'x'], ['--surface', 'surface:2', '--fresh']]) {
+  for (const argv of [[], ['--global'], ['--minimize'], ['--json', '--cwd', 'x'], ['--from', 'surface:2', '--fresh']]) {
     assert.deepEqual(validateToolArgs(argv), { ok: true, value: undefined }, argv.join(' '));
   }
   assert.equal(validateToolArgs(['--']).ok, false);

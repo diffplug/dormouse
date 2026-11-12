@@ -24,6 +24,18 @@ describe('FakePtyAdapter', () => {
     return { adapter, dataEvents, exitEvents };
   }
 
+  it('delivers ordered automation events only to a live fake PTY', async () => {
+    const { adapter } = createAdapter();
+    const input = vi.fn();
+    adapter.spawnPty('pane-a');
+    adapter.setInputHandler('pane-a', input);
+    await adapter.sendPtyInput('pane-a', [{ kind: 'text', data: 'hello' }, { kind: 'key', data: '\r' }]);
+    expect(input.mock.calls).toEqual([['hello'], ['\r']]);
+    adapter.killPty('pane-a');
+    await expect(adapter.sendPtyInput('pane-a', [{ kind: 'text', data: 'late' }])).rejects.toThrow(/not running/);
+    expect(input).toHaveBeenCalledTimes(2);
+  });
+
   // --- Core ---
 
   it('records ordered dirty reports from ordinary PTYs without inferring clean on exit', () => {

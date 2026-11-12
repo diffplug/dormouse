@@ -185,6 +185,19 @@ function handleLine(line) {
     // command, and the theme push.
     if (host.handleCommand(event, data)) return;
     switch (event) {
+      case 'pty:cancelInput': mgr.cancelSendInput(data.id, data.inputId); break;
+      case 'pty:sendInput':
+        void respondAsync('pty:inputDone', data.requestId, async () => {
+          // Preserve automation's activity tracking and resume paused ConPTY
+          // before the first write, as the ordinary input path does.
+          host.inputWritten(data.id);
+          for (const event of Array.isArray(data.events) ? data.events : []) {
+            if (typeof event?.data === 'string') host.alerts.onWrite(data.id, event.data);
+          }
+          await mgr.sendInput(data.id, data.events, data.inputId);
+          return { delivered: true };
+        });
+        break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;

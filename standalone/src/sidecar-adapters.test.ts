@@ -226,9 +226,9 @@ describe.each([
     adapter.writePty("typed", "y", { userInput: true });
     adapter.writePty("typed", "view\r", { launch: true });
     expect(sent()).toEqual([
-      ["pty_write", { id: "typed", data: "\x1b[I", paced: undefined, userInput: undefined, launch: undefined }],
-      ["pty_write", { id: "typed", data: "y", paced: undefined, userInput: true, launch: undefined }],
-      ["pty_write", { id: "typed", data: "view\r", paced: undefined, userInput: undefined, launch: true }],
+      ["pty_write", { id: "typed", data: "\x1b[I", userInput: undefined, launch: undefined }],
+      ["pty_write", { id: "typed", data: "y", userInput: true, launch: undefined }],
+      ["pty_write", { id: "typed", data: "view\r", userInput: undefined, launch: true }],
     ]);
   });
 

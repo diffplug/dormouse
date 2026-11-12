@@ -9,6 +9,7 @@ import { runCli } from '../dist/cli.js';
 import { NODE_HOST } from '../dist/node-host.js';
 import { buildShellCommandForKind, shellCommandKind } from '../dist/commands/shell-quote.js';
 import { browserBinaryIsMissing as agentBrowserIsMissing, binaryCandidateNames, isExecutableFile } from 'dor-lib-common';
+import { extractSessionFlags } from '../dist/commands/browser-cli.js';
 import { msysToWindowsCwd } from '../dist/commands/shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -108,13 +109,11 @@ const fixturePortsById = {
   'surface:4': [{ family: 'IPv6', address: '::1', port: 8080, pid: 5151, processName: 'python' }],
 };
 
-/** The Workspace a `workspace:<n|name>` target names in the fixture, the way the
+/** The Workspace an explicit id or name reference targets in the fixture, the way the
  *  host resolves one — its id, bare number, or exact name. */
 function fixtureWorkspace(target) {
-  const bare = String(target).replace(/^workspace:/, '');
-  return fixtureWorkspaces.find((row) => (
-    row.id === `workspace:${bare}` || row.name === bare
-  )) ?? fixtureWorkspaces[0];
+  const text = String(target);
+  return fixtureWorkspaces.find(row => text.startsWith('workspace-name:') ? row.name === text.slice(15) : row.id === text) ?? fixtureWorkspaces[0];
 }
 
 /** The `surface.browser` request a `dor agent-browser` run made, if it opened one at
@@ -164,7 +163,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // Mirror the real host: quote the argv for the target (here, posix) shell.
       const command = request.command ? buildShellCommandForKind('posix', request.command) : undefined;
       return {
-        status: 'created',
+        status: 'created', commandState: 'unconfirmed',
         surfaceId: 'surface:3',
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
@@ -207,6 +206,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const keyed = named && request.name === 'storybook' && !request.fresh;
       return {
         status: keyed ? 'existing' : 'created',
+        commandState: keyed ? 'running' : 'unconfirmed',
         surfaceId: 'surface:4',
         command,
         cwd: request.cwd,
@@ -223,6 +223,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const isExisting = command === 'pnpm dev:workspace';
       return {
         status: isExisting ? (request.restart ? 'restarted' : 'existing') : 'created',
+        commandState: isExisting ? 'running' : 'unconfirmed',
         surfaceId: 'surface:3',
         command,
         cwd: request.cwd,
@@ -234,7 +235,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       return {
         status: 'sent',
         surfaceId: request.surface === 'surface:2' ? 'surface:2' : 'surface:1',
-        inputCount: request.inputCount,
+        inputCount: request.events.length,
       };
     },
     async readSurface(request) {
@@ -284,7 +285,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // so the same key in `build` is another browser entirely.
       if (request.key !== undefined) {
         const workspace = fixtureWorkspaces.find((row) => (
-          request.workspace === row.name || request.workspace === row.id
+          request.workspace === `workspace-name:${row.name}` || request.workspace === row.id
         ));
         // `sessionForKey` scrubs the id's colon: a session name is a socket path.
         return { binding: { session: `dormouse.${workspace ? workspace.id.replace(':', '-') : '1'}.${request.key}`, ...request.proposed } };
@@ -493,29 +494,43 @@ test('split sends command argv to the host', async () => {
       cwd: process.cwd(),
       minimized: false,
       surface: undefined,
-      focusNeutral: true,
     },
   }]);
 });
 
-test('bare split is focus-stealing; an empty -- tail is not', async () => {
-  const bare = fixtureClient();
-  await runCli(['split'], { client: bare });
-  assert.equal(bare.requests[0].request.focusNeutral, false);
-  assert.equal(bare.requests[0].request.command, undefined);
+test('Surface-producing commands send focus only when --focus is given', async () => {
+  for (const args of [['split'], ['split', '--'], ['split', '--', 'echo', 'hi'], ['ensure', '--', 'echo', 'hi'], ['iframe', ':5173'], ['tool', '--', 'echo'], ['open', 'a.md']]) {
+    // Absent, the host applies its typed-at-a-prompt default.
+    const unstated = fixtureClient();
+    const result = await runCli(args, { client: unstated });
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
+    assert.equal('focus' in unstated.requests.at(-1).request, false, args.join(' '));
+    for (const [flag, focus] of [['--focus', true], ['--focus=true', true], ['--focus=false', false]]) {
+      const stated = fixtureClient();
+      const statedResult = await runCli([args[0], flag, ...args.slice(1)], { client: stated });
+      assert.equal(statedResult.exitCode, 0, JSON.stringify(statedResult));
+      assert.equal(stated.requests.at(-1).request.focus, focus, `${flag} ${args.join(' ')}`);
+    }
+    // Only an explicit --focus contradicts --minimize; --focus=false agrees with it.
+    const conflict = fixtureClient();
+    const refused = await runCli([args[0], '--focus', '--minimize', ...args.slice(1)], { client: conflict });
+    assert.equal(refused.exitCode, 1);
+    assert.match(refused.stderr, /--focus and --minimize are mutually exclusive/);
+    assert.equal(conflict.requests.length, 0);
+    const agreed = fixtureClient();
+    assert.equal((await runCli([args[0], '--focus=false', '--minimize', ...args.slice(1)], { client: agreed })).exitCode, 0);
+    assert.equal(agreed.requests.at(-1).request.focus, false);
+  }
+});
 
-  // `dor split --` opens a blank terminal without stealing focus: no command to
-  // run, but the `--` marks it focus-neutral, distinct from a bare `dor split`.
-  const emptyTail = fixtureClient();
-  await runCli(['split', '--'], { client: emptyTail });
-  assert.equal(emptyTail.requests[0].request.focusNeutral, true);
-  assert.equal(emptyTail.requests[0].request.command, undefined);
-
-  // The CLI owns the invariant that an initial command is never focus-stealing,
-  // so it stays focus-neutral even without a `--`.
-  const withCommand = fixtureClient();
-  await runCli(['split', 'echo', 'hi'], { client: withCommand });
-  assert.equal(withCommand.requests[0].request.focusNeutral, true);
+test('split takes its initial command only after --, before any request', async () => {
+  for (const argv of [['split', 'echo', 'hello'], ['split', '--right', 'echo', '--', 'hello']]) {
+    const client = fixtureClient();
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 1, argv.join(' '));
+    assert.equal(result.stderr, "Error: unexpected argument 'echo' before --\n");
+    assert.deepEqual(client.requests, []);
+  }
 });
 
 test('ensure text output', async () => {
@@ -600,7 +615,7 @@ test('ensure and tool refuse a --cwd that names no directory, launching nothing'
 
 test('ensure and tool accept --flag=value before --, as stricli does', async () => {
   const ensure = fixtureClient();
-  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' }, host: anyDirectoryHost });
+  const ensured = await runCli(['ensure', '--cwd=/work/other', '--from=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' }, host: anyDirectoryHost });
   assert.equal(ensured.exitCode, 0, ensured.stderr);
   assert.equal(smudgeWindowsPaths(ensure.requests[0].request.cwd), '/work/other');
   assert.equal(ensure.requests[0].request.surface, 'surface:3');
@@ -612,13 +627,29 @@ test('ensure and tool accept --flag=value before --, as stricli does', async () 
     assert.equal(client.requests[0].request.workspace, 'workspace:2');
   }
 
-  for (const argv of [['ensure', '--cwd=', '--', 'pnpm', 'dev'], ['tool', '--cwd=', 'storybook']]) {
-    const result = await runCli(argv, { client: fixtureClient(), env: { PWD: '/work/site' } });
-    assert.equal(result.exitCode, 1, argv.join(' '));
-    assert.equal(result.stderr, 'Error: --cwd requires a value\n');
+  // A boolean's value too, which `--focus=false` needs; stricli parses it.
+  for (const head of [['ensure', '--json=true'], ['tool', '--json=true', 'storybook']]) {
+    const boolean = await runCli([...head, ...(head[0] === 'ensure' ? ['--', 'pnpm', 'dev'] : [])], { client: fixtureClient(), env: { PWD: '/work/site' } });
+    assert.equal(boolean.exitCode, 0, boolean.stderr);
+    assert.match(boolean.stdout, /^\{/, head.join(' '));
   }
-  const boolean = await runCli(['ensure', '--json=true', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } });
-  assert.equal(boolean.stderr, "Error: unknown option '--json=true'\n");
+  const unknown = await runCli(['ensure', '--jsn=true', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } });
+  assert.equal(unknown.stderr, "Error: unknown option '--jsn=true'\n");
+});
+
+test('an empty --cwd is a missing value, never the caller\'s directory', async () => {
+  // `dor ensure --cwd "$BUILD_DIR" -- make clean` with BUILD_DIR unset must not run in PWD.
+  const commands = [['ensure', '--', 'pnpm', 'dev'], ['tool', 'storybook'], ['tool', '--list'], ['open', 'notes.md'], ['list']];
+  for (const [name, ...rest] of commands) {
+    for (const cwd of [['--cwd='], ['--cwd', '']]) {
+      const argv = [name, ...cwd, ...rest];
+      const client = fixtureClient();
+      const result = await runCli(argv, { client, env: { PWD: '/work/site' }, host: anyDirectoryHost });
+      assert.equal(result.stderr, 'Error: --cwd requires a value\n', JSON.stringify(argv));
+      assert.equal(result.exitCode, 1, JSON.stringify(argv));
+      assert.deepEqual(client.requests, [], JSON.stringify(argv));
+    }
+  }
 });
 
 test('ensure json output', async () => {
@@ -783,15 +814,14 @@ test('send json output', async () => {
   );
 });
 
-test('send sends escaped text to the host', async () => {
+test('send sends literal text to the host', async () => {
   const client = fixtureClient();
   await runCli(['send', 'surface:1', '--text', 'echo hello\\n'], { client });
   assert.deepEqual(client.requests, [{
     method: 'sendSurface',
     request: {
       surface: 'surface:1',
-      input: 'echo hello\n',
-      inputCount: 1,
+      events: [{ text: 'echo hello\\n' }],
     },
   }]);
 });
@@ -803,8 +833,7 @@ test('send sends key input to the host', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:2',
-      input: '\x03',
-      inputCount: 1,
+      events: [{ key: 'ctrl-c' }],
     },
   }]);
 });
@@ -816,8 +845,7 @@ test('send combines text then key input', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:2',
-      input: 'npm test\r',
-      inputCount: 2,
+      events: [{ text: 'npm test' }, { key: 'enter' }],
     },
   }]);
 });
@@ -850,8 +878,7 @@ test('send sequence sends ordered input to the host', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:1',
-      input: 'npm test\r',
-      inputCount: 2,
+      events: [{ text: 'npm test' }, { key: 'enter' }],
     },
   }]);
 });
@@ -863,8 +890,7 @@ test('send stdin sends standard input to the host', async () => {
     method: 'sendSurface',
     request: {
       surface: 'surface:1',
-      input: 'cat from stdin\n',
-      inputCount: 1,
+      events: [{ text: 'cat from stdin\n' }],
     },
   }]);
 });
@@ -873,19 +899,21 @@ test('send stdin keeps backslash sequences literal', async () => {
   const client = fixtureClient();
   const script = 'printf "a\\tb\\n" C:\\\\tmp\n';
   await runCli(['send', 'surface:1', '--stdin'], { client, readStdin: async () => script });
-  assert.equal(client.requests[0].request.input, script);
+  assert.deepEqual(client.requests[0].request.events, [{ text: script }]);
 });
 
 test('send sequence text is not escape-decoded a second time', async () => {
   const client = fixtureClient();
   await runCli(['send', 'surface:1', '--sequence', '[{"text":"a\\\\tb"},{"text":"c\\td"}]'], { client });
-  assert.equal(client.requests[0].request.input, 'a\\tbc\td');
+  assert.deepEqual(client.requests[0].request.events, [{ text: 'a\\tb' }, { text: 'c\td' }]);
 });
 
-test('send raw text keeps backslash sequences literal', async () => {
+test('send refuses the retired raw flag', async () => {
   const client = fixtureClient();
-  await runCli(['send', 'surface:1', '--raw', '--text', 'a\\tb'], { client });
-  assert.equal(client.requests[0].request.input, 'a\\tb');
+  const result = await runCli(['send', 'surface:1', '--raw', '--text', 'a\\tb'], { client });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /--raw was removed/);
+  assert.deepEqual(client.requests, []);
 });
 
 test('send missing input output', async () => {
@@ -981,7 +1009,7 @@ test('await times out with exit 2 and an empty stdout', async () => {
     client: awaitClient({ outcome: 'timeout', waitedMs: 30_000 }),
   }));
 
-  // --json changes nothing about a failure: still stderr, still exit 2.
+  // JSON failures carry a machine-readable verdict as well as exit status.
   await snapshot('await-timeout-json', await runCli(['await', 'surface:5', '--until', 'quiet', '--json'], {
     client: awaitClient({ outcome: 'timeout', waitedMs: 600_000 }),
   }));
@@ -1087,7 +1115,7 @@ test('kill short confirm-if-read output', async () => {
 test('iframe text output', async () => {
   await snapshot(
     'iframe-text',
-    await runCli(['iframe', '--surface', 'surface:1', 'https://localhost:5173'], { client: fixtureClient() }),
+    await runCli(['iframe', '--from', 'surface:1', 'https://localhost:5173'], { client: fixtureClient() }),
   );
 });
 
@@ -1170,6 +1198,32 @@ test('agent-browser passthrough output', async () => {
   );
 });
 
+test('browser --focus belongs to dor anywhere before --, and is not forwarded to the provider', async () => {
+  for (const [argv, focus] of [
+    [['open', ':5173'], undefined],
+    [['--focus', 'open', ':5173'], true],
+    [['open', ':5173', '--focus'], true],
+    [['open', ':5173', '--focus=true'], true],
+    [['open', '--focus=false', ':5173'], false],
+  ]) {
+    const ab = fakeAgentBrowser();
+    const client = fixtureClient();
+    const result = await runCli(['agent-browser', ...argv], { client, execAgentBrowser: ab.exec });
+    assert.equal(result.exitCode, 0, argv.join(' '));
+    assert.equal(client.requests.find(r => r.method === 'browserSurface').request.focus, focus, argv.join(' '));
+    assert.equal(ab.calls.some(args => args.some(arg => arg.startsWith('--focus'))), false, argv.join(' '));
+  }
+  // After a bare --, it is the provider's.
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['agent-browser', '--', 'fill', '#q', '--focus'], { client, execAgentBrowser: ab.exec });
+  assert.equal(ab.calls.some(args => args.includes('--focus')), true);
+  for (const argv of [['--focus=yes', 'open', ':5173'], ['--focus', 'open', ':5173', '--focus=false']]) {
+    const refused = await runCli(['agent-browser', ...argv], { client: fixtureClient(), execAgentBrowser: fakeAgentBrowser().exec });
+    assert.equal(refused.exitCode, 1, argv.join(' '));
+  }
+});
+
 test('agent-browser resolves --key to a namespaced session and opens a surface', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
@@ -1191,7 +1245,7 @@ test('agent-browser resolves --key to a namespaced session and opens a surface',
 test('agent-browser --key in another Workspace drives that Workspace own session', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['agent-browser', '--workspace', 'build', '--key', 'default', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--workspace', 'workspace-name:build', '--key', 'default', 'open', 'http://localhost:6006'], { client, execAgentBrowser: ab.exec });
   // The same key in another Workspace is another browser: the session name is
   // namespaced by the Workspace's stable id, so nothing here can reach the
   // first Workspace's `dormouse.1.default`.
@@ -1200,10 +1254,10 @@ test('agent-browser --key in another Workspace drives that Workspace own session
     ['agent-browser', '--session', 'dormouse.workspace-2.default', 'stream', 'status', '--json'],
   ]);
   assert.deepEqual(client.requests, [
-    { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'default', proposed: proposedHere, workspace: 'build' } },
+    { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'default', proposed: proposedHere, workspace: 'workspace-name:build' } },
     {
       method: 'browserSurface',
-      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2.default', cwd: process.cwd(), wsPort: 61141, workspace: 'build' },
+      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2.default', cwd: process.cwd(), wsPort: 61141, workspace: 'workspace-name:build' },
     },
   ]);
 });
@@ -1231,7 +1285,7 @@ test('agent-browser raw --session skips key namespacing', async () => {
 test('agent-browser --workspace names the Workspace and never reaches the binary', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
-  await runCli(['agent-browser', '--workspace', 'build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  await runCli(['agent-browser', '--workspace', 'workspace-name:build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
   // Intercepted like the identity flags: the browser opens in `build`, the
   // handle resolves there, and agent-browser sees neither the flag nor its value.
   assert.deepEqual(ab.calls, [
@@ -1241,9 +1295,9 @@ test('agent-browser --workspace names the Workspace and never reaches the binary
   // Every host round trip the run makes names it: the session namespace, the
   // handle resolution, and the surface the browser lands in.
   assert.deepEqual(client.requests.map((entry) => [entry.method, entry.request.workspace]), [
-    ['resolveBrowser', 'build'],
-    ['resolveOpenTarget', 'build'],
-    ['browserSurface', 'build'],
+    ['resolveBrowser', 'workspace-name:build'],
+    ['resolveOpenTarget', 'workspace-name:build'],
+    ['browserSurface', 'workspace-name:build'],
   ]);
 });
 
@@ -1437,8 +1491,7 @@ test('agent-browser rejects an intercepted flag given twice', async () => {
 });
 
 test('agent-browser rejects a valueless identity flag, whichever one it is', async () => {
-  // The three flags share one parse loop; a trailing flag has no value and a
-  // following flag is never one, so neither may be swallowed as the value.
+  // Only an absent argument is a missing value; a leading dash is literal.
   for (const args of [['agent-browser', 'reload', '--key'], ['agent-browser', 'reload', '--session'], ['agent-browser', 'reload', '--surface']]) {
     const ab = fakeAgentBrowser();
     const result = await runCli(args, { client: fixtureClient(), execAgentBrowser: ab.exec });
@@ -1446,11 +1499,7 @@ test('agent-browser rejects a valueless identity flag, whichever one it is', asy
     assert.equal(result.stderr, `Error: ${args[2]} requires a value\n`);
     assert.deepEqual(ab.calls, []);
   }
-  const ab = fakeAgentBrowser();
-  const result = await runCli(['agent-browser', '--surface', '--json', 'reload'], { client: fixtureClient(), execAgentBrowser: ab.exec });
-  assert.equal(result.exitCode, 1);
-  assert.equal(result.stderr, 'Error: --surface requires a value\n');
-  assert.deepEqual(ab.calls, []);
+
 });
 
 test('agent-browser key/session conflict output', async () => {
@@ -1743,8 +1792,8 @@ test('list --all keeps the header of a Workspace its filters emptied', async () 
 
 test('list --workspace asks the host for another Workspace', async () => {
   const client = fixtureClient();
-  await runCli(['list', '--workspace', 'build'], { client, env: listEnv });
-  assert.deepEqual(client.requests, [{ includePorts: false, workspace: 'build' }]);
+  await runCli(['list', '--workspace', 'workspace-name:build'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: false, workspace: 'workspace-name:build' }]);
 });
 
 test('list --workspaces prints the overview', async () => {
@@ -1777,25 +1826,25 @@ test('workspace mutation verbs', async () => {
   await snapshot('workspace-new', await runCli(['workspace', 'new', 'build'], { client, env: listEnv }));
   await snapshot('workspace-new-json', await runCli(['workspace', 'new', '--json'], { client, env: listEnv }));
   await snapshot('workspace-rename', await runCli(['workspace', 'rename', 'workspace:2', 'agents'], { client, env: listEnv }));
-  await snapshot('workspace-switch', await runCli(['workspace', 'switch', 'build'], { client, env: listEnv }));
+  await snapshot('workspace-switch', await runCli(['workspace', 'switch', 'workspace-name:build'], { client, env: listEnv }));
   assert.deepEqual(client.requests, [
     { method: 'newWorkspace', request: { name: 'build' } },
     { method: 'newWorkspace', request: {} },
     { method: 'renameWorkspace', request: { workspace: 'workspace:2', name: 'agents' } },
-    { method: 'switchWorkspace', request: { workspace: 'build' } },
+    { method: 'switchWorkspace', request: { workspace: 'workspace-name:build' } },
   ]);
 });
 
 test('workspace pin and unpin send one request each, and take one workspace', async () => {
   const client = fixtureClient();
-  await snapshot('workspace-pin', await runCli(['workspace', 'pin', 'build'], { client, env: listEnv }));
+  await snapshot('workspace-pin', await runCli(['workspace', 'pin', 'workspace-name:build'], { client, env: listEnv }));
   await snapshot('workspace-unpin-json', await runCli(['workspace', 'unpin', 'workspace:2', '--json'], { client, env: listEnv }));
   assert.deepEqual(client.requests, [
-    { method: 'pinWorkspace', request: { workspace: 'build', pinned: true } },
+    { method: 'pinWorkspace', request: { workspace: 'workspace-name:build', pinned: true } },
     { method: 'pinWorkspace', request: { workspace: 'workspace:2', pinned: false } },
   ]);
   await snapshot('workspace-pin-arity', await runCli(['workspace', 'pin'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-unpin-force-misuse', await runCli(['workspace', 'unpin', '2', '--force'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-unpin-force-misuse', await runCli(['workspace', 'unpin', 'workspace:2', '--force'], { client: fixtureClient(), env: listEnv }));
 });
 
 test('workspace close refuses running work until forced', async () => {
@@ -1814,29 +1863,29 @@ test('workspace move sends the window and the index in one request', async () =>
   const client = fixtureClient();
   await snapshot(
     'workspace-move',
-    await runCli(['workspace', 'move', 'build', '--window', 'ws-2', '--index', '0'], { client, env: listEnv }),
+    await runCli(['workspace', 'move', 'workspace-name:build', '--window', 'window:ws-2', '--index', '0'], { client, env: listEnv }),
   );
   assert.deepEqual(client.requests, [{
     method: 'moveWorkspace',
-    request: { workspace: 'build', toWindow: 'ws-2', index: 0, dangerouslyDestroyIframePageState: false },
+    request: { workspace: 'workspace-name:build', toWindow: 'window:ws-2', index: 0, dangerouslyDestroyIframePageState: false },
   }]);
 });
 
 test('workspace move flags are refused off the action, and move needs one of them', async () => {
-  await snapshot('workspace-window-misuse', await runCli(['workspace', 'switch', '2', '--window', 'ws-2'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-index-misuse', await runCli(['workspace', 'switch', '2', '--index', '0'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-destroy-iframe-misuse', await runCli(['workspace', 'switch', '2', '--dangerously-destroy-iframe-page-state'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-move-needs-flag', await runCli(['workspace', 'move', '2'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-invalid-index', await runCli(['workspace', 'move', '2', '--index', 'x'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-window-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--window', 'window:ws-2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-index-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--index', '0'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-destroy-iframe-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--dangerously-destroy-iframe-page-state'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-move-needs-flag', await runCli(['workspace', 'move', 'workspace:2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-invalid-index', await runCli(['workspace', 'move', 'workspace:2', '--index', 'x'], { client: fixtureClient(), env: listEnv }));
 });
 
 test('list --window asks the host for another window', async () => {
   const client = fixtureClient();
-  await runCli(['list', '--window', 'ws-2'], { client, env: listEnv });
-  await runCli(['list', '--workspaces', '--window', 'ws-2'], { client, env: listEnv });
+  await runCli(['list', '--window', 'window:ws-2'], { client, env: listEnv });
+  await runCli(['list', '--workspaces', '--window', 'window:ws-2'], { client, env: listEnv });
   assert.deepEqual(client.requests, [
-    { includePorts: false, window: 'ws-2' },
-    { method: 'listWorkspaces', request: { window: 'ws-2' } },
+    { includePorts: false, window: 'window:ws-2' },
+    { method: 'listWorkspaces', request: { window: 'window:ws-2' } },
   ]);
 });
 
@@ -1845,7 +1894,7 @@ test('workspace usage errors name the action', async () => {
   await snapshot('workspace-unknown-action', await runCli(['workspace', 'destroy', 'x'], { client: fixtureClient(), env: listEnv }));
   await snapshot('workspace-list-action', await runCli(['workspace', 'list'], { client: fixtureClient(), env: listEnv }));
   await snapshot('workspace-rename-arity', await runCli(['workspace', 'rename', 'workspace:2'], { client: fixtureClient(), env: listEnv }));
-  await snapshot('workspace-force-misuse', await runCli(['workspace', 'switch', '2', '--force'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-force-misuse', await runCli(['workspace', 'switch', 'workspace:2', '--force'], { client: fixtureClient(), env: listEnv }));
 });
 
 test('app restart asks the host once', async () => {
@@ -1902,19 +1951,19 @@ test('app usage errors name the action', async () => {
 
 test('every action command forwards --workspace to the host', async () => {
   const calls = [
-    [['split', '--workspace', 'build', '--', 'pnpm', 'dev'], 'splitSurface'],
-    [['ensure', '--workspace', 'build', '--', 'pnpm', 'dev'], 'ensureSurface'],
-    [['send', 'surface:1', '--text', 'hi', '--workspace', 'build'], 'sendSurface'],
-    [['read', 'surface:1', '--workspace', 'build'], 'readSurface'],
-    [['kill', 'surface:1', '--confirm-dangerously', '--workspace', 'build'], 'killSurface'],
-    [['iframe', 'http://localhost:5173', '--workspace', 'build'], 'iframeSurface'],
+    [['split', '--workspace', 'workspace-name:build', '--', 'pnpm', 'dev'], 'splitSurface'],
+    [['ensure', '--workspace', 'workspace-name:build', '--', 'pnpm', 'dev'], 'ensureSurface'],
+    [['send', 'surface:1', '--text', 'hi', '--workspace', 'workspace-name:build'], 'sendSurface'],
+    [['read', 'surface:1', '--workspace', 'workspace-name:build'], 'readSurface'],
+    [['kill', 'surface:1', '--confirm-dangerously', '--workspace', 'workspace-name:build'], 'killSurface'],
+    [['iframe', 'http://localhost:5173', '--workspace', 'workspace-name:build'], 'iframeSurface'],
   ];
   for (const [argv, method] of calls) {
     const client = fixtureClient();
     const result = await runCli(argv, { client, env: listEnv });
     assert.equal(result.exitCode, 0, `${argv[0]} should succeed: ${result.stderr}`);
     const call = client.requests.find((entry) => entry.method === method);
-    assert.equal(call.request.workspace, 'build', `${argv[0]} should forward --workspace`);
+    assert.equal(call.request.workspace, 'workspace-name:build', `${argv[0]} should forward --workspace`);
   }
 });
 
@@ -2168,7 +2217,7 @@ test('bare tool without a terminal prints the listing --list prints', async () =
 });
 
 test('bare tool without a terminal refuses a placement flag', async () => {
-  for (const flag of [['--minimize'], ['--fresh'], ['--surface', 'surface:2'], ['--workspace', 'workspace:2']]) {
+  for (const flag of [['--minimize'], ['--fresh'], ['--from', 'surface:2'], ['--workspace', 'workspace:2']]) {
     const client = fixtureClient();
     const result = await runCli(['tool', ...flag], { client });
     assert.equal(result.exitCode, 1, flag.join(' '));
@@ -2254,7 +2303,7 @@ test('tool --list escapes control and format characters in repo text, in every o
 });
 
 test('tool and open escape control and format characters in the host answer, in every output', async () => {
-  const answer = { status: 'created', surfaceId: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J \u202e', cwd: '/work/\u0085site\ufeff', minimized: false, key: 'k\u009d' };
+  const answer = { status: 'created', commandState: 'unconfirmed', surfaceId: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J \u202e', cwd: '/work/\u0085site\ufeff', minimized: false, key: 'k\u009d' };
   const client = fixtureClient();
   client.toolSurface = async () => answer;
   for (const argv of [['tool', 'evil'], ['tool', '--json', 'evil'], ['open', 'a.md'], ['open', '--json', 'a.md']]) {
@@ -2310,7 +2359,7 @@ test('tool routes named and anonymous launches to an explicit Workspace', async 
 
 test('open forwards one file, explicit handler, placement, and Workspace to Tool dispatch', async () => {
   const client = fixtureClient();
-  const result = await runCli(['open', '--json', '--tool', 'markdown', '--workspace', 'workspace:2', '--fresh', '--minimize', '--surface', 'surface:4', 'a b.md'], { client, env: { PWD: '/repo' } });
+  const result = await runCli(['open', '--json', '--tool', 'markdown', '--workspace', 'workspace:2', '--fresh', '--minimize', '--from', 'surface:4', 'a b.md'], { client, env: { PWD: '/repo' } });
   assert.equal(result.exitCode, 0);
   client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
   assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
@@ -2324,12 +2373,12 @@ test('open --preview asks for the preview slot and prints its retarget', async (
   const client = fixtureClient();
   client.toolSurface = async function toolSurface(request) {
     this.requests.push({ method: 'toolSurface', request });
-    return { status: 'retargeted', surfaceId: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
+    return { status: 'retargeted', commandState: 'running', surfaceId: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
   };
   const result = await runCli(['open', '--preview', 'a.md'], { client, env: { PWD: '/repo' } });
   assert.equal(result.exitCode, 0);
   assert.equal(client.requests[0].request.preview, true);
-  assert.equal(result.stdout, 'retargeted surface:5  "viewer a.md"\n');
+  assert.equal(result.stdout, 'retargeted surface:5  [running]  "viewer a.md"\n');
   const plain = fixtureClient();
   await runCli(['open', 'a.md'], { client: plain, env: { PWD: '/repo' } });
   assert.equal('preview' in plain.requests[0].request, false);
@@ -2375,4 +2424,278 @@ test('open requires exactly one file', async () => {
     assert.equal(result.exitCode, 1);
     assert.equal(client.requests.length, 0);
   }
+});
+
+
+test('valued options preserve literal arguments in separate and equals forms', async () => {
+  for (const value of ['', '--help', '-h', '--text', '--', 'a=b', 'first\nsecond', '🐭']) {
+    for (const option of [['--text', value], [`--text=${value}`]]) {
+      const client = fixtureClient();
+      const result = await runCli(['send', 'surface:1', ...option, '--key', 'enter'], { client });
+      assert.equal(result.exitCode, 0, JSON.stringify({ option, result }));
+      assert.deepEqual(client.requests[0].request.events, [{ text: value }, { key: 'enter' }]);
+    }
+  }
+});
+
+test('a valued option containing help does not suppress validation or later real help', async () => {
+  const client = fixtureClient();
+  const invalid = await runCli(['send', 'surface:1', '--text', '--help', '--wat'], { client });
+  assert.equal(invalid.exitCode, 1);
+  assert.equal(client.requests.length, 0);
+  const help = await runCli(['send', '--text', '--help', '--help'], { client });
+  assert.equal(help.exitCode, 0);
+  assert.match(help.stdout, /USAGE/);
+  assert.equal(client.requests.length, 0);
+});
+
+
+test('argument errors report original values, never scanner transport tokens', async () => {
+  const client = fixtureClient();
+  const duplicate = await runCli(['read', 'surface:1', '--lines', '2', '--lines', '3'], { client });
+  assert.match(duplicate.stderr, /encountered "3" after "2"/);
+  const invalid = await runCli(['read', 'surface:1', '--lines', '--help'], { client });
+  assert.match(invalid.stderr, /invalid --lines '--help'/);
+  assert.equal(client.requests.length, 0);
+});
+
+
+test('browser identity values use the same literal option contract', () => {
+  for (const value of ['--help', '--json', '--', 'first\nsecond']) {
+    for (const args of [['--session', value], [`--session=${value}`]]) {
+      assert.deepEqual(extractSessionFlags([...args, 'snapshot'], { sessionNoun: 'session' }), {
+        ok: true, value: { session: value, rest: ['snapshot'] },
+      });
+    }
+  }
+});
+
+test('browser providers read Dormouse options anywhere, as the native CLIs read theirs', async () => {
+  // `open :5173 --key app`, options after the command, is the providers' own shape.
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  const result = await runCli(['agent-browser', 'open', ':5173', '--headed', '--key', 'app'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'dormouse.1.app', 'open', 'http://localhost:5173/', '--headed']);
+  assert.equal(client.requests[0].request.key, 'app');
+  assert.deepEqual(extractSessionFlags(['snapshot', '-i', '--workspace=workspace-name:build', '--session', 'raw'], { sessionNoun: 'session' }), {
+    ok: true, value: { session: 'raw', rest: ['snapshot', '-i'], workspace: 'workspace-name:build' },
+  });
+});
+
+test('a bare -- ends interception and forwards with the rest verbatim', async () => {
+  const tail = ['eval', '--surface', '--key', '--workspace=x', '--', '', 'a\nb'];
+  assert.deepEqual(extractSessionFlags(['--key', 'app', '--', ...tail], { sessionNoun: 'session' }), {
+    ok: true, value: { key: 'app', rest: ['--', ...tail] },
+  });
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['agent-browser', 'eval', '--session', 'raw', '--', ...tail.slice(1)], { execAgentBrowser: ab.exec, env: {} });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(ab.calls[0], ['agent-browser', '--session', 'raw', tail[0], '--', ...tail.slice(1)]);
+});
+
+test('only a lone --help is Dormouse help; any other goes to the provider', async () => {
+  const ab = fakeAgentBrowser();
+  const help = await runCli(['agent-browser', '--help'], { execAgentBrowser: ab.exec });
+  assert.match(help.stdout, /USAGE/);
+  assert.deepEqual(ab.calls, []);
+  for (const argv of [['agent-browser', 'open', '--help'], ['agent-browser', '--', '--help']]) {
+    const native = fakeAgentBrowser();
+    await runCli(argv, { execAgentBrowser: native.exec, env: {} });
+    assert.deepEqual(native.calls[0], ['agent-browser', '--session', 'dormouse.1.default', ...argv.slice(1)]);
+  }
+});
+
+test('named Tool arguments need -- only when they begin with a dash', async () => {
+  for (const [argv, args] of [[['tool', 'viewer', 'a.md', 'b.md'], ['a.md', 'b.md']], [['tool', 'viewer', '--', '--json', '--help', '--', '', 'a\nb'], ['--json', '--help', '--', '', 'a\nb']]]) {
+    const client = fixtureClient();
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(client.requests[0].request.args, args);
+  }
+});
+
+test('empty browser identities fail before a provider or host request', async () => {
+  for (const provider of ['agent-browser', 'playwright']) {
+    for (const flag of ['--session', '--key', '--surface', '--workspace', '--from', ...(provider === 'playwright' ? ['-s'] : [])]) {
+      for (const args of [[flag, ''], [`${flag}=`]]) {
+        const client = fixtureClient();
+        const invoked = [];
+        const exec = async (...args) => { invoked.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
+        const result = await runCli([provider, ...args, 'click', '@e3'], { client, execAgentBrowser: exec, execPlaywright: exec });
+        assert.equal(result.exitCode, 1, JSON.stringify({ provider, args, result }));
+        assert.match(result.stderr, /requires a value/);
+        assert.deepEqual(invoked, []);
+        assert.deepEqual(client.requests, []);
+      }
+    }
+  }
+});
+
+test('native browser option terminators survive before dash-leading values', async () => {
+  for (const provider of ['agent-browser', 'playwright']) {
+    for (const tail of [['fill', '@e1', '--', '-5'], ['fill', '@e1', '--', '--session'], ['--', 'snapshot']]) {
+      const calls = [];
+      const exec = async (binary, args) => { calls.push(args); return { exitCode: 0, stdout: '', stderr: '' }; };
+      const result = await runCli([provider, '--session', 'raw', ...tail], { execAgentBrowser: exec, execPlaywright: exec, env: {} });
+      assert.equal(result.exitCode, 0, JSON.stringify(result));
+      assert.deepEqual(calls[0], [...(provider === 'playwright' ? ['--session=raw'] : ['--session', 'raw']), ...tail]);
+    }
+  }
+});
+
+test('send preserves repeated event order and inserts stdin without changing its text', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['send', 'surface:1', '--key', 'escape', '--text', 'C:\\tmp\\n', '--stdin', '--key', 'enter', '--text=last'], { client, readStdin: async () => 'line\r\nnext\t🐭' });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(client.requests[0].request.events, [{ key: 'escape' }, { text: 'C:\\tmp\\n' }, { text: 'line\r\nnext\t🐭' }, { key: 'enter' }, { text: 'last' }]);
+});
+
+test('send validates all events before reading stdin or contacting the host', async () => {
+  for (const args of [['--stdin', '--key', 'not-a-key'], ['--sequence', '[{"text":"first"},{"key":"bad"}]'], ['--sequence', '[{"text":"first","extra":true}]'], ['--sequence', '[{"text":"first"}]', '--stdin'], ['--stdin', '--stdin']]) {
+    const client = fixtureClient();
+    const result = await runCli(['send', 'surface:1', ...args], { client, readStdin: () => assert.fail('must validate before reading stdin') });
+    assert.equal(result.exitCode, 1, args.join(' '));
+    assert.deepEqual(client.requests, []);
+  }
+});
+
+test('send does not claim success until host delivery and never retries a failed batch', async () => {
+  let finish;
+  let calls = 0;
+  let completed = false;
+  const pending = runCli(['send', 'surface:1', '--text', 'hello'], { client: { sendSurface: () => { calls++; return new Promise((_resolve, reject) => { finish = reject; }); } } }).then(result => { completed = true; return result; });
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(completed, false);
+  finish(new Error('PTY died after partial delivery'));
+  const result = await pending;
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /partial delivery/);
+  assert.equal(calls, 1);
+});
+
+
+test('JSON errors are objects for parsing, host, and endpoint failures', async () => {
+  const cases = [
+    [['read', 'surface:1', '--lines', '0', '--json'], { client: fixtureClient() }, 'INVALID_ARGUMENT'],
+    [['ensure', '--json', 'oops'], { client: fixtureClient() }, 'INVALID_ARGUMENT'],
+    [['unknown', '--json'], {}, 'INVALID_ARGUMENT'],
+    [['read', 'surface:1', '--json'], { env: {} }, 'CONTROL_UNAVAILABLE'],
+    [['read', 'surface:1', '--json'], { client: { readSurface: async () => { throw new Error('host refused \u001b[31m \n Unicode 🐭'); } } }, 'COMMAND_FAILED'],
+    [['await', 'surface:1', '--until', 'exit', '--json'], { client: awaitClient({ outcome: 'died', waitedMs: 3 }) }, 'SURFACE_DIED'],
+  ];
+  for (const [argv, options, code] of cases) {
+    const result = await runCli(argv, options);
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).error.code, code, JSON.stringify(result));
+    assert.ok(JSON.parse(result.stdout).error.message);
+  }
+  const literal = await runCli(['read', '--workspace', '--json', 'surface:1'], { env: {} });
+  assert.equal(literal.stdout, '');
+  const help = await runCli(['read', '--json', '--help']);
+  assert.match(help.stdout, /USAGE/);
+});
+
+
+test('JSON errors preserve original text while both output channels escape terminal controls', async () => {
+  const message = 'C:\\tmp\n \u001b[2J \u202e 🐭';
+  for (const argv of [['tool', 'example'], ['read', 'surface:1']]) {
+    const client = { toolSurface: async () => { throw new Error(message); }, readSurface: async () => { throw new Error(message); } };
+    for (const json of ['--json', '--json=true']) {
+      const result = await runCli([...argv, json], { client });
+      assert.equal(JSON.parse(result.stdout).error.message, message);
+      assert.doesNotMatch(result.stdout + result.stderr, HIDDEN);
+    }
+  }
+});
+
+test('launch output reports command_state in text and JSON', async () => {
+  for (const [status, commandState] of [['pending', 'awaiting_approval'], ['takeover', 'queued'], ['created', 'unconfirmed'], ['existing', 'running'], ['superseded', 'ended']]) {
+    const client = { toolSurface: async () => ({ status, commandState, surfaceId: 'surface:2', command: 'server', cwd: '/repo', minimized: false, key: null }) };
+    const json = await runCli(['tool', 'server', '--json'], { client });
+    assert.equal(json.exitCode, 0);
+    assert.equal(JSON.parse(json.stdout).command_state, commandState);
+    assert.equal(JSON.parse(json.stdout).status, status);
+    assert.equal('completion' in JSON.parse(json.stdout), false);
+    const text = await runCli(['tool', 'server'], { client });
+    assert.equal(text.stdout, `${status} surface:2  [${commandState}]  "server"\n`);
+  }
+});
+
+test('agent-browser exits 4 when its successful command cannot bind a pane', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  client.browserSurface = async () => { throw new Error('pane unavailable'); };
+  const result = await runCli(['agent-browser', 'open', ':5173', '--json'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 4);
+  assert.equal(result.stdout, '✓ ok\n');
+  assert.match(result.stderr, /agent-browser command succeeded/);
+  assert.match(result.stderr, /pane unavailable/);
+  assert.match(result.stderr, /already ran; do not repeat it blindly/);
+  assert.equal(ab.calls.filter(args => args.includes('open')).length, 1);
+});
+
+test('creation uses --from and rejects the old --surface spelling before host calls', async () => {
+  for (const args of [['split'], ['ensure', '--', 'echo'], ['tool', '--', 'echo'], ['open', 'a.md'], ['iframe', ':5173']]) {
+    const client = fixtureClient();
+    const result = await runCli([args[0], '--from', 'surface:8', ...args.slice(1)], { client });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(client.requests.at(-1).request.surface, 'surface:8');
+    const rejected = fixtureClient();
+    const old = await runCli([args[0], '--surface', 'surface:8', ...args.slice(1)], { client: rejected });
+    assert.equal(old.exitCode, 1);
+    assert.equal(rejected.requests.length, 0);
+  }
+});
+
+test('browser placement is carried through resolution and binding, never forwarded', async () => {
+  const client = fixtureClient();
+  const ab = fakeAgentBrowser();
+  const result = await runCli(['agent-browser', 'open', ':5173', '--from', 'surface:8', '--key', 'docs'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(client.requests.find(r => r.method === 'resolveBrowser').request.from, 'surface:8');
+  assert.equal(client.requests.find(r => r.method === 'browserSurface').request.from, 'surface:8');
+  assert.equal(ab.calls.some(args => args.includes('--from')), false);
+  const before = ab.calls.length;
+  const bad = await runCli(['agent-browser', 'open', ':5173', '--from', 'surface:8', '--surface', 'surface:3'], { client, execAgentBrowser: ab.exec });
+  assert.equal(bad.exitCode, 1);
+  assert.match(bad.stderr, /--from and --surface are mutually exclusive/);
+  assert.equal(ab.calls.length, before);
+  // After the bare `--`, a --from is the provider's.
+  const forwarded = await runCli(['agent-browser', '--key', 'docs', '--', 'eval', '--from'], { client, execAgentBrowser: ab.exec });
+  assert.equal(forwarded.exitCode, 0, forwarded.stderr);
+  assert.deepEqual(ab.calls.find(args => args.includes('eval')).slice(-2), ['eval', '--from']);
+});
+
+test('reference prefixes are required before any host mutation', async () => {
+  for (const args of [['list', '--workspace', '2'], ['split', '--workspace', 'build'], ['workspace', 'switch', 'build'], ['move', 'surface:1', '2'], ['list', '--window', 'main'], ['workspace', 'move', 'workspace:2', '--window', 'new']]) {
+    const client = fixtureClient();
+    const result = await runCli(args, { client });
+    assert.equal(result.exitCode, 1, JSON.stringify(args));
+    assert.equal(client.requests.length, 0);
+  }
+  for (const provider of ['agent-browser', 'playwright']) {
+    const client = fixtureClient();
+    const ab = fakeAgentBrowser();
+    const result = await runCli([provider, 'open', ':5173', '--workspace', 'build'], { client, execAgentBrowser: ab.exec, execPlaywright: ab.exec });
+    assert.equal(result.exitCode, 1, provider);
+    assert.match(result.stderr, /invalid Workspace reference 'build'/);
+    assert.equal(ab.calls.length, 0);
+    assert.equal(client.requests.length, 0);
+  }
+  const client = fixtureClient();
+  const result = await runCli(['workspace', 'move', 'workspace-name:2', '--new-window'], { client });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(client.requests[0].request.workspace, 'workspace-name:2');
+  assert.equal(client.requests[0].request.toWindow, 'new');
+  const conflict = fixtureClient();
+  assert.equal((await runCli(['workspace', 'move', 'workspace:2', '--new-window', '--window', 'window:main'], { client: conflict })).exitCode, 1);
+  assert.equal(conflict.requests.length, 0);
+});
+
+test('send --stdin=true keeps its position among ordered events', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['send', 'surface:1', '--text', 'first', '--stdin=true', '--key', 'Enter'], { client, readStdin: async () => 'second' });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.deepEqual(client.requests[0].request.events, [{ text: 'first' }, { text: 'second' }, { key: 'Enter' }]);
 });

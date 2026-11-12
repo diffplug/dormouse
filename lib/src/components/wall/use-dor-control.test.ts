@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/terminal-state-store';
-import { PREVIEW_OUTPUT_QUIET_MS, watchTerminalReady } from './use-dor-control';
+import { cwdFromOsc633 } from '../../lib/terminal-state';
+import { PREVIEW_OUTPUT_QUIET_MS, toolCommandState, watchTerminalReady } from './use-dor-control';
 
 let fake: FakePtyAdapter;
 
@@ -70,5 +71,24 @@ describe('watchTerminalReady', () => {
     vi.advanceTimersByTime(PREVIEW_OUTPUT_QUIET_MS);
     applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 1 }]);
     expect(onReady).not.toHaveBeenCalled();
+  });
+});
+
+describe('toolCommandState', () => {
+  it('does not mistake shell integration or old history for command startup', () => {
+    applyTerminalSemanticEvents('slot', [{ type: 'cwd', cwd: cwdFromOsc633('/repo')! }]);
+    expect(toolCommandState('created', 'slot', 'server', '/repo')).toBe('unconfirmed');
+    expect(toolCommandState('existing', 'slot', 'server', '/repo')).toBe('queued');
+    applyTerminalSemanticEvents('slot', [
+      { type: 'commandLine', commandLine: 'server' }, { type: 'commandStart', source: 'osc633_boundaries' },
+    ]);
+    expect(toolCommandState('created', 'slot', 'server', '/repo')).toBe('running');
+    expect(toolCommandState('created', 'slot', 'other', '/repo')).toBe('unconfirmed');
+    expect(toolCommandState('takeover', 'slot', 'server', '/repo')).toBe('queued');
+    expect(toolCommandState('pending', 'slot', 'server', '/repo')).toBe('awaiting_approval');
+    applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 1 }]);
+    expect(toolCommandState('created', 'slot', 'server', '/repo')).toBe('ended');
+    expect(toolCommandState('retargeted', 'slot', 'server', '/repo')).toBe('queued');
+    expect(toolCommandState('superseded', 'slot', 'server', '/repo')).toBe('ended');
   });
 });

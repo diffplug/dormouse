@@ -1,5 +1,5 @@
 exitCode: 0
 stdout:
-existing surface:4  "pnpm storybook"
+existing surface:4  [running]  "pnpm storybook"
 
 stderr:

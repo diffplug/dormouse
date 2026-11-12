@@ -313,8 +313,9 @@ function terminalBesidePage(url: string) {
   };
 }
 
-/** The page's next steal as this window sees it (its `blur`), or 100 ms,
- *  whichever is first: a page that kept focus steals nothing more. */
+/** The page's next steal as this window sees it (its `blur`), or 500 ms,
+ *  whichever is first: a page that kept focus steals nothing more. The page
+ *  steals every 200 ms, so the fallback only fires when it does keep focus. */
 function nextSteal(): Promise<void> {
   return new Promise((resolve) => {
     const done = () => {
@@ -322,7 +323,7 @@ function nextSteal(): Promise<void> {
       window.removeEventListener('blur', done);
       resolve();
     };
-    const timer = setTimeout(done, 100);
+    const timer = setTimeout(done, 500);
     window.addEventListener('blur', done);
   });
 }
@@ -340,7 +341,7 @@ function listenToPage(frame: HTMLIFrameElement) {
 }
 
 /**
- * A minimized browser pane whose page focuses itself every 50 ms gets none of
+ * A minimized browser pane whose page focuses itself every 200 ms gets none of
  * the keys typed into the terminal. Real input throughout: the click into the page opens WebKit's
  * cross-origin focus gate, and the keys are routed by the browser, not
  * dispatched. Outside the Vitest runner there is no real input, so the play
@@ -373,7 +374,9 @@ export const ParkedPageGetsNoKeys: Story = {
 
     // Each key goes in just after one of the page's steals, never inside the
     // task the Wall waits before taking focus back: a key typed in that task
-    // reaches the page, and the timing of that race is the browser's.
+    // reaches the page, and the timing of that race is the browser's. The key's
+    // RPC must also land before the next steal opens that task again, which the
+    // page's 200 ms interval leaves ample room for.
     const typed = 'nothing-for-the-page';
     const focusesAtTyping = page.focuses;
     for (const char of typed) {
@@ -389,6 +392,9 @@ export const ParkedPageGetsNoKeys: Story = {
     await wait(200);
     if (page.keys !== 0) throw new Error(`the parked page received ${page.keys} of ${typed.length} keys`);
     if (page.focuses <= focusesAtTyping) throw new Error('the parked page stopped taking focus while the keys were typed');
+    // The page keeps stealing focus during capture. Disabling cursor blink alone
+    // cannot freeze the resulting block/outline changes; keep both states solid.
+    getTerminalInstance('surface:1')!.options.cursorInactiveStyle = 'block';
     await settleTerminals();
   },
 };

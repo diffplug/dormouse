@@ -1,6 +1,7 @@
 /**
  * The take-over gate: `dor tool` or `dor open` typed alone at a prompt runs the
  * tool in that pane instead of splitting (`docs/specs/dor-tool.md` -> Take-over).
+ * The same typed-alone signal sets the CLI focus default.
  *
  * Pure predicates over facts the host has already read, so the placement rule is
  * testable without a Wall: the handler in `use-dor-control.ts` gathers the
@@ -16,23 +17,54 @@ import { commandProgramName, primaryCommandTokens } from '../../lib/terminal-sta
 const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
 
 /**
- * Whether the shell reported running exactly one command and that command is
- * the requested `dor` verb or its alias — the human-intent signal, not a security boundary
- * (`docs/specs/dor-tool.md` -> Take-over). Case folds on the launcher, which is
- * a filename; the requested verb must match exactly.
+ * The `dor` verb, its alias resolved, when the shell reported running exactly
+ * one command and that command is a `dor` invocation; else null. It is the
+ * human-intent signal both take-over and the CLI focus default read, not a
+ * security boundary (`docs/specs/dor-tool.md` -> Take-over). Case folds on the
+ * launcher, which is a filename; the verb is returned exactly as typed.
  */
-export function isNakedToolInvocation(rawCommandLine: string | null | undefined, verb: 'tool' | 'open' = 'tool'): boolean {
+export function typedDorVerb(rawCommandLine: string | null | undefined): string | null {
   const line = rawCommandLine?.trim();
-  if (!line || COMPOUND_SYNTAX.test(line)) return false;
+  if (!line || COMPOUND_SYNTAX.test(line)) return null;
   const [launcher, commandVerb] = primaryCommandTokens(line);
-  return canonicalDorVerb(commandVerb ?? '') === verb && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
+  if (!commandVerb || commandProgramName(launcher ?? '').toLowerCase() !== 'dor') return null;
+  return canonicalDorVerb(commandVerb);
+}
+
+/** What a CLI request's focus default reads; every field is known at arrival. */
+export interface FocusIntentFacts {
+  /** `--focus` as sent: absent unless the caller gave it. */
+  focus: unknown;
+  /** `--minimize`, or `dor open --preview`'s glance pane: either turns the
+   *  default off. */
+  background: boolean;
+  /** A request the webview's own UI made, which keeps its own policy. */
+  gui: boolean;
+  /** {@link typedDorVerb} of the caller's reported line. */
+  typedVerb: string | null;
+}
+
+/**
+ * Whether a CLI request focuses the Surface it opens or reuses
+ * (`docs/specs/dor-cli.md` -> "Focus intent"): `--focus` as sent, else off for
+ * `--minimize`, `--preview`, or a GUI-origin request, else on only when the
+ * caller's shell reports `dor <verb>` typed alone.
+ */
+export function cliFocusIntent(facts: FocusIntentFacts, verb: string): boolean {
+  if (typeof facts.focus === 'boolean') return facts.focus;
+  return !facts.gui && !facts.background && facts.typedVerb === verb;
+}
+
+/** Whether the shell reported running the requested `dor` verb alone. */
+export function isNakedToolInvocation(rawCommandLine: string | null | undefined, verb: 'tool' | 'open' = 'tool'): boolean {
+  return typedDorVerb(rawCommandLine) === verb;
 }
 
 /** What the placement rule reads. Every field is already known to the handler. */
 export interface ToolTakeoverGate {
   /** The `dor` verb the request came from. */
   verb: 'tool' | 'open';
-  /** `--surface`: an explicit placement, which take-over must not override. */
+  /** `--from`: an explicit placement, which take-over must not override. */
   explicitSurface: boolean;
   /** `--minimize`: a request for a background Surface, which the caller is not. */
   minimized: boolean;

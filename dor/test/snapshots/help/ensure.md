@@ -4,12 +4,12 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
+  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...
   dor ensure --help
 
-Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
+Ensures one surface in the current workspace is running the given command at the given path. It reuses a running or in-flight match, or creates a split and schedules the command. Creation waits for shell integration, not command startup; read command_state before assuming the command started.
 
-ensure never changes focus. Whether it reuses a match, restarts one, or creates a new split, the surface you ran it from keeps focus — a newly created surface (visible or minimized) starts in the background.
+Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error. Focusing a minimized match reveals it.
 
 Matching uses the command each shell reports it is running via Dormouse shell integration (OSC 633), not process inspection. This captures the typed command (`npm run dev`), not the forked child process (`node .../vite`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: `npm run dev` and `npm run dev --host` are different commands and get separate surfaces.
 
@@ -25,16 +25,23 @@ Two surfaces running the same command in different working directories are disti
 
 --restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
 
---surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+--from selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+
+command_state, the [tag] in text output, says what the reply proves about the command; status says how the Surface was found or made. Neither promises a successful exit or a ready service: check readiness separately. It is one of:
+  unconfirmed  a new Surface whose shell is ready; its command is scheduled but not yet seen starting
+  running      the shell reported the command running (always so after --restart)
+  queued       the match is a launch still on its way; its command has not started
+  ended        the new Surface's command already ended, perhaps with a nonzero exit
 
 Text output:
-  created surface:3  "npm run dev"
-  existing surface:3  "npm run dev"
-  restarted surface:3  "npm run dev"
+  created surface:3  [unconfirmed]  "npm run dev"
+  existing surface:3  [running]  "npm run dev"
+  restarted surface:3  [running]  "npm run dev"
 
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:3",
     "command": "npm run dev",
     "cwd": "/Users/me/projects/site",
@@ -42,12 +49,13 @@ JSON output:
   }
 
 FLAGS
-     [--json]       Print JSON output.
+     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
+     [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--restart]    Restart a matching surface in place.
-     [--surface]    Surface to split when creating.
+     [--from]       Surface to split when creating.
      [--cwd]        Working directory for matching and for the new command.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

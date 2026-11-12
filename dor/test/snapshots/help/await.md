@@ -32,7 +32,7 @@ JSON output:
     "detail": "output stopped after 10m 15s"
   }
 
-Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing. The JSON above is printed only on a resolution; a timeout or a death reports itself through the exit code and the stderr line, with nothing on stdout.
+Exits 0 on any resolution, 2 on timeout, and 3 if the surface died before finishing. With --json, failures print an error object with a stable code (TIMEOUT or SURFACE_DIED) and message on stdout. The exit status and stderr explanation also report the failure.
 
 Examples:
   dor await surface:3 --until quiet
@@ -41,10 +41,10 @@ Examples:
   CAUSE=$(dor await surface:3 --until quiet)
 
 FLAGS
-     [--json]       Print JSON output.
+     [--json]       Print a JSON result or error object.
      [--timeout]    Seconds to wait before giving up. Default 600; max 86400.
       --until       What to wait for: quiet or exit.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

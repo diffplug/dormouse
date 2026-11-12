@@ -1,6 +1,7 @@
 /** Private `surface.ensure` wiring for command+cwd idempotency. */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -9,8 +10,13 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
+  commandStateHelp,
   launchDirectory,
-  errorMessage,
+  cwdParser,
+  focusFlag,
+  focusHelp,
+  focusMinimizeConflict,
+  focusParam,
   renderJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -20,11 +26,20 @@ import {
   writeStdout,
 } from './shared.js';
 
+/** Every state ensure reports, in help order; it has no approval gate. */
+const ENSURE_COMMAND_STATES: ReadonlyArray<readonly [EnsureSurfaceResponse['commandState'], string]> = [
+  ['unconfirmed', 'a new Surface whose shell is ready; its command is scheduled but not yet seen starting'],
+  ['running', 'the shell reported the command running (always so after --restart)'],
+  ['queued', 'the match is a launch still on its way; its command has not started'],
+  ['ended', 'the new Surface\'s command already ended, perhaps with a nonzero exit'],
+];
+
 interface EnsureFlags extends WorkspaceScopedFlags {
+  readonly focus?: boolean;
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly restart?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
   readonly cwd?: string;
 }
 
@@ -41,8 +56,8 @@ const RESTART_TIMEOUT_MS = 60_000;
 const ENSURE_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
-const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--restart']);
-const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
+const BOOLEAN_FLAGS = new Set(['--focus', '--json', '--minimize', '--restart']);
+const FLAGS_WITH_VALUES = new Set(['--cwd', '--from', '--workspace']);
 
 // stricli treats a bare `--` as "rest are positionals", but it can't express
 // "everything after `--` is one required command tail, and only these flags may
@@ -77,15 +92,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--focus] [--json] [--minimize] [--restart] [--from handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
@@ -96,9 +111,9 @@ export const ensureCommand: Command = {
   command: buildCommand<EnsureFlags, string[], DorCommandContext>({
     docs: {
       brief: 'Ensure one surface is running a command.',
-      fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
+      fullDescription: `Ensures one surface in the current workspace is running the given command at the given path. It reuses a running or in-flight match, or creates a split and schedules the command. Creation waits for shell integration, not command startup; read command_state before assuming the command started.
 
-ensure never changes focus. Whether it reuses a match, restarts one, or creates a new split, the surface you ran it from keeps focus — a newly created surface (visible or minimized) starts in the background.
+${focusHelp({ minimize: true })} Focusing a minimized match reveals it.
 
 Matching uses the command each shell reports it is running via Dormouse shell integration (OSC 633), not process inspection. This captures the typed command (\`npm run dev\`), not the forked child process (\`node .../vite\`), and works for shells the user started by hand as well as shells Dormouse started. The match is exact: \`npm run dev\` and \`npm run dev --host\` are different commands and get separate surfaces.
 
@@ -114,16 +129,19 @@ Two surfaces running the same command in different working directories are disti
 
 --restart applies only to an already-running match: it interrupts the live command (Ctrl+C), waits for the shell to return to its prompt, then re-runs the command in place and blocks until the command is live again. A restarted surface keeps its minimized/visible state. If no surface is running the command, --restart behaves like a plain ensure and creates one.
 
---surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+--from selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
+
+${commandStateHelp(ENSURE_COMMAND_STATES)}
 
 Text output:
-  created surface:3  "npm run dev"
-  existing surface:3  "npm run dev"
-  restarted surface:3  "npm run dev"
+  created surface:3  [unconfirmed]  "npm run dev"
+  existing surface:3  [running]  "npm run dev"
+  restarted surface:3  [running]  "npm run dev"
 
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:3",
     "command": "npm run dev",
     "cwd": "/Users/me/projects/site",
@@ -132,11 +150,12 @@ JSON output:
     },
     parameters: {
       flags: {
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        focus: focusFlag,
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
-        cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
+        cwd: { kind: 'parsed', parse: cwdParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
         workspace: workspaceFlag,
       },
       positional: {
@@ -150,6 +169,8 @@ JSON output:
 };
 
 async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...commandArgs: string[]): Promise<void | Error> {
+  const conflict = focusMinimizeConflict(flags);
+  if (conflict) return conflict;
   const client = requireControlClient(this.options, flags.restart === true ? RESTART_TIMEOUT_MS : ENSURE_TIMEOUT_MS);
   if (client instanceof Error) return client;
   const cwd = launchDirectory(flags.cwd, this.options);
@@ -159,15 +180,16 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
     const response = await client.ensureSurface({
       command: commandArgs,
       minimized: flags.minimize === true,
+      ...focusParam(flags.focus),
       restart: flags.restart === true,
-      surface: flags.surface,
+      surface: flags.from,
       cwd,
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 
@@ -175,6 +197,7 @@ function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): s
   if (json) {
     return renderJson({
       status: response.status,
+      command_state: response.commandState,
       surface_id: response.surfaceId,
       command: response.command,
       cwd: response.cwd,
@@ -182,5 +205,5 @@ function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): s
     });
   }
 
-  return `${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}\n`;
+  return `${response.status} ${response.surfaceId}  [${response.commandState}]  ${JSON.stringify(response.command)}\n`;
 }

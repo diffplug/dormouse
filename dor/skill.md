@@ -88,18 +88,18 @@ dor split --minimize -- ./watch.sh
 dor split --                   # blank terminal, focus stays with you
 ```
 
-Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <id>` picks which surface to split from; the new terminal starts in your current directory. Always include the `--` (see Rules and pitfalls).
+Direction flags `--left|--right|--up|--down` (default `--auto`). `--from <id>` picks which surface to split from; the new terminal starts in your current directory. An initial command goes after `--`.
 
 ### `dor send` — type into a terminal
 
 ```sh
 dor send surface:3 --text "npm test" --key enter   # the canonical run-a-command
 dor send surface:3 --key ctrl-c                    # interrupt
-cat answers.txt | dor send surface:3 --stdin
+cat answers.txt | dor send surface:3 --stdin --key enter
 dor send surface:3 --sequence '[{"text":"y"},{"key":"enter"},{"key":"tab"}]'
 ```
 
-Exactly one input mode per call: `--text`/`--key` (only in that order, text first), `--stdin`, or `--sequence` for anything more complex. Special keys go through `--key` (`enter`, `escape`, `tab`, `backspace`, `delete`, arrows, `ctrl-a`..`ctrl-z`) so they are never confused with literal text. `--text` interprets `\n` `\r` `\t` `\\` unless `--raw`; `--stdin` and `--sequence` text go exactly as given. Input arrives at typing pace, so a long prompt plus `--key enter` submits whole in one call, but `sent` means queued: the program may still be reading it.
+Repeat `--text` and `--key` in the order to deliver them; `--stdin` inserts stdin at its position once. `--sequence` is an alternative ordered JSON array. All text is literal: no extra backslash decoding or newline conversion, and `--raw` is removed. Named keys (`enter`, `escape`, `tab`, `backspace`, `delete`, arrows, `ctrl-a`..`ctrl-z`) receive key pacing. A lone `--key ctrl-c` interrupts queued input immediately; inside a larger batch it stays ordered. `sent` means the final PTY write completed, not that the program processed it. A failure may mean partial delivery: never retry automatically; inspect with `dor read`.
 
 ### `dor read` — read a terminal's screen
 
@@ -128,7 +128,7 @@ dor kill surface:3 --confirm-dangerously          # only when already validated
 
 ## Browsers
 
-Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything after the Dormouse flags is that CLI's own command set. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`.
+Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything but the Dormouse flags, which may come anywhere, is that CLI's own command set; a bare `--` and everything after it are forwarded unchanged. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`.
 
 `dor list` shows each browser's `render_mode`, which says what drives it: `agent-browser-*` takes `dor agent-browser --surface <id>`, `playwright-*` takes `dor playwright --surface <id>`, and `iframe` takes neither — open its URL with `dor agent-browser open <url>` instead. `screencast` renders in the pane; `popout` is a separate window the pane stands in for.
 
@@ -139,6 +139,8 @@ Each command names its browser one way; the flags are mutually exclusive:
 - `--key <name>` (default `default`) — a browser this Workspace knows by name. One key is one browser, reused across commands; use distinct keys for independent browsers at once. agent-browser and Playwright keys are separate.
 - `--surface <handle>` — the browser a handle names; prefer it whenever you hold an id. It is the only way to reach a browser the user opened from the GUI or a Tool's browser, and it fails on a terminal or an `iframe` surface.
 - `--session <name>` (Playwright also takes `-s`) — a raw native session by its literal name.
+
+`--from <handle>` is not an identity: as on `split`, `ensure`, `tool`, `open`, and `iframe`, it says where a new pane goes. It places only a pane the command creates; a browser that already has one stays where it is. A `--key` belongs to the `--from` Surface's Workspace, so a later command for a key you placed in another Workspace needs the same `--from` or `--workspace`. It cannot be combined with `--surface`.
 
 Navigation verbs (`open`, `goto`, agent-browser's `navigate`) also accept Dormouse targets: `host:port` and `:port` default to `http://`, and a terminal handle (`surface:3`) opens the dev-server port that terminal owns.
 
@@ -190,7 +192,7 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 **The listing says how to work with each Tool:**
 
 - `[iframe]` is view-only; drive `[agent-browser-screencast]` with `dor agent-browser --surface <id>` and `[playwright-screencast]` with `dor playwright --surface <id>`.
-- `[keyed]`: running it again reveals and focuses the running one (`existing`), or restarts it in place if Dormouse stopped it while idle (`adopted`); `--fresh` starts another. Once its command exits, its pane is a plain terminal, and running it again starts another. Unkeyed, every call starts another — find the running one with `dor list --kind tool`.
+- `[keyed]`: running it again reveals the running one (`existing`), or restarts it in place if Dormouse stopped it while idle (`adopted`); `--fresh` starts another. Once its command exits, its pane is a plain terminal, and running it again starts another. Unkeyed, every call starts another — find the running one with `dor list --kind tool`.
 - `[port announced]`: no browser appears until the command announces its port. `[port auto]` shows the one port it opens.
 - A `run` shown as a list takes arguments (`dor tool <name> <args>`); a string takes none.
 - `[shadowed]`: a user Tool that the project's Tool of the same name replaces here.
@@ -200,20 +202,20 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 **When you add a Tool, write for the next agent:** a comment directly above the entry saying what it is for and anything its fields do not show, and `$HERE` in its `prespawn_dedupe` so each checkout gets its own. An entry's fields are `run`, `render`, `port`, and `prespawn_dedupe`, taking the values the listing shows, plus `viewport` (a preset name or dimensions). A user-file entry may instead import one Tool from another `dormouse.yml` with `from` (its directory, relative to the user file) and `tool` (its name there, when it differs).
 
 - **`dor tool -- <command>`** makes any command a Tool, serving the one port it opens, but with no key: every call creates another surface. For a process you will rerun, use `dor ensure` and a browser instead.
-- **`dor open <path>`** shows the user one local file (HTML, text, images, media) or folder in a new pane, or in the Tool the user's `dormouse.yml` `open` rules pick; a folder opens as a browsable list of names whose files the user can preview. It takes a path, never a URL. Opening the same path again reveals and focuses its viewer; `--fresh` opens another. `--preview` instead shows it in the Workspace's one reusable preview pane, replacing the last preview, without taking focus.
+- **`dor open <path>`** shows the user one local file (HTML, text, images, media) or folder in a new pane, or in the Tool the user's `dormouse.yml` `open` rules pick; a folder opens as a browsable list of names whose files the user can preview. It takes a path, never a URL. Opening the same path again reveals its viewer; `--fresh` opens another. `--preview` instead shows it in the Workspace's one reusable preview pane, replacing the last preview, without taking focus.
 
 ## Workspaces
 
 ```sh
 dor list --workspaces                     # the Workspace overview
 dor workspace new build                   # create one, in the background
-dor workspace switch workspace:build      # move the user to it
+dor workspace switch workspace-name:build      # move the user to it
 dor workspace close workspace:2 --force   # close it and everything in it
 ```
 
-A Window holds several Workspaces, each with its own surfaces. You almost never need these: your commands land in the Workspace that currently holds your terminal, and creating one is a change the user sees. When you do, name one by its id `workspace:<n>` or as `workspace:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's id finds it in any Workspace without that flag. `close` refuses a Workspace holding your running work unless you pass `--force`.
+A Window holds several Workspaces, each with its own surfaces. You almost never need these: your commands land in the Workspace that currently holds your terminal, and creating one is a change the user sees. When you do, name one by its id `workspace:<n>` or as `workspace-name:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's id finds it in any Workspace without that flag. `close` refuses a Workspace holding your running work unless you pass `--force`.
 
-`dor move <surface> <workspace>` moves one pane, keeping its id; `--new` creates a Workspace, and `--focus` follows it. A Workspace named `new` remains targetable. If your own terminal moves, unscoped `dor ensure -- pnpm dev` searches only the destination and may duplicate the server you left behind. Keep that server's id, or target its original Workspace with `--workspace`. The moved terminal prints a local notice naming its new Workspace. Iframes require `--dangerously-destroy-iframe-page-state` and reopen at their saved URL; dirty or pending Tools refuse even with that flag.
+`dor move <surface> <workspace>` moves one pane, keeping its id; `--new-workspace` creates a Workspace, and `--focus` follows it. If your own terminal moves, unscoped `dor ensure -- pnpm dev` searches only the destination and may duplicate the server you left behind. Keep that server's id, or target its original Workspace with `--workspace`. The moved terminal prints a local notice naming its new Workspace. Iframes require `--dangerously-destroy-iframe-page-state` and reopen at their saved URL; dirty or pending Tools refuse even with that flag.
 
 ## Recipes
 
@@ -221,7 +223,7 @@ A Window holds several Workspaces, each with its own surfaces. You almost never 
 
 ```sh
 $ dor ensure -- npm run dev
-created surface:3  "npm run dev"
+created surface:3  [unconfirmed]  "npm run dev"
 $ dor await surface:3 --until quiet
 $ dor agent-browser open surface:3
 ```
@@ -275,7 +277,7 @@ dor kill surface:N --confirm-if-read "npm run dev"
 
 ## Rules and pitfalls
 
-- **Never run a bare `dor split` (no `--`).** It moves the user's keyboard focus to the new pane, hijacking their keystrokes. `dor split -- <command>`, a blank `dor split --`, and `dor ensure` never take focus.
+- **Your commands leave the user's focus where it is**; only a `dor` command a person types alone at a prompt focuses its result. Pass `--focus` only when the user asks to be taken to the result. Browser commands reuse visible panes without taking focus, even when typed at a prompt.
 - **Never pre-quote command tails.** Everything after `--` is forwarded as a raw argv array; Dormouse quotes it correctly for whatever shell the target surface runs (POSIX, cmd, PowerShell). Pass `-- npm test -- --watch`, not `-- "npm test -- --watch"`.
 - **Take ids from responses.** Capture the id that `split`/`ensure`/`tool`/`open` print rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with, including its flags.
@@ -288,3 +290,7 @@ dor kill surface:N --confirm-if-read "npm run dev"
 - **`ENOENT`, refused connections, or authentication failures:** the host may have restarted, or the agent's tool runner may have inherited another host's environment. If the user's `dor list` works, compare the non-secret `DORMOUSE_HOST`, `DORMOUSE_SURFACE_ID`, and `DORMOUSE_CONTROL_SOCKET` values. Never print the control token, guess another socket, or retarget only the socket: endpoint, credentials, and caller identity belong together.
 
 **Codex's shared daemon can retain stale terminal context.** Tool commands can inherit an old host's environment even while the Codex UI is in a current Dormouse terminal. When this mismatch is confirmed, ask the user to exit Codex and resume from the working terminal with `codex --no-daemon resume`. `codex features disable daemon_auto_start` persists the preference; an existing daemon also needs `codex app-server daemon stop` before restarting normally. Stopping it can interrupt other Codex sessions: coordinate with the user first. Check the installed CLI's help before prescribing these options, then verify `dor list` after reconnecting. Do not switch to Computer Use or bypass authentication to work around stale context.
+
+With first-party `--json`, a failure returns `{"error":{"code":"...","message":"..."}}` on stdout and a nonzero exit status. Check the exit status before reading success fields; `await` uses `TIMEOUT` (exit 2) and `SURFACE_DIED` (exit 3). `CONTROL_UNAVAILABLE` means no host received the request, so nothing ran. Browser-provider output and exit status follow that provider, except exit 4: the command succeeded but its browser pane could not be opened. It already ran, so do not repeat it blindly; check the page first.
+
+Launch results carry `command_state`, apart from `status`: in text output from `ensure`, `tool`, and `open` it is the `[tag]` after the handle. `unconfirmed` has not been seen starting; `running` means the shell reported it running, not that its service is ready; `awaiting_approval` waits on the user and nothing ran; `queued` has not started, as with a takeover, which answers before its command can run; `ended` already ended, perhaps with a nonzero exit. Each command's `--help` lists the states it can report. Check application readiness separately.

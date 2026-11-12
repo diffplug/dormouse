@@ -4,22 +4,23 @@ Invocation: `dor send --help`
 
 ```text
 USAGE
-  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]
+  dor send <surface> (--text value | --key name | --stdin)... [--json] [--workspace ref]
+  dor send <surface> --sequence json [--json] [--workspace ref]
   dor send --help
 
-Sends text or key input to a target terminal surface. Special keys must be sent with --key so values like "enter" are never confused with literal text.
+Sends an ordered batch of text and key events to a terminal surface. Repeat --text and --key in any order. --stdin inserts standard input at its position and may occur once. --sequence is an alternative to these flags.
 
-Exactly one input mode is required: --text/--key, --stdin, or --sequence. --text and --key may be combined only in that order; text is sent first, then the key. Duplicate input flags are rejected. Use --sequence for arbitrary ordering or multiple text/key events.
+All text is literal: no backslash decoding, newline conversion, implicit Enter, or paste wrapping. Shell quoting and JSON parsing are the only decoding layers. --raw has been removed.
 
---text interprets backslash escapes for \n, \r, \t, and \\ unless --raw is set. Standard input and --sequence text are sent exactly as given: piped bytes are already literal, and JSON strings carry their own escapes.
+The complete batch is validated before anything is sent. Text arrives in short bursts; named keys wait for prior text to settle. Cursor keys use the terminal's active cursor-key mode. A batch stays together in the host queue. A lone ctrl-c interrupts pending input immediately; ctrl-c inside a larger batch stays ordered.
 
-Input arrives at typing pace: text in short bursts, and a key only after the text before it has settled, so interactive programs read it as typed. "sent" means the host accepted the input; the program may still be reading it.
+"sent" means the final write reached the live PTY, not that the program processed it. A failed or cancelled batch may have been partially delivered: do not retry automatically. Use dor await for program completion.
 
 Supported keys: enter, escape, esc, tab, backspace, delete, up, down, left, right, ctrl-a through ctrl-z.
 
 Sequence input is an ordered JSON array of {"text":"..."} and {"key":"..."} objects.
 
-A --text or --sequence value that starts with "-" must be joined to its flag (--text=-h); a value spanning lines must follow it as a separate argument.
+Option values are literal arguments, including empty strings, leading dashes, and line breaks. --text=value and --text value are equivalent.
 
 JSON output:
   {
@@ -36,13 +37,12 @@ Examples:
   dor send surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'
 
 FLAGS
-     [--json]       Print JSON output.
-     [--key]        Send a named key or chord.
-     [--raw]        Do not interpret backslash escapes in --text.
+     [--json]       Print a JSON result or error object.
+     [--key]...     Send a named key or chord.
      [--sequence]   Send an ordered JSON sequence of text and key events.
      [--stdin]      Read text from standard input and send it as text.
-     [--text]       Send text, decoding \n \r \t \\ unless --raw.
-     [--workspace]  Workspace to act in, instead of the caller's.
+     [--text]...    Send literal text; repeat to add another event.
+     [--workspace]  Workspace id or exact workspace-name: reference.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

@@ -1,6 +1,7 @@
 /** Private `surface.iframe` command wiring and open-target resolution. */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -8,7 +9,10 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
-  errorMessage,
+  focusFlag,
+  focusHelp,
+  focusMinimizeConflict,
+  focusParam,
   renderJson,
   requireControlClient,
   stringParser,
@@ -23,9 +27,10 @@ import {
 } from './open-target.js';
 
 interface IframeFlags extends WorkspaceScopedFlags {
+  readonly focus?: boolean;
   readonly json?: boolean;
   readonly minimize?: boolean;
-  readonly surface?: string;
+  readonly from?: string;
 }
 
 export const iframeCommand: Command = {
@@ -40,6 +45,8 @@ Agents cannot read or drive an iframe surface, and it drops the page's cookies, 
 A page from another machine opens only from a private network you allow, from its warning or Settings → Network; a page on the internet never does.
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
+
+${focusHelp({ minimize: true })}
 
 The target is one of:
   <url>          An absolute http:// URL.
@@ -66,9 +73,10 @@ JSON output:
     },
     parameters: {
       flags: {
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        focus: focusFlag,
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
+        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
       },
       positional: {
@@ -83,6 +91,8 @@ JSON output:
 };
 
 async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, target: string): Promise<void | Error> {
+  const conflict = focusMinimizeConflict(flags);
+  if (conflict) return conflict;
   const client = requireControlClient(this.options);
   if (client instanceof Error) return client;
 
@@ -91,21 +101,22 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
   let url = target;
   if (isSurfaceOpenTarget(target)) {
     const resolved = await resolveSurfaceOpenTarget(target, client, flags.workspace);
-    if (!resolved.ok) return new Error(resolved.message);
-    url = resolved.value;
+    if (resolved instanceof Error) return resolved;
+    url = resolved;
   }
 
   try {
     const response = await client.iframeSurface({
       minimized: flags.minimize === true,
-      surface: flags.surface,
+      ...focusParam(flags.focus),
+      surface: flags.from,
       url,
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderIframeResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

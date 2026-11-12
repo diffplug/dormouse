@@ -54,8 +54,8 @@ async function ran(args: string[]) {
 
 describe("playground dor open", () => {
   it("sends the real CLI's surface.tool request and prints its answer", async () => {
-    const requests = answerControl({ status: "takeover", surfaceId: "surface:1", command: "dor __view-file /x" });
-    expect(await ran(["o", "--preview", "README.md"])).toEqual({ exitCode: 0, text: 'takeover surface:1  "dor __view-file /x"\r\n' });
+    const requests = answerControl({ status: "takeover", commandState: "queued", surfaceId: "surface:1", command: "dor __view-file /x" });
+    expect(await ran(["o", "--preview", "README.md"])).toEqual({ exitCode: 0, text: 'takeover surface:1  [queued]  "dor __view-file /x"\r\n' });
     expect(requests).toMatchObject([{
       surfaceId: "t", method: "surface.tool",
       params: { file: "README.md", fresh: false, minimized: false, cwd: PLAYGROUND_CWD, preview: true },
@@ -75,9 +75,15 @@ describe("playground dor's other commands", () => {
       expect(await ran(args)).toMatchObject({ exitCode: 0, text: expect.stringContaining("USAGE\r\n  dor split [") });
     }
     for (const args of [["open", "--help"], ["help", "open"], ["help", "o"], ["o", "README.md", "-h"]]) {
-      expect((await ran(args)).text).toContain("USAGE\r\n  dor open [--json]");
+      expect((await ran(args)).text).toContain("USAGE\r\n  dor open [--focus] [--json]");
     }
     expect((await ran(["agent-browser", "--help"])).text).toContain("USAGE\r\n  dor agent-browser");
+  });
+
+  it("uses the shared JSON failure contract", async () => {
+    const result = await ran(["read", "surface:1", "--lines", "0", "--json"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.text).toContain('"code": "INVALID_ARGUMENT"');
   });
 
   it("prints version and skill from the playground's host", async () => {
@@ -173,7 +179,7 @@ describe("playground cancellation", () => {
     await Promise.resolve();
     expect(result).toBe("canceled");
     await pending;
-    await expect(client.splitSurface({ direction: "right", minimized: false, focusNeutral: false })).rejects.toThrow(/cancel/i);
+    await expect(client.splitSurface({ direction: "right", minimized: false, focus: false })).rejects.toThrow(/cancel/i);
     expect(requests).toHaveLength(1);
     requests[0].respond({ ok: true, result: {} });
     expect(result).toBe("canceled");

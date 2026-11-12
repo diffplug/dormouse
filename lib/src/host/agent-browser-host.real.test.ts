@@ -9,6 +9,8 @@ import { createAgentBrowserProvider } from './agent-browser-host';
 import { createBrowserHost } from './browser-host';
 
 // Opt-in: the installed agent-browser and Chromium, in a private socket dir.
+// No CI job sets the variable; run it by hand after changing the provider:
+// `DORMOUSE_AGENT_BROWSER_TEST_BIN=$(which agent-browser) pnpm exec vitest run src/host/agent-browser-host.real.test.ts` in lib.
 const binaryPath = process.env.DORMOUSE_AGENT_BROWSER_TEST_BIN;
 test.skipIf(!binaryPath)('real agent-browser: first destination script sees initial viewport and DPR', async () => {
   const socketDir = await mkdtemp(path.join(os.tmpdir(), 'av-'));

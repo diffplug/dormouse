@@ -68,7 +68,8 @@ async function rightClickSourceHeader(source: string) {
   await requireElement('[data-helper-terminal] .xterm', 'helper terminal');
   const helper = getHelper(source)!;
   // Fitting after output changes wrapping and can clip xterm's current prompt
-  // line. Release the fake shell only once it has its actual mounted grid.
+  // line, which no later wait repairs. Release the fake shell only once it has
+  // its actual mounted grid (`fake-adapter-helper.test.ts` pins the deferral).
   refitSession(helper.id);
   (getPlatform() as FakePtyAdapter).resumeHelperStartup(helper.id);
 }
