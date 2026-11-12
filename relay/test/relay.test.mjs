@@ -21,7 +21,7 @@ async function relay() {
   const server = await startRelay(created);
   const { sessionToken } = await ownerSession(created.app);
   const burrowSocket = async (burrowToken) => {
-    const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrowToken}`);
+    const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.burrow}`, { headers: { Authorization: `Bearer ${burrowToken}` } });
     await socket.ready;
     return socket;
   };

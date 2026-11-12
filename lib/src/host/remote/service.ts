@@ -167,7 +167,7 @@ export interface BurrowServiceOptions {
    * room. Reached only through the service's transport guard, as is
    * {@link BurrowServiceOptions.fetch}.
    */
-  createWebSocket?: (url: string) => WebSocketLike;
+  createWebSocket?: (url: string, bearer?: string) => WebSocketLike;
   /**
    * How this host builds a peer connection for the direct path
    * (`docs/specs/remote-api.md` → Transport → "Direct path"). Threaded rather
@@ -203,8 +203,11 @@ export interface BurrowServiceOptions {
  * sends no `Origin` header. Its optional native accelerators (`bufferutil`,
  * `utf-8-validate`) are left unbundled; it falls back to its JS paths.
  */
-function createRelaySocket(url: string): WebSocketLike {
-  return new WebSocket(url, { maxPayload: MAX_RELAY_TO_BURROW_FRAME_LENGTH }) as unknown as WebSocketLike;
+function createRelaySocket(url: string, bearer?: string): WebSocketLike {
+  return new WebSocket(url, {
+    maxPayload: MAX_RELAY_TO_BURROW_FRAME_LENGTH,
+    ...(bearer ? { headers: { Authorization: `Bearer ${bearer}` } } : {}),
+  }) as unknown as WebSocketLike;
 }
 
 /**
@@ -478,7 +481,7 @@ export class BurrowService {
   readonly #hostedOrigin: string | null;
   readonly #kind: BurrowKind;
   /** The injected socket factory behind the transport guard (constructor). */
-  readonly #createWebSocket: (url: string) => WebSocketLike;
+  readonly #createWebSocket: (url: string, bearer?: string) => WebSocketLike;
   /** The injected peer factory behind the transport guard, bound per runtime by {@link directPeeringFor}. */
   readonly #createDirectPeer?: BurrowDirectPeerFactory;
   /** The injected fetch, or the global one, behind the transport guard. */
@@ -619,9 +622,9 @@ export class BurrowService {
     // opens nothing. Each feature keeps its own check, for the error a person
     // reads.
     const createWebSocket = options.createWebSocket ?? createRelaySocket;
-    this.#createWebSocket = (url) => {
+    this.#createWebSocket = (url, bearer) => {
       this.#refuseNothing();
-      return createWebSocket(url);
+      return createWebSocket(url, bearer);
     };
     // The global is looked up at the call, so a test can stub it; a request that
     // gets no answer says which host and why, never undici's bare `fetch failed`.

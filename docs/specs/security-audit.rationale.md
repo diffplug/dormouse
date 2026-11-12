@@ -148,7 +148,7 @@ A PASS that names the finding with a `path:line` is a mechanical stand-in for ha
 
 A PASS still exits zero while ledger findings are open: the gate holds a release on what the current tree fails, and the ledger holds what a human has not yet triaged. The status issue lists them anyway, so a PASS is never published as all clear while one is open — the 2026-07-10 and 2026-10-06 closes said exactly that.
 
-The steps list the tracker with `--limit 1000`: the default of 30 once left an older open failure issue unreconciled. They search titles for `audit-finding` so that cap counts ledger issues only: the per-run reports share the tracker, and on 2026-11-09 it held 103 issues, 95 filed in the month before, which would have filled an unfiltered read within a year.
+The steps paginate the repository issue connection: a bounded list once left an older open failure issue unreconciled, and per-run reports would fill a 1000-issue snapshot within a year at the 95 issues filed in the month before 2026-11-09. A title search previously excluded reports, but its asynchronous index omitted the finding filed seconds before the ledger read on 2026-11-12: the read returned 83 issues, then 84 once indexed. The same lag can hide an existing key from deduplication, so all three reads use the issue connection.
 
 `File embargoed findings` never comments on a ledger issue, because the ledger read sees only an issue's first 100 comments and a comment per run would push a maintainer's `Fixed in` or `## Public summary` out of it, and because its token is a maintainer's own: the ledger issues and comments the workflow writes carry an admin's login and the `MEMBER` association, so what marks a public summary as a human's is that the workflow never writes one.
 

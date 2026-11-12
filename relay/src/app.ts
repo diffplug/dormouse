@@ -1290,8 +1290,8 @@ export function createApp(config: AppConfig): CreatedApp {
   }
 
   // --- The relay: one burrow socket per burrowId, many client sockets ------
-  // Auth rides the `token` query param (browsers cannot set WS headers). A bad
-  // token short-circuits with 401 here, so `injectWebSocket` never upgrades it.
+  // Node Burrows send a bearer header; browser Clients use the token query.
+  // A bad token short-circuits with 401 before `injectWebSocket` upgrades it.
 
   // The first frame of every Burrow socket while UV is demanded (RelayPolicyFrame).
   const burrowPolicy: RelayPolicyFrame | undefined = config.requireUserVerification
@@ -1300,7 +1300,8 @@ export function createApp(config: AppConfig): CreatedApp {
   app.get(
     WS_ROUTES.burrow,
     async (c, next) => {
-      const token = c.req.query(WS_TOKEN_PARAM);
+      const token = c.req.query(WS_TOKEN_PARAM) === undefined
+        ? parseBearer(c.req.header('Authorization')) : null;
       const burrow = token ? await burrowStore.findByToken(token) : undefined;
       if (!burrow) return c.json({ error: UNKNOWN_BURROW_TOKEN_ERROR }, 401);
       c.set('burrow', burrow);

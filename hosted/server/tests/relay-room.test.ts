@@ -223,7 +223,8 @@ async function signedIn(burrowToken: string) {
   return { authenticator, sessionToken: signed.json.sessionToken as string };
 }
 
-const burrowUrl = (token: string) => `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${token}`;
+const burrowUrl = () => `${wsBase}${WS_ROUTES.burrow}`;
+const burrowHeaders = (token: string) => ({ Authorization: `Bearer ${token}` });
 const clientUrl = (token: string) => `${wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${token}`;
 
 type FrameSocket = ReturnType<typeof openFrameSocket>;
@@ -258,9 +259,9 @@ async function account() {
     driver: {
       async connectBurrow() {
         const row = await burrowRow(userId);
-        return { ...row, socket: await open(burrowUrl(row.burrowToken)) };
+        return { ...row, socket: await open(burrowUrl(), { headers: burrowHeaders(row.burrowToken) }) };
       },
-      reconnectBurrow: (burrowToken: string) => open(burrowUrl(burrowToken)),
+      reconnectBurrow: (burrowToken: string) => open(burrowUrl(), { headers: burrowHeaders(burrowToken) }),
       openClient,
       async connectClient() {
         const ws = openClient();
@@ -352,14 +353,18 @@ test("each upgrade resolves its token and Origin first, and hands the object onl
     return { status: response.status, json: await response.json() };
   };
   // A Burrow socket carries no Origin: a browser page always sends one.
-  expect(await refusal(burrowUrl(burrowToken), POCKET.headers)).toEqual({
+  expect(await refusal(burrowUrl(), { ...POCKET.headers, ...burrowHeaders(burrowToken) })).toEqual({
     status: 403,
     json: { error: "forbidden" },
   });
   for (const token of ["", "short", randomSecret()])
-    expect(await refusal(`${origin}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${token}`), token).toEqual({
+    expect(await refusal(burrowUrl(), burrowHeaders(token)), token).toEqual({
       status: 401,
       json: { error: UNKNOWN_BURROW_TOKEN_ERROR },
+    });
+  for (const headers of [{}, burrowHeaders(burrowToken)])
+    expect(await refusal(burrowUrl() + '?token=' + burrowToken, headers)).toEqual({
+      status: 401, json: { error: UNKNOWN_BURROW_TOKEN_ERROR },
     });
   // A Client socket carries exactly this origin: no other page's, and not none.
   for (const headers of [{}, { origin: ORIGINS.account }, { origin: `${origin}.evil.test` }] as Record<
@@ -379,8 +384,8 @@ test("each upgrade resolves its token and Origin first, and hands the object onl
   // Admitted, the object hears the account and the Burrow or the session's
   // expiry and token hash, and not one of the caller's headers or its token.
   const before = (await (await owner.room()).probe()).upgrades.length;
-  await open(burrowUrl(burrowToken), {
-    headers: { cookie: "a=b", authorization: "Bearer x", "cf-connecting-ip": "203.0.113.9" },
+  await open(burrowUrl(), {
+    headers: { cookie: "a=b", ...burrowHeaders(burrowToken), "cf-connecting-ip": "203.0.113.9" },
   });
   await open(clientUrl(owner.sessionToken), { headers: { ...POCKET.headers, cookie: "a=b" } });
   const { upgrades, storage } = await (await owner.room()).probe();
@@ -400,7 +405,7 @@ test("each upgrade resolves its token and Origin first, and hands the object onl
 
   // A de-entitled owner opens neither socket; Pocket reads the 401 as expiry.
   await entitled();
-  expect(await refusal(burrowUrl(burrowToken))).toEqual({
+  expect(await refusal(burrowUrl(), burrowHeaders(burrowToken))).toEqual({
     status: 403,
     json: { error: NOT_ENTITLED_ERROR },
   });

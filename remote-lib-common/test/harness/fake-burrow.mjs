@@ -41,7 +41,6 @@ import {
   REMOTE_METHODS,
   SESSION_END_V1,
   WS_ROUTES,
-  WS_TOKEN_PARAM,
   knownPairingDeviceLabel,
   clampTerminalDimension,
   constantTimeEqual,
@@ -120,9 +119,9 @@ export class FakeBurrow extends EventEmitter {
     const wsBase = relayUrl.replace(/^http/, 'ws');
     const ws = attachFrameSocket(
       this,
-      `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrowToken}`,
+      `${wsBase}${WS_ROUTES.burrow}`,
       socket,
-      socketInit,
+      { ...socketInit, headers: { ...socketInit?.headers, Authorization: `Bearer ${burrowToken}` } },
     );
     ws.addEventListener('message', (ev) => {
       // Serialized through a promise chain for the reason the relay serializes
