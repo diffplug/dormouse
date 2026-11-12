@@ -1,6 +1,7 @@
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type { Command, DorCommandContext, MoveSurfaceResponse, WorkspaceScopedFlags } from './types.js';
-import { errorMessage, renderJson, requireControlClient, stringParser, workspaceFlag, workspaceParam, writeStdout } from './shared.js';
+import { renderJson, requireControlClient, stringParser, workspaceFlag, workspaceParam, writeStdout } from './shared.js';
 
 interface MoveFlags extends WorkspaceScopedFlags {
   readonly new?: boolean;
@@ -35,7 +36,7 @@ Text output: moved surface:4 workspace:2`,
         new: { kind: 'boolean', brief: 'Create a new destination Workspace.', optional: true, withNegated: false },
         focus: { kind: 'boolean', brief: 'Follow the moved Surface into passthrough.', optional: true, withNegated: false },
         dangerouslyDestroyIframePageState: { kind: 'boolean', brief: 'Accept reopening an iframe at its saved URL.', optional: true, withNegated: false },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         workspace: workspaceFlag,
       },
       positional: { kind: 'array', minimum: 1, parameter: { parse: stringParser, brief: 'Surface and destination Workspace.', placeholder: 'args' } },
@@ -53,7 +54,7 @@ Text output: moved surface:4 workspace:2`,
           ...workspaceParam(flags.workspace),
         });
         writeStdout(this, renderMoveResponse(result, flags.json === true));
-      } catch (error) { return new Error(errorMessage(error)); }
+      } catch (error) { return commandError(error); }
     },
   }),
 };

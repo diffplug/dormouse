@@ -10,6 +10,7 @@
  */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   ControlClient,
@@ -18,7 +19,6 @@ import type {
   WorkspaceMutationResponse,
 } from './types.js';
 import {
-  errorMessage,
   parseNonNegativeInt,
   printable,
   renderPrintableJson,
@@ -153,7 +153,7 @@ JSON output:
     parameters: {
       flags: {
         force: { kind: 'boolean', brief: 'Close even when the Workspace holds Surfaces Reopen cannot restore.', optional: true, withNegated: false },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         window: { kind: 'parsed', parse: stringParser, brief: 'move: the window to move to (a label, or "new").', optional: true, placeholder: 'label' },
         index: { kind: 'parsed', parse: (value) => parseNonNegativeInt(value, '--index'), brief: 'move: the 0-based strip position to move to.', optional: true, placeholder: 'n' },
         dangerouslyDestroyIframePageState: { kind: 'boolean', brief: 'move: accept losing every iframe Surface\'s page state.', optional: true, withNegated: false },
@@ -203,7 +203,7 @@ async function runWorkspaceCommand(
     writeStdout(this, renderWorkspaceResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

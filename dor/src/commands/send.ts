@@ -2,6 +2,7 @@
 
 import { validateInputEvents, SEND_INPUT_TIMEOUT_MS, type SendInputEvent } from '../input-events.js';
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -97,7 +98,7 @@ Examples:
     },
     parameters: {
       flags: {
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         key: { kind: 'parsed', variadic: true, parse: stringParser, brief: 'Send a named key or chord.', optional: true },
         sequence: { kind: 'parsed', parse: stringParser, brief: 'Send an ordered JSON sequence of text and key events.', optional: true, placeholder: 'json' },
         stdin: { kind: 'boolean', brief: 'Read text from standard input and send it as text.', optional: true, withNegated: false },
@@ -133,7 +134,7 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, surface
     writeStdout(this, renderSendResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

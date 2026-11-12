@@ -43,7 +43,7 @@ FLAGS
      [--left|--right|--up|--down|--auto]
                   Split direction. Mutually exclusive; default is --auto.
      [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
-     [--json]       Print JSON output.
+     [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--surface]    Reference Surface for placement.
      [--workspace]  Workspace to act in, instead of the caller's.

@@ -1009,7 +1009,7 @@ test('await times out with exit 2 and an empty stdout', async () => {
     client: awaitClient({ outcome: 'timeout', waitedMs: 30_000 }),
   }));
 
-  // --json changes nothing about a failure: still stderr, still exit 2.
+  // JSON failures carry a machine-readable verdict as well as exit status.
   await snapshot('await-timeout-json', await runCli(['await', 'surface:5', '--until', 'quiet', '--json'], {
     client: awaitClient({ outcome: 'timeout', waitedMs: 600_000 }),
   }));
@@ -2572,4 +2572,39 @@ test('send does not claim success until host delivery and never retries a failed
   assert.equal(result.exitCode, 1);
   assert.match(result.stderr, /partial delivery/);
   assert.equal(calls, 1);
+});
+
+
+test('JSON errors are objects for parsing, host, and endpoint failures', async () => {
+  const cases = [
+    [['read', 'surface:1', '--lines', '0', '--json'], { client: fixtureClient() }, 'INVALID_ARGUMENT'],
+    [['ensure', '--json', 'oops'], { client: fixtureClient() }, 'INVALID_ARGUMENT'],
+    [['unknown', '--json'], {}, 'INVALID_ARGUMENT'],
+    [['read', 'surface:1', '--json'], { env: {} }, 'CONTROL_UNAVAILABLE'],
+    [['read', 'surface:1', '--json'], { client: { readSurface: async () => { throw new Error('host refused \u001b[31m \n Unicode 🐭'); } } }, 'COMMAND_FAILED'],
+    [['await', 'surface:1', '--until', 'exit', '--json'], { client: awaitClient({ outcome: 'died', waitedMs: 3 }) }, 'SURFACE_DIED'],
+  ];
+  for (const [argv, options, code] of cases) {
+    const result = await runCli(argv, options);
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(JSON.parse(result.stdout).error.code, code, JSON.stringify(result));
+    assert.ok(JSON.parse(result.stdout).error.message);
+  }
+  const literal = await runCli(['read', '--workspace', '--json', 'surface:1'], { env: {} });
+  assert.equal(literal.stdout, '');
+  const help = await runCli(['read', '--json', '--help']);
+  assert.match(help.stdout, /USAGE/);
+});
+
+
+test('JSON errors preserve original text while both output channels escape terminal controls', async () => {
+  const message = 'C:\\tmp\n \u001b[2J \u202e 🐭';
+  for (const argv of [['tool', 'example'], ['read', 'surface:1']]) {
+    const client = { toolSurface: async () => { throw new Error(message); }, readSurface: async () => { throw new Error(message); } };
+    for (const json of ['--json', '--json=true']) {
+      const result = await runCli([...argv, json], { client });
+      assert.equal(JSON.parse(result.stdout).error.message, message);
+      assert.doesNotMatch(result.stdout + result.stderr, HIDDEN);
+    }
+  }
 });

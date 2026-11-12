@@ -1,6 +1,7 @@
 /** Private `surface.iframe` command wiring and open-target resolution. */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -8,7 +9,6 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
-  errorMessage,
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
@@ -74,7 +74,7 @@ JSON output:
     parameters: {
       flags: {
         focus: focusFlag,
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
@@ -101,8 +101,8 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
   let url = target;
   if (isSurfaceOpenTarget(target)) {
     const resolved = await resolveSurfaceOpenTarget(target, client, flags.workspace);
-    if (!resolved.ok) return new Error(resolved.message);
-    url = resolved.value;
+    if (resolved instanceof Error) return resolved;
+    url = resolved;
   }
 
   try {
@@ -116,7 +116,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
     writeStdout(this, renderIframeResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

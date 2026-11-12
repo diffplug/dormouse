@@ -1,6 +1,7 @@
 /** Private `surface.split` command wiring and response rendering. */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -11,7 +12,6 @@ import type {
 } from './types.js';
 import {
   callerWorkingDirectory,
-  errorMessage,
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
@@ -133,7 +133,7 @@ JSON output:
         auto: { kind: 'boolean', brief: 'Default; choose right when wide and down when narrow.', optional: true, withNegated: false },
         down: { kind: 'boolean', brief: 'Split below the target surface.', optional: true, withNegated: false },
         focus: focusFlag,
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true, withNegated: false },
@@ -174,7 +174,7 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
     writeStdout(this, renderSplitResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

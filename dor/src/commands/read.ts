@@ -1,6 +1,7 @@
 /** Private `surface.read` command wiring and response rendering. */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -8,7 +9,6 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
-  errorMessage,
   parsePositiveInt,
   renderJson,
   requireControlClient,
@@ -52,7 +52,7 @@ JSON output:
     },
     parameters: {
       flags: {
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         lines: { kind: 'parsed', parse: parseLineCount, brief: 'Maximum number of lines to return.', optional: true, placeholder: 'count' },
         scrollback: { kind: 'boolean', brief: 'Include terminal scrollback/history instead of only the visible screen.', optional: true, withNegated: false },
         workspace: workspaceFlag,
@@ -82,7 +82,7 @@ async function runReadCommand(this: DorCommandContext, flags: ReadFlags, surface
     writeStdout(this, renderReadResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

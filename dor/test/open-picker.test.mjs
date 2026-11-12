@@ -248,6 +248,17 @@ test('cancelling exits 1 silently and opens nothing', async () => {
   });
 });
 
+test('a cancel under --json is a CANCELLED error object', async () => {
+  await withTree(async (dir) => {
+    const { terminal, result } = await startPicker(dir, ['o', '--json']);
+    terminal.send('\x03');
+    const { exitCode, stdout, stderr } = await result;
+    assert.equal(exitCode, 1);
+    assert.equal(stderr, '');
+    assert.equal(JSON.parse(stdout).error.code, 'CANCELLED');
+  });
+});
+
 test('--tool fixes the handler without asking the host', async () => {
   await withTree(async (dir) => {
     const { terminal, client, result } = await startPicker(dir, ['o', '--tool', 'glow']);

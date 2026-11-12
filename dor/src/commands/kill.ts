@@ -1,6 +1,7 @@
 /** Private `surface.kill` command wiring and confirmation validation. */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -10,7 +11,6 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
-  errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
@@ -59,7 +59,7 @@ JSON output:
       flags: {
         confirmDangerously: { kind: 'boolean', brief: 'Kill without further confirmation.', optional: true, withNegated: false },
         confirmIfRead: { kind: 'parsed', parse: stringParser, brief: 'Kill only if dor read contains this text.', optional: true, placeholder: 'text' },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         workspace: workspaceFlag,
       },
       positional: {
@@ -89,7 +89,7 @@ async function runKillCommand(this: DorCommandContext, flags: KillFlags, surface
     writeStdout(this, renderKillResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return commandError(error);
   }
 }
 

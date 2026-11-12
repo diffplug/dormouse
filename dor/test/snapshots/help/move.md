@@ -21,7 +21,7 @@ FLAGS
      [--new]                                    Create a new destination Workspace.
      [--focus]                                  Follow the moved Surface into passthrough.
      [--dangerously-destroy-iframe-page-state]  Accept reopening an iframe at its saved URL.
-     [--json]                                   Print JSON output.
+     [--json]                                   Print a JSON result or error object.
      [--workspace]                              Workspace to act in, instead of the caller's.
   -h  --help                                    Print help information and exit
       --                                        All subsequent inputs should be interpreted as arguments

@@ -170,8 +170,8 @@ export async function resolveOpenTargetArgs(
     const client = requireControlClient(options);
     if (client instanceof Error) return { ok: false, message: client.message };
     const resolved = await resolveSurfaceOpenTarget(raw, client, workspace);
-    if (!resolved.ok) return resolved;
-    url = resolved.value;
+    if (resolved instanceof Error) return { ok: false, message: resolved.message };
+    url = resolved;
   } else {
     // A schemeless :port / host:port needs no host round trip. isSpecialOpenTarget
     // matched a non-surface target, so inference here always succeeds; leave argv

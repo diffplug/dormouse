@@ -19,7 +19,7 @@ JSON output:
   }
 
 FLAGS
-     [--json]        Print JSON output.
+     [--json]        Print a JSON result or error object.
      [--lines]       Maximum number of lines to return.
      [--scrollback]  Include terminal scrollback/history instead of only the visible screen.
      [--workspace]   Workspace to act in, instead of the caller's.

@@ -1,6 +1,7 @@
 /** `dor tool` — run a command as a Dor Tool (`docs/specs/dor-tool.md`). */
 
 import { buildCommand } from '@stricli/core';
+import { commandError } from './errors.js';
 import type {
   Command,
   DorCommandContext,
@@ -12,11 +13,11 @@ import {
   callerWorkingDirectory,
   cwdParser,
   launchDirectory,
-  errorMessage,
   focusFlag,
   focusHelp,
   focusMinimizeConflict,
   focusParam,
+  pickerCancelled,
   renderPrintableJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -176,7 +177,7 @@ JSON output:
       flags: {
         focus: focusFlag,
         global: { kind: 'boolean', brief: 'Resolve only user-global tools.', optional: true, withNegated: false },
-        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Ignore a declared key and always create.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
@@ -248,11 +249,7 @@ async function pickTool(context: DorCommandContext, flags: ToolFlags, placing: b
   }
   // The launch prints the chosen Tool's own warnings.
   const choice = await runToolPicker({ terminal, listing, home: context.options.env?.HOME ?? context.options.host.homedir() });
-  // A cancel runs nothing and prints nothing, but is not a success.
-  if (!choice) {
-    context.process.exitCode = 1;
-    return undefined;
-  }
+  if (!choice) return pickerCancelled(context);
   return dispatchToolSurface(context, {
     // A shadowed user Tool is the one chosen, so the project's must not run.
     name: choice.name, args: [], global: flags.global === true || choice.shadowed,
@@ -274,8 +271,7 @@ export async function dispatchToolSurface(
     writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
-    // Host errors can echo paths and repo text.
-    return new Error(printableExact(errorMessage(error)));
+    return commandError(error);
   }
 }
 
@@ -293,7 +289,7 @@ async function readToolList(context: DorCommandContext, flags: ToolFlags): Promi
   try {
     return await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options), global: flags.global === true });
   } catch (error) {
-    return new Error(printableExact(errorMessage(error)));
+    return commandError(error);
   }
 }
 

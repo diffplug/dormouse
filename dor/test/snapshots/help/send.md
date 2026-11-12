@@ -37,7 +37,7 @@ Examples:
   dor send surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'
 
 FLAGS
-     [--json]       Print JSON output.
+     [--json]       Print a JSON result or error object.
      [--key]...     Send a named key or chord.
      [--sequence]   Send an ordered JSON sequence of text and key events.
      [--stdin]      Read text from standard input and send it as text.

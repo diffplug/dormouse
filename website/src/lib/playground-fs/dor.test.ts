@@ -80,6 +80,12 @@ describe("playground dor's other commands", () => {
     expect((await ran(["agent-browser", "--help"])).text).toContain("USAGE\r\n  dor agent-browser");
   });
 
+  it("uses the shared JSON failure contract", async () => {
+    const result = await ran(["read", "surface:1", "--lines", "0", "--json"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.text).toContain('"code": "INVALID_ARGUMENT"');
+  });
+
   it("prints version and skill from the playground's host", async () => {
     expect((await ran(["--version"])).text).toMatch(/^dor \d+\.\d+\.\d+ \[playground\]\r\n$/);
     expect(JSON.parse((await ran(["skill", "--json"])).text).markdown).toContain("dor ensure");

@@ -39,7 +39,7 @@ FLAGS
      [--all]         List every Workspace, grouped by a Workspace header.
      [--command]     Exact running command to match.
      [--cwd]         Working directory to match.
-     [--json]        Print JSON output.
+     [--json]        Print a JSON result or error object.
      [--kind]        Surface kind to show.
      [--port]        Show terminal Surfaces listening on this TCP port.
      [--ports]       Include each terminal's listening ports.

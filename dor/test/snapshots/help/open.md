@@ -29,7 +29,7 @@ Typed alone at a prompt, the command focuses the Surface it opens or reuses; an 
 
 FLAGS
      [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
-     [--json]       Print JSON output.
+     [--json]       Print a JSON result or error object.
      [--minimize]   Create the surface minimized.
      [--fresh]      Open another instance even when the Tool has a key.
      [--surface]    Surface to split when creating.

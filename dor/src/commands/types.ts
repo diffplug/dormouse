@@ -757,6 +757,10 @@ export interface DorCommandContext extends CommandContext {
    *  is the only way a command can tell a named `dor tool` from an anonymous
    *  one, or keep `dor send`'s `--text` and `--key` events in argv order. */
   readonly commandArgs: readonly string[];
+  /** Records the failure `--json` prints. A failure stricli reports (a returned
+   *  or thrown error, a parse error) is recorded already; a command that exits
+   *  nonzero without one (`dor await`, a picker cancel) reports its own. */
+  readonly reportFailure: (failure: import('./errors.js').CliFailure) => void;
 }
 
 export interface Command {
