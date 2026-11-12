@@ -38,6 +38,6 @@ function control<T>(source: FileLinkSource, method: string, params: Record<strin
     response => response.ok ? resolve(response.result as T) : reject(new Error(response.error ?? 'The file could not be opened.')),
     // Confirming the printed URI chooses a viewer; the resolved file still
     // needs the terminal-link gate if that viewer would run its scripts.
-    { terminalLink: method === SURFACE_CONTROL_METHODS.tool },
+    { gui: true, terminalLink: method === SURFACE_CONTROL_METHODS.tool },
   ));
 }

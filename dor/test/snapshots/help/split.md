@@ -4,7 +4,7 @@ Invocation: `dor split --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]
+  dor split [--left|--right|--up|--down|--auto] [--focus] [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]
   dor split --help
 
 If no direction is provided, --auto is used. --auto chooses right when the target surface is wide, down when it is narrow, and right when the target is minimized.
@@ -13,7 +13,7 @@ The new terminal starts in the directory where you invoke dor split. --surface a
 
 Use -- followed by a command to run an initial command in the new terminal surface. Only split's own options come before --.
 
-Supplying -- leaves focus unchanged: "dor split -- <command>" runs the command in the new terminal, and "dor split --" opens a blank terminal. Without --, dor split focuses the new surface.
+Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
@@ -42,6 +42,7 @@ JSON output:
 FLAGS
      [--left|--right|--up|--down|--auto]
                   Split direction. Mutually exclusive; default is --auto.
+     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
      [--json]       Print JSON output.
      [--minimize]   Create the surface minimized.
      [--surface]    Reference Surface for placement.

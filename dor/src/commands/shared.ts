@@ -51,7 +51,7 @@ export function parseNonNegativeInt(input: string, flag: string): number {
 
 
 export interface PreDelimiterArgSpec {
-  /** Flags taking no value. */
+  /** Boolean flags, bare or as `--name=value` for stricli to parse. */
   readonly booleans: ReadonlySet<string>;
   /** Flags consuming the next argument. */
   readonly valued: ReadonlySet<string>;
@@ -70,9 +70,10 @@ export function scanPreDelimiterArgs(head: readonly string[], spec: PreDelimiter
   for (let index = 0; index < head.length; index += 1) {
     const arg = head[index];
     if (spec.booleans.has(arg)) continue;
-    // stricli also takes `--flag=value`.
+    // stricli also takes `--flag=value`, a boolean's value included.
     const equals = arg.indexOf('=');
-    if (arg.startsWith('--') && equals > 0 && spec.valued.has(arg.slice(0, equals))) {
+    const name = arg.slice(0, equals);
+    if (arg.startsWith('--') && equals > 0 && (spec.valued.has(name) || spec.booleans.has(name))) {
       continue;
     }
     if (spec.valued.has(arg)) {
@@ -130,6 +131,33 @@ export const workspaceFlag = {
 /** The `workspace` field of a request, present only when the flag was given. */
 export function workspaceParam(workspace: string | undefined): { workspace?: string } {
   return workspace === undefined ? {} : { workspace };
+}
+
+/** The `--focus` flag every Surface-producing command carries; `--focus=false`
+ *  states the default off (`docs/specs/dor-cli.md` → "Focus intent"). */
+export const focusFlag = {
+  kind: 'boolean',
+  brief: 'Focus the created or reused Surface (default: only when typed alone at a prompt).',
+  optional: true,
+  withNegated: false,
+} as const;
+
+/** The `focus` field of a request, present only when the flag was given, so
+ *  the host can apply its default. */
+export function focusParam(focus: boolean | undefined): { focus?: boolean } {
+  return focus === undefined ? {} : { focus };
+}
+
+/** The focus paragraph of each Surface-producing command's help. */
+export function focusHelp({ minimize, browser = false }: { minimize: boolean; browser?: boolean }): string {
+  return 'Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent\'s or a script\'s invocation leaves focus where it is. --focus or --focus=false decides either way.'
+    + (browser ? ' An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.' : '')
+    + (minimize ? ' --minimize turns the default off, and --focus with --minimize is an error.' : '');
+}
+
+/** An explicit `--focus` cannot apply to a Surface `--minimize` hides. */
+export function focusMinimizeConflict(flags: { readonly focus?: boolean; readonly minimize?: boolean }): Error | undefined {
+  return flags.focus === true && flags.minimize === true ? new Error('--focus and --minimize are mutually exclusive') : undefined;
 }
 
 export function writeStdout(context: DorCommandContext, stdout: string): void {

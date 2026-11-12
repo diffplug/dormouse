@@ -79,3 +79,7 @@ On macOS in November 2026, a Dormouse website Tool owned `*:5173` while an older
 **The pointer-only stub was tried and was too soft.** A stub that only said "run `dor skill`" left agents skipping it and falling back to native subprocesses and their own browser tools — the two behaviors needing redirection *before* an agent would think to read the skill. Hence the same two directives in the stub itself and again at the top of `dor/skill.md`, so an agent that does run `dor skill` meets them up front.
 
 **Why exactly those two directives and no more.** `dor ensure` and `dor agent-browser` are foundational command names, the least likely `dor` facts to drift, so a stub built only from them stays correct without maintenance — the point of committing it to a repo nobody will revisit. Every extra fact is one more thing that can go stale in every clone.
+
+## Focus intent
+
+The default follows who is typing. A bare `dor split` used to take focus while `dor split --` did not, so an agent that forgot the `--` moved the user's keyboard into its pane mid-keystroke, and a person who typed `dor ensure` or `dor tool` at a prompt then had to click over to the result. The shell's reported command line already separates the two for take-over: a person's `dor` runs as the pane's own command, an agent's runs under the agent's. Reading that line costs the agent nothing and needs no new detector; a forged line can only move focus, which `--focus` already allows any caller. The preview slot stays put because it is a glance pane the next preview replaces.

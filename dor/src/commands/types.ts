@@ -129,6 +129,12 @@ export interface WorkspaceScopedRequest {
   workspace?: string;
 }
 
+/** A Surface-producing request's `--focus`, present only when given: absent,
+ *  the host applies the default (`docs/specs/dor-cli.md` → "Focus intent"). */
+export interface FocusIntentRequest {
+  focus?: boolean;
+}
+
 /** The parsed `--workspace <ref>` flag behind it (`workspaceFlag` in
  *  `dor/src/commands/shared.ts`), which every action command declares. */
 export interface WorkspaceScopedFlags {
@@ -242,7 +248,7 @@ export type ReopenResponse = { status: 'reopened' } & (
   | { kind: 'window' }
 );
 
-export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
+export interface SplitSurfaceRequest extends WorkspaceScopedRequest, FocusIntentRequest {
   /** The invoking directory, where the new Session starts; `surface` is placement only. */
   cwd?: string;
   /** Raw argv for the initial command; the host quotes it for the target shell. */
@@ -250,11 +256,6 @@ export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
   direction: SplitDirection;
   minimized: boolean;
   surface?: string;
-  /** Leave focus on the caller instead of moving it to the new surface. The CLI
-   *  sets it for every split except a bare `dor split` (no `--`, no command): a
-   *  `--` tail (`dor split -- <command>` or an empty `dor split --`) and an
-   *  initial command both leave focus put. The host honors it as sent. */
-  focusNeutral: boolean;
 }
 
 export interface SplitSurfaceResponse {
@@ -265,7 +266,7 @@ export interface SplitSurfaceResponse {
   command?: string;
 }
 
-export interface EnsureSurfaceRequest extends WorkspaceScopedRequest {
+export interface EnsureSurfaceRequest extends WorkspaceScopedRequest, FocusIntentRequest {
   /** Raw argv for the command; the host quotes it for the target shell. */
   command: string[];
   minimized: boolean;
@@ -292,7 +293,7 @@ export interface EnsureSurfaceResponse {
  * file, so a caller cannot hand the host a command while claiming the file
  * authorized it (`docs/specs/dor-tool.md` -> Trust).
  */
-export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
+export interface ToolSurfaceRequest extends WorkspaceScopedRequest, FocusIntentRequest {
   /** Local-file dispatch (`dor open`). */
   file?: string;
   tool?: string;
@@ -503,7 +504,7 @@ export interface MoveSurfaceResponse {
   workspaceId: string;
 }
 
-export interface IframeSurfaceRequest extends WorkspaceScopedRequest {
+export interface IframeSurfaceRequest extends WorkspaceScopedRequest, FocusIntentRequest {
   minimized: boolean;
   surface?: string;
   url: string;
@@ -567,7 +568,7 @@ export interface ResolveBrowserResponse {
 
 /** After a browser command succeeds: open or reuse the Surface bound to its
  *  session. The binding fields are what the command ran with. */
-export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
+export interface BrowserSurfaceRequest extends WorkspaceScopedRequest, FocusIntentRequest {
   provider: BrowserAutomationProvider;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
@@ -752,10 +753,9 @@ export interface DorCommandContext extends CommandContext {
   readonly process: StricliProcess;
   readonly options: CliOptions;
   /** The raw argv after the command name, as `cli-core.ts` saw it before stricli
-   *  parsed it. stricli consumes `--` and leaves no trace in the parsed
-   *  positionals, so this is the only way a command can tell `dor split --`
-   *  (empty tail) from a bare `dor split`, or a named `dor tool` from an
-   *  anonymous one. */
+   *  parsed it. stricli consumes `--` and groups repeated flags by name, so this
+   *  is the only way a command can tell a named `dor tool` from an anonymous
+   *  one, or keep `dor send`'s `--text` and `--key` events in argv order. */
   readonly commandArgs: readonly string[];
 }
 

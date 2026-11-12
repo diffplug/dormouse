@@ -1,10 +1,13 @@
 import { buildCommand } from '@stricli/core';
 import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
-import { callerWorkingDirectory, cwdParser, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
+import {
+  callerWorkingDirectory, cwdParser, focusFlag, focusHelp, focusMinimizeConflict, focusParam, requireControlClient, stringParser, workspaceFlag, workspaceParam,
+} from './shared.js';
 import { runFilePicker } from './open-picker.js';
 import { dispatchToolSurface, TOOL_TIMEOUT_MS } from './tool.js';
 
 interface OpenFlags extends WorkspaceScopedFlags {
+  readonly focus?: boolean;
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly fresh?: boolean;
@@ -33,12 +36,15 @@ builtin:code opens any text file, Markdown and HTML included, as source in the c
 
 The selected Tool receives the canonical absolute path as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
 
-Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split without taking focus. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
+Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
+
+${focusHelp({ minimize: true })} --preview turns the default off too.
 
 --preview shows the file or folder in this Workspace's preview slot: one reusable pane, marked by an italic label, that each preview retargets in place — reporting "retargeted", or "superseded" when a newer preview replaced it first. Opening what the slot shows without --preview keeps it open, as do double-clicking its pane header, Keep open in its terminal context, and the Tool reporting unsaved changes; the next preview then gets a new slot. A retarget interrupts the slot with Ctrl+C, so preview Tools should exit on it (less -K, glow); a slot still running a second later is kept open instead. A preview never takes over the calling pane, and a Tool already kept open for it is revealed instead.`,
     },
     parameters: {
       flags: {
+        focus: focusFlag,
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Open another instance even when the Tool has a key.', optional: true, withNegated: false },
@@ -51,6 +57,8 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
       positional: { kind: 'tuple', parameters: [{ parse: stringParser, brief: 'Local file or folder to open; omit it to choose one.', placeholder: 'path', optional: true }] },
     },
     async func(this: DorCommandContext, flags: OpenFlags, path?: string) {
+      const conflict = focusMinimizeConflict(flags);
+      if (conflict) return conflict;
       // The slot is one reused pane: it is never another instance or a Door.
       if (flags.preview && (flags.fresh || flags.minimize)) {
         return new Error(`--preview cannot be combined with ${flags.fresh ? '--fresh' : '--minimize'}`);
@@ -75,6 +83,7 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
         ...workspaceParam(flags.workspace),
         fresh: flags.fresh === true,
         minimized: flags.minimize === true,
+        ...focusParam(flags.focus),
         surface: flags.surface,
         cwd,
         ...(flags.preview ? { preview: true } : {}),

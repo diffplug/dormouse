@@ -27,7 +27,7 @@ import type {
   ControlClient,
   ParseResult,
 } from './types.js';
-import { callerWorkingDirectory, errorMessage, fail, requireControlClient, workspaceParam } from './shared.js';
+import { callerWorkingDirectory, errorMessage, fail, focusParam, requireControlClient, workspaceParam } from './shared.js';
 import { inferredHttpUrl, isSpecialOpenTarget, isSurfaceOpenTarget, resolveSurfaceOpenTarget } from './open-target.js';
 import { callerWslDistro, linuxPathText, windowsPathArgs, type PathArgs } from './wsl-paths.js';
 
@@ -47,7 +47,7 @@ type InterceptedFlag = (typeof INTERCEPTED_FLAGS)[number];
  *  resolves — exactly one of the three, by construction. `key` rides along only
  *  when it named the session: a raw or surface-addressed session may be
  *  GUI-minted, which no key names. */
-export type ResolvedSessionFlags = { rest: string[]; workspace?: string } & (
+export type ResolvedSessionFlags = { rest: string[]; workspace?: string; focus?: boolean } & (
   | { session: string; key?: undefined; surface?: undefined }
   | { key: string; session?: undefined; surface?: undefined }
   | { surface: string; session?: undefined; key?: undefined }
@@ -59,6 +59,7 @@ export function extractSessionFlags(
 ): ParseResult<ResolvedSessionFlags> {
   const values = new Map<InterceptedFlag, string>();
   const rest: string[] = [];
+  let focus: boolean | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
@@ -67,6 +68,14 @@ export function extractSessionFlags(
     if (arg === '--') {
       rest.push(...args.slice(index));
       break;
+    }
+    // The one boolean: `--focus`, or `--focus=true|false`, never a separate value.
+    if (arg === '--focus' || arg.startsWith('--focus=')) {
+      const value = arg === '--focus' ? 'true' : arg.slice('--focus='.length);
+      if (value !== 'true' && value !== 'false') return { ok: false, message: `--focus takes true or false, not '${value}'` };
+      if (focus !== undefined) return { ok: false, message: '--focus may be given only once' };
+      focus = value === 'true';
+      continue;
     }
     const spells = (name: string) => arg === name || arg.startsWith(`${name}=`);
     const flag = INTERCEPTED_FLAGS.find(spells) ?? (sessionAliases.some(spells) ? '--session' : undefined);
@@ -105,7 +114,7 @@ export function extractSessionFlags(
     return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of ${sessionNoun})` };
   }
 
-  const workspace = workspaceParam(values.get('--workspace'));
+  const workspace = { ...workspaceParam(values.get('--workspace')), ...focusParam(focus) };
 
   const surface = values.get('--surface');
   if (surface !== undefined) return { ok: true, value: { surface, rest, ...workspace } };
@@ -541,6 +550,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       const blank = await run([...sessionArgs, ...navigation.blank], launchEnv);
       if (blank.exitCode !== 0) return fail(`Could not prepare the playwright viewport before navigation: ${blank.stderr.trim() || `playwright exited ${blank.exitCode}`}`);
       const preparedSurface = await client.browserSurface({
+        ...focusParam(flags.focus),
         provider: d.provider, key: flags.key, ...surfaceParam(flags.surface), session: binding.session, cwd: cwd ?? callerCwd,
         ...(binaryPath ? { binaryPath } : {}), ...(fresh && initialViewport ? { initialViewport } : {}),
         ...workspaceParam(flags.workspace),
@@ -582,6 +592,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
       const statusArgs = d.streamStatus?.(binding.session, mode);
       const wsPort = statusArgs === undefined ? undefined : parseStreamPort((await run([...statusArgs, ...nativeLaunchOptions])).stdout);
       await client.browserSurface({
+        ...focusParam(flags.focus),
         provider: d.provider,
         key: flags.key,
         ...surfaceParam(flags.surface),

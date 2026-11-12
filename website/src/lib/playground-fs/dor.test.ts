@@ -75,7 +75,7 @@ describe("playground dor's other commands", () => {
       expect(await ran(args)).toMatchObject({ exitCode: 0, text: expect.stringContaining("USAGE\r\n  dor split [") });
     }
     for (const args of [["open", "--help"], ["help", "open"], ["help", "o"], ["o", "README.md", "-h"]]) {
-      expect((await ran(args)).text).toContain("USAGE\r\n  dor open [--json]");
+      expect((await ran(args)).text).toContain("USAGE\r\n  dor open [--focus] [--json]");
     }
     expect((await ran(["agent-browser", "--help"])).text).toContain("USAGE\r\n  dor agent-browser");
   });
@@ -173,7 +173,7 @@ describe("playground cancellation", () => {
     await Promise.resolve();
     expect(result).toBe("canceled");
     await pending;
-    await expect(client.splitSurface({ direction: "right", minimized: false, focusNeutral: false })).rejects.toThrow(/cancel/i);
+    await expect(client.splitSurface({ direction: "right", minimized: false, focus: false })).rejects.toThrow(/cancel/i);
     expect(requests).toHaveLength(1);
     requests[0].respond({ ok: true, result: {} });
     expect(result).toBe("canceled");

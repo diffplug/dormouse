@@ -12,6 +12,10 @@ import type {
 import {
   callerWorkingDirectory,
   errorMessage,
+  focusFlag,
+  focusHelp,
+  focusMinimizeConflict,
+  focusParam,
   renderJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -24,6 +28,7 @@ import {
 interface SplitFlags extends WorkspaceScopedFlags {
   readonly auto?: boolean;
   readonly down?: boolean;
+  readonly focus?: boolean;
   readonly json?: boolean;
   readonly left?: boolean;
   readonly minimize?: boolean;
@@ -39,7 +44,7 @@ export const splitCommand: Command = {
   preParse(args) {
     const delimiter = args.indexOf('--');
     const scan = scanPreDelimiterArgs(delimiter < 0 ? args : args.slice(0, delimiter), {
-      booleans: new Set(['--auto', '--down', '--up', '--left', '--right', '--json', '--minimize']),
+      booleans: new Set(['--focus', '--auto', '--down', '--up', '--left', '--right', '--json', '--minimize']),
       valued: new Set(['--surface', '--workspace']),
       positionals: 'reject',
     });
@@ -57,8 +62,8 @@ export const splitCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface handle] [--workspace ref]<TO-EOL>`,
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]\n`,
+        `  dor split ${groupedSplitDirectionUsage} [--focus] [--json] [--minimize] [--surface handle] [--workspace ref]<TO-EOL>`,
+        `  dor split ${groupedSplitDirectionUsage} [--focus] [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]\n`,
       ],
     },
     {
@@ -97,7 +102,7 @@ The new terminal starts in the directory where you invoke dor split. --surface a
 
 Use -- followed by a command to run an initial command in the new terminal surface. Only split's own options come before --.
 
-Supplying -- leaves focus unchanged: "dor split -- <command>" runs the command in the new terminal, and "dor split --" opens a blank terminal. Without --, dor split focuses the new surface.
+${focusHelp({ minimize: true })}
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
@@ -127,6 +132,7 @@ JSON output:
       flags: {
         auto: { kind: 'boolean', brief: 'Default; choose right when wide and down when narrow.', optional: true, withNegated: false },
         down: { kind: 'boolean', brief: 'Split below the target surface.', optional: true, withNegated: false },
+        focus: focusFlag,
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
@@ -146,6 +152,8 @@ JSON output:
 };
 
 async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...commandArgs: string[]): Promise<void | Error> {
+  const conflict = focusMinimizeConflict(flags);
+  if (conflict) return conflict;
   const direction = parseSplitDirection(flags);
   if (!direction.ok) return new Error(direction.message);
   const command = commandArgs.length > 0 ? commandArgs : undefined;
@@ -159,11 +167,8 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       direction: direction.value,
       cwd: callerWorkingDirectory(undefined, this.options),
       minimized: flags.minimize === true,
+      ...focusParam(flags.focus),
       surface: flags.surface,
-      // An initial command needs `--`, so `--` alone decides: a bare `dor split`
-      // steals focus, and any `--`, empty or not, leaves it on the caller. The
-      // CLI owns the whole decision so the host can honor the field as sent.
-      focusNeutral: this.commandArgs.includes('--'),
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderSplitResponse(response, flags.json === true));

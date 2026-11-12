@@ -44,7 +44,10 @@ import { stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
+  cliFocusIntent,
   toolTakesOverCaller,
+  typedDorVerb,
+  type FocusIntentFacts,
   type ToolTakeoverGate,
 } from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
@@ -106,7 +109,6 @@ export type DorControlParams = {
   confirmation?: unknown;
   cwd?: unknown;
   direction?: unknown;
-  focusNeutral?: unknown;
   events?: unknown;
   key?: unknown;
   lines?: unknown;
@@ -158,6 +160,9 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   /** A click on a terminal link, which asks before a page that runs its own
    *  script. Never set by a control-socket request. */
   terminalLink?: true;
+  /** A request the webview's own UI makes, which keeps its own focus policy
+   *  rather than the CLI's. Never set by a control-socket request. */
+  gui?: true;
   /** The default placement reference when it is not the caller: a helper's
    *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
   placementSurfaceId?: string;
@@ -173,6 +178,9 @@ type EnsureBrowserSurfaceResult =
 /** Reuse-or-create an automated browser surface for the session a `dor agent-browser` /
  *  `dor playwright` command just drove — the surface half of the control plane. */
 type EnsureBrowserSurface = (args: {
+  focus: boolean;
+  /** Only an explicit request focuses a browser that is already visible. */
+  explicitFocus: boolean;
   provider: BrowserAutomationProvider;
   headed?: boolean;
   nativeIdentity: string;
@@ -1011,6 +1019,8 @@ export function useDorControl({
   }, [lath, retypeInterruptedRun, restoreOnLatePrompt]);
 
   const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
+    focus,
+    explicitFocus,
     key,
     provider,
     headed,
@@ -1047,7 +1057,7 @@ export function useDorControl({
         ok: true,
         status: 'existing',
         surfaceId: existing.id,
-        minimized: existing.minimized,
+        minimized: focus && (explicitFocus || existing.minimized) ? !revealSurface(existing.id) : existing.minimized,
       };
     }
 
@@ -1068,8 +1078,7 @@ export function useDorControl({
       reference: target.value,
       preserveSource,
       title,
-      // `dor agent-browser` opens the screencast in the background; caller keeps focus.
-      focusNeutral: true,
+      focusNeutral: !focus,
     });
     if (!result.ok) return { ok: false, message: result.message };
     handOver(result.value.id);
@@ -1079,13 +1088,27 @@ export function useDorControl({
       surfaceId: result.value.id,
       minimized: false,
     };
-  }, [createContentSurface, findBrowserSurface, updateSurfaceParams, lath]);
+  }, [createContentSurface, findBrowserSurface, updateSurfaceParams, lath, revealSurface]);
 
 
   // The request handler itself. The window listener that picks WHICH Wall runs it
   // lives in `dor-control-router.ts`, so exactly one Workspace answers.
   const handleDorControl = useCallback(async (detail: DorControlRequest) => {
     const params = detail.params ?? {};
+    if (booleanParam(params.focus) && booleanParam(params.minimized)) {
+      detail.respond({ ok: false, error: '--focus and --minimize are mutually exclusive' });
+      return;
+    }
+    // Read at arrival, while `dor` still holds the caller's prompt.
+    const focusFacts: FocusIntentFacts = {
+      focus: params.focus,
+      background: booleanParam(params.minimized) || booleanParam(params.preview),
+      gui: !!detail.gui,
+      typedVerb: detail.surfaceId !== undefined && isPaneOscDriven(detail.surfaceId)
+        ? typedDorVerb(getTerminalPaneState(detail.surfaceId).currentCommand?.rawCommandLine)
+        : null,
+    };
+    const focusIntent = (verb: string): boolean => cliFocusIntent(focusFacts, verb);
 
     // A Workspace being closed takes no new Surfaces: `closeAll` walks its
     // members, and one created behind the walk would ride the Wall's unmount out
@@ -1169,10 +1192,8 @@ export function useDorControl({
         reference: resolved.target,
         // The invoking directory, like `dor ensure`; `--surface` only places.
         cwd: stringParam(params.cwd),
-        // The CLI computes the focus intent — a bare `dor split` steals focus;
-        // a `--` tail or an initial command does not — and sends it as
-        // focusNeutral. Honor it.
-        focusNeutral: booleanParam(params.focusNeutral),
+        focusNeutral: !focusIntent('split'),
+        visible: focusIntent('split'),
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -1279,6 +1300,9 @@ export function useDorControl({
         const openFile = projectEntry ? undefined : historical?.target ?? stringParam(params.file);
         const toolArgs = projectEntry ? [projectEntry.target] : stringArrayParam(params.args) ?? [];
         const opening = openFile !== undefined;
+        const toolFocus = focusIntent(opening ? 'open' : 'tool');
+        // The webview's own requests keep their reveal policy: focus unless quiet.
+        const revealTool = (id: string, quiet = false) => revealSurface(id, { focusNeutral: detail.gui ? quiet : !toolFocus });
         if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
           detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
           return;
@@ -1466,7 +1490,7 @@ export function useDorControl({
               };
               const already = booleanParam(params.fresh) ? null : findSurfaceByParams(matchesPending);
               if (already) {
-                const revealed = revealSurface(already.id);
+                const revealed = revealTool(already.id);
                 respondTool('pending', {
                   surfaceId: already.id,
                   command: pendingCommand,
@@ -1497,7 +1521,7 @@ export function useDorControl({
                 visible: true,
                 reference: pendingTarget.target,
                 cwd,
-                focusNeutral: true,
+                focusNeutral: !toolFocus,
                 // No shell until a human approves: `createSplitSurface` would
                 // otherwise stage shell opts and, on some paths, spawn the PTY
                 // outright (docs/specs/dor-tool.md -> Trust rule 2).
@@ -1632,7 +1656,7 @@ export function useDorControl({
           };
           if (placedElsewhere()) return false;
           if (sameDocument && !traversal && params.fragment === undefined) {
-            respondStanding('existing', id, revealSurface(id));
+            respondStanding('existing', id, revealTool(id));
             return true;
           }
           const nextCommand = sameDocument ? '' : promptToolCommand(toolRun, id);
@@ -1657,7 +1681,7 @@ export function useDorControl({
             // reload the page, even through Back/Forward.
             lath.store.updateParams(id, { toolHistory: nextHistory });
             if (isPreviewSlotParams(source)) previewSlot.pin(id);
-            respondStanding('existing', id, revealSurface(id));
+            respondStanding('existing', id, revealTool(id));
             return true;
           }
           const token = beginSlotSwitch(id, () => lath.getMeta(id)?.params);
@@ -1692,7 +1716,7 @@ export function useDorControl({
             detail.respond({ ok: false, error: 'The destination Tool did not start.' });
             return true;
           }
-          respondStanding('retargeted', id, revealSurface(id));
+          respondStanding('retargeted', id, revealTool(id));
           return true;
         };
         if (params.disposition === 'current' && sourceId && sourceParams && openTarget
@@ -1754,7 +1778,7 @@ export function useDorControl({
           // Quoted for the slot's shell; the caller's directory is not the slot's.
           const slotCommand = toolRunCommand(toolRun, slotId);
           retargetInPlace(slotId, slotCommand, slotSwitch?.id === slotId ? slotSwitch.token : null, pin);
-          const visible = revealSurface(slotId, { focusNeutral: true });
+          const visible = revealTool(slotId, true);
           const slotCwd = runDirectory(slotId);
           const started = typeToolCommand(slotId, slotCommand, slotCwd, detail.signal);
           respondTool(status, { surfaceId: slotId, command: slotCommand, cwd: slotCwd, minimized: !visible });
@@ -1785,7 +1809,7 @@ export function useDorControl({
           if (decision.pin) previewSlot.pin(decision.id);
           // A reaped match starts again (docs/specs/dor-tool.md -> Reaping).
           const rehydrated = rehydrateTool(lath, decision.id) !== null;
-          respondStanding(rehydrated ? 'adopted' : 'existing', decision.id, revealSurface(decision.id, { focusNeutral: decision.quiet }));
+          respondStanding(rehydrated ? 'adopted' : 'existing', decision.id, revealTool(decision.id, decision.quiet));
           return;
         }
         if (decision.kind === 'retarget') {
@@ -1853,7 +1877,7 @@ export function useDorControl({
             // the "appears to do nothing" the invariant is written against.
             // The match's own directory, not the caller's: an `adopted`
             // restart ran there, and an `existing` match is running there.
-            respondStanding(idle ? 'adopted' : 'existing', match.id, revealSurface(match.id), matched);
+            respondStanding(idle ? 'adopted' : 'existing', match.id, revealTool(match.id), matched);
             return;
           }
         }
@@ -1901,11 +1925,9 @@ export function useDorControl({
           reference: toolTarget.target,
           cwd,
           requireIntegration: true,
-          // Focus-neutral like `dor ensure`: a tool spawned by a script or an
-          // agent must not steal the caller's selection.
-          focusNeutral: true,
+          focusNeutral: !toolFocus,
           // A preview slot is meant to be seen, even beside a Door reference.
-          visible: previewSignal !== null,
+          visible: previewSignal !== null || toolFocus,
           leafMeta: toolLeafMeta(toolName ?? command, previewSignal ? { ...toolParams, toolPreview: true } : toolParams),
         });
         if (!created.ok) {
@@ -1977,9 +1999,10 @@ export function useDorControl({
         detail.respond({ ok: false, error: 'cwd is required' });
         return;
       }
+      const focus = focusIntent('ensure');
       const existingId = findSurfaceIdRunningCommand(command, cwd);
       if (existingId) {
-        const minimized = doorsRef.current.some((door) => door.id === existingId);
+        const minimized = focus ? !revealSurface(existingId) : doorsRef.current.some((door) => door.id === existingId);
         // A launch still on its way starts fresh already; only a running command restarts.
         if (booleanParam(params.restart) && surfaceRunsCommand(getTerminalPaneState(existingId), command, cwd)) {
           const restarted = await restartSurfaceInPlace(existingId, command, cwd, detail.signal);
@@ -2031,8 +2054,8 @@ export function useDorControl({
         reference: resolved.target,
         cwd,
         requireIntegration: true,
-        // ensure never steals focus from the caller, matched or freshly created.
-        focusNeutral: true,
+        focusNeutral: !focus,
+        visible: focus,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -2260,8 +2283,7 @@ export function useDorControl({
         reference: target.value,
         preserveSource: !!detail.helperParentId,
         title: hostPathDisplay(url, true),
-        // `dor iframe` opens the embed in the background; caller keeps focus.
-        focusNeutral: true,
+        focusNeutral: !focusIntent('iframe'),
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -2547,6 +2569,8 @@ export function useDorControl({
         return;
       }
       const result = ensureBrowserSurface({
+        focus: focusIntent(provider),
+        explicitFocus: params.focus === true,
         provider,
         key,
         session,

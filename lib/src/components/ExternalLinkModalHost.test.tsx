@@ -169,7 +169,7 @@ it('loads the picker candidates without opening, then opens the default in the o
   expect(requests).toEqual([expect.objectContaining({ surfaceId: 'pane-a', method: 'tool.openHandlers', params: { target: fileUri, cwd: '/work' } })]);
   expect(document.body.textContent).toContain('Rendered document');
   act(() => button('Open file').click());
-  expect(requests[1]).toMatchObject({ surfaceId: 'pane-a', method: 'surface.tool', terminalLink: true, params: { file: fileUri, surface: 'pane-a', cwd: '/work' } });
+  expect(requests[1]).toMatchObject({ surfaceId: 'pane-a', method: 'surface.tool', gui: true, terminalLink: true, params: { file: fileUri, surface: 'pane-a', cwd: '/work' } });
   expect(requests[1].params).not.toHaveProperty('tool');
   expect(mocks.open).not.toHaveBeenCalled();
   expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();

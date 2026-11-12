@@ -88,7 +88,7 @@ dor split --minimize -- ./watch.sh
 dor split --                   # blank terminal, focus stays with you
 ```
 
-Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <id>` picks which surface to split from; the new terminal starts in your current directory. Always include the `--` (see Rules and pitfalls).
+Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <id>` picks which surface to split from; the new terminal starts in your current directory. An initial command goes after `--`.
 
 ### `dor send` — type into a terminal
 
@@ -190,7 +190,7 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 **The listing says how to work with each Tool:**
 
 - `[iframe]` is view-only; drive `[agent-browser-screencast]` with `dor agent-browser --surface <id>` and `[playwright-screencast]` with `dor playwright --surface <id>`.
-- `[keyed]`: running it again reveals and focuses the running one (`existing`), or restarts it in place if Dormouse stopped it while idle (`adopted`); `--fresh` starts another. Once its command exits, its pane is a plain terminal, and running it again starts another. Unkeyed, every call starts another — find the running one with `dor list --kind tool`.
+- `[keyed]`: running it again reveals the running one (`existing`), or restarts it in place if Dormouse stopped it while idle (`adopted`); `--fresh` starts another. Once its command exits, its pane is a plain terminal, and running it again starts another. Unkeyed, every call starts another — find the running one with `dor list --kind tool`.
 - `[port announced]`: no browser appears until the command announces its port. `[port auto]` shows the one port it opens.
 - A `run` shown as a list takes arguments (`dor tool <name> <args>`); a string takes none.
 - `[shadowed]`: a user Tool that the project's Tool of the same name replaces here.
@@ -200,7 +200,7 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 **When you add a Tool, write for the next agent:** a comment directly above the entry saying what it is for and anything its fields do not show, and `$HERE` in its `prespawn_dedupe` so each checkout gets its own. An entry's fields are `run`, `render`, `port`, and `prespawn_dedupe`, taking the values the listing shows, plus `viewport` (a preset name or dimensions). A user-file entry may instead import one Tool from another `dormouse.yml` with `from` (its directory, relative to the user file) and `tool` (its name there, when it differs).
 
 - **`dor tool -- <command>`** makes any command a Tool, serving the one port it opens, but with no key: every call creates another surface. For a process you will rerun, use `dor ensure` and a browser instead.
-- **`dor open <path>`** shows the user one local file (HTML, text, images, media) or folder in a new pane, or in the Tool the user's `dormouse.yml` `open` rules pick; a folder opens as a browsable list of names whose files the user can preview. It takes a path, never a URL. Opening the same path again reveals and focuses its viewer; `--fresh` opens another. `--preview` instead shows it in the Workspace's one reusable preview pane, replacing the last preview, without taking focus.
+- **`dor open <path>`** shows the user one local file (HTML, text, images, media) or folder in a new pane, or in the Tool the user's `dormouse.yml` `open` rules pick; a folder opens as a browsable list of names whose files the user can preview. It takes a path, never a URL. Opening the same path again reveals its viewer; `--fresh` opens another. `--preview` instead shows it in the Workspace's one reusable preview pane, replacing the last preview, without taking focus.
 
 ## Workspaces
 
@@ -275,7 +275,7 @@ dor kill surface:N --confirm-if-read "npm run dev"
 
 ## Rules and pitfalls
 
-- **Never run a bare `dor split` (no `--`).** It moves the user's keyboard focus to the new pane, hijacking their keystrokes. `dor split -- <command>`, a blank `dor split --`, and `dor ensure` never take focus.
+- **Your commands leave the user's focus where it is**; only a `dor` command a person types alone at a prompt focuses its result. Pass `--focus` only when the user asks to be taken to the result. Browser commands reuse visible panes without taking focus, even when typed at a prompt.
 - **Never pre-quote command tails.** Everything after `--` is forwarded as a raw argv array; Dormouse quotes it correctly for whatever shell the target surface runs (POSIX, cmd, PowerShell). Pass `-- npm test -- --watch`, not `-- "npm test -- --watch"`.
 - **Take ids from responses.** Capture the id that `split`/`ensure`/`tool`/`open` print rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with, including its flags.

@@ -4,7 +4,7 @@ Invocation: `dor agent-browser --help`
 
 ```text
 USAGE
-  dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
+  dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [--focus] [args...]
   dor agent-browser --help
 
 Forwards all arguments verbatim to your own agent-browser binary and binds the session to a Dormouse browser surface.
@@ -21,7 +21,8 @@ dor intercepts exactly three mutually exclusive identity flags:
 
 It also intercepts --workspace <ref>, which is not an identity: it says which
 Workspace of this Window the browser Surface is opened in and which one a
-handle resolves against (workspace:<n> or workspace:<name>).
+handle resolves against (workspace:<n> or workspace:<name>); and --focus
+(or --focus=true|false), which says whether that Surface takes focus.
 
 dor reads these flags anywhere in the arguments, up to an optional bare --,
 which it forwards unchanged. Everything else, and everything after that --, is
@@ -42,6 +43,8 @@ its stream — for a pane that froze, or never showed its page:
 After a successful command, dor opens the browser surface bound to the session,
 or reuses the one it already has. A playwright browser (render_mode playwright-*) is
 driven with dor playwright --surface instead.
+
+Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.
 
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
@@ -64,6 +67,7 @@ FLAGS
      [--session]    Raw agent-browser session name (mutually exclusive with --key/--surface).
      [--surface]    Surface handle whose bound session to drive (mutually exclusive with --key/--session).
      [--workspace]  Workspace to act in, instead of the caller's.
+     [--focus]      Focus the created or reused Surface (default: only when typed alone at a prompt).
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 
