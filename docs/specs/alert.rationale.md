@@ -72,8 +72,6 @@
 
 **Why the claim window is left unacknowledged.** Closing the gap between a claim and the caller actually reading the outcome would need a two-phase claim on *every* completion, to cover a process that dies in the microseconds after its answer was computed.
 
-**Why the timeout ceiling exists at all.** `timeoutMs` is a safety rail on a blocking call inside an agent loop, not an alert-tuning knob. Like the inactivity timeout it originates a process away and ends up in `setTimeout`, whose delay is a signed 32-bit millisecond count. Anything past ~24.9 days overflows and fires immediately, turning a long park into an instant `timeout`.
-
 **Why an ended realm's awaits are cancelled, and answered synchronously.** A caller that can no longer be answered would otherwise go on absorbing completions the human would have been shown. Synchronously, because in VS Code the cancelled outcome would arrive a microtask after the router stopped posting and be dropped, leaving `dor` blocked on a reply that never comes. A standalone reload keeps its window label, so the window says `hello` rather than the host inferring a new realm from a label list that never changed.
 
 ## WATCHING Track
@@ -83,10 +81,6 @@
 **Why the alert state is retired before the PTY is killed.** A data chunk is enough to create a Session's entry, so killing first leaves output already in flight to rebuild an entry — and a `QuiesceDetector` that nothing will ever dispose. A dying program also restores the terminal on `SIGHUP` — a title reset, an `OSC 9;4` clear, sometimes a bell — so a reported event once revived the id, leaving an entry nothing removed and a dead id able to ring and push. Every spawn calls `respawn` first, so a replacement pane never needs a report to reclaim its id.
 
 **Why the key is the last command of a list, past its wrappers.** The old key, argv[0] of the first simple command, named the set-up rather than the work: `cd web && pnpm dev` keyed on `cd`, `clear; claude` on `clear`, and `sudo make`, `time make`, `caffeinate -i claude` and `npx claude` on the wrapper, so a rule offered from those panes matched every other use of `cd` or `sudo` (audit, 2026-09-23). The last command of a list is the one still running when the line settles; a pipeline's first stage is the producer whose output the pane shows. An unknown wrapper flag keys the wrapper because guessing whether it swallowed the next word would key an argument as a program.
-
-**Why reserved words and here-documents are grammar.** Command lines keep their newlines and bash reports a whole history entry, so a compound entry's last word was its closer: `for f in *; do make; done` keyed on `done`, `if x; then make; fi` on `fi`, and `python3 - <<'EOF' … EOF` on its delimiter, splitting the script's own `&&` and `;` on the way (review, 2026-09-23). A rule offered from those panes matched nothing anyone runs. The body a loop or conditional runs is what the entry waits on, as a list's last command is; a closer's trailing `< list` or `| tee log` belongs to the whole compound command, whose producer is that body. fish ≥ 4 reports its command line too, so `while true; pnpm test; end` keyed on `end` — a rule matching every fish block — and `pnpm build; and pnpm start` on `and` (review, 2026-09-24).
-
-**Why a redirection is no word of the key.** `make > log` keyed `make >`, the operator read as a runner's script, and `make 2>&1`, its `&` kept whole, would have keyed `make 2>&1` (review, 2026-09-24).
 
 **Why runners key by script.** `pnpm dev` never finishes and `pnpm test` does; one `pnpm` rule rang for both, so watching a dev server's pane also rang every test run. `run` is dropped because `npm run test` and `npm test` are one script under two spellings.
 
@@ -113,8 +107,6 @@
 **Why an end with no cycle is ignored.** A command boundary ends a cycle silently, so a program's late `9;4;1;100` or `9;4;2` after its prompt would ring for a turn already over, as a defensive clear would; only a cycle's own end completes a turn (2026-10-22).
 
 **Why a progress event no longer drops a bell.** A mid-cycle update or a clear that ends no cycle summons nobody, so dropping the batch's lone `BEL` beside one lost the only ring (audit, 2026-09-23). Richness now decides detail for the batches that do both ring.
-
-**Why the titles name the command.** The generic `Progress complete` said nothing about which run finished; the watch key is the name the user already knows the pane by, and the watch record is live exactly while a cycle can end.
 
 **Why every Claude turn may ring.** Advertising iTerm2 3.6.6 turns on Claude Code's progress reports, one cycle per turn (the recorded turn, `a Claude Code turn` in `lib/src/lib/alert-engagement.test.ts`), so its turn end is a report completion, and reports are independent of WATCHING. Gating a cycle's end on a watched command was rejected: engagement is what spares the user who is watching, and a user who left wants the turn's end (product decision, 2026-09-23).
 
@@ -155,8 +147,6 @@
 **Why only hex grouping is normalized.** Grouped hex otherwise falls into the base64 tier and almost always misses its higher cutoff. In review samples of 20,000 random UUIDs, removing hex separators reduced misses from 100% to 0.01%, with no additional matches among the 1102 tracked paths (measured 2026-09). Applying separator removal to other alphabets would also redact `PostgreSQL_Connection_Manager` and `implementation_details_v2`; limiting normalization to hex keeps those identifiers unchanged.
 
 **Why padding must end the candidate.** Absorbing an `=` separator turns `CargoBuildFinished=ok` into `REDACTEDok`. Leaving it for punctuation cleanup yields `REDACTED ok`, preserving the word boundary. Trailing padding belongs to the token and carries no useful speech content.
-
-**Why embedded hex runs are checked.** A non-hex prefix or suffix such as `pod-` or `-log` otherwise moves an entire UUID candidate into the base64 tier, whose higher cutoff misses most such values. Checking every contiguous hex-group run preserves the hex threshold inside those candidates; replacing the enclosing token also avoids speaking credential prefixes or suffixes.
 
 **Why base32 does not require a digit.** Letter-only values are valid base32, including short high-entropy strings that fall below the base64 tier's minimum length. A digit requirement would reduce false positives but intentionally miss those values. The accepted cost extends beyond paths: review measured 663 of 2048 distinct ASCII-letter identifiers of at least 16 characters in `lib/src/` redacting (32.4%, measured 2026-09), including `PostgreSQLConnectionManager` and `CargoBuildFinished`. The cutoff test for `ABCDEFGHJKLMABCD` records that choice.
 
