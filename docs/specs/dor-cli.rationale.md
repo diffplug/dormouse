@@ -68,6 +68,8 @@ Windows PowerShell 5.1 and PowerShell 7.6.7 (measured on Windows, 2026-10) remov
 
 **Why the bind waits past the host's browser request timeout.** `surface.browser` answers only once the host has asked the browser where it streams, and that `attach` queues behind any launch, relaunch or close of the same browser, which can take the host's whole budget. At the client's default 5 s deadline, a command run just after a pop-out printed "could not open the Dormouse browser surface … timed out" and the pane bound anyway; agents read stderr, so the warning misled them (review of #777, 2026-09).
 
+**Why 4 for an unbound pane.** agent-browser 0.31.1 and playwright-cli 0.1.21 exit only 0 or 1 (read from their source, 2026-11), so a provider's own status never collides with 4; a crash or signal status (101, 128+n) still could not.
+
 **Why interactive forms are refused rather than streamed.** The final command's stdout and stderr are captured and printed when it exits, because a WSL caller's output has its Windows paths rewritten to Linux ones. So `agent-browser chat` with no message on a terminal (a REPL), `agent-browser mcp` (a stdio server that replies on stdout until stdin closes), and `playwright-cli show --port` (a blocking HTTP server whose URL is its output) sat silent and looked hung, and Ctrl+C discarded what was captured. Streaming would change how every passthrough's output is produced; the maintainer chose refusal (2026-11). Read from the providers' help: agent-browser 0.31.1, playwright-cli 0.1.21; piped `chat` input runs once and exits, and `show` without `--port` returns.
 
 ## Browser Open Target Resolution
