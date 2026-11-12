@@ -2,6 +2,15 @@ import type { MDXEditorProps } from '@mdxeditor/editor';
 
 type Options = NonNullable<MDXEditorProps['toMarkdownOptions']>;
 
+/** A heading's key, comparable between its source line and its parsed tree:
+ * link destinations, inline markers, and escapes are dropped on both sides. */
+const headingKey = (depth: number, text: string) =>
+  `${depth}:${text.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[\\`*_~[\]]/g, '').replace(/\s+/g, ' ').trim()}`;
+
+type Phrasing = { value?: string; alt?: string | null; children?: Phrasing[] };
+const plainText = (node: Phrasing): string =>
+  node.value ?? node.children?.map(plainText).join('') ?? node.alt ?? '';
+
 /** Keep the document's inexpensive style choices without retaining a second
  * editable syntax tree. Ambiguous Markdown still uses the stock serializer. */
 export function markdownFormat(markdown: string): Options {
@@ -15,7 +24,8 @@ export function markdownFormat(markdown: string): Options {
   let tight = 0, loose = 0;
   for (const match of prose.matchAll(/^ {0,3}(#{1,6})[ \t]+([^\n]+)\n(?=([^\n]*))/gm)) {
     const gap = match[3].trim() ? 0 : 1;
-    headings.set(`${match[1].length}:${match[2].trim()}`, gap);
+    // An ATX closing sequence is not part of the heading's text.
+    headings.set(headingKey(match[1].length, match[2].replace(/(?:^|[ \t]+)#+[ \t]*$/, '')), gap);
     if (gap) loose++; else tight++;
   }
   return {
@@ -53,8 +63,7 @@ export function markdownFormat(markdown: string): Options {
     },
     join: [left => {
       if (left.type !== 'heading') return;
-      const text = left.children.map(child => 'value' in child ? child.value : '').join('');
-      return headings.get(`${left.depth}:${text}`) ?? (tight > loose ? 0 : 1);
+      return headings.get(headingKey(left.depth, plainText(left as Phrasing))) ?? (tight > loose ? 0 : 1);
     }],
   };
 }
