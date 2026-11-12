@@ -1,3 +1,4 @@
+import type { PtyInputEvent } from '../../dor/src/input-events';
 import type { BrowserResult } from '../../lib/src/lib/platform/browser-automation';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
@@ -13,7 +14,9 @@ import type { ManagedVoiceStatus } from '../../lib/src/lib/platform/managed-voic
 export type WebviewMessage =
   | { type: 'pty:context'; request: TerminalContextRequest; requestId: string }
   | { type: 'pty:spawn'; id: string; options?: SpawnPtyOptions }
-  | { type: 'pty:input'; id: string; data: string; paced?: boolean; userInput?: true; launch?: true }
+  | { type: 'pty:cancelInput'; id: string; inputId: string }
+  | { type: 'pty:sendInput'; id: string; inputId: string; events: PtyInputEvent[]; requestId: string }
+  | { type: 'pty:input'; id: string; data: string; userInput?: true; launch?: true }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   // The webview parsed `chars` of the id's live output (docs/specs/transport.md
   // -> "Output flow control"). `chars` is validated host-side.
@@ -55,6 +58,7 @@ export type WebviewMessage =
 
 // Messages from extension host → webview
 export type ExtensionMessage =
+  | { type: 'pty:inputDone'; requestId: string; delivered?: true; error?: string }
   | { type: 'pty:contextResult'; result: TerminalContextInfo; requestId: string }
   // `textData` is the chunk with string-control payloads removed, for the
   // prompt heuristic. Omitted when it would equal `data` — the common case —

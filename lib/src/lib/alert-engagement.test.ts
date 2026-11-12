@@ -464,7 +464,7 @@ describe('the work-start gate', () => {
   it('hears each write before it reaches the PTY', () => {
     const order: string[] = [];
     vi.spyOn(manager, 'onWrite').mockImplementation((_id, data) => void order.push(`alerts ${data}`));
-    alertedPty(manager, { write: (_id, data) => void order.push(`pty ${data}`) }).write(PANE, 'hi\r', { paced: true });
+    alertedPty(manager, { write: (_id, data) => void order.push(`pty ${data}`) }).write(PANE, 'hi\r');
     expect(order).toEqual(['alerts hi\r', 'pty hi\r']);
   });
 
@@ -485,7 +485,7 @@ describe('the work-start gate', () => {
     vi.advanceTimersByTime(10_000);
     expect(ringing(PANE)).toBe(false);
 
-    pty().write(PANE, 'hi\r', { paced: true });
+    pty().write(PANE, 'hi\r');
     output(PANE, 3_000);
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE)).toMatchObject({

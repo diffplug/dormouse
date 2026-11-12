@@ -808,11 +808,11 @@ describe('the sidecar host', () => {
 
   it('acknowledges human input before its write, and nothing else that is written', () => {
     host.alerts.notifyFromProtocol('pty-1', REPORT);
-    host.handleCommand('pty:input', { id: 'pty-1', data: '\x1b[I', paced: true });
+    host.handleCommand('pty:input', { id: 'pty-1', data: '\x1b[I' });
     host.handleCommand('pty:input', { id: 'pty-1', data: 'y', userInput: true });
     expect(calls).toEqual([
-      { op: 'write', args: ['pty-1', '\x1b[I', { paced: true }], state: { status: 'ALERT_RINGING', todo: false } },
-      { op: 'write', args: ['pty-1', 'y', undefined], state: { status: 'WATCHING_DISABLED', todo: false } },
+      { op: 'write', args: ['pty-1', '\x1b[I'], state: { status: 'ALERT_RINGING', todo: false } },
+      { op: 'write', args: ['pty-1', 'y'], state: { status: 'WATCHING_DISABLED', todo: false } },
     ]);
   });
 
@@ -828,7 +828,7 @@ describe('the sidecar host', () => {
     host.handleCommand('pty:input', { id: 'pty-1', data: 'view /a\r', userInput: true });
     host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/typed')}` });
     host.handleCommand('pty:input', { id: 'pty-1', data: 'view /a\r', launch: true });
-    expect(calls.at(-1)).toMatchObject({ op: 'write', args: ['pty-1', 'view /a\r', undefined] });
+    expect(calls.at(-1)).toMatchObject({ op: 'write', args: ['pty-1', 'view /a\r'] });
     host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/launched')}` });
     host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/after')}` });
     expect(opens()).toEqual(['/launched']);
@@ -839,7 +839,7 @@ describe('the sidecar host', () => {
     try {
       host.alerts.notifyFromProtocol('pty-1', REPORT);
       host.alerts.dismissAlert('pty-1');
-      host.handleCommand('pty:input', { id: 'pty-1', data: 'hi\r', paced: true });
+      host.handleCommand('pty:input', { id: 'pty-1', data: 'hi\r' });
       for (let t = 0; t < 2_000; t += 100) {
         vi.advanceTimersByTime(100);
         host.onPtyEvent('data', { id: 'pty-1', data: 'frame' });

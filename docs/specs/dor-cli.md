@@ -123,7 +123,7 @@ One extension host can hold multiple Dormouse webviews, so the request carries `
 
 ### Deadlines And Cancellation
 
-**Every valid request must preserve `host ceiling < client socket < server reaper`**, except a `surface.tool` queued behind others. The client sends its own `timeoutMs` as a hint and the server reaps 10s above it. `dor await`'s host ceiling is at most 24h (`--timeout` takes 1–86400 whole seconds, the host's `MAX_AWAIT_TIMEOUT_MS`) and its socket deadline 5s later, so the server accepts hints up to 24h + 5s; an absent or nonsense hint (non-finite, ≤ 0, or above that) falls back to 65s, which clears the longest fixed client deadline (`dor ensure --restart` at 60s).
+**Every valid request must preserve `host ceiling < client socket < server reaper`**, except a `surface.tool` queued behind others. The client sends its own `timeoutMs` as a hint and the server reaps 10s above it. `dor send`'s delivery deadline is 24h; `dor await`'s host ceiling is at most 24h (`--timeout` takes 1–86400 whole seconds, the host's `MAX_AWAIT_TIMEOUT_MS`) and its socket deadline 5s later, so the server accepts hints up to 24h + 5s; an absent or nonsense hint (non-finite, ≤ 0, or above that) falls back to 65s, which clears the longest fixed client deadline (`dor ensure --restart` at 60s).
 
 **Must answer a malformed control request with an error before forwarding it, and keep serving later connections** (`standalone/sidecar/dor-control-server.test.js`).
 
@@ -205,6 +205,12 @@ Where `stricli` cannot express a shape, a command may declare narrow, snapshot-t
 `list --json` carries Host identity and runtime paths but **never the control socket**. **Consumers must gate on `has_terminal` / `has_browser`, not `kind`**, the capability vocabulary commands also use in target errors.
 
 Source of truth: `dor/src/cli-core.ts`, `dor/src/commands/`, `buildShellCommandForKind` in `dor/src/commands/shell-quote.ts`, and `useDorControl` in `lib/src/components/wall/use-dor-control.ts`.
+
+## dor send
+
+**Must validate the complete event batch before reading stdin or sending any event.** Text has no CLI-specific escaping or newline conversion. The renderer encodes named keys against the target terminal’s cursor-key mode and preserves event kinds through the host boundary. Program completion remains `dor await`’s concern. Delivery receipts and cancellation follow `docs/specs/transport.md` → "Paced input".
+
+Source of truth: `dor/src/commands/send.ts`; `dor/src/input-events.ts`; `useDorControl` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## dor move
 

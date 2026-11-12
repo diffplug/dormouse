@@ -1,3 +1,5 @@
+import { deliverPtyInput } from './pty-input-delivery';
+import { SEND_INPUT_TIMEOUT_MS, type PtyInputEvent } from '../../../../dor/src/input-events';
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import { BROWSER_REQUEST_TIMEOUT_MS, type BrowserRequest, type BrowserResult } from './browser-automation';
 import { applyLiveToolEvents } from '../tool-events';
@@ -289,7 +291,11 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced, userInput: options?.userInput, launch: options?.launch });
+    this.vscode.postMessage({ type: 'pty:input', id, data, userInput: options?.userInput, launch: options?.launch });
+  }
+
+  sendPtyInput(id: string, events: readonly PtyInputEvent[], signal?: AbortSignal): Promise<void> {
+    return deliverPtyInput(inputId => this.requestResponse<{ delivered?: boolean; error?: string }>('pty:sendInput', 'pty:inputDone', { id, events, inputId }, msg => msg, SEND_INPUT_TIMEOUT_MS), inputId => this.vscode.postMessage({ type: 'pty:cancelInput', id, inputId }), signal);
   }
 
   resizePty(id: string, cols: number, rows: number): void {

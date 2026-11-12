@@ -1578,56 +1578,27 @@ const PACED_CHUNK_BYTES = 256;
 const PACED_CHUNK_GAP_MS = 10;
 const PACED_KEY_SETTLE_MS = 100;
 
-// A key is one whole escape sequence, DEL, or a C0 control other than tab and
-// line feed, which stay text. Returns `i` when `data[i]` starts text.
-function keyTokenEnd(data, i) {
-  const code = data.charCodeAt(i);
-  if (code === 0x1b) {
-    const next = data[i + 1];
-    if (next === '[') {
-      // CSI: parameter and intermediate bytes (0x20-0x3F), then a final byte
-      // (0x40-0x7E); a sequence cut short ends where its valid bytes do.
-      let j = i + 2;
-      while (j < data.length && data.charCodeAt(j) >= 0x20 && data.charCodeAt(j) <= 0x3f) j += 1;
-      const final = data.charCodeAt(j);
-      return final >= 0x40 && final <= 0x7e ? j + 1 : j;
-    }
-    if (next === 'O') return Math.min(i + 3, data.length);
-    return Math.min(i + 2, data.length);
-  }
-  if (code === 0x7f || (code < 0x20 && code !== 0x09 && code !== 0x0a)) return i + 1;
-  return i;
-}
-
-/** Split input into text runs of at most PACED_CHUNK_BYTES UTF-8 bytes and
- *  whole keys, never cutting a code point or an escape sequence. */
-function pacedInputSegments(data) {
-  const segments = [];
+/** Split text into runs of at most PACED_CHUNK_BYTES UTF-8 bytes, never
+ *  cutting a code point. */
+function pacedTextRuns(text) {
+  const runs = [];
   let start = 0;
   let bytes = 0;
-  const flush = (end) => {
-    if (end > start) segments.push({ data: data.slice(start, end), key: false });
-    start = end;
-    bytes = 0;
-  };
-  for (let i = 0; i < data.length;) {
-    const keyEnd = keyTokenEnd(data, i);
-    if (keyEnd > i) {
-      flush(i);
-      segments.push({ data: data.slice(i, keyEnd), key: true });
-      start = i = keyEnd;
-      continue;
-    }
-    const codePoint = data.codePointAt(i);
+  for (let i = 0; i < text.length;) {
+    const codePoint = text.codePointAt(i);
     const size = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
-    if (bytes + size > PACED_CHUNK_BYTES) flush(i);
+    if (bytes + size > PACED_CHUNK_BYTES) {
+      runs.push(text.slice(start, i));
+      start = i;
+      bytes = 0;
+    }
     bytes += size;
     i += codePoint > 0xffff ? 2 : 1;
   }
-  flush(data.length);
-  return segments;
+  if (text.length > start) runs.push(text.slice(start));
+  return runs;
 }
-module.exports.pacedInputSegments = pacedInputSegments;
+module.exports.pacedTextRuns = pacedTextRuns;
 
 /** Whether `pid` still runs. An unknown pid reads as running: ConPTY names its
  *  shell's only once connected. EPERM is a process this one may not signal. */
@@ -1665,10 +1636,10 @@ function isProcessAlive(pid) {
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
 //
-// `onInputWritten(id)` hears each slice of input `write` queued (paced, or
-// behind paced input) as it is written, which can be long after the call: on
-// Windows a paused PTY must be read for input to arrive, and the host's flow
-// control decides when.
+// `onInputWritten(id)` hears each slice of queued input (`sendInput`'s paced
+// runs, or a `write` queued behind them) as it is written, which can be long
+// after the call: on Windows a paused PTY must be read for input to arrive,
+// and the host's flow control decides when.
 //
 // `canonicalDirectory(path)` validates a directory to open, injected for the
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
@@ -1714,8 +1685,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   // first, so the `p` a drain captured is still the live one.
   const inputs = new Map(); // id -> { steps: [{ data, key, paced }], timer, at, textAt }
 
-  function cancelInput(id) {
-    clearTimeout(inputs.get(id)?.timer);
+  function cancelInput(id, error = new Error('PTY input cancelled before delivery completed; some input may have been delivered')) {
+    const input = inputs.get(id);
+    for (const step of input?.steps ?? []) step.receipt?.reject(error);
+    clearTimeout(input?.timer);
     inputs.delete(id);
   }
 
@@ -1723,6 +1696,11 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     input.timer = undefined;
     while (input.steps.length > 0) {
       const step = input.steps[0];
+      if (step.receipt) {
+        input.steps.shift();
+        step.receipt.resolve();
+        continue;
+      }
       if (step.paced) {
         const dueAt = step.key
           ? Math.max(input.at + PACED_CHUNK_GAP_MS, input.textAt + PACED_KEY_SETTLE_MS)
@@ -1751,6 +1729,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       // Every write paces what follows it; only paced text settles a key. An
       // unpaced step drains in the same millisecond as the paced one before
       // it, so only a write straddling a millisecond can show the difference.
+      if (inputs.get(id) !== input) return;
       input.at = Date.now();
       if (step.paced && !step.key) input.textAt = input.at;
     }
@@ -1901,28 +1880,79 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     }
   }
 
-  function write(id, data, { paced = false } = {}) {
+  function write(id, data) {
     const p = ptys.get(id);
     if (!p) return;
     // An interrupt skips the line and discards what waits in it, as the tty
-    // flushes its own input queue on one. `dor send --key ctrl-c` is paced and
-    // is the interrupt agents are taught, so this cannot test for unpaced.
+    // flushes its own input queue on one.
     if (data === '\x03') cancelInput(id);
-    let input = inputs.get(id);
-    if (!paced && !input?.steps.length) {
+    const input = inputs.get(id);
+    if (!input?.steps.length) {
       p.write(data);
       return;
     }
+    input.steps.push({ data, key: false, paced: false });
+    if (input.timer === undefined) drainInput(id, p, input);
+  }
+
+  /** One atomic batch and a receipt after its last actual node-pty write.
+   * Named keys retain their pacing role even when their bytes are also text. */
+  // Tauri runs receipt-waiting commands on workers, so cancellation can arrive
+  // before submission. Remember unmatched tokens within a bounded race window.
+  const cancelledInputs = new Map();
+  function cancelSendInput(id, inputId) {
+    if (typeof id !== 'string' || typeof inputId !== 'string' || !inputId) return;
+    const input = inputs.get(id);
+    let found = false;
+    if (input) {
+      input.steps = input.steps.filter(step => {
+        if (step.inputId !== inputId) return true;
+        found = true;
+        step.receipt?.reject(new Error('PTY input cancelled; some input may have been delivered'));
+        return false;
+      });
+      if (found) {
+        clearTimeout(input.timer);
+        input.timer = undefined;
+        const p = ptys.get(id);
+        if (p) drainInput(id, p, input);
+      }
+    }
+    if (!found) {
+      cancelledInputs.set(JSON.stringify([id, inputId]), Date.now());
+      if (cancelledInputs.size > 1024) cancelledInputs.delete(cancelledInputs.keys().next().value);
+    }
+  }
+
+  function sendInput(id, events, inputId = Symbol()) {
+    const cancelledKey = typeof inputId === 'string' ? JSON.stringify([id, inputId]) : undefined;
+    if (cancelledKey && cancelledInputs.has(cancelledKey)) {
+      const at = cancelledInputs.get(cancelledKey);
+      cancelledInputs.delete(cancelledKey);
+      if (Date.now() - at < 60_000) return Promise.reject(new Error('PTY input cancelled before delivery'));
+    }
+    if (!Array.isArray(events) || events.length === 0 || events.some(event =>
+      !event || !['text', 'key'].includes(event.kind) || typeof event.data !== 'string'
+      || Object.keys(event).length !== 2)) {
+      return Promise.reject(new Error('invalid PTY input events'));
+    }
+    const p = ptys.get(id);
+    if (!p) return Promise.reject(new Error('PTY is not running'));
+    if (!events.some(event => event.data.length)) return Promise.reject(new Error('input cannot be empty'));
+    if (events.length === 1 && events[0].kind === 'key' && events[0].data === '\x03') cancelInput(id);
+    let input = inputs.get(id);
     if (!input) {
       input = { steps: [], timer: undefined, at: -Infinity, textAt: -Infinity };
       inputs.set(id, input);
     }
-    if (paced) {
-      for (const segment of pacedInputSegments(data)) input.steps.push({ ...segment, paced: true });
-    } else {
-      input.steps.push({ data, key: false, paced: false });
-    }
-    if (input.timer === undefined) drainInput(id, p, input);
+    return new Promise((resolve, reject) => {
+      for (const event of events) {
+        if (event.kind === 'key') input.steps.push({ data: event.data, key: true, paced: true, inputId });
+        else for (const run of pacedTextRuns(event.data)) input.steps.push({ data: run, key: false, paced: true, inputId });
+      }
+      input.steps.push({ receipt: { resolve, reject }, inputId });
+      if (input.timer === undefined) drainInput(id, p, input);
+    });
   }
 
   function resize(id, cols, rows, repaint = false) {
@@ -2312,7 +2342,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     send('shells', { shells: await detectAvailableShells(), requestId });
   }
 
-  return { spawn, setParentWindow, write, resize, pause, resume, hasPty, kill, killAll, list, context,
+  return { spawn, setParentWindow, write, sendInput, cancelSendInput, resize, pause, resume, hasPty, kill, killAll, list, context,
     getHelperParentId: (id) => helpers.get(id)?.parentId,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };

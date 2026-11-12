@@ -1,3 +1,4 @@
+import { SEND_INPUT_TIMEOUT_MS, type PtyInputEvent } from '../../dor/src/input-events';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
@@ -5,7 +6,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { log } from './log';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { OpenPort, WritePtyOptions } from '../../lib/src/lib/platform/types';
+import type { OpenPort } from '../../lib/src/lib/platform/types';
 import { openPortRequestTimeoutMs, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
 import { sliceSince } from '../../lib/src/host/replay-buffer';
 import { createPtyFlowControl } from '../../lib/src/host/pty-flow-host';
@@ -491,6 +492,20 @@ export function terminalContext(request: TerminalContextRequest): Promise<Termin
     });
 }
 
+export function cancelSendInput(id: string, inputId: string): void {
+  sendToChild({ type: 'cancelInput', id, inputId });
+}
+
+let inputSequence = 0;
+export async function sendInput(id: string, events: readonly PtyInputEvent[], inputId: string): Promise<void> {
+  outputFlow.input(id);
+  const requestId = `input-${++inputSequence}`;
+  const result = await requestChild<{ delivered?: boolean; error?: string }>(
+    { type: 'sendInput', id, events, inputId, requestId }, msg => msg.type === 'inputDone' && msg.requestId === requestId, SEND_INPUT_TIMEOUT_MS,
+  );
+  if (!result?.delivered) throw new Error(result?.error ?? 'PTY input delivery was not acknowledged');
+}
+
 export function getCwd(id: string): Promise<string | null> {
   return requestChild<{ cwd: string | null }>({ type: 'getCwd', id }, (msg) => msg.type === 'cwd' && msg.id === id, 1000)
     .then((msg) => msg.cwd, () => null);
@@ -519,10 +534,10 @@ export function getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort
     .then((msg) => msg.ports || {}, () => ({}));
 }
 
-export function write(id: string, data: string, options: WritePtyOptions = {}): void {
+export function write(id: string, data: string): void {
   // On Windows a paused PTY must be read for its input to arrive.
   outputFlow.input(id);
-  sendToChild({ type: 'input', id, data, paced: options.paced });
+  sendToChild({ type: 'input', id, data });
 }
 
 export function resize(id: string, cols: number, rows: number, repaint?: boolean): void {

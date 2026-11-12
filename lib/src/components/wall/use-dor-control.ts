@@ -1,3 +1,4 @@
+import { validateInputEvents, encodeInputEvents } from '../../../../dor/src/input-events';
 import { moveSurface } from './surface-move';
 import { messageOf } from '../../lib/errors';
 import { clearHoldLapse, holdForHostInterrupt } from '../../lib/tool-run-hold';
@@ -106,8 +107,7 @@ export type DorControlParams = {
   cwd?: unknown;
   direction?: unknown;
   focusNeutral?: unknown;
-  input?: unknown;
-  inputCount?: unknown;
+  events?: unknown;
   key?: unknown;
   lines?: unknown;
   minimized?: unknown;
@@ -2073,9 +2073,9 @@ export function useDorControl({
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.send) {
-      const input = stringParam(params.input);
-      if (input === undefined) {
-        detail.respond({ ok: false, error: 'input is required' });
+      const parsed = validateInputEvents(params.events);
+      if (!parsed.ok) {
+        detail.respond({ ok: false, error: parsed.message });
         return;
       }
       const target = requireTerminalSurface(params.surface, detail);
@@ -2089,15 +2089,16 @@ export function useDorControl({
       // Input someone chose to send: an untouched shell it reaches is no longer
       // one a close may take without asking (docs/specs/layout.md → "Kill confirmation").
       markSessionTouched(target.id);
-      getPlatform().writePty(target.id, input, { paced: true });
-      detail.respond({
-        ok: true,
-        result: {
-          status: 'sent',
-          surfaceId: target.id,
-          inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
-        },
-      });
+      const adapter = getPlatform();
+      if (!adapter.sendPtyInput) {
+        detail.respond({ ok: false, error: 'this platform cannot acknowledge PTY input delivery' });
+        return;
+      }
+      const events = encodeInputEvents(parsed.value, getTerminalInstance(target.id)?.modes?.applicationCursorKeysMode);
+      void adapter.sendPtyInput(target.id, events, detail.signal).then(
+        () => detail.respond({ ok: true, result: { status: 'sent', surfaceId: target.id, inputCount: events.length } }),
+        error => detail.respond({ ok: false, error: String(error?.message ?? error) }),
+      );
       return;
     }
 

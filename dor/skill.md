@@ -95,11 +95,11 @@ Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <id>
 ```sh
 dor send surface:3 --text "npm test" --key enter   # the canonical run-a-command
 dor send surface:3 --key ctrl-c                    # interrupt
-cat answers.txt | dor send surface:3 --stdin
+cat answers.txt | dor send surface:3 --stdin --key enter
 dor send surface:3 --sequence '[{"text":"y"},{"key":"enter"},{"key":"tab"}]'
 ```
 
-Exactly one input mode per call: `--text`/`--key` (only in that order, text first), `--stdin`, or `--sequence` for anything more complex. Special keys go through `--key` (`enter`, `escape`, `tab`, `backspace`, `delete`, arrows, `ctrl-a`..`ctrl-z`) so they are never confused with literal text. `--text` interprets `\n` `\r` `\t` `\\` unless `--raw`; `--stdin` and `--sequence` text go exactly as given. Input arrives at typing pace, so a long prompt plus `--key enter` submits whole in one call, but `sent` means queued: the program may still be reading it.
+Repeat `--text` and `--key` in the order to deliver them; `--stdin` inserts stdin at its position once. `--sequence` is an alternative ordered JSON array. All text is literal: no extra backslash decoding or newline conversion, and `--raw` is removed. Named keys (`enter`, `escape`, `tab`, `backspace`, `delete`, arrows, `ctrl-a`..`ctrl-z`) receive key pacing. A lone `--key ctrl-c` interrupts queued input immediately; inside a larger batch it stays ordered. `sent` means the final PTY write completed, not that the program processed it. A failure may mean partial delivery: never retry automatically; inspect with `dor read`.
 
 ### `dor read` — read a terminal's screen
 

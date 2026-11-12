@@ -1,3 +1,5 @@
+import { deliverPtyInput } from '../../lib/src/lib/platform/pty-input-delivery';
+import type { PtyInputEvent } from '../../dor/src/input-events';
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
 import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
@@ -157,7 +159,11 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   /** See TauriAdapter: `userInput` rides the write itself. */
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    this.host.send("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput, launch: options?.launch });
+    this.host.send("pty_write", { id, data, userInput: options?.userInput, launch: options?.launch });
+  }
+
+  sendPtyInput(id: string, events: readonly PtyInputEvent[], signal?: AbortSignal): Promise<void> {
+    return deliverPtyInput(inputId => this.host.invoke<{ delivered?: boolean; error?: string }>('pty_send_input', { id, events, inputId }), inputId => this.host.send('pty_cancel_input', { id, inputId }), signal);
   }
 
   resizePty(id: string, cols: number, rows: number): void {

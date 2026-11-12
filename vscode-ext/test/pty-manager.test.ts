@@ -29,6 +29,34 @@ describe('PTY manager lifetime and buffers', () => {
     vi.clearAllMocks();
   });
 
+  it('waits for the matching send receipt, resumes flow, and forwards cancellation', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    let started: Awaited<ReturnType<typeof startManager>>;
+    try { started = await startManager(); }
+    finally { Object.defineProperty(process, 'platform', platform); }
+    const { manager, child } = started;
+    manager.sentOutput('pane-a', PTY_HIGH_WATERMARK_CHARS + 1);
+    const events = [{ kind: 'text' as const, data: 'hello' }];
+    let done = false;
+    const sent = manager.sendInput('pane-a', events, 'batch-1').then(() => { done = true; });
+    const request = child.send.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'sendInput', id: 'pane-a', events, inputId: 'batch-1' });
+    expect(child.send.mock.calls.at(-2)![0]).toEqual({ type: 'resume', id: 'pane-a' });
+    child.emit('message', { type: 'inputDone', requestId: 'wrong', delivered: true });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    child.emit('message', { type: 'inputDone', requestId: request.requestId, delivered: true });
+    await sent;
+    const failed = manager.sendInput('pane-a', events, 'batch-2');
+    const rejection = expect(failed).rejects.toThrow('PTY died');
+    const second = child.send.mock.calls.at(-1)![0];
+    manager.cancelSendInput('pane-a', 'batch-2');
+    expect(child.send.mock.calls.at(-1)![0]).toEqual({ type: 'cancelInput', id: 'pane-a', inputId: 'batch-2' });
+    child.emit('message', { type: 'inputDone', requestId: second.requestId, error: 'PTY died' });
+    await rejection;
+  });
+
   it('forks the pty host in the extension’s own directory, never the inherited cwd', async () => {
     await startManager();
     expect(mocks.fork.mock.calls[0]![2]).toMatchObject({ cwd: '/extension' });

@@ -3593,15 +3593,18 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('writes dor send input paced', async () => {
+  it('preserves dor send event kinds through the adapter', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:4']} />));
     await flush();
-    const write = vi.spyOn(fake, 'writePty');
+    let delivered!: () => void;
+    const write = vi.spyOn(fake, 'sendPtyInput').mockImplementation(() => new Promise(resolve => { delivered = resolve; }));
     const respond = vi.fn();
     await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-      method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', input: '/simplify\r', inputCount: 2 }, respond,
+      method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', events: [{ text: '/simplify' }, { key: 'enter' }] }, respond,
     } })));
-    expect(write.mock.calls).toEqual([['surface:4', '/simplify\r', { paced: true }]]);
+    expect(write.mock.calls).toEqual([['surface:4', [{ kind: 'text', data: '/simplify' }, { kind: 'key', data: '\r' }], undefined]]);
+    expect(respond).not.toHaveBeenCalled();
+    await act(async () => delivered());
     expect(respond).toHaveBeenCalledWith({
       ok: true, result: { status: 'sent', surfaceId: 'surface:4', inputCount: 2 },
     });
@@ -3615,7 +3618,7 @@ describe('Wall on the Lath engine', () => {
       const write = vi.spyOn(fake, 'writePty');
       const respond = vi.fn();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', input: 'ls\r' }, respond,
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:4', events: [{ text: 'ls' }, { key: 'enter' }] }, respond,
       } })));
       expect(write).not.toHaveBeenCalled();
       expect(respond).toHaveBeenCalledWith({ ok: false, error: "surface 'surface:4' has no running shell" });
@@ -3630,7 +3633,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
       await flush();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:a', input: 'export X=1\r' }, respond: vi.fn(),
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:a', events: [{ text: 'export X=1' }, { key: 'enter' }] }, respond: vi.fn(),
       } })));
       await act(async () => {
         container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));

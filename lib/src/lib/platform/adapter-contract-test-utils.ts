@@ -34,11 +34,12 @@ import type { AlertStateDetail, PlatformAdapter, PtyDataDetail, PtyListDetail, P
 export type Impl = 'fake' | 'vscode' | 'tauri' | 'harness' | 'remote';
 
 /** What reached the host, in the contract's words: each harness maps its wire onto these. */
-export type HostOp = 'spawn' | 'write' | 'resize' | 'kill' | 'ack' | 'init' | 'theme' | 'alert' | 'cwds';
+export type HostOp = 'sendInput' | 'spawn' | 'write' | 'resize' | 'kill' | 'ack' | 'init' | 'theme' | 'alert' | 'cwds';
 export type SentRecord = { op: HostOp } & Record<string, unknown>;
 
 export interface ContractHarness {
   adapter: PlatformAdapter;
+  completeInput?(error?: string): void;
   /** The host sends one live output chunk for `id`. */
   data(id: string, data: string, textData?: string): void | Promise<void>;
   /** The host reports `id`'s process exited. */
@@ -57,7 +58,7 @@ export interface ContractHarness {
   settle<T>(promise: Promise<T>): Promise<T>;
 }
 
-type Hook = 'list' | 'replay' | 'sent' | 'failRequests';
+type Hook = 'completeInput' | 'list' | 'replay' | 'sent' | 'failRequests';
 
 interface ContractCase {
   /** The outcome, stated as the test's title. */
@@ -94,6 +95,7 @@ const MEMBERS = {
   terminalContext: ['FVTH-', FAIL('terminalContext')],
   spawnPty: ['FVTHR', ['pty-wire']],
   writePty: ['FVTHR', ['pty-wire']],
+  sendPtyInput: ['FVTH-', ['input-receipt']],
   resizePty: ['FVTHR', ['pty-wire']],
   killPty: ['FVTHR', ['pty-wire', 'kill-no-exit']],
   hostOwnsTheme: ['-V---', 'vscode-adapter.test.ts "owns the theme, the shell, and updates"'],
@@ -240,7 +242,7 @@ const LISTED: PtyListDetail = {
 };
 
 type CaseId = 'members' | 'pair' | 'ack-unclaimed' | 'ack-parsed' | 'ack-replay' | 'ack-wire' | 'exit' | 'kill-no-exit'
-  | 'pty-wire' | 'init-token' | 'theme' | 'list' | 'replay' | 'alert-verbs' | 'cwds-shared' | 'state' | 'window-state'
+  | 'input-receipt' | 'pty-wire' | 'init-token' | 'theme' | 'list' | 'replay' | 'alert-verbs' | 'cwds-shared' | 'state' | 'window-state'
   | `fail:${FailMember}`;
 
 const CASES: Record<CaseId, ContractCase> = {
@@ -351,6 +353,25 @@ const CASES: Record<CaseId, ContractCase> = {
       return exits;
     },
     expect: [],
+  },
+  'input-receipt': {
+    title: 'holds send completion until the host acknowledges delivery, and rejects failed delivery',
+    rule: 'transport.md → Paced input',
+    needs: ['completeInput', 'sent'],
+    members: ['sendPtyInput'],
+    async observe(h) {
+      const events = [{ kind: 'text' as const, data: 'hello' }, { kind: 'key' as const, data: '\r' }];
+      let completed = false;
+      const first = h.adapter.sendPtyInput!('p', events).then(() => { completed = true; });
+      await Promise.resolve();
+      const premature = completed;
+      h.completeInput!();
+      await first;
+      const failure = h.adapter.sendPtyInput!('p', events).then(() => 'success', () => 'failed');
+      h.completeInput!('PTY died');
+      return { premature, completed, failure: await failure, events: sentOf(h, 'sendInput')[0].events };
+    },
+    expect: { premature: false, completed: true, failure: 'failed', events: [{ kind: 'text', data: 'hello' }, { kind: 'key', data: '\r' }] },
   },
   'pty-wire': {
     title: 'carries spawn, write, resize and kill to the host, one message each, in order',
@@ -489,6 +510,7 @@ const DIFFERENCES: { [I in Impl]?: { [C in CaseId | 'fail:*']?: Difference } } =
     'ack-replay': { na: 'no replays: requestInit is answered by nothing, so a collection times out (reconnect.ts)' },
     'ack-wire': { na: NO_HOST },
     'pty-wire': { na: NO_HOST },
+    'input-receipt': { na: NO_HOST },
     'init-token': { na: NO_HOST },
     theme: { na: 'no host: its parse reads the theme in process' },
     list: { na: 'no host to list PTYs: requestInit is answered by nothing' },
