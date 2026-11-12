@@ -44,6 +44,8 @@ A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a lit
 
 ## Current Implemented Commands
 
+Option values previously passed through two incompatible scanners: help detection scanned every token, while stricli rejected empty or multiline inline values and interpreted leading dashes as options. Consuming declared valued options first makes both spellings equivalent; invocation-local scanner tokens preserve values without introducing an escaping syntax for callers.
+
 **What `dor list` replaced.** Two retired cmux-shaped commands, `list-panes` and `list-pane-surfaces`, plus `dor identify`, whose whole output became the top-level identity block of `dor list --json`. Collapsing all three into one listing is why new selection power goes into `dor list`'s filters rather than a second enumeration command.
 
 **Why `dor await` prints no terminal text.** Mirroring `dor read` would drag its whole output-flag surface (`--lines`, mode selection) onto `await` and spend the one thing `await` has that composes cleanly: a stdout that is nothing but the cause, so `CAUSE=$(dor await …)` needs no parsing. `dor await … && dor read …` gets the screen back for one extra command.

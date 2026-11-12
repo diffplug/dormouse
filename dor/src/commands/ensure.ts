@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import {
   launchDirectory,
+  cwdParser,
   errorMessage,
   renderJson,
   requireControlClient,
@@ -136,7 +137,7 @@ JSON output:
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
-        cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
+        cwd: { kind: 'parsed', parse: cwdParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
         workspace: workspaceFlag,
       },
       positional: {

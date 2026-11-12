@@ -1,6 +1,6 @@
 import { buildCommand } from '@stricli/core';
 import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
-import { callerWorkingDirectory, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
+import { callerWorkingDirectory, cwdParser, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
 import { runFilePicker } from './open-picker.js';
 import { dispatchToolSurface, TOOL_TIMEOUT_MS } from './tool.js';
 
@@ -44,7 +44,7 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
         fresh: { kind: 'boolean', brief: 'Open another instance even when the Tool has a key.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
-        cwd: { kind: 'parsed', parse: stringParser, brief: 'Directory for resolving the path.', optional: true, placeholder: 'path' },
+        cwd: { kind: 'parsed', parse: cwdParser, brief: 'Directory for resolving the path.', optional: true, placeholder: 'path' },
         tool: { kind: 'parsed', parse: stringParser, brief: 'Use a user Tool, builtin:file, builtin:code, or builtin:folder.', optional: true, placeholder: 'name' },
         preview: { kind: 'boolean', brief: "Show it in this Workspace's preview slot.", optional: true, withNegated: false },
       },

@@ -174,6 +174,8 @@ Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` and `parseSur
 
 ## Current Implemented Commands
 
+**Must consume each declared valued option’s next argument literally**, including an empty string, a leading dash, `--help`, or `--`; `--option=value` is equivalent, including multiline values. **Must recognize help and the forwarding delimiter only outside consumed values.** Command-specific semantic validation still applies (rationale). **Must reject an empty `--cwd`** as a missing value, never the caller's directory.
+
 Implemented commands call private `surface.*` control methods, **enumerated once in `dor/src/protocol.ts`** so the emitting client and the dispatching webview cannot drift.
 
 `surface.list` joins one Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each tagged `view` — with terminal state and activity snapshots, and reports the answering Workspace's id and Window's `window:<label>`. **Its `scope: 'all'` spans every Workspace of the Window**, tagging each row with its Workspace; **one Workspace that cannot answer fails the whole listing** — including one whose Wall never registers, after the routing retry ([Handle Model](#handle-model)) — since a missing Workspace reads as one holding nothing. **Only the active Workspace's selection is `focused`** in such a listing.

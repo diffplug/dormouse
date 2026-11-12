@@ -28,6 +28,7 @@ import type {
 import { hasBrowser, hasTerminal, SURFACE_KINDS } from './types.js';
 import {
   callerWorkingDirectory,
+  cwdParser,
   errorMessage,
   parsePositiveInt,
   printable,
@@ -109,7 +110,7 @@ function buildListCommand(): Command['command'] {
     },
     cwd: {
       kind: 'parsed',
-      parse: stringParser,
+      parse: cwdParser,
       brief: 'Working directory to match.',
       optional: true,
       placeholder: 'path',
