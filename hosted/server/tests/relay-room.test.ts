@@ -244,6 +244,14 @@ function closeAll() {
   opened.clear();
 }
 
+/** A Burrow's next frame but a sweep's nudge, whose order against a teardown is the row reads'. */
+async function routed(burrow: FrameSocket) {
+  for (;;) {
+    const frame = await burrow.take();
+    if (frame.t !== "passkeys-changed") return frame;
+  }
+}
+
 /** An entitled account, signed in, with the parity driver over its sockets. */
 async function account() {
   const userId = await entitled();
@@ -460,7 +468,7 @@ test("routing survives hibernation: across a binding, a replacement, and a pendi
   expect(await second.take(3000)).toEqual({ t: "client-gone", clientId: bound.clientId });
   // The Client of the other session, swept by the same alarm: still routed.
   client.send(e2eClientFrame(first.burrowId, { step: "transport" }));
-  expect(await second.take()).toMatchObject({ step: "transport" });
+  expect(await routed(second)).toMatchObject({ step: "transport" });
 });
 
 test("the alarm is the earliest Client expiry or sweep, at most an hour off; a close leaves it, and the alarm re-arms or clears", async ({
@@ -614,13 +622,6 @@ test("removing a passkey closes its sessions' Client sockets at once; the sweep 
   };
   const removed = await bound(owner.sessionToken);
   const kept = await bound((await signedIn((await burrowRow(owner.userId)).burrowToken)).sessionToken);
-  /** The next frame but a sweep's nudge, whose order against a teardown is the row reads'. */
-  const routed = async () => {
-    for (;;) {
-      const frame = await burrow.take();
-      if (frame.t !== "passkeys-changed") return frame;
-    }
-  };
   const unauthorized = async (ws: FrameSocket) => {
     const closed = await ws.closed;
     return [closed.code, closed.reason];
@@ -648,13 +649,13 @@ test("removing a passkey closes its sessions' Client sockets at once; the sweep 
   expect(await unauthorized(removed.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
   expect(await burrow.take()).toEqual({ t: "client-gone", clientId: removed.clientId });
   kept.ws.send(e2eClientFrame(burrowId, { step: "transport" }));
-  expect(await routed()).toMatchObject({ step: "transport", clientId: kept.clientId });
+  expect(await routed(burrow)).toMatchObject({ step: "transport", clientId: kept.clientId });
 
   // Its session deleted with no RPC, as an eviction at the session cap is.
   await sql(`DELETE FROM dormouse_relay_sessions WHERE "userId" = $1`, [owner.userId]);
   await room.fire();
   expect(await unauthorized(kept.ws)).toEqual([WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON]);
-  expect(await routed()).toEqual({ t: "client-gone", clientId: kept.clientId });
+  expect(await routed(burrow)).toEqual({ t: "client-gone", clientId: kept.clientId });
 
   // The owner loses the entitlement: a Client of a session still live goes too.
   const third = await bound((await signedIn((await burrowRow(owner.userId)).burrowToken)).sessionToken);

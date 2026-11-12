@@ -50,19 +50,6 @@ describe('owed alerts during resumed output', () => {
     manager.dismissAlert(ID);
     expect(published).toEqual([{ status: 'NOTHING_TO_SHOW', todo: true }]);
   });
-  it('keeps a report ringing while a claimant that takes the settle restarts work', () => {
-    driveToBusy(manager, ID);
-    manager.notifyFromProtocol(ID, REPORT);
-    vi.advanceTimersByTime(1_000);
-    manager.onData(ID);
-    manager.registerCompletionClaimant(ID, (event) => {
-      if (event.kind !== 'settled') return false;
-      work(manager, ID);
-      return true;
-    });
-    settle();
-    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
-  });
   it.each(['watching', 'report'] as const)('keeps a %s ringing through resumed output, delivering once on its original deadlines', (source) => {
     ring(source);
     const episode = manager.getState(ID).episode;
@@ -168,13 +155,12 @@ describe('owed alerts during resumed output', () => {
     driveToBusy(manager, ID);
     expect(toPersistedAlertState(manager.getState(ID))).toMatchObject({ todo: true, notification: REPORT });
   });
-  it.each(['acknowledge', 'dismiss', 'clearTodo', 'remove', 'seed'] as const)('clears a ring on %s without stale delivery', (action) => {
+  it.each(['acknowledge', 'dismiss', 'clearTodo', 'remove'] as const)('clears a ring on %s without stale delivery', (action) => {
     manager.setWatchedCommands([]); // Isolate report delivery from a later WATCHING settle.
     ring('report');
     driveToBusy(manager, ID);
     if (action === 'acknowledge') manager.acknowledge(ID, { input: false });
     else if (action === 'dismiss') manager.dismissAlert(ID);
-    else if (action === 'seed') manager.seed(ID, { todo: false });
     else manager[action](ID);
     vi.advanceTimersByTime(60_000);
     expect(manager.getState(ID).episode).toBeNull();

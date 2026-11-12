@@ -9,9 +9,51 @@ All notable changes to this project will be documented in this file. Also availa
 The format is based on [Keep a Changelog](https://keepachangelog.com/). Release checklist in [deploy.md](docs/specs/deploy.md).
 
 ## [Unreleased]
+
+## [2.0.0] - 2026-11-12
+
+### Added
+
+- **Pocket shows pages and Tools** — open local embedded pages and serving Tools on your phone over the encrypted connection, through Hosted Pocket or a one-time link. Automated-browser screencasts and self-hosted Pocket are not included ([#1515](https://github.com/diffplug/dormouse/pull/1515)).
+- **Pocket's new terminal UI** — a full-screen terminal, a Type composer that sends only when you tap Send and masks passwords, and a Sessions screen with theme and font-size settings ([#1495](https://github.com/diffplug/dormouse/pull/1495)).
+- **Tool picker** — a bare `dor tool` lists your Tools with fuzzy search, and your user Tools can import a Tool from another `dormouse.yml` ([#1689](https://github.com/diffplug/dormouse/pull/1689), [#1690](https://github.com/diffplug/dormouse/pull/1690)).
+- Settings lists your paired phones, each with Revoke and an access log; revoking disconnects the phone immediately ([#1459](https://github.com/diffplug/dormouse/pull/1459), [#1538](https://github.com/diffplug/dormouse/pull/1538)).
+- Double-click selects a word and triple-click a line; on Windows and Linux, Shift-drag selects even over a program that handles the mouse ([#1475](https://github.com/diffplug/dormouse/pull/1475)).
+- Muse conversations resume after Dormouse restarts ([#1577](https://github.com/diffplug/dormouse/pull/1577)).
+
+### Changed
+
+- **Breaking: the `dor` CLI is literal and explicit.** Scripts and agent prompts that call `dor` need updating; the [dor 2.0 migration guide](https://github.com/diffplug/dormouse/blob/main/docs/dor-v2-migration.md) lists every change ([#1738](https://github.com/diffplug/dormouse/pull/1738), [#1739](https://github.com/diffplug/dormouse/pull/1739), [#1740](https://github.com/diffplug/dormouse/pull/1740), [#1741](https://github.com/diffplug/dormouse/pull/1741), [#1742](https://github.com/diffplug/dormouse/pull/1742), [#1743](https://github.com/diffplug/dormouse/pull/1743), [#1744](https://github.com/diffplug/dormouse/pull/1744), [#1745](https://github.com/diffplug/dormouse/pull/1745), [#1758](https://github.com/diffplug/dormouse/pull/1758), [#1768](https://github.com/diffplug/dormouse/pull/1768)).
+  - `dor split` takes its command after `--`: `dor split -- npm test`.
+  - `dor send` sends exactly what you give it and never adds Enter: `dor send surface:3 --text 'hello' --key Enter`. `--raw` is removed.
+  - No command moves focus unless you pass `--focus`.
+  - Pane placement uses `--from` instead of `--surface`, and Workspace and window references need a prefix: `workspace:<id>`, `workspace-name:<exact name>`, `window:<label>`.
+  - `--json` failures print a structured `error` on stdout with a nonzero exit status, and launch results report `command_state` instead of `completion`.
+- **Breaking: Tool configuration uses `$HERE` instead of `$PROJECT_ROOT`** — the directory of the `dormouse.yml` that declares the Tool ([#1686](https://github.com/diffplug/dormouse/pull/1686)).
+- **Breaking: the terminal-context autorun is removed.** Opening a terminal's context gives you a helper shell without running a configured command ([#1540](https://github.com/diffplug/dormouse/pull/1540)).
+- **Breaking for self-hosted remote control: update the desktop and your Relay together.** An updated Relay rejects older desktops ([#1759](https://github.com/diffplug/dormouse/pull/1759)).
+- **Alerts no longer defer a ring.** A program that reports its progress finishes a turn when that progress ends, and a repaint after a click or the echo of your first keystroke no longer counts as new work ([#1368](https://github.com/diffplug/dormouse/pull/1368), [#1563](https://github.com/diffplug/dormouse/pull/1563), [#1222](https://github.com/diffplug/dormouse/pull/1222), [#1746](https://github.com/diffplug/dormouse/pull/1746)).
+- An unrecognized key in command mode opens a prompt instead of reaching the terminal ([#1476](https://github.com/diffplug/dormouse/pull/1476)).
+- Embedded pages on other machines load only from an allowed network. Settings shows Allowed networks at every network level, and none is turned on automatically ([#1593](https://github.com/diffplug/dormouse/pull/1593), [#1716](https://github.com/diffplug/dormouse/pull/1716)).
+- 🖥️ **Breaking on Windows: saved state moves from Roaming to Local AppData and is not migrated.** Recreate your layouts, then enroll and pair your phones again ([#1716](https://github.com/diffplug/dormouse/pull/1716)).
+
 ### Fixed
-- 🖥️ Shift+Enter keeps inserting a newline in Claude Code and other kitty-protocol TUIs after their Workspace moves to another window, instead of submitting the prompt until the app restarts.
-- 🖥️ TUIs also keep light/dark change reports, their cursor style and, on Windows, win32-input-mode after their Workspace moves to another window.
+
+- **Markdown editor** — table-cell edits, hard line breaks, heading spacing, and literal `>` and `=` survive a save; source mode shows the file's own text; edits made while a reload is in flight are kept ([#1255](https://github.com/diffplug/dormouse/pull/1255), [#1665](https://github.com/diffplug/dormouse/pull/1665), [#1670](https://github.com/diffplug/dormouse/pull/1670), [#1703](https://github.com/diffplug/dormouse/pull/1703), [#1754](https://github.com/diffplug/dormouse/pull/1754), [#1288](https://github.com/diffplug/dormouse/pull/1288)).
+- **Windows shells and WSL** — `dor`, browser commands, and dev-server discovery work across PowerShell, cmd, Git Bash, and WSL, with argument quoting intact and far less background scanning ([#1267](https://github.com/diffplug/dormouse/pull/1267), [#1303](https://github.com/diffplug/dormouse/pull/1303), [#1343](https://github.com/diffplug/dormouse/pull/1343), [#1348](https://github.com/diffplug/dormouse/pull/1348), [#1463](https://github.com/diffplug/dormouse/pull/1463), [#1617](https://github.com/diffplug/dormouse/pull/1617), [#1285](https://github.com/diffplug/dormouse/pull/1285), [#1735](https://github.com/diffplug/dormouse/pull/1735)).
+- **Tools** open the server their own process started, not another on the same port; breaking a Tool leaves its terminal a terminal, and idle cleanup never stops a Tool that took over your shell ([#1691](https://github.com/diffplug/dormouse/pull/1691), [#1287](https://github.com/diffplug/dormouse/pull/1287), [#1664](https://github.com/diffplug/dormouse/pull/1664)).
+- **Browser panes** keep their page, viewport size, and launch configuration on reload, and agent-browser reconnects on Windows ([#1304](https://github.com/diffplug/dormouse/pull/1304), [#1305](https://github.com/diffplug/dormouse/pull/1305), [#1293](https://github.com/diffplug/dormouse/pull/1293), [#1300](https://github.com/diffplug/dormouse/pull/1300)).
+- **Pocket** picks up the running program's keyboard and terminal modes, shows alarms and TODOs in its headers, and one-time links work when the phone's clock is wrong ([#1711](https://github.com/diffplug/dormouse/pull/1711), [#1282](https://github.com/diffplug/dormouse/pull/1282), [#1716](https://github.com/diffplug/dormouse/pull/1716)).
+- PowerShell keeps Unicode commands and reports the right exit status, and bash keeps your existing `PROMPT_COMMAND` ([#1729](https://github.com/diffplug/dormouse/pull/1729), [#1391](https://github.com/diffplug/dormouse/pull/1391)).
+- Fast terminal output no longer builds an unbounded backlog ([#1722](https://github.com/diffplug/dormouse/pull/1722)).
+- Copying keeps line breaks in tables and rewraps quoted text with its quote markers ([#1700](https://github.com/diffplug/dormouse/pull/1700), [#1466](https://github.com/diffplug/dormouse/pull/1466)).
+- A minimized or hidden page can no longer hold the keyboard, and closing a dialog returns focus to the terminal ([#1730](https://github.com/diffplug/dormouse/pull/1730), [#1757](https://github.com/diffplug/dormouse/pull/1757), [#1718](https://github.com/diffplug/dormouse/pull/1718)).
+- Terminal file links ask before opening a page that runs scripts ([#1734](https://github.com/diffplug/dormouse/pull/1734)).
+- 🔌 VS Code shutdown continues after a storage failure, and changing the global default shell clears a stale workspace override ([#1289](https://github.com/diffplug/dormouse/pull/1289), [#1632](https://github.com/diffplug/dormouse/pull/1632)).
+- 🖥️ Moving a Workspace to another window keeps Shift+Enter working in Claude Code and other kitty-protocol programs ([#1497](https://github.com/diffplug/dormouse/pull/1497)).
+- 🖥️ Windows restores maximized windows and keeps sign-in dialogs above Dormouse; Windows and Linux reuse the running app when launched again; macOS Workspace dragging works across monitors with different scaling ([#1709](https://github.com/diffplug/dormouse/pull/1709), [#1394](https://github.com/diffplug/dormouse/pull/1394), [#1704](https://github.com/diffplug/dormouse/pull/1704), [#1674](https://github.com/diffplug/dormouse/pull/1674)).
+- 🖥️ Linux reads the clipboard natively, and AppImage-launched shells and browsers no longer inherit the launcher's private paths ([#1672](https://github.com/diffplug/dormouse/pull/1672), [#1669](https://github.com/diffplug/dormouse/pull/1669)).
+- 🖥️ Quit, window-close, and update-restart confirmations stay tied to the work you approved, and a failed update stops reminding you hourly ([#1279](https://github.com/diffplug/dormouse/pull/1279), [#1605](https://github.com/diffplug/dormouse/pull/1605), [#1314](https://github.com/diffplug/dormouse/pull/1314)).
 
 ## [1.3.0] - 2026-10-20
 ### Added
