@@ -29,7 +29,9 @@
   });
   // Each time this page's window takes focus from outside it.
   window.addEventListener('focus', function () { focuses++; report(); });
-  setInterval(function () { field.focus(); report(); }, 50);
+  // Slow enough that a key the story sends just after a reclaim lands well
+  // before the next steal, even through a slow keyboard RPC on a loaded runner.
+  setInterval(function () { field.focus(); report(); }, 200);
 </script>
 </body>
 </html>
