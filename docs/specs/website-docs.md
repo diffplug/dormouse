@@ -102,7 +102,7 @@ Source of truth: `buildDocument` in `website/scripts/generate-docs.js`; `Markdow
 
 `siteMeta` in `website/src/lib/site-meta.ts` builds every page's title, description, canonical, and social cards; a page exports `meta` calling it with its own.
 
-**Never** hardcode one of those in `root.tsx`'s `<head>`, which is emitted before `<Meta />` (rationale). **Must** give every prerendered page a canonical on its own path, carrying the trailing slash the host redirects to. **Never** claim one from a route served through the SPA fallback, where the client `<Meta />` appends a second canonical (rationale); `siteMeta`'s `indexable: false` sends `robots: noindex, follow` instead. `checkPageHeadTags` and `checkSiteOrigin` pin the first two.
+**Never** hardcode one of those in `root.tsx`'s `<head>`, which is emitted before `<Meta />` (rationale). **Must** give every prerendered page but the catch-all `/404`, which stands in for every unknown path, a canonical on its own path, carrying the trailing slash the host redirects to. **Never** claim one from a route served through the SPA fallback, where the client `<Meta />` appends a second canonical (rationale); `siteMeta`'s `indexable: false` sends `robots: noindex, follow` instead. `checkPageHeadTags` and `checkSiteOrigin` pin the first two.
 
 **Every in-site link spells that served path** — `sitePath` in components, the generator's rewrites in reference prose — so no reader lands on a redirect. Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page. `checkInSiteHrefsAreServed` pins it.
 

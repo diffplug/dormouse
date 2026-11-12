@@ -1335,8 +1335,8 @@ export function Wall({
    *  enters passthrough in place; a minimized one reattaches on the same terms
    *  as clicking its Door chip, except that a reveal moves focus without
    *  acknowledging — `dor` reveals too, and an agent showing a pane is not the
-   *  human answering it. This is deliberately unlike `dor agent-browser`, whose
-   *  agent-initiated control path remains focus-neutral.
+   *  human answering it. `dor` browser commands reveal focus-neutrally unless
+   *  the command takes focus (docs/specs/dor-cli.md -> Focus intent).
    *
    *  `focusNeutral` is a reveal nobody asked to look at — a preview slot
    *  (`docs/specs/dor-tool.md` -> Preview slot): a Door reattaches, but mode,
@@ -1456,10 +1456,10 @@ export function Wall({
      *  tool` passes a tool leaf, which is a shell-hosted PTY exactly like a
      *  terminal but renders both capabilities. */
     leafMeta?: LeafMeta;
-    // `dor ensure` and `dor split -- <command>` must never move focus: the split
-    // is created in the background, leaving the caller's selection, mode, and DOM
-    // focus intact. Under Lath every add is inherently background (nothing
-    // re-parents or activates).
+    // Leave the caller's selection, mode, and DOM focus intact: the split is
+    // created in the background. `dor` passes it when the command does not take
+    // focus (docs/specs/dor-cli.md -> Focus intent). Under Lath every add is
+    // inherently background (nothing re-parents or activates).
     focusNeutral?: boolean;
     /** Create the leaf but stage no shell and spawn no PTY. `dor tool` uses it
      *  for a pane awaiting approval: nothing from the repo may run until a human
