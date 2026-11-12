@@ -35,6 +35,11 @@ Chromium sessions can be viewed and controlled in Dormouse.
 
 Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. An already-visible browser keeps focus unchanged unless --focus is explicit; the default still reveals and focuses a minimized browser.
 
+The exit status is playwright's own; 1 when dor refuses the command or fails
+before running it; or 4 when playwright succeeded but dor could not open
+or reuse its browser Surface. The command already ran and its output is printed,
+so do not repeat it blindly: check the page first.
+
 Examples:
   dor playwright --key app open :5173
   dor playwright --key app goto http://localhost:5173/settings

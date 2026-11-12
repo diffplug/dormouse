@@ -35,7 +35,7 @@ function toolClient({ tools } = {}) {
     },
     async toolSurface(request) {
       this.requests.push({ method: 'toolSurface', request });
-      return { status: 'created', surfaceId: 'surface:4', command: `run ${request.name}`, cwd: request.cwd, minimized: request.minimized, key: null };
+      return { status: 'created', commandState: 'unconfirmed', surfaceId: 'surface:4', command: `run ${request.name}`, cwd: request.cwd, minimized: request.minimized, key: null };
     },
   };
 }
@@ -60,7 +60,7 @@ test('a pick launches the Tool as dor tool <name> with the same flags would', as
   terminal.send('\r');
   const { exitCode, stdout, stderr } = await result;
   assert.equal(exitCode, 0);
-  assert.equal(stdout, 'created surface:4  "run harness"\n');
+  assert.equal(stdout, 'created surface:4  [unconfirmed]  "run harness"\n');
   assert.equal(stderr, '', 'the listing warnings stay out; the launch prints its own');
   assert.deepEqual(launch(client), launch(await typed(flags, 'harness')));
   assert.equal(terminal.listening, false);

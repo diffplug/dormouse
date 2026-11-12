@@ -2994,7 +2994,7 @@ describe('Wall on the Lath engine', () => {
         method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'surface:a', params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond: first,
       } })));
       await flush();
-      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created', commandState: 'unconfirmed' }) }));
       const second = vi.fn();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
         method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'surface:a', params: { name: finishesBeforeWait ? 'probe' : 'storybook', cwd: '/repo' }, signal: controller.signal, respond: second,
@@ -3432,7 +3432,7 @@ describe('Wall on the Lath engine', () => {
 
     expect(response).toMatchObject({
       ok: true,
-      result: { status: 'pending', surfaceId: toolId, minimized: false },
+      result: { status: 'pending', commandState: 'awaiting_approval', surfaceId: toolId, minimized: false },
     });
     expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
     expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
@@ -3483,7 +3483,7 @@ describe('Wall on the Lath engine', () => {
         act(() => finish(command));
       }
       await waitUntil(() => respond.mock.calls.length > 0);
-      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', surfaceId: id }) }));
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', commandState: 'ended', surfaceId: id }) }));
       expect(typed).toEqual(['\x03', `${command}\r`]);
       expect(terminalRegistry.getTerminalPaneState(id).currentCommand).toBeNull();
       expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).not.toBe(oldRun);
@@ -3592,7 +3592,7 @@ describe('Wall on the Lath engine', () => {
         params: { command: ['pnpm', 'dev'], cwd: '/repo' }, signal: controller.signal, respond,
       } })));
       await waitUntil(() => respond.mock.calls.length > 0);
-      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover', commandState: 'queued' }) }));
       if (change === 'cancelled') controller.abort();
       if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a' } : undefined);
       if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('surface:a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
@@ -3826,7 +3826,7 @@ describe('Wall on the Lath engine', () => {
         method: SURFACE_CONTROL_METHODS.tool, surfaceId: id, params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond: first,
       } })));
       await waitUntil(() => first.mock.calls.length > 0);
-      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover', commandState: 'queued' }) }));
       act(() => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
       await waitUntil(() => typed.length > 0);
       const previousRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;

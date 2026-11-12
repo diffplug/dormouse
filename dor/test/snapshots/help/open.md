@@ -25,6 +25,12 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
 
 Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error. --preview turns the default off too.
 
+command_state, the [tag] in text output, says what the reply proves about the command; status says how the Surface was found or made. Neither promises a successful exit or a ready service: check readiness separately. It is one of:
+  unconfirmed  a new Surface; its command is not yet seen starting
+  running      the shell reported the command running
+  queued       not started yet: a takeover, answered before its command is typed so dor can exit and free the shell, or a reused or retargeted Tool whose run has not started
+  ended        the command already ended, perhaps with a nonzero exit, or a newer preview superseded this one
+
 --preview shows the file or folder in this Workspace's preview slot: one reusable pane, marked by an italic label, that each preview retargets in place — reporting "retargeted", or "superseded" when a newer preview replaced it first. Opening what the slot shows without --preview keeps it open, as do double-clicking its pane header, Keep open in its terminal context, and the Tool reporting unsaved changes; the next preview then gets a new slot. A retarget interrupts the slot with Ctrl+C, so preview Tools should exit on it (less -K, glow); a slot still running a second later is kept open instead. A preview never takes over the calling pane, and a Tool already kept open for it is revealed instead.
 
 FLAGS

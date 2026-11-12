@@ -221,7 +221,7 @@ A Window holds several Workspaces, each with its own surfaces. You almost never 
 
 ```sh
 $ dor ensure -- npm run dev
-created surface:3  "npm run dev"
+created surface:3  [unconfirmed]  "npm run dev"
 $ dor await surface:3 --until quiet
 $ dor agent-browser open surface:3
 ```
@@ -289,4 +289,6 @@ dor kill surface:N --confirm-if-read "npm run dev"
 
 **Codex's shared daemon can retain stale terminal context.** Tool commands can inherit an old host's environment even while the Codex UI is in a current Dormouse terminal. When this mismatch is confirmed, ask the user to exit Codex and resume from the working terminal with `codex --no-daemon resume`. `codex features disable daemon_auto_start` persists the preference; an existing daemon also needs `codex app-server daemon stop` before restarting normally. Stopping it can interrupt other Codex sessions: coordinate with the user first. Check the installed CLI's help before prescribing these options, then verify `dor list` after reconnecting. Do not switch to Computer Use or bypass authentication to work around stale context.
 
-With first-party `--json`, a failure returns `{"error":{"code":"...","message":"..."}}` on stdout and a nonzero exit status. Check the exit status before reading success fields; `await` uses `TIMEOUT` (exit 2) and `SURFACE_DIED` (exit 3). `CONTROL_UNAVAILABLE` means no host received the request, so nothing ran. Browser-provider output follows that provider's format.
+With first-party `--json`, a failure returns `{"error":{"code":"...","message":"..."}}` on stdout and a nonzero exit status. Check the exit status before reading success fields; `await` uses `TIMEOUT` (exit 2) and `SURFACE_DIED` (exit 3). `CONTROL_UNAVAILABLE` means no host received the request, so nothing ran. Browser-provider output and exit status follow that provider, except exit 4: the command succeeded but its browser pane could not be opened. It already ran, so do not repeat it blindly; check the page first.
+
+Launch results carry `command_state`, apart from `status`: in text output from `ensure`, `tool`, and `open` it is the `[tag]` after the handle. `unconfirmed` has not been seen starting; `running` means the shell reported it running, not that its service is ready; `awaiting_approval` waits on the user and nothing ran; `queued` has not started, as with a takeover, which answers before its command can run; `ended` already ended, perhaps with a nonzero exit. Each command's `--help` lists the states it can report. Check application readiness separately.

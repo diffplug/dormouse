@@ -4,6 +4,7 @@ import { buildCommand } from '@stricli/core';
 import { commandError } from './errors.js';
 import type {
   Command,
+  CommandState,
   DorCommandContext,
   ParseResult,
   ToolListResponse,
@@ -11,6 +12,7 @@ import type {
 } from './types.js';
 import {
   callerWorkingDirectory,
+  commandStateHelp,
   cwdParser,
   launchDirectory,
   focusFlag,
@@ -29,6 +31,16 @@ import {
 } from './shared.js';
 import { approvalTag, printableExact, renderToolResponse, toolRunText, toolTags } from './terminal-text.js';
 import { runToolPicker } from './tool-picker.js';
+
+/** Every state `dor tool` reports, in help order. Only a preview, which
+ *  `dor tool` never asks for, is superseded or retargeted. */
+const TOOL_COMMAND_STATES: ReadonlyArray<readonly [CommandState, string]> = [
+  ['unconfirmed', 'a new Surface; its command is not yet seen starting'],
+  ['running', 'the shell reported the command running'],
+  ['awaiting_approval', 'the pane waits for you to approve the project dormouse.yml; nothing has run'],
+  ['queued', 'not started yet: a takeover, answered before its command is typed so dor can exit and free the shell, or a reused Tool whose re-run has not started'],
+  ['ended', 'the new or restarted command already ended, perhaps with a nonzero exit'],
+];
 
 interface ToolFlags {
   readonly list?: boolean;
@@ -136,10 +148,13 @@ ${focusHelp({ minimize: true })}
 
 Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --focus, --minimize, --fresh, --surface, or --workspace asks for a launch.
 
+${commandStateHelp(TOOL_COMMAND_STATES)}
+
 Text output:
-  created surface:3  "pnpm storybook"
-  existing surface:3  "pnpm storybook"
-  takeover surface:1  "pnpm storybook"
+  created surface:3  [unconfirmed]  "pnpm storybook"
+  existing surface:3  [running]  "pnpm storybook"
+  takeover surface:1  [queued]  "pnpm storybook"
+  pending surface:3  [awaiting_approval]  "pnpm storybook"
 
   project  /Users/me/projects/site/dormouse.yml  [approved]
     storybook  "pnpm storybook"  [iframe]  [port auto]  [keyed]
@@ -149,6 +164,7 @@ Text output:
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:3",
     "command": "pnpm storybook",
     "cwd": "/Users/me/projects/site",

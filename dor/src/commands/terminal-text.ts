@@ -50,6 +50,7 @@ export function renderToolResponse(response: ToolSurfaceResponse, json: boolean)
   if (json) {
     return renderPrintableJson({
       status: response.status,
+      command_state: response.commandState,
       surface_id: response.surfaceId,
       command: response.command,
       cwd: response.cwd,
@@ -57,7 +58,7 @@ export function renderToolResponse(response: ToolSurfaceResponse, json: boolean)
       key: response.key,
     });
   }
-  return `${printableExact(`${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}`)}\n`;
+  return `${printableExact(`${response.status} ${response.surfaceId}  [${response.commandState}]  ${JSON.stringify(response.command)}`)}\n`;
 }
 
 /** A listed Tool's command as `dor tool --list` and its picker show it: a

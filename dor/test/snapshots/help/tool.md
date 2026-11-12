@@ -32,10 +32,18 @@ Typed alone at a prompt, the command focuses the Surface it opens or reuses; an 
 
 Without a name or --, in an interactive terminal, a fuzzy finder lists the Tools --list would. Type to filter, ↑/↓ or the mouse to select, Enter or a double-click to run. Beside the list — or on one status line when the terminal is narrower than 100 columns — it shows the highlighted Tool's tags, file, and description. A shadowed user Tool runs as --global would run it. Esc or Ctrl+C cancels, exiting 1 silently. The other flags apply to the chosen Tool. With no Tool declared, it prints the listing instead. Without a terminal, or with --json, it prints what --list prints, unless --focus, --minimize, --fresh, --surface, or --workspace asks for a launch.
 
+command_state, the [tag] in text output, says what the reply proves about the command; status says how the Surface was found or made. Neither promises a successful exit or a ready service: check readiness separately. It is one of:
+  unconfirmed        a new Surface; its command is not yet seen starting
+  running            the shell reported the command running
+  awaiting_approval  the pane waits for you to approve the project dormouse.yml; nothing has run
+  queued             not started yet: a takeover, answered before its command is typed so dor can exit and free the shell, or a reused Tool whose re-run has not started
+  ended              the new or restarted command already ended, perhaps with a nonzero exit
+
 Text output:
-  created surface:3  "pnpm storybook"
-  existing surface:3  "pnpm storybook"
-  takeover surface:1  "pnpm storybook"
+  created surface:3  [unconfirmed]  "pnpm storybook"
+  existing surface:3  [running]  "pnpm storybook"
+  takeover surface:1  [queued]  "pnpm storybook"
+  pending surface:3  [awaiting_approval]  "pnpm storybook"
 
   project  /Users/me/projects/site/dormouse.yml  [approved]
     storybook  "pnpm storybook"  [iframe]  [port auto]  [keyed]
@@ -45,6 +53,7 @@ Text output:
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:3",
     "command": "pnpm storybook",
     "cwd": "/Users/me/projects/site",

@@ -200,11 +200,17 @@ Where `stricli` cannot express a shape, a command may declare narrow, snapshot-t
 - `kill` accepts browser Surfaces.
 - `ensure` against an unintegrated shell other than `cmd.exe` times out and closes the temporary Surface.
 - `list` **owns every Workspace read**.
-- Every command exits 1 on a usage or target error; besides 0, only `await` uses others (2, 3; help). `await` prints no terminal text (rationale).
+- Every command exits 1 on a usage or target error; besides 0, only `await` (2, 3; help) and the browser providers ([Browser Surface Addressing](#browser-surface-addressing)) use others. `await` prints no terminal text (rationale).
 
 `list --json` carries Host identity and runtime paths but **never the control socket**. **Consumers must gate on `has_terminal` / `has_browser`, not `kind`**, the capability vocabulary commands also use in target errors.
 
 Source of truth: `dor/src/cli-core.ts`, `dor/src/commands/`, `buildShellCommandForKind` in `dor/src/commands/shell-quote.ts`, and `useDorControl` in `lib/src/components/wall/use-dor-control.ts`.
+
+## Command state
+
+**Must report a launch's `command_state` separately from its creation/reuse `status`, from evidence present when replying.** Shell integration alone proves neither command startup nor application readiness; a completed earlier run never proves a new retarget or restart. A new or restarted command may already have ended when acknowledged. `CommandState` in `dor/src/commands/types.ts` owns the values, each response type narrows them to what its command can report, and each command's help lists only those.
+
+A successful request or approval-pending response never promises later execution. Takeover acknowledgement follows `docs/specs/dor-tool.md` → "Take-over", app restart [dor app](#dor-app), and input delivery [dor send](#dor-send).
 
 ## dor send
 
@@ -288,7 +294,7 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 - **Must read Dormouse's options anywhere in the provider argv**, up to an optional bare `--` that ends interception and is forwarded unchanged (rationale). Only a lone `--help`/`-h` is `dor`'s help; any other is the provider's.
 - **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except Dormouse-owned `dor-embed-size` and `dor-diagnostics`, forward arguments and exit status, and stdout and stderr at exit. **Must refuse a form that waits on the terminal or never exits** (`BLOCKING_FORMS`; rationale). **Must forward stdin only to the requested command**, never preparation or status probes.
 - **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.
-- **After a command that may bind succeeds, `surface.browser { provider, key?, surface?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**, routed by any `--surface`: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`** (rationale). A failure there adds a stderr warning without changing the command's success. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
+- **After a command that may bind succeeds, `surface.browser { provider, key?, surface?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**, routed by any `--surface`: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`** (rationale). **Must exit 4 (`BROWSER_UNBOUND_EXIT`) when binding fails after a successful provider command**, keeping the provider's output and stating on stderr that the command already ran; never retry it. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle Model](#handle-model)), and the host applies two gates in order:
 

@@ -202,7 +202,7 @@ flowchart TD
   T -- no --> SP[split: created]
 ```
 
-**Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never routing them to a native editor (rationale). Generated help owns syntax and response types own shape. CLI focus follows `docs/specs/dor-cli.md` → "Focus intent".
+**Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never routing them to a native editor (rationale). Generated help owns syntax and response types own shape. CLI focus and acknowledgements follow `docs/specs/dor-cli.md` → "Focus intent" and "Command state".
 
 **Must answer `dor tool --list` from the files `dor tool <name>` resolves from the same directory, executing nothing.** A project lists without a grant and reports whether it has one. Each entry carries the comment block directly above it as its description, and a user Tool hidden by a same-named project Tool is `shadowed`. A malformed file fails the listing as it fails lookup. Bare, `dor tool` picks or lists one ([Choosing a Tool](#choosing-a-tool)).
 

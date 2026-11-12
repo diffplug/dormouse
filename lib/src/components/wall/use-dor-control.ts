@@ -15,6 +15,7 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
+  EnsureSurfaceResponse,
   ToolOrigin,
   ToolSurfaceResponse,
 } from 'dor/commands/types';
@@ -398,6 +399,30 @@ export function waitForNewToolCommand(id: string, command: string, cwd: string, 
   return waitForTerminalState(id, state => surfaceRunsCommand(state, command, cwd)
     || completedCommandMatches(state, command, cwd),
   COMMAND_START_TIMEOUT_MS, signal);
+}
+
+/** What the pane shows of a launched command when replying: only evidence
+ * available now. A previous completed run cannot prove a retarget/restart;
+ * compare its run id with the history observed before injection. */
+export function observedCommandState(
+  newSurface: boolean, id: string, command: string, cwd: string, previousRunId?: string | null,
+): EnsureSurfaceResponse['commandState'] {
+  const state = getTerminalPaneState(id);
+  if (surfaceRunsCommand(state, command, cwd)) return 'running';
+  if (newSurface) return completedCommandMatches(state, command, cwd) ? 'ended' : 'unconfirmed';
+  if (previousRunId !== undefined && completedCommandMatches(state, command, cwd, previousRunId)) return 'ended';
+  return 'queued';
+}
+
+/** A Tool reply's command state: an approval, a takeover, and a superseded
+ * preview are settled by their status alone. */
+export function toolCommandState(
+  status: ToolSurfaceResponse['status'], id: string, command: string, cwd: string, previousRunId?: string | null,
+): ToolSurfaceResponse['commandState'] {
+  if (status === 'pending') return 'awaiting_approval';
+  if (status === 'takeover') return 'queued';
+  if (status === 'superseded') return 'ended';
+  return observedCommandState(status === 'created', id, command, cwd, previousRunId);
 }
 
 /** A terminal-only Tool is ready once its output has been quiet this long. */
@@ -1203,6 +1228,7 @@ export function useDorControl({
         ok: true,
         result: {
           status: 'created',
+          commandState: 'unconfirmed',
           surfaceId: result.value.id,
           direction,
           minimized: result.value.minimized,
@@ -1331,6 +1357,7 @@ export function useDorControl({
         const respondTool = (
           status: ToolSurfaceResponse['status'],
           surface: { surfaceId: string; command: string; cwd: string; minimized: boolean },
+          previousRunId?: string | null,
         ) => {
           if (documentLink && targetPosition && hasToolView(lath.getMeta(surface.surfaceId)?.params)) {
             lath.store.updateParams(surface.surfaceId, { toolViewRequest: { token: crypto.randomUUID(), position: targetPosition } });
@@ -1339,6 +1366,7 @@ export function useDorControl({
           ok: true,
           result: {
             status,
+            commandState: toolCommandState(status, surface.surfaceId, surface.command, surface.cwd, previousRunId),
             surfaceId: surface.surfaceId,
             command: surface.command,
             cwd: surface.cwd,
@@ -1380,7 +1408,8 @@ export function useDorControl({
             command: toolCommandFromParams(lath.getMeta(id)?.params) ?? '',
             cwd: runDirectory(id),
           },
-        ) => respondTool(status, { surfaceId: id, ...standing, minimized: !visible });
+          previousRunId?: string | null,
+        ) => respondTool(status, { surfaceId: id, ...standing, minimized: !visible }, previousRunId);
         /** Answer a preview a newer one replaced with the slot as it stands, or
          *  report false; its own cancellation is not that. */
         const answeredSuperseded = (): boolean => {
@@ -1702,7 +1731,9 @@ export function useDorControl({
           }
           retargetInPlace(id, nextCommand, token, isPreviewSlotParams(source));
           lath.store.updateParams(id, { toolHistory: nextHistory, toolViewRequest: undefined });
-          const started = await typeToolCommand(id, nextCommand, runDirectory(id), detail.signal, { acceptCompletedRun: true });
+          const previousRunId = getTerminalPaneState(id).lastCommand?.id ?? null;
+          const nextCwd = runDirectory(id);
+          const started = await typeToolCommand(id, nextCommand, nextCwd, detail.signal, { acceptCompletedRun: true });
           if (started !== 'ready') {
             if (token !== null) endPreviewTransition(id, token);
             // Restore only into the untouched prompt we own, never into a
@@ -1716,7 +1747,9 @@ export function useDorControl({
             detail.respond({ ok: false, error: 'The destination Tool did not start.' });
             return true;
           }
-          respondStanding('retargeted', id, revealTool(id));
+          // Run end can already have removed the Tool's params. Answer with
+          // the command we injected, not its now-plain terminal's metadata.
+          respondStanding('retargeted', id, revealTool(id), { command: nextCommand, cwd: nextCwd }, previousRunId);
           return true;
         };
         if (params.disposition === 'current' && sourceId && sourceParams && openTarget
@@ -1877,7 +1910,8 @@ export function useDorControl({
             // the "appears to do nothing" the invariant is written against.
             // The match's own directory, not the caller's: an `adopted`
             // restart ran there, and an `existing` match is running there.
-            respondStanding(idle ? 'adopted' : 'existing', match.id, revealTool(match.id), matched);
+            respondStanding(idle ? 'adopted' : 'existing', match.id, revealTool(match.id), matched,
+              idle || rehydrated ? matchState.lastCommand?.id ?? null : undefined);
             return;
           }
         }
@@ -2014,6 +2048,7 @@ export function useDorControl({
             ok: true,
             result: {
               status: 'restarted',
+              commandState: 'running',
               surfaceId: existingId,
               command,
               cwd,
@@ -2026,6 +2061,7 @@ export function useDorControl({
           ok: true,
           result: {
             status: 'existing',
+            commandState: observedCommandState(false, existingId, command, cwd),
             surfaceId: existingId,
             command,
             cwd,
@@ -2086,6 +2122,7 @@ export function useDorControl({
         ok: true,
         result: {
           status: 'created',
+          commandState: observedCommandState(true, result.value.id, command, cwd),
           surfaceId: result.value.id,
           command,
           cwd,

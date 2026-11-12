@@ -1,5 +1,5 @@
 exitCode: 0
 stdout:
-restarted surface:3  "pnpm dev:workspace"
+restarted surface:3  [running]  "pnpm dev:workspace"
 
 stderr:

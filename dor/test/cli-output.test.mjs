@@ -165,7 +165,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // Mirror the real host: quote the argv for the target (here, posix) shell.
       const command = request.command ? buildShellCommandForKind('posix', request.command) : undefined;
       return {
-        status: 'created',
+        status: 'created', commandState: 'unconfirmed',
         surfaceId: 'surface:3',
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
@@ -208,6 +208,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const keyed = named && request.name === 'storybook' && !request.fresh;
       return {
         status: keyed ? 'existing' : 'created',
+        commandState: keyed ? 'running' : 'unconfirmed',
         surfaceId: 'surface:4',
         command,
         cwd: request.cwd,
@@ -224,6 +225,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const isExisting = command === 'pnpm dev:workspace';
       return {
         status: isExisting ? (request.restart ? 'restarted' : 'existing') : 'created',
+        commandState: isExisting ? 'running' : 'unconfirmed',
         surfaceId: 'surface:3',
         command,
         cwd: request.cwd,
@@ -2303,7 +2305,7 @@ test('tool --list escapes control and format characters in repo text, in every o
 });
 
 test('tool and open escape control and format characters in the host answer, in every output', async () => {
-  const answer = { status: 'created', surfaceId: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J \u202e', cwd: '/work/\u0085site\ufeff', minimized: false, key: 'k\u009d' };
+  const answer = { status: 'created', commandState: 'unconfirmed', surfaceId: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J \u202e', cwd: '/work/\u0085site\ufeff', minimized: false, key: 'k\u009d' };
   const client = fixtureClient();
   client.toolSurface = async () => answer;
   for (const argv of [['tool', 'evil'], ['tool', '--json', 'evil'], ['open', 'a.md'], ['open', '--json', 'a.md']]) {
@@ -2373,12 +2375,12 @@ test('open --preview asks for the preview slot and prints its retarget', async (
   const client = fixtureClient();
   client.toolSurface = async function toolSurface(request) {
     this.requests.push({ method: 'toolSurface', request });
-    return { status: 'retargeted', surfaceId: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
+    return { status: 'retargeted', commandState: 'running', surfaceId: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
   };
   const result = await runCli(['open', '--preview', 'a.md'], { client, env: { PWD: '/repo' } });
   assert.equal(result.exitCode, 0);
   assert.equal(client.requests[0].request.preview, true);
-  assert.equal(result.stdout, 'retargeted surface:5  "viewer a.md"\n');
+  assert.equal(result.stdout, 'retargeted surface:5  [running]  "viewer a.md"\n');
   const plain = fixtureClient();
   await runCli(['open', 'a.md'], { client: plain, env: { PWD: '/repo' } });
   assert.equal('preview' in plain.requests[0].request, false);
@@ -2607,4 +2609,30 @@ test('JSON errors preserve original text while both output channels escape termi
       assert.doesNotMatch(result.stdout + result.stderr, HIDDEN);
     }
   }
+});
+
+test('launch output reports command_state in text and JSON', async () => {
+  for (const [status, commandState] of [['pending', 'awaiting_approval'], ['takeover', 'queued'], ['created', 'unconfirmed'], ['existing', 'running'], ['superseded', 'ended']]) {
+    const client = { toolSurface: async () => ({ status, commandState, surfaceId: 'surface:2', command: 'server', cwd: '/repo', minimized: false, key: null }) };
+    const json = await runCli(['tool', 'server', '--json'], { client });
+    assert.equal(json.exitCode, 0);
+    assert.equal(JSON.parse(json.stdout).command_state, commandState);
+    assert.equal(JSON.parse(json.stdout).status, status);
+    assert.equal('completion' in JSON.parse(json.stdout), false);
+    const text = await runCli(['tool', 'server'], { client });
+    assert.equal(text.stdout, `${status} surface:2  [${commandState}]  "server"\n`);
+  }
+});
+
+test('agent-browser exits 4 when its successful command cannot bind a pane', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  client.browserSurface = async () => { throw new Error('pane unavailable'); };
+  const result = await runCli(['agent-browser', 'open', ':5173', '--json'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 4);
+  assert.equal(result.stdout, '✓ ok\n');
+  assert.match(result.stderr, /agent-browser command succeeded/);
+  assert.match(result.stderr, /pane unavailable/);
+  assert.match(result.stderr, /already ran; do not repeat it blindly/);
+  assert.equal(ab.calls.filter(args => args.includes('open')).length, 1);
 });

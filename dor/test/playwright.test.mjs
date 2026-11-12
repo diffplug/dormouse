@@ -108,11 +108,11 @@ test('native failures and close do not create or resurrect panes', async () => {
   options.execPlaywright = async () => ({ exitCode: 7, stdout: '', stderr: 'native error' });
   assert.deepEqual(await runCli(['playwright', 'open', ':8080'], options), { exitCode: 7, stdout: '', stderr: 'native error' });
 });
-test('viewer failure preserves native command output and exit status', async () => {
+test('viewer failure preserves native output but exits 4', async () => {
   const { options } = fixture();
   options.client.browserSurface = async () => { throw new Error('Chromium only'); };
   const result = await runCli(['playwright', 'snapshot'], options);
-  assert.equal(result.exitCode, 0);
+  assert.equal(result.exitCode, 4);
   assert.equal(result.stdout, 'native output\n');
   assert.match(result.stderr, /Chromium only/);
 });

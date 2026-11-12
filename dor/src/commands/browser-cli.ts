@@ -27,7 +27,7 @@ import type {
   ControlClient,
   ParseResult,
 } from './types.js';
-import { callerWorkingDirectory, errorMessage, fail, focusParam, requireControlClient, workspaceParam } from './shared.js';
+import { BROWSER_UNBOUND_EXIT, callerWorkingDirectory, errorMessage, fail, focusParam, requireControlClient, workspaceParam } from './shared.js';
 import { inferredHttpUrl, isSpecialOpenTarget, isSurfaceOpenTarget, resolveSurfaceOpenTarget } from './open-target.js';
 import { callerWslDistro, linuxPathText, windowsPathArgs, type PathArgs } from './wsl-paths.js';
 
@@ -604,7 +604,8 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
         ...workspaceParam(flags.workspace),
       });
     } catch (error) {
-      result.stderr += `Warning: could not open the Dormouse browser surface: ${errorMessage(error)}\n`;
+      result.exitCode = BROWSER_UNBOUND_EXIT;
+      result.stderr += `Error: the ${d.provider} command succeeded, but Dormouse could not open its browser Surface: ${errorMessage(error)}. The command already ran; do not repeat it blindly.\n`;
     }
   }
   return result;

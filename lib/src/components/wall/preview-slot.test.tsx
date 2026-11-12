@@ -1321,6 +1321,23 @@ describe('a switching slot', () => {
 });
 
 describe('Tool document navigation', () => {
+  it('reports ended when an in-place destination finishes during injection', async () => {
+    await mountSlot();
+    fake.setInputHandler('surface:slot', data => {
+      typed['surface:slot'].push(data);
+      if (data === '\x03') returnToPrompt('surface:slot');
+      else if (data.endsWith('\r')) {
+        reportRunning('surface:slot', data.slice(0, -1));
+        terminalRegistry.applyTerminalSemanticEvents('surface:slot', [
+          { type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' },
+        ]);
+      }
+    });
+    expect(await answer(await request({ file: '/repo/b.md', disposition: 'current' }, 'surface:slot')))
+      .toMatchObject({ status: 'retargeted', commandState: 'ended', surfaceId: 'surface:slot', command: 'view /repo/b.md', cwd: '/repo' });
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/b.md\r']);
+  });
+
   it('still navigates when the Markdown page cannot supply its reading position', async () => {
     installHost();
     await mountWall([{ id: 'surface:slot', params: viewerParams('a.md', { toolScope: 'builtin', toolName: 'file' }) }]);

@@ -7,7 +7,7 @@ USAGE
   dor ensure [--focus] [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...
   dor ensure --help
 
-Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
+Ensures one surface in the current workspace is running the given command at the given path. It reuses a running or in-flight match, or creates a split and schedules the command. Creation waits for shell integration, not command startup; read command_state before assuming the command started.
 
 Typed alone at a prompt, the command focuses the Surface it opens or reuses; an agent's or a script's invocation leaves focus where it is. --focus or --focus=false decides either way. --minimize turns the default off, and --focus with --minimize is an error. Focusing a minimized match reveals it.
 
@@ -27,14 +27,21 @@ Two surfaces running the same command in different working directories are disti
 
 --surface selects the surface to split only when creating a new surface. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the same caller/focused fallback as dor split.
 
+command_state, the [tag] in text output, says what the reply proves about the command; status says how the Surface was found or made. Neither promises a successful exit or a ready service: check readiness separately. It is one of:
+  unconfirmed  a new Surface whose shell is ready; its command is scheduled but not yet seen starting
+  running      the shell reported the command running (always so after --restart)
+  queued       the match is a launch still on its way; its command has not started
+  ended        the new Surface's command already ended, perhaps with a nonzero exit
+
 Text output:
-  created surface:3  "npm run dev"
-  existing surface:3  "npm run dev"
-  restarted surface:3  "npm run dev"
+  created surface:3  [unconfirmed]  "npm run dev"
+  existing surface:3  [running]  "npm run dev"
+  restarted surface:3  [running]  "npm run dev"
 
 JSON output:
   {
     "status": "created",
+    "command_state": "unconfirmed",
     "surface_id": "surface:3",
     "command": "npm run dev",
     "cwd": "/Users/me/projects/site",

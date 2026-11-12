@@ -1,6 +1,7 @@
 import { CliError } from './errors.js';
 import type {
   CliOptions,
+  CommandState,
   CliResult,
   ControlClient,
   DorCommandContext,
@@ -215,4 +216,25 @@ export function diagnosticsHelp(command: string): string {
   return `and dor-diagnostics to print, as JSON, what the pane and the host know about
 its stream — for a pane that froze, or never showed its page:
   ${command} --surface surface:3 dor-diagnostics`;
+}
+
+/** The exit status of a browser-provider command that succeeded when its
+ *  Surface could not be opened: distinct from 1, so a caller never retries a
+ *  command that already ran. */
+export const BROWSER_UNBOUND_EXIT = 4;
+
+/** The exit-status paragraph both browser commands' help gives. */
+export function browserExitHelp(provider: string): string {
+  return `The exit status is ${provider}'s own; 1 when dor refuses the command or fails
+before running it; or ${BROWSER_UNBOUND_EXIT} when ${provider} succeeded but dor could not open
+or reuse its browser Surface. The command already ran and its output is printed,
+so do not repeat it blindly: check the page first.`;
+}
+
+/** The command_state paragraph of a launching command's help, listing only the
+ *  states that command can report, each with what it means there. */
+export function commandStateHelp(states: ReadonlyArray<readonly [CommandState, string]>): string {
+  const width = Math.max(...states.map(([state]) => state.length)) + 2;
+  return `command_state, the [tag] in text output, says what the reply proves about the command; status says how the Surface was found or made. Neither promises a successful exit or a ready service: check readiness separately. It is one of:
+${states.map(([state, meaning]) => `  ${state.padEnd(width)}${meaning}`).join('\n')}`;
 }

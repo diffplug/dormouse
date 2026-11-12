@@ -12,7 +12,7 @@ import {
 } from 'dor-lib-common/browser-providers';
 import type { BrowserCliDescriptor } from './browser-cli.js';
 import type { Command, DorCommandContext } from './types.js';
-import { diagnosticsHelp, focusFlag, focusHelp, stringParser, workspaceFlag } from './shared.js';
+import { browserExitHelp, diagnosticsHelp, focusFlag, focusHelp, stringParser, workspaceFlag } from './shared.js';
 
 const INSTALL_HINT = BROWSER_PROVIDERS['agent-browser'].installHint;
 const INSTALL_DOCS = 'https://agent-browser.dev';
@@ -89,6 +89,8 @@ or reuses the one it already has. A playwright browser (render_mode playwright-*
 driven with dor playwright --surface instead.
 
 ${focusHelp({ minimize: false, browser: true })}
+
+${browserExitHelp('agent-browser')}
 
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
