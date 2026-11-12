@@ -149,7 +149,7 @@ Source of truth: `.github/workflows/security-audit.yaml`; `scripts/security-audi
 
 ### Findings ledger
 
-**Every run reads the ledger, a PASS included, and only a human closes a ledger issue** (rationale). **Must read every page of the ledger through the repository issue connection, never the search index**, before deduplication and after filing; a failed page fails the read (rationale). A ledger issue's title starts `[audit-finding <key>]`: a failure's key hashes its rule's ID; a finding's, its normalized file and the root-cause symbol it names, or its rule's ID where it names none (rationale). A key with no open issue gets one, a PASS's WARNINGs included, an `INFO` never; one already open is left as it is (rationale). Any open `[audit-finding …]` issue counts, a hand-filed `manual-…` key included.
+**Every run reads the ledger, a PASS included, and only a human closes a ledger issue** (rationale). A ledger issue's title starts `[audit-finding <key>]`: a failure's key hashes its rule's ID; a finding's, its normalized file and the root-cause symbol it names, or its rule's ID where it names none (rationale). A key with no open issue gets one, a PASS's WARNINGs included, an `INFO` never; one already open is left as it is (rationale). Any open `[audit-finding …]` issue counts, a hand-filed `manual-…` key included.
 
 A filed ledger issue's body opens with one metadata line, `<!-- audit-ledger {…} -->`: JSON holding its key, severity, and its rule's ID, spec, and heading or its finding's file, with no `--` inside. **A maintainer closes a fixed ledger issue with a comment opening `Fixed in #<n>`** (`Fixed by`, `diffplug/dormouse#<n>`, or the PR's URL are read alike), and closes one not worth fixing as not planned.
 
@@ -157,7 +157,7 @@ Before the agent starts, `List open findings` writes the open titles to `audit-o
 
 - **FAIL IF** `S30` `File embargoed findings` can close, edit, or reopen an issue, comment on any issue but the per-run report it opened, or open a ledger issue for a key that already has one open (rationale).
 - **FAIL IF** `S270` two `audit` jobs of `.github/workflows/security-audit.yaml` can run at once, or a queued one be dropped: the job loses its one fixed `concurrency` group, sets `cancel-in-progress: true`, or queues with anything but `queue: max` (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** `S31` a PASS's status issue reads as all clear while the ledger holds an open finding or could not be read, or a PASS whose findings were not filed or whose ledger could not be read exits zero (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** `S31` a PASS's status issue reads as all clear while the ledger holds an open finding or could not be read, or a PASS whose findings were not filed or whose ledger could not be read exits zero; or a workflow ledger read uses the search index, stops before all pages, or succeeds after a failed page (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** `S32` a failure's key changes with its clause letter or where its rule sits, or a finding's with its line or the words around its symbol, or an open issue with a key the run did not mint stops counting. Pinned by `scripts/security-audit.test.mjs`.
 
 ### Disclosure
