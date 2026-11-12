@@ -1,6 +1,6 @@
 /** JSON-file state stores; `docs/specs/relay.md` → "State files" owns their schemas and invariants. */
 
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -371,21 +371,6 @@ export class BurrowLimitReachedError extends Error {
     super(`this Relay already has ${MAX_ENROLLED_BURROWS} burrows enrolled`);
     this.name = 'BurrowLimitReachedError';
   }
-}
-
-/**
- * What the v1.0–v1.1 `server/` Relay kept before the Host→Burrow rename. Every
- * row held a plaintext `hostToken` — that Relay's `/ws/host` bearer for one machine — and
- * nothing reads the file any more, so it is deleted unread at boot rather than
- * left behind (`docs/specs/security-remote.md` → "Credentials at rest").
- *
- * **Never fatal**: what it removes is unreachable either way, so a failure is
- * logged and the Relay still starts.
- */
-export async function forgetRetiredState(stateDir: string): Promise<void> {
-  await rm(join(stateDir, 'hosts.json'), { force: true }).catch((error: unknown) => {
-    console.warn(`[relay] could not remove the retired hosts.json: ${String(error)}`);
-  });
 }
 
 /**
