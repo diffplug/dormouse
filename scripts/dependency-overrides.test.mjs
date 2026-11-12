@@ -1,3 +1,6 @@
+// Runs VSCE, node-pg-migrate, archiver-utils, and Testcontainers through the
+// glob and minimatch `overrides` in pnpm-workspace.yaml, without Docker or
+// Postgres.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';

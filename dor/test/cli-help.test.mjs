@@ -1,3 +1,6 @@
+// Help snapshots. After changing any help text, refresh them from dor/:
+// `pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then `node --test` again,
+// and commit test/snapshots/.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';

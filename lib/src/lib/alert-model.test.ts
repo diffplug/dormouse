@@ -20,8 +20,20 @@ import {
  * `docs/specs/alert.md` -> "State machines", read from the spec at test time,
  * and the invariants its rules state (`alert-model-test-utils.ts`), over
  * seeded random event sequences against the real `AlertManager` and delivery
- * scheduler. `TESTING_AND_MODIFICATION_GUIDE.md` -> "Alert model test" says
- * how to read a failure and reproduce it.
+ * scheduler. Every change must be a path of drawn edges the step fired
+ * (soundness), every drawn edge must be reached (coverage), and every
+ * invariant must hold.
+ *
+ * - A failure names its finding (`soundness: <Machine>: <from> -> <to>` or
+ *   `invariant: <rule>`), the seed, and the shortest event list that still
+ *   fails, as literals: paste the list into a test and replay it with
+ *   `runAlertModel`, which is deterministic. `ALERT_MODEL_REPORT=1` prints
+ *   each edge's coverage.
+ * - A finding not fixed in the same change goes in `KNOWN`.
+ * - A new edge gets the `BINDINGS` predicate its label names, in the spec's
+ *   Terms, never read from the code. An edge no sequence reaches: add a script
+ *   to `SCRIPTS` or a weight in `draw`, or fix the diagram if the code cannot
+ *   make it.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));

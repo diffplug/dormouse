@@ -2,6 +2,7 @@
  * Freezes the clock for an Argos run, before any story module loads: a
  * timestamp in a `parameters` literal is built at module load, so a pin in a
  * story's `beforeEach` comes too late for it. `preview.ts` imports this first.
+ * A story reads `Date.now()` anywhere and never pins a clock of its own.
  *
  * Noon, so "an hour ago" and "two hours ago" fall on the same day.
  */
