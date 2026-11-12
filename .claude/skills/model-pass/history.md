@@ -136,4 +136,12 @@ The repository's review bot did the same at smaller scale: it found an accountin
 - The real machine in the loop during the work, not only on a checklist afterwards.
 - Stacked work held as a branch until its base merges.
 
+**Still open when this was written.** The next pass should not rediscover these.
+
+- Tracked as issues: the escape-sequence parser and xterm.js disagreeing about where a string control ends (#1715), and three native checks of Workspaces never run in a real build (#1750).
+- Never run on a device: the phone findings (`mobile-04`, `mobile-05`, `hosted-server-a-09`, `browser-web-21`), two Linux ones (`rust-lib-20`, `rust-other-03`), and flow control in a real minimized window on Windows or Linux. The ledger's `DEVICE-CHECKLIST.md` is the list.
+- Waiting on a decision: a kitty-keyboard depth counter that never resets on Windows (`termstate-11`), where the obvious fix breaks shells that set those flags themselves.
+- Deliberately left: five release-pipeline findings, eight design items deferred past launch, and the performance findings measured as small (the ledger's `perf/RESULTS.md`).
+- No net exists for the second-largest class, sibling paths in one module that drifted apart (33 broken). The model test covers one state machine; the terminal lifecycle, the browser pane lifecycle and Workspace transfer have no drawn model to test against.
+
 **Use next time.** Worker: Opus 5.5 or its successor. Priority areas last time: mobile UI and Pocket. Digest the undecided findings into classes as soon as the reviews end, leave slack in every spec budget a lane will touch before the lanes start, merge lane PRs one at a time with the canary test in the push gate, and book the device time while the reviews run. After the fix waves, build a net for each large root-cause class before fixing its findings by hand. Put a real machine for each OS within reach of the lanes. Before merging anything large, give it to an agent that did not write it, with the code and no conclusions.

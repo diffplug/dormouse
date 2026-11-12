@@ -122,7 +122,8 @@ Until each PR merges, it is yours. On every pass through the open PRs: merge `or
 1. Run `scorecard` and add a row to `history.md` in the same PR that updates `references/units.json`: models, units, tokens, findings by severity, fixed, regressions the pass itself caused, and the verdict in one sentence. An honest row includes the regressions.
 2. Write `<ledger>/DEVICE-CHECKLIST.md`: every claim that rests on a phone, Windows, Linux, or a packaged build, merged from the findings files' own lists and the PR bodies, ordered so one sitting covers it. Lanes reach only the machines they can drive over SSH, never a phone or a real window, and the first pass's most valuable follow-up was the hour the maintainer spent with this list.
 3. Write the open `high` findings as a decision brief: three lines each (what breaks, who hits it, the smallest fix), so he can answer `fix`, `defer`, or `ignore` quickly, and record the answers in `decisions.tsv`.
-4. Hand over: PR queue with merge order, the ledger path, the worktrees you created (remove them only when he agrees).
+4. Digest every other open finding into classes with one default each (fix, delete, check on a device first, measure first, defer, close), so the maintainer accepts or amends a table instead of answering each. What still needs him, ask one question at a time, each with a recommendation, and re-read the finding before asking: the first pass asked one from memory, described it wrongly, and built the wrong thing.
+5. Hand over: PR queue with merge order, the ledger path, the worktrees you created (remove them only when he agrees).
 
 **Stop rule.** Recommend against another pass with this model when the last wave found no `high` finding, and say what would change that: a large new subsystem, or the next model.
 
