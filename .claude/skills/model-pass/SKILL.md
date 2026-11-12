@@ -105,6 +105,14 @@ Traps that each cost a round in the first pass:
 - **The session's working directory follows a `cd`** into another worktree. Use `git -C` and subshells.
 - **Never `git stash`.** The stash is shared by every worktree and session on the machine.
 
+## Stage 4b: build the nets
+
+When the synthesis names a root-cause class with many findings and no test that catches it, build the net before fixing that class by hand. A net is a suite that runs the real code against a stated contract (every shell on every OS, every implementation of one interface, a spec's own state diagram) and keeps a `KNOWN` table: each thing it catches runs as an expected failure with its evidence. The net's PR fixes nothing; a fix lane then deletes entries, and is done when the table is empty. `history.md` lists the three the first pass built and what each caught.
+
+**Use a real machine while the lanes run**, not only on the checklist afterwards: a temporary clone over SSH, the repo's own tests, deleted when done. The first pass's largest design change came from one probe on real Windows.
+
+**Before merging anything large, give it to an agent that did not write it**: the diff and the spec, read-only, with no conclusions supplied. For a choice between designs, give the shapes and withhold the opinions.
+
 ## Stage 5: shepherd the PRs
 
 Until each PR merges, it is yours. On every pass through the open PRs: merge `origin/main` into any that conflict (merge commits, never a rebase of a pushed branch), read the bot's review bodies as well as its inline comments, apply or answer each, and re-run the gates above before pushing. Hand a non-trivial review fix back to that lane's implementer, which still has the context. When a fix reshapes a PR, rewrite its description. Say in each PR body what was not verified and how to verify it.
@@ -112,9 +120,10 @@ Until each PR merges, it is yours. On every pass through the open PRs: merge `or
 ## Stage 6: close out
 
 1. Run `scorecard` and add a row to `history.md` in the same PR that updates `references/units.json`: models, units, tokens, findings by severity, fixed, regressions the pass itself caused, and the verdict in one sentence. An honest row includes the regressions.
-2. Write `<ledger>/DEVICE-CHECKLIST.md`: every claim that rests on a phone, Windows, Linux, or a packaged build, merged from the findings files' own lists and the PR bodies, ordered so one sitting covers it. Nothing in a pass runs on a real device, and the first pass's most valuable follow-up was the hour the maintainer spent with this list.
+2. Write `<ledger>/DEVICE-CHECKLIST.md`: every claim that rests on a phone, Windows, Linux, or a packaged build, merged from the findings files' own lists and the PR bodies, ordered so one sitting covers it. Lanes reach only the machines they can drive over SSH, never a phone or a real window, and the first pass's most valuable follow-up was the hour the maintainer spent with this list.
 3. Write the open `high` findings as a decision brief: three lines each (what breaks, who hits it, the smallest fix), so he can answer `fix`, `defer`, or `ignore` quickly, and record the answers in `decisions.tsv`.
-4. Hand over: PR queue with merge order, the ledger path, the worktrees you created (remove them only when he agrees).
+4. Digest every other open finding into classes with one default each (fix, delete, check on a device first, measure first, defer, close), so the maintainer accepts or amends a table instead of answering each. What still needs him, ask one question at a time, each with a recommendation, and re-read the finding before asking: the first pass asked one from memory, described it wrongly, and built the wrong thing.
+5. Hand over: PR queue with merge order, the ledger path, the worktrees you created (remove them only when he agrees).
 
 **Stop rule.** Recommend against another pass with this model when the last wave found no `high` finding, and say what would change that: a large new subsystem, or the next model.
 

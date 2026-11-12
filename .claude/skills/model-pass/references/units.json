@@ -65,7 +65,7 @@
         "^lib/src/lib/(?:session\\-types|session\\-save|session\\-restore|session\\-remap|session\\-dirty|session\\-label|session\\-activity\\-store|reopen\\-stack|pending\\-kills|terminal\\-lifecycle|terminal\\-registry|terminal\\-store|terminal\\-transfer|id\\-pool|surface\\-ids|reconnect|local\\-json\\-store|resume\\-patterns|coding\\-agents|ref\\-count|settle\\-within|throttle|terminal\\-webgl|xterm\\-options|xterm\\-test\\-mock|test\\-local\\-storage|errors|is\\-record|elapsed)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/components/(?:PendingKillOverlay|TerminalPane)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/components/wall/(?:TerminalPanel)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
-        "^lib/src/host/(?:recovery\\-capture|recovery\\-store|recovery|owner\\-pty|atomic\\-json\\-file)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/host/(?:recovery\\-capture|recovery\\-store|recovery|owner\\-pty|atomic\\-json\\-file|pty\\-flow\\-host)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^canopy/"
       ],
       "tests": null,
