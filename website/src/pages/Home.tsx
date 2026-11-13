@@ -763,7 +763,7 @@ export default function Home() {
     <div className="hero-paint-gate">
       <style>{HERO_GATE_STYLE}</style>
       <script dangerouslySetInnerHTML={{ __html: HERO_GATE_SCRIPT }} />
-      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} prelaunch />
+      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} />
 
       {/* ── Fixed video layer — bottom-anchored, scrubs for the full runway ── */}
       <video

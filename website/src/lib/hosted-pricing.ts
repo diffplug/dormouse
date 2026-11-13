@@ -112,17 +112,10 @@ export function tiersOnSale(): Tier[] {
   return [HOSTED_MONTHLY, HOSTED_YEARLY, foundingTier()];
 }
 
-/**
- * Whether the buy buttons sell. False until the account Worker's Stripe
- * bindings are set: each button then opens a notice saying so. True, each
- * links to {@link checkoutUrl} and the offers go `InStock`.
- */
-export const CHECKOUT_OPEN: boolean = false;
-
 /** The account app's checkout, which signs the buyer in before it shows the plan. */
 export const CHECKOUT_PAGE = "https://hosted.dormouse.sh/checkout";
 
-/** Where `tier`'s buy button goes once checkout is open, carrying the visit's `ref`. */
+/** Where `tier`'s buy button goes, carrying the visit's `ref`. */
 export function checkoutUrl(tier: Tier, ref: HostedRef | "other" | null): string {
   const url = new URL(CHECKOUT_PAGE);
   url.searchParams.set("plan", tier.id);
@@ -135,11 +128,9 @@ export function checkoutUrl(tier: Tier, ref: HostedRef | "other" | null): string
  * page prints.
  *
  * Prerendered with the rest of the prices so an assistant fetching the page
- * can quote them without running the counters. Availability is `PreOrder`
- * until checkout opens — the buttons explain what is left to build, so
- * claiming `InStock` there would be the page's only false statement.
+ * can quote them without running the counters.
  */
-export function pricingJsonLd(pageUrl: string, checkoutOpen: boolean): string {
+export function pricingJsonLd(pageUrl: string): string {
   const data = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -155,7 +146,7 @@ export function pricingJsonLd(pageUrl: string, checkoutOpen: boolean): string {
       price: String(tier.price),
       priceCurrency: "USD",
       url: `${pageUrl}#pricing`,
-      availability: `https://schema.org/${checkoutOpen ? "InStock" : "PreOrder"}`,
+      availability: "https://schema.org/InStock",
       priceSpecification: {
         "@type": "UnitPriceSpecification",
         price: String(tier.price),

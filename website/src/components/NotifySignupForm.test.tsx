@@ -48,13 +48,10 @@ async function submit() {
 
 describe("NotifySignupForm", () => {
   it("posts to the MailerLite form without JavaScript", () => {
-    const markup = renderToStaticMarkup(
-      <NotifySignupForm buttonLabel="Get the email" variant="docs" />,
-    );
+    const markup = renderToStaticMarkup(<NotifySignupForm buttonLabel="Get the email" />);
     expect(markup).toContain(`action="${ENDPOINT}"`);
     expect(markup).toContain('method="post"');
     expect(markup).toContain("You’ll get one email to");
-    expect(markup).toContain("text-[var(--docs-button-text)]");
 
     const template = document.createElement("template");
     template.innerHTML = markup;
@@ -109,7 +106,7 @@ describe("NotifySignupForm", () => {
 
   it("restores a tab-scoped email draft after hydration", async () => {
     sessionStorage.setItem("dormouse:notify-email:hosted-notify-email", "dev@example.com");
-    const input = await mount({ emailId: "hosted-notify-email", variant: "docs" });
+    const input = await mount({ emailId: "hosted-notify-email" });
     expect(input.value).toBe("dev@example.com");
 
     type(input, "next@example.com");

@@ -16,14 +16,6 @@ vi.mock("../../../hosted/server/policy-constants", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../hosted/server/policy-constants")>(),
   VOICE_DAILY_CAP: 321,
 }));
-// `CHECKOUT_OPEN` is committed false; the open page is tested by flipping it here.
-const checkout = vi.hoisted(() => ({ open: false }));
-vi.mock("../lib/hosted-pricing", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  get CHECKOUT_OPEN() {
-    return checkout.open;
-  },
-}));
 
 const { default: Hosted } = await import("./Hosted");
 const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");
@@ -35,7 +27,6 @@ const {
   HOSTED_YEARLY,
   LIST_ANNUAL,
   foundingTier,
-  pricingJsonLd,
   tiersOnSale,
 } = await import("../lib/hosted-pricing");
 
@@ -56,8 +47,8 @@ async function mount(respond: (url: string) => Promise<Response>) {
   return container;
 }
 
-const buyButtons = (el: HTMLElement) =>
-  [...el.querySelectorAll('button[aria-label^="Buy "]')] as HTMLButtonElement[];
+const buyLinks = (el: HTMLElement) =>
+  [...el.querySelectorAll('a[aria-label^="Buy "]')] as HTMLAnchorElement[];
 
 afterEach(() => {
   if (root) act(() => root?.unmount());
@@ -67,7 +58,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   analytics.trackPageview.mockClear();
   analytics.trackEvent.mockClear();
-  checkout.open = false;
 });
 
 describe("what the Hosted page prerenders", () => {
@@ -142,18 +132,7 @@ describe("what the Hosted page prerenders", () => {
     expect(data["@type"]).toBe("Product");
     expect(data.offers.map((offer: { name: string; price: string }) => [offer.name, offer.price]))
       .toEqual(tiersOnSale().map((tier) => [tier.name, String(tier.price)]));
-    // Checkout is closed, so the one claim the page must not make is that
-    // these are in stock.
-    for (const offer of data.offers) expect(offer.availability).toBe("https://schema.org/PreOrder");
-  });
-
-  it("puts the offers in stock once checkout opens", () => {
-    const offers = (open: boolean) =>
-      JSON.parse(pricingJsonLd("https://dormouse.sh/hosted/", open)).offers.map(
-        (offer: { availability: string }) => offer.availability,
-      );
-    expect(new Set(offers(true))).toEqual(new Set(["https://schema.org/InStock"]));
-    expect(new Set(offers(false))).toEqual(new Set(["https://schema.org/PreOrder"]));
+    for (const offer of data.offers) expect(offer.availability).toBe("https://schema.org/InStock");
   });
 });
 
@@ -283,7 +262,7 @@ describe("the founding card's live half", () => {
     expect(el.textContent).not.toMatch(/founders? so far/);
     // The prices are prerendered, so an outage costs the page nothing it sells.
     expect(el.textContent).toContain(`$${foundingTier().price}`);
-    expect(buyButtons(el)).toHaveLength(2);
+    expect(buyLinks(el)).toHaveLength(2);
   });
 
   it("ignores a body that is not a whole count", async () => {
@@ -294,36 +273,10 @@ describe("the founding card's live half", () => {
 });
 
 describe("the buy buttons", () => {
-  const openFirst = async () => {
-    const el = await mount(async () => new Response("{}", { status: 404 }));
-    const button = buyButtons(el)[0];
-    await act(async () => {
-      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    return el;
-  };
-
-  it("say checkout is unbuilt rather than failing silently", async () => {
-    await openFirst();
-    const dialog = document.querySelector('[role="dialog"]');
-    expect(dialog).not.toBeNull();
-    expect(dialog?.textContent).toContain("TODO");
-    expect(dialog?.textContent).toContain("Checkout is not wired up yet");
-    expect(dialog?.textContent).toContain(HOSTED_MONTHLY.name);
-    expect(dialog?.textContent).toContain("You have not been charged");
-  });
-
-  it("count the click, naming the plan", async () => {
-    await openFirst();
-    expect(analytics.trackEvent.mock.calls).toEqual([[{ name: "hosted plan clicked", plan: HOSTED_MONTHLY.id }]]);
-  });
-
-  it("link to the account's checkout once it opens, carrying the visit's ref", async () => {
-    checkout.open = true;
+  it("link to the account's checkout carrying the visit's ref, and count the click", async () => {
     history.replaceState(null, "", "/hosted/?ref=settings-voice");
     const el = await mount(async () => new Response("{}", { status: 404 }));
-    const links = [...el.querySelectorAll('a[aria-label^="Buy "]')] as HTMLAnchorElement[];
-    expect(buyButtons(el)).toHaveLength(0);
+    const links = buyLinks(el);
     expect(links.map((a) => a.getAttribute("href"))).toEqual([
       `${CHECKOUT_PAGE}?plan=monthly&ref=settings-voice`,
       `${CHECKOUT_PAGE}?plan=founding&ref=settings-voice`,
@@ -332,12 +285,10 @@ describe("the buy buttons", () => {
     await act(async () => {
       links[0]!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(analytics.trackEvent.mock.calls).toEqual([[{ name: "hosted plan clicked", plan: "monthly" }]]);
   });
 
   it("link without a ref when the visit had none", async () => {
-    checkout.open = true;
     history.replaceState(null, "", "/hosted/");
     const el = await mount(async () => new Response("{}", { status: 404 }));
     const yearly = [...el.querySelectorAll("button")].find((b) => b.textContent === "Yearly")!;
@@ -345,13 +296,5 @@ describe("the buy buttons", () => {
       yearly.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(el.querySelector('a[aria-label="Buy Hosted yearly"]')?.getAttribute("href")).toBe(`${CHECKOUT_PAGE}?plan=yearly`);
-  });
-
-  it("close on Escape", async () => {
-    await openFirst();
-    await act(async () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    });
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });
