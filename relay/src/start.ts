@@ -16,7 +16,6 @@ import { removeRuntimeFile, writeRuntimeFile } from './runtime-file.js';
 import { generateSetupPassword } from './setup-password.js';
 import {
   CorruptStateError,
-  forgetRetiredState,
   SetupPasswordStore,
   VapidStore,
 } from './state.js';
@@ -55,10 +54,6 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
       throw err;
     }
   }
-
-  // Whatever the Host→Burrow rename stranded in the state dir, deleted unread.
-  // Nothing waits on it: it removes a file no code reads (`state.ts`).
-  void forgetRetiredState(stateDir);
 
   const [setupPassword, vapid] = await loadMintedState();
   try {
