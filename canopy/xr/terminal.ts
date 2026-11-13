@@ -9,6 +9,8 @@ export interface SceneTerminal {
   texture: CanvasTexture;
   /** Call once per scene frame. */
   tick(now: number): void;
+  /** One cell in CSS px, the unit Lath lays the wall out in. */
+  cellSize(): { width: number; height: number };
   /** Canvas size in device pixels, for sizing meshes and layers. */
   pixelWidth: number;
   pixelHeight: number;
@@ -47,15 +49,18 @@ export function createSceneTerminal(opts: { cols: number; rows: number; fontSize
   // the scene. A 2D drawImage reads the live drawing buffer.
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
+  let texture: CanvasTexture | undefined;
   const copy = () => {
     if (canvas.width !== source.width || canvas.height !== source.height) {
       canvas.width = source.width;
       canvas.height = source.height;
+      // three allocates WebGL2 texture storage immutably at the first upload's size.
+      texture?.dispose();
     }
     ctx.drawImage(source, 0, 0);
   };
   copy();
-  const texture = new CanvasTexture(canvas);
+  texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   texture.minFilter = LinearFilter;
   texture.generateMipmaps = false;
@@ -71,6 +76,9 @@ export function createSceneTerminal(opts: { cols: number; rows: number; fontSize
   return {
     term,
     texture,
+    cellSize() {
+      return { width: source.clientWidth / term.cols, height: source.clientHeight / term.rows };
+    },
     tick(now) {
       if (now >= dirtyUntil) return;
       copy();

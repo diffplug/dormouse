@@ -1,31 +1,61 @@
 import type { Terminal } from '@xterm/xterm';
-import { Vector3, type Object3D } from 'three';
+import { Vector3, type Object3D, type Quaternion } from 'three';
 
 export interface Cell {
   col: number;
   row: number;
 }
 
+/** A point on a terminal as fractions of its width and height from the top-left. */
+export interface Fraction {
+  fx: number;
+  fy: number;
+}
+
+const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+
 /**
- * Where a point in a pane's local frame (a centered `width` × `height` plane, +y up) falls on the
- * terminal, as fractions of its width and height from the top-left, clamped to the edges so a
- * captured drag past the pane keeps tracking.
+ * Maps world hits on a flat pane (a centered `width` × `height` plane, +y up, in `pane`'s frame) to
+ * terminal fractions, clamped to the edges so a captured drag past the pane keeps tracking.
  */
-export function paneFraction(local: { x: number; y: number }, width: number, height: number): { fx: number; fy: number } {
-  const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
-  return { fx: clamp01(local.x / width + 0.5), fy: clamp01(0.5 - local.y / height) };
+export function planeFraction(pane: Object3D, size: () => { width: number; height: number }): (e: PointerHit) => Fraction {
+  const local = new Vector3();
+  return (e) => {
+    pane.worldToLocal(local.copy(e.point));
+    const { width, height } = size();
+    return { fx: clamp01(local.x / width + 0.5), fy: clamp01(0.5 - local.y / height) };
+  };
 }
 
 /** The viewport cell under a pane fraction. */
-export function cellAt({ fx, fy }: { fx: number; fy: number }, cols: number, rows: number): Cell {
+export function cellAt({ fx, fy }: Fraction, cols: number, rows: number): Cell {
   return { col: Math.min(cols - 1, Math.floor(fx * cols)), row: Math.min(rows - 1, Math.floor(fy * rows)) };
 }
 
-/** The pointer-event surface @pmndrs/pointer-events dispatches on a `RayInteractable`'s Object3D. */
-interface PointerHit {
+/**
+ * The pointer-event surface @pmndrs/pointer-events dispatches on a `RayInteractable`'s Object3D: the
+ * hit, and the ray it was cast along. A captured pointer's `point` lies on the tangent plane of
+ * where the press landed, so a curved surface maps drags from the ray instead.
+ */
+export interface PointerHit {
   point: Vector3;
   pointerId: number;
+  pointerPosition: Vector3;
+  pointerQuaternion: Quaternion;
   target: { setPointerCapture?(id: number): void; releasePointerCapture?(id: number): void };
+}
+
+/** Subscribes ray pointer handlers; three's typed event map has no pointer events. */
+export function onPointer(object: Object3D, handlers: Partial<Record<'pointerdown' | 'pointermove' | 'pointerup', (e: PointerHit) => void>>): () => void {
+  const target = object as unknown as {
+    addEventListener(type: string, fn: (e: PointerHit) => void): void;
+    removeEventListener(type: string, fn: (e: PointerHit) => void): void;
+  };
+  const entries = Object.entries(handlers) as [string, (e: PointerHit) => void][];
+  for (const [type, fn] of entries) target.addEventListener(type, fn);
+  return () => {
+    for (const [type, fn] of entries) target.removeEventListener(type, fn);
+  };
 }
 
 export interface PaneInputEvents {
@@ -34,7 +64,8 @@ export interface PaneInputEvents {
 }
 
 /**
- * Gives `term` a mouse driven by the controller rays hitting `pane`: each ray event is replayed as
+ * Gives `term` a mouse driven by the controller rays hitting `pane`, whose events `fractionOf`
+ * places on the terminal: each ray event is replayed as
  * the DOM mouse event xterm.js listens for, at the hit's exact point on the terminal's screen
  * element. xterm then does what a desktop mouse does — selection (drag, double-click word, triple
  * click line) when the program has not asked for the mouse, mouse reports when it has — and the
@@ -45,7 +76,7 @@ export interface PaneInputEvents {
  */
 export function attachPaneInput(
   pane: Object3D,
-  size: () => { width: number; height: number },
+  fractionOf: (e: PointerHit) => Fraction,
   term: Terminal,
   events: PaneInputEvents = {},
 ): () => void {
@@ -54,13 +85,7 @@ export function attachPaneInput(
 
   let pressing: number | null = null;
   let lastDown = { time: 0, col: -1, row: -1, count: 0 };
-  const local = new Vector3();
 
-  const fractionOf = (e: PointerHit) => {
-    pane.worldToLocal(local.copy(e.point));
-    const { width, height } = size();
-    return paneFraction(local, width, height);
-  };
   const replay = (type: 'mousemove' | 'mousedown' | 'mouseup', e: PointerHit, detail = 0) => {
     const fraction = fractionOf(e);
     const rect = screen.getBoundingClientRect();
@@ -89,30 +114,22 @@ export function attachPaneInput(
     const cell = cellAt(fractionOf(e), term.cols, term.rows);
     const repeat = now - lastDown.time < 400 && cell.col === lastDown.col && cell.row === lastDown.row;
     lastDown = { time: now, ...cell, count: repeat ? lastDown.count + 1 : 1 };
-    events.onPointer?.('down', replay('mousedown', e, lastDown.count));
+    const downCell = replay('mousedown', e, lastDown.count);
+    events.onPointer?.('down', downCell);
   };
   const move = (e: PointerHit) => {
     if (pressing !== null && e.pointerId !== pressing) return;
-    events.onPointer?.('move', replay('mousemove', e));
+    // Never inline `replay` into the optional call: `?.` skips evaluating its arguments.
+    const moveCell = replay('mousemove', e);
+    events.onPointer?.('move', moveCell);
   };
   const up = (e: PointerHit) => {
     if (e.pointerId !== pressing) return;
     e.target.releasePointerCapture?.(e.pointerId);
     pressing = null;
-    events.onPointer?.('up', replay('mouseup', e, lastDown.count));
+    const upCell = replay('mouseup', e, lastDown.count);
+    events.onPointer?.('up', upCell);
   };
 
-  // three's typed event map has no pointer events; @pmndrs/pointer-events dispatches them untyped.
-  const target = pane as unknown as {
-    addEventListener(type: string, fn: (e: PointerHit) => void): void;
-    removeEventListener(type: string, fn: (e: PointerHit) => void): void;
-  };
-  target.addEventListener('pointerdown', down);
-  target.addEventListener('pointermove', move);
-  target.addEventListener('pointerup', up);
-  return () => {
-    target.removeEventListener('pointerdown', down);
-    target.removeEventListener('pointermove', move);
-    target.removeEventListener('pointerup', up);
-  };
+  return onPointer(pane, { pointerdown: down, pointermove: move, pointerup: up });
 }
