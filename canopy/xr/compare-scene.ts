@@ -12,19 +12,23 @@ import {
 import { demoContent } from '../src/demo-content';
 import { attachEchoShell } from './echo-shell';
 import { attachPaneInput, planeFraction } from './input';
+import { InSceneText, sceneFrames } from './in-scene-text';
 import { createSceneTerminal, type SceneTerminal } from './terminal';
 
 /**
- * `?scene=compare`: one SDF terminal drawn twice, as a mesh texture and into a quad layer, both
- * taking the controller ray as the terminal's mouse.
+ * `?scene=compare`: one SDF terminal drawn three ways — a mesh texture of its canvas, its scene
+ * frames drawn in the scene (when the addon has them), and a quad layer — each taking the controller
+ * ray as the terminal's mouse.
  */
-export function compareScene(world: World, terminals: Set<SceneTerminal>) {
+export function compareScene(world: World, terminals: Set<SceneTerminal>, params: URLSearchParams) {
   const terminal = createSceneTerminal({ cols: 100, rows: 24, fontSize: 14 });
   terminals.add(terminal);
   terminal.term.write(demoContent());
   attachEchoShell(terminal.term);
 
-  const PANE_WIDTH_M = 1.1;
+  const PANE_WIDTH_M = 0.95;
+  const SIDE_X = 1.05;
+  const SIDE_TURN = 0.35;
   const PANE_Y = 1.75;
   const PANE_Z = -1.4;
   const paneHeight = () => (PANE_WIDTH_M * terminal.pixelHeight) / terminal.pixelWidth;
@@ -34,8 +38,8 @@ export function compareScene(world: World, terminals: Set<SceneTerminal>) {
     new PlaneGeometry(PANE_WIDTH_M, paneHeight()),
     new MeshBasicMaterial({ map: terminal.texture, toneMapped: false }),
   );
-  meshPane.position.set(-0.6, PANE_Y, PANE_Z);
-  meshPane.rotation.y = 0.2;
+  meshPane.position.set(-SIDE_X, PANE_Y, PANE_Z + 0.15);
+  meshPane.rotation.y = SIDE_TURN;
   world.createTransformEntity(meshPane).addComponent(RayInteractable);
 
   /**
@@ -58,12 +62,29 @@ export function compareScene(world: World, terminals: Set<SceneTerminal>) {
     pixelHeight: terminal.pixelHeight,
     renderCallback: () => world.renderer.render(layerScene, layerCamera),
   });
-  layerEntity.object3D!.position.set(0.6, PANE_Y, PANE_Z);
-  layerEntity.object3D!.rotation.y = -0.2;
+  layerEntity.object3D!.position.set(SIDE_X, PANE_Y, PANE_Z + 0.15);
+  layerEntity.object3D!.rotation.y = -SIDE_TURN;
+
+  /**
+   * Center: the fork's scene frames drawn by the scene itself, over an invisible ray target. With
+   * the released addon (no scene frames) or `?inscene=0` it shows the texture instead.
+   */
+  const frames = params.get('inscene') === '0' ? null : sceneFrames(terminal.addon);
+  const scenePane = new Mesh(
+    new PlaneGeometry(PANE_WIDTH_M, paneHeight()),
+    frames ? new MeshBasicMaterial({ colorWrite: false, depthWrite: false }) : new MeshBasicMaterial({ map: terminal.texture, toneMapped: false }),
+  );
+  scenePane.position.set(0, PANE_Y, PANE_Z);
+  world.createTransformEntity(scenePane).addComponent(RayInteractable);
+  if (frames) {
+    const text = new InSceneText(frames);
+    text.setSurface({ kind: 'flat', width: PANE_WIDTH_M, height: paneHeight() });
+    scenePane.add(text.object);
+  }
   layerEntity.addComponent(RayInteractable);
 
   /** A one-line caption under a pane; returns a setter for its text. */
-  function caption(text: string, x: number, rotationY: number, row = 0): (text: string) => void {
+  function caption(text: string, x: number, rotationY: number, row = 0, z = PANE_Z): (text: string) => void {
     const canvas = document.createElement('canvas');
     canvas.width = 1024;
     canvas.height = 64;
@@ -84,18 +105,19 @@ export function compareScene(world: World, terminals: Set<SceneTerminal>) {
       new PlaneGeometry(PANE_WIDTH_M, PANE_WIDTH_M / 16),
       new MeshBasicMaterial({ map: texture, transparent: true, toneMapped: false }),
     );
-    mesh.position.set(x, PANE_Y - paneHeight() / 2 - 0.06 - row * 0.07, PANE_Z);
+    mesh.position.set(x, PANE_Y - paneHeight() / 2 - 0.06 - row * 0.07, z);
     mesh.rotation.y = rotationY;
     world.scene.add(mesh);
     return draw;
   }
-  caption('mesh texture (scene shader)', -0.6, 0.2);
-  caption('XRQuadLayer (compositor; IWER: fallback mesh)', 0.6, -0.2);
+  caption('mesh texture of the canvas', -SIDE_X, SIDE_TURN, 0, PANE_Z + 0.15);
+  caption(frames ? 'in-scene SDF (scene frames)' : 'in-scene SDF unavailable: texture', 0, 0);
+  caption('XRQuadLayer (compositor; IWER: fallback mesh)', SIDE_X, -SIDE_TURN, 0, PANE_Z + 0.15);
 
-  // Both panes take the controller ray as the terminal's mouse; the status line under the mesh pane
+  // Every pane takes the controller ray as the terminal's mouse; the status line under the center pane
   // reports where the ray lands and what xterm selected.
-  const status = caption('point a controller at either pane', -0.6, 0.2, 1);
-  for (const pane of [meshPane, layerEntity.object3D!]) {
+  const status = caption('point a controller at any pane', 0, 0, 1);
+  for (const pane of [meshPane, scenePane, layerEntity.object3D!]) {
     attachPaneInput(pane, planeFraction(pane, () => ({ width: PANE_WIDTH_M, height: paneHeight() })), terminal.term, {
       onPointer: (kind, { col, row }) => {
         if (kind !== 'move') status(`mouse${kind} → col ${col}, row ${row}`);
@@ -107,7 +129,7 @@ export function compareScene(world: World, terminals: Set<SceneTerminal>) {
     if (text) status(`selected: "${text}"`);
   });
 
-  const panes = { mesh: meshPane, layer: layerEntity.object3D! };
+  const panes = { mesh: meshPane, scene: scenePane, layer: layerEntity.object3D! };
 
   /** World-space center of a viewport cell on a pane, for aiming the emulated controller. */
   function cellPoint(pane: keyof typeof panes, col: number, row: number) {

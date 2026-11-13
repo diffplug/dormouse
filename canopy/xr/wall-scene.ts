@@ -20,6 +20,7 @@ import { move, resize, split } from 'lath/ops';
 import { demoContent } from '../src/demo-content';
 import { attachEchoShell } from './echo-shell';
 import { attachPaneInput, onPointer, type Fraction, type PointerHit } from './input';
+import { InSceneText, sceneFrames } from './in-scene-text';
 import { createSceneTerminal, type SceneTerminal } from './terminal';
 
 /** Lath lays the wall out in terminal CSS px; this is how big one is in the scene. */
@@ -167,6 +168,7 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
     let body: Object3D;
     let layerEntity: Entity | null = null;
     let bodyMesh: Mesh | null = null;
+    let inScene: InSceneText | null = null;
     if (kind === 'layer') {
       // The layer draws the terminal texture full-frame; iWSDK reads its render target top-down
       // (see the compare scene), and its cylinder fallback mirrors u the way arcGeometry corrects.
@@ -186,7 +188,19 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
       layerEntity.addComponent(RayInteractable);
       body = layerEntity.object3D!;
     } else {
-      bodyMesh = new Mesh(arcGeometry({ x: 0, y: 0, width: 1, height: 1 }), new MeshBasicMaterial({ map: terminal.texture, side: BackSide, toneMapped: false }));
+      // A mesh pane draws the fork's scene frames in the scene when the addon has them, over an
+      // invisible ray target; otherwise the canvas texture.
+      const frames = params.get('inscene') === '0' ? null : sceneFrames(terminal.addon);
+      bodyMesh = new Mesh(
+        arcGeometry({ x: 0, y: 0, width: 1, height: 1 }),
+        frames
+          ? new MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: BackSide })
+          : new MeshBasicMaterial({ map: terminal.texture, side: BackSide, toneMapped: false }),
+      );
+      if (frames) {
+        inScene = new InSceneText(frames);
+        bodyMesh.add(inScene.object);
+      }
       world.createTransformEntity(bodyMesh).addComponent(RayInteractable);
       body = bodyMesh;
     }
@@ -213,12 +227,18 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
           ctx.fillStyle = '#c8d0e0';
           ctx.font = '15px system-ui, sans-serif';
           ctx.textBaseline = 'middle';
-          ctx.fillText(`${id} · ${kind === 'layer' ? 'layer' : 'mesh'} · ${cols}×${rows}`, 10, HEADER_PX / 2);
+          ctx.fillText(`${id} · ${kind === 'layer' ? 'layer' : inScene ? 'in-scene SDF' : 'mesh'} · ${cols}×${rows}`, 10, HEADER_PX / 2);
         });
 
         if (bodyMesh) {
-          (bodyMesh.material as MeshBasicMaterial).map = terminal.texture;
           placeArc(bodyMesh, termRect);
+          inScene?.setSurface({
+            kind: 'arc',
+            radius: RADIUS_M,
+            angle0: angleOf(termRect.x),
+            angle1: angleOf(termRect.x + termRect.width),
+            height: termRect.height * M_PER_PX,
+          });
         }
         if (layerEntity) {
           const a0 = angleOf(termRect.x);

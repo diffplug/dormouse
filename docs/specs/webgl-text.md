@@ -27,6 +27,8 @@ Source of truth: `canopy/package.json`, `canopy/README.md` (bump flow and dev lo
 
 Fork-internal, behind the fork-added options `sdf` and `sdfGlyphSize`; FORK.md and the fork's code own it.
 
+The scene frame (`onSceneFrame` / `sceneFrame`, on the fork's `in-scene-sdf` branch) hands a caller each frame the renderer drew as plain data; **canopy's restated `SceneFrame` must match the fork's `IWebglSceneFrame`**, since canopy compiles against releases that predate it.
+
 Reserved: one plain distance field per atlas texel, in the alpha channel over white RGB (rationale), never multiple glyphs packed into color channels, keeping the layout compatible with the MSDF item in `## Future`.
 
 ## Canopy lab
@@ -45,16 +47,17 @@ A Vite app in `canopy/xr/` beside Storybook (`pnpm --filter canopy dev:xr`), on 
 - **Never enable the iWSDK dev plugin's `ai` or `workspace` options**: its own Playwright browser and MCP server stay off, and the app is driven through `dor agent-browser`.
 - Every terminal is the SDF addon (`sdf: true`) drawn as a mesh texture or into a WebXR composition layer. IWER implements no layers, so the emulator shows iWSDK's fallback mesh for each layer and proves only that both paths draw the same terminal.
 - The default scene is the Lath wall: Lath's pure core (`docs/specs/tiling-engine.md`) lays terminals out in wall px, mapped onto a cylinder around the viewer, each pane an `XRCylinderLayer` or a curved mesh under a header. A sash drag streams `resize` against the drag-start tree and commits on release; a header drag hit-tests every move against the live tree, shows the drop's preview rect, and commits `move`. `?scene=compare` instead shows one terminal as a flat mesh beside an `XRQuadLayer`.
+- **Must draw a mesh pane from the addon's scene frames when it has them**: background rects, glyph quads, and cursor go into the scene under its projection, with the fork's SDF smoothstep in the scene shader, so tilted and zoomed text stays crisp. Without them, or with `?inscene=0`, the pane shows the canvas texture; the compare scene's center pane is drawn this way too.
 - **Never give more than 15 panes a composition layer**: Quest composites 16 layers, one of them the projection layer; the rest are curved meshes, and `?layers=N` lowers the budget.
 - **Controller rays are the terminal's mouse**: a ray event on any pane is replayed as the DOM mouse event xterm.js listens for, at the hit point on its screen element, so xterm's own selection and mouse reporting apply and the demo holds no selection or protocol logic. After a press only the pressing pointer counts, since every ray hovers. A press focuses the terminal, so the desktop keyboard types into it; a local echo line editor stands in for a PTY.
 
-Source of truth: `canopy/vite.xr.config.ts`, `canopy/xr/main.ts`, `wallScene` in `canopy/xr/wall-scene.ts`, `attachPaneInput` in `canopy/xr/input.ts`.
+Source of truth: `canopy/vite.xr.config.ts`, `canopy/xr/main.ts`, `wallScene` in `canopy/xr/wall-scene.ts`, `attachPaneInput` in `canopy/xr/input.ts`, `InSceneText` in `canopy/xr/in-scene-text.ts`.
 
 ## Future
 
 **Scope: canopy-webxr** — the rest of the WebXR demo ("WebXR demo"), in order:
 
-1. **In-scene SDF** — the fork's glyph quads drawn into the scene with a projection matrix and the smoothstep in the scene shader, so tilted and zoomed panes stay crisp. Why the SDF work exists.
+1. **Release the scene frame** — merge the fork's `in-scene-sdf` branch into `sdf`, cut a release, and bump canopy; mesh panes then draw in-scene with no canopy change.
 2. **Live terminals** — a Client of a laptop Burrow: the one-time connection (`docs/specs/one-time.md`, no account or passkey) or Pocket-style pairing.
 
 **Headset checks** for what IWER cannot show: whether a mesh pane or a layer is sharper, whether the layers' flipped draws (`canopy/xr/compare-scene.ts`, `canopy/xr/wall-scene.ts`) are upright and unmirrored on a real compositor, whether layers hide the headers and sashes drawn into the projection layer, and whether xterm still redraws during an immersive session, since it schedules frames on `window.requestAnimationFrame`, which a headset browser may pause while presenting.

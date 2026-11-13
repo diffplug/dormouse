@@ -25,7 +25,7 @@ world.registerSystem(
 );
 
 const params = new URLSearchParams(location.search);
-const scene = params.get('scene') === 'compare' ? compareScene(world, terminals) : wallScene(world, terminals, params);
+const scene = params.get('scene') === 'compare' ? compareScene(world, terminals, params) : wallScene(world, terminals, params);
 
 // Read by the emulator checks (canopy/README.md): `canopyXR.world.launchXR()` enters the emulated
 // session, and each scene's handles give IWER's remote `look_at` its targets.

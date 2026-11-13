@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css';
 
 export interface SceneTerminal {
   term: Terminal;
+  addon: WebglAddon;
   /** A copy of the addon's WebGL canvas, refreshed by `tick` while xterm may be redrawing. */
   texture: CanvasTexture;
   /** Call once per scene frame. */
@@ -40,7 +41,8 @@ export function createSceneTerminal(opts: { cols: number; rows: number; fontSize
   term.open(host);
   // preserveDrawingBuffer: the copy below runs on the scene's frame, after the browser may have
   // composited and cleared an unpreserved WebGL drawing buffer.
-  term.loadAddon(new WebglAddon({ sdf: true, preserveDrawingBuffer: true }));
+  const addon = new WebglAddon({ sdf: true, preserveDrawingBuffer: true });
+  term.loadAddon(addon);
 
   const source = host.querySelector<HTMLCanvasElement>('.xterm-screen canvas:not(.xterm-link-layer)');
   if (!source) throw new Error('the webgl addon mounted no canvas');
@@ -75,6 +77,7 @@ export function createSceneTerminal(opts: { cols: number; rows: number; fontSize
 
   return {
     term,
+    addon,
     texture,
     cellSize() {
       return { width: source.clientWidth / term.cols, height: source.clientHeight / term.rows };
