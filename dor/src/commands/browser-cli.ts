@@ -440,7 +440,8 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   if (flags.rest[0] === 'dor-diagnostics') return runDiagnostics(d.provider, flags, options);
 
   const command = nativeCommand(d.provider, flags.rest);
-  const informational = flags.rest.some((arg) => d.informational.has(arg));
+  // After the `--`, a `--help` is a value the command carries, not a request for help.
+  const informational = (delimiter < 0 ? flags.rest : flags.rest.slice(0, delimiter)).some((arg) => d.informational.has(arg));
   const mayBind = command !== undefined && !d.noBind.has(command) && !informational;
 
   const spec = BROWSER_PROVIDERS[d.provider];

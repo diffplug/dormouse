@@ -2511,6 +2511,16 @@ test('only a lone --help is Dormouse help; any other goes to the provider', asyn
   }
 });
 
+test('a help or version flag after the browser -- is a value: the command still binds a pane', async () => {
+  for (const [provider, argv] of [['agent-browser', ['fill', '@e1', '--', '--help']], ['playwright', ['fill', 'e1', '--', '-v']]]) {
+    const exec = fakeAgentBrowser().exec;
+    const client = fixtureClient();
+    const result = await runCli([provider, ...argv], { client, execAgentBrowser: exec, execPlaywright: exec });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(client.requests.some(r => r.method === 'resolveBrowser'), true, argv.join(' '));
+  }
+});
+
 test('named Tool arguments need -- only when they begin with a dash', async () => {
   for (const [argv, args] of [[['tool', 'viewer', 'a.md', 'b.md'], ['a.md', 'b.md']], [['tool', 'viewer', '--', '--json', '--help', '--', '', 'a\nb'], ['--json', '--help', '--', '', 'a\nb']]]) {
     const client = fixtureClient();
