@@ -21,6 +21,7 @@ import { demoContent } from '../src/demo-content';
 import { attachEchoShell } from './echo-shell';
 import { attachPaneInput, onPointer, type Fraction, type PointerHit } from './input';
 import { InSceneText, sceneFrames } from './in-scene-text';
+import { cannedSource, type PaneSource } from './pane-source';
 import { createSceneTerminal, type SceneTerminal } from './terminal';
 
 /** Lath lays the wall out in terminal CSS px; this is how big one is in the scene. */
@@ -119,6 +120,7 @@ function labelTexture() {
 
 interface WallPane {
   id: LeafId;
+  redrawHeader(): void;
   terminal: SceneTerminal;
   kind: 'layer' | 'mesh';
   /** The terminal area, below the header, from the last layout. */
@@ -152,14 +154,39 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
   const panes = new Map<LeafId, WallPane>();
   let created = 0;
 
+  // `?source=canned`: the panes show a PaneSource's surfaces instead of local echo shells, one
+  // attached (streaming) at a time as over protocol-v1; pressing a pane attaches it.
+  const source: PaneSource | null = params.get('source') === 'canned' ? cannedSource(leaves(tree).length) : null;
+  const surfaceOf = new Map(leaves(tree).map((id, i) => [id, source?.getDirectoryEntries()[i]?.surfaceId ?? id]));
+  let attachedId: LeafId | null = null;
+  const attach = (pane: WallPane) => {
+    if (!source || attachedId === pane.id) return;
+    const previous = attachedId ? panes.get(attachedId) : undefined;
+    attachedId = pane.id;
+    previous?.redrawHeader();
+    pane.redrawHeader();
+    void source.setActivePane(surfaceOf.get(pane.id)!, pane.terminal.term.cols, pane.terminal.term.rows);
+  };
+  source?.onPtyData(({ id, data }, claim) => {
+    const pane = [...panes.values()].find((p) => surfaceOf.get(p.id) === id);
+    pane?.terminal.term.write(data, claim?.());
+  });
+
   function createPane(id: LeafId): WallPane {
     const kind = created++ < maxLayers ? 'layer' : 'mesh';
     const terminal = createSceneTerminal({ cols: 40, rows: 10, fontSize: 14 });
     terminals.add(terminal);
-    terminal.term.write(
-      id === 'a' ? demoContent() : `\x1b[1;38;2;120;220;120mpane ${id}\x1b[0m \x1b[90m· ${kind === 'layer' ? 'XRCylinderLayer' : 'mesh (past the layer budget)'}\x1b[0m`,
-    );
-    attachEchoShell(terminal.term);
+    const entry = source?.getDirectoryEntries().find((e) => e.surfaceId === surfaceOf.get(id));
+    if (source) {
+      // Local until the first attach repaints the screen, so the pane draws a frame at all.
+      terminal.term.write(`\x1b[90m${entry?.title ?? id} · press to attach\x1b[0m`);
+      terminal.term.onData((data) => source.writePty(surfaceOf.get(id)!, data));
+    } else {
+      terminal.term.write(
+        id === 'a' ? demoContent() : `\x1b[1;38;2;120;220;120mpane ${id}\x1b[0m \x1b[90m· ${kind === 'layer' ? 'XRCylinderLayer' : 'mesh (past the layer budget)'}\x1b[0m`,
+      );
+      attachEchoShell(terminal.term);
+    }
 
     const headerLabel = labelTexture();
     const header = new Mesh(arcGeometry({ x: 0, y: 0, width: 1, height: 1 }), new MeshBasicMaterial({ map: headerLabel.texture, side: BackSide, toneMapped: false }));
@@ -205,6 +232,7 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
       body = bodyMesh;
     }
 
+    let headerWidth = 1;
     const pane: WallPane = {
       id,
       terminal,
@@ -212,23 +240,32 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
       termRect: { x: 0, y: 0, width: 1, height: 1 },
       header,
       body,
+      redrawHeader() {
+        const how = kind === 'layer' ? 'layer' : inScene ? 'in-scene SDF' : 'mesh';
+        const what = entry ? `${entry.title} · ${attachedId === id ? 'attached' : 'detached'}` : id;
+        headerLabel.draw(headerWidth, HEADER_PX, (ctx) => {
+          ctx.fillStyle = attachedId === id ? '#2f4a3a' : '#2a3442';
+          ctx.fillRect(0, 0, headerWidth, HEADER_PX);
+          ctx.fillStyle = '#c8d0e0';
+          ctx.font = '15px system-ui, sans-serif';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`${what} · ${how} · ${terminal.term.cols}×${terminal.term.rows}`, 10, HEADER_PX / 2);
+        });
+      },
       place(rect) {
         const termRect = { x: rect.x, y: rect.y + HEADER_PX, width: rect.width, height: Math.max(1, rect.height - HEADER_PX) };
         pane.termRect = termRect;
         const cell = terminal.cellSize();
         const cols = Math.max(2, Math.floor(termRect.width / cell.width));
         const rows = Math.max(1, Math.floor(termRect.height / cell.height));
-        if (cols !== terminal.term.cols || rows !== terminal.term.rows) terminal.term.resize(cols, rows);
+        if (cols !== terminal.term.cols || rows !== terminal.term.rows) {
+          terminal.term.resize(cols, rows);
+          if (source && attachedId === id) source.resizePty(surfaceOf.get(id)!, cols, rows);
+        }
 
         placeArc(header, { x: rect.x, y: rect.y, width: rect.width, height: HEADER_PX });
-        headerLabel.draw(rect.width, HEADER_PX, (ctx) => {
-          ctx.fillStyle = '#2a3442';
-          ctx.fillRect(0, 0, rect.width, HEADER_PX);
-          ctx.fillStyle = '#c8d0e0';
-          ctx.font = '15px system-ui, sans-serif';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(`${id} · ${kind === 'layer' ? 'layer' : inScene ? 'in-scene SDF' : 'mesh'} · ${cols}×${rows}`, 10, HEADER_PX / 2);
-        });
+        headerWidth = rect.width;
+        pane.redrawHeader();
 
         if (bodyMesh) {
           placeArc(bodyMesh, termRect);
@@ -259,7 +296,11 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
       const r = pane.termRect;
       return { fx: clamp01((p.x - r.x) / r.width), fy: clamp01((p.y - r.y) / r.height) };
     };
-    attachPaneInput(body, fractionOf, terminal.term);
+    attachPaneInput(body, fractionOf, terminal.term, {
+      onPointer: (kind) => {
+        if (kind === 'down') attach(pane);
+      },
+    });
     attachHeaderDrag(pane);
     return pane;
   }
@@ -372,6 +413,7 @@ export function wallScene(world: World, terminals: Set<SceneTerminal>, params: U
   }
 
   render(tree);
+  if (source) attach(panes.get(leaves(tree)[0])!);
 
   return {
     wall: {
