@@ -224,7 +224,7 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
         // `alert:*` naming a window (an await's result, a `sync`'s store
         // snapshots) goes to it. One carrying an id is about one Session, and
         // goes to the window showing it: after the mark the new owner's
-        // collection re-sends it (§Alerts). What carries neither — the two
+        // collection re-sends it (docs/specs/standalone.md -> "Alerts"). What carries neither — the two
         // app-global stores' broadcasts — reaches everyone.
         _ if event.starts_with("alert:") => {
             if let Some(label) = str_field(data, "forWindow") {

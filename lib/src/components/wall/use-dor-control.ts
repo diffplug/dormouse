@@ -378,7 +378,7 @@ export function waitForNewToolCommand(id: string, command: string, cwd: string, 
 /** What the pane shows of a launched command when replying: only evidence
  * available now. A previous completed run cannot prove a retarget/restart;
  * compare its run id with the history observed before injection. */
-export function observedCommandState(
+function observedCommandState(
   newSurface: boolean, id: string, command: string, cwd: string, previousRunId?: string | null,
 ): EnsureSurfaceResponse['commandState'] {
   const state = getTerminalPaneState(id);

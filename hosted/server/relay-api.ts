@@ -103,7 +103,7 @@ export const MAX_SETUP_CHALLENGES_PER_BURROW = MAX_TOKENS_PER_BURROW;
 const DEVICE_CODE_EXPIRY_BYTES = 4;
 
 /** A table a caller grows, capped per `owner` value. */
-export interface Capped {
+interface Capped {
   table: string;
   pk: string;
   owner: string;

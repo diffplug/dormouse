@@ -8,7 +8,7 @@ A release run fails rather than ship unofficial because the label is permanent: 
 
 ## Stage 1: CI workflow
 
-**Why `release-attest` is its own environment, with no secrets and no reviewer.** A required reviewer would stall every release on manual approval at its first jobs, and build jobs have no business seeing credentials. Neither existing `v*` environment fits: `vscode-extension-publish` requires reviewers; `security-audit` holds `AUDIT_PAT`, `CLAUDE_CODE_OAUTH_TOKEN`, and `EMBARGO_TOKEN`.
+**Why `release-attest` is its own environment, with no secrets and no reviewer.** A required reviewer would stall every release on manual approval at its first jobs, and build jobs have no business seeing credentials. None of the existing `v*` environments fits: `vscode-extension-publish` requires reviewers; `blyg-publish` holds `BLYG_API_TOKEN`; `security-audit` holds `AUDIT_PAT`, `CLAUDE_CODE_OAUTH_TOKEN`, and `EMBARGO_TOKEN`.
 
 **Why a dropped dotfile fails the release instead of degrading it.** The dotfiles are the ZDOTDIR files under `standalone/sidecar/shell-integration/zsh/`: `.zshenv`, `.zshrc`, `.zprofile`. `artifact-manifest.sha256` is generated from the runner's disk *before* upload, so a dotfile `actions/upload-artifact` silently omitted is still listed in the manifest, and Stage 2's hash verification fails on an artifact CI reported green.
 

@@ -380,7 +380,6 @@ function writeResponse(socket, response) {
 module.exports = {
   createDorControlServer,
   serverTimeoutFor,
-  controlDirPath,
   ensureControlDir,
   resolveControlSocketPath,
   proveToken,

@@ -18,7 +18,7 @@ describe("the site stylesheet", () => {
   });
 
   it("keeps the library's tests and stories out of the scan", () => {
-    // 180 of the library's 430 files, none of them rendered here.
+    // A large share of the library's files, none of them rendered here.
     for (const kind of ["test.ts", "test.tsx", "stories.ts", "stories.tsx"]) {
       expect(css).toContain(`@source not "../../lib/src/**/*.${kind}"`);
     }
