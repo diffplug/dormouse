@@ -39,11 +39,21 @@ Source of truth: `canopy/src/GlTerminal.stories.tsx`, `canopy/README.md`.
 
 ## Future
 
+**Scope: canopy-webxr** — a limited WebXR demo on Meta's Immersive Web SDK (iWSDK), built and checked in its desktop emulator (IWER), in order:
+
+1. **Scaffold** — an iWSDK Vite app in `canopy/` beside Storybook, pinned to stable `@iwsdk/core` 1.0.x with `three` aliased to the matching `super-three` (`0.181.0`) in canopy alone; IWER emulates a Quest 3; the dev plugin's own AI browser stays off, and the app is driven through `dor agent-browser`.
+2. **One terminal** — the SDF addon's canvas as a mesh texture, and the same terminal drawn into an iWSDK quad layer. IWER proves correctness only; which is sharper waits for a headset.
+3. **Input** — a controller ray's hit mapped to a cell for click and selection; typing from the desktop keyboard in IWER.
+4. **Lath wall** — terminals placed on a cylinder by Lath's pure core (`docs/specs/tiling-engine.md`), sashes and drag hit-testing included; panes past Quest's 16-layer compositor limit fall back to meshes. Open: extract Lath's core into a workspace package both `lib` and canopy consume, or relax canopy's independence from `dormouse-lib`.
+5. **In-scene SDF** — the fork's glyph quads drawn into the scene with a projection matrix and the smoothstep in the scene shader, so tilted and zoomed panes stay crisp. Why the SDF work exists.
+6. **Live terminals** — a Client of a laptop Burrow: the one-time connection (`docs/specs/one-time.md`, no account or passkey) or Pocket-style pairing.
+
+**The full Quest version** is a native Meta Spatial SDK app, not WebXR, since WebXR cannot draw a cross-origin frame into the scene. Its panes are WebView panels in layer mode running `lib`; Lath runs in a controller WebView whose rects reach Kotlin through `addWebMessageListener`, which origin-allowlists the bridge where `addJavascriptInterface` reaches every frame. It needs a headset: Meta Spatial Simulator runs only 2D Android apps. First device checks: the WebView's feature flags, memory per WebView, rect-to-panel latency, and layer versus SDF sharpness. Its protocol is `docs/specs/remote-api.md` -> "7. The Window (VR)".
+
 **Scope: sdf-next** — unordered:
 
 - **MSDF (multi-channel signed distance fields)** — sharper corners than single-channel SDF, which rounds them at extreme magnification. Needs outlines rather than canvas rasterization, so font-file access: a build-time bundled default font (e.g. msdf-atlas-gen) with the runtime SDF path as fallback for uncovered glyphs, or per-host runtime font-byte discovery (Tauri/sidecar can read font files; browsers mostly cannot). The texel layout is already reserved for it; the shader gains a `median(r,g,b)` branch.
 - **SDF decorated cells** — decorated text blurs under magnification while underline/strikethrough/overline stay on the raster path. Fix by composing decoration distance fields with the glyph field, or by drawing decorations analytically in the shader.
 - **Fork release automation** — a GitHub Action on the fork that attaches the addon tarball on tag, plus a scheduled upstream-master merge PR into `sdf`.
-- **WebXR terminal-as-texture** — the terminal rendered into a texture in a three.js/WebXR scene, with the SDF smoothstep moved into the scene shader so crispness holds at any distance. The canopy roadmap's next step, and why the SDF work exists.
 - **Production adoption** — adopting the fork in `lib/` / `standalone/` (behind an option) would bring SDF rendering to real Dormouse terminals.
 - **Emoji heuristic refinement** — revisit `isProbablyEmoji`'s ranges if real content surfaces text-presentation symbols that deserve SDF crispness, or colored glyphs that slip through.
