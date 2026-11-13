@@ -40,8 +40,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why an inactive Wall is inert before it is hidden.** During the outgoing fade the Wall remains visible beneath its successor. `inert` removes its focusability immediately, before `visibility: hidden` takes effect.
 
-**Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
-
 ## Workspace tabs
 
 **Why the tab's TODO pill enters passthrough and the tab does not.** Clicking the pill is a focused task, going to deal with one TODO, so it lands where a click on that Surface would, with the keys there. A tab click is an arrival in a Workspace: it stays in command mode, where the user looks around and confirms with `Enter` (product decision, 2026-09). The pill first shipped as selection only, in command mode, which left an `Enter` between the click and the TODO (2026-09).
@@ -78,13 +76,7 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Per-edge speeds.** The counterexample: moving between panes flush at the top but differing in height, the top edge translates purely sideways and must stay crisp while the bottom edge moves diagonally and smears hard. A centre velocity averages those into the same wrong answer for both.
 
-**Why two layers, and why corners are separate pieces.** The ring is one closed path so the dash phase runs unbroken around the perimeter, and SVG `stroke-width` is a single scalar — so that one path cannot carry four different widths. A corner has to reach two at once, and opacity cannot vary along a stroke, so a corner can only take the mean of its two edges' (mechanism at `cornerPath`).
-
 **The `feGaussianBlur` measurements.** WebKit CPU-rasterizes SVG filters every frame: measured in Safari 26.5 (2026-08) at 25.6ms/frame with 31 of 98 frames over 25ms during ring travel, versus a locked 16.7ms with zero dropped frames after the eight-piece smear replaced the filter.
-
-## Inline rename
-
-Pane headers re-render on every activity, terminal-state, and palette change. An editor that re-derived its value (or re-ran `select()`) on those renders would fight the user mid-word — one re-render between two keystrokes and the second keystroke replaces everything typed so far.
 
 ## Renderer
 

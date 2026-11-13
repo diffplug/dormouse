@@ -11,13 +11,9 @@ A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Base
 
 ## Shell layout
 
-Two areas: Content, the tiling layout of Panes rendered by the Lath engine, and the Baseboard.
-
 Lath holds the geometry; the Wall holds selection (`selectedId` / `selectedType`) and modes. Source of truth: `Wall` in `lib/src/components/Wall.tsx`.
 
 ## Content
-
-Each pane is one leaf in Lath's split tree, never re-parented (`docs/specs/tiling-engine.md` → "The HTML adapter (LathHost)"), holding one Surface.
 
 Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop". The Wall commits the op and owns selection after it: a center drop lands exactly where `Cmd/Ctrl+Arrow` would ([Spatial navigation](#spatial-navigation)). Source of truth: `onProposeMove` in `lib/src/components/Wall.tsx`.
 
@@ -98,7 +94,6 @@ A minimized session becomes a door, showing its label plus the alert badge clust
 - Click (any mode) or `Enter` (command mode): restore the session as a pane and enter passthrough.
 - `m` / `d` (command mode): restore into a pane but stay in command mode — the inverse of `m`/`d` on a pane, making them toggles.
 - `x` / `k` (command mode): restore into a pane, then show the kill confirmation; a close that asks nothing closes the Door as it is, so Reopen returns it to the Baseboard ([Kill confirmation](#kill-confirmation)).
-- Arrow keys navigate to and between doors ([Spatial navigation](#spatial-navigation)).
 
 ### Baseboard responsive sizing
 
@@ -165,12 +160,12 @@ Source of truth: `moveSurface` in `lib/src/components/wall/surface-move.ts`.
 
 ### Workspace lifecycle
 
-VS Code mounts a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window. Verb semantics are the glossary's Workspace verb rows.
+VS Code mounts a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window.
 
 - **Must mount every Workspace's Wall in one grid cell**, inactive Walls `inert`, then `visibility:hidden` after their fade and never `display:none` (rationale).
 - **Must preserve mounted leaves across switches**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction.
 - **A hidden Wall's terminals must hold no element and no GL context**: the outgoing fade's completion unmounts every terminal element, exactly as minimize does ([Renderer](#renderer)); activation mounts and fits through the [Animations](#animations) gate, so an unchanged grid sends no PTY resize. Browser Surfaces keep their live documents (rationale).
-- **A hidden Wall must consume no window input**: every listener that dispatches, forwards, or `preventDefault`s window input is gated on `active`. **Never let a hidden Workspace's page keep the keyboard**: focus landing there returns to the active Wall, as for a parked leaf (`docs/specs/tiling-engine.md` → Parked leaves). **Only the active Wall may render the modal hosts and the overlays that trap keys** — the kill confirmation and a terminal's copy editor (rationale); a staged prompt survives the switch and is answered only where the user can see it.
+- **A hidden Wall must consume no window input**: every listener that dispatches, forwards, or `preventDefault`s window input is gated on `active`. **Never let a hidden Workspace's page keep the keyboard**: focus landing there returns to the active Wall, as for a parked leaf (`docs/specs/tiling-engine.md` → Parked leaves). **Only the active Wall may render the modal hosts and the overlays that trap keys** — the kill confirmation and a terminal's copy editor; a staged prompt survives the switch and is answered only where the user can see it.
 - Exactly one Wall answers a `dor` request (`docs/specs/dor-cli.md` → "Handle Model"). Every Wall registers a handle, a bare one under `DEFAULT_WORKSPACE_ID`.
 - **Never unmount a Wall before its Surfaces are disposed**, a Surface born during the close included (`docs/specs/glossary.md` → "Invariants" I4). **Must refuse when a kill fade outlasts the engine's exit duration rather than report clean.**
 - **A closing Workspace must take no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error, rechecked after any host round trip the verb makes before creating (`CREATING_CONTROL_METHODS` in `lib/src/components/wall/use-dor-control.ts`).
@@ -186,8 +181,6 @@ A Workspace may leave the Window for another: `docs/specs/standalone.md` -> "Tra
 
 **Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gates, and host termination confirmations**: a bare matching letter confirms, another bare key cancels, and a modifier or chord never answers, so `Cmd+Q` still quits. **Must ignore the close confirmation's key while that Workspace transfers, and refuse renaming or pinning it.** **Must hold at most one pending Workspace confirmation** (close, cross-Window move gate, Surface move iframe consent), answered no when a newer one is raised or any close, cross-Window move, Surface move, pin, or unpin starts, by gesture or `dor`, even one that refuses. **Must abandon superseded preparation while awaiting a Wall, window probe, persistence flush or editor decision**, so an older verb cannot later act or replace the newer question. A successful transfer dismisses only the departing Workspace's pending confirmation and rename UI; a failed transfer retains them. No pending kill follows a Workspace to its destination.
 
-Persisted containers: `docs/specs/transport.md`; standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". The union projection: `docs/specs/alert.md` → Workspace union.
-
 Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; the hidden-Wall mount gate in `lib/src/components/TerminalPane.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `requestConfirmation` in `lib/src/lib/workspace-ui-store.ts`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`.
 
 ## Modes
@@ -198,9 +191,6 @@ Wall starts in `command` mode. Embedders may pass `initialMode="passthrough"` wh
 - Keyboard input routes to the active session's xterm.js instance, which holds DOM focus.
 - Three interceptions only: the mode-exit gesture (below), the terminal selection/copy/paste chords (`docs/specs/mouse-and-clipboard.md`), and clipboard chords inside one of Dormouse's own text fields.
 - In VS Code, selected workbench chords are mirrored: xterm still processes the key and the extension host runs the matching VS Code command (`docs/specs/vscode.md`).
-
-### Command mode
-- Keyboard drives navigation and commands; the Session receives no input.
 
 ### Mode switching
 
@@ -299,7 +289,7 @@ Source of truth: `lib/src/lib/rect-tween.ts`; `lib/src/lib/ring-geometry.ts`.
 
 #### Directional motion smear
 
-**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/helper union, **separate from the crisp, unbroken outline** (rationale). **Never use an SVG `feGaussianBlur` here** (rationale).
+**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/helper union, **separate from the crisp, unbroken outline**. **Never use an SVG `feGaussianBlur` here** (rationale).
 
 Source of truth: `writeSmear` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
 
@@ -331,7 +321,7 @@ Source of truth: `WallNav` in `lib/src/components/wall/keyboard/types.ts`; `hand
 
 ### Minimize (`m`/`d`, the header button, or a drag onto the baseboard)
 
-Minimizing detaches the leaf into a Door with its restore token (`docs/specs/tiling-engine.md` → "Restore tokens") and moves selection to the new door in command mode. **Never dispose on minimize**: the Session stays in the registry. Minimizing the *last* pane also triggers the [Auto-spawn refill](#auto-spawn-refill). A Door carries no metadata copy, and a minimized browser or Tool Surface parks: `docs/specs/tiling-engine.md` → "Parked leaves".
+Minimizing detaches the leaf into a Door with its restore token (`docs/specs/tiling-engine.md` → "Restore tokens") and moves selection to the new door in command mode. **Never dispose on minimize**: the Session stays in the registry. A Door carries no metadata copy, and a minimized browser or Tool Surface parks: `docs/specs/tiling-engine.md` → "Parked leaves".
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
@@ -343,9 +333,9 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 ## Inline rename
 
-Triggered by `,` in command mode or by clicking the session name in the pane header. **Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal or Tool pane, on every face, mounts the title editor.
+**Must consume `,` without starting a rename on a Door or browser Surface.** Only a terminal or Tool pane, on every face, mounts the title editor.
 
-The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Never submit it untouched**: that would pin the derived label. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
+The editor confirms on `Enter` or blur and cancels on `Escape`; whichever lands first settles the edit. **Never submit it untouched**: that would pin the derived label. **Must seed each rename from the current label and preserve the user's draft and selection across header re-renders**. Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs); `<unnamed>` is allowed as a user pin. On rejection the input still closes and a transient warning names the offending value.
 
@@ -353,7 +343,7 @@ Source of truth: `usePaneRename` in `lib/src/components/wall/use-pane-rename.tsx
 
 ## Session lifecycle and terminal registry
 
-**Must use one stable Session id for a terminal Surface, its registry key, and its platform PTY.** Layout moves and swaps change position only. The session (xterm.js instance, PTY, DOM element) persists in the registry across React mount/unmount cycles; an unmounted element leaves the entry `Orphaned`. A browser surface's pane ID is a Surface id with no registry entry or PTY; its DOM is rebuilt from persisted params, never from the registry.
+**Must use one stable Session id for a terminal Surface, its registry key, and its platform PTY.** Layout moves and swaps change position only. A browser surface's pane ID is a Surface id with no registry entry or PTY; its DOM is rebuilt from persisted params, never from the registry.
 
 | Op | Behavior |
 |---|---|
@@ -441,10 +431,6 @@ flowchart TD
 
 Source of truth: `lib/src/components/wall/use-session-persistence.ts` (capture and save triggers); `createSessionDirtyTracker` in `lib/src/lib/session-dirty.ts`; `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority).
 
-### Activity state
-
-Renderer Activity storage: `docs/specs/alert.md` → Public State.
-
 ## Animations
 
 All pane motion belongs to the Lath animator (`docs/specs/tiling-engine.md` → "Animation"). **Never resize terminals to intermediate animation or sash-preview dimensions.** Fit after the final geometry is painted, including a sash commit at its last preview size; canceled sash drags preserve the original grid, and same-size reattachment sends no PTY resize (rationale).
@@ -457,13 +443,7 @@ Zoom is presentation-only (`docs/specs/tiling-engine.md` → "Core model"). **Mu
 
 Only the owner's header shows Unzoom, and only the owner's control toggles zoom off. Other headers stay reachable around the zoomed pane, so **their Zoom control must hand zoom over, focus included**, rather than merely unzooming the owner. Source of truth: `releaseZoomExcept` in `lib/src/components/Wall.tsx`.
 
-### Spawn (new pane reveal)
-
-Enter motion: `docs/specs/tiling-engine.md` → "Animation".
-
 ### Kill (two-phase fade + tween reclaim)
-
-Every kill gesture runs the animator's two-phase exit (`docs/specs/tiling-engine.md` → "Animation").
 
 **Must move selection at removal time only when the killed pane is still the selected pane** — to a survivor, or to `null` and then auto-spawn when the last pane goes. A background kill leaves selection untouched and a selection move during the fade is honored both ways (rationale).
 
