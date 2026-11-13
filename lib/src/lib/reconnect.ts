@@ -1,6 +1,6 @@
 import type { TerminalGrid } from './terminal-transfer';
 import { adoptOrphanedHelper, restoreHelper } from './helper-terminal';
-import type { LathPersistedLayout } from './lath/persistence';
+import type { LathPersistedLayout } from 'lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import type { TerminalResumeInfo } from './terminal-lifecycle';

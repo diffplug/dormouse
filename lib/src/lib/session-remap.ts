@@ -1,5 +1,5 @@
-import { renameFingerprint, type LathNode } from './lath/model';
-import { isLathPersistedLayout } from './lath/persistence';
+import { renameFingerprint, type LathNode } from 'lath/model';
+import { isLathPersistedLayout } from 'lath/persistence';
 import { sessionSurfaceIds, type PersistedSession } from './session-types';
 import { isRecord } from './is-record';
 import { surfaceIdMinter } from './surface-ids';

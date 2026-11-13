@@ -1,4 +1,4 @@
-import type { Rect } from '../../lib/lath/model';
+import type { Rect } from 'lath/model';
 import { POPUP_SURFACE_CLASS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { DragPreview } from './lath-drag-controller';
 

@@ -1,4 +1,4 @@
-import { LATH_EASING, LATH_MOTION_MS } from '../lib/lath/animator';
+import { LATH_EASING, LATH_MOTION_MS } from 'lath/animator';
 import { motionIsInstant } from '../lib/ui-geometry';
 import { workspaceTabElement } from './workspace-tab-elements';
 

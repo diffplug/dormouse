@@ -29,7 +29,7 @@ import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import { applyLiveToolEvents } from '../../lib/tool-events';
 import { openSequence } from 'dor-tools-lib/osc';
 import { parseReplay } from '../../lib/platform/replay-parse';
-import type { LathNode } from '../../lib/lath/model';
+import type { LathNode } from 'lath/model';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
 import { PREVIEW_INTERRUPT_GRACE_MS, PREVIEW_OUTPUT_QUIET_MS, PROMPT_RETURN_TIMEOUT_MS } from './use-dor-control';

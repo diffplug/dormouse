@@ -11,9 +11,9 @@ import {
   leafTree,
   leaves,
   oppositeEdge,
-} from '../../lib/lath/model';
-import type { EnterFrom } from '../../lib/lath/animator';
-import { type Direction, type LayoutOpts, autoEdge, neighbors, nodeRectAtPath } from '../../lib/lath/layout';
+} from 'lath/model';
+import type { EnterFrom } from 'lath/animator';
+import { type Direction, type LayoutOpts, autoEdge, neighbors, nodeRectAtPath } from 'lath/layout';
 import {
   type DropTarget,
   type RestoreToken,
@@ -25,8 +25,8 @@ import {
   restore,
   split,
   swap,
-} from '../../lib/lath/ops';
-import type { LeafMeta } from '../../lib/lath/persistence';
+} from 'lath/ops';
+import type { LeafMeta } from 'lath/persistence';
 import { PANE_GUTTER_PX } from '../design';
 
 // Re-exported for the wall modules that read/write the store's meta map — the type

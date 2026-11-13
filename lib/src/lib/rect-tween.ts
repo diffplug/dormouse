@@ -3,10 +3,10 @@
 // (animator style: `now` is always passed in; no DOM, React, timers, or
 // Date/performance). The overlay drives it from a rAF loop and
 // tests assert real interpolated values against a fake clock, exactly like the
-// Lath animator (lib/src/lib/lath/animator.ts). It reuses that module's house
+// Lath animator (lath/src/animator.ts). It reuses that module's house
 // easing rather than re-deriving the curve.
 
-import { LATH_EASING } from './lath/animator';
+import { LATH_EASING } from 'lath/animator';
 import { unionBounds } from './rect-union-outline';
 
 /** The ring's measured box in viewport (fixed-position) coordinates. */

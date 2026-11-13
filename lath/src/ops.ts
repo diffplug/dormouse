@@ -25,7 +25,7 @@ import {
 } from './model';
 import { type LayoutOpts, allocateChildSpans, autoEdge, minSpan, nodeRectAtPath } from './layout';
 
-import { isRecord, isStringArray } from '../is-record';
+import { isRecord, isStringArray } from './is-record';
 import { type DropTarget, materializeTarget, targetByLeafSet } from './drop-target';
 export type { DropTarget } from './drop-target';
 

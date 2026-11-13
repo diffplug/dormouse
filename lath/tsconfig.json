@@ -1,0 +1,21 @@
+{
+  // No DOM lib and no ambient types: the core must never import DOM, React, or
+  // Three.js types (docs/specs/tiling-engine.md -> "Principles and non-goals"),
+  // so a reach for one fails here.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

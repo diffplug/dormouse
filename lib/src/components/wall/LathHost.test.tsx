@@ -7,12 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type M
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { type ContextHelper, createLathWallEngine } from './lath-wall-engine';
-import { layout } from '../../lib/lath/layout';
-import { LATH_EASING } from '../../lib/lath/animator';
-import { type DropTarget, move } from '../../lib/lath/ops';
-import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lath/model';
-import { edgeTarget, leaf, split, tree as treeOf, movePreview as movePreviewAt, landingPreview as landingPreviewAt } from '../../lib/lath/test-util';
-import { leafMeta } from '../../lib/lath/test-fixtures';
+import { layout } from 'lath/layout';
+import { LATH_EASING } from 'lath/animator';
+import { type DropTarget, move } from 'lath/ops';
+import { leafTree, type LathNode, type LathTree, type Rect } from 'lath/model';
+import { edgeTarget, leaf, split, tree as treeOf, movePreview as movePreviewAt, landingPreview as landingPreviewAt } from 'lath/test-util';
+import { leafMeta } from 'lath/test-fixtures';
 import { SLIDE_ARM_MS } from './lath-drag-controller';
 import type { PaneProps } from './pane-props';
 import { LayoutFramesContext } from './wall-context';

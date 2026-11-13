@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { TerminalContextOverlay } from './TerminalContextOverlay';
 import type { ContextPlacer, LathWallEngine } from './lath-wall-engine';
 import type { ContextSide } from './terminal-context-placement';
-import type { Rect } from '../../lib/lath/model';
+import type { Rect } from 'lath/model';
 
 const { rendered } = vi.hoisted(() => ({ rendered: vi.fn() }));
 vi.mock('./TerminalContext', () => ({ TerminalContext: () => {

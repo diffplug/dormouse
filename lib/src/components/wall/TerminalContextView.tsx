@@ -10,7 +10,7 @@ import type { PortUrlEntry } from './port-url';
 import { displayModeFor, type RenderMode } from './agent-browser-screen';
 import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
-import { oppositeEdge } from '../../lib/lath/model';
+import { oppositeEdge } from 'lath/model';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
 import { anchoredTarget } from '../../lib/dom';

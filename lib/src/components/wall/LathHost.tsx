@@ -17,10 +17,10 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { type LathTree, type Rect, leaves } from '../../lib/lath/model';
-import { layout, sashes } from '../../lib/lath/layout';
-import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
-import { type DropTarget, resize } from '../../lib/lath/ops';
+import { type LathTree, type Rect, leaves } from 'lath/model';
+import { layout, sashes } from 'lath/layout';
+import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from 'lath/animator';
+import { type DropTarget, resize } from 'lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
 import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX } from '../design';
 import type { PaneProps } from './pane-props';

@@ -8,8 +8,8 @@ import {
   shouldParkOnMinimize,
 } from './lath-wall-engine';
 import type { PersistedDoor } from '../../lib/session-types';
-import { leaves } from '../../lib/lath/model';
-import { LATH_MOTION_MS } from '../../lib/lath/animator';
+import { leaves } from 'lath/model';
+import { LATH_MOTION_MS } from 'lath/animator';
 import { cfg } from '../../cfg';
 
 describe('lath-wall-engine motion', () => {

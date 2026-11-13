@@ -31,7 +31,7 @@ Reserved: one plain distance field per atlas texel, in the alpha channel over wh
 
 ## Canopy lab
 
-`canopy/` is a Storybook-only workspace package, **kept independent of `dormouse-lib`** and outside the production build.
+`canopy/` is a workspace package of Storybook stories and the WebXR demo, **kept independent of `dormouse-lib`** and outside the production build; it shares Lath through the `lath` package.
 
 **`UpstreamVsFork`'s pristine upstream `@xterm/addon-webgl` must come from the fork base commit**, its addon/core/commit triple recorded as `addon <v> == core <v> == commit <sha>` in both `canopy/src/GlTerminal.stories.tsx` and `canopy/README.md`; `scripts/xterm-lint.mjs` holds each record to canopy's pins and the two to each other.
 
@@ -52,7 +52,7 @@ Source of truth: `canopy/vite.xr.config.ts`, `canopy/xr/main.ts`, `attachPaneInp
 
 **Scope: canopy-webxr** — the rest of the WebXR demo ("WebXR demo"), in order:
 
-1. **Lath wall** — terminals placed on a cylinder by Lath's pure core (`docs/specs/tiling-engine.md`), sashes and drag hit-testing included; panes past Quest's 16-layer compositor limit fall back to meshes. Open: extract Lath's core into a workspace package both `lib` and canopy consume, or relax canopy's independence from `dormouse-lib`.
+1. **Lath wall** — terminals placed on a cylinder by Lath's pure core (`docs/specs/tiling-engine.md`), sashes and drag hit-testing included; panes past Quest's 16-layer compositor limit fall back to meshes.
 2. **In-scene SDF** — the fork's glyph quads drawn into the scene with a projection matrix and the smoothstep in the scene shader, so tilted and zoomed panes stay crisp. Why the SDF work exists.
 3. **Live terminals** — a Client of a laptop Burrow: the one-time connection (`docs/specs/one-time.md`, no account or passkey) or Pocket-style pairing.
 

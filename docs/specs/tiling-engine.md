@@ -1,7 +1,7 @@
 # Tiling Engine (Lath)
 
 > - See [glossary.md](glossary.md) for the Surface model, the `Window ⊃ Workspace ⊃ Pane ⊃ Surface` hierarchy, and the Pane / Door / baseboard / passthrough vocabulary used here.
-> - **Owns** the engine internals: the pure core under `lib/src/lib/lath/` (model, layout, ops, animator, hit-testing) plus the Wall binding with native motion and hierarchical DnD.
+> - **Owns** the engine internals: the pure core under `lath/src/` (model, layout, ops, animator, hit-testing) plus the Wall binding with native motion and hierarchical DnD.
 > - **Defers** the interaction model on top to [layout.md](layout.md): selection, focus, modes, session lifecycle.
 > - Evidence behind the rules: [tiling-engine.rationale.md](tiling-engine.rationale.md).
 
@@ -26,7 +26,7 @@ Invariants, enforced by every op and checked by `validate(tree)`:
 
 **Zoom is never in the tree.** It is presentation state (`zoomedId` in the wall store), so the tree, every other rect, and all leaf DOM stay unchanged beneath a zoomed leaf.
 
-Source of truth: `LathTree` / `validate` in `lib/src/lib/lath/model.ts`.
+Source of truth: `LathTree` / `validate` in `lath/src/model.ts`.
 
 ## Layout
 
@@ -38,7 +38,7 @@ Source of truth: `LathTree` / `validate` in `lib/src/lib/lath/model.ts`.
 - `autoEdge` — the split heuristic: laid-out rect wider than tall → `'right'`, else `'bottom'` (`'right'` for a missing leaf).
 - `sashes`, `nodeRectAtPath` — divider and interior-node geometry.
 
-Source of truth: `lib/src/lib/lath/layout.ts`.
+Source of truth: `lath/src/layout.ts`.
 
 ## Operations
 
@@ -56,7 +56,7 @@ All ops are pure and synchronous and return `{ tree, ok }` plus op-specific fiel
 
 A `DropTarget` is a leaf swap or an edge at an ancestor path, optionally narrowed to a contiguous child range of that split. **Must normalize a range away in the committed tree**, so persistence keeps its version-1 shape.
 
-Source of truth: `lib/src/lib/lath/ops.ts`.
+Source of truth: `lath/src/ops.ts`.
 
 ## Hierarchical drag and drop
 
@@ -78,7 +78,7 @@ Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-co
 
 ## Restore tokens (Doors)
 
-**Must persist `RestoreToken` as the Door's sole restore payload.** Its fields and capture rules live beside `remove` in `lib/src/lib/lath/ops.ts`; a token persisted before the sibling-subtree fields existed keeps the older leaf-neighbor behavior. `restore` applies three tiers from the Wall's reattach:
+**Must persist `RestoreToken` as the Door's sole restore payload.** Its fields and capture rules live beside `remove` in `lath/src/ops.ts`; a token persisted before the sibling-subtree fields existed keeps the older leaf-neighbor behavior. `restore` applies three tiers from the Wall's reattach:
 
 ```mermaid
 flowchart TD
@@ -100,7 +100,7 @@ flowchart TD
 - **Must reject malformed restore tokens without changing the tree.** **Must ignore a Door token naming another Surface.** Reattach fallback: [layout.md](layout.md#reattach-click-door-entermd-on-door-or-drag-out).
 - **Must supply a live `fallbackRef` when the exact and neighbor tiers fail in a nonempty tree.**
 
-Source of truth: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`.
+Source of truth: `RestoreToken` / `restore` in `lath/src/ops.ts`.
 
 ## Parked leaves
 
@@ -145,7 +145,7 @@ Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 - **Exit is two-phase**: the leaf fades in place with its DOM still mounted, then its removal commits and survivors tween into the space. A second kill of a dying leaf is a no-op, and a dying leaf takes no pointer input.
 - Reduced motion is the same code path with zero duration (`motionIsInstant()`). **There is no CSS entrance/exit path.**
 
-Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`.
+Source of truth: `createAnimator` in `lath/src/animator.ts`.
 
 ## Pane props contract
 
@@ -164,4 +164,4 @@ The versioned Lath layout rides inside `PersistedSession`, written only in the n
 
 **The session read boundary validates the layout once**: `persistedLathLayout` returns it only when node shapes, tree invariants, and metadata for exactly its leaves are valid. **Both recovery paths then require the layout's leaf set to match the visible pane set**; an absent, rejected, or mismatched layout falls back to fresh panes, except that **a cold restore holding a visible Tool pane must synthesize a single-row layout from the pane projection instead**, dropping browser panes, so Tool identity and commands survive corrupt geometry (`lib/src/lib/session-restore.test.ts`).
 
-Source of truth: `lathLayoutFromStore` in `lib/src/lib/lath/persistence.ts`; `persistedLathLayout` in `lib/src/lib/session-restore.ts`.
+Source of truth: `lathLayoutFromStore` in `lath/src/persistence.ts`; `persistedLathLayout` in `lib/src/lib/session-restore.ts`.

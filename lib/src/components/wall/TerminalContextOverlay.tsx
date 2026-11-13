@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Rect } from '../../lib/lath/model';
+import type { Rect } from 'lath/model';
 import { getTerminalInstance } from '../../lib/terminal-registry';
 import { TerminalContext } from './TerminalContext';
 import type { TerminalContextState } from './wall-context';

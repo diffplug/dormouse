@@ -6,7 +6,7 @@
 // `serializeLayout`/`seed`, which call through here.
 
 import { type LathTree, leaves, validate } from './model';
-import { isRecord } from '../is-record';
+import { isRecord } from './is-record';
 
 /** Per-leaf presentation metadata, keyed by leaf id — the Pane props contract's
  *  "read side", owned live by the wall store's `leafMeta` map and serialized

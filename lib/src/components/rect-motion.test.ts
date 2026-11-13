@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cfg } from '../cfg';
-import { LATH_EASING } from '../lib/lath/animator';
+import { LATH_EASING } from 'lath/animator';
 import type { RingRect } from '../lib/rect-tween';
 import { FOCUS_MOTION_MS } from './design';
 import { installFakeFrames } from './motion-test-utils';

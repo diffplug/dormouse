@@ -1,4 +1,5 @@
 {
+  "extends": "../tsconfig.workspace-sources.json",
   "compilerOptions": {
     "target": "ES2022",
     "useDefineForClassFields": true,
@@ -16,5 +17,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "xr", "vite.xr.config.ts"]
+  "include": ["src", "xr", "vite.xr.config.ts", ".storybook"]
 }

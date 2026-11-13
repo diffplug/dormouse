@@ -91,6 +91,8 @@ export async function hostedBundles(repoRoot) {
       logLevel: 'silent',
       jsx: 'automatic',
       loader: { '.css': 'empty', '.svg': 'empty', '.png': 'empty', '.sql': 'text' },
+      // Hosted's Vite build reads internal packages from source; a dist-less one (`lath`) has nothing else.
+      alias: workspaceSourceAliases(),
       ...(platform === 'worker'
         ? { platform: 'neutral', conditions: ['workerd', 'worker', 'browser'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*', ...builtins] }
         : { platform: 'browser' }),

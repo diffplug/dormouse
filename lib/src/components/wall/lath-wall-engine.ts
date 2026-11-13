@@ -6,15 +6,15 @@ import {
   type LathTree,
   leafTree,
   leaves,
-} from '../../lib/lath/model';
-import type { Direction } from '../../lib/lath/layout';
+} from 'lath/model';
+import type { Direction } from 'lath/layout';
 import {
   type Frame,
   type LathAnimator,
   LATH_EASING,
   LATH_MOTION_MS,
   createAnimator,
-} from '../../lib/lath/animator';
+} from 'lath/animator';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import { UNNAMED_PANEL_TITLE } from '../../lib/terminal-registry';
 import type { ResolvedSplitDirection as DorResolvedSplitDirection } from 'dor/commands/types';
@@ -28,7 +28,7 @@ import {
   type LathPersistedLayout,
   isLathPersistedLayout,
   lathLayoutFromStore,
-} from '../../lib/lath/persistence';
+} from 'lath/persistence';
 import type { VisiblePane } from './wall-types';
 import { isToolParams } from './browser-surface';
 import { toolCommandFromParams } from '../../lib/session-save';

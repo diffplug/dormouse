@@ -1,4 +1,4 @@
-import type { LeafMeta } from '../../lib/lath/persistence';
+import type { LeafMeta } from 'lath/persistence';
 import { PERSISTED_SESSION_VERSION, type PersistedSession } from '../../lib/session-types';
 import type { SurfaceReopenRecord } from '../../lib/reopen-stack';
 import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';

@@ -2,7 +2,7 @@
 // op builds through. Pure data — no DOM, React, or timing. See
 // docs/specs/tiling-engine.md ("Core model") for the contract this implements.
 
-import { isRecord } from '../is-record';
+import { isRecord } from './is-record';
 
 export type LeafId = string;
 

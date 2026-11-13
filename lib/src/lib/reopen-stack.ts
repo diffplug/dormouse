@@ -1,5 +1,5 @@
-import type { LeafMeta } from './lath/persistence';
-import type { RestoreToken } from './lath/ops';
+import type { LeafMeta } from 'lath/persistence';
+import type { RestoreToken } from 'lath/ops';
 import type { PersistedPane, PersistedWorkspace, WorkspaceId } from './session-types';
 
 /**

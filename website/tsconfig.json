@@ -24,6 +24,8 @@
       "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
       "dor-tools-lib": ["../dor-tools-lib/src"],
       "dor-tools-lib/*": ["../dor-tools-lib/src/*"],
+      "lath": ["../lath/src"],
+      "lath/*": ["../lath/src/*"],
       "remote-lib-common": ["../remote-lib-common/src"],
       "remote-lib-common/*": ["../remote-lib-common/src/*"]
     },

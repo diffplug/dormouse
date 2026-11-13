@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LATH_EASING } from './lath/animator';
+import { LATH_EASING } from 'lath/animator';
 import {
   retargetRingTween,
   sampleRectTween,

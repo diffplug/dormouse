@@ -33,6 +33,7 @@
     "dor-tools-lib": "workspace:*",
     "fflate": "0.8.3",
     "jsonc-parser": "3.3.1",
+    "lath": "workspace:*",
     "picomatch": "^4.0.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

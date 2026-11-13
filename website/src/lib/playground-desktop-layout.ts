@@ -1,4 +1,4 @@
-import type { LathPersistedLayout } from "dormouse-lib/lib/lath/persistence";
+import type { LathPersistedLayout } from "lath/persistence";
 
 export const PANE_MAIN = "tut-main";
 export const PANE_BOXED = "tut-boxed";

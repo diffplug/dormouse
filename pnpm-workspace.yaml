@@ -5,6 +5,7 @@ packages:
   - dor-tools-builtin
   - dor-tools-lib
   - hosted
+  - lath
   - lib
   - relay
   - remote-lib-common

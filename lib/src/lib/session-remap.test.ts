@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { leaves, renameFingerprint, structureFingerprint, type LathNode, type LathTree } from './lath/model';
-import { remove, restore, type RestoreToken } from './lath/ops';
+import { leaves, renameFingerprint, structureFingerprint, type LathNode, type LathTree } from 'lath/model';
+import { remove, restore, type RestoreToken } from 'lath/ops';
 import { withFreshSurfaceIds } from './session-remap';
 import type { PersistedSession } from './session-types';
 import { installSurfaceIdPool, mintSurfaceId, resetSurfaceIdPool } from './surface-ids';

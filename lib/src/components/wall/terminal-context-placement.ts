@@ -1,4 +1,4 @@
-import { edgeAxis, type Edge, type Rect } from '../../lib/lath/model';
+import { edgeAxis, type Edge, type Rect } from 'lath/model';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 
 export type ContextSide = Edge;

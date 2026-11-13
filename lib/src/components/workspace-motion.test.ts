@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWorkspaceMotion, collapseWorkspace, restoreWorkspaceMotion, workspaceInTravel, workspaceIsCollapsed } from './workspace-motion';
-import { LATH_EASING, LATH_MOTION_MS } from '../lib/lath/animator';
+import { LATH_EASING, LATH_MOTION_MS } from 'lath/animator';
 import { cfg } from '../cfg';
 
 let wall: HTMLDivElement;

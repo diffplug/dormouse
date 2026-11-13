@@ -3,9 +3,9 @@
 
 import type { SurfaceWorkspaceDrag } from './surface-workspace-drag';
 import type { MutableRefObject, RefObject } from 'react';
-import { type Rect, rectKey } from '../../lib/lath/model';
-import type { DropTarget } from '../../lib/lath/ops';
-import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
+import { type Rect, rectKey } from 'lath/model';
+import type { DropTarget } from 'lath/ops';
+import { type DropCandidate, hitTest } from 'lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
 import { shieldFrames } from '../../lib/frame-shield';

@@ -47,7 +47,8 @@ pnpm build       # typecheck lib; build vscode extension, Pocket, frame origin, 
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
 - **`dor-tools-builtin/`** — The built-in Tools (`builtin:file` viewer and editors, `builtin:code` source editor, `builtin:folder`), loaded by `dor` from a separate runtime bundle; lib and the hosts import its pure format module.
 - **`dor-tools-lib/`** — The Tool integration protocol (OSC 367 and the iframe save channel) for Tools and their hosts; MIT, no runtime dependencies, private until 1.0.
-- **`canopy/`** — Experimental 3D/WebXR terminal-rendering lab (Storybook-only, not in the production build). Consumes `@diffplug/xterm-addon-webgl-sdf` — the webgl addon from our [xterm.js fork](https://github.com/diffplug/xterm.js) (`sdf` branch).
+- **`lath/`** — Lath's pure core (tree, layout, ops, animator, hit-testing, persistence), shared by `lib` and `canopy`; no DOM types
+- **`canopy/`** — Experimental 3D/WebXR terminal-rendering lab (Storybook stories and an iWSDK WebXR demo, not in the production build). Consumes `@diffplug/xterm-addon-webgl-sdf` — the webgl addon from our [xterm.js fork](https://github.com/diffplug/xterm.js) (`sdf` branch).
 
 **Burrow, Client, Relay** — the three remote-control roles — are defined in `docs/specs/glossary.md` -> "Roles". *Host* is reserved for the platform host, the `Host` header, hostnames, and self-hosting; *server* for HTTP servers and dev servers.
 

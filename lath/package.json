@@ -1,0 +1,16 @@
+{
+  "name": "lath",
+  "version": "0.0.0",
+  "description": "Lath, Dormouse's headless tiling engine: split tree, layout, ops, animator, hit-testing, and persistence as plain data in and out.",
+  "license": "FSL-1.1-MIT",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "test": "tsc -p . && vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.0",
+    "vitest": "^5.0.0"
+  }
+}

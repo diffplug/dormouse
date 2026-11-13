@@ -4,10 +4,10 @@ import {
   type LathWallStore,
   LATH_LAYOUT_OPTS,
 } from './lath-wall-store';
-import { leaves, oppositeEdge, type LathNode, type LathTree } from '../../lib/lath/model';
-import { layout } from '../../lib/lath/layout';
-import { leaf, split, tree } from '../../lib/lath/test-util';
-import { leafMeta } from '../../lib/lath/test-fixtures';
+import { leaves, oppositeEdge, type LathNode, type LathTree } from 'lath/model';
+import { layout } from 'lath/layout';
+import { leaf, split, tree } from 'lath/test-util';
+import { leafMeta } from 'lath/test-fixtures';
 
 const RECT = { x: 0, y: 0, width: 800, height: 600 };
 

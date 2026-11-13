@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { layout } from "dormouse-lib/lib/lath/layout";
-import { validate } from "dormouse-lib/lib/lath/model";
-import { isLathPersistedLayout } from "dormouse-lib/lib/lath/persistence";
+import { layout } from "lath/layout";
+import { validate } from "lath/model";
+import { isLathPersistedLayout } from "lath/persistence";
 import { LATH_LAYOUT_OPTS } from "dormouse-lib/components/wall/lath-wall-store";
 import { terminalLeafMeta } from "dormouse-lib/components/wall/lath-wall-engine";
 import {

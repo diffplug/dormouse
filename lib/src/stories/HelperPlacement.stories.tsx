@@ -7,8 +7,8 @@ import { disposeHelper, getHelper } from '../lib/helper-terminal';
 import { flushTerminal, getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { FakePtyAdapter, getPlatform, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { flattenScenario } from './fake-scenarios';
-import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
-import type { LathPersistedLayout } from '../lib/lath/persistence';
+import { leaves, normalizeWeights, type LathNode } from 'lath/model';
+import type { LathPersistedLayout } from 'lath/persistence';
 import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
 
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';

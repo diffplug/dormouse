@@ -120,7 +120,7 @@ const SPECS_DIR = 'docs/specs';
 
 const TOP_LEVEL_DIRS = [
   'lib/', 'standalone/', 'vscode-ext/', 'website/', 'relay/', 'hosted/',
-  'remote-lib-common/', 'dor/', 'dor-lib-common/', 'dor-tools-builtin/', 'dor-tools-lib/', 'canopy/', 'docs/',
+  'remote-lib-common/', 'dor/', 'dor-lib-common/', 'dor-tools-builtin/', 'dor-tools-lib/', 'lath/', 'canopy/', 'docs/',
   'scripts/', 'deploy/', '.github/', '.claude/', '.vscode/',
   // Plus every top-level directory git tracks, so a new one (`.config/`) is
   // checked without anyone remembering to list it; the listed ones stay

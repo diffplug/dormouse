@@ -19,7 +19,7 @@ import { setPlatform } from "dormouse-lib/lib/platform";
 import { getWorkspacesSnapshot, installWorkspaceIdPool, resetWorkspaceIdPool, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
 import { installSurfaceIdPool, resetSurfaceIdPool } from "dormouse-lib/lib/surface-ids";
 import { resetWindowSessionAggregator } from "dormouse-lib/lib/window-session-aggregator";
-import type { LathNode } from "dormouse-lib/lib/lath/model";
+import type { LathNode } from "lath/model";
 import { restoreWindowOrFresh, routeUnownedPtys } from "./window-restore";
 
 /** A native Lath layout over `ids` — what every post-Lath save carries. */

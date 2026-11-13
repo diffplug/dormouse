@@ -88,7 +88,7 @@ import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
 import { rehydrateTool } from './tool-reaper';
 import { VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
-import type { LeafMeta } from '../../lib/lath/persistence';
+import type { LeafMeta } from 'lath/persistence';
 import type { DooredItem } from './wall-types';
 
 /** The params a Wall reads. The Window-level params (`scope`, and the container

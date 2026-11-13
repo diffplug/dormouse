@@ -81,10 +81,10 @@ import { installDorControlRouter } from './wall/dor-control-router';
 import { reopenClosed } from './wall/reopen';
 import { addPendingKill, finalizePendingKills, isOwnPendingKill, pendingKillKey, restorePendingKill, type PendingKill } from '../lib/pending-kills';
 import { isDelayedKillEnabled } from '../lib/labs-settings';
-import { remove as removeFromTree, type DropTarget, type RestoreToken } from '../lib/lath/ops';
+import { remove as removeFromTree, type DropTarget, type RestoreToken } from 'lath/ops';
 import { pushReopenRecord, type SurfaceReopenRecord } from '../lib/reopen-stack';
 import { reopenPane } from '../lib/session-restore';
-import type { Edge } from '../lib/lath/model';
+import type { Edge } from 'lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
   resolveRenderMode,
@@ -113,7 +113,7 @@ import {
   directionForArrow,
   persistableLeafMeta,
 } from './wall/lath-wall-engine';
-import type { LeafMeta } from '../lib/lath/persistence';
+import type { LeafMeta } from 'lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
 import { endToolDesignation, useToolRunEnd } from './wall/use-tool-run-end';
 import { useToolReaper } from './wall/use-tool-reaper';

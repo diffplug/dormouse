@@ -21,7 +21,7 @@ import { collectLivePtys, resumeOrRestore, resumeOrRestoreFrom } from './reconne
 import { mintSurfaceId, resetSurfaceIdPool } from './surface-ids';
 import { getHelper, forgetHelper } from './helper-terminal';
 import { setPlatform } from './platform';
-import type { LathNode } from './lath/model';
+import type { LathNode } from 'lath/model';
 import { parseReplay, setReplayLocalHost } from './platform/replay-parse';
 import { getInheritableCwd, removeTerminalPaneState } from './terminal-state-store';
 import { persistableLeafMeta, toolLeafMeta } from '../components/wall/lath-wall-engine';

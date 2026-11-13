@@ -216,6 +216,9 @@ importers:
       '@xterm/xterm':
         specifier: 6.1.0-beta.337
         version: 6.1.0-beta.337
+      lath:
+        specifier: workspace:*
+        version: link:../lath
       react:
         specifier: ^19.3.0
         version: 19.3.1
@@ -453,6 +456,15 @@ importers:
         specifier: 4.158.0
         version: 4.158.0(@types/node@24.19.2)
 
+  lath:
+    devDependencies:
+      typescript:
+        specifier: ^7.0.0
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.1.0(@opentelemetry/api@1.9.1)(@types/node@24.19.2)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(jsdom@30.1.3(@noble/hashes@2.4.0))(vite@8.3.6(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+
   lib:
     dependencies:
       '@phosphor-icons/react':
@@ -497,6 +509,9 @@ importers:
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
+      lath:
+        specifier: workspace:*
+        version: link:../lath
       picomatch:
         specifier: ^4.0.7
         version: 4.0.7
@@ -653,6 +668,9 @@ importers:
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
+      lath:
+        specifier: workspace:*
+        version: link:../lath
       react:
         specifier: ^19.3.0
         version: 19.3.1
@@ -840,6 +858,9 @@ importers:
       dormouse-lib:
         specifier: workspace:*
         version: link:../lib
+      lath:
+        specifier: workspace:*
+        version: link:../lath
       posthog-js:
         specifier: ^1.438.24
         version: 1.447.3(@types/react@19.3.0)(react@19.3.1)

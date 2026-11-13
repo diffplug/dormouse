@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 export function touchesHosted(paths) {
   return paths.some(
     (path) =>
-      /^(?:hosted\/|remote-lib-common\/|dor-lib-common\/|lib\/(?:src|pocket|one-time)\/|lib\/vite[^/]*\.config\.ts$|lib\/tsconfig[^/]*\.json$|website\/src\/lib\/hosted-[^/]+\.ts$|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
+      /^(?:hosted\/|remote-lib-common\/|dor-lib-common\/|lath\/|lib\/(?:src|pocket|one-time)\/|lib\/vite[^/]*\.config\.ts$|lib\/tsconfig[^/]*\.json$|website\/src\/lib\/hosted-[^/]+\.ts$|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
         path,
       ) ||
       [

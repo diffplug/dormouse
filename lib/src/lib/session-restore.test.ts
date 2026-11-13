@@ -15,7 +15,7 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { reopenPane, restoreSession } from './session-restore';
-import { isLathPersistedLayout } from './lath/persistence';
+import { isLathPersistedLayout } from 'lath/persistence';
 import { createLathWallEngine } from '../components/wall/lath-wall-engine';
 
 function createPlatform(

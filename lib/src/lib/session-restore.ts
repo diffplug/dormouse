@@ -1,5 +1,5 @@
-import type { LathNode } from './lath/model';
-import { type LathPersistedLayout, type LeafMeta, isLathPersistedLayout } from './lath/persistence';
+import type { LathNode } from 'lath/model';
+import { type LathPersistedLayout, type LeafMeta, isLathPersistedLayout } from 'lath/persistence';
 import type { PlatformAdapter } from './platform/types';
 import { PLATFORM_STRING } from './platform';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';

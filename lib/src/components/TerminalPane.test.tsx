@@ -7,7 +7,7 @@ import { focusSession } from '../lib/terminal-registry';
 import { LathHost } from './wall/LathHost';
 import { createLathWallEngine, terminalLeafMeta, type LathWallEngine } from './wall/lath-wall-engine';
 import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store';
-import { leaf, split, tree } from '../lib/lath/test-util';
+import { leaf, split, tree } from 'lath/test-util';
 import { PANE_HEADER_HEIGHT_PX } from './design';
 import { WorkspaceActiveContext, WorkspaceVisibleContext } from './wall/wall-context';
 import { clearSizeHold, getSizeHolds, holdSize, releaseSizeHold } from '../lib/size-hold-store';

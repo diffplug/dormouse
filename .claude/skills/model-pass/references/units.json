@@ -8,7 +8,7 @@
     {
       "unit": "lath",
       "rules": [
-        "^lib/src/lib/lath/",
+        "^lath/src/",
         "^lib/src/components/wall/(?:LathHost|lath\\-wall\\-store|lath\\-wall\\-engine|lath\\-drag\\-controller|LathDropPreview|pane\\-motion)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/lib/(?:rect\\-tween|rect\\-union\\-outline|ui\\-geometry)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/components/(?:rect\\-motion|motion\\-test\\-utils)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"

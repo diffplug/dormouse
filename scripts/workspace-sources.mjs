@@ -22,6 +22,7 @@ export const WORKSPACE_SOURCES = {
   'dor-lib-common': 'dor-lib-common/src',
   'dor-tools-builtin': 'dor-tools-builtin/src',
   'dor-tools-lib': 'dor-tools-lib/src',
+  lath: 'lath/src',
   'remote-lib-common': 'remote-lib-common/src',
 };
 
