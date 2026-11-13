@@ -33,7 +33,7 @@ CAUTION: pnpm 11's link also writes persistent residue — a `link:` dependency 
 pnpm --filter canopy dev:xr   # Vite + IWER (emulated Quest 3) on http://localhost:5173
 ```
 
-Inside Dormouse, run it with `dor ensure` and open it with `dor agent-browser open :5173`. IWER's "Enter XR" button needs a real user gesture; from automation, enter with `dor agent-browser eval 'canopyXR.world.launchXR()'`. `docs/specs/webgl-text.md` -> "WebXR demo" owns the pins and what is built; its Future holds the remaining stages.
+Inside Dormouse, run it with `dor ensure` and open it with `dor agent-browser open :5173`. IWER's "Enter XR" button needs a real user gesture; from automation, enter with `dor agent-browser eval 'canopyXR.world.launchXR()'`. To aim and press a controller from automation, `dor agent-browser eval -b <base64 script>` running `IWER_DEVICE.remote.dispatch('look_at', { device: 'controller-right', target: canopyXR.cellPoint('mesh', col, row) })` then `dispatch('select', { device: 'controller-right' })`. In the scene's terminal, `mouse` toggles mouse reporting. `docs/specs/webgl-text.md` -> "WebXR demo" owns the pins and what is built; its Future holds the remaining stages.
 
 ## Roadmap
 

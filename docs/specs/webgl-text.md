@@ -44,19 +44,19 @@ A Vite app in `canopy/xr/` beside Storybook (`pnpm --filter canopy dev:xr`), on 
 - **Must pin `@iwsdk/core` exactly and alias `three` to the `super-three` version that core release depends on**, in canopy alone; iWSDK needs one Three.js module instance, so `pnpm-workspace.yaml` also overrides IWER DevUI's stock `three`.
 - **Never enable the iWSDK dev plugin's `ai` or `workspace` options**: its own Playwright browser and MCP server stay off, and the app is driven through `dor agent-browser`.
 - One SDF-addon terminal (`sdf: true`) feeds two panes: its canvas as a mesh texture, and the same texture drawn into an `XRQuadLayer`. IWER implements no WebXR layers, so the emulator shows iWSDK's fallback mesh for the layer and proves only that both draw the same terminal.
+- **Controller rays are the terminal's mouse**: a ray event on either pane is replayed as the DOM mouse event xterm.js listens for, at the hit point on its screen element, so xterm's own selection and mouse reporting apply and the demo holds no selection or protocol logic. After a press only the pressing pointer counts, since every ray hovers. A press focuses the terminal, so the desktop keyboard types into it; a local echo line editor stands in for a PTY.
 
-Source of truth: `canopy/vite.xr.config.ts`, `canopy/xr/main.ts`.
+Source of truth: `canopy/vite.xr.config.ts`, `canopy/xr/main.ts`, `attachPaneInput` in `canopy/xr/input.ts`.
 
 ## Future
 
 **Scope: canopy-webxr** — the rest of the WebXR demo ("WebXR demo"), in order:
 
-1. **Input** — a controller ray's hit mapped to a cell for click and selection; typing from the desktop keyboard in IWER.
-2. **Lath wall** — terminals placed on a cylinder by Lath's pure core (`docs/specs/tiling-engine.md`), sashes and drag hit-testing included; panes past Quest's 16-layer compositor limit fall back to meshes. Open: extract Lath's core into a workspace package both `lib` and canopy consume, or relax canopy's independence from `dormouse-lib`.
-3. **In-scene SDF** — the fork's glyph quads drawn into the scene with a projection matrix and the smoothstep in the scene shader, so tilted and zoomed panes stay crisp. Why the SDF work exists.
-4. **Live terminals** — a Client of a laptop Burrow: the one-time connection (`docs/specs/one-time.md`, no account or passkey) or Pocket-style pairing.
+1. **Lath wall** — terminals placed on a cylinder by Lath's pure core (`docs/specs/tiling-engine.md`), sashes and drag hit-testing included; panes past Quest's 16-layer compositor limit fall back to meshes. Open: extract Lath's core into a workspace package both `lib` and canopy consume, or relax canopy's independence from `dormouse-lib`.
+2. **In-scene SDF** — the fork's glyph quads drawn into the scene with a projection matrix and the smoothstep in the scene shader, so tilted and zoomed panes stay crisp. Why the SDF work exists.
+3. **Live terminals** — a Client of a laptop Burrow: the one-time connection (`docs/specs/one-time.md`, no account or passkey) or Pocket-style pairing.
 
-**Headset checks** for what IWER cannot show: whether the mesh pane or the quad layer is sharper, and whether the layer's flipped draw (`canopy/xr/main.ts`) is upright on a real compositor.
+**Headset checks** for what IWER cannot show: whether the mesh pane or the quad layer is sharper, whether the layer's flipped draw (`canopy/xr/main.ts`) is upright on a real compositor, and whether xterm still redraws during an immersive session, since it schedules frames on `window.requestAnimationFrame`, which a headset browser may pause while presenting.
 
 **The full Quest version** is a native Meta Spatial SDK app, not WebXR, since WebXR cannot draw a cross-origin frame into the scene. Its panes are WebView panels in layer mode running `lib`; Lath runs in a controller WebView whose rects reach Kotlin through `addWebMessageListener`, which origin-allowlists the bridge where `addJavascriptInterface` reaches every frame. It needs a headset: Meta Spatial Simulator runs only 2D Android apps. First device checks: the WebView's feature flags, memory per WebView, rect-to-panel latency, and layer versus SDF sharpness. Its protocol is `docs/specs/remote-api.md` -> "7. The Window (VR)".
 
