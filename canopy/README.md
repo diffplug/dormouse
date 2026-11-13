@@ -27,8 +27,16 @@ cd canopy && pnpm link ~/projects/xterm.js/addons/addon-webgl
 
 CAUTION: pnpm 11's link also writes persistent residue — a `link:` dependency in the ROOT `package.json` and an `overrides:` entry in `pnpm-workspace.yaml` — which silently keeps resolving the link. Revert both and `pnpm install` before trusting a tarball verification.
 
+## WebXR demo
+
+```sh
+pnpm --filter canopy dev:xr   # Vite + IWER (emulated Quest 3) on http://localhost:5173
+```
+
+Inside Dormouse, run it with `dor ensure` and open it with `dor agent-browser open :5173`. IWER's "Enter XR" button needs a real user gesture; from automation, enter with `dor agent-browser eval 'canopyXR.world.launchXR()'`. `docs/specs/webgl-text.md` -> "WebXR demo" owns the pins and what is built; its Future holds the remaining stages.
+
 ## Roadmap
 
 1. ~~Consume the stock webgl addon through the fork pipeline~~ (done — the stories render via WebGL2 with the pixel-accurate texture atlas)
 2. ~~Swap the glyph atlas to signed distance fields~~ (done — vendored mapbox/tiny-sdf behind the addon's `sdf` / `sdfGlyphSize` options; hybrid atlas keeps emoji, box/powerline custom glyphs and decorated cells on the raster path. `SdfVsRasterAt3x` renders a low-res SDF atlas crisp at 3x; `SdfTextureAtlas` shows the live distance fields. Known v1 limits: decorated cells fall back to raster, and single-channel SDF rounds very sharp corners at extreme magnification — MSDF is the upgrade path.)
-3. WebXR: `docs/specs/webgl-text.md` -> Future, **Scope: canopy-webxr**.
+3. WebXR: `docs/specs/webgl-text.md` -> "WebXR demo" and Future, **Scope: canopy-webxr**.

@@ -49,6 +49,11 @@ peerDependencyRules:
     # the missing API. Drop this when Storybook's range includes 7.
     "@storybook/react>typescript": ^7.0.0
     "@storybook/react-vite>typescript": ^7.0.0
+    # canopy's WebXR demo shares Storybook's Vite 8; @iwsdk/vite-plugin-dev
+    # 1.0.1 declares `^7.0.0` only because it predates Vite 8. canopy is a
+    # dev-only lab, and its `pnpm dev:xr` serving the emulated scene is the
+    # check. Drop this when an @iwsdk/vite-plugin-dev release admits Vite 8.
+    "@iwsdk/vite-plugin-dev>vite": ^8.0.0
 minimumReleaseAge: 1440
 overrides:
   # Mermaid 11's core imports KaTeX for $$ math labels. Keep its layout/appearance
@@ -63,6 +68,10 @@ overrides:
   "node-pg-migrate>glob@<14.0.2": 14.0.4
   "@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2": 14.0.4
   "@vscode/vsce>minimatch@<11.0.1": 11.0.5
+  # iWSDK needs one Three.js module instance, its `super-three` fork; IWER's
+  # DevUI (canopy only) otherwise pulls stock `three`. This is the override
+  # @iwsdk/core's README prescribes, scoped to the one consumer that strays.
+  "@iwer/devui>three": npm:super-three@0.181.0
 minimumReleaseAgeExclude:
   - pgstencil
   - "@pgstencil/*"

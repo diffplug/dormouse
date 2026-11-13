@@ -37,16 +37,24 @@ Reserved: one plain distance field per atlas texel, in the alpha channel over wh
 
 Source of truth: `canopy/src/GlTerminal.stories.tsx`, `canopy/README.md`.
 
+## WebXR demo
+
+A Vite app in `canopy/xr/` beside Storybook (`pnpm --filter canopy dev:xr`), on Meta's Immersive Web SDK (iWSDK), checked in its desktop emulator (IWER) as a Quest 3.
+
+- **Must pin `@iwsdk/core` exactly and alias `three` to the `super-three` version that core release depends on**, in canopy alone; iWSDK needs one Three.js module instance, so `pnpm-workspace.yaml` also overrides IWER DevUI's stock `three`.
+- **Never enable the iWSDK dev plugin's `ai` or `workspace` options**: its own Playwright browser and MCP server stay off, and the app is driven through `dor agent-browser`.
+
+Source of truth: `canopy/vite.xr.config.ts`, `canopy/xr/main.ts`.
+
 ## Future
 
-**Scope: canopy-webxr** — a limited WebXR demo on Meta's Immersive Web SDK (iWSDK), built and checked in its desktop emulator (IWER), in order:
+**Scope: canopy-webxr** — the rest of the WebXR demo ("WebXR demo"), in order:
 
-1. **Scaffold** — an iWSDK Vite app in `canopy/` beside Storybook, pinned to stable `@iwsdk/core` 1.0.x with `three` aliased to the matching `super-three` (`0.181.0`) in canopy alone; IWER emulates a Quest 3; the dev plugin's own AI browser stays off, and the app is driven through `dor agent-browser`.
-2. **One terminal** — the SDF addon's canvas as a mesh texture, and the same terminal drawn into an iWSDK quad layer. IWER proves correctness only; which is sharper waits for a headset.
-3. **Input** — a controller ray's hit mapped to a cell for click and selection; typing from the desktop keyboard in IWER.
-4. **Lath wall** — terminals placed on a cylinder by Lath's pure core (`docs/specs/tiling-engine.md`), sashes and drag hit-testing included; panes past Quest's 16-layer compositor limit fall back to meshes. Open: extract Lath's core into a workspace package both `lib` and canopy consume, or relax canopy's independence from `dormouse-lib`.
-5. **In-scene SDF** — the fork's glyph quads drawn into the scene with a projection matrix and the smoothstep in the scene shader, so tilted and zoomed panes stay crisp. Why the SDF work exists.
-6. **Live terminals** — a Client of a laptop Burrow: the one-time connection (`docs/specs/one-time.md`, no account or passkey) or Pocket-style pairing.
+1. **One terminal** — the SDF addon's canvas as a mesh texture, and the same terminal drawn into an iWSDK quad layer. IWER proves correctness only; which is sharper waits for a headset.
+2. **Input** — a controller ray's hit mapped to a cell for click and selection; typing from the desktop keyboard in IWER.
+3. **Lath wall** — terminals placed on a cylinder by Lath's pure core (`docs/specs/tiling-engine.md`), sashes and drag hit-testing included; panes past Quest's 16-layer compositor limit fall back to meshes. Open: extract Lath's core into a workspace package both `lib` and canopy consume, or relax canopy's independence from `dormouse-lib`.
+4. **In-scene SDF** — the fork's glyph quads drawn into the scene with a projection matrix and the smoothstep in the scene shader, so tilted and zoomed panes stay crisp. Why the SDF work exists.
+5. **Live terminals** — a Client of a laptop Burrow: the one-time connection (`docs/specs/one-time.md`, no account or passkey) or Pocket-style pairing.
 
 **The full Quest version** is a native Meta Spatial SDK app, not WebXR, since WebXR cannot draw a cross-origin frame into the scene. Its panes are WebView panels in layer mode running `lib`; Lath runs in a controller WebView whose rects reach Kotlin through `addWebMessageListener`, which origin-allowlists the bridge where `addJavascriptInterface` reaches every frame. It needs a headset: Meta Spatial Simulator runs only 2D Android apps. First device checks: the WebView's feature flags, memory per WebView, rect-to-panel latency, and layer versus SDF sharpness. Its protocol is `docs/specs/remote-api.md` -> "7. The Window (VR)".
 
