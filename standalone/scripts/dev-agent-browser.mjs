@@ -158,13 +158,14 @@ const fireAndForget = {
   // (`iframe_release_proxy` in src-tauri/src/lib.rs).
   iframe_release_proxy: ({ lease }) => writeSidecar('iframe:releaseProxy', { owner: HARNESS_WINDOW, id: lease ?? null }),
   kill_sidecar_now: () => shutdown(),
+  // The page posts it through `send`, as Tauri's `pty_cancel_input` returns nothing.
+  pty_cancel_input: ({ id, inputId }) => writeSidecar('pty:cancelInput', { id, inputId }),
 };
 
 const invokeMap = {
   // BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts.
   browser_request: ({ request }) => requestSidecar('browser:request', { request }, 'browser:result', (data) => data.result, 40000),
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
-  pty_cancel_input: ({ id, inputId }) => writeSidecar('pty:cancelInput', { id, inputId }),
   pty_send_input: ({ id, events, inputId }) => requestSidecar('pty:sendInput', { id, events, inputId }, 'pty:inputDone', data => data, 24 * 60 * 60 * 1000),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),
