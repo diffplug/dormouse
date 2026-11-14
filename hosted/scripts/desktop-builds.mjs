@@ -1,10 +1,10 @@
 // Builds each supported desktop release's own Burrow service, for the gate in
-// `server/tests/desktop-compat.test.ts`: every `vX.Y.Z` tag from the floor in
+// `server/tests/desktop-compat.gate.ts`: every `vX.Y.Z` tag from the floor in
 // `desktop-compat.json` through the newest. Each tag's source is read out of
 // git, never this checkout's, and bundled with this checkout's third-party
 // packages: the wire is ours, theirs is not.
 //
-//   node scripts/desktop-builds.mjs   → .wrangler/desktop-compat/<tag>.mjs + manifest.json
+//   node scripts/desktop-builds.mjs   → .wrangler/desktop-compat/<tag>.mjs + releases.json
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -42,7 +42,8 @@ function extract(tag, dirs, tree) {
       const [, type, sha] = meta.split(" ");
       return { type, sha, file };
     })
-    .filter((entry) => entry.type === "blob");
+    // Tests and stories reach no bundle.
+    .filter((entry) => entry.type === "blob" && !/\.(test|stories)\.[cm]?[jt]sx?$/.test(entry.file));
   const out = execFileSync("git", ["cat-file", "--batch"], {
     cwd: root,
     input: blobs.map((b) => b.sha).join("\n") + "\n",
@@ -61,7 +62,13 @@ function extract(tag, dirs, tree) {
   }
 }
 
-async function buildRelease(tag) {
+/** Each workspace package's own `node_modules`, and the root's, where a bundle finds third-party packages. */
+const NODE_PATHS = [...new Set(Object.values(WORKSPACE_SOURCES).map((dir) => dir.split("/")[0])), "."].map((dir) =>
+  path.join(root, dir, "node_modules"),
+);
+
+/** Extract `tag`'s workspace sources, then bundle its service. */
+function buildRelease(tag) {
   const tree = path.join(OUT, "src", tag);
   rmSync(tree, { recursive: true, force: true });
   mkdirSync(tree, { recursive: true });
@@ -75,10 +82,9 @@ async function buildRelease(tag) {
       "",
     ].join("\n"),
   );
-  const outfile = path.join(OUT, `${tag}.mjs`);
-  await build({
+  return build({
     entryPoints: [entry],
-    outfile,
+    outfile: path.join(OUT, `${tag}.mjs`),
     bundle: true,
     platform: "node",
     format: "esm",
@@ -86,28 +92,27 @@ async function buildRelease(tag) {
     logLevel: "warning",
     // The tag's own workspace packages; third-party ones from this checkout.
     alias: Object.fromEntries(Object.entries(WORKSPACE_SOURCES).map(([name, dir]) => [name, path.join(tree, dir)])),
-    nodePaths: ["lib", "remote-lib-common", "dor-lib-common", "."].map((dir) => path.join(root, dir, "node_modules")),
+    nodePaths: NODE_PATHS,
     // As the sidecar bundles them: `ws` falls back to its JS paths.
     external: ["bufferutil", "utf-8-validate", "node-datachannel"],
     // `ws` is CommonJS: an ESM bundle needs a `require` for its builtins.
     banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
   });
-  return { tag, module: path.relative(OUT, outfile) };
 }
 
-export async function buildSupportedReleases() {
+async function buildSupportedReleases() {
   const { floor } = JSON.parse(readFileSync(path.join(hosted, "desktop-compat.json"), "utf8"));
   const releases = supportedReleases(git("tag", "--list", "v*").split("\n").filter(Boolean), floor);
   if (!releases.length || releases[0] !== floor)
     throw new Error(`no ${floor} tag here: fetch tags (actions/checkout fetch-depth: 0) before the gate`);
   mkdirSync(OUT, { recursive: true });
-  const built = [];
-  for (const tag of releases) built.push(await buildRelease(tag));
-  writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify({ floor, releases: built }, null, 2));
-  return built;
+  // Extraction is synchronous; the bundles build concurrently.
+  await Promise.all(releases.map(buildRelease));
+  writeFileSync(path.join(OUT, "releases.json"), JSON.stringify(releases));
+  return releases;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const built = await buildSupportedReleases();
-  console.log(`built ${built.map((b) => b.tag).join(", ")} into ${path.relative(root, OUT)}`);
+  console.log(`built ${built.join(", ")} into ${path.relative(root, OUT)}`);
 }

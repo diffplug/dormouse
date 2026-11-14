@@ -17,8 +17,8 @@ import {
 } from "remote-lib-common";
 import { SimAuthenticator, registrationClientData } from "../../../remote-lib-common/test/harness/actors.mjs";
 import { FakeClient } from "../../../remote-lib-common/test/harness/fake-client.mjs";
-import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
+import { entitledAccount } from "./accounts";
 import { workerDatabases } from "./worker-roles";
 import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, alone, bundleWorker, miniflareOptions, testVapidKeys } from "./bundle";
 import { OUT } from "../../scripts/desktop-builds.mjs";
@@ -44,10 +44,8 @@ type Release = {
   FileBurrowStateStore: new (dir: string) => unknown;
 };
 
-const manifest = JSON.parse(readFileSync(path.join(OUT, "manifest.json"), "utf8")) as {
-  floor: string;
-  releases: { tag: string; module: string }[];
-};
+/** The tags `scripts/desktop-builds.mjs` built, each at `OUT/<tag>.mjs`. */
+const releases = JSON.parse(readFileSync(path.join(OUT, "releases.json"), "utf8")) as string[];
 
 type Authenticator = Awaited<ReturnType<typeof SimAuthenticator.create>>;
 const newAuthenticator = (rpId: string) =>
@@ -82,9 +80,7 @@ beforeAll(async () => {
         RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
         ...testVapidKeys(),
       },
-      // workerd tries `localhost` as ::1 first, which a Docker Desktop port
-      // answers only after a ~20 s fallback: longer than a Burrow's request.
-      hyperdrives: { HYPERDRIVE: String(databases.relay).replace("@localhost:", "@127.0.0.1:") },
+      hyperdrives: { HYPERDRIVE: databases.relay },
       serviceBindings: {
         ASSETS: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
       },
@@ -110,14 +106,6 @@ async function call(route: string, body: unknown, bearer?: string) {
   });
   const text = await response.text();
   return { status: response.status, json: (text ? JSON.parse(text) : null) as Record<string, any> };
-}
-
-/** The one entitled account, as the account Worker's sign-up leaves it. */
-async function entitledAccount() {
-  const id = crypto.randomUUID();
-  await sql(`UPDATE "user" SET email = id || '@example.test' WHERE email = $1`, [ADMIN_EMAIL]);
-  await sql(`INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, $1, $2, true)`, [id, ADMIN_EMAIL]);
-  return id;
 }
 
 /** The release's service, its webview played by `command` and `until`. */
@@ -185,14 +173,14 @@ function desktop(release: Release) {
   };
 }
 
-describe.each(manifest.releases)("$tag", ({ module }) => {
+describe.each(releases)("%s", (tag) => {
   let release: Release;
   beforeAll(async () => {
-    release = (await import(pathToFileURL(path.join(OUT, module)).href)) as Release;
+    release = (await import(pathToFileURL(path.join(OUT, `${tag}.mjs`)).href)) as Release;
   });
 
   test("enrolls by device code, holds the relay socket, and pairs and answers a phone", async ({ onTestFinished }) => {
-    const userId = await entitledAccount();
+    const userId = await entitledAccount(context.database.url);
     const dormouse = desktop(release);
     onTestFinished(() => dormouse.close());
     await dormouse.service.start();

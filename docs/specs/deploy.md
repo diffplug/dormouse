@@ -19,7 +19,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 ## Release checklist
 
-**Must ship a desktop release that needs anything Hosted production does not yet serve — a route, header, field, or frame, or a new one-time link version — only after it does**: run `.github/workflows/hosted-production.yml` first and confirm its live verification passed, `oneTimeSmoke` included for a link version (its rendezvous routes and `/connect/` page on `HOSTED_ONE_TIME_ORIGIN`, `docs/specs/one-time.md` -> "Link"). Hosted's side, serving every release from the floor on: `docs/specs/hosted.md` -> "Desktop compatibility".
+**Must ship a desktop release that needs anything Hosted production does not yet serve only after it does** (`docs/specs/hosted.md` -> "Desktop compatibility"): run `.github/workflows/hosted-production.yml` first and confirm its live verification passed, `oneTimeSmoke` included for a new one-time link version (`docs/specs/one-time.md` -> "Link").
 
 A release that changes remote control or Hosted runs the red team first (`docs/specs/security-audit.md` -> "Red team").
 
