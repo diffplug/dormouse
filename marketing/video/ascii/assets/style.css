@@ -1,0 +1,13 @@
+/* Fira Code (OFL, from the firacode npm package): full coverage of box drawing, block elements and braille.
+   At 32.5px its advance is 20px and its block glyphs fill a 40px line exactly, so the grid is 96 x 27 cells of 20 x 40. */
+@font-face { font-family: "Fira Code"; src: url(fonts/FiraCode-Regular.woff2) format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Fira Code"; src: url(fonts/FiraCode-Bold.woff2) format("woff2"); font-weight: 700; font-display: block; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #24201e; }
+.stage { position: absolute; inset: 0; background: #24201e; }
+.grid { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+.row {
+  position: absolute; left: 0; width: 1920px; height: 40px; overflow: hidden;
+  white-space: pre; font-family: "Fira Code", monospace; font-size: 32.5px; line-height: 40px;
+  font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; color: #f4e8d4;
+}
+.row span { display: inline-block; height: 40px; vertical-align: top; }

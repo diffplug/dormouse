@@ -1,0 +1,95 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="intro" data-width="1920" data-height="1080">
+    <div id="intro-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // Bars 0-4: `dor sing` starts the program, DORMOUSE stutters in, the mouse boots everything up.
+      const sc = S.begin("intro");
+      const { C, RAINBOW, hit, seg, outBack, beat, pulse } = A;
+      const PROMPT = "you@laptop ~ $ ";
+      // "Do-do-Dormouse" is one transcript word; its three syllables land on eighth notes.
+      const stutters = [[0.52, 0.853, 1.186], [7.0, 7.333, 7.666]];
+      const hits = [3.5, 8.19, 9.52, 11.5, 12.84];
+      const BOOT = [
+        "{o}dormouse {d}v1 · booting",
+        "{l}[ ok ] {c}tiling engine",
+        "{l}[ ok ] {c}panes, splits, zoom",
+        "{l}[ ok ] {c}alerts {d}when it needs you",
+        "{l}[ ok ] {o}dor {c}cli on $PATH",
+        "{l}[ ok ] {c}browser panes",
+        "{l}[ ok ] {c}dor tools",
+        "{l}[ ok ] {c}vs code + standalone",
+        "{l}[ ok ] {c}phone remote",
+        "{l}[ ok ] {c}mouse support {p}♥",
+        "{o}ready.",
+      ];
+      const scheme = (ft) => {
+        const n = hits.filter((h) => ft >= h).length + (ft >= stutters[1][0] ? 1 : 0);
+        return n % 3 === 0 ? { fill: () => C.or, shadow: C.ord } : n % 3 === 1 ? { fill: () => C.cream, shadow: C.or } : { fill: (i) => RAINBOW[i % RAINBOW.length], shadow: C.brown };
+      };
+
+      A.run(sc, (g, ft) => {
+        // The prompt types the command.
+        g.text(1, 0, PROMPT, C.dim);
+        const cmd = A.typed("dor sing", 0.04, 22, ft);
+        g.text(1 + PROMPT.length, 0, cmd, C.cream, undefined, true);
+        if (ft < 0.5) { if (Math.floor(ft * 6) % 2 === 0) g.put(1 + PROMPT.length + cmd.length, 0, "█", C.or); }
+        else g.rich(1, 1, "{o}♪ {c}now playing {d}· {o}Dormouse Multitask {d}· 90 bpm · 4/4");
+
+        // DORMOUSE stutters in: Do- / do- / Dormouse.
+        let shown = 0, shake = 0;
+        for (const [a, b, c] of stutters) {
+          if (ft >= a && ft < b) { shown = 2; }
+          else if (ft >= b && ft < c) { shown = 2; shake = Math.round(Math.sin(ft * 90) * 3 * A.clamp(1 - (ft - b) / 0.25)); }
+          else if (ft >= c && (c < 7 ? ft < stutters[1][0] : true)) { shown = 8; }
+        }
+        const sch = scheme(ft);
+        const lastStart = ft >= stutters[1][2] ? stutters[1][2] : stutters[0][2];
+        const band = Math.max(...hits.map((h) => hit(ft, h, 0.35)), hit(ft, stutters[0][0], 0.3), hit(ft, stutters[1][0], 0.3));
+        if (band > 0.05) g.rect(0, 3, A.COLS, 9, band > 0.5 ? C.ink2 : C.ink);
+        if (shown) {
+          g.bigCenter(7, "DORMOUSE", { dx: shake,
+            sx: 2, sy: 2, gap: 1,
+            color: (i) => (i < shown && ft >= lastStart + i * 0.035 - (shown === 2 ? 99 : 0) ? sch.fill(i) : null),
+            shadow: sch.shadow, sdx: 1, sdy: 1,
+            yoff: (i) => -Math.round(3 * Math.max(...hits.map((h) => hit(ft, h + i * 0.03, 0.3)))),
+          });
+        }
+
+        // The mouse pops up and bops on the beat.
+        if (ft >= 1.82) {
+          const up = outBack(seg(ft, 1.82, 2.25));
+          const bop = Math.round(pulse(ft, 0.25) * 1.4) + Math.round(Math.max(...hits.map((h) => hit(ft, h, 0.4))) * 3);
+          const y = Math.round(A.lerp(56, 23, up)) - bop;
+          const sung = hits.some((h) => ft >= h && ft < h + 0.3) || stutters.some(([a]) => ft >= a && ft < a + 1.2);
+          A.mouse(g, 35, y, { blink: (ft % 3.3) < 0.13, open: sung && Math.floor(ft * 6) % 2 === 0, sway: ft * 4 });
+        }
+
+        // Boot log, one line a beat.
+        const b = beat(ft);
+        const nLines = Math.min(BOOT.length, b.n - 2);
+        if (nLines > 0) {
+          g.box(1, 11, 33, 13, { style: "round", fg: C.line, title: "boot", titleFg: C.dim });
+          for (let i = 0; i < nLines; i++) {
+            const loading = i === nLines - 1 && i > 0 && i < BOOT.length - 1 && b.frac < 0.5;
+            g.rich(3, 12 + i, loading ? BOOT[i].replace("[ ok ]", `[ ${A.spin(ft)}  ]`) : BOOT[i]);
+          }
+        }
+        // Equalizer on the right.
+        if (ft >= 1.82) {
+          g.box(62, 11, 33, 13, { style: "round", fg: C.line, title: "vu", titleFg: C.dim });
+          A.eq(g, ft, 64, 12, 30, 11, { thick: true });
+        }
+        // A tiny mouse scurries along the floor every bar.
+        if (ft >= 2.8) {
+          const x = Math.floor(((ft - 0.137) / 2.667 % 1) * 120) - 10;
+          g.text(x, 24, "<:3 )~", C.or);
+        }
+        // `clear`: rows wipe away before the panes arrive.
+        if (ft > 13.12) { const n = Math.floor(A.seg(ft, 13.12, 13.42) * 25); g.rect(0, 0, A.COLS, n, C.bg); }
+      });
+    })();
+  </script>
+</template>

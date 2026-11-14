@@ -1,0 +1,13 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="chorus2" data-width="1920" data-height="1080">
+    <div id="chorus2-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // The chorus: two "Dormouse," hits as big block letters, then the tag line as a picture. See assets/chorus.js.
+      const sc = S.begin("chorus2");
+      A.run(sc, (g, ft) => A.chorus(g, ft, ["c2a", "c2b", "c2c", "c2d"], true));
+    })();
+  </script>
+</template>

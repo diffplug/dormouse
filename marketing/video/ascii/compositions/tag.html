@@ -1,0 +1,58 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="tag" data-width="1920" data-height="1080">
+    <div id="tag-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // Bar 24: "Do-Dormouse.sh, baby". The URL types itself as it is sung, a browser opens it, and "baby" gets a heart.
+      const sc = S.begin("tag");
+      const { C, RAINBOW, seg, outBack, outCubic, lerp, hit, pulse } = A;
+      const tSung = A.w("tag", "Do-Dormouse.sh,"), tBaby = A.w("tag", "baby");
+      const PROMPT = "you@laptop ~ $ ";
+      // Each piece of the URL lands with its syllable: "Do-" "Dor-" "mouse" "dot" "S" "H".
+      const KEYS = [["open ", sc.start + 0.02, 40], ["https://", sc.start + 0.14, 60], ["dor", tSung + 0.3, 14], ["mouse", tSung + 0.62, 18], [".", tSung + 1.0, 30], ["s", tSung + 1.25, 30], ["h", tSung + 1.48, 30]];
+      const tEnter = tSung + 1.72;
+      const typedNow = (ft) => KEYS.map(([s, at, cps]) => A.typed(s, at, cps, ft)).join("");
+
+      A.run(sc, (g, ft) => {
+        g.text(1, 0, PROMPT, C.dim);
+        const cmd = typedNow(ft);
+        g.text(1 + PROMPT.length, 0, cmd.slice(0, 4), C.or, undefined, true);
+        g.text(1 + PROMPT.length + 4, 0, cmd.slice(4), C.cream);
+        if (ft < tEnter && Math.floor(ft * 6) % 2 === 0) g.put(1 + PROMPT.length + cmd.length, 0, "█", C.or);
+        // The domain, big, as it is sung.
+        const host = cmd.startsWith("open https://") ? cmd.slice(13) : "";
+        if (host) {
+          const pop = hit(ft, tSung + 0.3, 0.2);
+          g.bigCenter(4 - Math.round(pop), host, { sx: 1, sy: 2, gapPx: 2, color: (i) => (i < 8 ? C.or : C.cream), shadow: C.brown });
+        }
+        // Enter: the page opens.
+        if (ft >= tEnter) {
+          const k = outBack(seg(ft, tEnter, tEnter + 0.25));
+          const h = Math.max(2, Math.round(10 * k));
+          const y = 13 + Math.round((10 - h) / 2);
+          A.browser(g, 4, y, 76, h, "https://dormouse.sh", { frame: C.or });
+          if (h >= 10) {
+            g.rect(5, 15, 74, 7, C.cream);
+            A.mouse(g, 7, 30, { k: 0.5, sway: ft * 5, open: ft >= tBaby && ft < tBaby + 0.3 });
+            g.text(22, 15, "Dormouse", C.or, C.cream, true);
+            g.text(22, 16, "a mouse-friendly multitasking terminal", C.ink, C.cream);
+            g.text(22, 18, " Download ", C.white, C.or, true);
+            g.text(34, 18, " VS Code ", C.white, C.blue, true);
+            g.text(45, 18, " phone ", C.ink, C.lav, true);
+            g.text(22, 20, "panes · alerts · dor · browser · tools", C.dim, C.cream);
+          }
+        }
+        // "baby": a heart that beats, and a little shower of them.
+        if (ft >= tBaby - 0.05) {
+          const k = outBack(seg(ft, tBaby - 0.05, tBaby + 0.2));
+          const beatS = 1 + Math.round(pulse(ft, 0.25));
+          if (k > 0.3) g.big(88 - Math.floor((5 * (1 + beatS)) / 2), 28 - Math.floor((7 * (1 + beatS)) / 2), "♥", { sx: 1 + beatS, sy: 1 + beatS, color: C.pink, shadow: C.red });
+          A.confetti(g, ft, tBaby, { n: 50, chars: "♥♥♥✦", x0: 50, w: 46 });
+          g.text(85, 22, " baby ", C.bg, C.pink, true);
+        }
+      });
+    })();
+  </script>
+</template>

@@ -1,0 +1,74 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="outro" data-width="1920" data-height="1080">
+    <div id="outro-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // Bars 25-27: four more "Dormouse" hits, each adding a piece of the logo: tile and prompt, the mouse, the wordmark, the URL.
+      const sc = S.begin("outro");
+      const { C, RAINBOW, seg, outBack, outCubic, lerp, hit } = A;
+      const H = ["out1", "out2", "out3", "out4"].map((id) => A.line(id).start);
+      const TX = 3, TY = 8, TW = 40, TH = 38, R = 6;
+      const inTile = (i, j, w, h, r) => {
+        const cx = i < r ? r : i >= w - r ? w - r - 1 : i, cy = j < r ? r : j >= h - r ? h - r - 1 : j;
+        return (i - cx) ** 2 + (j - cy) ** 2 <= r * r;
+      };
+      const stroke = (g, x0, y0, x1, y1, t, c) => {
+        const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2;
+        for (let s = 0; s <= n; s++) { const x = Math.round(lerp(x0, x1, s / n)), y = Math.round(lerp(y0, y1, s / n)); g.pxRect(x, y, t, t, c); }
+      };
+
+      A.run(sc, (g, ft) => {
+        const flash = Math.max(...H.map((h) => hit(ft, h, 0.4)));
+        if (flash > 0.1) g.box(0, 0, A.COLS, 25, { style: flash > 0.5 ? "heavy" : "round", fg: flash > 0.5 ? C.or : C.line });
+        if (ft < H[0]) {
+          // A breath: the heart from "baby" keeps beating until the first hit.
+          g.text(1, 0, "you@laptop ~ $ ", C.dim);
+          if (Math.floor(ft * 3) % 2 === 0) g.put(16, 0, "█", C.or);
+          const s = 2 + Math.round(A.pulse(ft, 0.3));
+          g.bigCenter(25 - Math.floor((7 * s) / 2), "♥", { sx: s, sy: s, color: C.pink, shadow: C.red });
+          return;
+        }
+        // 1: the tile and its prompt.
+        const k = outBack(seg(ft, H[0], H[0] + 0.3));
+        const w = Math.max(2, Math.round(TW * k)), h = Math.max(2, Math.round(TH * k));
+        const ox = TX + Math.round((TW - w) / 2), oy = TY + Math.round((TH - h) / 2);
+        for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (inTile(i, j, w, h, Math.min(R, Math.floor(w / 2)))) g.px(ox + i, oy + j, C.tile);
+        if (k > 0.95) {
+          stroke(g, TX + 5, TY + 7, TX + 13, TY + 15, 3, C.white);
+          stroke(g, TX + 13, TY + 15, TX + 5, TY + 23, 3, C.white);
+        }
+        // 2: the mouse lands on it.
+        if (ft >= H[1] - 0.05) {
+          const d = outBack(seg(ft, H[1] - 0.05, H[1] + 0.25));
+          const y = Math.round(lerp(-44, TY - 4, d));
+          A.mouse(g, TX + 11, y, { k: 1.3, sway: ft * 4, blink: (ft % 2.9) < 0.12, open: H.some((t) => ft >= t && ft < t + 0.25) });
+        }
+        if (ft >= H[1] && Math.floor(ft * 1.5) % 2 === 0) g.pxRect(TX + 6, TY + 30, 11, 2, C.white);
+        // 3: the wordmark.
+        if (ft >= H[2]) {
+          g.big(47, 10, "DORMOUSE", {
+            color: (i) => (ft >= H[2] + i * 0.03 ? (ft >= H[3] ? RAINBOW[(i + Math.floor(ft * 4)) % RAINBOW.length] : C.or) : null),
+            shadow: C.brown,
+            yoff: (i) => -Math.round(3 * hit(ft, H[2] + i * 0.03, 0.25)) - Math.round(2 * hit(ft, H[3] + i * 0.02, 0.25)),
+          });
+          g.text(47, 9, "a mouse-friendly multitasking terminal".slice(0, Math.floor((ft - H[2]) * 60)), C.dim);
+        }
+        // 4: the address, and the program ends.
+        if (ft >= H[3]) {
+          const s = outBack(seg(ft, H[3], H[3] + 0.2));
+          if (s > 0.5) {
+            g.text(47, 15, " dormouse.sh ", C.bg, C.or, true);
+            g.text(62, 15, "panes · alerts · dor", C.cream);
+            g.text(47, 17, "vs code · standalone · phone", C.dim);
+          }
+          A.confetti(g, ft, H[3], { n: 60, chars: "✦*+♥", x0: 44, w: 52 });
+          const msg = "thanks for multitasking ♥";
+          const shown = A.typed(msg, H[3] + 0.9, 24, ft);
+          if (shown) { g.text(47, 20, "$ ", C.dim); g.text(49, 20, shown, C.cream); if (Math.floor(ft * 3) % 2 === 0) g.put(49 + shown.length, 20, "█", C.or); }
+        }
+      });
+    })();
+  </script>
+</template>

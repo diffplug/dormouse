@@ -1,0 +1,100 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="pre" data-width="1920" data-height="1080">
+    <div id="pre-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // Bars 7-8: a pane needs you, a toast pops, the mouse clicks it. Then C-L-I: dor commands type themselves and chain into a flow.
+      const sc = S.begin("pre");
+      const { C, w, seg, outCubic, outBack, lerp, hit, clamp } = A;
+      const tAl = w("pre1", "Alerts"), tPop = w("pre1", "pop"), tUp = w("pre1", "up"), tWhen = w("pre1", "when"), tKnow = w("pre1", "know");
+      const tCLI = w("pre2", "C-L-I"), tAuto = w("pre2", "automation"), tBuild = w("pre2", "build"), tMy = w("pre2", "my"), tOwn = w("pre2", "own"), tFlow = w("pre2", "flow");
+      const L = A.agentLines(21, 300), R = A.agentLines(22, 300), D = A.devLines(23, 300);
+      const ASK = ["{y}? {c}Allow edit to {b}package.json{c}?", "{d}  ❯ {o}y{d}es / {c}n{d}o"];
+      const R2 = (n) => { const out = R.slice(0, n); return out; };
+      const POINTER = ["#.........", "##........", "#c#.......", "#cc#......", "#ccc#.....", "#cccc#....", "#ccccc#...", "#cccccc#..", "#ccc####..", "#c#c#.....", "##..#c#...", "#...#c#...", ".....#....",];
+      const toast = (g, x, y, wd, lines, border, at, ft) => {
+        const k = outBack(seg(ft, at, at + 0.22));
+        if (k <= 0) return;
+        const xx = Math.round(lerp(A.COLS, x, k));
+        g.box(xx, y, wd, lines.length + 2, { style: "round", fg: border, bg: C.ink, title: "◆ dormouse", titleFg: C.or });
+        lines.forEach((l, i) => g.rich(xx + 2, y + 1 + i, l, wd - 4, C.ink));
+      };
+      const CMDS = [["dor split --right", tAuto], ["dor ensure -- pnpm dev", tAuto + 0.26], ["dor await", tAuto + 0.5], ["dor send \"ship it\"", tAuto + 0.66]];
+      const NODES = [["split", "--right", tBuild], ["ensure", "pnpm dev", tMy], ["await", "until idle", tOwn], ["send", "\"ship it\"", tFlow]];
+
+      A.run(sc, (g, ft) => {
+        if (ft < tCLI - 0.06) {
+          // Three panes. The right agent stops to ask; the left one finishes.
+          const asked = ft >= tAl, clicked = ft >= tKnow;
+          const nR = asked && !clicked ? 30 : 30 + Math.max(0, ft - tKnow) * 8;
+          const blink = asked && !clicked && Math.floor((ft - tAl) / 0.16) % 2 === 0;
+          A.pane(g, 0, 0, 48, 16, { title: "agent ◂ left", lines: L, n: ft < tUp ? 24 + (ft - sc.start) * 7 : 24 + (tUp - sc.start) * 7, titleFg: C.or,
+            badge: ft >= tUp ? " ✓ done " : null, badgeBg: C.lime, border: ft >= tUp && ft < tUp + 0.5 && Math.floor(ft * 8) % 2 ? C.lime : C.line });
+          A.pane(g, 48, 0, 48, 16, { title: "agent ▸ right", titleFg: C.or, focus: clicked, border: clicked ? C.or : asked ? (blink ? C.yel : C.or) : C.line,
+            badge: asked && !clicked ? " [!] needs you " : null, badgeBg: blink ? C.yel : C.or });
+          const rLines = R.slice(0, Math.floor(nR));
+          if (asked) { rLines.splice(30, 0, ...ASK); if (clicked) rLines.splice(32, 0, "{o}  ❯ y {l}✓ allowed"); }
+          A.stream(g, 50, 1, 44, 14, rLines, rLines.length);
+          A.pane(g, 0, 16, 96, 9, { title: "dev server", lines: D, n: 10 + (ft - sc.start) * 6, titleFg: C.or });
+          if (!clicked) {
+            toast(g, 52, 3, 42, ["{y}[!] {o}agent ▸ right {c}needs you", "{d}    waiting for permission"], C.yel, tPop, ft);
+            toast(g, 52, 8, 42, ["{l} ✓  {o}agent ◂ left {c}finished", "{d}    3 files changed · tests pass"], C.lime, tUp, ft);
+          }
+          // The pointer glides to the alert and clicks it on "know".
+          if (ft >= tWhen) {
+            const k = outCubic(seg(ft, tWhen, tKnow - 0.05));
+            const px = Math.round(lerp(14, 70, k)), py = Math.round(lerp(46, 3, k));
+            const ring = hit(ft, tKnow, 0.35);
+            if (ring > 0) { const r = Math.round((1 - ring) * 5) + 1; g.box(Math.floor(px) - r, Math.floor(py / 2) - Math.ceil(r / 2), r * 2 + 1, r + 1, { style: "round", fg: C.or }); }
+            g.sprite(px, py - (ft >= tKnow && ft < tKnow + 0.12 ? 1 : 0), POINTER, { "#": C.brown, c: C.cream });
+          }
+          // A big bell rings across the screen on "Alerts".
+          const bell = hit(ft, tAl, 0.5);
+          if (bell > 0.05) { g.rect(18, 9, 60, 7, C.yel); g.bigCenter(20, "ALERTS!", { sx: 1, sy: 1, color: C.bg }); }
+          return;
+        }
+        // C-L-I: a clean shell.
+        g.box(0, 0, A.COLS, 25, { style: "round", fg: C.line, title: "zsh", titleFg: C.dim });
+        const letters = [["C", tCLI], ["-", tCLI + 0.18], ["L", tCLI + 0.23], ["-", tCLI + 0.41], ["I", tCLI + 0.46]];
+        const TW = A.bigWidth("C-L-I", 2, 1);
+        let x = Math.floor((A.COLS - TW) / 2);
+        letters.forEach(([ch, at], i) => {
+          if (ft >= at) g.big(x, 3 - Math.round(3 * hit(ft, at, 0.25)), ch, { sx: 2, sy: 2, color: ch === "-" ? C.dim : [C.or, C.yel, C.teal][i / 2], shadow: C.brown });
+          x += A.glyph(ch).w * 2 + 2;
+        });
+        // The commands type themselves.
+        CMDS.forEach(([cmd, at], i) => {
+          if (ft < at) return;
+          g.text(4, 10 + i, "$ ", C.dim);
+          const s = A.typed(cmd, at, 70, ft);
+          g.text(6, 10 + i, s.slice(0, 3), C.or, undefined, true);
+          g.text(9, 10 + i, s.slice(3), C.cream);
+          if (s.length === cmd.length) g.text(60, 10 + i, "✓", C.lime);
+        });
+        // Each becomes a node of the flow as it is sung.
+        const NW = 18, GAP = 5, X0 = Math.floor((A.COLS - (NW * 4 + GAP * 3)) / 2), Y0 = 16;
+        const loop = ft >= tFlow ? ((ft - tFlow) / 0.6) % 1 : -1;
+        NODES.forEach(([name, arg, at], i) => {
+          if (ft < at) return;
+          const nx = X0 + i * (NW + GAP), pop = outBack(seg(ft, at, at + 0.2));
+          const lit = loop >= 0 && Math.floor(loop * 4) === i;
+          const yy = Y0 + Math.round((1 - pop) * 3);
+          g.box(nx, yy, NW, 5, { style: lit ? "heavy" : "round", fg: lit ? C.or : C.cream, bg: lit ? C.ink2 : C.ink });
+          g.center(yy + 1, "dor " + name, C.or, undefined, true, nx, NW);
+          g.center(yy + 3, arg, C.dim, undefined, false, nx, NW);
+          if (i > 0) {
+            const ax = nx - GAP, grow = Math.round(seg(ft, at, at + 0.15) * GAP);
+            g.text(ax, Y0 + 2, ("───▶ ").slice(0, grow), C.or);
+          }
+        });
+        if (loop >= 0) {
+          const pos = X0 + loop * (NW * 4 + GAP * 3);
+          g.put(pos, Y0 + 5, "●", C.yel); g.put(pos - 1, Y0 + 5, "·", C.or);
+          g.center(Y0 + 7, "◆ my own flow ◆", C.or, undefined, true);
+        }
+      });
+    })();
+  </script>
+</template>

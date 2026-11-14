@@ -1,0 +1,74 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="verse1" data-width="1920" data-height="1080">
+    <div id="verse1-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // Bars 5-6: the screen splits exactly as sung. Agent left, agent right, dev server at the bottom, then packed in tight.
+      const sc = S.begin("verse1");
+      const { C, w, seg, outCubic, lerp, hit } = A;
+      const tA = w("v1a", "Agent"), tLeft = w("v1a", "left"), tAn = w("v1a", "another"), tR = w("v1a", "right");
+      const tDev = w("v1b", "Dev"), tInfo = w("v1b", "information"), tPacked = w("v1b", "packed-in"), tTight = w("v1b", "tight");
+      const FEEDS = [A.agentLines(1, 400), A.agentLines(2, 400), A.devLines(3, 400), A.agentLines(4, 400), A.agentLines(5, 400), A.devLines(6, 400), A.agentLines(7, 400), A.agentLines(8, 400), A.devLines(9, 400), A.agentLines(10, 400), A.agentLines(11, 400), A.devLines(12, 400)];
+      const NAMES = ["agent ◂ left", "agent ▸ right", "dev server", "agent 3", "tests", "logs", "agent 4", "git", "build", "docs", "agent 5", "lint"];
+      const count = (ft, t0, k) => Math.max(0, (ft - t0) * 7 + Math.max(0, ft - tInfo) * 16) + (k % 3) * 2;
+      const label = (g, x, y, wd, text, at, until, ft) => {
+        if (ft < at || ft >= until) return;
+        const bw = A.bigWidth(text) + 4;
+        const bx = x + Math.floor((wd - bw) / 2);
+        g.rect(bx, y, bw, 5, C.ink);
+        g.big(bx + 2, y * 2 + 2, text, { color: C.or, shadow: C.ord });
+      };
+
+      A.run(sc, (g, ft) => {
+        // Before the first word: one pane draws its own border.
+        if (ft < tA) {
+          const per = seg(ft, sc.start, tA - 0.05);
+          // The border runs clockwise from the top-left corner.
+          const ring = [];
+          for (let x = 0; x < A.COLS; x++) ring.push([x, 0, x === 0 ? "┌" : x === A.COLS - 1 ? "┐" : "─"]);
+          for (let y = 1; y < 24; y++) ring.push([A.COLS - 1, y, "│"]);
+          for (let x = A.COLS - 1; x >= 0; x--) ring.push([x, 24, x === A.COLS - 1 ? "┘" : x === 0 ? "└" : "─"]);
+          for (let y = 23; y > 0; y--) ring.push([0, y, "│"]);
+          const n = Math.floor(A.outCubic(per) * ring.length);
+          ring.slice(0, n).forEach(([x, y, ch], i) => g.put(x, y, ch, i > n - 4 ? C.or : C.line));
+          g.text(2, 0, " ~ ", C.dim, undefined, true);
+          g.text(2, 2, "$ ", C.dim); g.text(4, 2, A.typed("dor split", sc.start + 0.05, 30, ft), C.cream, undefined, true);
+          return;
+        }
+        const split = outCubic(seg(ft, tDev, tDev + 0.25));
+        const topH = Math.round(lerp(25, 16, split));
+        const leftW = Math.round(lerp(0, 48, outCubic(seg(ft, tA, tA + 0.28))));
+        const rightX = Math.round(lerp(96, 48, outCubic(seg(ft, tAn, tAn + 0.28))));
+        // Rectangles: [x, y, w, h, feed index].
+        let rects = [];
+        if (ft < tPacked) {
+          if (leftW >= 4) rects.push([0, 0, Math.min(leftW, rightX), topH, 0]);
+          if (ft >= tAn && 96 - rightX >= 4) rects.push([rightX, 0, 96 - rightX, topH, 1]);
+          if (ft >= tDev && 25 - topH >= 3) rects.push([0, topH, 96, 25 - topH, 2]);
+        } else if (ft < tTight) {
+          rects = [[0, 0, 24, 16, 0], [24, 0, 24, 16, 3], [48, 0, 24, 16, 1], [72, 0, 24, 16, 4], [0, 16, 32, 9, 2], [32, 16, 32, 9, 5], [64, 16, 32, 9, 8]];
+        } else {
+          rects = [[0, 0, 24, 8, 0], [24, 0, 24, 8, 3], [48, 0, 24, 8, 1], [72, 0, 24, 8, 4], [0, 8, 24, 8, 6], [24, 8, 24, 8, 7], [48, 8, 24, 8, 10], [72, 8, 24, 8, 11], [0, 16, 24, 9, 2], [24, 16, 24, 9, 5], [48, 16, 24, 9, 8], [72, 16, 24, 9, 9]];
+        }
+        rects.forEach(([x, y, wd, h, k]) => {
+          const flash = k === 0 ? hit(ft, tLeft, 0.4) : k === 1 ? hit(ft, tR, 0.4) : k === 2 ? hit(ft, tDev, 0.4) : hit(ft, tTight, 0.3);
+          A.pane(g, x, y, wd, h, {
+            title: NAMES[k], lines: FEEDS[k], n: count(ft, k === 1 ? tAn : k === 2 ? tDev : tA, k),
+            border: flash > 0.2 ? C.or : C.line, titleFg: k < 3 ? C.or : C.cream,
+          });
+          g.put(x + wd - 3, y, A.spin(ft, 8, k), C.teal);
+        });
+        label(g, 0, 5, 48, "AGENT", tA + 0.05, tAn, ft);
+        label(g, 48, 5, 48, "AGENT", tAn + 0.1, tDev, ft);
+        label(g, 0, 18, 96, "DEV SERVER", tDev + 0.15, tInfo, ft);
+        if (ft >= tInfo && ft < tPacked) {
+          const n = Math.floor(seg(ft, tInfo, tPacked) * 5) + 1;
+          g.rect(30, 11, 36, 3, C.or);
+          g.center(12, `information ${"▮".repeat(n)}${"▯".repeat(5 - n)}`, C.bg, C.or, true);
+        }
+      });
+    })();
+  </script>
+</template>

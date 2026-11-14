@@ -1,0 +1,168 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="verse2" data-width="1920" data-height="1080">
+    <div id="verse2-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // Bars 13-16: a browser in front of a terminal party; the mullet; any stack; an evening; the desk; the train.
+      const sc = S.begin("verse2");
+      const { C, RAINBOW, w, seg, outCubic, outBack, lerp, hit, hash, beat, pulse } = A;
+      const T = {
+        browser: w("v2a", "Browser"), front: w("v2a", "front"), party: w("v2a", "party"), back: w("v2a", "back"),
+        dor: w("v2b", "Dor"), tool: w("v2b", "Tool"), mullet: w("v2b", "mullet"), build: w("v2b", "build"), any: w("v2b", "any"), stack: w("v2b", "stack"),
+        vibe: w("v2c", "Vibe-coded"), evening: w("v2c", "evening"), still: w("v2c", "still"), easy: w("v2c", "easy"), to: w("v2c", "to"), maintain: w("v2c", "maintain"),
+        mouse: w("v2d", "Mouse"), keys: w("v2d", "keys"), desk: w("v2d", "desk"), just: w("v2d", "just"), thumbs: w("v2d", "thumbs"), train: w("v2d", "train"),
+      };
+      const rb = (i, ft) => RAINBOW[(i + Math.floor(ft * 8)) % RAINBOW.length];
+      const pill = (g, x, y, text, bg = C.or, fg = C.bg) => g.text(x, y, ` ${text} `, fg, bg, true);
+      const LOGS = A.devLines(51, 300);
+      const CODE = A.agentLines(52, 400);
+      const STACK = [["react", C.blue], ["svelte", C.or], ["rust", C.red], ["python", C.yel], ["go", C.teal], ["vue", C.lime]];
+
+      function frontBack(g, ft) {
+        // The terminal at the back, partying once it is sung.
+        const party = ft >= T.party;
+        A.pane(g, 34, 1, 61, 17, { title: "terminal", titleFg: party ? rb(0, ft) : C.cream, border: party ? rb(2, ft) : C.line, lines: LOGS, n: 8 + (ft - sc.start) * 8 });
+        if (party) {
+          const b = beat(ft);
+          for (let i = 0; i < 6; i++) {
+            const pose = (b.n + i) % 2 ? "\\o/" : i % 2 ? "/o/" : "\\o\\";
+            g.text(64 + i * 5, 14 - ((b.n + i) % 2), pose, rb(i, ft), C.bg, true);
+          }
+          for (let i = 0; i < 26; i++) { const x = 63 + Math.floor(hash(i, 1) * 30), y = 2 + Math.floor((hash(i, 2) * 12 + ft * (3 + hash(i, 3) * 4)) % 11); g.put(x, y, "*+·✦"[i % 4], rb(i, ft)); }
+        }
+        if (ft >= T.back) pill(g, 78, 18, "◂ in the back", C.lav);
+        // The browser in front.
+        const x = Math.round(lerp(-60, 2, outCubic(seg(ft, T.browser - 0.05, T.browser + 0.3))));
+        A.browser(g, x, 5, 58, 19, "localhost:5173");
+        g.rect(x + 1, 7, 56, 1, C.white);
+        g.text(x + 3, 7, "◆ my-app", C.or, C.white, true);
+        g.text(x + 33, 7, "home  docs  pricing", C.dim, C.white);
+        g.big(x + 4, 18, "HELLO", { color: C.ink, shadow: C.or });
+        g.text(x + 4, 13, "a little app I vibe-coded", C.ink, C.cream);
+        g.text(x + 4, 15, " Sign up ", C.white, C.or, true);
+        g.text(x + 15, 15, " Docs ", C.ink, C.lav);
+        for (let i = 0; i < 3; i++) {
+          g.rect(x + 4 + i * 17, 17, 15, 4, "#eadcc4");
+          g.text(x + 5 + i * 17, 18, ["fast", "cozy", "mousey"][i], C.ink, "#eadcc4", true);
+          g.text(x + 5 + i * 17, 19, "▬▬▬▬▬▬▬▬", "#c9b89c", "#eadcc4");
+        }
+        if (ft >= T.front) pill(g, x + 2, 23, "in the front ▸", C.blue);
+        if (ft >= T.browser - 0.05) pill(g, x + 44, 5, "browser", C.blue);
+      }
+
+      function mullet(g, ft) {
+        // "A Dor Tool": the browser and the terminal on one surface.
+        g.big(4, 2, "DOR TOOL", { color: C.or, shadow: C.ord });
+        if (ft >= T.tool) g.text(4, 6, "a browser in front, a terminal behind", C.dim);
+        if (ft >= T.dor && ft < T.mullet) {
+          // The tool itself: a terminal, and a browser stacked in front of it.
+          const k = outBack(seg(ft, T.dor, T.dor + 0.25));
+          A.pane(g, 16, 8 + Math.round((1 - k) * 18), 30, 11, { title: "terminal", lines: LOGS, n: 6 + (ft - T.dor) * 10 });
+          if (ft >= T.tool) {
+            const k2 = outBack(seg(ft, T.tool, T.tool + 0.25));
+            const by = 12 + Math.round((1 - k2) * 14);
+            A.browser(g, 6, by, 30, 10, "my-tool.local");
+            g.big(9, (by + 3) * 2, "TOOL", { color: C.or, shadow: C.ord });
+            g.text(9, by + 7, " Run ", C.white, C.or, true);
+            g.text(15, by + 7, " Save ", C.ink, C.lav, true);
+          }
+        }
+        if (ft >= T.mullet) {
+          const k = outBack(seg(ft, T.mullet, T.mullet + 0.25));
+          const y = Math.round(lerp(52, 17, k)) - Math.round(pulse(ft, 0.2));
+          A.mouse(g, 6, y, { mullet: true, sway: ft * 5, blink: ft > 39.6 && ft < 39.72 });
+          g.text(34, 11, "◂ business in the front", C.cream, undefined, true);
+          if (ft >= T.mullet + 0.2) g.text(34, 15, "◂ party in the back", rb(1, ft), undefined, true);
+          if (ft >= T.mullet + 0.1) pill(g, 34, 19, "a Dor Tool is a mullet", C.or);
+        }
+        // Any stack: blocks drop in and stack up.
+        if (ft >= T.build) {
+          g.text(66, 24, "▀".repeat(28), C.line);
+          const times = [T.build, T.build + 0.16, T.build + 0.32, T.any, T.any + 0.13, T.stack];
+          STACK.forEach(([name, col], i) => {
+            const at = times[i];
+            if (ft < at) return;
+            const land = 21 - i * 3, y = Math.round(lerp(-3, land, Math.min(1, outBack(seg(ft, at, at + 0.18)))));
+            const off = (i % 2) * 4 - 2;
+            g.rect(70 + off, y, 18, 3, col);
+            g.center(y + 1, name, C.bg, col, true, 70 + off, 18);
+          });
+          if (ft >= T.stack) pill(g, 72, 1, "any stack ✓", C.lime);
+        }
+      }
+
+      function evening(g, ft) {
+        const SKY = ["#2a2440", "#30284a", "#3a2c4c", "#4a3150", "#5c3850", "#73424e", "#8a4c48"];
+        for (let py = 0; py < 18; py++) g.pxRect(0, py, A.COLS, 1, SKY[Math.min(SKY.length - 1, Math.floor(py / 2.6))]);
+        const set = seg(ft, T.vibe, T.still);
+        const sunY = Math.round(lerp(6, 20, set));
+        for (let j = -4; j <= 4; j++) for (let i = -4; i <= 4; i++) if (i * i + j * j <= 18 && sunY + j < 18) g.px(80 + i, sunY + j, set > 0.6 ? C.cream : C.or2);
+        for (let i = 0; i < 24; i++) if (hash(i, 4) < set) g.px(Math.floor(hash(i, 5) * 70) + 20, Math.floor(hash(i, 6) * 14), C.cream);
+        const mins = Math.round(lerp(18 * 60, 23 * 60 + 59, seg(ft, T.vibe, T.still)));
+        const clock = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+        g.big(3, 3, clock, { color: C.yel, shadow: C.brown });
+        g.text(36, 3, ft >= T.evening ? "in an evening" : "vibe-coding…", C.cream, null, true);
+        // The editor fills itself, fast.
+        A.pane(g, 1, 9, 58, 15, { title: "vibe.ts ◆ vibe-coded", titleFg: C.or, lines: CODE, n: 4 + (ft - T.vibe) * 16 });
+        // ...but still easy to maintain.
+        if (ft >= T.still) {
+          g.box(61, 10, 34, 14, { style: "round", fg: C.lime, bg: C.ink, title: "but still", titleFg: C.lime });
+          [["typed", T.still], ["tested", T.easy], ["readable", T.to], ["easy to maintain", T.maintain]].forEach(([s, at], i) => {
+            if (ft < at) return;
+            const pop = hit(ft, at, 0.25);
+            g.text(63, 12 + i * 2, "[✓]", C.lime, pop > 0.3 ? C.ink2 : C.ink, true);
+            g.text(67, 12 + i * 2, s, i === 3 ? C.or : C.cream, C.ink, i === 3);
+          });
+        }
+      }
+
+      const MOUSE = ["..####..", ".#ll#rr#", "#lll#rrr", "#lll#rrr", "########", "########", "########", "########", ".######.", "..####.."];
+      function desk(g, ft) {
+        // The desk: a monitor of panes, a keyboard that types, a mouse that clicks.
+        g.pxRect(0, 42, A.COLS, 2, "#6b4a33");
+        g.pxRect(0, 44, A.COLS, 6, "#4a3324");
+        if (ft >= T.desk - 0.1) {
+          A.miniPanes(g, 24, 1, 46, 13, ft, 61);
+          g.box(23, 0, 48, 15, { style: "round", fg: C.cream });
+          g.text(45, 15, "┃┃", C.line);
+          g.text(39, 16, "▄▄▄▄▄▄▄▄▄▄▄▄▄▄", C.line);
+          pill(g, 4, 3, "at my desk", C.lav);
+        }
+        if (ft >= T.keys - 0.05) {
+          const k = outCubic(seg(ft, T.keys - 0.05, T.keys + 0.2));
+          const kx = Math.round(lerp(-60, 12, k));
+          g.rect(kx, 17, 56, 4, C.tile);
+          ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"].forEach((r, j) => [...r].forEach((ch, i) => {
+            const lit = ft >= T.keys && hash(j, i, Math.floor(ft * 10)) < 0.18;
+            g.text(kx + 2 + j * 2 + i * 5, 17 + j, `[${ch}]`, lit ? C.bg : C.cream, lit ? C.or : C.tile, lit);
+          }));
+          g.text(kx + 16, 20, "[      space      ]", C.cream, C.tile);
+          pill(g, kx + 2, 15, "keys", C.yel);
+        }
+        // The computer mouse, which clicks on "Mouse".
+        const mk = outBack(seg(ft, T.mouse - 0.15, T.mouse + 0.12));
+        const mxp = Math.round(lerp(100, 74, mk));
+        const click = hit(ft, T.mouse, 0.25) > 0.2 || hit(ft, T.mouse + 0.5, 0.2) > 0.2;
+        g.sprite(mxp, 22, MOUSE, { "#": C.cream, l: click ? C.or : C.cream, r: C.cream }, 2, 2);
+        g.pxRect(mxp + 8, 24, 1, 6, C.line);
+        for (let i = 0; i < 10; i++) g.px(mxp + 8 + Math.round(Math.sin(i * 0.8) * 2), 21 - i, C.line);
+        if (click) g.text(mxp + 1, 8, "click!", C.or, undefined, true);
+        pill(g, mxp + 4, 21, "mouse", C.or);
+      }
+
+      A.run(sc, (g, ft) => {
+        if (ft < T.dor - 0.1) frontBack(g, ft);
+        else if (ft < T.vibe - 0.06) mullet(g, ft);
+        else if (ft < T.mouse - 0.15) evening(g, ft);
+        else if (ft < T.just) desk(g, ft);
+        else {
+          A.train(g, ft);
+          if (ft >= T.thumbs) pill(g, 24, 4, "just my thumbs ▾", C.teal);
+          if (ft >= T.train) pill(g, 62, 4, "on the train ▸▸", C.or);
+        }
+      });
+    })();
+  </script>
+</template>

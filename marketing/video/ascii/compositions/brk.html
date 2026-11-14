@@ -1,0 +1,72 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="brk" data-width="1920" data-height="1080">
+    <div id="brk-stage" class="stage"></div>
+  </div>
+  <script>
+    (() => {
+      // Bars 17-19: still on the train, the dialogue as a chat log typed at the sung times; then "I'm a…" loads for a whole bar.
+      const sc = S.begin("brk");
+      const { C, seg, outBack, outCubic, lerp, hit, clamp } = A;
+      const MSGS = ["br1", "br2", "br3", "br4"].map((id) => A.line(id));
+      const tLoad = A.line("br4").end + 0.05, tDone = A.line("c2a").start - 0.12;
+      // Loading never moves smoothly: it stalls, then jumps.
+      const STEPS = [[0, 0], [0.12, 0.08], [0.3, 0.31], [0.42, 0.33], [0.55, 0.57], [0.7, 0.64], [0.82, 0.9], [0.93, 0.99], [1, 1]];
+      const progress = (u) => { let v = 0; for (const [a, b] of STEPS) if (u >= a) v = b; return v; };
+
+      A.run(sc, (g, ft) => {
+        A.train(g, ft);
+        // The phone, held up close.
+        const PX = 28, PW = 40;
+        const up = outCubic(seg(ft, sc.start, sc.start + 0.35));
+        const top = Math.round(lerp(26, 0, up));
+        g.box(PX, top, PW, 25, { style: "round", fg: C.cream, bg: C.ink });
+        g.text(PX + 18, top, "▬▬▬▬", C.cream);
+        g.rect(PX + 1, top + 1, PW - 2, 1, C.ink2);
+        g.text(PX + 2, top + 1, "◆ #train-chat", C.or, C.ink2, true);
+        g.text(PX + PW - 12, top + 1, "2 online ●", C.dim, C.ink2);
+        let y = top + 3;
+        MSGS.forEach((l, i) => {
+          if (ft < l.start - 0.45) return;
+          const her = l.voice === "her";
+          // Typing dots first, then the words as they are sung.
+          const words = l.words.filter((x) => ft >= x.start).map((x) => x.text);
+          let text = words.join(" ");
+          if (i === 3 && ft >= tLoad) text += "…";
+          const full = l.words.map((x) => x.text).join(" ") + (i === 3 ? "…" : "");
+          const bw = Math.min(PW - 6, full.length + 4);
+          const bx = her ? PX + 2 : PX + PW - 2 - bw;
+          const col = her ? C.pink : C.teal;
+          const pop = outBack(seg(ft, l.start - 0.45, l.start - 0.3));
+          if (pop <= 0) return;
+          g.box(bx, y, bw, 3, { style: "round", fg: col, bg: C.ink, title: her ? "her" : "him", titleFg: col });
+          if (!words.length) g.text(bx + 2, y + 1, ["·  ", "·· ", "···"][Math.floor(ft * 8) % 3], C.dim, C.ink);
+          else g.text(bx + 2, y + 1, text, C.cream, C.ink);
+          y += 4;
+        });
+        g.rect(PX + 1, top + 23, PW - 2, 1, C.ink2);
+        g.text(PX + 2, top + 23, "▸ message #train-chat", C.dim, C.ink2);
+
+        // Bar 19: "I'm a…" and the answer loads.
+        if (ft >= tLoad) {
+          const k = outBack(seg(ft, tLoad, tLoad + 0.25));
+          const h = Math.max(2, Math.round(15 * k));
+          const y0 = 5 + Math.round((15 - h) / 2);
+          g.box(10, y0, 76, h, { style: "heavy", fg: C.or, bg: C.ink2 });
+          if (h >= 15) {
+            g.bigCenter(16, "I'M A", { color: C.cream, shadow: C.ord, dx: -10 });
+            const u = seg(ft, tLoad + 0.2, tDone);
+            const p = progress(u);
+            const n = Math.round(p * 60);
+            g.text(17, 14, "▕", C.or); g.text(78, 14, "▏", C.or);
+            g.text(18, 14, "░".repeat(60), C.line);
+            for (let i = 0; i < n; i++) g.put(18 + i, 14, "█", i % 6 < 3 ? C.or : C.or2);
+            g.text(64, 9, `${String(Math.round(p * 100)).padStart(3, " ")}%`, C.yel, C.ink2, true);
+            const msg = p >= 1 ? "✓ identity loaded" : p > 0.6 ? "resolving species…" : p > 0.3 ? "not a dog ✓  checking ears…" : "loading identity…";
+            g.text(18, 16, `${p >= 1 ? " " : A.spin(ft, 10)} ${msg}`, p >= 1 ? C.lime : C.cream, C.ink2);
+          }
+        }
+      });
+    })();
+  </script>
+</template>
