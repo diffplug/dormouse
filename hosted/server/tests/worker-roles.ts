@@ -12,10 +12,20 @@ export type Worker = keyof typeof RUNTIME_ROLES;
 /** Roles are cluster-wide: these exist only in pgstencil's local test container. */
 const password = (role: string) => `${role}-local-only`;
 
+/**
+ * `url` as workerd should dial it: workerd tries `localhost` as ::1 first,
+ * which a Docker Desktop port answers only after a ~20 s fallback.
+ */
+function forWorkerd(url: string) {
+  const ipv4 = new URL(url);
+  if (ipv4.hostname === "localhost") ipv4.hostname = "127.0.0.1";
+  return ipv4.href;
+}
+
 /** The test database at `url`, connected as `worker`'s restricted role. */
 function asWorker(url: string, worker: Worker) {
   const role = RUNTIME_ROLES[worker];
-  const restricted = new URL(url);
+  const restricted = new URL(forWorkerd(url));
   restricted.username = role;
   restricted.password = password(role);
   return restricted.href;
@@ -59,5 +69,5 @@ export async function workerDatabases(url: string): Promise<Record<Worker | "acc
       ${roles.map((role) => `ALTER ROLE ${role} LOGIN PASSWORD '${password(role)}';`).join("\n      ")}
     END $$`,
   );
-  return { account: url, relay: asWorker(url, "relay"), voice: asWorker(url, "voice") };
+  return { account: forWorkerd(url), relay: asWorker(url, "relay"), voice: asWorker(url, "voice") };
 }

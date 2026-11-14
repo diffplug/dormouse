@@ -464,10 +464,10 @@ Before the first one, either build a recorded notice to the billing and contact 
 2. Merge reviewed code to `main`, then run **Hosted production release**:
 
    ```sh
-   gh workflow run hosted-production.yml --repo diffplug/dormouse --ref main -f promote=true
+   gh workflow run hosted-production.yml --repo diffplug/dormouse --ref main
    ```
 
-   Default `promote=false` verifies and builds only. `promote=true` enters the protected production environment and runs the preflight, backup and restore-test, migration, deployment, and live-verification sequence in `docs/specs/hosted.md` -> "Production releases", deploying the frames, try, relay, voice, and account Workers in that order. The try Worker's revision and page checks pass before the relay deploys, the relay's revision, readiness, and one-time checks before the voice or account deploys, and every Worker is checked again after the account deploys. No real mail is sent by its smoke checks, and passing them is not acceptance.
+   Every run deploys: after verification it waits for a reviewer to approve the protected production environment (reject there to stop), then runs the preflight, backup and restore-test, migration, deployment, and live-verification sequence in `docs/specs/hosted.md` -> "Production releases", deploying the frames, try, relay, voice, and account Workers in that order. The try Worker's revision and page checks pass before the relay deploys, the relay's revision, readiness, and one-time checks before the voice or account deploys, and every Worker is checked again after the account deploys. No real mail is sent by its smoke checks, and passing them is not acceptance.
 
    The release needs all three Hyperdrive variables. A missing one, two Workers on one Hyperdrive, or a Hyperdrive that caches, reaches another database, or connects as anything but its Worker's role stops it at preflight, before the backup, so nothing in production changes. Preflight reads only Cloudflare's side: a role Postgres refuses (no LOGIN, a wrong password, a missing grant) passes it. A refused relay role stops the release at the relay's readiness, right after the relay deploys and before the voice or account; a refused voice or account role is caught only by the live verification after all three deploy. Either way the new Worker is already serving and its lookups fail, so before the first release on a new role, confirm it connects with `psql` as that role; on a failure, fix the role at once and rerun.
 

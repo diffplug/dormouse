@@ -6,6 +6,7 @@ import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { workerDatabases } from "./worker-roles";
+import { entitledAccount } from "./accounts";
 import {
   API_ROUTES,
   MAX_PASSKEY_QUERY_IDS,
@@ -175,16 +176,7 @@ async function call(
   return { status: response.status, json: (text ? JSON.parse(text) : null) as Record<string, any> };
 }
 
-/** A user row made the one entitled account: `ADMIN_EMAIL` is unique, so whoever held it moves. */
-async function entitled() {
-  const id = randomUUID();
-  await sql(`UPDATE "user" SET email = id || '@example.test' WHERE email = $1`, [ADMIN_EMAIL]);
-  await sql(`INSERT INTO "user" (id, name, email, "emailVerified") VALUES ($1, $1, $2, true)`, [
-    id,
-    ADMIN_EMAIL,
-  ]);
-  return id;
-}
+const entitled = () => entitledAccount(context.database.url);
 
 /** An enrolled Burrow row, as the device-code poll writes one. */
 async function burrowRow(userId: string) {
