@@ -395,9 +395,17 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 Source of truth: `.github/workflows/hosted-preview.yml`; `previewConfig` / `previewSecrets` / `sweep` in `hosted/scripts/preview.mjs`; `hosted/server/preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`.
 
+## Desktop compatibility
+
+**Must serve every desktop release from the floor in `hosted/desktop-compat.json` onward**: each route, header, field, frame, and one-time link version a shipped Burrow uses (`docs/specs/one-time.md` -> "Links from older builds"). **Never raise the floor except by a reviewed edit of that file.** The desktop side: `docs/specs/deploy.md` -> "Release checklist".
+
+**Must pass the desktop compatibility gate before every production deploy**: each `vX.Y.Z` tag's own `BurrowService`, floor to newest, enrolls, holds the relay socket, and pairs and answers a current Client against this revision's relay Worker over real sockets.
+
+Source of truth: `hosted/scripts/desktop-builds.mjs`; `hosted/server/tests/desktop-compat.gate.ts`.
+
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain, and the relay's `ACCOUNT_ORIGIN` and `TRY_ORIGIN` to those Workers' origins; `preflight`, before the backup, checks each Worker's Hyperdrive and its own secret names (`docs/specs/security-hosted.md` -> "Deployment boundary") — names only. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy frames, try, relay, voice, then account, stopping at a failure**; the try Worker must pass its revision check and `oneTimePageSmoke` before the relay deploys, and the relay its revision check, `/api/ready`, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build, the desktop compatibility gate ("Desktop compatibility"), and accepted clean package provenance**, every run, once a reviewer approves the `hosted-production` environment. `productionConfig` holds each config to its Worker's pinned name, origin, and lone custom domain, and the relay's `ACCOUNT_ORIGIN` and `TRY_ORIGIN` to those Workers' origins; `preflight`, before the backup, checks each Worker's Hyperdrive and its own secret names (`docs/specs/security-hosted.md` -> "Deployment boundary") — names only. **Must back up, encrypt, decrypt, and restore-test before applying migrations**, uploading only the encrypted archive. **Must deploy frames, try, relay, voice, then account, stopping at a failure**; the try Worker must pass its revision check and `oneTimePageSmoke` before the relay deploys, and the relay its revision check, `/api/ready`, push config, and `oneTimeSmoke` before the next deploy (rationale). Production has no public candidate URL.
 
 **Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. A try deploy restarts every room, dropping links still waiting or mid-handshake, and a relay deploy every relay socket, which its end reconnects; a session already on its direct path never touches Hosted. Live verification checks every Worker once the account has deployed.
 
