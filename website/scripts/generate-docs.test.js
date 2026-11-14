@@ -33,8 +33,8 @@ import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
 const data = await generateDocs();
 
 /**
- * Every link href in the generated data: all three published pages, plus the
- * guide data, which has no page today but is generated and must stay correct.
+ * Every link href in the generated data: every published page's blocks, plus
+ * the guide data, which has no page today but is generated and must stay correct.
  */
 function generatedHrefs() {
   const hrefs = [];
@@ -634,7 +634,7 @@ describe('cli reference', () => {
   });
 
   it('nests every command under one heading, and that heading is an anchor', () => {
-    // Flat, this page alone is fourteen rail entries; nested under an id that
+    // Flat, this page alone is one rail entry per command; nested under an id that
     // is not on the page, the parent is a link that scrolls nowhere.
     const { commandsHeading, toc } = data.cli;
     expect(toc.map((e) => e.id)).toEqual(['targeting', 'surface-handles', 'dor', commandsHeading.id]);

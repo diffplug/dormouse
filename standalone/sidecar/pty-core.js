@@ -1617,13 +1617,6 @@ function isProcessAlive(pid) {
  *
  * Usage: const mgr = require('./pty-core').create(send, nodePty)
  *   where send(event, data) is a transport callback.
- *
- * Events emitted via send():
- *   send('data',  { id, data })
- *   send('exit',  { id, exitCode, signal })
- *   send('error', { id, message })
- *   send('list',  { ptys: [{ id, alive, shell }] })
- *   send('openPorts', { id, ports: [{ protocol, family, address, port, pid, processName }], requestId })
  */
 
 // `sliceSince` is injected rather than imported: its implementation is shared

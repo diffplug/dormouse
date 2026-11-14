@@ -19,8 +19,8 @@ import { OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, themePreviewButton } from './d
 import { useBrowserLayoutEffect } from '../lib/use-browser-layout-effect';
 
 /**
- * `compact` is the free-floating trigger used by the website's Pocket
- * playground pages, which have no baseboard and therefore no Settings dialog.
+ * `compact` is the free-floating trigger for a page with no baseboard and
+ * therefore no Settings dialog.
  * `row` names the active theme, for a row in the Settings dialog, where every
  * host with a baseboard sets its theme, or on the mobile Settings page
  * (docs/specs/theme.md).
