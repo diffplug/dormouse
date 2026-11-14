@@ -1,0 +1,115 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="chorus1" data-width="1920" data-height="1080">
+    <div id="chorus1-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("chorus1");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const L = (id) => sc.line(id);
+      const wd = (id, i) => L(id).words[i].start;
+      const edge = (id) => L(id).start - 0.08;
+      S.field(stage, C.ink);
+
+      // c1a: "Dormouse, Dormouse" slams twice, on two fields; then "multitask" takes four panes and "more" takes the frame.
+      {
+        const s = S.section(tl, stage, 0, edge("c1b"), C.char);
+        const f2 = S.field(s, C.orange);
+        S.show(tl, f2, wd("c1a", 1) - 0.05);
+        const d1 = S.type(s, "Dormouse,", { x: 80, y: 360, size: 422, color: C.cream, css: "font-stretch:62%" });
+        S.slam(tl, d1, wd("c1a", 0), { from: 1.6, until: wd("c1a", 1) - 0.05 });
+        S.shake(tl, s, wd("c1a", 0));
+        const d2 = S.type(f2, "Dormouse,", { x: 80, y: 360, size: 422, color: C.ink, css: "font-stretch:62%" });
+        S.slam(tl, d2, wd("c1a", 1), { from: 0.5, ease: "back.out(2)", until: wd("c1a", 2) + 0.2 });
+        S.shake(tl, s, wd("c1a", 1));
+        // Four panes, one after another in a sixteenth-note roll.
+        const tM = wd("c1a", 2);
+        const cols = [[C.cobalt, C.cream], [C.cream, C.ink], [C.ink, C.orange], [C.lime, C.ink]];
+        cols.forEach(([bgc, fg], i) => {
+          const p = S.box(s, { x: (i % 2) * 968, y: Math.floor(i / 2) * 548, w: 952, h: 532, bg: bgc, cls: "pane" });
+          S.slam(tl, p, tM - 0.08 + i * 0.07, { from: 0.6, dur: 0.25 });
+          S.type(p, "Multitask", { x: 60, y: 180, size: 210, color: fg, css: "font-stretch:62%" });
+          S.type(p, `> ${i + 1}`, { x: 60, y: 60, size: 48, cls: "mono", color: fg });
+        });
+        const tMore = wd("c1a", 3);
+        const more = S.field(s, C.lime);
+        S.show(tl, more, tMore - 0.05);
+        tl.fromTo(more, { clipPath: "inset(45% 0% 45% 0%)" }, { clipPath: "inset(0% 0% 0% 0%)", duration: 0.22, ease: "expo.out", immediateRender: false }, tMore - 0.05);
+        S.slam(tl, S.type(more, "More", { x: 113, y: 364, size: 440, color: C.ink, css: "font-stretch:125%" }), tMore, { from: 0.4, ease: "back.out(2.4)" });
+      }
+
+      // c1b: the name runs up both edges; the middle spells D-O-R and lands on the command.
+      {
+        const s = S.section(tl, stage, edge("c1b"), edge("c1c"), C.cobalt);
+        const colL = S.box(s, { x: 60, y: 1020, css: "transform-origin:0 0;transform:rotate(-90deg)" });
+        const colR = S.box(s, { x: 1860, y: 60, css: "transform-origin:0 0;transform:rotate(90deg)" });
+        const tL = S.type(colL, "Dormouse,", { size: 240, color: C.cream, css: "font-stretch:62%;position:relative" });
+        const tR = S.type(colR, "Dormouse,", { size: 240, color: C.orange, css: "font-stretch:62%;position:relative" });
+        S.slam(tl, tL, wd("c1b", 0), { from: 1, dx: -900, dur: 0.3 });
+        S.slam(tl, tR, wd("c1b", 1), { from: 1, dx: -900, dur: 0.3 });
+        // D, O and R light up in the middle and in both columns.
+        const lL = S.letters(tL), lR = S.letters(tR);
+        const tD = wd("c1b", 2);
+        ["D", "O", "R"].forEach((ch, i) => {
+          const at = tD + i * 0.2;
+          const cell = S.box(s, { x: 420 + i * 380, y: 130, w: 330, h: 380, bg: C.ink, css: "border-radius:12px" });
+          S.type(cell, ch, { x: 0, y: 55, w: 330, size: 340, color: C.orange, css: "text-align:center" });
+          S.slam(tl, cell, at, { from: 1.5, dur: 0.25 });
+          [lL[i], lR[i]].forEach((l) => tl.set(l, { color: C.lime }, at - 0.03));
+        });
+        S.show(tl, S.type(s, "spells", { x: 420, y: 580, size: 90, cls: "mono", color: C.cream }), wd("c1b", 3) - 0.05);
+        const dor = S.type(s, "$ dor", { x: 420, y: 700, size: 250, cls: "mono", color: C.lime });
+        S.slam(tl, dor, wd("c1b", 4), { from: 1.4, origin: "0% 50%" });
+        const cur = S.box(s, { x: 420 + 5 * 150 + 20, y: 710, w: 140, h: 230, bg: C.cream });
+        S.blink(tl, cur, beats, wd("c1b", 4) + 0.1, edge("c1c"));
+      }
+
+      // c1c: two stacked names, then "VS Code" over "standalone" with a mono "or" between.
+      {
+        const s = S.section(tl, stage, edge("c1c"), edge("c1d"), C.ink);
+        const a = S.type(s, "Dormouse,", { x: 84, y: 70, size: 270, color: C.orange });
+        const b = S.type(s, "Dormouse,", { x: 84, y: 560, size: 270, color: "transparent", css: `-webkit-text-stroke:5px ${C.cream}` });
+        S.slam(tl, a, wd("c1c", 0), { from: 1, dx: 1900, dur: 0.3, until: wd("c1c", 2) - 0.1 });
+        S.slam(tl, b, wd("c1c", 1), { from: 1, dx: -1900, dur: 0.3, until: wd("c1c", 2) - 0.1 });
+        const top = S.box(s, { w: 1920, h: 470, bg: C.cobalt, cls: "pane" });
+        S.wipe(tl, top, wd("c1c", 2) - 0.1, "top", 0.22);
+        S.slam(tl, S.type(top, "VS", { x: 120, y: 100, size: 330, color: C.cream }), wd("c1c", 2), { from: 1.4 });
+        S.slam(tl, S.type(top, "Code", { x: 672, y: 100, size: 330, color: C.cream }), wd("c1c", 3), { from: 1.4 });
+        const or = S.type(s, "or", { x: 124, y: 480, size: 100, cls: "mono", color: C.lime });
+        S.show(tl, or, wd("c1c", 4) - 0.05);
+        const bot = S.box(s, { y: 590, w: 1920, h: 490, bg: C.orange, cls: "pane" });
+        S.wipe(tl, bot, wd("c1c", 5) - 0.12, "bottom", 0.2);
+        S.slam(tl, S.type(bot, "Standalone", { x: 118, y: 97, size: 370, color: C.ink, css: "font-stretch:62%" }), wd("c1c", 5), { from: 1.3 });
+      }
+
+      // c1d: two names pass each other; then the type block goes from a 16:9 laptop to a phone-shaped column.
+      {
+        const s = S.section(tl, stage, edge("c1d"), sc.dur + 1, C.cream);
+        const a = S.type(s, "Dormouse,", { x: 100, y: 110, size: 350, color: C.ink, css: "font-stretch:75%" });
+        const b = S.type(s, "Dormouse,", { x: 100, y: 610, size: 350, color: C.cobalt, css: "font-stretch:75%" });
+        S.slam(tl, a, wd("c1d", 0), { from: 1, dx: 700, dur: 0.4, until: wd("c1d", 2) - 0.1 });
+        tl.to(a, { x: -140, duration: 1.2, ease: "none" }, wd("c1d", 0) + 0.4);
+        S.slam(tl, b, wd("c1d", 1), { from: 1, dx: -700, dur: 0.4, until: wd("c1d", 2) - 0.1 });
+        const dark = S.field(s, C.char);
+        S.show(tl, dark, wd("c1d", 2) - 0.1);
+        // The frame of type: 16:9, then a phone.
+        const tFrom = wd("c1d", 2), tTo = wd("c1d", 5);
+        const frame = S.box(s, { x: 320, y: 180, w: 1280, h: 720, css: `border:14px solid ${C.cream};border-radius:18px;overflow:hidden` });
+        S.slam(tl, frame, tFrom, { from: 1.15, dur: 0.3 });
+        const fromMy = S.sing(tl, frame, { words: L("c1d").words.slice(2, 4) }, { x: 70, y: 70, size: 64, color: C.cream, gap: 0.5 });
+        const laptop = S.type(frame, "Laptop", { x: 82, y: 260, size: 260, color: C.orange });
+        S.slam(tl, laptop, wd("c1d", 4), { from: 1.3 });
+        tl.to([laptop, fromMy.row], { autoAlpha: 0, duration: 0.1 }, tTo - 0.05);
+        tl.to(frame, { left: 760, top: 60, width: 400, height: 960, borderRadius: 56, duration: 0.3, ease: "expo.inOut" }, tTo - 0.15);
+        S.sing(tl, frame, { words: L("c1d").words.slice(5, 7) }, { x: 60, y: 60, size: 56, color: C.cream, gap: 0.5 });
+        [..."PHONE"].forEach((ch, i) => {
+          const l = S.type(frame, ch, { x: 0, y: 190 + i * 148, w: 372, size: 170, color: C.lime, css: "text-align:center" });
+          S.slam(tl, l, wd("c1d", 7) + i * 0.04, { from: 0.3, dur: 0.25, ease: "back.out(2)" });
+        });
+      }
+      window.__timelines["chorus1"] = tl;
+    })();
+  </script>
+</template>

@@ -1,0 +1,82 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="intro" data-width="1920" data-height="1080">
+    <div id="intro-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("intro");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const bg = S.field(stage, C.char);
+      const bar = sc.bar;
+      // "Do-do-Dormouse" is one word in the transcript; it is sung as four eighth notes.
+      const stutter = (t0) => [t0, t0 + 0.333, t0 + 0.666, t0 + 1.0];
+      S.cuts(tl, bg, [[0, C.char], [sc.w("Dormouse") - 0.05, C.orange], [bar(2), C.cream], [sc.w("Dormouse", { nth: 2 }) - 0.08, C.ink], [bar(4), C.char]]);
+
+      // Bar 0: a prompt and a cursor keep time, then the name stutters in.
+      const prompt = S.type(stage, ">", { x: 150, y: 400, size: 260, cls: "mono", color: C.orange });
+      const cur0 = S.box(stage, { x: 330, y: 420, w: 130, h: 220, bg: C.cream });
+      S.blink(tl, cur0, beats, 0, 0.5);
+      S.show(tl, prompt, 0, 0.5);
+      const [a, b, c, d] = stutter(sc.w("Do-do-Dormouse"));
+      const do1 = S.type(stage, "Do", { x: 150, y: 290, size: 560, color: C.cream });
+      const do2 = S.type(stage, "Do", { x: 960, y: 290, size: 560, color: C.orange });
+      const dor = S.type(stage, "Dor", { x: 150, y: 290, size: 560, color: C.cream });
+      S.slam(tl, do1, a, { from: 1.4, until: b });
+      S.slam(tl, do2, b, { from: 1.4, until: c, dy: -40 });
+      S.slam(tl, dor, c, { from: 1.25, until: d });
+      const full = S.type(stage, "Dormouse", { x: 80, y: 400, size: 280, color: C.cream });
+      S.slam(tl, full, d, { from: 1.2, until: sc.w("Dormouse") - 0.05 });
+      const cur1 = S.box(stage, { x: 1770, y: 640, w: 70, h: 34, bg: C.orange });
+      S.blink(tl, cur1, beats, d + 0.3, sc.w("Dormouse") - 0.1);
+
+      // "Dormouse": the field flips to orange and the name runs off the right edge, a terminal line.
+      const t2 = sc.w("Dormouse");
+      const p2 = S.type(stage, "> dormouse", { x: 120, y: 120, size: 90, cls: "mono", color: C.ink });
+      S.show(tl, p2, t2 - 0.05, bar(2));
+      const big2 = S.type(stage, "Dormouse", { x: 120, y: 380, size: 310, color: C.ink, css: "font-stretch:88%" });
+      S.slam(tl, big2, t2, { from: 0.6, until: bar(2), ease: "back.out(2)" });
+      tl.to(big2, { x: -60, duration: bar(2) - t2, ease: "none" }, t2 + 0.3);
+      const cur2 = S.box(stage, { x: 120, y: 860, w: 120, h: 40, bg: C.ink });
+      S.blink(tl, cur2, beats, t2 + 0.6, bar(2));
+
+      // Bar 2: the frame tiles into four panes on the beat, and the next stutter takes one pane per syllable.
+      const PW = 952, PH = 532, G = 16;
+      const paneColors = [C.orange, C.char, C.cobalt, C.ink];
+      const inks = [C.ink, C.orange, C.cream, C.orange];
+      const panes = [0, 1, 2, 3].map((i) => S.box(stage, { x: (i % 2) * (PW + G), y: Math.floor(i / 2) * (PH + G), w: PW, h: PH, bg: paneColors[i], cls: "pane" }));
+      const dirs = ["left", "top", "bottom", "right"];
+      panes.forEach((p, i) => { S.wipe(tl, p, bar(2) + i * S.BEAT * 0.5 + (i ? S.BEAT : 0), dirs[i]); S.hide(tl, p, sc.w("Dormouse", { nth: 1 }) - 0.08); });
+      const syl = ["Do", "do", "Dor", "mouse"];
+      const st2 = stutter(sc.w("Do-do-Dormouse", { nth: 1 }) - 0.08);
+      syl.forEach((s, i) => {
+        const el = S.type(panes[i], s, { x: 60, y: 120, size: s.length > 3 ? 280 : 360, color: inks[i], css: s.length > 3 ? "font-stretch:75%" : "" });
+        S.slam(tl, el, st2[i], { from: 1.6 });
+      });
+      const curP = S.box(stage, { x: 0, y: 0, w: 70, h: 110, bg: C.cream });
+      gsap.set(curP, { x: 920, y: 480 });
+      S.blink(tl, curP, beats, bar(2), st2[0] - 0.1, { on: 0.6 });
+
+      // "Dormouse, Dormouse": the top half, then the bottom half, in each other's colors.
+      const tA = sc.w("Dormouse", { nth: 1 }), tB = sc.w("Dormouse", { nth: 2 });
+      const top = S.box(stage, { w: 1920, h: 540, bg: C.orange, cls: "pane" });
+      const bot = S.box(stage, { y: 540, w: 1920, h: 540, bg: C.cream, cls: "pane" });
+      S.type(top, "Dormouse,", { x: 84, y: 100, size: 420, color: C.ink, css: "font-stretch:62%" });
+      S.type(bot, "Dormouse", { x: 84, y: 100, size: 420, color: C.cobalt, css: "font-stretch:62%" });
+      S.slam(tl, top, tA - 0.08, { from: 1, dy: -540, dur: 0.28, until: bar(4) });
+      S.slam(tl, bot, tB - 0.08, { from: 1, dy: 540, dur: 0.28, until: bar(4) });
+
+      // Bar 4: an outline, then the same word filled. A cursor waits on the beat between them.
+      const tC = sc.w("Dormouse", { nth: 3 }), tD = sc.w("Dormouse", { nth: 4 });
+      const outline = S.type(stage, "Dormouse,", { x: 92, y: 400, size: 350, color: "transparent", css: `-webkit-text-stroke:6px ${C.cream};font-stretch:75%` });
+      S.slam(tl, outline, tC, { from: 1.3 });
+      const curO = S.box(stage, { x: 92, y: 760, w: 140, h: 40, bg: C.orange });
+      S.blink(tl, curO, beats, bar(4), tC - 0.1);
+      const filled = S.type(stage, "Dormouse", { x: 92, y: 400, size: 350, color: C.orange, css: "font-stretch:75%" });
+      S.slam(tl, filled, tD, { from: 0.85, ease: "back.out(2.5)" });
+      S.shake(tl, stage, tD);
+      window.__timelines["intro"] = tl;
+    })();
+  </script>
+</template>

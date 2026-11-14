@@ -1,0 +1,48 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="outro" data-width="1920" data-height="1080">
+    <div id="outro-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      // The last four "Dormouse"s stack up as four panes, one in each of the film's voices; then they clear for the end card.
+      const sc = S.begin("outro");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      S.field(stage, C.ink);
+      const hits = ["out1", "out2", "out3", "out4"].map((id) => sc.line(id).start);
+      const rows = [
+        { bg: C.orange, text: "Dormouse,", cls: "big", size: 300, color: C.ink, y: 15, css: "font-stretch:62%" },
+        { bg: C.cobalt, text: "dormouse,", cls: "mono", size: 200, color: C.cream, y: 35, css: "" },
+        { bg: C.cream, text: "Dormouse,", cls: "serif ital", size: 290, color: C.ink, y: 2, css: "" },
+        { bg: C.lime, text: "Dormouse", cls: "big", size: 240, color: "transparent", y: 39, css: `-webkit-text-stroke:5px ${C.ink}` },
+      ];
+      const tEnd = sc.line("out4").start + 0.42;
+      const panes = rows.map((r, i) => {
+        const p = S.box(stage, { y: i * 270, w: 1920, h: 270, bg: r.bg, cls: "pane" });
+        const word = S.type(p, r.text, { x: 80, y: r.y, size: r.size, cls: r.cls, color: r.color, css: r.css });
+        S.type(p, `> ${i + 1}`, { x: 1740, y: 30, size: 44, cls: "mono", color: i === 1 ? C.cream : C.ink });
+        const dir = i % 2 ? 1 : -1;
+        S.show(tl, p, hits[i] - 0.1);
+        tl.fromTo(p, { x: dir * 1920 }, { x: 0, duration: 0.24, ease: "expo.out", immediateRender: false }, hits[i] - 0.1);
+        tl.fromTo(word, { x: dir * 300 }, { x: 0, duration: 0.5, ease: "expo.out", immediateRender: false }, hits[i] - 0.1);
+        tl.to(p, { x: -dir * 1920, duration: 0.3, ease: "expo.in" }, tEnd - 0.3 + i * 0.05);
+        return p;
+      });
+      // A cursor waits under the newest pane between hits.
+      const cur = S.box(stage, { x: 1740, y: 0, w: 60, h: 90, bg: C.ink });
+      hits.forEach((t, i) => tl.set(cur, { y: i * 270 + 150, backgroundColor: i === 1 ? C.cream : C.ink }, t));
+      S.blink(tl, cur, beats, hits[0] + 0.3, tEnd - 0.3);
+      // The end card: the real icon, the name, the address.
+      const icon = S.box(stage, { x: 230, y: 290, w: 500, h: 500, html: `<img src="assets/icon.svg" style="width:500px;height:500px;display:block" alt="">` });
+      S.pop(tl, icon, tEnd + 0.05, { origin: "50% 50%" });
+      const name = S.type(stage, "Dormouse", { x: 780, y: 390, size: 170, color: C.cream });
+      S.slam(tl, name, tEnd + 0.2, { from: 1, dx: 200, dur: 0.4 });
+      const url = S.type(stage, "dormouse.sh", { x: 788, y: 600, size: 96, cls: "mono", color: C.orange });
+      S.letters(url).forEach((l, i) => S.show(tl, l, tEnd + 0.3 + i * 0.025));
+      const c2 = S.box(stage, { x: 788 + 11 * 57.6 + 14, y: 604, w: 50, h: 92, bg: C.cream });
+      S.blink(tl, c2, beats, tEnd + 0.7, sc.dur + 1);
+      window.__timelines["outro"] = tl;
+    })();
+  </script>
+</template>

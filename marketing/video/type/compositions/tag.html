@@ -1,0 +1,35 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="tag" data-width="1920" data-height="1080">
+    <div id="tag-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      // "Do-Dormouse.sh, baby": the stutter, then the name resolves into an address bar.
+      // The transcript times "Do-Dor" at 64.46 and "mouse.sh" at 65.12; lyrics.json holds them as one word.
+      const sc = S.begin("tag");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const t0 = sc.w("Do-Dormouse.sh"), tDor = t0 + 0.3, tMouse = sc.t(65.12), tBaby = sc.w("baby");
+      S.field(stage, C.cream);
+      const wait = S.box(stage, { x: 90, y: 110, w: 150, h: 230, bg: C.ink });
+      S.show(tl, wait, 0, t0 - 0.04);
+      S.slam(tl, S.type(stage, "Do-", { x: 80, y: 90, size: 330, color: C.orange }), t0, { from: 1.6, origin: "0% 50%" });
+      S.slam(tl, S.type(stage, "Dor", { x: 720, y: 90, size: 330, color: C.ink }), tDor, { from: 1.6, origin: "0% 50%" });
+      const pill = S.box(stage, { x: 160, y: 500, w: 1600, h: 240, bg: C.ink, css: "border-radius:120px;overflow:hidden" });
+      S.slam(tl, pill, tDor - 0.05, { from: 1, dy: 600, dur: 0.3 });
+      S.box(pill, { x: 80, y: 95, w: 50, h: 50, bg: C.lime, css: "border-radius:50%" });
+      const dor = S.type(pill, "dor", { x: 180, y: 45, size: 150, cls: "mono", color: C.lime });
+      S.show(tl, dor, tDor);
+      const rest = S.type(pill, "mouse.sh", { x: 180 + 3 * 90, y: 45, size: 150, cls: "mono", color: C.cream });
+      S.letters(rest).forEach((l, i) => S.show(tl, l, tMouse - 0.04 + i * 0.035));
+      const cur = S.box(pill, { x: 180 + 11 * 90 + 16, y: 55, w: 80, h: 140, bg: C.orange });
+      S.blink(tl, cur, beats, tMouse + 0.35, sc.dur);
+      const baby = S.type(stage, "baby", { x: 1180, y: 780, size: 270, cls: "serif ital", color: C.orange });
+      gsap.set(baby, { rotation: -7 });
+      S.show(tl, baby, tBaby - 0.06);
+      tl.fromTo(baby, { scale: 0.2, rotation: -40 }, { scale: 1, rotation: -7, duration: 0.4, ease: "back.out(2.5)", immediateRender: false }, tBaby - 0.06);
+      window.__timelines["tag"] = tl;
+    })();
+  </script>
+</template>

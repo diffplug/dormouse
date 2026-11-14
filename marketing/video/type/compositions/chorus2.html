@@ -1,0 +1,151 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="chorus2" data-width="1920" data-height="1080">
+    <div id="chorus2-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      // Chorus 2 is chorus 1 turned up: every idea from the first chorus comes back bigger, faster or doubled.
+      const sc = S.begin("chorus2");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const L = (id) => sc.line(id);
+      const wd = (id, i) => L(id).words[i].start;
+      const edge = (id) => L(id).start - 0.08;
+      const R = S.rand(2026);
+      S.field(stage, C.ink);
+
+      // c2a: the name explodes out of the wind-up's cursor, a wall of names follows, sixteen panes multitask, and "more" echoes outward.
+      {
+        const s = S.section(tl, stage, 0, edge("c2b"), C.ink);
+        const t1 = wd("c2a", 0), t2 = wd("c2a", 1);
+        S.flash(tl, s, t1 - 0.04, C.cream, 0.3);
+        const word = S.type(s, "Dormouse,", { x: 0, y: 360, w: 1920, size: 422, color: C.orange, css: "font-stretch:62%;text-align:center" });
+        const ls = S.letters(word);
+        S.show(tl, word, 0, t2 - 0.08);
+        ls.forEach((l, i) => {
+          const a = R() * Math.PI * 2, d = 900 + R() * 900;
+          tl.fromTo(l, { x: Math.cos(a) * d, y: Math.sin(a) * d, rotation: (R() - 0.5) * 360, scale: 3 }, { x: 0, y: 0, rotation: 0, scale: 1, duration: 0.2, ease: "power3.out", immediateRender: false }, Math.max(0, t1 - 0.2));
+          const b = R() * Math.PI * 2;
+          tl.to(l, { x: Math.cos(b) * 1400, y: Math.sin(b) * 900, rotation: (R() - 0.5) * 540, scale: 0.4 + R() * 2, duration: 0.4, ease: "power2.in" }, t1 + 0.32);
+        });
+        S.shake(tl, s, t1, 26);
+        // The wall: six rows, alternating directions and colors.
+        const rowCols = [C.cream, C.orange, "transparent", C.lime, C.cream, C.orange];
+        rowCols.forEach((c, i) => {
+          const row = S.type(s, "Dormouse, Dormouse, Dormouse,", { x: 0, y: i * 180, size: 225, color: c, css: `font-stretch:75%;${c === "transparent" ? `-webkit-text-stroke:4px ${C.cream};` : ""}` });
+          S.show(tl, row, t2 - 0.06 + i * 0.03);
+          const dir = i % 2 ? 1 : -1;
+          tl.fromTo(row, { x: dir > 0 ? -1400 : -200 }, { x: dir > 0 ? -700 : -900, duration: wd("c2a", 2) - t2 + 0.1, ease: "power1.out", immediateRender: false }, t2 - 0.06);
+        });
+        // Sixteen panes in a diagonal cascade.
+        const tM = wd("c2a", 2);
+        const pal = [[C.cobalt, C.cream], [C.cream, C.ink], [C.orange, C.ink], [C.char, C.lime]];
+        for (let i = 0; i < 16; i++) {
+          const cx = i % 4, cy = Math.floor(i / 4);
+          const [bgc, fg] = pal[(cx + cy) % 4];
+          const p = S.box(s, { x: cx * 482, y: cy * 272, w: 474, h: 264, bg: bgc, cls: "pane" });
+          S.type(p, "Multitask", { x: 40, y: 92, size: 100, color: fg, css: "font-stretch:62%" });
+          S.type(p, `> ${i + 1}`, { x: 40, y: 24, size: 32, cls: "mono", color: fg });
+          S.slam(tl, p, tM - 0.1 + (cx + cy) * 0.035, { from: 0.3, dur: 0.22, ease: "back.out(2)" });
+        }
+        const tMore = wd("c2a", 3);
+        const more = S.field(s, C.lime);
+        S.show(tl, more, tMore - 0.05);
+        tl.fromTo(more, { clipPath: "circle(0% at 50% 50%)" }, { clipPath: "circle(75% at 50% 50%)", duration: 0.25, ease: "expo.out", immediateRender: false }, tMore - 0.05);
+        [4, 3, 2, 1].forEach((k) => {
+          const echo = S.type(more, "More", { x: 0, y: 364, w: 1920, size: 440, color: "transparent", css: `-webkit-text-stroke:4px ${C.ink};text-align:center;font-stretch:125%` });
+          S.show(tl, echo, tMore + 0.05 * k);
+          tl.fromTo(echo, { scale: 1 }, { scale: 1 + k * 0.35, opacity: 0, duration: 0.7, ease: "power2.out", immediateRender: false }, tMore + 0.05 * k);
+        });
+        S.slam(tl, S.type(more, "More", { x: 0, y: 364, w: 1920, size: 440, color: C.ink, css: "text-align:center;font-stretch:125%" }), tMore, { from: 0.3, ease: "back.out(2.6)" });
+      }
+
+      // c2b: tilted names; then D, O and R each get the whole frame; then the command, huge.
+      {
+        const s = S.section(tl, stage, edge("c2b"), edge("c2c"), C.cobalt);
+        const t1 = wd("c2b", 0), t2 = wd("c2b", 1), tD = wd("c2b", 2);
+        const f2 = S.field(s, C.orange);
+        S.show(tl, f2, t2 - 0.05);
+        const a = S.type(S.box(s, { w: 1920, h: 1080, css: "transform:rotate(-8deg)" }), "Dormouse,", { x: 0, y: 380, w: 1920, size: 400, color: C.cream, css: "font-stretch:62%;text-align:center" });
+        S.slam(tl, a, t1, { from: 2.2, rot: -30, until: t2 - 0.05 });
+        const b = S.type(S.box(f2, { w: 1920, h: 1080, css: "transform:rotate(8deg)" }), "Dormouse,", { x: 0, y: 380, w: 1920, size: 400, color: C.ink, css: "font-stretch:62%;text-align:center" });
+        S.slam(tl, b, t2, { from: 2.2, rot: 30 });
+        const cuts = [[C.lime, C.ink], [C.cobalt, C.cream], [C.orange, C.ink]];
+        ["D", "O", "R"].forEach((ch, i) => {
+          const at = tD + i * 0.2;
+          const f = S.field(s, cuts[i][0]);
+          S.show(tl, f, at - 0.04);
+          const l = S.type(f, ch, { x: 0, y: 100, w: 1920, size: 1100, color: cuts[i][1], css: "text-align:center" });
+          S.slam(tl, l, at, { from: 1.25, dur: 0.18 });
+        });
+        const tS = wd("c2b", 3), tDor = wd("c2b", 4);
+        const term = S.field(s, C.ink);
+        S.show(tl, term, tS - 0.05);
+        S.show(tl, S.type(term, "spells", { x: 0, y: 130, w: 1920, size: 110, cls: "mono", color: C.cream, css: "text-align:center" }), tS - 0.05);
+        const dor = S.type(term, "dor", { x: 0, y: 380, w: 1920, size: 480, cls: "mono", color: C.lime, css: "text-align:center" });
+        S.slam(tl, dor, tDor, { from: 3, ease: "expo.out", dur: 0.35 });
+        S.shake(tl, s, tDor, 14);
+        const cur = S.box(term, { x: 960 + 432 + 30, y: 410, w: 250, h: 420, bg: C.orange });
+        S.blink(tl, cur, beats, tDor + 0.2, sc.dur);
+        tl.set(cur, { autoAlpha: 1 }, tDor + 0.05);
+      }
+
+      // c2c: the name stretches wide and squeezes thin; then a diagonal split: VS Code above, standalone below, "or" on the seam.
+      {
+        const s = S.section(tl, stage, edge("c2c"), edge("c2d"), C.cream);
+        const t1 = wd("c2c", 0), t2 = wd("c2c", 1);
+        const a = S.type(s, "Dormouse,", { x: 0, y: 230, w: 1920, size: 234, color: C.ink, css: "text-align:center" });
+        const b = S.type(s, "Dormouse,", { x: 0, y: 600, w: 1920, size: 234, color: C.orange, css: "text-align:center" });
+        S.show(tl, a, t1 - 0.05, wd("c2c", 2) + 0.2);
+        S.show(tl, b, t2 - 0.05, wd("c2c", 2) + 0.2);
+        tl.fromTo(a, { fontStretch: "62%" }, { fontStretch: "125%", duration: 0.5, ease: "expo.out", immediateRender: false }, t1 - 0.05);
+        tl.fromTo(b, { fontStretch: "125%", letterSpacing: "0.1em" }, { fontStretch: "62%", letterSpacing: "-0.035em", duration: 0.5, ease: "expo.out", immediateRender: false }, t2 - 0.05);
+        const tV = wd("c2c", 2);
+        const tri1 = S.field(s, C.cobalt, "clip-path:polygon(0 0,100% 0,0 100%)");
+        const tri2 = S.field(s, C.orange, "clip-path:polygon(100% 0,100% 100%,0 100%)");
+        S.slam(tl, tri1, tV - 0.08, { from: 1, dx: -900, dy: -500, dur: 0.25 });
+        S.show(tl, tri2, wd("c2c", 5) - 0.1);
+        tl.fromTo(tri2, { x: 900, y: 500 }, { x: 0, y: 0, duration: 0.2, ease: "expo.out", immediateRender: false }, wd("c2c", 5) - 0.1);
+        S.slam(tl, S.type(tri1, "VS", { x: 80, y: 80, size: 260, color: C.cream }), tV, { from: 1.5 });
+        S.slam(tl, S.type(tri1, "Code", { x: 80 + 372 + 80, y: 80, size: 260, color: C.cream }), wd("c2c", 3), { from: 1.5 });
+        const or = S.box(s, { x: 850, y: 430, w: 220, h: 220, bg: C.lime, css: "border-radius:50%" });
+        S.type(or, "or", { x: 0, y: 60, w: 220, size: 100, cls: "mono", color: C.ink, css: "text-align:center" });
+        S.pop(tl, or, wd("c2c", 4));
+        S.slam(tl, S.type(tri2, "Standalone", { x: 480, y: 800, size: 300, color: C.ink, css: "font-stretch:62%" }), wd("c2c", 5), { from: 1.3, origin: "100% 100%" });
+      }
+
+      // c2d: the names strobe on the beat; then the laptop and the phone side by side, and the cursor block carries the name across.
+      {
+        const s = S.section(tl, stage, edge("c2d"), sc.dur + 1, C.ink);
+        const t1 = wd("c2d", 0), t2 = wd("c2d", 1), tF = wd("c2d", 2), tTo = wd("c2d", 5), tP = wd("c2d", 7);
+        S.cuts(tl, s, [[0, C.ink], [t2 - 0.05, C.cream], [t2 + 0.33, C.ink], [t2 + 0.5, C.cream], [tF - 0.1, C.char]]);
+        const a = S.type(s, "Dormouse,", { x: 0, y: 380, w: 1920, size: 360, color: C.cream, css: "font-stretch:75%;text-align:center" });
+        S.slam(tl, a, t1, { from: 0.6, until: t2 - 0.05, ease: "back.out(2)" });
+        const b = S.type(s, "Dormouse,", { x: 0, y: 380, w: 1920, size: 360, color: C.ink, css: "font-stretch:75%;text-align:center" });
+        S.slam(tl, b, t2, { from: 1.6, until: tF - 0.1 });
+        tl.set(b, { color: C.orange }, t2 + 0.33);
+        tl.set(b, { color: C.ink }, t2 + 0.5);
+        const lap = S.box(s, { x: 80, y: 250, w: 1060, h: 596, css: `border:14px solid ${C.cream};border-radius:18px;overflow:hidden` });
+        S.slam(tl, lap, tF - 0.04, { from: 0.7, dur: 0.3 });
+        S.sing(tl, lap, { words: L("c2d").words.slice(2, 4) }, { x: 60, y: 60, size: 64, color: C.cream, gap: 0.5 });
+        S.slam(tl, S.type(lap, "Laptop", { x: 50, y: 230, size: 220, color: C.orange }), wd("c2d", 4), { from: 1.3 });
+        const ph = S.box(s, { x: 1380, y: 70, w: 440, h: 940, css: `border:14px solid ${C.cream};border-radius:56px;overflow:hidden` });
+        S.slam(tl, ph, tTo - 0.1, { from: 0.4, dur: 0.3, ease: "back.out(1.8)" });
+        S.sing(tl, ph, { words: L("c2d").words.slice(5, 7) }, { x: 60, y: 60, size: 56, color: C.cream, gap: 0.5 });
+        [..."PHONE"].forEach((ch, i) => {
+          const l = S.type(ph, ch, { x: 0, y: 180 + i * 145, w: 412, size: 170, color: C.lime, css: "text-align:center" });
+          S.slam(tl, l, tP - 0.04 + i * 0.03, { from: 0.3, dur: 0.22, ease: "back.out(2)" });
+        });
+        // The cursor block jumps from the laptop to the phone on "to".
+        const blk = S.box(s, { x: 0, y: 0, w: 90, h: 130, bg: C.orange });
+        gsap.set(blk, { x: 850, y: 470 });
+        S.show(tl, blk, wd("c2d", 4) + 0.15, tTo + 0.25);
+        tl.fromTo(blk, { x: 850, y: 470 }, { x: 1300, y: 300, duration: 0.18, ease: "power2.out", immediateRender: false }, tTo - 0.12);
+        tl.to(blk, { x: 1555, y: 500, scale: 0.3, duration: 0.18, ease: "power2.in" }, tTo + 0.06);
+        tl.to(ph, { backgroundColor: C.cobalt, duration: 0.15 }, tP - 0.1);
+      }
+      window.__timelines["chorus2"] = tl;
+    })();
+  </script>
+</template>

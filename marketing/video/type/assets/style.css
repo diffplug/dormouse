@@ -1,0 +1,26 @@
+@font-face { font-family: "Archivo"; src: url("fonts/Archivo.woff2") format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono.woff2") format("woff2"); font-weight: 100 800; }
+@font-face { font-family: "Instrument Serif"; src: url("fonts/InstrumentSerif.woff2") format("woff2"); font-style: normal; }
+@font-face { font-family: "Instrument Serif"; src: url("fonts/InstrumentSerif-Italic.woff2") format("woff2"); font-style: italic; }
+
+/* The icon's two colors, made louder: its orange and charcoal, a cream paper, a cobalt that fights the orange, and lime kept for alerts. */
+:root {
+  --orange: #e8834a; --icon-orange: #d38d5f; --char: #43423d; --ink: #1f1b18;
+  --cream: #f3eadb; --cobalt: #2b45d9; --lime: #d9ff3d;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--ink); color: var(--cream); font-family: "Archivo", sans-serif; }
+
+.stage { position: absolute; inset: 0; overflow: hidden; }
+.abs { position: absolute; left: 0; top: 0; }
+.field { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+/* The poster face: Archivo at full weight, set tight. */
+.big { font-family: "Archivo", sans-serif; font-weight: 900; line-height: 0.8; letter-spacing: -0.035em; text-transform: uppercase; white-space: nowrap; }
+.mono { font-family: "JetBrains Mono", monospace; font-weight: 700; white-space: nowrap; line-height: 1; }
+.serif { font-family: "Instrument Serif", serif; font-weight: 400; white-space: nowrap; line-height: 0.9; }
+.ital { font-style: italic; }
+
+.cursor { position: absolute; left: 0; top: 0; background: var(--orange); }
+.pane { position: absolute; left: 0; top: 0; overflow: hidden; }
+.kw { display: inline-block; }

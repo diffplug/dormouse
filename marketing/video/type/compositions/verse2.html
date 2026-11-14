@@ -1,0 +1,133 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="verse2" data-width="1920" data-height="1080">
+    <div id="verse2-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("verse2");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const L = (id) => sc.line(id);
+      const wd = (id, i) => L(id).words[i].start;
+      const edge = (id) => L(id).start - 0.08;
+      const mono = (parent, text, x, y, size, color, t) => S.show(tl, S.type(parent, text, { x, y, size, cls: "mono", color }), t - 0.05);
+      S.field(stage, C.ink);
+
+      // v2a: the browser in front, the terminal behind; on "terminal" they trade places.
+      {
+        const s = S.section(tl, stage, 0, edge("v2b"), C.cobalt);
+        const back = S.box(s, { x: 380, y: 300, w: 1460, h: 720, bg: C.char, css: "border-radius:22px;overflow:hidden;z-index:1" });
+        const front = S.box(s, { x: 80, y: 80, w: 1300, h: 700, bg: C.cream, css: "border-radius:22px;overflow:hidden;z-index:2;box-shadow:24px 24px 0 rgba(0,0,0,0.25)" });
+        // Browser chrome is three dots and an address pill; the terminal's is a prompt.
+        const chrome = S.box(front, { w: 1300, h: 80, bg: C.ink });
+        [C.orange, C.lime, C.cobalt].forEach((c, i) => S.box(chrome, { x: 34 + i * 48, y: 26, w: 28, h: 28, bg: c, css: "border-radius:50%" }));
+        S.box(chrome, { x: 200, y: 18, w: 800, h: 44, bg: C.char, css: "border-radius:22px" });
+        S.slam(tl, front, 0.02, { from: 1, dy: -900, dur: 0.3 });
+        S.slam(tl, back, 0.12, { from: 1, dx: 900, dy: 300, dur: 0.4 });
+        S.slam(tl, S.type(front, "Browser", { x: 60, y: 140, size: 220, color: C.ink }), wd("v2a", 0), { from: 1.3, origin: "0% 50%" });
+        S.sing(tl, front, { words: L("v2a").words.slice(1, 4) }, { x: 66, y: 350, size: 64, color: C.ink, gap: 0.5 });
+        S.slam(tl, S.type(front, "Front,", { x: 60, y: 440, size: 280, color: C.orange }), wd("v2a", 4), { from: 1, dx: -500, dur: 0.3 });
+        mono(back, ">_", 1300, 30, 60, C.orange, 0.12);
+        const tT = wd("v2a", 5);
+        const term = S.type(back, "Terminal", { x: 70, y: 60, size: 220, color: C.orange });
+        S.slam(tl, term, tT, { from: 1.2, origin: "0% 50%" });
+        tl.to(front, { x: 380, y: 240, scale: 0.92, duration: 0.35, ease: "expo.inOut" }, tT - 0.18);
+        tl.to(back, { x: -300, y: -220, duration: 0.35, ease: "expo.inOut" }, tT - 0.18);
+        tl.set(front, { zIndex: 1 }, tT - 0.02);
+        tl.set(back, { zIndex: 2 }, tT - 0.02);
+        S.pop(tl, S.type(back, "party", { x: 70, y: 300, size: 150, cls: "mono", color: C.lime }), wd("v2a", 6));
+        S.sing(tl, back, { words: L("v2a").words.slice(7, 9) }, { x: 600, y: 345, size: 70, color: C.cream, gap: 0.5 });
+        S.slam(tl, S.type(back, "Back", { x: 70, y: 460, size: 300, color: C.cream }), wd("v2a", 9), { from: 1, dy: 300, dur: 0.3 });
+      }
+
+      // v2b: "A Dor Tool is a mullet": business in front (a serif), party in the back (mono). Then the stack piles up.
+      {
+        const s = S.section(tl, stage, edge("v2b"), edge("v2c"), C.ink);
+        S.sing(tl, s, { words: L("v2b").words.slice(0, 3) }, { x: 80, y: 70, size: 200, cls: "big", color: C.cream, gap: 0.25, kick: -60 });
+        S.sing(tl, s, { words: L("v2b").words.slice(3, 5) }, { x: 86, y: 270, size: 70, color: C.orange, gap: 0.5 });
+        const tM = wd("v2b", 5);
+        const biz = S.box(s, { x: 80, y: 380, w: 680, h: 420, bg: C.cream, cls: "pane" });
+        const party = S.box(s, { x: 760, y: 380, w: 680, h: 420, bg: C.orange, cls: "pane" });
+        S.type(biz, "Mul", { x: 60, y: 30, w: 620, size: 420, cls: "serif", color: C.ink, css: "text-align:right" });
+        S.type(party, "let,", { x: 20, y: 120, size: 250, cls: "mono", color: C.ink, css: "font-weight:800" });
+        S.wipe(tl, biz, tM - 0.06, "right", 0.22);
+        S.wipe(tl, party, tM - 0.06, "left", 0.22);
+        S.sing(tl, s, { words: L("v2b").words.slice(6, 11) }, { x: 86, y: 860, size: 70, color: C.cream, gap: 0.5 });
+        // S-T-A-C-K lands from the bottom up, so it reads top to bottom once it stands.
+        const cols = [C.orange, C.cobalt, C.lime, C.cream, C.orange];
+        const tS = wd("v2b", 11);
+        [..."STACK"].forEach((ch, i) => {
+          const blk = S.box(s, { x: 1520, y: 270 + i * 150, w: 320, h: 140, bg: cols[i], css: "border-radius:10px" });
+          S.type(blk, ch, { x: 0, y: 20, w: 320, size: 130, color: i === 1 ? C.cream : C.ink, css: "text-align:center" });
+          const at = tS - 0.36 + (4 - i) * 0.07;
+          S.show(tl, blk, at);
+          tl.fromTo(blk, { y: -1100 }, { y: 0, duration: 0.26, ease: "bounce.out", immediateRender: false }, at);
+        });
+      }
+
+      // v2c: vibe-coded at sunset, the evening falls; then a strict grid, and "maintain" sits on it.
+      {
+        const s = S.section(tl, stage, edge("v2c"), edge("v2d"), C.orange);
+        const t0 = wd("v2c", 0), tEve = wd("v2c", 3), tBut = wd("v2c", 4);
+        tl.set(s, { backgroundColor: C.cobalt }, tEve - 0.05);
+        const sun = S.box(s, { x: 1150, y: 160, w: 620, h: 620, bg: C.lime, css: "border-radius:50%" });
+        tl.fromTo(sun, { y: 0, backgroundColor: C.lime }, { y: 760, backgroundColor: C.orange, duration: 0.9, ease: "power2.in", immediateRender: false }, tEve - 0.2);
+        const horizon = S.box(s, { y: 860, w: 1920, h: 220, bg: C.ink });
+        const vibe = S.type(s, "Vibe-coded", { x: 90, y: 130, size: 260, color: C.ink, css: "font-style:normal" });
+        S.slam(tl, vibe, t0, { from: 1.3 });
+        gsap.set(vibe, { skewX: -12 });
+        beats.filter((b) => b.t > t0 && b.t < tBut).forEach((b, i) => tl.fromTo(vibe, { rotation: i % 2 ? 3 : -3 }, { rotation: 0, duration: 0.5, ease: "elastic.out(1, 0.4)", immediateRender: false }, b.t));
+        const inAn = S.sing(tl, s, { words: L("v2c").words.slice(1, 3) }, { x: 96, y: 400, size: 80, color: C.ink, gap: 0.5 });
+        tl.set(inAn.row, { color: C.cream }, tEve - 0.05);
+        const eve = S.type(s, "Evening,", { x: 90, y: 520, size: 300, color: C.cream });
+        S.slam(tl, eve, tEve, { from: 1, dy: 260, dur: 0.35, ease: "power3.out" });
+        tl.set(vibe, { color: C.cream }, tEve - 0.05);
+        // The grid: ink, twelve columns, and everything sits square on it.
+        const g = S.field(s, C.ink);
+        S.show(tl, g, tBut - 0.06);
+        for (let i = 0; i <= 12; i++) {
+          const ln = S.box(g, { x: 80 + i * 146.6, y: 0, w: 2, h: 1080, bg: "rgba(243,234,219,0.18)" });
+          tl.fromTo(ln, { scaleY: 0 }, { scaleY: 1, duration: 0.25, ease: "expo.out", immediateRender: false }, tBut - 0.06 + i * 0.012);
+        }
+        [140, 480, 900].forEach((y) => S.box(g, { y, w: 1920, h: 2, bg: "rgba(243,234,219,0.18)" }));
+        S.sing(tl, g, { words: L("v2c").words.slice(4, 6) }, { x: 80, y: 60, size: 70, color: C.cream, gap: 0.5 });
+        S.slam(tl, S.type(g, "Easy", { x: 74, y: 160, size: 300, color: C.lime }), wd("v2c", 6), { from: 1, dx: -40, dur: 0.2 });
+        S.show(tl, S.type(g, "to", { x: 80, y: 500, size: 70, cls: "mono", color: C.cream }), wd("v2c", 7) - 0.05);
+        S.slam(tl, S.type(g, "Maintain", { x: 74, y: 640, size: 310, color: C.cream }), wd("v2c", 8), { from: 1, dy: -40, dur: 0.2 });
+      }
+
+      // v2d: the desk on the left, the train on the right.
+      {
+        const s = S.section(tl, stage, edge("v2d"), sc.dur + 1, C.cream);
+        const right = S.box(s, { x: 960, w: 960, h: 1080, bg: C.cobalt, cls: "pane" });
+        S.wipe(tl, right, wd("v2d", 6) - 0.12, "right", 0.25);
+        S.slam(tl, S.type(s, "Mouse", { x: 80, y: 80, size: 200, color: C.ink }), wd("v2d", 0), { from: 1.4, origin: "0% 50%" });
+        mono(s, "and", 86, 290, 60, C.ink, wd("v2d", 1));
+        [..."KEYS"].forEach((ch, i) => {
+          const cap = S.box(s, { x: 80 + i * 195, y: 380, w: 175, h: 175, bg: C.cream, css: `border:6px solid ${C.ink};border-bottom-width:18px;border-radius:18px` });
+          S.type(cap, ch, { x: 0, y: 20, w: 163, size: 110, cls: "mono", color: C.ink, css: "text-align:center" });
+          S.pop(tl, cap, wd("v2d", 2) + i * 0.05);
+          tl.fromTo(cap, { y: 0 }, { y: 10, duration: 0.08, yoyo: true, repeat: 1, immediateRender: false }, beats.find((b) => b.t > wd("v2d", 3))?.t + i * 0.08 || wd("v2d", 3));
+        });
+        S.sing(tl, s, { words: L("v2d").words.slice(3, 5) }, { x: 86, y: 610, size: 60, color: C.ink, gap: 0.5 });
+        S.slam(tl, S.type(s, "Desk,", { x: 80, y: 700, size: 200, color: C.orange }), wd("v2d", 5), { from: 1, dy: -300, dur: 0.3, ease: "bounce.out" });
+        S.box(s, { x: 40, y: 870, w: 880, h: 26, bg: C.ink });
+        S.sing(tl, right, { words: L("v2d").words.slice(6, 9) }, { x: 70, y: 80, size: 60, color: C.cream, gap: 0.5 });
+        S.slam(tl, S.type(right, "Thumbs", { x: 64, y: 170, size: 170, color: C.cream }), wd("v2d", 9), { from: 1.5 });
+        S.sing(tl, right, { words: L("v2d").words.slice(10, 12) }, { x: 70, y: 380, size: 60, color: C.lime, gap: 0.5 });
+        // The train pulls in from the right and stops on its word.
+        const track = S.box(right, { y: 980, w: 960, h: 10, bg: C.cream });
+        const train = S.box(right, { x: 40, y: 520, w: 1400, h: 400, bg: C.ink, css: "border-radius:40px 0 0 40px" });
+        S.type(train, "Train", { x: 60, y: 110, size: 240, color: C.lime });
+        [0, 1, 2, 3].forEach((i) => S.box(train, { x: 60 + i * 210, y: 40, w: 170, h: 50, bg: C.cream, css: "border-radius:8px" }));
+        const tTr = wd("v2d", 12);
+        S.show(tl, train, tTr - 0.35);
+        S.show(tl, track, tTr - 0.35);
+        tl.fromTo(train, { x: 1100 }, { x: 0, duration: 0.33, ease: "power3.out", immediateRender: false }, tTr - 0.35);
+        tl.to(train, { x: -120, duration: 0.6, ease: "power1.in" }, tTr + 0.05);
+      }
+      window.__timelines["verse2"] = tl;
+    })();
+  </script>
+</template>

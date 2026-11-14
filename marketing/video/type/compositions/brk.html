@@ -1,0 +1,84 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="brk" data-width="1920" data-height="1080">
+    <div id="brk-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      // The break is a dialogue in two typographic voices: hers a serif italic in cream on cobalt, on the left;
+      // his a monospace in ink on orange, on the right. Whoever is talking gets the bigger half.
+      const sc = S.begin("brk");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const L = (id) => sc.line(id);
+      const wd = (id, i) => L(id).words[i].start;
+      S.field(stage, C.ink);
+      const her = S.box(stage, { w: 960, h: 1080, bg: C.cobalt, cls: "pane" });
+      const him = S.box(stage, { x: 960, w: 960, h: 1080, bg: C.orange, cls: "pane" });
+      const split = (t, W) => {
+        tl.to(her, { width: W, duration: 0.3, ease: "expo.inOut" }, t - 0.2);
+        tl.to(him, { left: W, width: 1920 - W, duration: 0.3, ease: "expo.inOut" }, t - 0.2);
+      };
+      tl.fromTo(her, { y: -1080 }, { y: 0, duration: 0.35, ease: "expo.out", immediateRender: false }, 0);
+      tl.fromTo(him, { y: 1080 }, { y: 0, duration: 0.35, ease: "expo.out", immediateRender: false }, 0);
+      gsap.set([her, him], { y: 0 });
+      // Who's talking, as a small label in each voice's face.
+      S.type(her, "her", { x: 80, y: 60, size: 60, cls: "serif ital", color: C.lime });
+      S.type(him, "him", { x: 70, y: 60, size: 48, cls: "mono", color: C.ink, css: "font-weight:400" });
+
+      // "What app is that?"
+      split(wd("br1", 0), 1300);
+      const q = S.sing(tl, her, { words: L("br1").words.slice(0, 2) }, { x: 80, y: 260, size: 300, cls: "serif ital", color: C.cream, gap: 0.22, kick: 40 });
+      const q2 = S.sing(tl, her, { words: L("br1").words.slice(2) }, { x: 80, y: 560, size: 300, cls: "serif ital", color: C.cream, gap: 0.22, kick: 40 });
+      tl.to([q.row, q2.row], { autoAlpha: 0, duration: 0.1 }, wd("br3", 0) - 0.12);
+
+      // "Oh I'm vibescrolling, girl": the word scrolls up behind him like a feed.
+      split(wd("br2", 0), 620);
+      const feed = S.box(him, { x: 70, y: 0 });
+      for (let i = 0; i < 18; i++) S.type(feed, "vibescrolling", { x: 0, y: i * 120, size: 100, cls: "mono", color: "#d9763f" });
+      S.show(tl, feed, wd("br2", 2) - 0.05, wd("br4", 0) - 0.1);
+      tl.fromTo(feed, { y: 300 }, { y: -900, duration: wd("br4", 0) - wd("br2", 2), ease: "none", immediateRender: false }, wd("br2", 2) - 0.05);
+      const a = S.sing(tl, him, { words: L("br2").words.slice(0, 2) }, { x: 70, y: 200, size: 130, color: C.ink, gap: 0.6 });
+      const scroll = S.type(him, "vibescrolling,", { x: 70, y: 400, size: 130, cls: "mono", color: C.cream });
+      S.slam(tl, scroll, wd("br2", 2), { from: 1, dy: 300, dur: 0.3 });
+      const girl = S.type(him, "girl", { x: 70, y: 600, size: 260, cls: "mono", color: C.ink, css: "font-weight:800" });
+      S.pop(tl, girl, wd("br2", 3), { origin: "0% 50%" });
+      tl.to([a.row, scroll, girl], { autoAlpha: 0, duration: 0.1 }, wd("br4", 0) - 0.12);
+
+      // "Dawg, vibescrolling?"
+      split(wd("br3", 0), 1300);
+      const dawg = S.type(her, "Dawg,", { x: 80, y: 190, size: 400, cls: "serif ital", color: C.cream });
+      S.slam(tl, dawg, wd("br3", 0), { from: 1.4, origin: "0% 50%" });
+      const vq = S.type(her, "vibescrolling?", { x: 80, y: 600, size: 220, cls: "serif ital", color: C.lime });
+      S.slam(tl, vq, wd("br3", 1), { from: 1, dx: -120, dur: 0.3 });
+
+      // "I'm not a dog, I'm a…": on "dog" her word is struck through.
+      split(wd("br4", 0), 560);
+      S.sing(tl, him, { words: L("br4").words.slice(0, 4) }, { x: 70, y: 220, size: 100, color: C.ink, gap: 0.6 });
+      const strike = S.box(her, { x: 60, y: 330, w: 940, h: 34, bg: C.orange });
+      S.wipe(tl, strike, wd("br4", 3), "left", 0.18);
+      const ima = S.sing(tl, him, { words: L("br4").words.slice(4) }, { x: 70, y: 420, size: 220, color: C.cream, gap: 0.5 });
+
+      // Bar 19, the wind-up: he takes the whole frame, the dots fill in on the beat, a loading bar fills, the cursor swallows everything.
+      const b19 = sc.bar(19);
+      split(b19 + 0.45, 0);
+      const dots = [0, 1, 2].map((i) => S.type(him, ".", { x: 70 + (5 + i) * 132, y: 420, size: 220, color: C.cream, cls: "mono" }));
+      beats.filter((b) => b.t > b19 + 0.3).slice(0, 3).forEach((b, i) => S.pop(tl, dots[i], b.t));
+      const track = S.box(him, { x: 70, y: 780, w: 1780, h: 90, css: `border:8px solid ${C.ink}` });
+      S.show(tl, track, b19 + 0.6);
+      const fill = S.box(track, { x: 8, y: 8, w: 1748, h: 58, bg: C.ink });
+      S.show(tl, fill, b19 + 0.6);
+      const steps = [0, 0.08, 0.2, 0.35, 0.55, 0.7, 0.82, 0.9, 0.95, 1];
+      gsap.set(fill, { scaleX: 0, transformOrigin: "0% 50%" });
+      steps.forEach((k, i) => tl.set(fill, { scaleX: k }, b19 + 0.6 + i * 0.17 * (1 - i * 0.04)));
+      const pct = S.type(him, "0%", { x: 70, y: 900, size: 70, cls: "mono", color: C.ink });
+      S.show(tl, pct, b19 + 0.6);
+      steps.forEach((k, i) => tl.set(pct, { textContent: `${Math.round(k * 100)}%` }, b19 + 0.6 + i * 0.17 * (1 - i * 0.04)));
+      const cur = S.box(stage, { x: 900, y: 480, w: 120, h: 120, bg: C.ink });
+      const tEnd = sc.dur;
+      S.show(tl, cur, tEnd - 0.42);
+      tl.fromTo(cur, { scale: 0.2 }, { scale: 18, duration: 0.4, ease: "power4.in", immediateRender: false }, tEnd - 0.42);
+      window.__timelines["brk"] = tl;
+    })();
+  </script>
+</template>

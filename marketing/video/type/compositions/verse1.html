@@ -1,0 +1,66 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="verse1" data-width="1920" data-height="1080">
+    <div id="verse1-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("verse1");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const w = (x, n = 0, line) => sc.w(x, { nth: n, line });
+      S.field(stage, C.cream);
+      // Before the first word: a lone cursor on paper.
+      const cur = S.box(stage, { x: 900, y: 470, w: 120, h: 140, bg: C.ink });
+      S.blink(tl, cur, beats, 0, w("Agent") - 0.05);
+
+      // "Agent to the left": the left half becomes a pane.
+      const L = S.box(stage, { w: 952, h: 1080, bg: C.orange, cls: "pane" });
+      S.wipe(tl, L, w("Agent") - 0.12, "left", 0.3);
+      S.slam(tl, S.type(L, "Agent", { x: 64, y: 70, size: 220, color: C.ink }), w("Agent"), { from: 1.3, origin: "0% 50%" });
+      S.show(tl, S.type(L, "to the", { x: 70, y: 285, size: 64, cls: "mono", color: C.ink }), w("to") - 0.04);
+      S.slam(tl, S.type(L, "Left,", { x: 64, y: 375, size: 260, color: C.cream }), w("left"), { from: 1, dx: 400, dur: 0.35 });
+
+      // "another agent to the right": the right half, from the other side.
+      const R = S.box(stage, { x: 968, w: 952, h: 1080, bg: C.cobalt, cls: "pane" });
+      S.wipe(tl, R, w("another") - 0.12, "right", 0.3);
+      S.slam(tl, S.type(R, "Another", { x: 64, y: 70, size: 140, color: C.cream, css: "font-stretch:62%" }), w("another"), { origin: "0% 50%" });
+      S.slam(tl, S.type(R, "agent", { x: 556, y: 70, size: 140, color: C.orange, css: "font-stretch:62%" }), w("agent", 1), { origin: "0% 50%" });
+      S.show(tl, S.type(R, "to the", { x: 64, y: 285, size: 64, cls: "mono", color: C.cream }), w("to", 1) - 0.04);
+      S.slam(tl, S.type(R, "Right", { x: 952 - 64 - 773, y: 375, size: 230, color: C.cream }), w("right"), { from: 1, dx: -400, dur: 0.35 });
+
+      // "Dev server at the bottom": both panes give up the bottom of the frame to a third.
+      const tDev = w("Dev");
+      [L, R].forEach((p) => tl.to(p, { height: 624, duration: 0.3, ease: "expo.out" }, tDev - 0.12));
+      const B = S.box(stage, { y: 640, w: 1920, h: 440, bg: C.char, cls: "pane" });
+      S.show(tl, B, tDev - 0.12);
+      tl.fromTo(B, { y: 440 }, { y: 0, duration: 0.3, ease: "expo.out", immediateRender: false }, tDev - 0.12);
+      const dev = S.type(B, "$ dev", { x: 64, y: 60, size: 96, cls: "mono", color: C.orange });
+      const server = S.type(B, "server", { x: 64 + 5.7 * 96 * 0.6, y: 60, size: 96, cls: "mono", color: C.orange });
+      S.show(tl, dev, tDev - 0.05);
+      S.show(tl, server, w("server") - 0.05);
+      S.show(tl, S.type(B, "at the", { x: 70, y: 220, size: 56, cls: "mono", color: C.cream }), w("at") - 0.04);
+      S.slam(tl, S.type(B, "Bottom,", { x: 1920 - 64 - 1271, y: 160, size: 260, color: C.cream }), w("bottom"), { from: 1, dy: 300, dur: 0.3 });
+      const curB = S.box(B, { x: 64 + 11.4 * 96 * 0.6, y: 66, w: 56, h: 96, bg: C.cream });
+      S.blink(tl, curB, beats, w("server") + 0.3, w("information") - 0.1);
+
+      // "information packed-in tight": a band across all three panes; its type is squeezed until it is tight.
+      const tInfo = w("information");
+      const band = S.box(stage, { y: 330, w: 1920, h: 420, bg: C.lime });
+      S.wipe(tl, band, tInfo - 0.12, "left", 0.22);
+      const info = S.type(band, "Information", { y: 40, w: 1920, size: 170, color: C.ink, css: "text-align:center;font-stretch:125%;letter-spacing:0.08em" });
+      S.show(tl, info, tInfo - 0.05);
+      tl.fromTo(info, { fontStretch: "125%", letterSpacing: "0.08em" }, { fontStretch: "62%", letterSpacing: "-0.06em", duration: w("tight") - tInfo, ease: "power2.in", immediateRender: false }, tInfo);
+      const row = S.box(band, { y: 230, w: 1920, css: "text-align:center;white-space:nowrap" });
+      const packed = S.type(row, "packed-in", { size: 120, cls: "mono", color: C.ink, css: "position:relative;display:inline-block;vertical-align:bottom;margin-right:30px;letter-spacing:-0.04em" });
+      const tight = S.type(row, "Tight", { size: 170, color: C.orange, css: "position:relative;display:inline-block;vertical-align:bottom;font-stretch:62%;letter-spacing:-0.06em" });
+      S.slam(tl, packed, w("packed-in"), { from: 1.4 });
+      S.slam(tl, tight, w("tight"), { from: 1.8, ease: "back.out(2)" });
+      // On "tight" the whole layout closes up around the band.
+      tl.to([L, R], { y: 40, duration: 0.25, ease: "power3.in" }, w("tight") - 0.1);
+      tl.to(B, { y: -40, duration: 0.25, ease: "power3.in" }, w("tight") - 0.1);
+      tl.to(band, { scaleY: 1.12, duration: 0.25, ease: "power3.in" }, w("tight") - 0.1);
+      window.__timelines["verse1"] = tl;
+    })();
+  </script>
+</template>

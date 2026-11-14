@@ -1,0 +1,83 @@
+<template>
+  <style>#root { position: absolute; inset: 0; }</style>
+  <div id="root" data-composition-id="pre" data-width="1920" data-height="1080">
+    <div id="pre-stage" class="stage" data-layout-allow-overflow data-layout-allow-overlap></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("pre");
+      const { tl, stage, beats } = sc;
+      const { C } = S;
+      const w = (x, n = 0) => sc.w(x, { nth: n });
+      const bg = S.field(stage, C.char);
+      const tCli = w("C-L-I");
+      S.cuts(tl, bg, [[0, C.char], [tCli - 0.1, C.cobalt]]);
+
+      // "Alerts pop up": the word arrives, then badges pop around it on the beat, and "up" jumps.
+      const A = S.box(stage, { w: 1920, h: 1080 });
+      S.hide(tl, A, tCli - 0.1);
+      S.slam(tl, S.type(A, "Alerts", { x: 80, y: 70, size: 330, color: C.cream, css: "font-stretch:62%" }), w("Alerts"), { from: 1, dx: -300, dur: 0.3 });
+      S.pop(tl, S.type(A, "Pop", { x: 80, y: 370, size: 330, color: C.lime, css: "font-stretch:62%" }), w("pop"), { origin: "30% 60%" });
+      const up = S.type(A, "Up", { x: 600, y: 370, size: 330, color: C.orange, css: "font-stretch:62%" });
+      S.slam(tl, up, w("up"), { from: 1, dy: 260, dur: 0.35, ease: "back.out(2.2)" });
+      // The badges: lime dots with a ring, each on a beat from "alerts" on.
+      const spots = [[1010, 120], [1240, 300], [1500, 140], [1720, 360], [1080, 520], [1380, 600]];
+      const R = S.rand(7);
+            spots.forEach(([x, y], i) => {
+        const at = w("Alerts") + i * 0.333;
+        const size = 90 + Math.floor(R() * 70);
+        const dot = S.box(A, { x: x - size / 2, y: y - size / 2, w: size, h: size, bg: C.lime, css: "border-radius:50%" });
+        S.pop(tl, dot, at);
+        const ring = S.box(A, { x: x - size / 2, y: y - size / 2, w: size, h: size, css: `border-radius:50%;border:8px solid ${C.lime}` });
+        S.show(tl, ring, at);
+        tl.fromTo(ring, { scale: 1, opacity: 1 }, { scale: 2.6, opacity: 0, duration: 0.6, ease: "power2.out", immediateRender: false }, at);
+        const bang = S.type(dot, "!", { x: 0, y: size * 0.18, w: size, size: size * 0.7, cls: "mono", color: C.ink, css: "text-align:center" });
+      });
+      // "when I need to know": the notification itself.
+      const toast = S.box(A, { x: 80, y: 820, w: 1140, h: 150, bg: C.cream, css: "border-radius:22px" });
+      S.slam(tl, toast, w("when") - 0.08, { from: 1, dy: 260, dur: 0.3 });
+      S.box(toast, { x: 40, y: 47, w: 56, h: 56, bg: C.orange, css: "border-radius:50%" });
+      S.sing(tl, toast, { words: sc.line("pre1").words.slice(3) }, { x: 130, y: 39, size: 72, color: C.ink, gap: 0.5 });
+
+      // "C-L-I": three terminal cells light one letter at a time.
+      const cells = ["C", "L", "I"].map((ch, i) => {
+        const cell = S.box(stage, { x: 80 + i * 250, y: 80, w: 230, h: 300, bg: C.ink, css: "border-radius:10px" });
+        const letter = S.type(cell, ch, { x: 0, y: 25, w: 230, size: 260, cls: "mono", color: C.cream, css: "text-align:center" });
+        const at = tCli + i * 0.22;
+        S.show(tl, cell, tCli - 0.05);
+        S.show(tl, letter, at - 0.03);
+        tl.set(cell, { backgroundColor: C.orange }, at - 0.03);
+        tl.set(cell, { backgroundColor: C.ink }, at + 0.2);
+        tl.fromTo(cell, { y: -30 }, { y: 0, duration: 0.25, ease: "back.out(3)", immediateRender: false }, at - 0.03);
+        return cell;
+      });
+      // "automation", typed.
+      const prompt = S.type(stage, "$", { x: 880, y: 160, size: 120, cls: "mono", color: C.lime });
+      S.show(tl, prompt, tCli - 0.05);
+      const auto = S.type(stage, "automation", { x: 880 + 2 * 72, y: 160, size: 120, cls: "mono", color: C.cream });
+      const chars = S.letters(auto);
+      const tAuto = w("automation");
+      chars.forEach((ch, i) => S.show(tl, ch, tAuto - 0.04 + i * 0.045));
+      const caret = S.box(stage, { x: 0, y: 160, w: 72, h: 120, bg: C.lime });
+      gsap.set(caret, { x: 880 + 2 * 72 });
+      S.show(tl, caret, tCli - 0.05);
+      tl.fromTo(caret, { x: 880 + 2 * 72 }, { x: 880 + 12 * 72, duration: 0.45, ease: "steps(10)", immediateRender: false }, tAuto - 0.04);
+      S.blink(tl, caret, beats, w("to", 1) + 0.1, sc.dur);
+      S.sing(tl, stage, { words: sc.line("pre2").words.slice(2, 6) }, { x: 84, y: 440, size: 84, color: C.cream, gap: 0.45 });
+
+      // "flow": the word rides a wave to the end of the scene.
+      const flow = S.type(stage, "Flow", { x: 80, y: 600, size: 400, color: C.orange, css: "font-stretch:125%" });
+      const fl = S.letters(flow);
+      const tFlow = w("flow");
+      S.show(tl, flow, tFlow - 0.05);
+      fl.forEach((l, i) => {
+        tl.fromTo(l, { y: 160, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.3, ease: "power2.out", immediateRender: false }, tFlow - 0.06 + i * 0.03);
+        const wave = gsap.timeline({ repeat: 3, yoyo: true });
+        wave.fromTo(l, { y: 0 }, { y: -70, duration: 0.17, ease: "sine.inOut", immediateRender: false });
+        tl.add(wave, tFlow + 0.25 + i * 0.07);
+      });
+      tl.fromTo(flow, { x: 0 }, { x: 260, duration: sc.dur - tFlow, ease: "sine.inOut", immediateRender: false }, tFlow);
+      window.__timelines["pre"] = tl;
+    })();
+  </script>
+</template>
