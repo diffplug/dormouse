@@ -1,0 +1,138 @@
+@font-face { font-family: "Ubuntu Sans Mono"; src: url("fonts/ubuntu-sans-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 400 700; }
+@font-face { font-family: "Ubuntu Mono"; src: url("fonts/ubuntu-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; }
+@font-face { font-family: "Ubuntu Mono"; src: url("fonts/ubuntu-mono-latin-700-normal.woff2") format("woff2"); font-weight: 700; }
+
+/* The film paints one bundled-looking dark theme, and chorus 2 swaps these variables for other themes. */
+:root, .theme-dark {
+  --app: #181818; --app-fg: #cccccc; --term: #1f1f1f; --fg: #d4d4d4; --muted: #8b8b8b;
+  --head: #2d2d30; --head-fg: #c5c5c5; --head-on: #04395e; --head-on-fg: #ffffff;
+  --ring: #2f9bff; --alarm: #ffffff; --raised: #252526; --border: #3c3c3c;
+  --red: #f14c4c; --green: #23d18b; --yellow: #e5c33b; --blue: #3b8eea; --magenta: #d670d6; --cyan: #29b8db;
+  --caramel: #d99a45; --mouse: #d98a52;
+}
+.theme-light {
+  --app: #f3f3f3; --app-fg: #3b3b3b; --term: #ffffff; --fg: #1f1f1f; --muted: #767676;
+  --head: #e4e6f1; --head-fg: #3b3b3b; --head-on: #0060c0; --head-on-fg: #ffffff;
+  --ring: #005fb8; --alarm: #000000; --raised: #f8f8f8; --border: #d0d0d0;
+  --red: #cd3131; --green: #107c41; --yellow: #946800; --blue: #0451a5; --magenta: #bc05bc; --cyan: #0598bc;
+  --caramel: #b47624;
+}
+.theme-monokai {
+  --app: #1e1f1c; --app-fg: #cccccc; --term: #272822; --fg: #f8f8f2; --muted: #88846f;
+  --head: #3e3d32; --head-fg: #f8f8f2; --head-on: #75715e; --head-on-fg: #ffffff;
+  --ring: #f92672; --alarm: #ffffff; --raised: #1e1f1c; --border: #414339;
+  --red: #f92672; --green: #a6e22e; --yellow: #e6db74; --blue: #66d9ef; --magenta: #ae81ff; --cyan: #a1efe4;
+  --caramel: #fd971f;
+}
+.theme-solarized {
+  --app: #00212b; --app-fg: #93a1a1; --term: #002b36; --fg: #93a1a1; --muted: #657b83;
+  --head: #073642; --head-fg: #93a1a1; --head-on: #005a6f; --head-on-fg: #fdf6e3;
+  --ring: #2aa198; --alarm: #ffffff; --raised: #00212b; --border: #2aa19899;
+  --red: #dc322f; --green: #859900; --yellow: #b58900; --blue: #268bd2; --magenta: #d33682; --cyan: #2aa198;
+  --caramel: #cb4b16;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0c0c0c; color: #d4d4d4; font-family: "Ubuntu Sans Mono", "Ubuntu Mono", monospace; }
+.stage { position: absolute; inset: 0; overflow: hidden; background: #0c0c0c; }
+.abs { position: absolute; left: 0; top: 0; }
+
+/* The window: app bar, wall, baseboard. 1920 x 984, above the lyric line. */
+.win { position: absolute; left: 0; top: 0; width: 1920px; height: 984px; background: var(--app); color: var(--app-fg); overflow: hidden; transform-origin: 0 0; }
+.appbar { position: absolute; left: 0; top: 0; right: 0; height: 60px; display: flex; align-items: flex-end; padding-left: 16px; gap: 6px; }
+.appbar .logo { width: 40px; height: 40px; margin: 0 10px 10px 0; }
+.wtab { height: 44px; padding: 0 22px; border-radius: 12px 12px 0 0; background: var(--head); color: var(--head-fg); font: 500 24px/44px "Ubuntu Sans Mono", monospace; white-space: nowrap; }
+.wtab.on { background: var(--head-on); color: var(--head-on-fg); }
+.wctl { position: absolute; right: 0; top: 0; height: 60px; display: flex; }
+.wctl i { width: 76px; height: 60px; display: block; position: relative; }
+.wctl i::before { content: ""; position: absolute; left: 30px; top: 22px; width: 16px; height: 16px; border: 2px solid var(--app-fg); opacity: 0.75; }
+.wctl i.min::before { border-width: 0 0 2px 0; top: 14px; }
+.wctl i.close::before { border: 0; width: 22px; height: 2px; background: var(--app-fg); transform: rotate(45deg); top: 29px; left: 27px; box-shadow: 0 0 0 0 transparent; }
+.wctl i.close::after { content: ""; position: absolute; left: 27px; top: 29px; width: 22px; height: 2px; background: var(--app-fg); opacity: 0.75; transform: rotate(-45deg); }
+.wall { position: absolute; left: 0; top: 60px; width: 1920px; height: 868px; }
+.baseboard { position: absolute; left: 0; top: 928px; width: 1920px; height: 56px; display: flex; align-items: flex-end; gap: 8px; padding: 0 16px; }
+.door { position: relative; height: 44px; min-width: 130px; padding: 0 20px; border-radius: 12px 12px 0 0; background: var(--head); color: var(--head-fg); font: 500 24px/44px "Ubuntu Sans Mono", monospace; white-space: nowrap; display: flex; gap: 12px; align-items: center; }
+.door .alarm { border-radius: 12px 12px 0 0; }
+
+/* A pane: the header is the tab, the body is the terminal. Bg-only chrome, no borders. */
+.pane { position: absolute; border-radius: 12px; overflow: hidden; background: var(--term); }
+.ph { position: absolute; left: 0; top: 0; right: 0; height: 44px; background: var(--head); color: var(--head-fg); display: flex; align-items: center; gap: 12px; padding: 0 16px; font: 500 24px/44px "Ubuntu Sans Mono", monospace; white-space: nowrap; overflow: hidden; }
+.ph .on { position: absolute; inset: 0; background: var(--head-on); opacity: 0; }
+.ph > span, .ph > b { position: relative; }
+.ph .pt { overflow: hidden; text-overflow: ellipsis; }
+.ph .grow { flex: 1; }
+.ph .act { opacity: 0.6; letter-spacing: 0.25em; font-weight: 400; }
+.todo { font: 600 18px/1 "Ubuntu Sans Mono", monospace; letter-spacing: 0.08em; padding: 5px 8px 4px; border-radius: 5px; background: rgba(255, 255, 255, 0.16); color: inherit; }
+.pb { position: absolute; left: 0; right: 0; top: 44px; bottom: 0; overflow: hidden; padding: 12px 16px; font: 400 24px/32px "Ubuntu Mono", monospace; color: var(--fg); }
+.pb .scroll { position: relative; }
+.ln { white-space: pre; height: 32px; overflow: hidden; }
+.alarm { position: absolute; inset: 0; border-radius: 12px; box-shadow: inset 0 0 0 5px var(--alarm); opacity: 0; pointer-events: none; }
+.fring { position: absolute; border-radius: 15px; box-shadow: 0 0 0 3px var(--ring); pointer-events: none; opacity: 0; }
+.cur { display: inline-block; width: 0.55em; height: 1em; background: var(--fg); vertical-align: -0.12em; }
+.big { font-family: "Ubuntu Sans Mono", monospace; font-weight: 700; white-space: pre; line-height: 1.05; }
+
+.c-r { color: var(--red); } .c-g { color: var(--green); } .c-y { color: var(--yellow); } .c-b { color: var(--blue); }
+.c-m { color: var(--magenta); } .c-c { color: var(--cyan); } .c-d { color: var(--muted); } .c-k { color: var(--caramel); } .c-w { color: #fff; font-weight: 700; }
+.dot { display: inline-block; width: 0.5em; height: 0.5em; border-radius: 50%; background: currentColor; vertical-align: 0.08em; margin-right: 0.5em; }
+
+/* The lyric line: a prompt under the window that sings along. */
+.lyrics { z-index: 40; position: absolute; left: 0; top: 984px; width: 1920px; height: 96px; background: #0c0c0c; border-top: 2px solid #2a2a2a; }
+.lyr { position: absolute; left: 0; right: 0; top: 0; height: 96px; text-align: center; font: 700 50px/92px "Ubuntu Sans Mono", monospace; color: #6a6a6a; white-space: pre; opacity: 0; }
+.lyr .pr { color: #d99a45; }
+.lyr .who { color: #8b8b8b; font-weight: 500; }
+
+/* Device frames, drawn plainly. */
+.laptop-lid { position: absolute; border: 14px solid #3a3a3a; border-bottom-width: 18px; border-radius: 22px 22px 0 0; background: #000; overflow: hidden; }
+.laptop-base { position: absolute; height: 22px; background: #4a4a4a; border-radius: 0 0 26px 26px; }
+.phone { position: absolute; border: 12px solid #3a3a3a; border-radius: 54px; background: var(--term); overflow: hidden; }
+.phone .notch { position: absolute; left: 50%; top: 10px; width: 110px; height: 26px; margin-left: -55px; border-radius: 13px; background: #000; z-index: 5; }
+.touch { position: absolute; left: 0; top: 0; width: 90px; height: 90px; margin: -45px 0 0 -45px; border-radius: 50%; background: rgba(255, 255, 255, 0.28); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55); opacity: 0; pointer-events: none; }
+.key { position: absolute; left: 0; top: 0; padding: 0 22px; height: 76px; border-radius: 12px; background: var(--raised); color: var(--fg); border: 2px solid var(--border); box-shadow: 0 6px 0 #000; font: 700 40px/72px "Ubuntu Sans Mono", monospace; white-space: nowrap; }
+.pointer { position: absolute; left: 0; top: 0; width: 44px; height: 60px; pointer-events: none; }
+
+/* A browser Surface's inside: the page keeps its own colors, on white. */
+.web { position: absolute; inset: 0; background: #fff; color: #1b1b1f; font-family: "Ubuntu Sans Mono", monospace; overflow: hidden; }
+.web .addr { height: 46px; background: var(--raised); display: flex; align-items: center; gap: 10px; padding: 0 14px; color: var(--muted); font: 500 22px/1 "Ubuntu Sans Mono", monospace; }
+.web .addr .url { flex: 1; background: var(--term); color: var(--fg); border-radius: 8px; padding: 8px 14px; white-space: nowrap; overflow: hidden; }
+.web .addr .nb { font-weight: 700; }
+.page .nav { display: flex; gap: 36px; align-items: center; padding: 18px 32px; font: 500 22px/1 "Ubuntu Sans Mono", monospace; color: #555; border-bottom: 2px solid #eee; white-space: nowrap; }
+.page .nav b { font-size: 28px; color: #111; margin-right: auto; }
+.page .hero { padding: 34px 32px 24px; white-space: nowrap; }
+.page .h1 { font: 700 52px/1.1 "Ubuntu Sans Mono", monospace; color: #111; }
+.page .h2 { font: 700 52px/1.1 "Ubuntu Sans Mono", monospace; color: #c2452d; }
+.page .btn { display: inline-block; margin-top: 22px; padding: 12px 24px; border-radius: 10px; background: #111; color: #fff; font: 700 24px/1 "Ubuntu Sans Mono", monospace; }
+.page .cards { display: flex; gap: 20px; padding: 0 32px; }
+.page .cards > div { flex: 1; border: 2px solid #e6e6e6; border-radius: 14px; padding: 16px; }
+.page .cards i { display: block; height: 90px; border-radius: 8px; margin-bottom: 12px; }
+.page .cards b { display: block; height: 14px; border-radius: 7px; background: #d9d9d9; margin-bottom: 9px; }
+.page .cards b.s { width: 60%; }
+.popup { position: absolute; left: 0; top: 0; z-index: 20; padding: 12px 20px; border-radius: 8px; background: var(--raised); color: var(--fg); border: 2px solid var(--border); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55); font: 500 26px/1.25 "Ubuntu Sans Mono", monospace; white-space: nowrap; }
+.popup .k { color: var(--muted); }
+
+/* The tag words that land on the window. */
+.tagword { position: absolute; left: 0; top: 0; z-index: 30; font: 700 200px/1 "Ubuntu Sans Mono", monospace; white-space: nowrap; -webkit-text-stroke: 18px #0c0c0c; paint-order: stroke fill; }
+
+/* VS Code's frame, in its own fixed colors: it is the host, not the theme. */
+.vsc { position: absolute; z-index: 10; font-family: "Ubuntu Sans Mono", monospace; color: #cccccc; white-space: nowrap; overflow: hidden; }
+.vsc.title { left: 0; top: 0; width: 1920px; height: 40px; background: #1f1f1f; text-align: center; font: 500 20px/40px "Ubuntu Sans Mono", monospace; border-bottom: 1px solid #2b2b2b; }
+.vsc.act { left: 0; top: 40px; width: 64px; height: 920px; background: #181818; border-right: 1px solid #2b2b2b; padding-top: 10px; }
+.vsc.act i { display: block; width: 34px; height: 34px; margin: 14px 15px 22px; border-radius: 8px; border: 3px solid #6b6b6b; }
+.vsc.act i.on { border-color: #fff; }
+.vsc.side { left: 64px; top: 40px; width: 300px; height: 920px; background: #181818; border-right: 1px solid #2b2b2b; padding: 12px 18px; font: 500 22px/36px "Ubuntu Sans Mono", monospace; white-space: pre; }
+.vsc.side .hd { font-size: 17px; letter-spacing: 0.08em; color: #8b8b8b; }
+.vsc.edit { left: 364px; top: 40px; width: 1556px; height: 171px; background: #1f1f1f; }
+.vsc.edit .tabs { height: 44px; background: #181818; display: flex; font: 500 20px/44px "Ubuntu Sans Mono", monospace; }
+.vsc.edit .tabs span { padding: 0 24px; border-right: 1px solid #2b2b2b; color: #9d9d9d; }
+.vsc.edit .tabs span.on { background: #1f1f1f; color: #fff; box-shadow: inset 0 2px 0 #0078d4; }
+.vsc.edit .src { height: 86px; padding: 4px 0 0 0; font: 400 21px/26px "Ubuntu Mono", monospace; white-space: pre; color: #d4d4d4; }
+.vsc.edit .src .no { display: inline-block; width: 70px; text-align: right; margin-right: 24px; color: #6e7681; }
+.vsc.edit .panel { height: 41px; border-top: 1px solid #2b2b2b; display: flex; gap: 34px; padding: 0 24px; font: 500 17px/40px "Ubuntu Sans Mono", monospace; letter-spacing: 0.06em; color: #9d9d9d; }
+.vsc.edit .panel span.on { color: #fff; box-shadow: inset 0 -2px 0 #0078d4; }
+.vsc.status { left: 0; top: 960px; width: 1920px; height: 24px; background: #007acc; color: #fff; display: flex; gap: 30px; padding: 0 16px; font: 500 16px/24px "Ubuntu Sans Mono", monospace; }
+
+/* The train at night, behind the phone. */
+.train { background: linear-gradient(#0b0e14, #10141c 60%, #07080b); }
+.train .sill { top: 760px; width: 1920px; height: 224px; background: #050506; border-top: 6px solid #1c1f26; }
+/* Words said out loud, in the break. */
+.said { font: 700 62px/78px "Ubuntu Sans Mono", monospace; white-space: nowrap; padding: 26px 30px; position: absolute; left: 0; top: 0; }
+.ycode { position: absolute; left: 30px; top: 22px; font: 500 38px/54px "Ubuntu Mono", monospace; white-space: pre; }

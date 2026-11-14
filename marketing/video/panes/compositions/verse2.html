@@ -1,0 +1,145 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+    #verse2-stage .union { position: absolute; border-radius: 20px; box-shadow: 0 0 0 4px var(--ring); opacity: 0; }
+    #verse2-stage .chip { position: absolute; left: 0; top: 0; padding: 4px 18px; border-radius: 10px 10px 0 0; background: var(--ring); color: #fff; font: 700 28px/40px "Ubuntu Sans Mono", monospace; opacity: 0; white-space: nowrap; }
+    #verse2-stage .clock { position: absolute; right: 30px; bottom: 20px; font: 700 110px/1 "Ubuntu Sans Mono", monospace; color: var(--caramel); white-space: nowrap; }
+  </style>
+  <div id="root" data-composition-id="verse2" data-width="1920" data-height="1080">
+    <div id="verse2-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("verse2"), { tl, stage } = sc;
+      const w = (word, line, o = {}) => sc.w(word, { line, ...o });
+      const back = P.train(stage, tl, 0, sc.dur);
+      const ui = P.chrome(stage);
+      const over = S.html(stage, `<div class="abs theme-dark" style="width:1920px;height:984px;pointer-events:none"></div>`);
+      P.lyrics(sc, stage);
+      P.DOORS.forEach((t) => P.door(ui.base, t));
+      const eighth = 60 / S.SONG.bpm / 2;
+      const tag = (text, x, y, size, color = "#fff") => { const el = S.html(over, `<div class="tagword" data-layout-allow-overlap style="font-size:${size}px;color:${color}">${text}</div>`); gsap.set(el, { x, y, xPercent: -50, yPercent: -50, opacity: 0 }); return el; };
+      const land = (el, t, until) => { tl.fromTo(el, { opacity: 0, scale: 1.5 }, { opacity: 1, scale: 1, duration: 0.2, ease: "back.out(2)", immediateRender: false }, t); tl.to(el, { opacity: 0, duration: 0.12 }, until); };
+
+      // ---- "Browser repping in the front, terminal party in the back": one Tool, two faces. ----
+      const [small, pile] = P.split(P.WALL, "h", 0.64), area = P.WALL;
+      const faces = (a, dx) => [{ x: a.x + dx, y: a.y, w: a.w - dx, h: a.h - 190 }, { x: a.x, y: a.y + 190, w: a.w - dx, h: a.h - 190 }];
+      const [backRect, frontRect] = faces(area, 330);
+      const RAINBOW = ["r", "y", "g", "c", "b", "m"];
+      const party = Array.from({ length: 40 }, (_, i) => `<span class="c-${RAINBOW[i % 6]}">${["  VITE v7.1.4  ready in 212 ms", "  hmr update /src/Mullet.tsx", "  GET /api/party 200 4ms", "  hmr update /src/Back.tsx", "  GET /api/front 200 9ms", "  page reload index.html"][i % 6]}</span>`);
+      const term = P.pane(ui.wall, backRect, { title: "npm run dev", lines: party, shown: 0 });
+      const web = P.browser(ui.wall, frontRect, { title: "localhost:5173" });
+      const duo = [term, web];
+      P.spawn(tl, web, w("Browser", "v2a") - 0.02, "corner", 0.3);
+      P.focus(tl, duo, web, 0, 0.01);
+      P.bump(tl, web.el, w("repping", "v2a"), 0.04);
+      land(tag("front", frontRect.x + frontRect.w / 2, 60 + frontRect.y + frontRect.h - 150, 170, "#ffcf87"), w("front,", "v2a") - 0.12, w("A", "v2b"));
+      P.spawn(tl, term, w("terminal", "v2a") - 0.02, "top", 0.3);
+      P.focus(tl, duo, term, w("terminal", "v2a"), 0.15);
+      P.stream(tl, term, w("party", "v2a"), w("A", "v2b") + 2.6, {});
+      // The party: the terminal's header runs through the ANSI colors on every eighth note.
+      for (let k = 0, t = w("party", "v2a"); t < w("A", "v2b"); t += eighth / 2, k++) tl.set(term.on, { backgroundColor: `var(--${["red", "yellow", "green", "cyan", "blue", "magenta"][k % 6]})` }, t);
+      tl.set(term.on, { backgroundColor: "var(--head-on)" }, w("A", "v2b"));
+      land(tag("back", backRect.x + backRect.w - 250, 60 + backRect.y + 120, 170), w("back", "v2a") - 0.1, w("A", "v2b"));
+
+      // ---- "A Dor Tool is a mullet": the ring wraps both, because they are one Surface. ----
+      const union = S.html(ui.wall, `<div class="union"><div class="chip">tool: mullet</div></div>`);
+      gsap.set(union, { left: area.x - 2, top: area.y - 2, width: area.w + 4, height: area.h + 4 });
+      const chip = union.querySelector(".chip");
+      gsap.set(chip, { x: area.w - 330, y: area.h - 44 });
+      tl.to(union, { opacity: 1, duration: 0.15 }, w("Dor", "v2b"));
+      tl.to(chip, { opacity: 1, duration: 0.1 }, w("Tool", "v2b"));
+      P.focus(tl, duo, null, w("Dor", "v2b"), 0.1);
+      duo.forEach((p) => P.bump(tl, p.el, w("Tool", "v2b"), 0.03));
+      const mullet = tag("mullet", area.x + area.w / 2, 60 + area.h / 2, 250, "#ffcf87");
+      land(mullet, w("mullet,", "v2b"), w("build", "v2b") + 0.5);
+      duo.forEach((p) => P.bump(tl, p.el, w("mullet,", "v2b"), 0.05));
+
+      // ---- "I can build with any stack": the Tool makes room, and six more stack up beside it, one per word. ----
+      const room = w("I", "v2b") - 0.12, [backSmall, frontSmall] = faces(small, 170);
+      P.move(tl, term, backSmall, room, 0.3);
+      P.move(tl, web, frontSmall, room, 0.3);
+      tl.to(union, { left: small.x - 2, width: small.w + 4, duration: 0.3, ease: P.EASE }, room);
+      tl.to(chip, { x: small.w - 330, duration: 0.3, ease: P.EASE }, room);
+      tl.to(mullet, { x: small.x + small.w / 2, duration: 0.3, ease: P.EASE }, room);
+      const STACK = [["vite", "pnpm dev"], ["rails", "bin/rails server"], ["django", "python manage.py runserver"], ["phoenix", "mix phx.server"], ["cargo", "cargo run"], ["storybook", "pnpm storybook"]];
+      const slots = P.grid(pile, 1, 6).reverse();
+      const stackT = ["I", "can", "build", "with", "any", "stack"].map((x) => w(x, "v2b"));
+      const stack = STACK.map(([name, run], i) => {
+        const p = P.pane(ui.wall, slots[i], { title: `tool: ${name}`, lines: [`${P.c("c", "run")}: ${run}`, `${P.c("c", "port")}: ${P.c("y", "auto")}`] });
+        tl.fromTo(p.el, { y: -900, opacity: 1 }, { y: 0, duration: 0.2, ease: "power3.in" }, stackT[i] - 0.2);
+        stack_bump(p, stackT[i]);
+        return p;
+      });
+      function stack_bump(p, t) { tl.fromTo(p.el, { scaleY: 0.86, transformOrigin: "50% 100%" }, { scaleY: 1, duration: 0.25, ease: "back.out(3)", immediateRender: false }, t); }
+      stack.forEach((p, i) => stack.slice(0, i).forEach((q) => tl.fromTo(q.el, { y: 5 }, { y: 0, duration: 0.15, immediateRender: false }, stackT[i])));
+
+      // ---- "Vibe-coded in an evening, but still easy to maintain": an agent writes the Tool, and the Tool is five lines. ----
+      const cut = sc.bar(15);
+      [term, web, ...stack].forEach((p) => tl.set(p.el, { opacity: 0 }, cut));
+      tl.set(union, { opacity: 0 }, cut);
+      const [la, ra] = P.split(P.WALL, "h", 0.52);
+      const coder = P.pane(ui.wall, la, { title: "claude", lines: [`${P.c("k", ">")} ${P.c("w", "make my app a dor tool")}`, "", ...P.agent(808, 40).slice(2)], shown: 0, active: true, fs: 28 });
+      const yml = P.pane(ui.wall, ra, { title: "dormouse.yml" });
+      [coder, yml].forEach((p) => tl.fromTo(p.el, { opacity: 0 }, { opacity: 1, duration: 0.01, immediateRender: true }, cut));
+      P.stream(tl, coder, cut + 0.03, w("easy", "v2c"), { to: 26 });
+      const clock = S.html(coder.body, `<div class="clock">6:00 PM</div>`);
+      const HOURS = ["6:00", "6:20", "6:40", "7:00", "7:20", "7:40", "8:00", "8:20", "8:40", "9:00"];
+      HOURS.forEach((h, i) => tl.set(clock, { textContent: `${h} PM` }, w("Vibe-coded", "v2c") + ((w("evening,", "v2c", { after: true }) - w("Vibe-coded", "v2c")) * i) / (HOURS.length - 1)));
+      P.bump(tl, clock, w("evening,", "v2c"), 0.12);
+      const code = S.html(yml.body, `<div class="ycode"></div>`);
+      const YML = [`${P.c("c", "tools")}:`, `  ${P.c("c", "mullet")}:`, `    ${P.c("c", "run")}: npm run dev`, `    ${P.c("c", "render")}: agent-browser-screencast`, `    ${P.c("c", "port")}: ${P.c("y", "auto")}`];
+      const rows = YML.map((l, i) => { const r = S.html(code, `<div><span class="c-d">${i + 1}  </span>${l}</div>`); gsap.set(r, { opacity: 0 }); return r; });
+      const y1 = w("evening,", "v2c", { after: true });
+      rows.forEach((r, i) => tl.set(r, { opacity: 1 }, w("Vibe-coded", "v2c") + 0.25 + ((y1 - w("Vibe-coded", "v2c") - 0.3) * i) / 4));
+      P.focus(tl, [coder, yml], yml, w("but", "v2c"), 0.2);
+      land(tag("5 lines", ra.x + ra.w / 2, 60 + 520, 170, "#7be0a4"), w("easy", "v2c"), sc.bar(16) - 0.03);
+      rows.forEach((r, i) => tl.fromTo(r, { backgroundColor: "rgba(47,155,255,0.35)" }, { backgroundColor: "rgba(47,155,255,0)", duration: 0.3, immediateRender: false }, w("maintain", "v2c") + i * 0.06));
+
+      // ---- "Mouse and keys at my desk": a click moves the focus, and two keys split the wall. ----
+      const desk = sc.bar(16);
+      tl.set(yml.el, { opacity: 0 }, desk);
+      tl.set(clock, { opacity: 0 }, desk);
+      const [r1, r2] = P.split(ra, "v", 0.5), [r2a, r2b] = P.split(r2, "h", 0.5);
+      const pA = P.pane(ui.wall, ra, { title: "npm run dev", lines: P.dev(31, 40), shown: 10 });
+      tl.fromTo(pA.el, { opacity: 0 }, { opacity: 1, duration: 0.01 }, desk);
+      P.stream(tl, pA, desk, sc.dur, {});
+      const quad = [coder, pA];
+      const ptr = P.pointer(over);
+      const click = { x: ra.x + 300, y: 60 + ra.y + 20 };
+      tl.fromTo(ptr, { x: 700, y: 620, opacity: 0 }, { x: click.x, y: click.y, opacity: 1, duration: 0.3, ease: "power2.out" }, desk - 0.28);
+      tl.fromTo(ptr, { scale: 0.75 }, { scale: 1, duration: 0.2, immediateRender: false }, w("Mouse", "v2d"));
+      P.focus(tl, quad, pA, w("Mouse", "v2d"), 0.2);
+      tl.to(ptr, { opacity: 0, duration: 0.15 }, w("keys", "v2d") + 0.2);
+      const keycap = (label, x) => { const k = S.html(over, `<div class="key">${label}</div>`); gsap.set(k, { x, y: 800, opacity: 0, scale: 1.7 }); return k; };
+      const press = (k, t) => { tl.fromTo(k, { opacity: 0, y: 830 }, { opacity: 1, y: 800, duration: 0.1, immediateRender: false }, t - 0.1); tl.to(k, { y: 806, boxShadow: "0 0px 0 #000", duration: 0.05 }, t); tl.to(k, { y: 800, boxShadow: "0 6px 0 #000", duration: 0.1 }, t + 0.08); tl.to(k, { opacity: 0, duration: 0.15 }, t + 0.5); };
+      const k1 = keycap("-", 840), k2 = keycap("|", 1010);
+      press(k1, w("keys", "v2d"));
+      P.move(tl, pA, r1, w("keys", "v2d"), 0.26);
+      const pB = P.pane(ui.wall, r2, { title: "pnpm test", lines: P.tests(32, 40), shown: 0 });
+      P.spawn(tl, pB, w("keys", "v2d"), "top", 0.26);
+      P.stream(tl, pB, w("keys", "v2d") + 0.05, sc.dur, {});
+      press(k2, w("desk,", "v2d"));
+      P.move(tl, pB, r2a, w("desk,", "v2d"), 0.26);
+      const pC = P.pane(ui.wall, r2b, { title: "codex", lines: P.agent(33, 40), shown: 0 });
+      P.spawn(tl, pC, w("desk,", "v2d"), "left", 0.26);
+      P.stream(tl, pC, w("desk,", "v2d") + 0.05, sc.dur, {});
+      quad.push(pB, pC);
+      P.focus(tl, quad, pB, w("keys", "v2d"), 0.15);
+      P.focus(tl, quad, pC, w("desk,", "v2d"), 0.15);
+
+      // ---- "and just my thumbs on the train": the window shrinks into a phone, and the lights start passing. ----
+      const go = w("just", "v2d") - 0.12, PH = { x: 760, y: 30, w: 400, h: 900 };
+      tl.to(ui.win, { scale: 0.2, x: 768, y: 380, opacity: 0, duration: 0.3, ease: "power3.in" }, go);
+      tl.to(back, { opacity: 1, duration: 0.3 }, go + 0.1);
+      const phone = P.phone(stage, PH);
+      const feed = P.mobile(phone.screen);
+      tl.fromTo(phone.el, { scale: 0.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.35, ease: "back.out(1.5)" }, go + 0.22);
+      tl.fromTo(feed, { y: 0 }, { y: -27 * 14, duration: sc.dur - go, ease: "none" }, go);
+      const tL = P.touch(stage), tR = P.touch(stage);
+      for (let k = 0, t = w("thumbs", "v2d"); t < sc.dur - 0.1; t += eighth, k++) P.tap(tl, k % 2 ? tR : tL, PH.x + (k % 2 ? 300 : 100), PH.y + 760 - (k % 3) * 40, t);
+      sc.beats.filter((b) => b.t > go + 0.5).forEach((b) => tl.fromTo(phone.el, { y: 7 }, { y: 0, duration: 0.3, ease: "power2.out", immediateRender: false }, b.t));
+      window.__timelines["verse2"] = tl;
+    })();
+  </script>
+</template>

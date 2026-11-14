@@ -1,0 +1,11 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+  </style>
+  <div id="root" data-composition-id="chorus1" data-width="1920" data-height="1080">
+    <div id="chorus1-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    Chorus("chorus1", { lines: ["c1a", "c1b", "c1c", "c1d"], themes: ["dark", "dark", "dark", "dark"] });
+  </script>
+</template>

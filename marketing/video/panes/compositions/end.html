@@ -1,0 +1,63 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+    #end-stage .card { position: absolute; left: 0; top: 0; width: 1920px; height: 868px; }
+    #end-stage .mark { position: absolute; left: 200px; top: 262px; width: 340px; height: 340px; }
+    #end-stage .name { position: absolute; left: 590px; top: 318px; font: 700 196px/1 "Ubuntu Sans Mono", monospace; color: #fff; white-space: pre; }
+    #end-stage .line { position: absolute; left: 600px; top: 540px; font: 500 58px/1 "Ubuntu Sans Mono", monospace; color: var(--caramel); white-space: nowrap; }
+    #end-stage .pitch { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 64px/1 "Ubuntu Sans Mono", monospace; white-space: pre; }
+  </style>
+  <div id="root" data-composition-id="end" data-width="1920" data-height="1080">
+    <div id="end-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("end"), { tl, stage, w } = sc;
+      const ui = P.chrome(stage);
+      P.lyrics(sc, stage);
+      const doors = P.DOORS.map((t) => P.door(ui.base, t));
+
+      // "Do-Dormouse.sh, baby": the logo lands, and the address is typed beside it.
+      const card = S.html(ui.wall, `<div class="card"><img class="mark" src="${P.LOGO}" alt="" /><div class="name"></div><div class="line">Multitasking terminal for mice</div></div>`);
+      const mark = card.querySelector(".mark"), name = card.querySelector(".name"), line = card.querySelector(".line");
+      const said = sc.line("tag").words[0];
+      tl.fromTo(mark, { scale: 0, rotation: -25 }, { scale: 1, rotation: 0, duration: 0.45, ease: "back.out(2)" }, said.start - 0.05);
+      const mid = said.start + (said.end - said.start) * 0.38; // "Do-" stutters, then the name itself.
+      const typed = P.type(tl, name, "dormouse", mid, said.end - 0.42);
+      const sh = P.type(tl, name, ".sh", said.end - 0.4, said.end - 0.05, { cls: "c-k", cursor: false });
+      name.appendChild(typed.cur);
+      P.bump(tl, mark, mid, 0.1);
+      tl.fromTo(line, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, w("baby"));
+      P.bump(tl, name, w("baby"), 0.05);
+      doors.forEach((d, i) => P.ring(tl, d, w("baby") + i * 0.05, { hold: 0.2 }));
+      sc.beats.filter((b) => b.t > w("baby") + 0.3).forEach((b) => tl.fromTo(typed.cur, { opacity: 0.15 }, { opacity: 1, duration: 0.3, immediateRender: false }, b.t));
+
+      // Four more "Dormouse": four panes take the corners, one for each place it runs.
+      const W = P.WALL, pw = 560, ph = 236;
+      const spots = [
+        [{ x: W.x, y: W.y, w: pw, h: ph }, "VS Code", "in VS Code", "left", "#4fb6ff"],
+        [{ x: W.x + W.w - pw, y: W.y, w: pw, h: ph }, "standalone", "standalone", "right", "#ffcf87"],
+        [{ x: W.x, y: W.y + W.h - ph, w: pw, h: ph }, "pocket", "on your phone", "left", "#7be0a4"],
+        [{ x: W.x + W.w - pw, y: W.y + W.h - ph, w: pw, h: ph }, "zsh", `<span class="c-k">$ </span>dor`, "right", "#fff"],
+      ];
+      const panes = [];
+      ["out1", "out2", "out3", "out4"].forEach((id, i) => {
+        const t = sc.line(id).start, [rect, title, text, from, color] = spots[i];
+        const p = P.pane(ui.wall, rect, { title });
+        S.html(p.body, `<div class="pitch" style="color:${color}">${text}</div>`);
+        panes.push(p);
+        P.spawn(tl, p, t, from, 0.3);
+        P.focus(tl, panes, p, t, 0.1);
+        P.bump(tl, mark, t, 0.12);
+        P.ring(tl, doors[i + 1], t, { hold: 0.25 });
+        tl.fromTo(mark, { rotation: i % 2 ? 8 : -8 }, { rotation: 0, duration: 0.4, ease: "back.out(3)", immediateRender: false }, t);
+      });
+      tl.to(card, { y: -10, duration: 0.01 }, 0);
+
+      // Out on the last note.
+      const black = S.html(stage, `<div class="abs" style="width:1920px;height:1080px;background:#000;opacity:0;z-index:60"></div>`);
+      tl.to(black, { opacity: 1, duration: 0.7, ease: "power1.in" }, sc.dur - 0.75);
+      window.__timelines["end"] = tl;
+    })();
+  </script>
+</template>

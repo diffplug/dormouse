@@ -1,0 +1,135 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+  </style>
+  <div id="root" data-composition-id="intro" data-width="1920" data-height="1080">
+    <div id="intro-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("intro"), { tl, stage } = sc;
+      const ui = P.chrome(stage);
+      P.lyrics(sc, stage);
+      const COLORS = ["var(--caramel)", "var(--cyan)", "var(--green)", "var(--magenta)", "var(--yellow)", "var(--blue)", "var(--red)", "var(--fg)"];
+      const eighth = 60 / S.SONG.bpm / 2;
+
+      // The window is there from the first frame, with one shell and its cursor.
+      const shell = P.pane(ui.wall, P.WALL, { title: "zsh", lines: [`${P.c("g", "~/dormouse")} ${P.c("d", "$")} <span class="cur"></span>`], active: true });
+      const cur0 = shell.el.querySelector(".cur");
+      sc.beats.filter((b) => b.t < 0.5).forEach((b) => tl.fromTo(cur0, { opacity: 0.2 }, { opacity: 1, duration: 0.2 }, b.t));
+
+      // "Do-do-Dor-mouse": the wall stutters into four columns that spell it, one per eighth note.
+      const cols = P.grid(P.WALL, 4, 1);
+      const t1 = sc.w("Do-do-Dormouse") - 0.05;
+      const stutter = ["Do-", "do-", "Dor", "mouse"].map((word, i) => {
+        const p = i === 0 ? shell : P.pane(ui.wall, cols[i], { title: word.replace("-", ""), lines: [] });
+        const text = P.big(p, word, 132, COLORS[i]);
+        const t = t1 + i * eighth;
+        if (i === 0) {
+          P.move(tl, p, cols[0], t, 0.2);
+          tl.set(p.lines[0], { opacity: 0 }, t);
+          tl.set(p.title, { textContent: "do" }, t);
+          tl.fromTo(text, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.18, ease: "back.out(3)" }, t);
+        } else {
+          P.spawn(tl, p, t, "left", 0.22);
+          tl.fromTo(text, { scale: 0.6 }, { scale: 1, duration: 0.22, ease: "back.out(3)" }, t);
+        }
+        return { p, text, t };
+      });
+      const all1 = stutter.map((s) => s.p);
+      stutter.forEach((s) => P.focus(tl, all1, s.p, s.t, 0.1));
+      sc.beats.filter((b) => b.t > 1.6 && b.t < 3.3).forEach((b) => all1.forEach((p, i) => P.bump(tl, stutter[i].text, b.t + i * 0.03, 0.12)));
+
+      // Bar 1: they fold back to two, and "Dor-mouse" lands on them.
+      const halves = P.grid(P.WALL, 2, 1);
+      const l2 = sc.line("intro2").start, fold = l2 - 0.2;
+      [1, 3].forEach((i) => P.kill(tl, all1[i], fold, 0.15));
+      P.move(tl, all1[0], halves[0], fold, 0.3);
+      P.move(tl, all1[2], halves[1], fold, 0.3);
+      [0, 2].forEach((i) => tl.to(stutter[i].text, { opacity: 0, duration: 0.1 }, fold));
+      const dor = P.big(all1[0], "Dor", 300, COLORS[0]), mouse = P.big(all1[2], "mouse", 300, COLORS[1]);
+      gsap.set([dor, mouse], { opacity: 0 });
+      tl.fromTo(dor, { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.2, ease: "back.out(2.5)" }, l2);
+      tl.fromTo(mouse, { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.2, ease: "back.out(2.5)" }, l2 + 0.36);
+      tl.set(all1[0].title, { textContent: "dor" }, l2);
+      P.focus(tl, all1, all1[0], l2, 0.1);
+      P.focus(tl, all1, all1[2], l2 + 0.36, 0.1);
+
+      // Both minimize to doors on the baseboard, one beat each.
+      const doorAt = (i) => ({ x: 16 + i * 176, y: 872, w: 168, h: 44 });
+      const doors = [];
+      function minimize(p, t, title) {
+        const i = doors.length, d = P.door(ui.base, title);
+        doors.push(d);
+        tl.to(p.el, { ...P.css(doorAt(i)), opacity: 0, duration: 0.3, ease: "power3.in" }, t);
+        tl.fromTo(d.el, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.2, ease: "back.out(2)" }, t + 0.24);
+        P.ring(tl, d, t + 0.3, { hold: 0.25 });
+      }
+      minimize(all1[0], sc.beat(7), "dor");
+      minimize(all1[2], sc.beat(7) + eighth, "mouse");
+
+      // Bar 2: a fresh shell, and someone types the name on the beat.
+      const typed = P.pane(ui.wall, P.WALL, { title: "zsh", lines: [], active: true });
+      P.spawn(tl, typed, sc.bar(2), "corner", 0.35);
+      const row = S.html(typed.body, `<div class="big" style="position:absolute;left:70px;top:250px;font-size:230px"><span class="c-k">&gt; </span></div>`);
+      const name = P.type(tl, row, "dormouse", sc.bar(2) + eighth, sc.line("intro3").start - 0.12);
+      sc.beats.filter((b) => b.t >= sc.bar(2) && b.t < 7).forEach((b) => tl.fromTo(name.cur, { opacity: 0.25 }, { opacity: 1, duration: 0.25 }, b.t));
+
+      // "Do-do-Dormouse, Dormouse, Dormouse": every word is another pane, and the wall re-tiles to fit: 4, then 6, then 8.
+      const l3 = sc.line("intro3").words[0], l4 = sc.line("intro4").words;
+      const q = (l3.end - l3.start) / 4;
+      const hits = [
+        ["Do-", l3.start], ["do-", l3.start + q], ["Dor", l3.start + 2 * q], ["mouse", l3.start + 3 * q],
+        ["Dor", l4[0].start], ["mouse", l4[0].start + 0.34], ["Dor", l4[1].start], ["mouse", l4[1].start + 0.34],
+      ];
+      const layout = (n) => (n <= 2 ? P.grid(P.WALL, 2, 1) : n <= 4 ? P.grid(P.WALL, 2, 2) : n <= 6 ? P.grid(P.WALL, 3, 2) : P.grid(P.WALL, 4, 2));
+      const crowd = [];
+      hits.forEach(([word, t], i) => {
+        const n = i + 1, rects = n === 1 ? [P.WALL] : layout(n);
+        if (i === 0) {
+          tl.to(row, { opacity: 0, duration: 0.08 }, t);
+          tl.set(typed.title, { textContent: "do" }, t);
+          const text = P.big(typed, word, 132, COLORS[0]);
+          tl.fromTo(text, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.18, ease: "back.out(3)" }, t);
+          crowd.push({ p: typed, text });
+        } else {
+          crowd.forEach((c, k) => { if (c.p.rect !== rects[k]) P.move(tl, c.p, rects[k], t, 0.26); });
+          const p = P.pane(ui.wall, rects[i], { title: word.replace("-", ""), lines: [] });
+          const text = P.big(p, word, 132, COLORS[i % COLORS.length]);
+          P.spawn(tl, p, t, i % 2 ? "left" : "top", 0.24);
+          tl.fromTo(text, { scale: 0.6 }, { scale: 1, duration: 0.22, ease: "back.out(3)" }, t);
+          crowd.push({ p, text });
+        }
+        P.focus(tl, crowd.map((c) => c.p).concat(typed), crowd[i].p, t, 0.1);
+      });
+
+      // Then the words give way to work: each pane starts printing, a beat apart, and the type shrinks to a watermark.
+      const work = sc.line("intro4").end + 0.1;
+      crowd.forEach((c, i) => {
+        const t = work + i * 0.08;
+        tl.to(c.text, { opacity: 0, scale: 0.8, duration: 0.25 }, t);
+        tl.set(c.p.title, { textContent: P.titleOf(i) }, t);
+        P.add(c.p, P.say(P.titleOf(i), i + 3, 40), 0);
+        P.stream(tl, c.p, t + 0.1, sc.dur, { rect: layout(8)[i] });
+      });
+      sc.beats.filter((b) => b.t > work && b.t < sc.line("intro5").start - 0.2).forEach((b, k) => P.focus(tl, crowd.map((c) => c.p), crowd[(k * 3 + 1) % 8].p, b.t, 0.15));
+
+      // "Dormouse, Dormouse": four hits, and two panes drop to the baseboard on each.
+      const l5 = sc.line("intro5").words;
+      [l5[0].start, l5[0].start + 0.34, l5[1].start, l5[1].start + 0.34].forEach((t, k) => {
+        [k, k + 4].forEach((i) => tl.to(crowd[i].p.el, { ...P.css(doorAt(doors.length)), opacity: 0, duration: 0.28, ease: "power3.in" }, t));
+        // The ones still up re-tile to fill the wall.
+        const rest = crowd.filter((_, i) => i % 4 > k), n = rest.length;
+        const fill = n === 6 ? P.grid(P.WALL, 3, 2) : n === 4 ? P.grid(P.WALL, 2, 2) : P.grid(P.WALL, 2, 1);
+        rest.sort((a, b) => crowd.indexOf(a) % 4 - crowd.indexOf(b) % 4 || crowd.indexOf(a) - crowd.indexOf(b));
+        const cols = n / 2;
+        rest.forEach((c, j) => P.move(tl, c.p, fill[(j % 2) * cols + Math.floor(j / 2)], t + 0.1, 0.3));
+        const d = P.door(ui.base, "dormouse");
+        doors.push(d);
+        tl.fromTo(d.el, { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.2, ease: "back.out(2)" }, t + 0.2);
+        P.ring(tl, d, t + 0.26, { hold: 0.2 });
+      });
+      window.__timelines["intro"] = tl;
+    })();
+  </script>
+</template>

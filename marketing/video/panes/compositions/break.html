@@ -1,0 +1,86 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+  </style>
+  <div id="root" data-composition-id="break" data-width="1920" data-height="1080">
+    <div id="break-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("break"), { tl, stage } = sc;
+      const eighth = 60 / S.SONG.bpm / 2, drop = sc.bar(19);
+      const back = P.train(stage, tl, 0, sc.dur);
+      gsap.set(back, { opacity: 1 });
+      const world = S.html(stage, `<div class="abs theme-dark" style="width:1920px;height:984px"></div>`);
+
+      // The phone from the end of verse 2, still on the train. Its feed scrolls under a thumb: vibescrolling.
+      const PH = { x: 760, y: 30, w: 400, h: 900 };
+      const phone = P.phone(world, PH);
+      const feed = P.mobile(phone.screen);
+      gsap.set(feed, { y: -27 * 14 });
+      const thumb = P.touch(world);
+      // Each flick lands on a beat: the thumb drags up and the feed follows, then coasts.
+      sc.beats.filter((b) => b.t < drop).forEach((b, k) => {
+        tl.set(thumb, { x: PH.x + 290, y: PH.y + 640 }, b.t);
+        tl.fromTo(thumb, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.08, immediateRender: false }, b.t);
+        tl.to(thumb, { y: PH.y + 360, duration: 0.22, ease: "power2.in" }, b.t + 0.08);
+        tl.to(thumb, { opacity: 0, duration: 0.1 }, b.t + 0.3);
+        tl.to(feed, { y: -27 * (14 + (k + 1) * 9), duration: 0.6, ease: "power3.out" }, b.t + 0.1);
+        tl.fromTo(phone.el, { y: 7 }, { y: 0, duration: 0.3, ease: "power2.out", immediateRender: false }, b.t);
+      });
+
+      // Two panes, one per voice. Every word arrives when it is said.
+      const her = P.pane(world, { x: 70, y: 130, w: 630, h: 330 }, { title: "her" });
+      const him = P.pane(world, { x: 1220, y: 420, w: 630, h: 410 }, { title: "him" });
+      const both = [her, him];
+      const say = (p, id, rows, color) => {
+        const l = sc.line(id), el = S.html(p.body, `<div class="said" style="color:${color}"></div>`);
+        let k = 0;
+        rows.forEach((n) => {
+          const row = S.html(el, `<div></div>`);
+          for (let i = 0; i < n; i++, k++) {
+            const word = l.words[k], span = S.html(row, `<span>${word.text} </span>`);
+            gsap.set(span, { opacity: 0 });
+            tl.set(span, { opacity: 1 }, word.start);
+            tl.fromTo(span, { color: "#ffcf87" }, { color, duration: 0.3, immediateRender: false }, word.start);
+          }
+        });
+        P.focus(tl, both, p, l.start - 0.05, 0.12);
+        P.bump(tl, p.el, l.start, 0.03);
+        return el;
+      };
+      P.spawn(tl, her, sc.line("br1").start - 0.2, "left", 0.25);
+      P.spawn(tl, him, sc.line("br2").start - 0.2, "right", 0.25);
+      const h1 = say(her, "br1", [2, 2], "#f5a3d0");
+      say(him, "br2", [2, 1, 1], "#8fd0ff");
+      tl.set(h1, { opacity: 0 }, sc.line("br3").start - 0.05);
+      say(her, "br3", [1, 1], "#f5a3d0");
+      tl.set(him.body.querySelectorAll(".said")[0], { opacity: 0 }, sc.line("br4").start - 0.03);
+      const last = say(him, "br4", [4, 2], "#8fd0ff");
+      S.html(last.lastElementChild, `<span class="cur" style="background:#8fd0ff;opacity:0"></span>`);
+      tl.set(last.querySelector(".cur"), { opacity: 1 }, sc.line("br4").end);
+
+      // The instrumental bar answers for him: the window comes back and eight panes spell it, one per eighth note.
+      const ui = P.chrome(stage);
+      gsap.set(ui.win, { opacity: 0 });
+      tl.set(ui.win, { opacity: 1 }, drop);
+      tl.set([world, back], { opacity: 0 }, drop + 0.02);
+      P.DOORS.forEach((t) => P.door(ui.base, t));
+      const cols = P.grid(P.WALL, 8, 1);
+      const COLORS = ["var(--caramel)", "var(--cyan)", "var(--green)", "var(--magenta)", "var(--yellow)", "var(--blue)", "var(--red)", "var(--fg)"];
+      const letters = [..."DORMOUSE"].map((ch, i) => {
+        const p = P.pane(ui.wall, cols[i], { title: ch.toLowerCase() });
+        const text = P.big(p, ch, 230, COLORS[i]);
+        const t = drop + i * eighth;
+        P.spawn(tl, p, t, "top", 0.2);
+        tl.fromTo(text, { scale: 0.4 }, { scale: 1, duration: 0.25, ease: "back.out(3)" }, t);
+        return { p, text, t };
+      });
+      const lp = letters.map((l) => l.p);
+      letters.forEach((l) => P.focus(tl, lp, l.p, l.t, 0.08));
+      letters.forEach((l, i) => letters.slice(0, i).forEach((m) => P.bump(tl, m.text, l.t, 0.1)));
+      P.lyrics(sc, stage);
+      window.__timelines["break"] = tl;
+    })();
+  </script>
+</template>

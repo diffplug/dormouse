@@ -1,0 +1,91 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+    #pre-stage .cmd { position: absolute; left: 28px; right: 20px; font: 700 50px/64px "Ubuntu Sans Mono", monospace; white-space: pre; }
+    #pre-stage .out { position: absolute; left: 28px; font: 400 34px/64px "Ubuntu Mono", monospace; color: var(--muted); white-space: pre; }
+  </style>
+  <div id="root" data-composition-id="pre" data-width="1920" data-height="1080">
+    <div id="pre-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("pre"), { tl, stage, w } = sc;
+      const ui = P.chrome(stage);
+      P.lyrics(sc, stage);
+      const doors = P.DOORS.map((t) => P.door(ui.base, t));
+
+      // The wall as verse 1 left it: eleven panes, all printing.
+      const [top, bottom] = P.split(P.WALL, "v", 0.62);
+      const cells = P.grid(top, 4, 2), thirds = P.grid(bottom, 3, 1);
+      const spots = [[cells[0], "claude"], [cells[1], "pnpm test"], [cells[2], "git log"], [cells[3], "codex"], [cells[4], "claude"], [cells[5], "cargo watch"], [cells[6], "pnpm build"], [cells[7], "codex"], [thirds[0], "npm run dev"], [thirds[1], "tail -f app.log"], [thirds[2], "pnpm lint"]];
+      const cli = w("C-L-I") - 0.14;
+      const panes = spots.map(([rect, title], i) => {
+        const p = P.pane(ui.wall, rect, { title, lines: P.say(title, i + 40, 30), shown: 5 + (i % 3) });
+        P.stream(tl, p, 0.1 + i * 0.03, cli + 0.3, { to: 20 });
+        return p;
+      });
+      P.focus(tl, panes, panes[8], 0, 0.01);
+
+      // "Alerts pop up": a pane rings and takes a TODO, a notice pops beside it, and it happens again on the next words.
+      const notice = (p, text) => P.popup(ui.wall, p.rect.x + 22, p.rect.y + 56, `<span class="dot c-y"></span>${text} <span class="k">[enter]</span>`);
+      const alerts = [
+        [panes[4], w("Alerts"), "claude needs you"],
+        [panes[3], w("pop"), "codex is done"],
+        [panes[9], w("up"), "the build broke"],
+      ];
+      alerts.forEach(([p, t, text], i) => {
+        P.ring(tl, p, t, { pulses: 3, hold: w("know") - t - 0.3 });
+        P.todoOn(tl, p, t + 0.05);
+        P.bump(tl, p.el, t, 0.04);
+        P.pop(tl, notice(p, text), t + 0.08, w("know") - t - 0.1);
+        P.ring(tl, doors[2 + i], t + 0.1, { pulses: 2, hold: 0.5 });
+      });
+      // "when I need to know": the focus ring walks to each one, and each TODO resolves.
+      [w("need"), w("to"), w("know")].forEach((t, i) => {
+        P.focus(tl, panes, alerts[i][0], t, 0.18);
+        tl.to(alerts[i][0].todo, { opacity: 0, scale: 1.3, duration: 0.25, ease: "power2.out" }, t + 0.16);
+      });
+
+      // "C-L-I automation": everything else minimizes, and one shell takes the left of the wall to type a command.
+      const [big, side] = P.split(P.WALL, "h", 0.6), stack = P.grid(side, 1, 3);
+      const shell = panes[2];
+      panes.forEach((p, i) => { if (p !== shell) P.kill(tl, p, cli + (i % 4) * 0.02, 0.16); });
+      doors.forEach((d, i) => P.ring(tl, d, cli + 0.1 + i * 0.03, { hold: 0.15 }));
+      P.move(tl, shell, big, cli, 0.3);
+      P.focus(tl, panes, shell, cli, 0.1);
+      tl.set(shell.title, { textContent: "zsh" }, cli);
+      tl.set(shell.scroll, { opacity: 0 }, cli);
+      const row = (y, cls = "cmd") => S.html(shell.body, `<div class="${cls}" style="top:${y}px"></div>`);
+      const prompt = (el) => el.appendChild(Object.assign(document.createElement("span"), { className: "c-k", textContent: "$ " }));
+      const r1 = row(30);
+      prompt(r1);
+      gsap.set(r1, { opacity: 0 });
+      tl.set(r1, { opacity: 1 }, cli + 0.05);
+      const typed = P.type(tl, r1, "dor split -- claude", w("C-L-I"), w("automation", { after: true }) - 0.05);
+      tl.set(typed.cur, { opacity: 0 }, w("to", { line: "pre2" }));
+
+      // "to build my own flow": each command lands on a word and each one makes a Surface.
+      const made = [];
+      function run(y, cmd, out, t, tOut, make, from) {
+        if (cmd) { const r = row(y); prompt(r); r.appendChild(document.createTextNode(cmd)); gsap.set(r, { opacity: 0 }); tl.set(r, { opacity: 1 }, t); }
+        const o = row(y + 64, "out");
+        o.textContent = out;
+        gsap.set(o, { opacity: 0 });
+        tl.set(o, { opacity: 1 }, tOut);
+        const p = make();
+        made.push(p);
+        P.spawn(tl, p, tOut, from, 0.3);
+        P.bump(tl, p.el, tOut + 0.02, 0.05);
+      }
+      run(30, null, "created surface:12", 0, w("to", { line: "pre2" }), () => { const p = P.pane(ui.wall, stack[0], { title: "claude", lines: P.agent(77, 30), shown: 0 }); P.stream(tl, p, w("to", { line: "pre2" }) + 0.1, sc.dur + 1); return p; }, "left");
+      run(190, "dor ensure -- npm run dev", "created surface:13", w("build"), w("my"), () => { const p = P.pane(ui.wall, stack[1], { title: "npm run dev", lines: P.dev(8, 30), shown: 0 }); P.stream(tl, p, w("my") + 0.1, sc.dur + 1); return p; }, "left");
+      run(350, "dor agent-browser open :5173", "created surface:14", w("own"), w("flow"), () => P.browser(ui.wall, stack[2], { title: "localhost:5173" }), "left");
+      const last = row(510);
+      prompt(last);
+      S.html(last, `<span class="cur"></span>`);
+      gsap.set(last, { opacity: 0 });
+      tl.set(last, { opacity: 1 }, w("flow") + 0.1);
+      window.__timelines["pre"] = tl;
+    })();
+  </script>
+</template>

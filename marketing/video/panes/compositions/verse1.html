@@ -1,0 +1,65 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; }
+  </style>
+  <div id="root" data-composition-id="verse1" data-width="1920" data-height="1080">
+    <div id="verse1-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("verse1"), { tl, stage, w } = sc;
+      const ui = P.chrome(stage);
+      P.lyrics(sc, stage);
+      P.DOORS.forEach((t) => P.door(ui.base, t));
+      const panes = [];
+      const make = (rect, title, lines, shown = 0) => { const p = P.pane(ui.wall, rect, { title, lines, shown }); panes.push(p); return p; };
+
+      const [top, bottom] = P.split(P.WALL, "v", 0.62);
+      const [fullL, fullR] = P.split(P.WALL, "h"), [topL, topR] = P.split(top, "h");
+      const cells = P.grid(top, 4, 2), thirds = P.grid(bottom, 3, 1);
+
+      // "Agent to the left": it reveals from the left edge and gets to work.
+      const left = make(fullL, "claude", P.agent(11, 70));
+      P.spawn(tl, left, w("Agent") - 0.06, "left");
+      P.focus(tl, panes, left, w("Agent") - 0.06, 0.1);
+      P.stream(tl, left, w("Agent") + 0.1, w("Dev"), { to: 22 });
+      P.bump(tl, left.el, w("left,"), 0.03);
+
+      // "another agent to the right"
+      const right = make(fullR, "codex", P.agent(29, 70));
+      P.spawn(tl, right, w("another") - 0.04, "right");
+      P.focus(tl, panes, right, w("another"), 0.2);
+      P.stream(tl, right, w("another") + 0.1, w("Dev"), { to: 14 });
+      P.bump(tl, right.el, w("right"), 0.03);
+
+      // "Dev server at the bottom": the agents make room and it comes up from below.
+      const server = make(bottom, "npm run dev", P.dev(5, 50));
+      P.move(tl, left, topL, w("Dev") - 0.04);
+      P.move(tl, right, topR, w("Dev") - 0.04);
+      P.spawn(tl, server, w("Dev") - 0.04, "bottom");
+      P.focus(tl, panes, server, w("Dev"), 0.2);
+      P.stream(tl, server, w("Dev") + 0.15, w("information"), { to: 8 });
+      P.stream(tl, left, w("Dev"), w("information"), { to: 34, rect: topL });
+      P.stream(tl, right, w("Dev"), w("information"), { to: 26, rect: topR });
+      P.bump(tl, server.el, w("bottom,"), 0.03);
+
+      // "information packed-in tight": every pane splits, eleven in all, each one printing.
+      const pack = w("information"), tight = w("tight");
+      P.move(tl, left, cells[0], pack, 0.3);
+      P.move(tl, right, cells[3], pack, 0.3);
+      P.move(tl, server, thirds[0], pack, 0.3);
+      const more = [[cells[1], "pnpm test"], [cells[2], "git log"], [cells[4], "claude"], [cells[7], "codex"], [cells[5], "cargo watch"], [cells[6], "pnpm build"], [thirds[1], "tail -f app.log"], [thirds[2], "pnpm lint"]];
+      more.forEach(([rect, title], i) => {
+        const p = make(rect, title, P.say(title, i + 2, 40), 3);
+        const t = pack + 0.04 + (i * (tight - pack - 0.1)) / more.length;
+        P.spawn(tl, p, t, ["left", "top", "corner"][i % 3], 0.3);
+        P.stream(tl, p, t + 0.05, sc.dur, {});
+      });
+      P.stream(tl, left, pack, sc.dur, { rect: cells[0] });
+      P.stream(tl, right, pack, sc.dur, { rect: cells[3] });
+      P.stream(tl, server, pack, sc.dur, { rect: thirds[0] });
+      panes.forEach((p, i) => P.bump(tl, p.el, tight + i * 0.012, 0.06));
+      window.__timelines["verse1"] = tl;
+    })();
+  </script>
+</template>

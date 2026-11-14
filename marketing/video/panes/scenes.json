@@ -1,0 +1,14 @@
+{
+  "comment": "Cuts land on bars of the song. The break waits for the last word of verse 2, and runs through the instrumental bar into chorus 2.",
+  "scripts": ["assets/chorus.js"],
+  "scenes": [
+    { "id": "intro" },
+    { "id": "verse1", "bar": 5 },
+    { "id": "pre", "bar": 7 },
+    { "id": "chorus1", "bar": 9 },
+    { "id": "verse2", "bar": 13 },
+    { "id": "break", "at": 45.75 },
+    { "id": "chorus2", "bar": 20 },
+    { "id": "end", "bar": 24 }
+  ]
+}
