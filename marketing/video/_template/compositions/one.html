@@ -1,0 +1,15 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="one" data-width="1920" data-height="1080">
+    <div id="one-stage" class="stage"><div id="one-word" style="position:absolute;left:100px;top:400px;font-size:160px">one</div><div id="one-dot" style="position:absolute;left:100px;top:800px;width:80px;height:80px;border-radius:50%;background:#f80"></div></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("one"); const { tl } = sc;
+      const el = document.getElementById("one-word");
+      sc.lines.forEach((l) => l.words.forEach((x) => { if (x.start >= 0 && x.start < sc.dur) tl.set(el, { textContent: x.text }, x.start); }));
+      sc.beats.forEach((b) => tl.fromTo("#one-dot", { scale: b.inBar ? 1.4 : 2.4 }, { scale: 1, duration: 0.3 }, b.t));
+      window.__timelines["one"] = tl;
+    })();
+  </script>
+</template>

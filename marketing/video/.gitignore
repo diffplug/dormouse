@@ -1,0 +1,16 @@
+node_modules/
+.bin/
+_stub/
+renders/
+snapshots/
+snap/
+.hyperframes/
+.thumbnails/
+.waveform-cache/
+# Copied or transcoded by the build.
+shared/song.m4a
+shared/song.wav
+shared/audio-analysis.json
+shared/audio.err
+*/assets/kit.js
+*/assets/song.m4a
