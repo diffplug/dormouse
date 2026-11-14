@@ -7,7 +7,7 @@
 //   node scripts/desktop-builds.mjs   → .wrangler/desktop-compat/<tag>.mjs + releases.json
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -112,7 +112,7 @@ async function buildSupportedReleases() {
   return releases;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const built = await buildSupportedReleases();
   console.log(`built ${built.join(", ")} into ${path.relative(root, OUT)}`);
 }
