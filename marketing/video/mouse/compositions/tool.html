@@ -1,0 +1,77 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="tool" data-width="1920" data-height="1080">
+    <div id="tool-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("tool"); const { tl, stage, w } = sc;
+      // Evening comes on behind everything: the sky turns, the sun goes down and the moon comes up.
+      const dusk = S.html(stage, `<div class="abs" style="width:1920px;height:880px;background:linear-gradient(#4a3a78, #e98a6b 78%, #f4c64f);opacity:0" data-layout-ignore></div>`);
+      const sun = S.html(stage, `<div class="abs" style="width:220px;height:220px;border-radius:50%;background:var(--sun);border:7px solid var(--ink)" data-layout-ignore></div>`);
+      gsap.set(sun, { x: 1010, y: 90 });
+      const moon = S.html(stage, `<svg class="prop" width="170" height="170" viewBox="0 0 170 170" data-layout-ignore><path d="M110 12 A76 76 0 1 0 158 112 A60 60 0 0 1 110 12 Z" fill="${S.CREAM}" ${S.L}/></svg>`);
+      gsap.set(moon, { x: 1090, y: 70, scale: 0, transformOrigin: "50% 50%" });
+      const rs = S.rand(55);
+      const stars = Array.from({ length: 14 }, () => { const el = S.html(stage, `<div class="abs" style="width:14px;height:14px;border-radius:50%;background:var(--cream)" data-layout-ignore></div>`); gsap.set(el, { x: 40 + rs() * 1840, y: 30 + rs() * 330, scale: 0 }); return el; });
+      S.ground(stage);
+
+      // The Tool: one window, a browser in the front half and a terminal in the back half.
+      const tool = S.html(stage, `<div class="abs" style="width:640px;height:440px" data-layout-ignore>
+        <div class="window" style="width:640px;height:440px"><div class="bar"><i style="background:var(--red)"></i><i style="background:var(--sun)"></i><i style="background:var(--teal)"></i><span class="mono" style="font-size:24px;margin-left:10px">dor tool</span></div>
+          <div style="position:absolute;left:0;top:54px;bottom:0;width:50%;border-right:7px solid var(--ink);padding:20px"><div style="height:26px;width:70%;background:var(--ink);border-radius:8px;margin-bottom:16px"></div><div style="height:150px;background:var(--teal);border:6px solid var(--ink);border-radius:14px;margin-bottom:16px"></div><div style="height:14px;width:85%;background:#c9c2b4;border-radius:7px;margin-bottom:10px"></div><div style="height:14px;width:55%;background:#c9c2b4;border-radius:7px"></div></div>
+          <div class="mono" style="position:absolute;right:0;top:54px;bottom:0;width:50%;background:var(--tile);color:var(--cream);font-size:24px;line-height:1.6;padding:16px 18px">$ npm run dev<br><span style="color:#9be7da">ready in 212ms</span><br>$ <span style="color:var(--sun)">_</span></div></div>
+        <svg class="prop wig" width="640" height="440" viewBox="0 0 640 440"><path d="M-6 30 C30 -44 190 -62 330 -40 C470 -62 620 -40 652 40 C672 150 664 300 700 420 C664 424 640 404 630 380 C632 420 620 448 596 462 C590 420 580 380 574 330 C566 240 572 120 560 60 C500 20 420 30 330 44 C230 20 110 20 60 70 C36 60 10 50 -6 30 Z" fill="${S.HAIR}" ${S.L}/></svg></div>`);
+      gsap.set(tool, { x: 110, y: 420, scale: 0, transformOrigin: "50% 100%" });
+      const wig = tool.querySelector(".wig");
+      gsap.set(wig, { y: -520, opacity: 0 });
+      const names = ["Go", "Python", "Rust", "React"], colors = [S.BLUE, S.SUN, S.RED, S.TEAL];
+      const blocks = names.map((n, i) => { const el = S.html(stage, `<div class="abs display" style="width:300px;height:86px;background:${colors[i]};border:7px solid var(--ink);border-radius:16px;box-shadow:7px 7px 0 var(--ink);font-size:50px;display:flex;align-items:center;justify-content:center" data-layout-ignore>${n}</div>`); gsap.set(el, { x: 1420 + [0, 14, -10, 6][i], y: -120 }); return el; });
+      const TOP = 880 - 86 * 4;
+
+      const m = S.mouse(stage, { scale: 1.15, mullet: true });
+      S.stand(m, 960);
+      gsap.set(m.el, { transformOrigin: "50% 90%" });
+      S.bop(tl, m, sc.beats, { amp: 1.1, to: w("evening") });
+      S.sing(tl, m, S.wordsOf(sc.lines));
+
+      // "A Dor Tool is a mullet": it presents the Tool, and the Tool gets the haircut.
+      tl.to(tool, { scale: 1, duration: 0.3, ease: "back.out(1.8)" }, 0.02);
+      tl.to(m.armL, { rotation: 100, duration: 0.2, ease: "back.out(2)" }, w("tool"));
+      tl.to(m.head, { rotation: -8, duration: 0.2 }, w("tool"));
+      tl.set(wig, { opacity: 1 }, w("mullet") - 0.2);
+      tl.to(wig, { y: 0, duration: 0.2, ease: "power2.in" }, w("mullet") - 0.2);
+      tl.fromTo(tool, { scaleY: 0.9, scaleX: 1.05 }, { scaleY: 1, scaleX: 1, duration: 0.45, ease: "elastic.out(1, 0.4)", immediateRender: false }, w("mullet"));
+      S.ringAt(tl, stage, 430, 520, w("mullet"), { size: 900 });
+
+      // "I can build with any stack": blocks drop into a pile, and the mouse hops up on it.
+      tl.to(m.head, { rotation: 8, duration: 0.2 }, w("i"));
+      tl.to(m.armL, { rotation: 20, duration: 0.2 }, w("i"));
+      tl.to(m.armR, { rotation: -100, duration: 0.2, ease: "back.out(2)" }, w("i"));
+      const drops = [w("build"), w("with"), w("any"), w("stack")];
+      blocks.forEach((b, i) => { tl.to(b, { y: 880 - 86 * (i + 1) - 4, duration: 0.2, ease: "power2.in" }, drops[i] - 0.2); tl.fromTo(b, { scaleY: 0.8 }, { scaleY: 1, transformOrigin: "50% 100%", duration: 0.3, ease: "elastic.out(1, 0.5)", immediateRender: false }, drops[i]); });
+      S.leap(tl, m, w("stack") + 0.05, 1570, TOP - 6, { rise: 70, dur: 0.3 });
+      tl.to([m.armL, m.armR, m.head], { rotation: 0, duration: 0.2 }, w("stack") + 0.05);
+
+      // "Vibe-coded in an evening": night falls and it lies back.
+      const vibe = w("vibe-coded");
+      tl.to(dusk, { opacity: 1, duration: 0.9, ease: "power1.inOut" }, vibe);
+      tl.to(sun, { y: 900, duration: 1.0, ease: "power1.in" }, vibe);
+      tl.to(m.el, { rotation: -16, duration: 0.35, ease: "back.out(1.6)" }, vibe + 0.1);
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -152 : 152), duration: 0.3, ease: "back.out(2)" }, vibe + 0.1);
+      tl.to(moon, { scale: 1, duration: 0.3, ease: "back.out(2.4)" }, w("evening"));
+      stars.forEach((s, i) => tl.to(s, { scale: 1, duration: 0.2, ease: "back.out(3)" }, w("evening") + i * 0.03));
+      tl.to(m.eyes, { scaleY: 0.12, duration: 0.1 }, w("evening"));
+
+      // "but still easy to maintain": one eye opens, one finger points, and the Tool is fine.
+      tl.to(m.eyes, { scaleY: 1, duration: 0.08 }, w("but"));
+      tl.to(m.armL, { rotation: 96, duration: 0.2, ease: "back.out(2)" }, w("easy") - 0.1);
+      tl.fromTo(tool, { rotation: -3 }, { rotation: 0, duration: 0.4, ease: "elastic.out(1, 0.3)", immediateRender: false }, w("easy"));
+      S.tick(tl, stage, 700, 450, w("maintain"), 1.8);
+      S.ringAt(tl, stage, 700, 450, w("maintain"), { size: 800, color: S.TEAL });
+
+      S.karaoke(sc);
+      window.__timelines["tool"] = tl;
+    })();
+  </script>
+</template>

@@ -1,0 +1,104 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="party" data-width="1920" data-height="1080">
+    <div id="party-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("party"); const { tl, stage, w } = sc;
+      const cam = S.html(stage, `<div class="abs" style="width:1920px;height:1080px" data-layout-ignore></div>`);
+      const { straps } = S.train(cam, 1920, tl, sc.dur, { speed: 170 });
+      // Party lights on the wall, a different color for each line of the chorus.
+      const tint = S.html(cam, `<div class="abs" style="width:1920px;height:1080px;background:var(--sun);opacity:0.5"></div>`);
+      const r = S.rand(31);
+      const lights = Array.from({ length: 7 }, (_, i) => { const el = S.html(cam, `<div class="abs" style="width:260px;height:260px;border-radius:50%;background:${[S.PINK, S.CREAM, S.TEAL, S.BLUE][i % 4]};opacity:0.55"></div>`); gsap.set(el, { x: 40 + i * 270 + r() * 40, y: 380 + r() * 200, scale: 0.5 }); return el; });
+      S.trainSeat(cam, 1920);
+      S.ground(cam, "#8fa9a2");
+
+      // Everyone in the car is up and dancing.
+      const botL = S.bot(cam, { scale: 1.25, color: S.TEAL }); gsap.set(botL.el, { x: 110, y: 880 - 244 * 1.25 });
+      const botR = S.bot(cam, { scale: 1.25, color: S.BLUE }); gsap.set(botR.el, { x: 1570, y: 880 - 244 * 1.25 });
+      const grey = S.mouse(cam, { scale: 1.12, fur: "#b9b1a3", inner: "#8f877a", belly: "#ded8cc" }); S.stand(grey, 560);
+      const her = S.mouse(cam, { scale: 1.2, ...S.girlLook }); S.stand(her, 1360);
+      const him = S.mouse(cam, { scale: 1.4, mullet: true }); S.stand(him, 960);
+      const mice = [grey, him, her];
+      mice.forEach((m, i) => { S.bop(tl, m, sc.beats, { amp: 1.3 }); S.sing(tl, m, S.wordsOf(sc.lines)); });
+      S.dance(tl, him, sc.beats);
+      sc.beats.forEach((b) => {
+        [grey, her].forEach((m, k) => { const up = (b.n + k) % 2 === 0; tl.to(m.armL, { rotation: up ? 150 : 30, duration: 0.2, ease: "back.out(2)" }, b.t); tl.to(m.armR, { rotation: up ? -150 : -30, duration: 0.2, ease: "back.out(2)" }, b.t); });
+        [botL, botR].forEach((bt, k) => { const up = (b.n + k) % 2 === 0; tl.to(bt.armL, { rotation: up ? 150 : 0, duration: 0.2, ease: "back.out(2)" }, b.t + 0.333); tl.to(bt.armR, { rotation: up ? 0 : -150, duration: 0.2, ease: "back.out(2)" }, b.t + 0.333); tl.to(bt.head, { rotation: up ? 9 : -9, duration: 0.2, ease: "back.out(2)" }, b.t); });
+        tl.fromTo(cam, { y: 9 }, { y: 0, duration: 0.3, ease: "power2.out", immediateRender: false }, b.t);
+        tl.to(straps, { rotation: b.n % 2 ? 16 : -16, duration: 0.3, ease: "sine.inOut" }, b.t);
+        tl.to(lights, { scale: (k) => ((b.n + k) % 2 ? 1.15 : 0.5), duration: 0.3, ease: "power2.out" }, b.t);
+        tl.to(him.mulletBack, { rotation: b.n % 2 ? 5 : -5, duration: 0.3, ease: "sine.inOut" }, b.t);
+      });
+      S.bounce(tl, botL.all, sc.beats, { amp: 1.4 });
+      S.bounce(tl, botR.all, sc.beats, { amp: 1.4 });
+      [S.SUN, S.TEAL, S.PINK, S.BLUE].forEach((c, i) => tl.set(tint, { background: c }, sc.bar(20 + i) + 0.001));
+      [21, 22, 23].forEach((b) => S.flash(tl, stage, sc.bar(b), 0.45));
+
+      // Each line brings its own thing in over their heads, and takes the last one away.
+      const prop = (el, x, y, rot = 0) => { gsap.set(el, { x, y, scale: 0, rotation: rot, transformOrigin: "50% 50%" }); return el; };
+      const inAt = (el, t, s = 1) => tl.to(el, { scale: s, duration: 0.26, ease: "back.out(2.6)" }, t);
+      const outAt = (els, t) => tl.to(els, { scale: 0, duration: 0.14, ease: "back.in(2)" }, t - 0.16);
+      const sign = (text, bg, color, size = 92) => S.html(cam, `<div class="sign" style="background:${bg};color:${color};font-size:${size}px">${text}</div>`);
+      // "multitask more"
+      const multi = prop(sign("multitask", "var(--cream)", "var(--ink)", 110), 380, 70, -4), more = prop(sign("more!", "var(--ink)", "var(--sun)", 130), 1120, 60, 5);
+      inAt(multi, w("multitask")); inAt(more, w("more"));
+      S.ringAt(tl, cam, 960, 300, w("more"), { size: 1900, color: S.CREAM });
+      mice.forEach((m, i) => S.hop(tl, m.el, w("more") - 0.04 + i * 0.03, { height: 80, dur: 0.32 }));
+      outAt([multi, more], sc.bar(21));
+      // "D-O-R spells dor": a card over each mouse.
+      const d = w("d-o-r"), step = (w("d-o-r", { after: true }) - d) / 3;
+      const cards = ["D", "O", "R"].map((ch, i) => { const c = prop(S.html(cam, `<div class="letter">${ch}</div>`), [465, 865, 1265][i], 40, [-6, 3, -4][i]); inAt(c, d + i * step); S.hop(tl, mice[i].el, d + i * step - 0.04, { height: 60, dur: 0.26 }); return c; });
+      const dor = w("dor", { nth: 1 });
+      tl.to(cards, { x: (i) => 865 + (i - 1) * 204, rotation: 0, duration: 0.2, ease: "back.out(2)" }, w("spells"));
+      tl.fromTo(cards, { y: 0 }, { y: 40, duration: 0.3, ease: "bounce.out", immediateRender: false }, dor);
+      S.ringAt(tl, cam, 960, 150, dor, { size: 1500, color: S.CREAM });
+      outAt(cards, sc.bar(22));
+      // "VS Code or standalone"
+      const vs = prop(sign("VS Code", "#3f7fc0", "#fff", 110), 250, 70, -5), sa = prop(sign("standalone", "var(--tile)", "#fff", 110), 1010, 70, 4);
+      inAt(vs, w("vs")); inAt(sa, w("standalone"));
+      S.hop(tl, grey.el, w("vs") - 0.04, { height: 80, dur: 0.3 }); S.hop(tl, her.el, w("standalone") - 0.04, { height: 80, dur: 0.3 });
+      S.ringAt(tl, cam, 1360, 200, w("standalone"), { size: 900, color: S.CREAM });
+      outAt([vs, sa], sc.bar(23));
+      // "from my laptop to my phone": panes fly from one to the other.
+      const laptop = prop(S.html(cam, `<svg class="prop" width="340" height="230" viewBox="0 0 340 230"><rect x="40" y="8" width="260" height="170" rx="18" fill="${S.TILE}" ${S.L}/><rect x="58" y="26" width="104" height="60" rx="8" fill="${S.TEAL}"/><rect x="176" y="26" width="106" height="60" rx="8" fill="${S.PINK}"/><rect x="58" y="98" width="224" height="62" rx="8" fill="${S.SUN}"/><path d="M8 182 H332 L312 220 H28 Z" fill="${S.GREY}" ${S.L}/></svg>`), 330, 40, -5);
+      const phone = prop(S.html(cam, `<svg class="prop" width="160" height="270" viewBox="0 0 160 270"><rect x="8" y="8" width="144" height="254" rx="30" fill="${S.TILE}" ${S.L}/><rect x="28" y="40" width="104" height="52" rx="8" fill="${S.TEAL}"/><rect x="28" y="104" width="104" height="52" rx="8" fill="${S.PINK}"/><rect x="28" y="168" width="104" height="52" rx="8" fill="${S.SUN}"/></svg>`), 1350, 20, 6);
+      inAt(laptop, w("laptop")); inAt(phone, w("phone"));
+      [S.TEAL, S.PINK, S.SUN].forEach((c, i) => {
+        const p = S.html(cam, `<div class="abs" style="width:90px;height:56px;background:${c};border:6px solid var(--ink);border-radius:12px"></div>`);
+        gsap.set(p, { x: 640, y: 130, scale: 0 });
+        const t0 = w("to", { nth: 0 }) - 0.1 + i * 0.09, t1 = w("phone") + i * 0.07;
+        tl.set(p, { scale: 1 }, t0);
+        tl.to(p, { x: 1380, rotation: 300, duration: t1 - t0, ease: "none" }, t0);
+        tl.to(p, { y: 20, duration: (t1 - t0) / 2, ease: "power2.out" }, t0);
+        tl.to(p, { y: 130, duration: (t1 - t0) / 2, ease: "power2.in" }, t0 + (t1 - t0) / 2);
+        tl.set(p, { scale: 0 }, t1);
+      });
+      S.ringAt(tl, cam, 1430, 160, w("phone"), { size: 900, color: S.CREAM });
+      mice.forEach((m, i) => S.hop(tl, m.el, w("phone") + i * 0.03, { height: 90, dur: 0.32 }));
+
+      // It opens on the word he was winding up for.
+      const slam = S.html(stage, `<div class="abs" style="width:1920px;height:1080px;background:var(--sun);overflow:hidden" data-layout-ignore></div>`);
+      const burst = S.html(slam, `<svg class="prop" width="1920" height="1080" viewBox="-960 -540 1920 1080">${Array.from({ length: 16 }, (_, i) => `<path d="M0 0 L${Math.cos((i / 16) * 6.283) * 1500} ${Math.sin((i / 16) * 6.283) * 1500} L${Math.cos(((i + 0.5) / 16) * 6.283) * 1500} ${Math.sin(((i + 0.5) / 16) * 6.283) * 1500} Z" fill="#f8d679"/>`).join("")}</svg>`);
+      gsap.set(burst, { transformOrigin: "50% 50%" });
+      tl.to(burst, { rotation: 40, duration: 1.6, ease: "none" }, 0);
+      const big = S.mouse(slam, { scale: 1.75, mullet: true });
+      S.stand(big, 960, 1050);
+      gsap.set([big.armL, big.armR], { rotation: (i) => (i ? -150 : 150) });
+      S.bop(tl, big, sc.beats, { amp: 1.5, to: 1.4 });
+      S.sing(tl, big, S.wordsOf(sc.lines), { to: 1.4 });
+      const word = S.html(slam, `<div class="abs display" style="width:1920px;text-align:center;font-size:300px;color:var(--ink);text-shadow:12px 12px 0 var(--cream)">DORMOUSE!</div>`);
+      gsap.set(word, { y: 40, transformOrigin: "50% 50%" });
+      tl.fromTo(word, { scale: 2.6 }, { scale: 1, duration: 0.2, ease: "power4.out" }, 0);
+      tl.fromTo(word, { rotation: -3 }, { rotation: 3, duration: 0.09, repeat: 5, yoyo: true, ease: "sine.inOut" }, 0.2);
+      tl.fromTo(word, { scale: 1.12 }, { scale: 1, duration: 0.3, ease: "power2.out", immediateRender: false }, w("dormouse", { nth: 1 }));
+      S.ringAt(tl, slam, 960, 540, 0.02, { size: 2600, color: S.CREAM, dur: 0.7 });
+      tl.to(slam, { y: -1090, duration: 0.3, ease: "power3.in" }, w("multitask") - 0.4);
+
+      S.karaoke(sc);
+      window.__timelines["party"] = tl;
+    })();
+  </script>
+</template>

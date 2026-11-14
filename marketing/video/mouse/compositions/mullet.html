@@ -1,0 +1,65 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="mullet" data-width="1920" data-height="1080">
+    <div id="mullet-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("mullet"); const { tl, stage, w } = sc;
+      S.dots(stage, 21);
+      // The party side: a dark room with lights, which the turn reveals.
+      const night = S.html(stage, `<div class="abs" style="width:1920px;height:880px;background:#3a2d52;opacity:0" data-layout-ignore></div>`);
+      const r = S.rand(77);
+      const lights = [S.PINK, S.TEAL, S.SUN, S.BLUE, S.PINK, S.SUN].map((c, i) => { const el = S.html(night, `<div class="abs" style="width:300px;height:300px;border-radius:50%;background:${c};opacity:0.5"></div>`); gsap.set(el, { x: 60 + i * 310 + r() * 60, y: 40 + r() * 420, scale: 0.6 }); return el; });
+      S.ground(stage);
+      const floor = S.html(stage, `<div class="ground" style="background:#2a2040;opacity:0" data-layout-ignore></div>`);
+
+      // The business side: a browser window.
+      const browser = S.html(stage, `<div class="window" style="width:560px;height:400px" data-layout-ignore><div class="bar"><i style="background:var(--red)"></i><i style="background:var(--sun)"></i><i style="background:var(--teal)"></i><span class="mono" style="font-size:22px;margin-left:12px;background:var(--sand);padding:6px 14px;border-radius:10px">localhost:5173</span></div>
+        <div style="padding:22px 26px"><div style="height:34px;width:60%;background:var(--ink);border-radius:8px;margin-bottom:18px"></div><div style="display:flex;gap:16px"><div style="flex:1;height:150px;background:var(--teal);border:6px solid var(--ink);border-radius:14px"></div><div style="flex:1;height:150px;background:var(--sun);border:6px solid var(--ink);border-radius:14px"></div></div><div style="height:16px;width:80%;background:#c9c2b4;border-radius:8px;margin-top:18px"></div></div></div>`);
+      gsap.set(browser, { x: -600, y: 330, rotation: -4 });
+      const terms = [[90, 150, S.TEAL, "zsh"], [1420, 110, S.PINK, "agent"], [150, 520, S.SUN, "logs"], [1480, 480, S.BLUE, "dev"]].map(([x, y, color, title], i) => { const p = S.pane(stage, { w: 330, h: 220, title, color, rows: 6, seed: 80 + i }); gsap.set(p, { x, y, scale: 0, rotation: [-8, 7, 6, -6][i], transformOrigin: "50% 50%" }); return p; });
+
+      const m = S.mouse(stage, { scale: 1.5 });
+      S.stand(m, 960);
+      gsap.set(m.el, { transformOrigin: "50% 50%" });
+      gsap.set([m.mulletBack, m.mulletFront], { opacity: 1, scale: 0 });
+      S.bop(tl, m, sc.beats, { amp: 1.2 });
+      S.sing(tl, m, S.wordsOf(sc.lines), { to: w("terminal") });
+      const sign = (text, x, y, bg, color) => { const el = S.html(stage, `<div class="sign" style="background:${bg};color:${color};font-size:76px">${text}</div>`); gsap.set(el, { x, y, scale: 0, rotation: -5, transformOrigin: "50% 50%" }); return el; };
+      const front = sign("front", 300, 730, "var(--cream)", "var(--ink)"), back = sign("back", 1300, 730, "var(--sun)", "var(--ink)");
+
+      // "Browser repping in the front": the window comes in, and a neat fringe grows.
+      tl.to(browser, { x: 110, duration: 0.3, ease: "back.out(1.5)" }, w("browser"));
+      tl.to(m.armL, { rotation: 96, duration: 0.2, ease: "back.out(2)" }, w("browser") + 0.1);
+      tl.to(m.mulletFront, { scale: 1, duration: 0.24, ease: "back.out(3)" }, w("repping"));
+      tl.to(m.mulletBack, { scale: 1, duration: 0.3, ease: "back.out(2)" }, w("repping") + 0.1);
+      tl.to(front, { scale: 1, duration: 0.22, ease: "back.out(2.6)" }, w("repping") + 0.15);
+      S.ringAt(tl, stage, 960, 400, w("front"), { size: 700 });
+
+      // "terminal party in the back": it turns round, and there is a lot more hair there.
+      const turn = w("terminal") - 0.02;
+      tl.to(m.el, { scaleX: 0, duration: 0.09, ease: "power2.in" }, turn);
+      tl.set([m.face, m.mulletFront, m.belly], { opacity: 0 }, turn + 0.09);
+      tl.set(m.rear, { opacity: 1 }, turn + 0.09);
+      tl.to(m.el, { scaleX: 1, duration: 0.14, ease: "back.out(2.5)" }, turn + 0.09);
+      tl.to(night, { opacity: 1, duration: 0.15 }, turn);
+      tl.to(floor, { opacity: 1, duration: 0.15 }, turn);
+      tl.to(browser, { x: -640, duration: 0.2, ease: "power2.in" }, turn);
+      tl.to(front, { scale: 0, duration: 0.12 }, turn);
+      terms.forEach((p, i) => tl.to(p, { scale: 1, duration: 0.24, ease: "back.out(2.4)" }, w("terminal") + 0.08 + i * 0.12));
+      S.dance(tl, m, sc.beats, { from: turn });
+      for (let t = turn + 0.15, i = 0; t < sc.dur; t += 0.1665, i++) {
+        tl.to(m.rear, { rotation: i % 2 ? 7 : -7, duration: 0.16, ease: "sine.inOut" }, t);
+        tl.to(lights, { scale: (k) => ((i + k) % 2 ? 1.1 : 0.55), duration: 0.16, ease: "power2.out" }, t);
+        tl.to(terms, { y: (k) => `+=${(i + k) % 2 ? 22 : -22}`, duration: 0.16, ease: "sine.inOut" }, t);
+      }
+      S.hop(tl, m.el, w("party"), { height: 60, dur: 0.3 });
+      tl.to(back, { scale: 1, duration: 0.22, ease: "back.out(2.6)" }, w("party") + 0.15);
+      S.ringAt(tl, stage, 960, 420, w("back"), { size: 1800, color: S.PINK });
+
+      S.karaoke(sc);
+      window.__timelines["mullet"] = tl;
+    })();
+  </script>
+</template>

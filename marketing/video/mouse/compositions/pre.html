@@ -1,0 +1,76 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="pre" data-width="1920" data-height="1080">
+    <div id="pre-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("pre"); const { tl, stage, w } = sc;
+      S.dots(stage, 5);
+      const c = S.crew(stage);
+      const wires = S.html(stage, `<svg class="prop" width="1920" height="1080" viewBox="0 0 1920 1080" data-layout-ignore>
+        <path class="wire" d="M700 236 C560 300 500 420 500 560" /><path class="wire" d="M1220 236 C1360 300 1420 420 1420 560" />
+        <path class="wire" d="M610 846 H752" /><path class="wire" d="M1168 846 H1310" /></svg>`);
+      S.ground(stage);
+      const { m, sv, botL, botR } = c;
+      gsap.set(m.armR, { rotation: -30 });
+      gsap.set(botL.armR, { rotation: -150 }); gsap.set(botR.armL, { rotation: 150 });
+      const paths = [...wires.querySelectorAll(".wire")];
+      paths.forEach((p) => { p.setAttribute("fill", "none"); p.setAttribute("stroke", S.INK); p.setAttribute("stroke-width", "9"); p.setAttribute("stroke-linecap", "round"); const n = Math.ceil(p.getTotalLength()) + 2; gsap.set(p, { strokeDasharray: n, strokeDashoffset: n }); });
+      const [w1, w2, w3, w4] = paths;
+      S.bop(tl, m, sc.beats);
+      S.sing(tl, m, S.wordsOf(sc.lines));
+      S.bounce(tl, botL.all, sc.beats, { offbeat: true });
+      S.bounce(tl, botR.all, sc.beats, { offbeat: true });
+
+      // "Alerts pop up": a bell over whoever needs the mouse, and it looks at each.
+      const until = w("know");
+      S.ringBell(tl, stage, 500, 500, w("alerts"), { scale: 1.3, until });
+      tl.to(botL.armR, { rotation: 0, duration: 0.15 }, w("alerts"));
+      tl.to(m.head, { rotation: -12, duration: 0.15 }, w("alerts") + 0.05);
+      S.ringBell(tl, stage, 1420, 500, w("pop"), { scale: 1.3, until: until + 0.08 });
+      tl.to(botR.armL, { rotation: 0, duration: 0.15 }, w("pop"));
+      tl.to(m.head, { rotation: 12, duration: 0.15 }, w("pop") + 0.05);
+      S.ringBell(tl, stage, 1113, 150, w("up"), { scale: 1.1, until: until + 0.16 });
+      tl.to(m.head, { rotation: 0, duration: 0.15 }, w("up") + 0.05);
+      tl.to(m.eyes, { y: -8, duration: 0.12 }, w("up") + 0.05);
+      tl.to(m.eyes, { y: 0, duration: 0.12 }, w("need"));
+      // "when I need to know": one wave of the baton and each is dealt with.
+      tl.to(m.armR, { rotation: -160, duration: 0.2, ease: "power2.out" }, w("need") - 0.1);
+      tl.to(m.armR, { rotation: -40, duration: 0.12, ease: "power3.in" }, until - 0.12);
+      S.tick(tl, stage, 500, 500, until + 0.05, 1.2);
+      S.tick(tl, stage, 1420, 500, until + 0.13, 1.2);
+      S.tick(tl, stage, 1113, 150, until + 0.21, 1);
+      tl.to([botL.armR, botR.armL], { rotation: (i) => (i ? 150 : -150), duration: 0.2, ease: "back.out(2)" }, until + 0.1);
+
+      // "C-L-I automation": a prompt opens over the top row, and the mouse types into it.
+      const term = S.html(stage, `<div class="pane" style="width:900px;height:210px" data-layout-ignore><div class="hd"><i style="background:var(--sun)"></i>dor</div><div class="bd" style="color:var(--cream);font-size:38px;line-height:1.35;padding:14px 22px"></div></div>`);
+      gsap.set(term, { x: 510, y: 36, scale: 0, transformOrigin: "50% 50%" });
+      const cli = w("c-l-i");
+      tl.to(term, { scale: 1, duration: 0.25, ease: "back.out(2)" }, cli - 0.15);
+      const body = term.querySelector(".bd");
+      S.type(tl, body, "$ dor split -- claude", cli + 0.05, w("to") - 0.05);
+      S.type(tl, body, "$ dor await --until quiet", w("to"), w("flow") - 0.1);
+      const ok = S.html(body, `<div class="mono" style="color:#9be7da;opacity:0">flow: ready</div>`);
+      tl.set(ok, { opacity: 1 }, w("flow"));
+      tl.to(m.armR, { rotation: -55, duration: 0.15 }, cli - 0.05);
+      tl.to(m.armL, { rotation: 55, duration: 0.15 }, cli - 0.05);
+      S.typing(tl, m, cli + 0.1, w("flow") - 0.15);
+      // "to build my own flow": wires run from the prompt to each agent, and along the floor to the server.
+      tl.to(w1, { strokeDashoffset: 0, duration: 0.35, ease: "power2.inOut" }, w("automation") + 0.15);
+      tl.to(w2, { strokeDashoffset: 0, duration: 0.35, ease: "power2.inOut" }, w("build") - 0.1);
+      tl.to(w3, { strokeDashoffset: 0, duration: 0.2, ease: "power2.inOut" }, w("my"));
+      tl.to(w4, { strokeDashoffset: 0, duration: 0.2, ease: "power2.inOut" }, w("own"));
+      const flow = w("flow");
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -150 : 150), duration: 0.2, ease: "back.out(2.5)" }, flow);
+      S.hop(tl, m.el, flow, { height: 46, dur: 0.3 });
+      S.ringAt(tl, stage, 500, 620, flow, { size: 500, color: S.TEAL });
+      S.ringAt(tl, stage, 1420, 620, flow + 0.08, { size: 500, color: S.PINK });
+      S.ringAt(tl, stage, 960, 790, flow + 0.16, { size: 700, color: S.BLUE });
+      sv.leds.forEach((led, i) => tl.fromTo(led, { opacity: 0.2 }, { opacity: 1, duration: 0.08, repeat: 3, yoyo: true, immediateRender: false }, flow + (i % 3) * 0.06));
+
+      S.karaoke(sc);
+      window.__timelines["pre"] = tl;
+    })();
+  </script>
+</template>

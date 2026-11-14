@@ -1,0 +1,57 @@
+<template>
+  <style>#root{position:absolute;inset:0} #hosts-stage{background:var(--pink)}</style>
+  <div id="root" data-composition-id="hosts" data-width="1920" data-height="1080">
+    <div id="hosts-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("hosts"); const { tl, stage, w } = sc;
+      S.dots(stage, 15, "#f195b0");
+      S.ground(stage, "#d96a8c");
+      S.flash(tl, stage, 0.001, 0.5);
+      const bars = (n, colors, seed) => { const r = S.rand(seed); return Array.from({ length: n }, (_, i) => `<div style="height:13px;border-radius:7px;margin-bottom:11px;width:${Math.round(25 + r() * 70)}%;background:${colors[i % colors.length]}"></div>`).join(""); };
+      const mini = (title, color, seed) => `<div style="flex:1;background:var(--tile);border:5px solid var(--ink);border-radius:12px;padding:8px 10px;overflow:hidden"><div class="mono" style="color:var(--cream);font-size:17px;margin-bottom:8px">${title}</div>${bars(4, [color, "#fff8ea", "#8d867a"], seed)}</div>`;
+
+      // An editor with Dormouse in its panel, and Dormouse as its own window.
+      const code = S.html(stage, `<div class="window" style="width:660px;height:400px" data-layout-ignore><div class="bar"><i style="background:var(--red)"></i><i style="background:var(--sun)"></i><i style="background:var(--teal)"></i></div>
+        <div style="position:absolute;left:0;top:54px;bottom:0;width:60px;background:#3f7fc0;border-right:6px solid var(--ink)"></div>
+        <div style="position:absolute;left:66px;top:54px;bottom:0;width:150px;border-right:6px solid var(--ink);padding:14px 12px">${bars(6, ["#c9c2b4"], 3)}</div>
+        <div style="position:absolute;left:222px;top:54px;right:0;height:128px;padding:14px 16px">${bars(4, ["#79b4e8", "#c9c2b4", "#ec7fa0"], 4)}</div>
+        <div style="position:absolute;left:222px;top:182px;right:0;bottom:0;border-top:6px solid var(--ink);background:var(--sand);padding:10px;display:flex;gap:10px">${mini("agent", "#5fb3a6", 5)}${mini("dev", "#f4c64f", 6)}</div></div>`);
+      const app = S.html(stage, `<div class="window" style="width:660px;height:400px;background:var(--sand)" data-layout-ignore><div class="bar" style="background:var(--tile);color:var(--cream)"><i style="background:var(--red)"></i><i style="background:var(--sun)"></i><i style="background:var(--teal)"></i><span class="mono" style="font-size:24px;margin-left:10px">&gt;_</span></div>
+        <div style="position:absolute;left:0;right:0;top:54px;bottom:0;padding:12px;display:flex;gap:12px"><div style="flex:1;display:flex;flex-direction:column;gap:12px">${mini("agent", "#5fb3a6", 7)}${mini("agent", "#ec7fa0", 8)}</div><div style="flex:1.2;display:flex">${mini("dev server", "#f4c64f", 9)}</div></div></div>`);
+      const WY = 486;
+      gsap.set(code, { x: 130, y: WY, scale: 0, transformOrigin: "50% 100%" });
+      gsap.set(app, { x: 1130, y: WY, scale: 0, transformOrigin: "50% 100%" });
+      tl.to(code, { scale: 1, duration: 0.3, ease: "back.out(1.8)" }, w("dormouse"));
+      tl.to(app, { scale: 1, duration: 0.3, ease: "back.out(1.8)" }, w("dormouse", { nth: 1 }));
+      const label = (text, x, bg, color) => { const el = S.html(stage, `<div class="sign" style="background:${bg};color:${color}">${text}</div>`); gsap.set(el, { x, y: 770, scale: 0, rotation: -4, transformOrigin: "50% 50%" }); return el; };
+      const l1 = label("VS Code", 300, "#3f7fc0", "#fff"), l2 = label("standalone", 1270, "var(--tile)", "#fff");
+
+      const m = S.mouse(stage, { scale: 0.9 });
+      S.stand(m, 960);
+      S.bop(tl, m, sc.beats, { amp: 1.2 });
+      S.dance(tl, m, sc.beats, { to: w("vs") - 0.5 });
+      S.sing(tl, m, S.wordsOf(sc.lines));
+
+      // "VS Code": up onto the editor. "or standalone": across to the app.
+      const land = (win, sign, t) => {
+        tl.fromTo(win, { scaleY: 0.9, scaleX: 1.04 }, { scaleY: 1, scaleX: 1, duration: 0.4, ease: "elastic.out(1, 0.45)", immediateRender: false }, t);
+        tl.to(sign, { scale: 1, duration: 0.24, ease: "back.out(2.6)" }, t);
+      };
+      const vs = w("vs");
+      S.leap(tl, m, vs - 0.32, 460, WY + 8, { rise: 150, dur: 0.32 });
+      land(code, l1, vs);
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -150 : 150), duration: 0.2, ease: "back.out(2)" }, vs);
+      const sa = w("standalone");
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -100 : 100), duration: 0.15 }, sa - 0.4);
+      S.leap(tl, m, sa - 0.26, 1460, WY + 8, { rise: 230, dur: 0.44 });
+      land(app, l2, sa + 0.18);
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -150 : 150), duration: 0.2, ease: "back.out(2)" }, sa + 0.18);
+      S.ringAt(tl, stage, 1460, 420, sa + 0.18, { size: 900, color: S.CREAM });
+
+      S.karaoke(sc);
+      window.__timelines["hosts"] = tl;
+    })();
+  </script>
+</template>

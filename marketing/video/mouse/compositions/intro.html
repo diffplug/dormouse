@@ -1,0 +1,97 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="intro" data-width="1920" data-height="1080">
+    <div id="intro-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("intro"); const { tl, stage, line } = sc;
+      const outer = stage;
+      const cam = S.html(outer, `<div class="abs" style="width:1920px;height:1080px" data-layout-ignore></div>`);
+      S.dots(cam, 3);
+      // The wordmark waits for the last line.
+      const dor = S.html(cam, `<div class="abs display" style="font-size:230px;color:var(--ink);text-shadow:9px 9px 0 var(--fur)" data-layout-ignore>Dor</div>`);
+      const mse = S.html(cam, `<div class="abs display" style="font-size:230px;color:var(--ink);text-shadow:9px 9px 0 var(--fur)" data-layout-ignore>mouse</div>`);
+      gsap.set(dor, { x: 250, y: 130, scale: 0, transformOrigin: "50% 60%" });
+      gsap.set(mse, { x: 1190, y: 130, scale: 0, transformOrigin: "50% 60%" });
+
+      const m = S.mouse(cam, { id: "intro-mouse", scale: 1 });
+      const HID = 470, EARS = 372, EYES = 296, HEAD = 226, TOP = 38;
+      gsap.set(m.el, { x: 810, y: HID });
+      const t = S.tile(cam, { scale: 1.1 });
+      gsap.set(t.el, { x: 740, y: 444, transformOrigin: "50% 100%" });
+      S.ground(cam);
+      gsap.set(cam, { scale: 1.3, transformOrigin: "50% 81.48%" });
+
+      // The tile keeps time on its own: it squashes on the beat and its cursor blinks on the off-beat.
+      sc.beats.forEach((b) => {
+        tl.fromTo(t.el, { scaleY: 0.965, scaleX: 1.02 }, { scaleY: 1, scaleX: 1, duration: 0.3, ease: "power2.out", immediateRender: false }, b.t);
+        tl.set(t.us, { opacity: 0 }, b.t + 0.333);
+        tl.set(t.us, { opacity: 1 }, b.t + 0.6);
+      });
+      S.bop(tl, m, sc.beats, { amp: 0.8 });
+      S.sing(tl, m, S.wordsOf(sc.lines));
+
+      // "Do-do-Dormouse": the ears come up in stutters, then the whole head.
+      const i1 = line("intro1").start;
+      tl.to(m.el, { y: EARS, duration: 0.12, ease: "back.out(3)" }, i1);
+      tl.to(m.el, { y: EARS + 40, duration: 0.1 }, i1 + 0.17);
+      tl.to(m.el, { y: EYES, duration: 0.12, ease: "back.out(3)" }, i1 + 0.3);
+      tl.to(m.el, { y: EYES + 40, duration: 0.1 }, i1 + 0.47);
+      tl.to(m.el, { y: HEAD, duration: 0.2, ease: "back.out(2.5)" }, i1 + 0.6);
+      S.ringAt(tl, cam, 960, 430, i1 + 1.0, { size: 900 });
+      tl.to(m.el, { y: HID, duration: 0.25, ease: "power2.in" }, i1 + 1.9);
+
+      // "Dormouse": round the left side of the tile.
+      const i2 = line("intro2").start;
+      tl.set(m.el, { x: 760, y: 470, rotation: -24, transformOrigin: "50% 80%" }, i2 - 0.3);
+      tl.to(m.el, { x: 520, duration: 0.24, ease: "back.out(2)" }, i2 - 0.08);
+      S.blink(tl, m, i2 + 0.55);
+      tl.to(m.el, { x: 760, duration: 0.22, ease: "power2.in" }, i2 + 1.0);
+
+      // The quiet bar: it looks over the top, left and right.
+      tl.set(m.el, { x: 810, y: HID, rotation: 0 }, i2 + 1.3);
+      tl.to(m.el, { y: EYES, duration: 0.5, ease: "power2.out" }, i2 + 1.5);
+      tl.to(m.eyes, { x: -9, duration: 0.15 }, i2 + 2.0);
+      tl.to(m.eyes, { x: 9, duration: 0.15 }, i2 + 2.5);
+      tl.to(m.eyes, { x: 0, duration: 0.12 }, i2 + 2.95);
+      S.blink(tl, m, i2 + 3.1);
+      tl.to(m.el, { y: HID, duration: 0.2, ease: "power2.in" }, i2 + 3.2);
+
+      // "Do-do-Dormouse" again, round the right side.
+      const i3 = line("intro3").start;
+      tl.set(m.el, { x: 860, y: 470, rotation: 24 }, i3 - 0.25);
+      tl.to(m.el, { x: 940, duration: 0.1, ease: "back.out(3)" }, i3);
+      tl.to(m.el, { x: 900, duration: 0.08 }, i3 + 0.17);
+      tl.to(m.el, { x: 1010, duration: 0.1, ease: "back.out(3)" }, i3 + 0.3);
+      tl.to(m.el, { x: 970, duration: 0.08 }, i3 + 0.47);
+      tl.to(m.el, { x: 1100, duration: 0.18, ease: "back.out(2.5)" }, i3 + 0.6);
+      tl.to(m.el, { x: 860, duration: 0.14, ease: "power2.in" }, i3 + 0.98);
+
+      // "Dormouse, Dormouse": up over the top, then all the way onto the tile.
+      const i4 = line("intro4");
+      tl.set(m.el, { x: 810, y: HID, rotation: 0 }, i4.start - 0.04);
+      tl.to(m.el, { y: HEAD, duration: 0.18, ease: "back.out(2.5)" }, i4.start);
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -150 : 150), duration: 0.2, ease: "back.out(2)" }, i4.start + 0.1);
+      const up = i4.words[1].start - 0.3;
+      tl.to(cam, { scale: 1, duration: 0.5, ease: "power2.inOut" }, up - 0.25);
+      tl.to(m.el, { y: -24, duration: 0.2, ease: "power2.out" }, up);
+      tl.set(m.el, { zIndex: 5 }, up + 0.2);
+      tl.to(m.el, { y: TOP, duration: 0.16, ease: "power2.in" }, up + 0.2);
+      tl.fromTo(t.el, { scaleY: 0.88, scaleX: 1.06 }, { scaleY: 1, scaleX: 1, duration: 0.4, ease: "elastic.out(1, 0.5)", immediateRender: false }, up + 0.36);
+      S.ringAt(tl, cam, 960, 444, up + 0.36, { size: 1100 });
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -40 : 40), duration: 0.3, ease: "power2.out" }, up + 0.5);
+
+      // "Dormouse, Dormouse": its name, one half each side.
+      const i5 = line("intro5");
+      tl.to(dor, { scale: 1, duration: 0.3, ease: "back.out(2.2)" }, i5.words[0].start);
+      tl.to(m.armL, { rotation: 118, duration: 0.2, ease: "back.out(2)" }, i5.words[0].start);
+      tl.to(mse, { scale: 1, duration: 0.3, ease: "back.out(2.2)" }, i5.words[1].start);
+      tl.to(m.armR, { rotation: -118, duration: 0.2, ease: "back.out(2)" }, i5.words[1].start);
+      S.hop(tl, m.el, i5.words[1].start, { height: 50, dur: 0.3 });
+
+      S.karaoke(sc);
+      window.__timelines["intro"] = tl;
+    })();
+  </script>
+</template>

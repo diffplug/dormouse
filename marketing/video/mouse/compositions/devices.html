@@ -1,0 +1,66 @@
+<template>
+  <style>#root{position:absolute;inset:0} #devices-stage{background:var(--blue)}</style>
+  <div id="root" data-composition-id="devices" data-width="1920" data-height="1080">
+    <div id="devices-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("devices"); const { tl, stage, w } = sc;
+      S.dots(stage, 18, "#8fc1ee");
+      S.ground(stage, "#5f9ed6");
+      S.flash(tl, stage, 0.001, 0.5);
+
+      // A laptop with the mouse on its screen, and a phone that is asleep.
+      const laptop = S.html(stage, `<div class="abs" style="width:860px;height:560px" data-layout-ignore>
+        <div style="position:absolute;left:70px;top:0;width:720px;height:480px;background:var(--ink);border-radius:30px"></div>
+        <div class="scr" style="position:absolute;left:92px;top:22px;width:676px;height:436px;background:var(--paper);border-radius:14px;overflow:hidden"></div>
+        <div style="position:absolute;left:0;top:478px;width:860px;height:60px;background:var(--grey, #d9d3c7);border:7px solid var(--ink);border-radius:12px 12px 34px 34px;box-shadow:8px 8px 0 var(--ink)"></div>
+        <div style="position:absolute;left:350px;top:485px;width:160px;height:16px;background:var(--ink);border-radius:0 0 12px 12px"></div></div>`);
+      gsap.set(laptop, { x: 150, y: 330 });
+      const lscr = laptop.querySelector(".scr");
+      [[24, 26, S.TEAL, "agent"], [444, 26, S.PINK, "agent"]].forEach(([x, y, color, title], i) => { const p = S.pane(lscr, { w: 208, h: 150, title, color, rows: 4, seed: 60 + i }); gsap.set(p, { x, y }); p.style.boxShadow = "none"; });
+      const phone = S.html(stage, `<div class="abs" style="width:330px;height:600px" data-layout-ignore>
+        <div style="position:absolute;inset:0;background:var(--ink);border-radius:54px;box-shadow:9px 9px 0 rgba(46,43,39,.35)"></div>
+        <div class="scr" style="position:absolute;left:20px;top:20px;right:20px;bottom:20px;background:var(--tile);border-radius:36px;overflow:hidden"></div>
+        <div style="position:absolute;left:115px;top:30px;width:100px;height:22px;background:var(--ink);border-radius:11px"></div></div>`);
+      gsap.set(phone, { x: 1330, y: 270, rotation: 5, transformOrigin: "50% 100%" });
+      const pscr = phone.querySelector(".scr");
+      const lit = S.html(pscr, `<div style="position:absolute;inset:0;background:var(--paper);opacity:0"></div>`);
+      const stack = [[S.TEAL, "agent"], [S.PINK, "agent"]].map(([color, title], i) => { const p = S.pane(pscr, { w: 250, h: 104, title, color, rows: 2, seed: 70 + i }); gsap.set(p, { x: 20, y: 52 + i * 118, scale: 0, transformOrigin: "50% 50%" }); p.style.boxShadow = "none"; return p; });
+
+      const big = S.mouse(lscr, { scale: 0.95 });
+      gsap.set(big.el, { x: 338 - 142, y: 450 });
+      const small = S.mouse(pscr, { scale: 0.62 });
+      gsap.set(small.el, { x: 145 - 93, y: 570 });
+      [big, small].forEach((m) => { S.bop(tl, m, sc.beats, { amp: 1.2 }); S.sing(tl, m, S.wordsOf(sc.lines)); });
+
+      // "Dormouse, Dormouse": it pops up on the laptop and waves.
+      tl.to(big.el, { y: 108, duration: 0.3, ease: "back.out(2)" }, w("dormouse"));
+      tl.to(big.armR, { rotation: -150, duration: 0.2, ease: "back.out(2)" }, w("dormouse") + 0.1);
+      [0, 1, 2, 3].forEach((i) => tl.to(big.armR, { rotation: i % 2 ? -150 : -120, duration: 0.14, ease: "sine.inOut" }, w("dormouse", { nth: 1 }) + i * 0.15));
+      // "from my laptop": it points across. "to my phone": down it goes, and across.
+      tl.to(big.armR, { rotation: -95, duration: 0.16, ease: "back.out(2)" }, w("laptop"));
+      tl.to(big.head, { rotation: 12, duration: 0.16 }, w("laptop"));
+      const go = w("to"), arrive = w("phone");
+      tl.to(big.el, { y: 470, duration: 0.18, ease: "power2.in" }, go);
+      const dart = S.html(stage, `<svg class="prop" width="120" height="100" viewBox="0 0 120 100" data-layout-ignore><circle cx="28" cy="26" r="24" fill="${S.FUR}" ${S.L}/><circle cx="92" cy="26" r="24" fill="${S.FUR}" ${S.L}/><ellipse cx="60" cy="58" rx="44" ry="36" fill="${S.FUR}" ${S.L}/><circle cx="46" cy="54" r="5" fill="${S.INK}"/><circle cx="74" cy="54" r="5" fill="${S.INK}"/></svg>`);
+      gsap.set(dart, { x: 520, y: 600, scale: 0, transformOrigin: "50% 50%" });
+      const fly = arrive - (go + 0.14);
+      tl.set(dart, { scale: 0.8 }, go + 0.14);
+      tl.to(dart, { x: 1435, duration: fly, ease: "none" }, go + 0.14);
+      tl.to(dart, { y: 150, rotation: 200, duration: fly / 2, ease: "power2.out" }, go + 0.14);
+      tl.to(dart, { y: 520, rotation: 400, duration: fly / 2, ease: "power2.in" }, go + 0.14 + fly / 2);
+      tl.set(dart, { scale: 0 }, arrive);
+      tl.to(lit, { opacity: 1, duration: 0.08 }, arrive);
+      tl.fromTo(phone, { scaleY: 0.9, scaleX: 1.06 }, { scaleY: 1, scaleX: 1, duration: 0.45, ease: "elastic.out(1, 0.4)", immediateRender: false }, arrive);
+      tl.to(phone, { rotation: -4, duration: 0.3, ease: "back.out(3)" }, arrive);
+      S.ringAt(tl, stage, 1495, 560, arrive, { size: 1300, color: S.CREAM });
+      tl.to(small.el, { y: 310, duration: 0.26, ease: "back.out(2.2)" }, arrive + 0.02);
+      tl.to([small.armL, small.armR], { rotation: (i) => (i ? -150 : 150), duration: 0.2, ease: "back.out(2)" }, arrive + 0.1);
+      stack.forEach((p, i) => tl.to(p, { scale: 1, duration: 0.2, ease: "back.out(2.4)" }, arrive + 0.06 + i * 0.08));
+
+      S.karaoke(sc);
+      window.__timelines["devices"] = tl;
+    })();
+  </script>
+</template>

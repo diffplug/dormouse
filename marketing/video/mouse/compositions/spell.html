@@ -1,0 +1,60 @@
+<template>
+  <style>#root{position:absolute;inset:0} #spell-stage{background:var(--teal)}</style>
+  <div id="root" data-composition-id="spell" data-width="1920" data-height="1080">
+    <div id="spell-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("spell"); const { tl, stage, w } = sc;
+      S.dots(stage, 12, "#74c2b5");
+      S.ground(stage, "#4c9d91");
+      S.flash(tl, stage, 0.001, 0.5);
+
+      // Three cards land face down, one for each "Dormouse" and one between.
+      const X = [820, 1060, 1300], Y = 300;
+      const lands = [w("dormouse"), (w("dormouse") + w("dormouse", { nth: 1 })) / 2, w("dormouse", { nth: 1 })];
+      const cards = ["D", "O", "R"].map((ch, i) => {
+        const c = S.html(stage, `<div class="letter" style="background:var(--tile);color:#fff" data-layout-ignore><span class="mono" style="font-size:120px">&gt;</span></div>`);
+        gsap.set(c, { x: X[i], y: -260, rotation: [-7, 4, -5][i], transformOrigin: "50% 50%" });
+        tl.to(c, { y: Y, duration: 0.3, ease: "bounce.out" }, Math.max(0, lands[i] - 0.1));
+        const face = S.html(stage, `<div class="letter" data-layout-ignore>${ch}</div>`);
+        gsap.set(face, { x: X[i], y: Y, rotation: [-7, 4, -5][i], scaleX: 0, transformOrigin: "50% 50%" });
+        return { back: c, face };
+      });
+
+      const m = S.mouse(stage, { scale: 1.35, prop: "pointer" });
+      S.stand(m, 440);
+      gsap.set(m.armR, { rotation: -20 });
+      S.bop(tl, m, sc.beats, { amp: 1.2 });
+      S.sing(tl, m, S.wordsOf(sc.lines));
+
+      // "D-O-R": the pointer raps each card and it turns over.
+      const d = w("d-o-r"), step = (w("d-o-r", { after: true }) - d) / 3;
+      cards.forEach((c, i) => {
+        const t = d + i * step;
+        tl.to(m.armR, { rotation: -112 + i * 9, duration: 0.07, ease: "power3.in" }, t - 0.07);
+        tl.to(m.armR, { rotation: -96 + i * 9, duration: 0.09 }, t + 0.02);
+        tl.to(c.back, { scaleX: 0, duration: 0.06, ease: "power2.in" }, t);
+        tl.to(c.face, { scaleX: 1, duration: 0.14, ease: "back.out(3)" }, t + 0.06);
+        tl.fromTo(c.face, { y: Y - 46 }, { y: Y, duration: 0.3, ease: "bounce.out", immediateRender: false }, t + 0.06);
+      });
+      tl.to(m.head, { rotation: 10, duration: 0.15 }, d);
+
+      // "spells": the cards close up. "dor": they become the command.
+      tl.to(cards.map((c) => c.face), { x: (i) => 1060 + (i - 1) * 204, rotation: 0, duration: 0.2, ease: "back.out(2)" }, w("spells"));
+      tl.to(m.armR, { rotation: -150, duration: 0.2, ease: "back.out(2)" }, w("spells"));
+      const cmd = S.html(stage, `<div class="pane" style="width:700px;height:300px" data-layout-ignore><div class="hd"><i style="background:var(--sun)"></i>zsh</div><div class="bd mono" style="color:#fff;font-size:150px;line-height:1.4;padding:10px 36px;white-space:nowrap">$ dor<span style="color:var(--sun)">_</span></div></div>`);
+      gsap.set(cmd, { x: 805, y: 262, scale: 0, transformOrigin: "50% 50%" });
+      const dor = w("dor", { nth: 1 });
+      tl.to(cards.map((c) => c.face), { scale: 0, duration: 0.1, ease: "power2.in" }, dor - 0.1);
+      tl.to(cmd, { scale: 1, duration: 0.26, ease: "back.out(2.4)" }, dor);
+      S.ringAt(tl, stage, 1155, 410, dor, { size: 1500, color: S.CREAM });
+      tl.to(m.armR, { rotation: -100, duration: 0.12, ease: "power3.in" }, dor - 0.06);
+      S.hop(tl, m.el, dor, { height: 70, dur: 0.3 });
+      tl.to(m.head, { rotation: 0, duration: 0.15 }, dor);
+
+      S.karaoke(sc);
+      window.__timelines["spell"] = tl;
+    })();
+  </script>
+</template>

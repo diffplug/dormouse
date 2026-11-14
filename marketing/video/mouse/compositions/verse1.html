@@ -1,0 +1,66 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="verse1" data-width="1920" data-height="1080">
+    <div id="verse1-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("verse1"); const { tl, stage, w } = sc;
+      S.dots(stage, 5);
+      const cam = S.html(stage, `<div class="abs" style="width:1920px;height:1080px" data-layout-ignore></div>`);
+      const c = S.crew(cam);
+      S.ground(stage);
+      const { m, sv, botL, botR } = c;
+
+      // The mouse starts on the floor with its baton, and the room is empty.
+      gsap.set(m.el, { y: "+=174" });
+      gsap.set(sv.el, { y: 900 });
+      gsap.set(botL.el, { x: -320 });
+      gsap.set(botR.el, { x: 1980 });
+      gsap.set([c.paneL, c.paneR, c.sideL, c.sideR, ...c.extras], { scale: 0, transformOrigin: "50% 50%" });
+      gsap.set(m.armR, { rotation: -30 });
+      S.bop(tl, m, sc.beats);
+      S.sing(tl, m, S.wordsOf(sc.lines));
+      S.bounce(tl, botL.all, sc.beats, { offbeat: true });
+      S.bounce(tl, botR.all, sc.beats, { offbeat: true });
+
+      // "Agent to the left": a hand cues it in.
+      tl.to(m.head, { rotation: -10, duration: 0.2 }, w("agent"));
+      tl.to(m.armL, { rotation: 100, duration: 0.22, ease: "back.out(2.5)" }, w("left") - 0.25);
+      tl.to(botL.el, { x: 370, duration: 0.5, ease: "back.out(1.4)" }, w("left") - 0.42);
+      tl.to(c.paneL, { scale: 1, duration: 0.3, ease: "back.out(2)" }, w("left"));
+      tl.to(botL.armR, { rotation: -150, duration: 0.2, ease: "back.out(2)" }, w("left") + 0.1);
+
+      // "another agent to the right": the baton cues that one.
+      tl.to(m.head, { rotation: 10, duration: 0.2 }, w("another"));
+      tl.to(m.armL, { rotation: 20, duration: 0.25 }, w("another"));
+      tl.to(m.armR, { rotation: -105, duration: 0.22, ease: "back.out(2.5)" }, w("right") - 0.25);
+      tl.to(botR.el, { x: 1290, duration: 0.5, ease: "back.out(1.4)" }, w("right") - 0.42);
+      tl.to(c.paneR, { scale: 1, duration: 0.3, ease: "back.out(2)" }, w("right"));
+      tl.to(botR.armL, { rotation: 150, duration: 0.2, ease: "back.out(2)" }, w("right") + 0.1);
+
+      // "Dev server at the bottom": it comes up through the floor, under the feet of the mouse.
+      tl.to(m.head, { rotation: 0, duration: 0.2 }, w("dev"));
+      tl.to(m.armR, { rotation: -30, duration: 0.2 }, w("dev"));
+      tl.to(m.eyes, { y: 7, duration: 0.15 }, w("server"));
+      tl.to(sv.el, { y: 694, duration: 0.4, ease: "back.out(1.6)" }, w("bottom") - 0.3);
+      tl.to(m.el, { y: "-=174", duration: 0.4, ease: "back.out(1.6)" }, w("bottom") - 0.3);
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -70 : 70), duration: 0.2, ease: "back.out(3)" }, w("bottom") - 0.25);
+      tl.to(m.eyes, { y: 0, duration: 0.15 }, w("bottom") + 0.2);
+      sv.leds.forEach((led, i) => tl.fromTo(led, { opacity: 0.25 }, { opacity: 1, duration: 0.1, repeat: 5, yoyo: true, immediateRender: false }, w("bottom") + 0.1 + (i % 3) * 0.08));
+
+      // "information packed-in tight": panes fill every gap, and then the whole room squeezes.
+      const fill = [c.extras[0], c.extras[5], c.extras[1], c.extras[4], c.extras[2], c.extras[3], c.sideL, c.sideR];
+      const t0 = w("information"), t1 = w("tight") - 0.1;
+      fill.forEach((p, i) => tl.to(p, { scale: 1, duration: 0.22, ease: "back.out(2.4)" }, t0 + ((t1 - t0) * i) / fill.length));
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? -150 : 150), duration: 0.25, ease: "back.out(2)" }, w("information"));
+      tl.to([m.armL, m.armR], { rotation: (i) => (i ? 24 : -24), duration: 0.14, ease: "power3.in" }, w("tight") - 0.14);
+      tl.to(cam, { scale: 0.93, transformOrigin: "50% 62%", duration: 0.1, ease: "power3.in" }, w("tight") - 0.1);
+      tl.to(cam, { scale: 1, duration: 0.5, ease: "elastic.out(1, 0.4)" }, w("tight"));
+      S.ringAt(tl, stage, 960, 520, w("tight"), { size: 1900, dur: 0.7 });
+
+      S.karaoke(sc);
+      window.__timelines["verse1"] = tl;
+    })();
+  </script>
+</template>

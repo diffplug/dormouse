@@ -1,0 +1,44 @@
+@font-face { font-family: "Fredoka"; src: url("fonts/Fredoka.woff2") format("woff2"); font-weight: 300 700; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/JetBrainsMono-Bold.woff2") format("woff2"); font-weight: 700; }
+
+:root {
+  --paper: #f6ecd9; --sand: #ead9bd; --ink: #2e2b27; --tile: #43423d; --fur: #d38d5f;
+  --teal: #5fb3a6; --sun: #f4c64f; --pink: #ec7fa0; --blue: #79b4e8; --red: #e2625a; --cream: #fff8ea;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--paper); font-family: "Fredoka", sans-serif; color: var(--ink); }
+
+.stage { position: absolute; inset: 0; overflow: hidden; background: var(--paper); }
+.abs { position: absolute; left: 0; top: 0; }
+.prop { position: absolute; left: 0; top: 0; overflow: visible; }
+.display { font-family: "Fredoka", sans-serif; font-weight: 700; line-height: 1; }
+.mono { font-family: "JetBrains Mono", monospace; font-weight: 700; }
+
+/* Everything is flat paper with a hard ink outline and a hard shadow, like the logo. */
+.ground { position: absolute; left: 0; right: 0; top: 880px; bottom: 0; background: var(--sand); border-top: 7px solid var(--ink); }
+
+/* The sing-along line is the terminal's prompt, in the same place in every scene. */
+.kband { position: absolute; left: 0; right: 0; top: 930px; height: 150px; background: var(--ink); z-index: 50; border-top: 7px solid var(--ink); }
+.kline { position: absolute; left: 0; right: 0; top: 0; height: 143px; display: flex; align-items: center; justify-content: center; gap: 17px; font: 600 58px/1 "Fredoka", sans-serif; color: #8d867a; white-space: nowrap; }
+.kline .kp { font: 700 54px/1 "JetBrains Mono", monospace; color: var(--cream); margin-right: 8px; }
+.kline span { display: inline-block; }
+
+.pane { position: absolute; left: 0; top: 0; background: var(--tile); border: 6px solid var(--ink); border-radius: 18px; box-shadow: 7px 7px 0 var(--ink); overflow: hidden; }
+.pane .hd { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 5px solid var(--ink); font: 700 19px/1 "JetBrains Mono", monospace; color: var(--cream); white-space: nowrap; }
+.pane .hd i { width: 13px; height: 13px; border-radius: 50%; display: inline-block; flex: none; }
+.pane .bd { padding: 10px 12px; }
+.pane .ln { height: 10px; border-radius: 5px; margin-bottom: 9px; }
+
+.window { position: absolute; left: 0; top: 0; background: var(--cream); border: 7px solid var(--ink); border-radius: 22px; box-shadow: 10px 10px 0 var(--ink); overflow: hidden; }
+.window .bar { height: 54px; border-bottom: 7px solid var(--ink); display: flex; align-items: center; gap: 11px; padding: 0 20px; font: 600 28px/1 "Fredoka", sans-serif; }
+.window .bar i { width: 19px; height: 19px; border-radius: 50%; border: 4px solid var(--ink); display: inline-block; }
+
+.tag { position: absolute; left: 0; top: 0; padding: 8px 22px 11px; background: var(--ink); color: var(--cream); border-radius: 12px; font: 600 36px/1.1 "Fredoka", sans-serif; white-space: nowrap; }
+.sign { position: absolute; left: 0; top: 0; padding: 10px 28px 14px; background: var(--sun); color: var(--ink); border: 7px solid var(--ink); border-radius: 18px; box-shadow: 7px 7px 0 var(--ink); font: 700 64px/1 "Fredoka", sans-serif; white-space: nowrap; }
+.bubble { position: absolute; left: 0; top: 0; padding: 18px 30px 22px; background: var(--cream); border: 7px solid var(--ink); border-radius: 34px; box-shadow: 7px 7px 0 var(--ink); font: 600 52px/1.1 "Fredoka", sans-serif; white-space: nowrap; }
+.bubble span { display: inline-block; margin-right: 13px; }
+.bubble span:last-of-type { margin-right: 0; }
+.bubble svg { position: absolute; bottom: -41px; width: 60px; height: 44px; overflow: visible; }
+.ring { position: absolute; left: 0; top: 0; border-radius: 50%; border: 10px solid var(--sun); opacity: 0; }
+.flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 60; }
+.letter { position: absolute; left: 0; top: 0; width: 190px; height: 220px; display: flex; align-items: center; justify-content: center; background: var(--cream); border: 7px solid var(--ink); border-radius: 22px; box-shadow: 8px 8px 0 var(--ink); font: 700 170px/1 "Fredoka", sans-serif; }

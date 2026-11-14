@@ -1,0 +1,63 @@
+<template>
+  <style>#root{position:absolute;inset:0}</style>
+  <div id="root" data-composition-id="desk" data-width="1920" data-height="1080">
+    <div id="desk-stage" class="stage" data-layout-allow-overflow></div>
+  </div>
+  <script>
+    (() => {
+      const sc = S.begin("desk"); const { tl, stage, w } = sc;
+      // Left: the desk. It has the whole screen until the train slides in over the right half.
+      const left = S.html(stage, `<div class="abs" style="width:1920px;height:1080px;background:var(--paper)" data-layout-ignore></div>`);
+      S.dots(left, 24);
+      S.ground(left);
+      const mon = S.pane(left, { w: 420, h: 290, title: "dormouse", color: S.TEAL, rows: 8, seed: 91 });
+      gsap.set(mon, { x: 130, y: 330 });
+      S.html(left, `<div class="abs" style="left:310px;top:620px;width:60px;height:50px;background:var(--ink)"></div>`);
+      const m = S.mouse(left, { scale: 1.2, mullet: true });
+      S.stand(m, 760, 836);
+      S.html(left, `<div class="abs" style="left:60px;top:660px;width:1180px;height:56px;background:#b98554;border:7px solid var(--ink);border-radius:14px;box-shadow:7px 7px 0 var(--ink)"></div>`);
+      S.html(left, `<div class="abs" style="left:100px;top:709px;width:1100px;height:178px;background:#9c6c40;border:7px solid var(--ink)"></div>`);
+      const keys = S.html(left, `<svg class="prop" width="330" height="70" viewBox="0 0 330 70" data-layout-ignore><rect x="4" y="14" width="322" height="50" rx="12" fill="${S.GREY}" ${S.L}/>${Array.from({ length: 9 }, (_, i) => `<rect x="${20 + i * 33}" y="26" width="24" height="24" rx="6" fill="${S.CREAM}" stroke="${S.INK}" stroke-width="4"/>`).join("")}</svg>`);
+      gsap.set(keys, { x: 596, y: 600, transformOrigin: "50% 100%" });
+      const pointer = S.html(left, `<svg class="prop" width="110" height="90" viewBox="0 0 110 90" data-layout-ignore><path d="M30 60 C-20 60 -30 20 -70 30" fill="none" stroke="${S.INK}" stroke-width="6" stroke-linecap="round"/><ellipse cx="62" cy="56" rx="42" ry="28" fill="${S.CREAM}" ${S.L}/><path d="M62 28 V52" stroke="${S.INK}" stroke-width="5"/></svg>`);
+      gsap.set(pointer, { x: 990, y: 582, transformOrigin: "50% 100%" });
+      gsap.set(m.armL, { rotation: 34 }); gsap.set(m.armR, { rotation: -34 });
+      S.bop(tl, m, sc.beats);
+      S.sing(tl, m, S.wordsOf(sc.lines), { to: w("and", { nth: 1 }) });
+      S.typing(tl, m, w("keys"), w("and", { nth: 1 }));
+
+      // "Mouse and keys at my desk": each one jumps as it is named.
+      S.hop(tl, pointer, w("mouse"), { height: 60, dur: 0.26 });
+      S.ringAt(tl, left, 1050, 620, w("mouse") + 0.02, { size: 360 });
+      tl.to(m.armR, { rotation: -62, duration: 0.14, ease: "back.out(2)" }, w("mouse"));
+      S.hop(tl, keys, w("keys"), { height: 46, dur: 0.24 });
+      S.ringAt(tl, left, 760, 630, w("keys") + 0.02, { size: 420, color: S.TEAL });
+
+      // Right: the train. "and just my thumbs on the train".
+      const right = S.html(stage, `<div class="abs" style="width:960px;height:1080px;overflow:hidden;border-left:9px solid var(--ink)" data-layout-ignore></div>`);
+      gsap.set(right, { x: 1920 });
+      const car = S.html(right, `<div class="abs" style="width:960px;height:1080px"></div>`);
+      S.train(car, 960, tl, sc.dur, { windows: [270] });
+      const t = S.mouse(car, { scale: 1.3, mullet: true });
+      S.stand(t, 480, 870);
+      gsap.set(t.armL, { rotation: -30 }); gsap.set(t.armR, { rotation: 30 });
+      const phone = S.heldPhone(car, 480, 690, 1.25);
+      S.trainSeat(car, 960);
+      S.ground(car, "#8fa9a2");
+      gsap.set(t.eyes, { y: 9 });
+      S.bop(tl, t, sc.beats, { amp: 0.9 });
+      S.sing(tl, t, S.wordsOf(sc.lines), { from: w("and", { nth: 1 }) });
+      const slide = w("and", { nth: 1 }) - 0.1;
+      tl.to(right, { x: 960, duration: 0.3, ease: "expo.out" }, slide);
+      tl.to(left, { x: -230, duration: 0.3, ease: "expo.out" }, slide);
+      S.thumbing(tl, phone, t, w("thumbs"), sc.dur);
+      sc.beats.forEach((b) => tl.fromTo(car, { y: 7 }, { y: 0, duration: 0.3, ease: "power2.out", immediateRender: false }, b.t));
+      S.ringAt(tl, car, 480, 760, w("thumbs"), { size: 520, color: S.SUN });
+      tl.to(t.eyes, { y: 0, duration: 0.12 }, w("train"));
+      S.blink(tl, t, w("train") + 0.25);
+
+      S.karaoke(sc);
+      window.__timelines["desk"] = tl;
+    })();
+  </script>
+</template>
