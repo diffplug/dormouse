@@ -1,0 +1,1926 @@
+{
+  "language_code": "eng",
+  "segments": [
+    {
+      "text": "[upbeat music] Do-do-door mouse. ",
+      "start_time": 0.0,
+      "end_time": 2.0,
+      "words": [
+        {
+          "text": "[upbeat music]",
+          "start_time": 0.0,
+          "end_time": 0.46
+        },
+        {
+          "text": " ",
+          "start_time": 0.46,
+          "end_time": 0.52
+        },
+        {
+          "text": "Do-do-door",
+          "start_time": 0.52,
+          "end_time": 1.4
+        },
+        {
+          "text": " ",
+          "start_time": 1.4,
+          "end_time": 1.52
+        },
+        {
+          "text": "mouse.",
+          "start_time": 1.52,
+          "end_time": 1.82
+        },
+        {
+          "text": " ",
+          "start_time": 1.82,
+          "end_time": 2.0
+        }
+      ]
+    },
+    {
+      "text": "Door mouse. ",
+      "start_time": 3.5,
+      "end_time": 4.32,
+      "words": [
+        {
+          "text": "Door",
+          "start_time": 3.5,
+          "end_time": 3.76
+        },
+        {
+          "text": " ",
+          "start_time": 3.76,
+          "end_time": 3.86
+        },
+        {
+          "text": "mouse.",
+          "start_time": 3.86,
+          "end_time": 4.32
+        },
+        {
+          "text": " ",
+          "start_time": 4.32,
+          "end_time": 4.32
+        }
+      ]
+    },
+    {
+      "text": "Do-do-door mouse. Door mouse, door mouse. ",
+      "start_time": 7.0,
+      "end_time": 10.44,
+      "words": [
+        {
+          "text": "Do-do-door",
+          "start_time": 7.0,
+          "end_time": 9.06
+        },
+        {
+          "text": " ",
+          "start_time": 9.06,
+          "end_time": 9.18
+        },
+        {
+          "text": "mouse.",
+          "start_time": 9.18,
+          "end_time": 9.18
+        },
+        {
+          "text": " ",
+          "start_time": 9.18,
+          "end_time": 9.18
+        },
+        {
+          "text": "Door",
+          "start_time": 9.18,
+          "end_time": 9.18
+        },
+        {
+          "text": " ",
+          "start_time": 9.18,
+          "end_time": 9.18
+        },
+        {
+          "text": "mouse,",
+          "start_time": 9.18,
+          "end_time": 9.46
+        },
+        {
+          "text": " ",
+          "start_time": 9.46,
+          "end_time": 9.52
+        },
+        {
+          "text": "door",
+          "start_time": 9.52,
+          "end_time": 9.72
+        },
+        {
+          "text": " ",
+          "start_time": 9.72,
+          "end_time": 9.86
+        },
+        {
+          "text": "mouse.",
+          "start_time": 9.86,
+          "end_time": 10.38
+        },
+        {
+          "text": " ",
+          "start_time": 10.38,
+          "end_time": 10.44
+        }
+      ]
+    },
+    {
+      "text": "Door mouse, door mouse. Agent to the left, another agent to the right. Dev server at the bottom, information packed in tight. Alerts pop up when I need to know. CLI automation to build my own flow. Door mouse, door mouse. Multitask more. Door mouse, door mouse. D-O-R spells door. Door mouse, door mouse. Be as code or standalone. Door mouse, door mouse. From my laptop to my phone. Browser rapping in the front, terminal party in the back. A door tool is a mullet I can build with any stack. Vibe coded in an evening, but still easy to maintain. Mouse and keys at my desk and just my thumbs on the train. ",
+      "start_time": 11.5,
+      "end_time": 45.64,
+      "words": [
+        {
+          "text": "Door",
+          "start_time": 11.5,
+          "end_time": 11.7
+        },
+        {
+          "text": " ",
+          "start_time": 11.7,
+          "end_time": 11.84
+        },
+        {
+          "text": "mouse,",
+          "start_time": 11.84,
+          "end_time": 12.24
+        },
+        {
+          "text": " ",
+          "start_time": 12.24,
+          "end_time": 12.24
+        },
+        {
+          "text": "door",
+          "start_time": 12.84,
+          "end_time": 13.06
+        },
+        {
+          "text": " ",
+          "start_time": 13.06,
+          "end_time": 13.18
+        },
+        {
+          "text": "mouse.",
+          "start_time": 13.18,
+          "end_time": 13.56
+        },
+        {
+          "text": " ",
+          "start_time": 13.56,
+          "end_time": 13.56
+        },
+        {
+          "text": "Agent",
+          "start_time": 13.86,
+          "end_time": 14.12
+        },
+        {
+          "text": " ",
+          "start_time": 14.12,
+          "end_time": 14.18
+        },
+        {
+          "text": "to",
+          "start_time": 14.18,
+          "end_time": 14.32
+        },
+        {
+          "text": " ",
+          "start_time": 14.32,
+          "end_time": 14.36
+        },
+        {
+          "text": "the",
+          "start_time": 14.36,
+          "end_time": 14.42
+        },
+        {
+          "text": " ",
+          "start_time": 14.42,
+          "end_time": 14.5
+        },
+        {
+          "text": "left,",
+          "start_time": 14.5,
+          "end_time": 14.68
+        },
+        {
+          "text": " ",
+          "start_time": 14.68,
+          "end_time": 14.76
+        },
+        {
+          "text": "another",
+          "start_time": 14.76,
+          "end_time": 15.1
+        },
+        {
+          "text": " ",
+          "start_time": 15.1,
+          "end_time": 15.2
+        },
+        {
+          "text": "agent",
+          "start_time": 15.2,
+          "end_time": 15.46
+        },
+        {
+          "text": " ",
+          "start_time": 15.46,
+          "end_time": 15.52
+        },
+        {
+          "text": "to",
+          "start_time": 15.52,
+          "end_time": 15.64
+        },
+        {
+          "text": " ",
+          "start_time": 15.64,
+          "end_time": 15.68
+        },
+        {
+          "text": "the",
+          "start_time": 15.68,
+          "end_time": 15.76
+        },
+        {
+          "text": " ",
+          "start_time": 15.76,
+          "end_time": 15.86
+        },
+        {
+          "text": "right.",
+          "start_time": 15.86,
+          "end_time": 16.12
+        },
+        {
+          "text": " ",
+          "start_time": 16.12,
+          "end_time": 16.2
+        },
+        {
+          "text": "Dev",
+          "start_time": 16.2,
+          "end_time": 16.379
+        },
+        {
+          "text": " ",
+          "start_time": 16.379,
+          "end_time": 16.48
+        },
+        {
+          "text": "server",
+          "start_time": 16.48,
+          "end_time": 16.78
+        },
+        {
+          "text": " ",
+          "start_time": 16.78,
+          "end_time": 16.86
+        },
+        {
+          "text": "at",
+          "start_time": 16.86,
+          "end_time": 16.98
+        },
+        {
+          "text": " ",
+          "start_time": 16.98,
+          "end_time": 17.02
+        },
+        {
+          "text": "the",
+          "start_time": 17.02,
+          "end_time": 17.1
+        },
+        {
+          "text": " ",
+          "start_time": 17.1,
+          "end_time": 17.16
+        },
+        {
+          "text": "bottom,",
+          "start_time": 17.16,
+          "end_time": 17.46
+        },
+        {
+          "text": " ",
+          "start_time": 17.46,
+          "end_time": 17.54
+        },
+        {
+          "text": "information",
+          "start_time": 17.54,
+          "end_time": 18.06
+        },
+        {
+          "text": " ",
+          "start_time": 18.06,
+          "end_time": 18.16
+        },
+        {
+          "text": "packed",
+          "start_time": 18.16,
+          "end_time": 18.36
+        },
+        {
+          "text": " ",
+          "start_time": 18.36,
+          "end_time": 18.38
+        },
+        {
+          "text": "in",
+          "start_time": 18.38,
+          "end_time": 18.5
+        },
+        {
+          "text": " ",
+          "start_time": 18.5,
+          "end_time": 18.54
+        },
+        {
+          "text": "tight.",
+          "start_time": 18.54,
+          "end_time": 18.78
+        },
+        {
+          "text": " ",
+          "start_time": 18.78,
+          "end_time": 19.06
+        },
+        {
+          "text": "Alerts",
+          "start_time": 19.06,
+          "end_time": 19.38
+        },
+        {
+          "text": " ",
+          "start_time": 19.38,
+          "end_time": 19.5
+        },
+        {
+          "text": "pop",
+          "start_time": 19.5,
+          "end_time": 19.78
+        },
+        {
+          "text": " ",
+          "start_time": 19.78,
+          "end_time": 19.94
+        },
+        {
+          "text": "up",
+          "start_time": 19.94,
+          "end_time": 20.1
+        },
+        {
+          "text": " ",
+          "start_time": 20.1,
+          "end_time": 20.16
+        },
+        {
+          "text": "when",
+          "start_time": 20.16,
+          "end_time": 20.3
+        },
+        {
+          "text": " ",
+          "start_time": 20.3,
+          "end_time": 20.4
+        },
+        {
+          "text": "I",
+          "start_time": 20.4,
+          "end_time": 20.44
+        },
+        {
+          "text": " ",
+          "start_time": 20.44,
+          "end_time": 20.52
+        },
+        {
+          "text": "need",
+          "start_time": 20.52,
+          "end_time": 20.74
+        },
+        {
+          "text": " ",
+          "start_time": 20.74,
+          "end_time": 20.8
+        },
+        {
+          "text": "to",
+          "start_time": 20.8,
+          "end_time": 20.92
+        },
+        {
+          "text": " ",
+          "start_time": 20.92,
+          "end_time": 20.98
+        },
+        {
+          "text": "know.",
+          "start_time": 20.98,
+          "end_time": 21.26
+        },
+        {
+          "text": " ",
+          "start_time": 21.26,
+          "end_time": 21.32
+        },
+        {
+          "text": "CLI",
+          "start_time": 21.32,
+          "end_time": 21.94
+        },
+        {
+          "text": " ",
+          "start_time": 21.94,
+          "end_time": 22.02
+        },
+        {
+          "text": "automation",
+          "start_time": 22.02,
+          "end_time": 22.62
+        },
+        {
+          "text": " ",
+          "start_time": 22.62,
+          "end_time": 22.66
+        },
+        {
+          "text": "to",
+          "start_time": 22.66,
+          "end_time": 22.74
+        },
+        {
+          "text": " ",
+          "start_time": 22.74,
+          "end_time": 22.8
+        },
+        {
+          "text": "build",
+          "start_time": 22.8,
+          "end_time": 22.96
+        },
+        {
+          "text": " ",
+          "start_time": 22.96,
+          "end_time": 23.0
+        },
+        {
+          "text": "my",
+          "start_time": 23.0,
+          "end_time": 23.12
+        },
+        {
+          "text": " ",
+          "start_time": 23.12,
+          "end_time": 23.16
+        },
+        {
+          "text": "own",
+          "start_time": 23.16,
+          "end_time": 23.32
+        },
+        {
+          "text": " ",
+          "start_time": 23.32,
+          "end_time": 23.44
+        },
+        {
+          "text": "flow.",
+          "start_time": 23.44,
+          "end_time": 23.78
+        },
+        {
+          "text": " ",
+          "start_time": 23.78,
+          "end_time": 23.78
+        },
+        {
+          "text": "Door",
+          "start_time": 24.14,
+          "end_time": 24.4
+        },
+        {
+          "text": " ",
+          "start_time": 24.4,
+          "end_time": 24.52
+        },
+        {
+          "text": "mouse,",
+          "start_time": 24.52,
+          "end_time": 24.76
+        },
+        {
+          "text": " ",
+          "start_time": 24.76,
+          "end_time": 24.82
+        },
+        {
+          "text": "door",
+          "start_time": 24.82,
+          "end_time": 25.1
+        },
+        {
+          "text": " ",
+          "start_time": 25.1,
+          "end_time": 25.18
+        },
+        {
+          "text": "mouse.",
+          "start_time": 25.68,
+          "end_time": 25.84
+        },
+        {
+          "text": " ",
+          "start_time": 25.84,
+          "end_time": 25.84
+        },
+        {
+          "text": "Multitask",
+          "start_time": 25.84,
+          "end_time": 26.44
+        },
+        {
+          "text": " ",
+          "start_time": 26.44,
+          "end_time": 26.54
+        },
+        {
+          "text": "more.",
+          "start_time": 26.54,
+          "end_time": 26.8
+        },
+        {
+          "text": " ",
+          "start_time": 26.8,
+          "end_time": 26.82
+        },
+        {
+          "text": "Door",
+          "start_time": 26.84,
+          "end_time": 27.08
+        },
+        {
+          "text": " ",
+          "start_time": 27.08,
+          "end_time": 27.2
+        },
+        {
+          "text": "mouse,",
+          "start_time": 27.2,
+          "end_time": 27.46
+        },
+        {
+          "text": " ",
+          "start_time": 27.46,
+          "end_time": 27.46
+        },
+        {
+          "text": "door",
+          "start_time": 28.16,
+          "end_time": 28.16
+        },
+        {
+          "text": " ",
+          "start_time": 28.16,
+          "end_time": 28.16
+        },
+        {
+          "text": "mouse.",
+          "start_time": 28.16,
+          "end_time": 28.16
+        },
+        {
+          "text": " ",
+          "start_time": 28.16,
+          "end_time": 28.16
+        },
+        {
+          "text": "D-O-R",
+          "start_time": 28.16,
+          "end_time": 28.68
+        },
+        {
+          "text": " ",
+          "start_time": 28.68,
+          "end_time": 28.74
+        },
+        {
+          "text": "spells",
+          "start_time": 28.74,
+          "end_time": 29.08
+        },
+        {
+          "text": " ",
+          "start_time": 29.08,
+          "end_time": 29.18
+        },
+        {
+          "text": "door.",
+          "start_time": 29.18,
+          "end_time": 29.44
+        },
+        {
+          "text": " ",
+          "start_time": 29.44,
+          "end_time": 29.44
+        },
+        {
+          "text": "Door",
+          "start_time": 29.56,
+          "end_time": 29.74
+        },
+        {
+          "text": " ",
+          "start_time": 29.74,
+          "end_time": 29.84
+        },
+        {
+          "text": "mouse,",
+          "start_time": 29.84,
+          "end_time": 30.12
+        },
+        {
+          "text": " ",
+          "start_time": 30.12,
+          "end_time": 30.16
+        },
+        {
+          "text": "door",
+          "start_time": 30.16,
+          "end_time": 30.4
+        },
+        {
+          "text": " ",
+          "start_time": 30.4,
+          "end_time": 30.44
+        },
+        {
+          "text": "mouse.",
+          "start_time": 30.5,
+          "end_time": 30.64
+        },
+        {
+          "text": " ",
+          "start_time": 30.64,
+          "end_time": 30.68
+        },
+        {
+          "text": "Be",
+          "start_time": 30.7,
+          "end_time": 30.8
+        },
+        {
+          "text": " ",
+          "start_time": 30.8,
+          "end_time": 30.86
+        },
+        {
+          "text": "as",
+          "start_time": 30.86,
+          "end_time": 30.98
+        },
+        {
+          "text": " ",
+          "start_time": 30.98,
+          "end_time": 31.04
+        },
+        {
+          "text": "code",
+          "start_time": 31.04,
+          "end_time": 31.3
+        },
+        {
+          "text": " ",
+          "start_time": 31.3,
+          "end_time": 31.32
+        },
+        {
+          "text": "or",
+          "start_time": 31.32,
+          "end_time": 31.38
+        },
+        {
+          "text": " ",
+          "start_time": 31.38,
+          "end_time": 31.44
+        },
+        {
+          "text": "standalone.",
+          "start_time": 31.44,
+          "end_time": 32.119
+        },
+        {
+          "text": " ",
+          "start_time": 32.119,
+          "end_time": 32.119
+        },
+        {
+          "text": "Door",
+          "start_time": 32.18,
+          "end_time": 32.4
+        },
+        {
+          "text": " ",
+          "start_time": 32.4,
+          "end_time": 32.52
+        },
+        {
+          "text": "mouse,",
+          "start_time": 32.52,
+          "end_time": 32.78
+        },
+        {
+          "text": " ",
+          "start_time": 32.78,
+          "end_time": 32.84
+        },
+        {
+          "text": "door",
+          "start_time": 32.84,
+          "end_time": 33.04
+        },
+        {
+          "text": " ",
+          "start_time": 33.04,
+          "end_time": 33.16
+        },
+        {
+          "text": "mouse.",
+          "start_time": 33.16,
+          "end_time": 33.44
+        },
+        {
+          "text": " ",
+          "start_time": 33.44,
+          "end_time": 33.48
+        },
+        {
+          "text": "From",
+          "start_time": 33.48,
+          "end_time": 33.62
+        },
+        {
+          "text": " ",
+          "start_time": 33.62,
+          "end_time": 33.66
+        },
+        {
+          "text": "my",
+          "start_time": 33.66,
+          "end_time": 33.76
+        },
+        {
+          "text": " ",
+          "start_time": 33.76,
+          "end_time": 33.8
+        },
+        {
+          "text": "laptop",
+          "start_time": 33.8,
+          "end_time": 34.12
+        },
+        {
+          "text": " ",
+          "start_time": 34.12,
+          "end_time": 34.16
+        },
+        {
+          "text": "to",
+          "start_time": 34.16,
+          "end_time": 34.26
+        },
+        {
+          "text": " ",
+          "start_time": 34.26,
+          "end_time": 34.3
+        },
+        {
+          "text": "my",
+          "start_time": 34.3,
+          "end_time": 34.44
+        },
+        {
+          "text": " ",
+          "start_time": 34.44,
+          "end_time": 34.46
+        },
+        {
+          "text": "phone.",
+          "start_time": 34.46,
+          "end_time": 34.76
+        },
+        {
+          "text": " ",
+          "start_time": 34.76,
+          "end_time": 34.76
+        },
+        {
+          "text": "Browser",
+          "start_time": 34.82,
+          "end_time": 35.1
+        },
+        {
+          "text": " ",
+          "start_time": 35.1,
+          "end_time": 35.18
+        },
+        {
+          "text": "rapping",
+          "start_time": 35.18,
+          "end_time": 35.48
+        },
+        {
+          "text": " ",
+          "start_time": 35.48,
+          "end_time": 35.54
+        },
+        {
+          "text": "in",
+          "start_time": 35.54,
+          "end_time": 35.64
+        },
+        {
+          "text": " ",
+          "start_time": 35.64,
+          "end_time": 35.68
+        },
+        {
+          "text": "the",
+          "start_time": 35.68,
+          "end_time": 35.76
+        },
+        {
+          "text": " ",
+          "start_time": 35.76,
+          "end_time": 35.82
+        },
+        {
+          "text": "front,",
+          "start_time": 35.82,
+          "end_time": 35.94
+        },
+        {
+          "text": " ",
+          "start_time": 35.94,
+          "end_time": 36.02
+        },
+        {
+          "text": "terminal",
+          "start_time": 36.02,
+          "end_time": 36.44
+        },
+        {
+          "text": " ",
+          "start_time": 36.44,
+          "end_time": 36.52
+        },
+        {
+          "text": "party",
+          "start_time": 36.52,
+          "end_time": 36.84
+        },
+        {
+          "text": " ",
+          "start_time": 36.84,
+          "end_time": 36.88
+        },
+        {
+          "text": "in",
+          "start_time": 36.88,
+          "end_time": 36.98
+        },
+        {
+          "text": " ",
+          "start_time": 36.98,
+          "end_time": 37.02
+        },
+        {
+          "text": "the",
+          "start_time": 37.02,
+          "end_time": 37.1
+        },
+        {
+          "text": " ",
+          "start_time": 37.1,
+          "end_time": 37.16
+        },
+        {
+          "text": "back.",
+          "start_time": 37.16,
+          "end_time": 37.34
+        },
+        {
+          "text": " ",
+          "start_time": 37.34,
+          "end_time": 37.4
+        },
+        {
+          "text": "A",
+          "start_time": 37.4,
+          "end_time": 37.44
+        },
+        {
+          "text": " ",
+          "start_time": 37.44,
+          "end_time": 37.52
+        },
+        {
+          "text": "door",
+          "start_time": 37.52,
+          "end_time": 37.76
+        },
+        {
+          "text": " ",
+          "start_time": 37.76,
+          "end_time": 37.84
+        },
+        {
+          "text": "tool",
+          "start_time": 37.84,
+          "end_time": 38.16
+        },
+        {
+          "text": " ",
+          "start_time": 38.16,
+          "end_time": 38.22
+        },
+        {
+          "text": "is",
+          "start_time": 38.22,
+          "end_time": 38.32
+        },
+        {
+          "text": " ",
+          "start_time": 38.32,
+          "end_time": 38.38
+        },
+        {
+          "text": "a",
+          "start_time": 38.38,
+          "end_time": 38.42
+        },
+        {
+          "text": " ",
+          "start_time": 38.42,
+          "end_time": 38.48
+        },
+        {
+          "text": "mullet",
+          "start_time": 38.48,
+          "end_time": 38.8
+        },
+        {
+          "text": " ",
+          "start_time": 38.8,
+          "end_time": 38.9
+        },
+        {
+          "text": "I",
+          "start_time": 38.9,
+          "end_time": 38.94
+        },
+        {
+          "text": " ",
+          "start_time": 38.94,
+          "end_time": 38.98
+        },
+        {
+          "text": "can",
+          "start_time": 38.98,
+          "end_time": 39.08
+        },
+        {
+          "text": " ",
+          "start_time": 39.08,
+          "end_time": 39.14
+        },
+        {
+          "text": "build",
+          "start_time": 39.14,
+          "end_time": 39.3
+        },
+        {
+          "text": " ",
+          "start_time": 39.3,
+          "end_time": 39.34
+        },
+        {
+          "text": "with",
+          "start_time": 39.34,
+          "end_time": 39.5
+        },
+        {
+          "text": " ",
+          "start_time": 39.5,
+          "end_time": 39.56
+        },
+        {
+          "text": "any",
+          "start_time": 39.56,
+          "end_time": 39.72
+        },
+        {
+          "text": " ",
+          "start_time": 39.72,
+          "end_time": 39.82
+        },
+        {
+          "text": "stack.",
+          "start_time": 39.82,
+          "end_time": 40.08
+        },
+        {
+          "text": " ",
+          "start_time": 40.08,
+          "end_time": 40.16
+        },
+        {
+          "text": "Vibe",
+          "start_time": 40.16,
+          "end_time": 40.42
+        },
+        {
+          "text": " ",
+          "start_time": 40.42,
+          "end_time": 40.48
+        },
+        {
+          "text": "coded",
+          "start_time": 40.48,
+          "end_time": 40.82
+        },
+        {
+          "text": " ",
+          "start_time": 40.82,
+          "end_time": 40.88
+        },
+        {
+          "text": "in",
+          "start_time": 40.88,
+          "end_time": 40.98
+        },
+        {
+          "text": " ",
+          "start_time": 40.98,
+          "end_time": 41.04
+        },
+        {
+          "text": "an",
+          "start_time": 41.04,
+          "end_time": 41.12
+        },
+        {
+          "text": " ",
+          "start_time": 41.12,
+          "end_time": 41.2
+        },
+        {
+          "text": "evening,",
+          "start_time": 41.2,
+          "end_time": 41.4
+        },
+        {
+          "text": " ",
+          "start_time": 41.4,
+          "end_time": 41.48
+        },
+        {
+          "text": "but",
+          "start_time": 41.48,
+          "end_time": 41.56
+        },
+        {
+          "text": " ",
+          "start_time": 41.56,
+          "end_time": 41.62
+        },
+        {
+          "text": "still",
+          "start_time": 41.62,
+          "end_time": 41.8
+        },
+        {
+          "text": " ",
+          "start_time": 41.8,
+          "end_time": 41.86
+        },
+        {
+          "text": "easy",
+          "start_time": 41.86,
+          "end_time": 42.1
+        },
+        {
+          "text": " ",
+          "start_time": 42.1,
+          "end_time": 42.16
+        },
+        {
+          "text": "to",
+          "start_time": 42.16,
+          "end_time": 42.26
+        },
+        {
+          "text": " ",
+          "start_time": 42.26,
+          "end_time": 42.3
+        },
+        {
+          "text": "maintain.",
+          "start_time": 42.3,
+          "end_time": 42.74
+        },
+        {
+          "text": " ",
+          "start_time": 42.74,
+          "end_time": 42.8
+        },
+        {
+          "text": "Mouse",
+          "start_time": 42.8,
+          "end_time": 42.98
+        },
+        {
+          "text": " ",
+          "start_time": 42.98,
+          "end_time": 43.02
+        },
+        {
+          "text": "and",
+          "start_time": 43.02,
+          "end_time": 43.12
+        },
+        {
+          "text": " ",
+          "start_time": 43.12,
+          "end_time": 43.2
+        },
+        {
+          "text": "keys",
+          "start_time": 43.2,
+          "end_time": 43.48
+        },
+        {
+          "text": " ",
+          "start_time": 43.48,
+          "end_time": 43.5
+        },
+        {
+          "text": "at",
+          "start_time": 43.5,
+          "end_time": 43.58
+        },
+        {
+          "text": " ",
+          "start_time": 43.58,
+          "end_time": 43.64
+        },
+        {
+          "text": "my",
+          "start_time": 43.64,
+          "end_time": 43.74
+        },
+        {
+          "text": " ",
+          "start_time": 43.74,
+          "end_time": 43.8
+        },
+        {
+          "text": "desk",
+          "start_time": 43.8,
+          "end_time": 43.98
+        },
+        {
+          "text": " ",
+          "start_time": 43.98,
+          "end_time": 44.02
+        },
+        {
+          "text": "and",
+          "start_time": 44.02,
+          "end_time": 44.1
+        },
+        {
+          "text": " ",
+          "start_time": 44.1,
+          "end_time": 44.16
+        },
+        {
+          "text": "just",
+          "start_time": 44.16,
+          "end_time": 44.26
+        },
+        {
+          "text": " ",
+          "start_time": 44.26,
+          "end_time": 44.3
+        },
+        {
+          "text": "my",
+          "start_time": 44.3,
+          "end_time": 44.44
+        },
+        {
+          "text": " ",
+          "start_time": 44.44,
+          "end_time": 44.5
+        },
+        {
+          "text": "thumbs",
+          "start_time": 44.5,
+          "end_time": 44.8
+        },
+        {
+          "text": " ",
+          "start_time": 44.8,
+          "end_time": 44.86
+        },
+        {
+          "text": "on",
+          "start_time": 44.86,
+          "end_time": 44.96
+        },
+        {
+          "text": " ",
+          "start_time": 44.96,
+          "end_time": 44.98
+        },
+        {
+          "text": "the",
+          "start_time": 44.98,
+          "end_time": 45.08
+        },
+        {
+          "text": " ",
+          "start_time": 45.08,
+          "end_time": 45.16
+        },
+        {
+          "text": "train.",
+          "start_time": 45.16,
+          "end_time": 45.64
+        },
+        {
+          "text": " ",
+          "start_time": 45.64,
+          "end_time": 45.64
+        }
+      ]
+    },
+    {
+      "text": "What app is that? ",
+      "start_time": 46.0,
+      "end_time": 46.84,
+      "words": [
+        {
+          "text": "What",
+          "start_time": 46.0,
+          "end_time": 46.12
+        },
+        {
+          "text": " ",
+          "start_time": 46.12,
+          "end_time": 46.18
+        },
+        {
+          "text": "app",
+          "start_time": 46.18,
+          "end_time": 46.32
+        },
+        {
+          "text": " ",
+          "start_time": 46.32,
+          "end_time": 46.38
+        },
+        {
+          "text": "is",
+          "start_time": 46.38,
+          "end_time": 46.5
+        },
+        {
+          "text": " ",
+          "start_time": 46.5,
+          "end_time": 46.56
+        },
+        {
+          "text": "that?",
+          "start_time": 46.56,
+          "end_time": 46.84
+        },
+        {
+          "text": " ",
+          "start_time": 46.84,
+          "end_time": 46.84
+        }
+      ]
+    },
+    {
+      "text": "Oh, I'm vibe scrolling, girl. ",
+      "start_time": 47.08,
+      "end_time": 48.42,
+      "words": [
+        {
+          "text": "Oh,",
+          "start_time": 47.08,
+          "end_time": 47.22
+        },
+        {
+          "text": " ",
+          "start_time": 47.22,
+          "end_time": 47.32
+        },
+        {
+          "text": "I'm",
+          "start_time": 47.32,
+          "end_time": 47.44
+        },
+        {
+          "text": " ",
+          "start_time": 47.44,
+          "end_time": 47.5
+        },
+        {
+          "text": "vibe",
+          "start_time": 47.5,
+          "end_time": 47.74
+        },
+        {
+          "text": " ",
+          "start_time": 47.74,
+          "end_time": 47.84
+        },
+        {
+          "text": "scrolling,",
+          "start_time": 47.84,
+          "end_time": 48.16
+        },
+        {
+          "text": " ",
+          "start_time": 48.16,
+          "end_time": 48.24
+        },
+        {
+          "text": "girl.",
+          "start_time": 48.24,
+          "end_time": 48.42
+        },
+        {
+          "text": " ",
+          "start_time": 48.42,
+          "end_time": 48.42
+        }
+      ]
+    },
+    {
+      "text": "Dog, vibe scrolling? ",
+      "start_time": 48.64,
+      "end_time": 50.0,
+      "words": [
+        {
+          "text": "Dog,",
+          "start_time": 48.64,
+          "end_time": 48.96
+        },
+        {
+          "text": " ",
+          "start_time": 48.96,
+          "end_time": 49.26
+        },
+        {
+          "text": "vibe",
+          "start_time": 49.26,
+          "end_time": 49.48
+        },
+        {
+          "text": " ",
+          "start_time": 49.48,
+          "end_time": 49.56
+        },
+        {
+          "text": "scrolling?",
+          "start_time": 49.56,
+          "end_time": 49.94
+        },
+        {
+          "text": " ",
+          "start_time": 49.94,
+          "end_time": 50.0
+        }
+      ]
+    },
+    {
+      "text": "I'm not a dog, I'm a... [upbeat music] Door mouse, door mouse. Multitask more. Door mouse, door mouse. D-O-R spells door. Door mouse, door mouse. Be as code or standalone. Door mouse, door mouse. From my laptop to my phone. Do-door mouse.sh, baby. Door mouse, door mouse, door mouse, door mouse.",
+      "start_time": 50.0,
+      "end_time": 73.6,
+      "words": [
+        {
+          "text": "I'm",
+          "start_time": 50.0,
+          "end_time": 50.1
+        },
+        {
+          "text": " ",
+          "start_time": 50.1,
+          "end_time": 50.14
+        },
+        {
+          "text": "not",
+          "start_time": 50.14,
+          "end_time": 50.22
+        },
+        {
+          "text": " ",
+          "start_time": 50.22,
+          "end_time": 50.28
+        },
+        {
+          "text": "a",
+          "start_time": 50.28,
+          "end_time": 50.32
+        },
+        {
+          "text": " ",
+          "start_time": 50.32,
+          "end_time": 50.44
+        },
+        {
+          "text": "dog,",
+          "start_time": 50.44,
+          "end_time": 50.76
+        },
+        {
+          "text": " ",
+          "start_time": 50.76,
+          "end_time": 50.82
+        },
+        {
+          "text": "I'm",
+          "start_time": 50.82,
+          "end_time": 50.92
+        },
+        {
+          "text": " ",
+          "start_time": 50.92,
+          "end_time": 50.98
+        },
+        {
+          "text": "a...",
+          "start_time": 50.98,
+          "end_time": 51.04
+        },
+        {
+          "text": " ",
+          "start_time": 51.04,
+          "end_time": 51.06
+        },
+        {
+          "text": "[upbeat music]",
+          "start_time": 51.06,
+          "end_time": 53.4
+        },
+        {
+          "text": " ",
+          "start_time": 53.4,
+          "end_time": 53.46
+        },
+        {
+          "text": "Door",
+          "start_time": 53.46,
+          "end_time": 53.72
+        },
+        {
+          "text": " ",
+          "start_time": 53.72,
+          "end_time": 53.82
+        },
+        {
+          "text": "mouse,",
+          "start_time": 53.82,
+          "end_time": 54.06
+        },
+        {
+          "text": " ",
+          "start_time": 54.06,
+          "end_time": 54.14
+        },
+        {
+          "text": "door",
+          "start_time": 54.14,
+          "end_time": 54.38
+        },
+        {
+          "text": " ",
+          "start_time": 54.38,
+          "end_time": 54.5
+        },
+        {
+          "text": "mouse.",
+          "start_time": 54.5,
+          "end_time": 54.84
+        },
+        {
+          "text": " ",
+          "start_time": 54.84,
+          "end_time": 54.84
+        },
+        {
+          "text": "Multitask",
+          "start_time": 54.98,
+          "end_time": 55.76
+        },
+        {
+          "text": " ",
+          "start_time": 55.76,
+          "end_time": 55.84
+        },
+        {
+          "text": "more.",
+          "start_time": 55.84,
+          "end_time": 56.14
+        },
+        {
+          "text": " ",
+          "start_time": 56.14,
+          "end_time": 56.2
+        },
+        {
+          "text": "Door",
+          "start_time": 56.2,
+          "end_time": 56.38
+        },
+        {
+          "text": " ",
+          "start_time": 56.38,
+          "end_time": 56.5
+        },
+        {
+          "text": "mouse,",
+          "start_time": 56.5,
+          "end_time": 56.78
+        },
+        {
+          "text": " ",
+          "start_time": 56.78,
+          "end_time": 56.78
+        },
+        {
+          "text": "door",
+          "start_time": 56.84,
+          "end_time": 57.04
+        },
+        {
+          "text": " ",
+          "start_time": 57.04,
+          "end_time": 57.16
+        },
+        {
+          "text": "mouse.",
+          "start_time": 57.16,
+          "end_time": 57.42
+        },
+        {
+          "text": " ",
+          "start_time": 57.42,
+          "end_time": 57.48
+        },
+        {
+          "text": "D-O-R",
+          "start_time": 57.48,
+          "end_time": 58.0
+        },
+        {
+          "text": " ",
+          "start_time": 58.0,
+          "end_time": 58.06
+        },
+        {
+          "text": "spells",
+          "start_time": 58.06,
+          "end_time": 58.42
+        },
+        {
+          "text": " ",
+          "start_time": 58.42,
+          "end_time": 58.48
+        },
+        {
+          "text": "door.",
+          "start_time": 58.5,
+          "end_time": 58.84
+        },
+        {
+          "text": " ",
+          "start_time": 58.84,
+          "end_time": 58.84
+        },
+        {
+          "text": "Door",
+          "start_time": 58.9,
+          "end_time": 59.04
+        },
+        {
+          "text": " ",
+          "start_time": 59.04,
+          "end_time": 59.16
+        },
+        {
+          "text": "mouse,",
+          "start_time": 59.16,
+          "end_time": 59.42
+        },
+        {
+          "text": " ",
+          "start_time": 59.42,
+          "end_time": 59.48
+        },
+        {
+          "text": "door",
+          "start_time": 59.48,
+          "end_time": 59.72
+        },
+        {
+          "text": " ",
+          "start_time": 59.72,
+          "end_time": 59.8
+        },
+        {
+          "text": "mouse.",
+          "start_time": 59.82,
+          "end_time": 59.96
+        },
+        {
+          "text": " ",
+          "start_time": 59.96,
+          "end_time": 60.0
+        },
+        {
+          "text": "Be",
+          "start_time": 60.0,
+          "end_time": 60.12
+        },
+        {
+          "text": " ",
+          "start_time": 60.12,
+          "end_time": 60.18
+        },
+        {
+          "text": "as",
+          "start_time": 60.18,
+          "end_time": 60.3
+        },
+        {
+          "text": " ",
+          "start_time": 60.3,
+          "end_time": 60.36
+        },
+        {
+          "text": "code",
+          "start_time": 60.36,
+          "end_time": 60.62
+        },
+        {
+          "text": " ",
+          "start_time": 60.62,
+          "end_time": 60.64
+        },
+        {
+          "text": "or",
+          "start_time": 60.64,
+          "end_time": 60.7
+        },
+        {
+          "text": " ",
+          "start_time": 60.7,
+          "end_time": 60.76
+        },
+        {
+          "text": "standalone.",
+          "start_time": 60.76,
+          "end_time": 61.48
+        },
+        {
+          "text": " ",
+          "start_time": 61.48,
+          "end_time": 61.48
+        },
+        {
+          "text": "Door",
+          "start_time": 61.5,
+          "end_time": 61.72
+        },
+        {
+          "text": " ",
+          "start_time": 61.72,
+          "end_time": 61.84
+        },
+        {
+          "text": "mouse,",
+          "start_time": 61.84,
+          "end_time": 62.08
+        },
+        {
+          "text": " ",
+          "start_time": 62.08,
+          "end_time": 62.14
+        },
+        {
+          "text": "door",
+          "start_time": 62.14,
+          "end_time": 62.38
+        },
+        {
+          "text": " ",
+          "start_time": 62.38,
+          "end_time": 62.48
+        },
+        {
+          "text": "mouse.",
+          "start_time": 62.48,
+          "end_time": 62.76
+        },
+        {
+          "text": " ",
+          "start_time": 62.76,
+          "end_time": 62.78
+        },
+        {
+          "text": "From",
+          "start_time": 62.8,
+          "end_time": 62.94
+        },
+        {
+          "text": " ",
+          "start_time": 62.94,
+          "end_time": 62.96
+        },
+        {
+          "text": "my",
+          "start_time": 62.96,
+          "end_time": 63.08
+        },
+        {
+          "text": " ",
+          "start_time": 63.08,
+          "end_time": 63.12
+        },
+        {
+          "text": "laptop",
+          "start_time": 63.12,
+          "end_time": 63.44
+        },
+        {
+          "text": " ",
+          "start_time": 63.44,
+          "end_time": 63.48
+        },
+        {
+          "text": "to",
+          "start_time": 63.48,
+          "end_time": 63.56
+        },
+        {
+          "text": " ",
+          "start_time": 63.56,
+          "end_time": 63.62
+        },
+        {
+          "text": "my",
+          "start_time": 63.62,
+          "end_time": 63.76
+        },
+        {
+          "text": " ",
+          "start_time": 63.76,
+          "end_time": 63.78
+        },
+        {
+          "text": "phone.",
+          "start_time": 63.78,
+          "end_time": 64.12
+        },
+        {
+          "text": " ",
+          "start_time": 64.12,
+          "end_time": 64.12
+        },
+        {
+          "text": "Do-door",
+          "start_time": 64.459,
+          "end_time": 65.019
+        },
+        {
+          "text": " ",
+          "start_time": 65.019,
+          "end_time": 65.12
+        },
+        {
+          "text": "mouse.sh,",
+          "start_time": 65.12,
+          "end_time": 66.22
+        },
+        {
+          "text": " ",
+          "start_time": 66.22,
+          "end_time": 66.34
+        },
+        {
+          "text": "baby.",
+          "start_time": 66.34,
+          "end_time": 66.76
+        },
+        {
+          "text": " ",
+          "start_time": 66.76,
+          "end_time": 66.76
+        },
+        {
+          "text": "Door",
+          "start_time": 67.48,
+          "end_time": 67.72
+        },
+        {
+          "text": " ",
+          "start_time": 67.72,
+          "end_time": 67.84
+        },
+        {
+          "text": "mouse,",
+          "start_time": 67.84,
+          "end_time": 68.18
+        },
+        {
+          "text": " ",
+          "start_time": 68.18,
+          "end_time": 68.28
+        },
+        {
+          "text": "door",
+          "start_time": 68.82,
+          "end_time": 69.06
+        },
+        {
+          "text": " ",
+          "start_time": 69.06,
+          "end_time": 69.16
+        },
+        {
+          "text": "mouse,",
+          "start_time": 69.16,
+          "end_time": 69.5
+        },
+        {
+          "text": " ",
+          "start_time": 69.5,
+          "end_time": 70.16
+        },
+        {
+          "text": "door",
+          "start_time": 70.16,
+          "end_time": 70.38
+        },
+        {
+          "text": " ",
+          "start_time": 70.38,
+          "end_time": 70.48
+        },
+        {
+          "text": "mouse,",
+          "start_time": 70.48,
+          "end_time": 70.94
+        },
+        {
+          "text": " ",
+          "start_time": 70.94,
+          "end_time": 70.96
+        },
+        {
+          "text": "door",
+          "start_time": 71.48,
+          "end_time": 71.72
+        },
+        {
+          "text": " ",
+          "start_time": 71.72,
+          "end_time": 71.82
+        },
+        {
+          "text": "mouse.",
+          "start_time": 71.82,
+          "end_time": 73.6
+        }
+      ]
+    }
+  ]
+}
