@@ -10,6 +10,16 @@ setup:
   - name: Define the markdown merge driver
     run: node scripts/setup-git.mjs
 
+# Both checks read the tag layout docs/specs/security-ci.md requires as a
+# failure; its audited rules hold the real properties instead. Acceptance
+# covers the whole check name, so a new environment problem still has to
+# get past S55, which fails on any environment
+# .github/audit/expected-github-state.json does not name.
+checks:
+  accepted:
+    tag-protection: "S52 and S68 split tag protection: Tag operations covers ~ALL except refs/tags/hosted/**, which Hosted tag creation and Hosted tag history cover; scripts/github-state-check.mjs audits all three"
+    credential-environments: "Builds on the tag-protection verdict. S55 (scripts/github-state-check.mjs) admin-gates every environment's refs, and S67 (scripts/workflow-lint.mjs) pins hosted-release-tag to the tag job, which needs the review-gated deploy"
+
 secrets:
   allowed:
     - CHROMATIC_PROJECT_TOKEN
