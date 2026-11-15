@@ -28,7 +28,7 @@ async function fixture(t) {
     const { createInterface } = require('node:readline');
     createInterface({ input: process.stdin }).on('line', line => {
       const { event, data } = JSON.parse(line);
-      if (event === 'alert:command' || event === 'pty:input') console.error('SIDECAR_LINE ' + line);
+      if (event === 'alert:command' || event === 'pty:input' || event === 'pty:cancelInput') console.error('SIDECAR_LINE ' + line);
       // pty-core reports an exit for a PTY it killed; a resize stands in for
       // one ending on its own.
       if (event === 'pty:kill' || event === 'pty:resize') console.log(JSON.stringify({ event: 'pty:exit', data: { id: data.id, exitCode: 0 } }));
@@ -238,6 +238,15 @@ test('stamps its one window on alert commands and carries userInput and launch o
   assert.equal((await send(run, 'pty_write', { id: 'p1', data: 'view\r', launch: true })).status, 200);
   assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*"launch".*\})/), {
     event: 'pty:input', data: { id: 'p1', data: 'view\r', launch: true },
+  });
+});
+
+// The page cancels paced input through `send` (`BrowserSidecarAdapter.sendPtyInput`).
+test('forwards a paced-input cancel the page sends', { timeout: 60000 }, async t => {
+  const run = await (await fixture(t)).start().ready();
+  assert.equal((await send(run, 'pty_cancel_input', { id: 'p1', inputId: 'in-1' })).status, 200);
+  assert.deepEqual(JSON.parse((await run.wait(/SIDECAR_LINE (\{"event":"pty:cancelInput".*\})/))[1]), {
+    event: 'pty:cancelInput', data: { id: 'p1', inputId: 'in-1' },
   });
 });
 
