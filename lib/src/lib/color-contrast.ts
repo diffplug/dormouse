@@ -1,7 +1,7 @@
 // Perceptual color helpers for theme-aware "biggest delta" pickers.
 
 /** Parse any CSS color (hex, rgb, hsl, named, color-mix…) to sRGB bytes via
- *  canvas. Returns null on failure.
+ *  canvas. Returns null for an empty string; an invalid color reads as black.
  *
  *  globalCompositeOperation='copy' ensures each fillRect replaces the pixel
  *  rather than alpha-compositing over the previous fill — without it,

@@ -418,8 +418,7 @@ else
   # read probe prints "No serve config" and exits 0. The role itself is the thing
   # to check, and `debug prefs` is where tailscaled exposes it. The read still
   # runs first: a denial *there* means something broader than the operator role
-  # is wrong. A node with no Serve configuration exits nonzero too, so only a
-  # refusal is fatal.
+  # is wrong. A nonzero exit can have other causes, so only a refusal is fatal.
   if [ "$TEST_MODE" != "1" ]; then
     if ! SERVE_PROBE="$(ts serve status 2>&1)"; then
       ts_denied "$SERVE_PROBE" && die_needs_operator "\`tailscale serve status\` was refused for this user" "$SERVE_PROBE"

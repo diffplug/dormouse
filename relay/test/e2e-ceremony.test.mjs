@@ -470,9 +470,9 @@ test('an approval and a denial are the same number of bytes on the wire', async 
     });
     assert.equal(no.ok, false);
 
-    // The success carries a Burrow static, a label, three passkey fields and a
-    // delivery id; the denial carries one word. NUL padding is what keeps the
-    // relay from reading the answer off a length.
+    // The success carries a Burrow static, a label, an account id, two passkey
+    // fields and a delivery id; the denial carries one word. NUL padding is what
+    // keeps the relay from reading the answer off a length.
     assert.equal(yes.ct.length, no.ct.length);
     assert.equal(fromBase64Url(yes.ct).length, 1 + 4096 + 16);
 

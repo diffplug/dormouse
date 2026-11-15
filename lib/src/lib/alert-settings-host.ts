@@ -44,7 +44,7 @@ export class AlertSettingsHost {
 
   private apply(value: unknown): void {
     // Renderer input is revalidated here: the host must never install a NaN or
-    // absurd timer because a webview sent one (`docs/specs/transport.md`).
+    // absurd timer because a webview sent one.
     this.settings = normalizeAlertSettings(value);
   }
 
