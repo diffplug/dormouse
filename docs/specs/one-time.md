@@ -169,7 +169,7 @@ Every release before the page's move shows `https://relay.dormouse.sh/connect/#â
 
 - **The relay must answer `/connect` and `/connect/` with a 308 to `TRY_ORIGIN` + `ONE_TIME_PAGE_PATH`, and nothing else under `/connect/`**: no page, no shell, and no client route, so nothing of a stranger's renders beside Pocket from the release that serves the try Worker on (rationale).
 - A browser carries the fragment across the redirect, and the prologue binds no origin, so the link completes on the page's origin unchanged.
-- **Must keep the redirect while a shipped Burrow may show such a link** (`docs/specs/deploy.md` -> "Release checklist"); it renders nothing, so no grace period ends it.
+- **Must keep the redirect while a shipped Burrow may show such a link** (`docs/specs/hosted.md` -> "Desktop compatibility"); it renders nothing, so no grace period ends it.
 - A phone that loaded the old page before the deploy finds its client route gone at the Connect tap, and reads generic copy, like any lost room.
 
 Source of truth: `oneTimePageMoved` in `hosted/server/one-time.ts`.

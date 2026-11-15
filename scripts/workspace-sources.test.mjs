@@ -10,9 +10,10 @@ import { workspaceDeps, workspacePackages } from './workspace-packages.mjs';
 import { WORKSPACE_SOURCES } from './workspace-sources.mjs';
 
 const BASE = 'tsconfig.workspace-sources.json';
-/** esbuild callers that bundle no workspace package, and why. */
+/** esbuild callers that bundle no workspace package from this checkout's source, and why. */
 const NO_WORKSPACE_BUNDLE = {
   'hosted/server/tests/boundary.test.ts': 'its own build keeps every package external; its Worker bundles come from bundle.ts',
+  'hosted/scripts/desktop-builds.mjs': "it aliases each package to a release tag's source, never this checkout's",
 };
 const packages = [...workspacePackages().values()];
 

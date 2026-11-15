@@ -1,11 +1,8 @@
 name: Hosted production release
 on:
+  # No dry-run input: a verify-only run reported green and deployed nothing.
+  # The environment's required reviewers are the gate; reject there instead.
   workflow_dispatch:
-    inputs:
-      promote:
-        description: Deploy the Workers after verification
-        type: boolean
-        default: false
 permissions:
   contents: read
 concurrency:
@@ -15,11 +12,13 @@ jobs:
   verify:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Every release tag: the desktop compatibility gate builds each one.
+          fetch-depth: 0
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -27,6 +26,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:hosted
+      - name: Require every supported desktop release to enroll, connect, and pair against this revision
+        run: pnpm --filter dormouse-hosted test:desktop-compat
       - run: pnpm build:hosted
       # npm exits nonzero for a failure anywhere in Hosted's tree; only pgstencil's packages gate here.
       - name: Require each pgstencil package's provenance, npm signature, signer, and source commit, and that commit on main with a passing audit
@@ -45,7 +46,6 @@ jobs:
           retention-days: 3
   deploy:
     needs: verify
-    if: inputs.promote
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment:

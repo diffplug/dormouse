@@ -23,7 +23,8 @@
     "preview:cleanup": "node scripts/preview.mjs cleanup",
     "preview:sweep": "node scripts/preview.mjs sweep",
     "preview:smoke": "node scripts/preview-smoke.mjs",
-    "test:dom": "vitest run src"
+    "test:dom": "vitest run src",
+    "test:desktop-compat": "node ../scripts/build-workspace-deps.mjs && node scripts/desktop-builds.mjs && vitest run --config vitest.desktop-compat.config.ts"
   },
   "dependencies": {
     "@fontsource/ubuntu-mono": "^5.3.0",
