@@ -1,7 +1,7 @@
 import { useEffect, type RefObject } from 'react';
 
 /**
- * The pane-header popovers' shared dismissal contract (docs/specs/layout.md):
+ * The pane-header popovers' shared dismissal:
  * any window `pointerdown` (an overlay that should survive its own clicks stops
  * propagation on its root), Escape, `resize`, or capture-phase `scroll` —
  * except scrolls originating inside `overlayRef` itself, which never dismiss:
