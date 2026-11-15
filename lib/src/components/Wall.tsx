@@ -628,7 +628,7 @@ export function Wall({
     // DOM (and any iframe document still running inside it) with it.
     lath.store.forgetLeaf(id);
     // Dispose the session/registry entry — this stops the PTY and makes a
-    // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
+    // still-armed typeCommandWhenPromptReady exit via its registry-entry
     // check, so a late OSC signal can't type the command into a dead surface.
     disposeSession(id);
     clearLocalSurfaceActivity(id);

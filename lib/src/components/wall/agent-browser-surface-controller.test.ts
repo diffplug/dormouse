@@ -622,8 +622,7 @@ describe('diagnostics', () => {
 
 describe('param-write buffering', () => {
   it('buffers writes while detached and flushes them on the next attach', async () => {
-    // Answering no CDP endpoint keeps the popped-out CDP observer from opening
-    // a second socket, so only the stream socket exists.
+    // With no extra answers, only the stream socket exists.
     installBrowserHost();
 
     // Popped out ⇒ exempt from parking, so a detached (minimized) pane keeps its
