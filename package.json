@@ -2,11 +2,11 @@
   "name": "dormouse-root",
   "private": true,
   "license": "FSL-1.1-MIT",
-  "packageManager": "pnpm@12.18.0",
+  "packageManager": "pnpm@12.20.0",
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": "24.22.2",
+      "version": "24.22.3",
       "onFail": "download"
     }
   },
