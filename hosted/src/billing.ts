@@ -95,11 +95,14 @@ export function takeConfirmation(): string | null {
   return checkout || null;
 }
 
-/**
- * Each plan on sale, founding first while open, at the price checkout will
- * charge: founding at the open cohort's step, which the server reads.
- */
-export function planOffers(founding: BillingSummary["founding"]): Tier[] {
+/** Founding at the open cohort's step, which the server reads; null when not on sale to this account. */
+export function foundingOffer(founding: BillingSummary["founding"]): Tier | null {
   const step = founding && FOUNDING_LADDER[founding.cohort];
-  return [...(step ? [{ ...foundingTier(), price: step }] : []), HOSTED_YEARLY, HOSTED_MONTHLY];
+  return step ? { ...foundingTier(), price: step } : null;
+}
+
+/** Each plan on sale, founding first while open, at the price checkout will charge. */
+export function planOffers(founding: BillingSummary["founding"]): Tier[] {
+  const offer = foundingOffer(founding);
+  return [...(offer ? [offer] : []), HOSTED_YEARLY, HOSTED_MONTHLY];
 }

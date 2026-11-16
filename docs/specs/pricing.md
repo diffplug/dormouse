@@ -21,9 +21,8 @@
 
 ### Plan cards
 
-Each paid card carries a 30-day refund beneath its buy button.
-
 - **While `CHECKOUT_OPEN` is false a buy button opens the closed-checkout notice; once true it links to the account origin's `/checkout?plan=`, carrying the visit's `ref`.** **Never render a buy button that silently does nothing.**
+- **Hosted's `/enroll` sells through the same cards to an account with no plan**, founding only as checkout sells it; a buy button opens checkout there. Stripe returns to `/billing`, so the buyer opens Dormouse's link again (`docs/specs/hosted.md` -> "Burrow enrollment").
 
 ### The founding card's live half
 
@@ -49,7 +48,7 @@ Prices in USD; DiffPlug adds or includes applicable tax by jurisdiction.
 - **The step is $10 per cohort of 100, fixed**, and the ladder's last step is the one below list — reaching list closes founding.
 - **Show the current price, the struck list price, and the seats left at that price — never the next step or how many cohorts remain.**
 
-Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `fetchCohort` in `website/src/lib/hosted-cohorts.ts`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `PlanCards` in `website/src/components/PlanCards.tsx`; `fetchCohort` in `website/src/lib/hosted-cohorts.ts`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
 
 ## Checkout and entitlement
 

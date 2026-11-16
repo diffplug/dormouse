@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // phone page the relay stages. Whole packages and directories, never a
 // hand-picked subset of Pocket's import graph, so a new import cannot slip past.
 // The website's hosted-* modules hold the prices and notices Hosted's billing
-// imports.
+// imports, and its plan cards (with what they import) render on `/enroll`.
 // The exception is dor/, dor-tools-lib/, dor-tools-builtin/, and their alias
 // wiring (scripts/workspace-sources.mjs): lib/src imports them from source, but
 // ci.yml already builds Pocket and Hosted and runs Hosted's miniflare suite on
@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 export function touchesHosted(paths) {
   return paths.some(
     (path) =>
-      /^(?:hosted\/|remote-lib-common\/|dor-lib-common\/|lib\/(?:src|pocket|one-time)\/|lib\/vite[^/]*\.config\.ts$|lib\/tsconfig[^/]*\.json$|website\/src\/lib\/hosted-[^/]+\.ts$|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
+      /^(?:hosted\/|remote-lib-common\/|dor-lib-common\/|lib\/(?:src|pocket|one-time)\/|lib\/vite[^/]*\.config\.ts$|lib\/tsconfig[^/]*\.json$|website\/src\/(?:lib\/(?:hosted-[^/]+|site-meta|playground-routing)\.ts|components\/PlanCards\.tsx)$|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
         path,
       ) ||
       [

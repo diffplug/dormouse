@@ -443,10 +443,10 @@ export function App({
     setError(keepRead);
     history.replaceState(null, "", session ? "/account" : "/login");
   };
-  const purchase = (plan: Plan, price: number) =>
+  const purchase = (plan: Plan, price: number, ref = checkout?.ref ?? null) =>
     act("checkout", async () => {
       try {
-        await startCheckout(plan, price, checkout?.ref ?? null);
+        await startCheckout(plan, price, ref);
       } catch (error) {
         if (!(error instanceof PriceChangedError)) throw error;
         // Read the price checkout would charge now, and ask again.

@@ -340,7 +340,7 @@ Errors are the managed-voice cookie routes' ("Managed voice"): the list and remo
 - **Must remove a passkey by deleting its row**, every session it signed in cascading, so it signs in to nothing again, **then close their sockets and nudge the account's Burrows** ("Relay sockets"), each of which revokes its pairings with that passkey, one offline at its next connection (`docs/specs/remote-security-model.md` -> "Relay-named revocation"); every session names the passkey that signed it in, its `"credentialId"` `NOT NULL`.
 - **Must take the `/enroll` fragment before render and erase it from history, and hold the code in memory only**: through email sign-in and back, never into storage. Provider sign-in leaves the page, so the user opens the link again.
 - **Must preserve newer enrollments when earlier approvals complete.**
-- **Never offer the digits to an account the server says is unentitled**, and never conclude that from a failed read; the page offers another account instead.
+- **Never offer the digits to an account the server says is unentitled**, and never conclude that from a failed read; the page offers the plan cards (`docs/specs/pricing.md` -> "Plan cards") and another account instead.
 
 **Must bind every approval to its purpose, defaulting omitted purpose to remote control.** Voice approvals use a distinct code derivation and scope. Voice clients require begin to acknowledge their purpose before displaying or polling a code. Voice redemption atomically marks the approval and mints a token, without a Burrow or its cap; later polls report it spent. A remote poll cannot redeem a voice approval, or vice versa. Both purposes share the digits, approval gates, and expiry.
 
