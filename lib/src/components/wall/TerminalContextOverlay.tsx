@@ -30,17 +30,23 @@ export function TerminalContextOverlay({ context, mode, focusRequest, title, too
     const terminal = getTerminalInstance(context.id);
     return cursorHalfSide(terminal?.buffer.active, terminal?.rows ?? 0);
   });
-  const [manual, setManual] = useState(() => preferences.get(context.id));
+  // Properties never go below their source on their own, whatever was chosen there in an
+  // earlier opening; a terminal already below keeps its side when switched to properties.
+  const [manual, setManual] = useState(() => { const side = preferences.get(context.id); return mode === 'properties' && side === 'bottom' ? undefined : side; });
   const host = useRef<HTMLDivElement>(null);
   // The last placement, its side the next one's fallback.
   const placed = useRef<ContextPlacement | undefined>(undefined);
-  const place = (painted: Rect | undefined) => placeTerminalContext(wall, painted ?? source, multiPane, manual ?? placed.current?.side, coverSide);
+  // The placer reads the mode as it paints.
+  const modeRef = useRef(mode);
+  const place = (painted: Rect | undefined) => {
+    const preferred = manual ?? placed.current?.side;
+    const avoid = modeRef.current === 'properties' && preferred !== 'bottom' ? 'bottom' : undefined;
+    return placeTerminalContext(wall, painted ?? source, multiPane, preferred, coverSide, avoid);
+  };
   // Mount geometry only: children measure the host in layout effects that run before LathHost paints.
   const [initial] = useState(() => (placed.current = place(lath.animator.framesAt(nowMs()).get(context.id)?.rect)));
   const [shown, setShown] = useState<Omit<ContextPlacement, 'rect'>>(initial);
   const [initialStyle] = useState(() => contextHostStyle(initial, mode));
-  // The placer reads the mode as it paints.
-  const modeRef = useRef(mode);
   // A switched mode restyles the host at once, without waiting for a paint, and the ring follows.
   useLayoutEffect(() => {
     if (modeRef.current === mode) return;

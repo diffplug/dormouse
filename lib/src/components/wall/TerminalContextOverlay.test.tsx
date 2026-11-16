@@ -125,3 +125,36 @@ it('covers its source from the top, except for `!`, which keeps clear of the cur
     container.remove();
   }
 });
+
+it('opens properties above a source with room only below, though a remembered side was below', () => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const source = { x: 0, y: 0, width: 1200, height: 396 };
+  const lath = {
+    animator: { framesAt: () => new Map([['source', { rect: source }]]) },
+    setContextPlacer: () => {},
+    notifyFrames: vi.fn(),
+  } as unknown as LathWallEngine;
+  const side = (mode: ContextMode) => {
+    let placed: ContextSide | undefined;
+    act(() => root.render(<TerminalContextOverlay key={mode} context={{ id: 'source' }} mode={mode} tool={false}
+      wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source} multiPane lath={{ ...lath, setContextPlacer: (placer: ContextPlacer | null) => { placed = placer?.(new Map())?.side; } } as LathWallEngine} preferences={new Map([['source', 'bottom']])} />));
+    return placed;
+  };
+  try {
+    expect(side('aux')).toBe('bottom');
+    expect(side('properties')).toBe('top');
+    // A terminal below that switches to properties stays below.
+    let placer: ContextPlacer | null = null;
+    const render = (mode: ContextMode) => act(() => root.render(<TerminalContextOverlay key="switch" context={{ id: 'source' }} mode={mode} tool={false}
+      wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source} multiPane lath={{ ...lath, setContextPlacer: (next: ContextPlacer | null) => { placer = next; } } as LathWallEngine} preferences={new Map()} />));
+    render('aux');
+    expect(placer!(new Map())?.side).toBe('bottom');
+    render('properties');
+    expect(placer!(new Map())?.side).toBe('bottom');
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});

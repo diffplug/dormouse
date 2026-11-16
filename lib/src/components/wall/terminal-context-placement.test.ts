@@ -11,6 +11,17 @@ describe('terminal context placement', () => {
     expect(placeTerminalContext(wall, { ...wall, height: 396 }, true)).toMatchObject({ side: 'bottom', rect: { x: 0, y: 386, width: 1200, height: 396 } });
     expect(placeTerminalContext(wall, { ...wall, y: 404, height: 396 }, true)).toMatchObject({ side: 'top', rect: { x: 0, y: 0, width: 1200, height: 414 } });
   });
+  it('never chooses an avoided side, by preference or by room, though it stays available', () => {
+    // Only below has room: the context covers the source's top half instead.
+    const top = placeTerminalContext(wall, { ...wall, height: 396 }, true, 'bottom', 'top', 'bottom');
+    expect(top).toMatchObject({ side: 'top', rect: { x: 0, y: 0 } });
+    // Room on both sides: the other one, with below still on offer.
+    const middle = placeTerminalContext(wall, { x: 0, y: 260, width: 1200, height: 280 }, true, 'bottom', 'top', 'bottom');
+    expect(middle.side).toBe('top');
+    expect(middle.available).toContain('bottom');
+    // A single pane covering from below is avoided too.
+    expect(placeTerminalContext(wall, wall, false, 'bottom', 'bottom', 'bottom').side).toBe('top');
+  });
   it('overlaps the source by exactly the teeth on every adjacent side', () => {
     const source = { x: 400, y: 260, width: 400, height: 280 };
     const right = placeTerminalContext(wall, source, true, 'right').rect;

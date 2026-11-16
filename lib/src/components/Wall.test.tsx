@@ -5543,11 +5543,11 @@ it('recedes every other pane while a context is open and restores them as it exi
   }
 });
 
-it('moves a retained aux terminal without resizing or replacing its source, and remembers the manual side', async () => {
+it('moves a retained aux terminal without resizing or replacing its source, and remembers the manual side for the terminal', async () => {
   const retained: auxTerminals.AuxTerminal = { id: 'surface:placement-aux', parentId: 'surface:placement-source' };
   vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:placement-source' ? retained : undefined);
   const openAux = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue(retained);
-  await act(async () => root.render(<Wall initialPaneIds={['surface:placement-source']} />));
+  await act(async () => root.render(<Wall initialPaneIds={['surface:placement-source']} initialMode="command" />));
   await flush();
   const source = container.querySelector<HTMLElement>('[data-lath-leaf="surface:placement-source"]')!;
   const sourceStyle = source.getAttribute('style');
@@ -5573,11 +5573,21 @@ it('moves a retained aux terminal without resizing or replacing its source, and 
   expect(container.querySelector('[data-lath-leaf="surface:placement-source"]')).toBe(source);
   act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
   await flush();
+  const context = () => container.querySelector<HTMLElement>('[data-terminal-context]')!;
+  const close = async () => {
+    act(() => context().querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
+    await flush();
+  };
+  // Properties never open below, the remembered side notwithstanding.
   await open();
-  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextMode).toBe('properties');
-  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('bottom');
-  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Place context at top"]')!.click());
-  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('top');
+  expect(context().dataset.contextMode).toBe('properties');
+  expect(context().dataset.contextSide).toBe('top');
+  await close();
+  // The terminal, opened as itself, goes where it was put.
+  await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '!', bubbles: true, cancelable: true })); });
+  await flush();
+  expect(context().dataset.contextMode).toBe('aux');
+  expect(context().dataset.contextSide).toBe('bottom');
 });
 
 

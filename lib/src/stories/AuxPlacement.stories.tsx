@@ -100,9 +100,13 @@ async function openContext(source: string, mode: ContextMode, via: Props['via'])
   expect(text.match(/\/home\/demo\/projects\/dormouse ❯/g)).toHaveLength(1);
   expect(input.buffer.active.viewportY).toBe(input.buffer.active.baseY);
 }
-function expectedSide({ layout, zoomed, cursor, sourceAtEnd, via }: Props) {
-  // Alone in the Wall, it covers the top half, but from `!` avoids the cursor; beside a neighbor, it takes the neighbor's side.
-  if (zoomed || layout === 'single') return via === 'key' && cursor === 'top' ? 'bottom' : 'top';
+/** Whether the context covers its source rather than sitting beside it: alone in the Wall, or
+ *  opened on properties (a right-click) where its only room is below. */
+const covers = ({ layout, zoomed, sourceAtEnd, via }: Props) => zoomed || layout === 'single' || (via === 'click' && layout === 'rows' && !sourceAtEnd);
+function expectedSide(args: Props) {
+  const { layout, cursor, sourceAtEnd, via } = args;
+  // Covering, it takes the top half, but from `!` avoids the cursor; beside a neighbor, it takes the neighbor's side.
+  if (covers(args)) return via === 'key' && cursor === 'top' ? 'bottom' : 'top';
   if (layout === 'grid') return 'right';
   if (layout === 'wide-bottom') return 'top';
   if (layout === 'rows') return sourceAtEnd ? 'top' : 'bottom';
@@ -152,7 +156,7 @@ async function prepare(args: Props) {
   }
   const a = context().getBoundingClientRect();
   const b = sourcePane(id).getBoundingClientRect();
-  if (!args.zoomed && args.layout !== 'single') {
+  if (!covers(args)) {
     const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
     // Only the teeth reach over the source, and they face it.
     expect(overlap[side]).toBeCloseTo(TERMINAL_CONTEXT_TEETH_PX);
@@ -246,19 +250,20 @@ export const PreserveInputAndFocus = story({
       expect(context().dataset.contextSide).toBe('bottom');
       checkInput();
     });
-    await step('Close and reopen the retained aux terminal, then select the top side', async () => {
+    await step('Close and reopen the retained aux terminal above, as properties open, then select the bottom side', async () => {
       await userEvent.click(within(context()).getByRole('button', { name: 'Close terminal context' }));
       await waitFor(() => expect(document.querySelector('[data-terminal-context]')).toBeNull());
       const resizedSource = rect(sourcePane(source));
       await rightClickSourceHeader(source);
-      expect(context().dataset.contextSide).toBe('bottom');
+      // The right-click opened properties, which never go below, though below was chosen before.
+      expect(context().dataset.contextSide).toBe('top');
       expect(rect(sourcePane(source))).toEqual(resizedSource);
       checkInput();
       input.focus();
       const focused = document.activeElement;
-      await userEvent.click(within(context()).getByRole('button', { name: 'Place context at top' }));
-      await waitFor(() => expect(within(context()).getByRole('button', { name: 'Place context at top' })).toHaveAttribute('aria-pressed', 'true'));
-      expect(context().dataset.contextSide).toBe('top');
+      await userEvent.click(within(context()).getByRole('button', { name: 'Place context at bottom' }));
+      await waitFor(() => expect(within(context()).getByRole('button', { name: 'Place context at bottom' })).toHaveAttribute('aria-pressed', 'true'));
+      expect(context().dataset.contextSide).toBe('bottom');
       expect(document.activeElement).toBe(focused);
       checkInput();
     });
@@ -268,7 +273,18 @@ export const PreserveInputAndFocus = story({
 /** Properties are only as tall as their rows, held to the edge their teeth share with the source. */
 export const PropertiesAbove = story({ args: { layout: 'wide-bottom', mode: 'properties' } });
 export const PropertiesBeside = story({ args: { layout: 'columns', mode: 'properties' } });
-export const PropertiesBelow = story({ args: { layout: 'rows', mode: 'properties' } });
+/** Properties never go below on their own: with room only there, they cover the source's top half. */
+export const PropertiesNeverBelow = story({ args: { layout: 'rows', mode: 'properties' } });
+/** `!` opens the terminal below where that is the room; switching to properties keeps it there. */
+export const AuxBelowFromKey = story({
+  args: { layout: 'rows', via: 'key' },
+  play: async ({ args }) => {
+    await prepare(args);
+    await userEvent.click(within(context()).getByRole('button', { name: 'Show properties' }));
+    await waitFor(() => expect(context().dataset.contextMode).toBe('properties'));
+    expect(context().dataset.contextSide).toBe('bottom');
+  },
+});
 export const PropertiesCovering = story({ args: { cursor: 'top', mode: 'properties' } });
 
 export const TwoColumnsDark = story({ args: { layout: 'columns' }, globals: { theme: 'Dark (Visual Studio)' } });
