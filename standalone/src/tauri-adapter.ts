@@ -357,9 +357,7 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async getCwd(id: string): Promise<string | null> {
-    try {
-      return await rawInvoke<string | null>("pty_get_cwd", { id });
-    } catch { return null; }
+    return (await this.getCwds([id]))[id] ?? null;
   }
 
   /** One sidecar round trip, and one process scan inside it, for every pane a
@@ -394,14 +392,12 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
-    try {
-      return await rawInvoke<OpenPort[]>("pty_get_open_ports", { id });
-    } catch { return []; }
+    return (await this.getOpenPortsMany([id]))[id] ?? [];
   }
 
   /** Every terminal of a listing in one round trip, so a `dor list --ports` that
    *  spans Workspaces costs the sidecar one process scan rather than one per
-   *  terminal. Fails soft to no ports, exactly as the per-id call does. */
+   *  terminal. Fails soft to no ports. */
   async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
     try {
       return await rawInvoke<Record<string, OpenPort[]>>("pty_get_open_ports_many", { ids });

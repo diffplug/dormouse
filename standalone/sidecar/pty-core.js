@@ -2208,18 +2208,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
 
   const cwdsForRoots = (roots) => getCwdsForPids([...new Set(roots.map((root) => root.pid))]);
 
-  async function getCwd(id, requestId) {
-    send('cwd', { id, cwd: (await answerForIds([id], null, cwdsForRoots))[id], requestId });
-  }
-
   /** One answer for every id a save asks about, so N panes cost one process
    *  scan rather than N (docs/specs/transport.md -> "Persisted session"). */
   async function getCwds(ids, requestId) {
     send('cwds', { cwds: await answerForIds(ids, null, cwdsForRoots), requestId });
-  }
-
-  async function getOpenPorts(id, requestId) {
-    send('openPorts', { id, ports: (await answerForIds([id], [], scanPorts))[id], requestId });
   }
 
   /** One answer for every id a listing or a Dev-Server Chip / Tool serving pass
@@ -2337,6 +2329,6 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
 
   return { spawn, setParentWindow, write, sendInput, cancelSendInput, resize, pause, resume, hasPty, kill, killAll, list, context,
     getHelperParentId: (id) => helpers.get(id)?.parentId,
-    getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
+    getCwds, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };
 };

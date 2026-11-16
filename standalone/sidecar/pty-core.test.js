@@ -2342,33 +2342,31 @@ test('getOpenPortsMany answers a key for every requested id, [] for one with no 
   assert.deepEqual(answer.data.ports['pane-gone'], []);
 });
 
-for (const many of [false, true]) {
-  test(`pending ${many ? 'batched' : 'single'} port scans allow PTY I/O and discard a replaced PTY's result`, async () => {
-    const events = [];
-    const writes = [];
-    let finishScan, output;
-    const manager = create((event, data) => events.push({ event, data }), {
-      spawn() {
-        return { pid: 42, onData(fn) { output = fn; }, onExit() {}, resize() {},
-          write(data) { writes.push(data); }, kill() {} };
-      },
-    }, { scanPorts: () => new Promise((resolve) => { finishScan = resolve; }) });
-    manager.spawn('pane');
-    const scan = many ? manager.getOpenPortsMany(['pane'], 'request') : manager.getOpenPorts('pane', 'request');
-    manager.write('pane', 'typed');
-    output('echo');
-    assert.deepEqual(writes, ['typed']);
-    assert.ok(events.some(({ event, data }) => event === 'data' && data.data === 'echo'));
-    manager.kill('pane');
-    manager.spawn('pane'); // Same pid too: object identity must fence the answer.
-    finishScan(new Map([[42, [{ port: 1234 }]]]));
-    await scan;
-    const answer = events.find(({ event }) => event === (many ? 'openPortsMany' : 'openPorts'));
-    assert.equal(answer.data.requestId, 'request');
-    assert.deepEqual(many ? answer.data.ports.pane : answer.data.ports, []);
-    manager.killAll();
-  });
-}
+test('pending port scans allow PTY I/O and discard a replaced PTY\'s result', async () => {
+  const events = [];
+  const writes = [];
+  let finishScan, output;
+  const manager = create((event, data) => events.push({ event, data }), {
+    spawn() {
+      return { pid: 42, onData(fn) { output = fn; }, onExit() {}, resize() {},
+        write(data) { writes.push(data); }, kill() {} };
+    },
+  }, { scanPorts: () => new Promise((resolve) => { finishScan = resolve; }) });
+  manager.spawn('pane');
+  const scan = manager.getOpenPortsMany(['pane'], 'request');
+  manager.write('pane', 'typed');
+  output('echo');
+  assert.deepEqual(writes, ['typed']);
+  assert.ok(events.some(({ event, data }) => event === 'data' && data.data === 'echo'));
+  manager.kill('pane');
+  manager.spawn('pane'); // Same pid too: object identity must fence the answer.
+  finishScan(new Map([[42, [{ port: 1234 }]]]));
+  await scan;
+  const answer = events.find(({ event }) => event === 'openPortsMany');
+  assert.equal(answer.data.requestId, 'request');
+  assert.deepEqual(answer.data.ports.pane, []);
+  manager.killAll();
+});
 
 // The clamping arithmetic itself lives in lib/src/host/replay-buffer.ts and is
 // tested there; what belongs here is the buffer accounting this file owns and

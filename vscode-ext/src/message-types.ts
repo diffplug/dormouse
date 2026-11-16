@@ -22,9 +22,7 @@ export type WebviewMessage =
   // -> "Output flow control"). `chars` is validated host-side.
   | { type: 'pty:ack'; id: string; chars: number }
   | { type: 'pty:kill'; id: string }
-  | { type: 'pty:getCwd'; id: string; requestId?: string }
   | { type: 'pty:getCwds'; ids: string[]; requestId?: string }
-  | { type: 'pty:getOpenPorts'; id: string; requestId?: string }
   | { type: 'pty:getOpenPortsMany'; ids: string[]; requestId?: string }
   | { type: 'surface:reserveIds'; count: number; floor: number; requestId: string }
   | { type: 'clipboard:readFiles'; requestId: string }
@@ -74,9 +72,7 @@ export type ExtensionMessage =
   | { type: 'terminal:clientInput'; id: string }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
-  | { type: 'pty:cwd'; id: string; cwd: string | null; requestId?: string }
   | { type: 'pty:cwds'; cwds: Record<string, string | null>; requestId?: string }
-  | { type: 'pty:openPorts'; id: string; ports: OpenPort[]; requestId?: string }
   | { type: 'pty:openPortsMany'; ports: Record<string, OpenPort[]>; requestId?: string }
   | { type: 'surface:reservedIds'; ids: string[]; requestId: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }

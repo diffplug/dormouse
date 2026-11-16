@@ -32,8 +32,8 @@ async function fixture(t) {
       // pty-core reports an exit for a PTY it killed; a resize stands in for
       // one ending on its own.
       if (event === 'pty:kill' || event === 'pty:resize') console.log(JSON.stringify({ event: 'pty:exit', data: { id: data.id, exitCode: 0 } }));
-      if (event === 'pty:getCwd') console.log(JSON.stringify({
-        event: 'pty:cwd', data: { requestId: data.requestId, cwd: process.env.VITE_DORMOUSE_BROWSER_DEV_HOST || process.cwd() }
+      if (event === 'pty:getCwds') console.log(JSON.stringify({
+        event: 'pty:cwds', data: { requestId: data.requestId, cwds: { test: process.env.VITE_DORMOUSE_BROWSER_DEV_HOST || process.cwd() } }
       }));
     });
   `);
@@ -99,7 +99,7 @@ async function fixture(t) {
   };
 }
 
-async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_cwd', args = { id: 'test' }) {
+async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_cwds', args = { ids: ['test'] }) {
   return fetch(`${run.bridge}/__dormouse_dev_host/invoke?t=${token}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin },
     body: JSON.stringify({ cmd, args }),
@@ -207,7 +207,7 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
     const response = await invoke(run);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('access-control-allow-origin'), run.app);
-    assert.deepEqual(await response.json(), { ok: true, result: path.join(dir, 'standalone/sidecar') });
+    assert.deepEqual(await response.json(), { ok: true, result: { test: path.join(dir, 'standalone/sidecar') } });
     assert.equal((await invoke(run, other.token)).status, 404);
     assert.equal((await invoke(run, run.token, other.app)).headers.get('access-control-allow-origin'), run.app);
   }
