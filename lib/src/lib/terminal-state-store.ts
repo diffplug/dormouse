@@ -19,7 +19,7 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
-import { stripTerminalControlsBothWays, TerminalControlStreamFilter } from './terminal-controls';
+import { removeStringControls, stripTerminalControlsBothWays } from './terminal-controls';
 
 const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
@@ -303,7 +303,7 @@ export function seedPromptShapeFromScrollback(id: string, scrollback: string): v
   // bounded tail rather than the live stream: the prompt is in the last few
   // hundred characters, and 64 KiB is ample runway to resync the control state
   // before the 1024 the result is cut to.
-  const text = new TerminalControlStreamFilter().process(scrollback.slice(-65_536));
+  const text = removeStringControls(scrollback.slice(-65_536));
   const filter = new PromptAltScreenFilter();
   const visible = filter.process(text);
   promptAltScreenFilters.set(id, filter);
