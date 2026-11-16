@@ -205,43 +205,82 @@ const FEATURE_VIDEO_VARIANTS = {
 
 const PocketDemo = lazy(() => import("../components/pocket-demo/PocketDemo"));
 
-/** The real Pocket UI playing a script in a phone frame. It mounts once a third
- *  of the phone is on screen, so the script starts in view, and unmounts once
- *  it has scrolled away, so it starts over on return. */
+/** The phone's layout width: a real phone's, so Pocket's bars fit their labels. */
+const PHONE_WIDTH = 390;
+/** Viewport height the phone leaves free: the site header and some air. */
+const PHONE_VIEWPORT_MARGIN = 140;
+
+/** The real Pocket UI playing a script in a phone frame. It lays out at a
+ *  phone's width and scales down to fit one screen and its column. It mounts
+ *  once a third of the phone is on screen, so the script starts in view, and
+ *  unmounts once it has scrolled away, so it starts over on return. */
 function PocketDemoPhone({ className = "" }: { className?: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const slotRef = useRef<HTMLDivElement>(null);
+  const phoneRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [fit, setFit] = useState<{ scale: number; height: number; top: number } | null>(null);
   useEffect(() => {
-    const phone = ref.current;
-    if (!phone) return;
+    const slot = slotRef.current;
+    const phone = phoneRef.current;
+    if (!slot || !phone) return;
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.intersectionRatio >= 0.35) setPlaying(true);
       else if (!entry.isIntersecting) setPlaying(false);
     }, { threshold: [0, 0.35] });
-    observer.observe(phone);
-    return () => observer.disconnect();
+    observer.observe(slot);
+    // The projection's size at scale 1: its drawn box over the scale it was drawn at.
+    let drawnScale = 1;
+    const refit = () => {
+      const box = phone.getBoundingClientRect();
+      const width = box.width / drawnScale;
+      const height = box.height / drawnScale;
+      drawnScale = Math.min(1, slot.clientWidth / width, (window.innerHeight - PHONE_VIEWPORT_MARGIN) / height);
+      // Turned about its center, so centering the layout box centers the projection.
+      setFit({ scale: drawnScale, height: height * drawnScale, top: (height * drawnScale - phone.offsetHeight) / 2 });
+    };
+    refit();
+    const resize = new ResizeObserver(refit);
+    resize.observe(slot);
+    window.addEventListener("resize", refit);
+    return () => {
+      observer.disconnect();
+      resize.disconnect();
+      window.removeEventListener("resize", refit);
+    };
   }, []);
   return (
     <div
-      ref={ref}
+      ref={slotRef}
       role="img"
       aria-label="Dormouse Pocket on a phone: a request typed to a coding agent, its question answered with two gestures, then the README it changed, with a 3D cheese wedge turning in it"
-      className={`w-full rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 ${className}`}
-      style={{
-        // Turned toward the text, as a photographed phone would be; the
-        // stacked shadows read as its near edge's thickness.
-        transform: "perspective(1600px) rotateY(16deg) rotateX(6deg) rotateZ(-2deg)",
-        boxShadow: "-3px 3px 0 #3a3a3c, -6px 6px 0 #2a2a2c, -8px 8px 0 #1c1c1e, -30px 40px 90px rgba(0,0,0,0.6)",
-      }}
+      className={`relative w-full max-w-[390px] ${className}`}
+      // Unfitted (prerendered), the slot holds the phone's natural proportions.
+      style={fit ? { height: fit.height } : { aspectRatio: "390 / 750" }}
     >
-      <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
-      <div className="aspect-[390/760] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
-        <div className="h-full" aria-hidden="true" inert>
-          {playing ? (
-            <Suspense fallback={null}>
-              <PocketDemo still={prefersReducedMotion()} />
-            </Suspense>
-          ) : null}
+      <div
+        ref={phoneRef}
+        className="absolute left-1/2 rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3"
+        style={{
+          width: PHONE_WIDTH,
+          marginLeft: -PHONE_WIDTH / 2,
+          top: fit?.top ?? 0,
+          // Turned toward the text, as a photographed phone would be, through a
+          // long lens (a far vanishing point), so it does not distort. The
+          // stacked shadows read as its near edge's thickness.
+          transform: `scale(${fit?.scale ?? 1}) perspective(6000px) rotateY(16deg) rotateX(6deg) rotateZ(-2deg)`,
+          boxShadow: "-3px 3px 0 #3a3a3c, -6px 6px 0 #2a2a2c, -8px 8px 0 #1c1c1e, -30px 40px 90px rgba(0,0,0,0.6)",
+          visibility: fit ? undefined : "hidden",
+        }}
+      >
+        <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
+        <div className="aspect-[390/760] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
+          <div className="h-full" aria-hidden="true" inert>
+            {playing ? (
+              <Suspense fallback={null}>
+                <PocketDemo still={prefersReducedMotion()} />
+              </Suspense>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
@@ -900,7 +939,7 @@ export default function Home() {
         {/* Section 2: image left, text right */}
         <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,390px)_1fr] gap-8 md:gap-12 items-start`}>
           {/* A phone's own width: narrower, the mode bar truncates its labels. */}
-          <PocketDemoPhone className="order-2 md:order-1 mx-auto max-w-[390px]" />
+          <PocketDemoPhone className="order-2 md:order-1 mx-auto" />
           <div className="order-1 md:order-2">
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
               Push notifications you can self-host

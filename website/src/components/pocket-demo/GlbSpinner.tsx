@@ -192,16 +192,22 @@ export function GlbSpinner({ spinning, label, className }: {
   label: string;
   className?: string;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const holderRef = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    const holder = holderRef.current;
+    if (!holder) return;
+    // A canvas per run: once `dispose` loses its context, that canvas only
+    // ever returns the lost one.
+    const canvas = document.createElement("canvas");
+    canvas.className = "block h-full w-full";
+    holder.append(canvas);
     let frame = 0;
     let cancelled = false;
     let renderer: ReturnType<typeof createRenderer> = null;
     MODEL.then((mesh) => {
-      const canvas = canvasRef.current;
-      if (cancelled || !canvas) return;
+      if (cancelled) return;
       renderer = createRenderer(canvas, mesh);
       if (!renderer) {
         setFailed(true);
@@ -226,12 +232,13 @@ export function GlbSpinner({ spinning, label, className }: {
       cancelled = true;
       cancelAnimationFrame(frame);
       renderer?.dispose();
+      canvas.remove();
     };
   }, [spinning]);
 
   return failed ? (
     <div className={`grid place-items-center text-xs opacity-60 ${className ?? ""}`}>{label}</div>
   ) : (
-    <canvas ref={canvasRef} role="img" aria-label={label} className={className} />
+    <div ref={holderRef} role="img" aria-label={label} className={className} />
   );
 }
