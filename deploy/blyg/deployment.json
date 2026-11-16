@@ -10,9 +10,9 @@
     "archiveIndex": 200,
     "anonymousSettings": 401,
     "webmentionAdvertised": true,
-    "ownerLogin": null,
-    "publishedReleases": 17,
-    "pinnedRevisions": 33,
+    "ownerLogin": true,
+    "publishedReleases": 18,
+    "pinnedRevisions": 34,
     "existingRevisionsPreserved": 33,
     "importedDatesInspected": 0,
     "importedDatesRepaired": 0
@@ -20,5 +20,13 @@
   "protocolVersion": "0.4",
   "privateApiVersion": "5.10.0",
   "workerVersion": "9aa0db05-eff7-451c-ab4e-5e118afc831e",
-  "lastMigration": "0046_background.sql"
+  "lastMigration": "0046_background.sql",
+  "verifiedAt": "2026-11-16T06:14:55.876784+00:00",
+  "publication": {
+    "version": "2.0.0",
+    "url": "https://blyg.dormouse.sh/t/5nnnjjwyk1259w1ae32jwwpfb3/",
+    "revision": 1,
+    "workflowRun": "https://github.com/diffplug/dormouse/actions/runs/43815296964",
+    "tokenExpiresAt": "2026-12-16T06:05:54+00:00"
+  }
 }
