@@ -17,10 +17,6 @@ pub const MAIN_LABEL: &str = "main";
 pub const WS_LABEL_PREFIX: &str = "ws-";
 /// How many saved windows a boot reopens. The excess stays on disk.
 pub const MAX_RESTORED_WINDOWS: usize = 8;
-/// How long a transfer may suppress a PTY's output before the suppression is
-/// assumed lost and released (fail open: duplicated bytes beat a dead pane).
-pub const AWAITING_REPLAY_MAX: Duration = Duration::from_secs(5);
-
 /// How long an arrival may sit unadopted before Rust hands it back. The
 /// target's own collection times out at 3 s and a torn-out window boots in
 /// well under this; past it the target webview is wedged, and its shells
@@ -62,8 +58,8 @@ pub enum Route<'a> {
 /// copied: this runs once per PTY chunk.
 pub struct RouteView<'a> {
     pub owners: &'a HashMap<String, String>,
-    /// Ids mid-transfer, each with the instant its suppression began.
-    pub awaiting_replay: &'a HashMap<String, Instant>,
+    /// Ids mid-transfer.
+    pub awaiting_replay: &'a HashSet<String>,
     /// Which window took each outstanding `dor` request, so its cancel follows
     /// the request instead of waking every window.
     pub dor_targets: &'a HashMap<String, String>,
@@ -123,7 +119,7 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
         | "terminal:semanticEvents"
         | "terminal:toolEvents"
         | "terminal:clipboardOffer" => match str_field(data, "id") {
-            Some(id) if view.awaiting_replay.contains_key(id) => Route::Drop,
+            Some(id) if view.awaiting_replay.contains(id) => Route::Drop,
             Some(id) => showing(view, id),
             None => Route::Broadcast,
         },
@@ -388,8 +384,8 @@ pub fn hand_back_ids(arrival: &Arrival, marks: &JsonValue) -> (Vec<String>, Vec<
         .partition(|id| marks.get(id).is_some())
 }
 
-/// Every id an in-flight arrival claims: the ids the sweep may not release and
-/// a boot list may not place as panes.
+/// Every id an in-flight arrival claims: the ids a boot list may not place as
+/// panes.
 pub fn arrival_ids(arrivals: &Arrivals) -> HashSet<String> {
     arrivals
         .iter()
@@ -409,30 +405,6 @@ pub fn boot_list_ids(owned: Vec<String>, arrivals: &Arrivals) -> Vec<String> {
     }
     let arriving = arrival_ids(arrivals);
     owned.into_iter().filter(|id| !arriving.contains(id)).collect()
-}
-
-/// Release every suppression older than `max` that **no arrival claims**,
-/// returning each released id.
-///
-/// Fail open, but only defensively: a suppression whose arrival record is gone
-/// is bookkeeping nothing will ever lift, while a real arrival's is lifted by
-/// its own replay — and a cold boot slow enough to outrun `max` would otherwise
-/// have its shells unsilenced into a window that has not resumed them yet.
-pub fn sweep_awaiting(
-    map: &mut HashMap<String, Instant>,
-    now: Instant,
-    max: Duration,
-    arriving: &HashSet<String>,
-) -> Vec<String> {
-    let mut released = Vec::new();
-    map.retain(|id, at| {
-        let stale = now.duration_since(*at) >= max && !arriving.contains(id);
-        if stale {
-            released.push(id.clone());
-        }
-        !stale
-    });
-    released
 }
 
 /// `ws-4` -> 4; anything else -> None.
@@ -602,9 +574,8 @@ mod tests {
             .collect()
     }
 
-    fn awaiting(ids: &[&str]) -> HashMap<String, Instant> {
-        let now = Instant::now();
-        ids.iter().map(|id| ((*id).to_string(), now)).collect()
+    fn awaiting(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
     }
 
     /// A routing state whose `owners` are exactly these pairs.
@@ -842,42 +813,6 @@ mod tests {
         assert_eq!(
             route("pty:data", &json!({"id":"a"}), &released.view(&no_registry)),
             Route::EmitTo("ws-2")
-        );
-    }
-
-    #[test]
-    fn a_stale_suppression_with_no_arrival_fails_open() {
-        let mut map = HashMap::new();
-        let now = Instant::now();
-        map.insert("old".to_string(), now - Duration::from_secs(9));
-        map.insert("fresh".to_string(), now);
-        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &HashSet::new());
-        assert_eq!(swept, vec!["old".to_string()]);
-        assert!(!map.contains_key("old"));
-        assert!(map.contains_key("fresh"));
-    }
-
-    /// A cold boot slower than `AWAITING_REPLAY_MAX` must not have its shells
-    /// unsilenced into a window that has not resumed them yet: the fail-open is
-    /// for suppressions no arrival claims.
-    #[test]
-    fn the_sweep_never_releases_a_live_arrivals_suppression() {
-        let mut map = HashMap::new();
-        let now = Instant::now();
-        map.insert("arriving".to_string(), now - Duration::from_secs(9));
-        map.insert("orphan".to_string(), now - Duration::from_secs(9));
-        let mut arrivals = Arrivals::new();
-        queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["arriving"]));
-
-        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals));
-        assert_eq!(swept, vec!["orphan".to_string()]);
-        assert!(map.contains_key("arriving"));
-
-        // Its record settled: the suppression is ordinary bookkeeping again.
-        take_arrival(&mut arrivals, "w1", "ws-2").unwrap();
-        assert_eq!(
-            sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals)),
-            vec!["arriving".to_string()]
         );
     }
 

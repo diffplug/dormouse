@@ -660,9 +660,8 @@ describe("the target half", () => {
   });
 
   it("mounts a browser-only arrival, which names no PTYs at all", async () => {
-    // Distinguishable from a swept suppression precisely because the record
-    // says `terminalIds: []`: the host answers with an empty list at once
-    // rather than leaving the collector to sit out its timeout.
+    // The record says `terminalIds: []`, so the host answers with an empty
+    // list at once rather than leaving the collector to sit out its timeout.
     const platform = fakePlatform();
     arrivals = [payload({ terminalIds: [], allIds: ["browser-1"] })];
 

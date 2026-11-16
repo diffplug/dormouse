@@ -20,7 +20,7 @@ A second close before `onExit` crashed the Node process in the native test.
 
 **Why after the parse.** The renderer can only acknowledge what it receives, the parse's `data`, and the parse strips OSCs: a raw count in `pty-core` would never be paid back. VS Code's node-pty runs in the pty-host child while its parse and `pty:data` are the extension host's, so the count lives there and the pause crosses the IPC.
 
-**Why Rust acknowledges what it drops.** After a transfer mark Rust drops an id's output until the target's replay; a suppression no arrival claims fails open after `AWAITING_REPLAY_MAX` with no `requestInit` behind it, which would have left the PTY paused on output no window ever saw.
+**Why Rust acknowledges what it drops.** No renderer parses a chunk Rust drops, so nothing else would pay it back: an ownerless id has no `requestInit` coming to forgive its debt, and neither does a suppressed id whose replay never arrives, which would leave the PTY paused on output no window ever saw.
 
 **The constants** (measured 2026-11-11, macOS 27 on Apple silicon, node-pty 1.2.0-beta.18, Node 24.22): the real `pty-core` and node-pty, the host counter, and a renderer child process parsing with real xterm over Node IPC (headless, so faster than a webview that also renders), with 0, 2 or 5 ms added each way. Median of three, MB/s of parsed output; `yes` is `y\n`, logs are 80-column lines:
 
@@ -96,8 +96,6 @@ The retry is the same argument applied to the plain boot: the arrival path refus
 The earlier list of private-mode resets missed insert mode, scroll margins, and kitty keyboard stacks (reproduced against the pinned xterm, 2026-10-20). A soft reset clears these without erasing retained text; the Windows keyboard arbiter resets its matching stack depth too. Alternate-screen exit and mouse resets remain explicit because xterm keeps those outside its soft reset.
 
 ## Transferring a Workspace
-
-The suppression is bounded and fails open because the two failures are not symmetric: duplicated bytes are a cosmetic repeat the user can scroll past, and a permanently silenced pane is a terminal they have to kill. The host's own measurements and the ordering the guarantee rests on are `docs/specs/standalone.rationale.md` → Arrival queue.
 
 Release-without-kill is a separate verb rather than a flag on the closure path because the closure path is reachable from an unmount and this must not be. The two differ in exactly one line, and that line is the whole difference between moving a Workspace and losing it.
 

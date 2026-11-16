@@ -24,7 +24,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -100,8 +100,8 @@ struct RoutingState {
     /// transfer.
     owners: HashMap<String, String>,
     /// Ids whose output is suppressed until the replay their new owner is about
-    /// to be sent has been emitted, each with the instant it began.
-    awaiting_replay: HashMap<String, Instant>,
+    /// to be sent has been emitted.
+    awaiting_replay: HashSet<String>,
     /// dor requestId -> the window handling it, so a cancel reaches the window
     /// holding the subscription, watch or completion claim it releases.
     dor_targets: HashMap<String, String>,
@@ -117,7 +117,7 @@ impl RoutingState {
     fn mark_transfer(&mut self, id: &str, mark: u64) {
         if self.marking.remove(id).is_some() {
             self.transfer_marks.insert(id.to_string(), mark);
-            self.awaiting_replay.insert(id.to_string(), Instant::now());
+            self.awaiting_replay.insert(id.to_string());
         }
     }
 
@@ -136,19 +136,15 @@ impl RoutingState {
 #[derive(Default)]
 struct WindowState {
     routing: Mutex<RoutingState>,
-    /// `awaiting_replay.len()`, readable without the lock. Nothing is
-    /// transferring in the steady state, and this is what lets a chunk skip the
-    /// sweep and the `Instant::now()` it needs.
-    suppressed: AtomicUsize,
     /// Window labels, most recently focused first.
     focus_order: Mutex<Vec<String>>,
     /// Every Workspace in flight, from the source's invoke until its target
     /// adopts it or dies (`routing::Arrival`), and the teardown requests
     /// deferred behind them (`ArrivalQueue`). Pulled, never pushed.
     ///
-    /// **Never take this lock while holding `routing`.** `dispatch_sidecar_event`
-    /// reads it before it takes `routing`, so the two are only ever acquired in
-    /// that order.
+    /// **Never take this lock while holding `routing`.**
+    /// `journal_and_open_arrival` takes `routing` while holding it, so the two
+    /// are only ever acquired in that order.
     arrivals: Mutex<ArrivalQueue>,
     /// The window currently showing a cross-window drop caret, so the previous
     /// one can be told to clear it.
@@ -306,14 +302,12 @@ impl WindowState {
     ///
     /// Clears any suppression left under this id. A spawn reusing an id whose
     /// transfer never completed would otherwise start life silenced, with no
-    /// replay coming to lift it — the sweep's 5 s of a dead pane.
+    /// replay coming to lift it.
     fn mint(&self, id: &str, label: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.insert(id.to_string(), label.to_string());
         routing.transfer_marks.remove(id);
         routing.awaiting_replay.remove(id);
-        self.suppressed
-            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// Refuse every later `save_session` and geometry write for `label` (a
@@ -338,7 +332,6 @@ impl WindowState {
             routing.transfer_marks.remove(id);
             routing.marking.insert(id.clone(), source.to_string());
         }
-        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// Give every id back to `source` that no kill dropped — an exited one too,
@@ -355,10 +348,9 @@ impl WindowState {
             // A kill drops the owner and the transfer records alike.
             if !transferring && !routing.owners.contains_key(id) { continue; }
             routing.owners.insert(id.clone(), source.to_string());
-            if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
+            if mark.is_some() { routing.awaiting_replay.insert(id.clone()); }
             else { routing.awaiting_replay.remove(id); }
         }
-        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
         JsonValue::Object(marks)
     }
 
@@ -371,7 +363,6 @@ impl WindowState {
         routing.transfer_marks.remove(id);
         routing.awaiting_replay.remove(id);
         routing.marking.remove(id);
-        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// The PTY exited on its own. **Ownership stays until the Session is
@@ -383,7 +374,6 @@ impl WindowState {
     fn exited_pty(&self, id: &str) {
         let mut routing = guard(&self.routing);
         routing.awaiting_replay.remove(id);
-        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// Drop any suppression on `ids`, leaving ownership alone. What settles an
@@ -396,8 +386,6 @@ impl WindowState {
             routing.transfer_marks.remove(id);
             routing.marking.remove(id);
         }
-        self.suppressed
-            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// Forget a window: its ownership, its outstanding `dor` requests, its
@@ -427,8 +415,6 @@ impl WindowState {
             // Its answers can never arrive, so neither can the cancels that
             // would have retired them.
             routing.dor_targets.retain(|_, target| target != label);
-            self.suppressed
-                .store(routing.awaiting_replay.len(), Ordering::Relaxed);
             owned
         };
         guard(&self.focus_order).retain(|entry| entry != label);
@@ -487,16 +473,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         return;
     };
 
-    let mut released: Vec<String> = Vec::new();
     let delivery = {
-        // Before the routing lock, never inside it (§`arrivals`). Nothing is
-        // transferring in the steady state, so this second acquisition is paid
-        // only while something is.
-        let arriving = if state.suppressed.load(Ordering::Relaxed) > 0 {
-            routing::arrival_ids(&guard(&state.arrivals))
-        } else {
-            HashSet::new()
-        };
         // Only a `dor` request consults the registry; a PTY chunk never pays
         // for the lock. Taken before the routing lock and released with it.
         let registry_guard = (event == "dor:controlRequest").then(|| guard(&state.registry));
@@ -504,19 +481,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             Some(registry) => registry,
             None => &EMPTY_REGISTRY,
         };
-        let mut routing = guard(&state.routing);
-        if state.suppressed.load(Ordering::Relaxed) > 0 {
-            released = routing::sweep_awaiting(
-                &mut routing.awaiting_replay,
-                Instant::now(),
-                routing::AWAITING_REPLAY_MAX,
-                &arriving,
-            );
-            if !released.is_empty() {
-                state.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
-            }
-        }
-
+        let routing = guard(&state.routing);
         match routing::route(event, &data, &routing.view(registry)) {
             Route::Drop => Delivery::Nowhere,
             Route::Broadcast => Delivery::Broadcast,
@@ -588,19 +553,12 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
                 let mut routing = guard(&state.routing);
                 if let Some(mark) = data.get("mark").and_then(JsonValue::as_u64) {
                     routing.mark_transfer(id, mark);
-                    state
-                        .suppressed
-                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
                 }
             }
         }
         "pty:replay" => {
             if let Some(id) = id() {
-                let mut routing = guard(&state.routing);
-                routing.awaiting_replay.remove(id);
-                state
-                    .suppressed
-                    .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                guard(&state.routing).awaiting_replay.remove(id);
             }
         }
         "dor:controlRequest" => {
@@ -636,14 +594,6 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             }
         }
         _ => {}
-    }
-
-    // Logged outside the lock: a chatty log write must never sit in front of the
-    // next PTY chunk's routing decision.
-    for id in released {
-        append_log(format!(
-            "[window] suppression for {id} expired with no arrival claiming it; releasing"
-        ));
     }
 }
 
@@ -5199,7 +5149,6 @@ mod tests {
     use std::collections::HashSet;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::Ordering;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// A Window-wide port listing is budgeted for its batch: both of the
@@ -5520,7 +5469,7 @@ mod tests {
         assert_eq!(windows.hand_back(&lost[0].terminal_ids, "main")["t1"], 42);
         let routing = guard(&windows.routing);
         assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
-        assert!(routing.awaiting_replay.contains_key("t1"));
+        assert!(routing.awaiting_replay.contains("t1"));
         assert_eq!(routing.owners.get("t2").map(String::as_str), Some("main"));
         assert!(!routing.owners.contains_key("t3"));
     }
@@ -5538,7 +5487,7 @@ mod tests {
         assert!(!routing.transfer_marks.contains_key("t1"));
         // The source shows the exited pane again, behind the replay of its cut.
         assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
-        assert!(routing.awaiting_replay.contains_key("t1"));
+        assert!(routing.awaiting_replay.contains("t1"));
     }
 
     /// An exit between a transfer's invoke and its mark belongs to the source,
@@ -5753,7 +5702,7 @@ mod tests {
         let mut state = super::RoutingState::default();
         state.marking.insert("t1".to_string(), "main".to_string());
         state.mark_transfer("t1", 42);
-        assert!(state.awaiting_replay.contains_key("t1"));
+        assert!(state.awaiting_replay.contains("t1"));
         assert_eq!(state.transfer_marks.get("t1"), Some(&42));
         state.awaiting_replay.remove("t1"); // what the target's replay lifts
         assert_eq!(state.transfer_marks.get("t1"), Some(&42));
@@ -7107,37 +7056,29 @@ mod tests {
     fn queue_test_suppression(state: &super::WindowState, id: &str) {
         state.mint(id, "main");
         state.begin_transfer(&[id.to_string()], "main", "ws-2");
-        let mut routing = guard(&state.routing);
-        routing.mark_transfer(id, 42);
-        state.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+        guard(&state.routing).mark_transfer(id, 42);
     }
 
     /// A spawn reusing a transferring id must not inherit its suppression: no
-    /// replay is coming for the new PTY, so it would paint nothing until the
-    /// fail-open sweep (`routing::AWAITING_REPLAY_MAX`).
+    /// replay is coming for the new PTY, so it would paint nothing.
     #[test]
     fn minting_a_pty_clears_a_stale_transfer_suppression() {
         let state = super::WindowState::default();
         queue_test_suppression(&state, "pane-a");
-        assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
+        assert!(guard(&state.routing).awaiting_replay.contains("pane-a"));
 
         state.mint("pane-a", "main");
         assert!(guard(&state.routing).awaiting_replay.is_empty());
-        assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
         assert_eq!(state.owned_by("main"), vec!["pane-a".to_string()]);
     }
 
-    /// Every way out of a suppression lifts it and republishes the count the
-    /// hot path reads: an id left in `awaiting_replay` stays silent until the
-    /// sweep, and a stale count sends every chunk through the sweep.
+    /// Every way out of a suppression lifts it: an id left in `awaiting_replay`
+    /// stays silent.
     #[test]
     fn every_way_out_of_a_suppression_lifts_it() {
         let state = super::WindowState::default();
         let ids = ["pane-a".to_string()];
-        let lifted = || {
-            guard(&state.routing).awaiting_replay.is_empty()
-                && state.suppressed.load(Ordering::Relaxed) == 0
-        };
+        let lifted = || guard(&state.routing).awaiting_replay.is_empty();
 
         queue_test_suppression(&state, "pane-a");
         state.clear_suppression(&ids);
