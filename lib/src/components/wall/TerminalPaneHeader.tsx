@@ -31,7 +31,6 @@ import {
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
 import {
-  buildAppTitleResolver,
   createTerminalPaneState,
   COMMAND_FAIL_GLYPH,
   deriveHeader,
@@ -85,11 +84,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
   const allPaneStates = useMemo(() => [...terminalStates].filter(([surfaceId]) => !isHelperSession(surfaceId)).map(([, state]) => state), [terminalStates]);
   const visiblePaneStates = allPaneStates.length > 0 ? allPaneStates : [paneState];
-  const appTitleForPane = useMemo(
-    () => buildAppTitleResolver(terminalStates, activityStates),
-    [terminalStates, activityStates],
-  );
-  const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
+  const derivedHeader = deriveHeader(paneState, visiblePaneStates);
   const displayTitle = resolveDisplayPrimary(derivedHeader.primary, title);
   // The failure glyph rides at the end of the title string (so tabs/OS titles
   // carry it too). `lastCommandFailed` tells us authoritatively that it's there,

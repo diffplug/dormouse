@@ -143,7 +143,6 @@ Header priority — first match wins:
 
 1. User-pinned title.
 2. While a command is running (`currentCommand` is set):
-   - The alert manager's live `OSC 9` message text, unless the pane's own `osc9` candidate places that message outside the command's window. **With no `osc9` candidate at all the app title is trusted.** (rationale)
    - The newest in-run `OSC 0` / `OSC 2` / `OSC 9` candidate.
    - `currentCommand.displayCommand`.
 3. After a command has finished (`currentCommand` null and `lastCommand` set): `<idle> ${LAST_TITLE}`, `LAST_TITLE` applying the same priority to `lastCommand` with the in-run title taken from `lastCommand.finalTerminalTitle` **so a post-finish title event cannot overwrite it**.
@@ -171,7 +170,7 @@ Source of truth: `cwdIdentity` in `lib/src/lib/terminal-state.ts`.
 
 ## Terminal context diagnostics
 
-**Must derive title explanation from the header's winning-title functions**, including user override, eligible OSC candidate, notification title, and command fallback. Retain the last command's captured title when later shell OSCs replace live candidates; the diagnostic table is not an OSC history.
+**Must derive title explanation from the header's winning-title functions**, including user override, eligible OSC candidate, and command fallback. Retain the last command's captured title when later shell OSCs replace live candidates; the diagnostic table is not an OSC history.
 
 **Must abbreviate home only at a complete path boundary**, retaining the absolute path for copying and native directory operations. Compare helper and source host identity as well as directory paths.
 

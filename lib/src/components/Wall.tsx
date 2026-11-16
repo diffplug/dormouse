@@ -53,7 +53,6 @@ import {
   UNNAMED_PANEL_TITLE,
 } from '../lib/terminal-registry';
 import {
-  buildAppTitleResolver,
   createTerminalPaneState,
   deriveSurfaceLabel,
 } from '../lib/terminal-state';
@@ -1326,7 +1325,6 @@ export function Wall({
     const zoomedId = lath.store.getSnapshot().zoomedId;
     const terminalStates = getTerminalPaneStateSnapshot();
     const activityStates = getActivitySnapshot();
-    const appTitleForPane = buildAppTitleResolver(terminalStates, activityStates);
 
     const sources = [
       ...panels.map((panel) => ({ id: panel.id, params: panel.params, title: panel.title, minimized: false })),
@@ -1349,7 +1347,7 @@ export function Wall({
       const activity = activityStates.get(source.id);
       const shellActivity = terminalBacked ? state.activity : null;
       const title = terminalBacked
-        ? deriveSurfaceLabel(state, appTitleForPane, source.title ?? source.id)
+        ? deriveSurfaceLabel(state, source.title ?? source.id)
         : (source.title ?? source.id);
       const view: DorSurfaceView = source.minimized
         ? 'minimized'

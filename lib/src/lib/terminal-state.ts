@@ -89,10 +89,6 @@ export interface DirectoryDisplayOptions {
   homePath?: string;
 }
 
-export interface HeaderOptions extends DirectoryDisplayOptions {
-  appTitleForPane?: (pane: TerminalPaneState) => string | null | undefined;
-}
-
 export interface DerivedHeader {
   primary: string;
   secondary?: string;
@@ -522,10 +518,10 @@ export function resolveDisplayPrimary(
 export function deriveHeader(
   pane: TerminalPaneState,
   visiblePanes: TerminalPaneState[],
-  options: HeaderOptions = {},
+  options: DirectoryDisplayOptions = {},
 ): DerivedHeader {
-  const primary = headerPrimary(pane, options);
-  const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate, options).text === primary.text);
+  const primary = headerPrimary(pane);
+  const samePrimary = visiblePanes.filter((candidate) => headerPrimary(candidate).text === primary.text);
   const cwd = effectiveCwd(pane);
   let secondary: string | undefined;
 
@@ -549,20 +545,9 @@ export function deriveHeader(
  *  `secondary`/`lastCommandFailed` use `deriveHeader` directly. */
 export function deriveSurfaceLabel(
   pane: TerminalPaneState,
-  appTitleForPane: HeaderOptions['appTitleForPane'],
   fallbackTitle: string | null | undefined,
 ): string {
-  return resolveDisplayPrimary(deriveHeader(pane, [], { appTitleForPane }).primary, fallbackTitle);
-}
-
-export function notificationDisplayTitle(
-  notification: TerminalNotificationTitleLike | null | undefined,
-): string | null {
-  if (notification?.source === 'OSC 9') {
-    const body = notification.body?.trim();
-    if (body) return body;
-  }
-  return null;
+  return resolveDisplayPrimary(deriveHeader(pane, []).primary, fallbackTitle);
 }
 
 export function terminalTitleFromNotification(
@@ -571,7 +556,7 @@ export function terminalTitleFromNotification(
 ): TerminalTitle | null {
   if (!notification) return null;
   if (notification.source === 'OSC 9') {
-    const title = notificationDisplayTitle(notification);
+    const title = notification.body?.trim();
     return title ? { title, source: 'osc9', updatedAt } : null;
   }
   if (notification.source === 'OSC 99') {
@@ -585,25 +570,11 @@ export function terminalTitleFromNotification(
   return null;
 }
 
-export function buildAppTitleResolver(
-  terminalStates: Map<string, TerminalPaneState>,
-  activityStates: Map<string, { notification?: TerminalNotificationTitleLike | null }>,
-): (pane: TerminalPaneState) => string | null {
-  const titlesByPane = new WeakMap<TerminalPaneState, string>();
-  for (const [id, pane] of terminalStates) {
-    const title = notificationDisplayTitle(activityStates.get(id)?.notification);
-    if (title) titlesByPane.set(pane, title);
-  }
-  return (pane) => titlesByPane.get(pane) ?? null;
-}
-
 /** Explanation uses the same winning-title functions as headerPrimary. */
-export function explainTerminalTitle(pane: TerminalPaneState, options: HeaderOptions = {}): { source: string; value: string; note: string }[] {
+export function explainTerminalTitle(pane: TerminalPaneState): { source: string; value: string; note: string }[] {
   const user = titleCandidateForSource(pane, 'user')?.title.trim();
   const command = pane.currentCommand ?? pane.lastCommand;
-  const app = options.appTitleForPane?.(pane)?.trim();
-  const appWins = !user && !!command && !!app && isAppTitleFreshFor(pane, command);
-  const terminal = !user && !appWins && command ? terminalTitleForCommand(pane, command) : null;
+  const terminal = !user && command ? terminalTitleForCommand(pane, command) : null;
   const winner = terminal && command ? (command.finishedAt !== undefined && command.finalTerminalTitle && meaningfulTerminalTitle(command.finalTerminalTitle.title) ? command.finalTerminalTitle : findInRunTerminalTitle(pane, command)) : null;
   const candidates = titleCandidatesForDisplay(pane);
   const rows = candidates.map(candidate => ({
@@ -613,9 +584,8 @@ export function explainTerminalTitle(pane: TerminalPaneState, options: HeaderOpt
   if (winner && !candidates.some(candidate => candidate.source === winner.source && candidate.updatedAt === winner.updatedAt)) {
     rows.push({ source: `${titleSourceLabel(winner.source)} (command)`, value: winner.title, note: 'Used by command title' });
   }
-  if (appWins) rows.push({ source: 'Notification', value: app!, note: 'Used' });
-  if (command) rows.push({ source: 'Command', value: command.displayCommand, note: !user && !appWins && !terminal ? 'Used' : 'Fallback' });
-  rows.push({ source: 'Result', value: headerPrimary(pane, options).text, note: pane.currentCommand ? 'Running' : 'Idle' });
+  if (command) rows.push({ source: 'Command', value: command.displayCommand, note: !user && !terminal ? 'Used' : 'Fallback' });
+  rows.push({ source: 'Result', value: headerPrimary(pane).text, note: pane.currentCommand ? 'Running' : 'Idle' });
   return rows;
 }
 
@@ -1393,12 +1363,12 @@ function truncateCommandTitle(title: string): string {
   return `${Array.from(title).slice(0, COMMAND_TITLE_LIMIT - 3).join('').trimEnd()}...`;
 }
 
-function headerPrimary(pane: TerminalPaneState, options: HeaderOptions): { text: string; failed: boolean } {
+function headerPrimary(pane: TerminalPaneState): { text: string; failed: boolean } {
   const userTitle = titleCandidateForSource(pane, 'user')?.title.trim();
   if (userTitle) return { text: userTitle, failed: false };
-  if (pane.currentCommand) return { text: commandHeaderLabel(pane, pane.currentCommand, options), failed: false };
+  if (pane.currentCommand) return { text: commandHeaderLabel(pane, pane.currentCommand), failed: false };
   if (pane.lastCommand) {
-    const idle = `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand, options)}`;
+    const idle = `${DEFAULT_IDLE_TITLE} ${commandHeaderLabel(pane, pane.lastCommand)}`;
     const failed = lastCommandFailed(pane.lastCommand);
     return { text: failed ? `${idle} ${COMMAND_FAIL_GLYPH}` : idle, failed };
   }
@@ -1411,28 +1381,10 @@ function lastCommandFailed(command: CommandRun): boolean {
   return typeof command.exitCode === 'number' && command.exitCode !== 0;
 }
 
-function commandHeaderLabel(pane: TerminalPaneState, command: CommandRun, options: HeaderOptions): string {
-  const appTitle = options.appTitleForPane?.(pane)?.trim();
-  if (appTitle && isAppTitleFreshFor(pane, command)) return appTitle;
+function commandHeaderLabel(pane: TerminalPaneState, command: CommandRun): string {
   const terminalTitle = terminalTitleForCommand(pane, command);
   if (terminalTitle) return terminalTitle;
   return command.displayCommand;
-}
-
-// appTitleForPane is sourced from the alert manager's current OSC 9 notification.
-// The protocol parser populates titleCandidates.osc9 from the same OSC 9 stream,
-// so when both exist they share a timestamp. Use the candidate to apply the same
-// staleness rule we apply in terminalTitleForCommand: an OSC 9 emitted before the
-// command started (or — for finished commands — after it ended) must not override
-// the command's own label. If no osc9 candidate exists (e.g. notification was
-// injected without going through the parser), trust the appTitle to preserve
-// legacy behaviour.
-function isAppTitleFreshFor(pane: TerminalPaneState, command: CommandRun): boolean {
-  const osc9 = pane.titleCandidates.osc9;
-  if (!osc9) return true;
-  if (osc9.updatedAt < command.startedAt) return false;
-  if (command.finishedAt !== undefined && osc9.updatedAt > command.finishedAt) return false;
-  return true;
 }
 
 const HEADER_APP_TITLE_SOURCES: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];

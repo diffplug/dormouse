@@ -22,7 +22,6 @@ import {
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
 import {
-  buildAppTitleResolver,
   createTerminalPaneState,
   DEFAULT_IDLE_TITLE,
   deriveHeader,
@@ -73,15 +72,11 @@ export function useMobileWallSessionItems(
     [sessions, terminalStates],
   );
   const visiblePaneStates = allSessionStates.length > 0 ? allSessionStates : [createTerminalPaneState()];
-  const appTitleForPane = useMemo(
-    () => buildAppTitleResolver(terminalStates, activityStates),
-    [terminalStates, activityStates],
-  );
 
   return useMemo(() => sessions.map((session) => {
     const paneState = terminalStates.get(session.id) ?? createTerminalPaneState();
     const activity = activityStates.get(session.id) ?? DEFAULT_ACTIVITY_STATE;
-    const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
+    const derivedHeader = deriveHeader(paneState, visiblePaneStates);
     const primary = resolveDisplayPrimary(derivedHeader.primary, session.title);
     return {
       id: session.id,
@@ -94,7 +89,7 @@ export function useMobileWallSessionItems(
       episode: activity.episode ?? null,
       todo: activity.todo,
     };
-  }), [activeSessionId, activityStates, appTitleForPane, sessions, terminalStates, visiblePaneStates]);
+  }), [activeSessionId, activityStates, sessions, terminalStates, visiblePaneStates]);
 }
 
 export function MobileWall({

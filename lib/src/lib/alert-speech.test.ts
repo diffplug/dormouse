@@ -151,20 +151,12 @@ describe('spoken alarms', () => {
           startedAt: 10,
           source: 'osc133_boundaries',
         },
-        // OSC 0/2 come from terminal semantic state. OSC 9 is exercised below
-        // through the alert-backed app-title resolver used by the display label.
-        titleCandidates: source === 'osc9'
-          ? {}
-          : { [source]: { title: `program title ${source}`, source, updatedAt: 20 } },
+        titleCandidates: { [source]: { title: `program title ${source}`, source, updatedAt: 20 } },
       });
     }
 
     start();
-    for (const source of sources) {
-      ring(`${source}-title`, source === 'osc9'
-        ? { notification: { source: 'OSC 9', title: null, body: 'program title osc9' } }
-        : {});
-    }
+    for (const source of sources) ring(`${source}-title`);
     due(...sources.map((source) => `${source}-title`));
 
     engine.utterances[0].onend?.();

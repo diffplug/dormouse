@@ -1,6 +1,5 @@
 import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
-import { getActivitySnapshot, type ActivityState } from './session-activity-store';
-import { buildAppTitleResolver, createTerminalPaneState, deriveSurfaceLabel, DEFAULT_IDLE_TITLE, type TerminalPaneState } from './terminal-state';
+import { createTerminalPaneState, deriveSurfaceLabel, DEFAULT_IDLE_TITLE, type TerminalPaneState } from './terminal-state';
 import { getTerminalPaneStateSnapshot } from './terminal-state-store';
 
 /**
@@ -17,23 +16,20 @@ import { getTerminalPaneStateSnapshot } from './terminal-state-store';
  * (`docs/specs/alert.md` -> Spoken alarms).
  */
 export function deriveSessionLabel(id: string): string {
-  const states = getTerminalPaneStateSnapshot();
-  return labelOf(states.get(id), buildAppTitleResolver(states, getActivitySnapshot()), null);
+  return labelOf(getTerminalPaneStateSnapshot().get(id), null);
 }
 
 /** A {@link deriveSessionLabel} for one caller that asks on every store
  *  emission, such as a hook's snapshot. It derives again only when the id, the
- *  fallback, or that Surface's own terminal state or activity changed — the
- *  only inputs the label reads — so another pane's output costs a lookup. */
+ *  fallback, or that Surface's own terminal state changed — the only inputs
+ *  the label reads — so another pane's output costs a lookup. */
 export function createSessionLabelMemo(): (id: string, fallbackTitle?: string | null) => string {
-  let last: { id: string; state?: TerminalPaneState; activity?: ActivityState; fallbackTitle: string | null; label: string } | null = null;
+  let last: { id: string; state?: TerminalPaneState; fallbackTitle: string | null; label: string } | null = null;
   return (id, fallbackTitle = null) => {
     const state = getTerminalPaneStateSnapshot().get(id);
-    const activities = getActivitySnapshot();
-    const activity = activities.get(id);
-    if (last?.id === id && last.state === state && last.activity === activity && last.fallbackTitle === fallbackTitle) return last.label;
-    const label = labelOf(state, buildAppTitleResolver(new Map(state ? [[id, state]] : []), activities), fallbackTitle);
-    last = { id, state, activity, fallbackTitle, label };
+    if (last?.id === id && last.state === state && last.fallbackTitle === fallbackTitle) return last.label;
+    const label = labelOf(state, fallbackTitle);
+    last = { id, state, fallbackTitle, label };
     return label;
   };
 }
@@ -49,28 +45,25 @@ export function deriveDisplayedSurfaceLabel(
   id: string,
   title: string,
   states = getTerminalPaneStateSnapshot(),
-  appTitleForPane = buildAppTitleResolver(states, getActivitySnapshot()),
 ): string {
-  return hasTerminal(kind) ? deriveSurfaceLabel(states.get(id) ?? createTerminalPaneState(), appTitleForPane, title) : title;
+  return hasTerminal(kind) ? deriveSurfaceLabel(states.get(id) ?? createTerminalPaneState(), title) : title;
 }
 
-/** {@link deriveSessionLabel} for many ids, reading the stores and building the
- *  app-title resolver once rather than once per id. */
+/** {@link deriveSessionLabel} for many ids, reading the store once rather than
+ *  once per id. */
 export function deriveSessionLabels(ids: Iterable<string>): Map<string, string> {
   const states = getTerminalPaneStateSnapshot();
-  const appTitleForPane = buildAppTitleResolver(states, getActivitySnapshot());
   const labels = new Map<string, string>();
-  for (const id of ids) labels.set(id, labelOf(states.get(id), appTitleForPane, null));
+  for (const id of ids) labels.set(id, labelOf(states.get(id), null));
   return labels;
 }
 
 function labelOf(
   state: TerminalPaneState | undefined,
-  appTitleForPane: (pane: TerminalPaneState) => string | null,
   fallbackTitle: string | null,
 ): string {
   if (state) {
-    const primary = deriveSurfaceLabel(state, appTitleForPane, fallbackTitle);
+    const primary = deriveSurfaceLabel(state, fallbackTitle);
     if (primary && primary !== DEFAULT_IDLE_TITLE) return primary;
   }
   return fallbackTitle?.trim() || 'terminal';

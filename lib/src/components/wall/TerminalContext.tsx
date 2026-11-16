@@ -10,7 +10,7 @@ import { getHelper, helperRevision, openHelper, resetHelper, setHelperVisible, s
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import { DEFAULT_WORKSPACE_ID } from '../../lib/session-types';
 import { getPlatform, IS_MAC, IS_WINDOWS } from '../../lib/platform';
-import { buildAppTitleResolver, createTerminalPaneState, cwdDisplay, deriveSurfaceLabel, explainTerminalTitle, type CwdState } from '../../lib/terminal-state';
+import { createTerminalPaneState, cwdDisplay, deriveSurfaceLabel, explainTerminalTitle, type CwdState } from '../../lib/terminal-state';
 import { focusSession, getRunningCommandWatchKey, getRunningCommandWatchRule, getTerminalInstance, getActivitySnapshot, getTerminalPaneStateSnapshot, setCommandWatched, subscribeToActivity, subscribeToTerminalPaneState, subscribeToWatchedCommands, getWatchedCommandsSnapshot, toggleSessionTodo } from '../../lib/terminal-registry';
 import { writeTextToClipboard } from '../../lib/clipboard-write';
 import { listenerUrlsByPort } from './port-url';
@@ -48,8 +48,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   // A bare runner rule already covering the running script is the one the row offers.
   const watchRule = getRunningCommandWatchRule(id);
   const offeredRule = watchRule ?? getRunningCommandWatchKey(id);
-  const appTitleForPane = useMemo(() => buildAppTitleResolver(states, activities), [states, activities]);
-  const titleSources = useMemo(() => explainTerminalTitle(state, { appTitleForPane }), [state, appTitleForPane]);
+  const titleSources = useMemo(() => explainTerminalTitle(state), [state]);
   const display = (location: CwdState) => cwdDisplay(location, { style: 'full', homePath: home });
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +84,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
     resetAsks={!isDelayedKillEnabled()}
-    onReset={async () => { await resetHelper(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, appTitleForPane, title ?? id) }); await openHelper(id); }} onPromote={() => context.promote(id)}
+    onReset={async () => { await resetHelper(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, title ?? id) }); await openHelper(id); }} onPromote={() => context.promote(id)}
     onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>
     {/* The Tool's xterm itself: `focusSession` would reach its browser Surface's focus handle. */}
     {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}

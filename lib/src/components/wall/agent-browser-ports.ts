@@ -17,7 +17,6 @@
  */
 import { useEffect, useState } from 'react';
 import { useSyncExternalStore } from 'react';
-import { subscribeToActivity } from '../../lib/session-activity-store';
 import { createSessionLabelMemo } from '../../lib/session-label';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 
@@ -133,15 +132,6 @@ export function subscribeDevServerRescan(listener: () => void): () => void {
   };
 }
 
-function subscribeToSessionLabels(listener: () => void): () => void {
-  const unsubscribeState = subscribeToTerminalPaneState(listener);
-  const unsubscribeActivity = subscribeToActivity(listener);
-  return () => {
-    unsubscribeState();
-    unsubscribeActivity();
-  };
-}
-
 /** Header hook: register interest in a loopback `port` (or none) and return the
  *  pane currently serving it, labelled as it is now, or null while unresolved /
  *  unmatched. */
@@ -159,7 +149,7 @@ export function useDevServerMatch(port: number | null): DevServerMatch | null {
   // Every pane's output emits; the label reads only the serving pane's.
   const [sessionLabel] = useState(createSessionLabelMemo);
   const label = useSyncExternalStore(
-    subscribeToSessionLabels,
+    subscribeToTerminalPaneState,
     () => (resolution ? sessionLabel(resolution.paneId, resolution.fallbackTitle) : null),
   );
   return resolution && label !== null ? { paneId: resolution.paneId, label } : null;

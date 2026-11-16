@@ -20,8 +20,6 @@ import {
   deriveHeader,
   explainTerminalTitle,
   deriveSurfaceLabel,
-  buildAppTitleResolver,
-  notificationDisplayTitle,
   reduceTerminalState,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
@@ -660,11 +658,11 @@ describe('header and grouping derivation', () => {
   it('deriveSurfaceLabel composes deriveHeader + resolveDisplayPrimary for one pane', () => {
     // A real command label wins; the fallback title is ignored.
     const running = runningPane('/repo/app', 'pnpm test --watch');
-    expect(deriveSurfaceLabel(running, () => null, 'door title')).toBe('pnpm test --watch');
+    expect(deriveSurfaceLabel(running, 'door title')).toBe('pnpm test --watch');
     // An idle pane stays <idle> (resolveDisplayPrimary substitutes the fallback
     // only for the generic command title, not for idle).
     const idle = createTerminalPaneState();
-    expect(deriveSurfaceLabel(idle, () => null, 'door title')).toBe(DEFAULT_IDLE_TITLE);
+    expect(deriveSurfaceLabel(idle, 'door title')).toBe(DEFAULT_IDLE_TITLE);
   });
 
   it('lets fresh app-sent terminal titles override running command labels', () => {
@@ -684,7 +682,7 @@ describe('header and grouping derivation', () => {
       { type: 'title', title: { title: 'README.md', source: 'osc2', updatedAt: 2 } },
     );
 
-    expect(deriveSurfaceLabel(pane, () => null, null)).toBe('README.md');
+    expect(deriveSurfaceLabel(pane, null)).toBe('README.md');
   });
 
   it('keeps the command when ConPTY broadcasts a child process path as the title', () => {
@@ -751,38 +749,6 @@ describe('header and grouping derivation', () => {
     expect(titleCandidatesForDisplay(pane).map((candidate) => candidate.source)).toEqual(['osc0', 'user']);
   });
 
-  it('lets legacy OSC 9 message text override derived command labels', () => {
-    const pane = runningPane('/repo/app', 'npm run build');
-    const terminalStates = new Map([['pane', pane]]);
-    const activityStates = new Map([
-      ['pane', { notification: { source: 'OSC 9', title: null, body: 'Build finished' } }],
-    ]);
-
-    expect(notificationDisplayTitle(activityStates.get('pane')?.notification)).toBe('Build finished');
-    expect(deriveHeader(pane, [pane], {
-      appTitleForPane: buildAppTitleResolver(terminalStates, activityStates),
-    })).toEqual({
-      primary: 'Build finished',
-    });
-  });
-
-  it('ignores stale OSC 9 notifications emitted before the current command', () => {
-    const pane = reduceTerminalState(
-      runningPane('/repo/app', 'npm run build'),
-      { type: 'title', title: { title: 'Build finished', source: 'osc9', updatedAt: 0 } },
-    );
-    const terminalStates = new Map([['pane', pane]]);
-    const activityStates = new Map([
-      ['pane', { notification: { source: 'OSC 9', title: null, body: 'Build finished' } }],
-    ]);
-
-    expect(deriveHeader(pane, [pane], {
-      appTitleForPane: buildAppTitleResolver(terminalStates, activityStates),
-    })).toEqual({
-      primary: 'npm run build',
-    });
-  });
-
   it.each(['osc99', 'osc777'] as const)('keeps %s diagnostics out of command-start fallbacks', (source) => {
     const pane = createTerminalPaneState({
       titleCandidates: { [source]: { title: 'Finished tests', source, updatedAt: 1 } },
@@ -793,8 +759,6 @@ describe('header and grouping derivation', () => {
   });
 
   it('does not use rich notification titles as tab title overrides', () => {
-    expect(notificationDisplayTitle({ source: 'OSC 777', title: 'Tests', body: '341 passed' })).toBeNull();
-    expect(notificationDisplayTitle({ source: 'OSC 99', title: 'Build', body: 'Finished successfully' })).toBeNull();
     expect(terminalTitleFromNotification({ source: 'OSC 777', title: 'Tests', body: '341 passed' }, 2)).toEqual({
       title: 'Tests',
       source: 'osc777',
