@@ -119,7 +119,7 @@
     {
       "unit": "termstate",
       "rules": [
-        "^lib/src/lib/(?:terminal\\-state|terminal\\-state\\-store|terminal\\-protocol|processed\\-pty\\-stream|terminal\\-report\\-filter|osc\\-sanitize|keyboard\\-protocol\\-arbiter|terminal\\-prompt\\-shape|terminal\\-command\\-input|helper\\-terminal|terminal\\-context\\-types|shell\\-store|shell\\-defaults|shell\\-escape|posix\\-escape|terminal\\-buffer\\-read|buffer\\-cells|ansi|terminal\\-controls)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:terminal\\-state|terminal\\-state\\-store|terminal\\-protocol|processed\\-pty\\-stream|terminal\\-report\\-filter|osc\\-sanitize|keyboard\\-protocol\\-arbiter|terminal\\-prompt\\-shape|terminal\\-command\\-input|aux\\-terminal|terminal\\-context\\-types|shell\\-store|shell\\-defaults|shell\\-escape|posix\\-escape|terminal\\-buffer\\-read|buffer\\-cells|ansi|terminal\\-controls)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/components/wall/(?:TerminalContextView|TerminalContext|TerminalContextOverlay|terminal\\-context\\-placement)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/host/(?:git\\-info|git\\-remote\\-url|git\\-upstream|git\\-cli|local\\-directory)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
       ],
@@ -129,7 +129,7 @@
         "docs/specs/terminal-context.md",
         "docs/specs/terminal-escapes.md"
       ],
-      "what": "per-Session semantic state: `terminal-state.ts` (1,609 lines), its store, `terminal-protocol.ts` (1,091 lines), the processed PTY stream, the report filter, OSC sanitization, the keyboard-protocol arbiter, prompt and command lifecycle, shell store and escaping, the helper terminal and unified terminal context views, and the host-side git info helpers.",
+      "what": "per-Session semantic state: `terminal-state.ts` (1,609 lines), its store, `terminal-protocol.ts` (1,091 lines), the processed PTY stream, the report filter, OSC sanitization, the keyboard-protocol arbiter, prompt and command lifecycle, shell store and escaping, the aux terminal and unified terminal context views, and the host-side git info helpers.",
       "read": "**Specs you own** (read first, in the snapshot): `docs/specs/terminal-state.md`, `docs/specs/terminal-context.md`, `docs/specs/terminal-escapes.md`, each with its `.rationale.md`. `terminal-escapes.md` is a registry: every sequence the code parses, answers, or ignores must have a row, and every row must match code. Check both directions and list each mismatch.",
       "focus": [
         "Parsing across chunk boundaries: an OSC, CSI, DCS, or APC split between two PTY chunks, an unterminated sequence that grows a buffer without bound, ST vs BEL terminators, 8-bit C1 controls, invalid UTF-8.",
@@ -137,7 +137,7 @@
         "`terminal-report-filter.ts`: replies to queries (DA, DSR, color queries, XTVERSION, kitty keyboard) must never let program output inject keyboard input, and must not be answered twice (once by xterm.js and once by Dormouse).",
         "`keyboard-protocol-arbiter.ts`: push/pop balance, state after a program crashes without popping, state across reconnect.",
         "Prompt and command lifecycle (OSC 133/633 and friends): states that get stuck, command text mis-attributed, title and header derivation and grouping keys.",
-        "The helper terminal: lifecycle, promotion, source closure, as `terminal-context.md` states them.",
+        "The aux terminal: lifecycle, promotion, source closure, as `terminal-context.md` states them.",
         "Host git helpers: how often git is spawned (per cwd change? per render?), timeouts, a cwd that is deleted, huge repos, paths with spaces or newlines.",
         "Per-chunk cost: regexes that can backtrack on long lines, repeated string concatenation of large buffers, state recomputed for every chunk.",
         "Dead code: parsed fields nothing reads, protocol branches no shell integration script emits (compare with `standalone/sidecar/shell-integration/`)."
@@ -237,7 +237,7 @@
       "focus": [
         "The method table: every method the CLI can send has a handler, and every handler has a CLI caller. List methods on one side only.",
         "Reply discipline: every request gets exactly one reply on every path, including thrown errors, a surface killed mid-request, a Workspace closed mid-request, and a client that disconnects while waiting. Find hung requests and double replies.",
-        "Handle resolution: `surface:N`, `surface:self`, `surface:focused`, `title:<exact>`, `workspace:<n>`, `workspace-name:<name>`, `window:<label>`. Look for a stale or reused id retargeting a destructive verb (`kill`, `send`), helper terminals leaking into listings or matching, and Workspace scoping mistakes (`--workspace`, `--all`).",
+        "Handle resolution: `surface:N`, `surface:self`, `surface:focused`, `title:<exact>`, `workspace:<n>`, `workspace-name:<name>`, `window:<label>`. Look for a stale or reused id retargeting a destructive verb (`kill`, `send`), aux terminals leaking into listings or matching, and Workspace scoping mistakes (`--workspace`, `--all`).",
         "`ensure`: the command + cwd identity key, matching against live commands, `--restart` keeping layout place, races between two simultaneous `ensure` calls creating duplicates.",
         "`await`: `--until quiet` and `--until exit` semantics, waiter cleanup on kill or disconnect, alert absorption, timeouts.",
         "`send`: text, key, stdin, and sequence modes; pacing; what happens to a queue when the target dies.",
@@ -752,7 +752,7 @@
         "`kill`: `--confirm-if-read` (the four-non-whitespace-character minimum, what screen text is compared) and `--confirm-dangerously`.",
         "`ensure` and `split`: cwd resolution, `--restart`, the missing `--` case (a bare `dor split` steals focus: is that still true and still documented?).",
         "`await`: timeouts, exit codes, what is printed.",
-        "`list`: filters ANDed together, `--port`/`--ports`, `--json` shape stability, the `(you)` and `*` markers, helper terminals excluded.",
+        "`list`: filters ANDed together, `--port`/`--ports`, `--json` shape stability, the `(you)` and `*` markers, aux terminals excluded.",
         "`browser-cli.ts`, `agent-browser.ts`, `playwright.ts`: identity flags (`--key`, `--surface`, `--session`) mutual exclusion, argument pass-through to the native CLI (injection, flag collisions), navigation targets (`:port`, `host:port`, `surface:N`), `dor-embed-size`.",
         "`open`, `open-picker.ts`, `fuzzy.ts`, `file-list.ts`: path handling (relative, `~`, spaces, symlinks, WSL and Windows paths, a URL passed where a path is required), the picker's cost on a huge directory.",
         "`app restart`, `move`, `reopen`, `workspace`: destructive verbs and their guards.",

@@ -37,17 +37,17 @@ Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHe
 
 **Must open the terminal context from terminal header, body, and command-mode `a`, `?`, and `!` entry points.** Browser-only Surfaces and Doors have no context.
 
-**Must show the context in one of two modes, each offering the other**: properties (the Surface id, directory, and port rows) or the terminal (the helper, or a Tool's primary terminal). **Must open on properties, except from `!` and a Tool's Terminal Context button, which open on the terminal**, and a refused source closure, which reveals the helper there (`docs/specs/terminal-context.md` → Promotion and source closure). A Tool's context displays its primary terminal (`docs/specs/terminal-context.md` → Tool context); application mouse ownership: `docs/specs/mouse-and-clipboard.md` → Terminal context input.
+**Must show the context in one of two modes, each offering the other**: properties (the Surface id, directory, and port rows) or the terminal (the aux terminal, or a Tool's primary terminal). **Must open on properties, except from `!` and a Tool's Terminal Context button, which open on the terminal**, and a refused source closure, which reveals the aux terminal there (`docs/specs/terminal-context.md` → Promotion and source closure). A Tool's context displays its primary terminal (`docs/specs/terminal-context.md` → Tool context); application mouse ownership: `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
-**Must render one context per Wall in a stable Wall-level overlay**, anchored to the invoking source and following its painted bounds without resizing panes or remounting the helper. An outside pointer press or explicit close dismisses it; its copy editors count as inside.
+**Must render one context per Wall in a stable Wall-level overlay**, anchored to the invoking source and following its painted bounds without resizing panes or remounting the aux terminal. An outside pointer press or explicit close dismisses it; its copy editors count as inside.
 
 **Must choose placement on opening and retain its side while usable. Never reposition in response to terminal output.** It goes beside the source where a usable candidate fits, else over the source's half opposite its visible terminal cursor; minimized panes do not count, and zoom uses single-pane placement. **Must remember a manual side choice per source for the mounted Wall's lifetime**, never on disk; an unavailable choice falls back automatically.
 
 **Must keep port actions on one line, overflowing into a dropdown that launches an action only on a choice from its open list.**
 
-**Must focus context controls on opening.** Explicit entry into the helper xterm gives it terminal keys, Escape there included. Escape from controls closes the innermost disclosure, then the context. Terminal clipboard routing uses the focused helper rather than the selected source.
+**Must focus context controls on opening.** Explicit entry into the aux terminal's xterm gives it terminal keys, Escape there included. Escape from controls closes the innermost disclosure, then the context. Terminal clipboard routing uses the focused aux terminal rather than the selected source.
 
-**Must promote by adopting the helper Session into a new split beside the source**, preserving identity and focusing it. Helper lifetime and source closure: `docs/specs/terminal-context.md`.
+**Must promote by adopting the aux terminal Session into a new split beside the source**, preserving identity and focusing it. Aux terminal lifetime and source closure: `docs/specs/terminal-context.md`.
 
 Source of truth: `TerminalContextOverlay` in `lib/src/components/wall/TerminalContextOverlay.tsx`.
 
@@ -153,9 +153,9 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 - **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Otherwise disable both, and refuse CLI `--new-workspace`.
 - **Must offer Move to workspace in terminal and Tool context.** **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
 - **Must list every other Window's Workspaces in Move to workspace, under a header per Window**, from the host's registry (`docs/specs/standalone.md` → Workspace registry). Such a move takes the Surface, even a sole one, into a new background Workspace that transfers to that Window (`docs/specs/standalone.md` → Transfer), where the Surface moves on and is followed; consent and refusals are the source's. **A handed-back transfer must return the Surface to its source when that remains**; a refused onward move leaves it in its carrier, activated, with the reason.
-- **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. **Never close a departing Session.** A moved preview slot is pinned, and a moved browser drops its `--key`, reachable by id.
+- **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained aux terminal follows its source. **Never close a departing Session.** A moved preview slot is pinned, and a moved browser drops its `--key`, reachable by id.
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with the typed-letter Workspace confirmation ([Workspace lifecycle](#workspace-lifecycle)): the Surface reopens at its last-known saved URL, possibly losing page state. Doors remain minimized while waiting. CLI consent: `docs/specs/dor-cli.md` → dor move.
-- **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Iframe consent never bypasses a dirty or pending refusal.
+- **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and aux terminal promotion**, rechecking after consent and asynchronous preparation. Iframe consent never bypasses a dirty or pending refusal.
 - **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus: `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors unless it is pinned, which refills instead; if Doors remain but no pane does, refill normally.
 - **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom and metadata. Refs: `docs/specs/dor-cli.md` → Handle Model; durable publication: `docs/specs/transport.md` → Persisted session types.
 
@@ -292,7 +292,7 @@ Source of truth: `lib/src/lib/rect-tween.ts`; `lib/src/lib/ring-geometry.ts`.
 
 #### Directional motion smear
 
-**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/helper union, **separate from the crisp, unbroken outline**. **Never use an SVG `feGaussianBlur` here** (rationale).
+**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/aux terminal union, **separate from the crisp, unbroken outline**. **Never use an SVG `feGaussianBlur` here** (rationale).
 
 Source of truth: `writeSmear` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
 
@@ -369,7 +369,7 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 **Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction; `cfg.terminal.webglRenderer` disables it (rationale). **Must report the active renderer as `data-renderer="webgl"|"dom"`** on the persistent terminal host.
 
-- **Must acquire GPU resources at mount, never at Session creation, and release them on unmount/minimize, Workspace deactivation, helper parking, and Session disposal** (rationale), never letting a release failure abort teardown. The xterm, grid, buffers, PTY, and other addons survive the release, and a reattach loads a fresh addon without resizing the terminal.
+- **Must acquire GPU resources at mount, never at Session creation, and release them on unmount/minimize, Workspace deactivation, aux terminal parking, and Session disposal** (rationale), never letting a release failure abort teardown. The xterm, grid, buffers, PTY, and other addons survive the release, and a reattach loads a fresh addon without resizing the terminal.
 - **Must attempt WebGL at most once per mount**: failure or context loss stays on DOM until the next remount (re-arming: [Future](#re-arming-the-webgl-renderer-after-context-loss)).
 - **Must preserve the addon's shared atlas cache** across compatible mounted terminals (rationale).
 

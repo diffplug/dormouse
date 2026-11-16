@@ -49,9 +49,9 @@ const LENGTH = 80;
  * found it, run beside them so a regression there fails CI too.
  */
 const REGRESSION_SEEDS: ReadonlyArray<{ seed: number; length: number }> = [
-  // A completion held, its viewer gone, then the Session made a helper before the leave grace elapses.
+  // A completion held, its viewer gone, then the Session made an aux terminal before the leave grace elapses.
   { seed: 100_868, length: LENGTH },
-  // The same with push on, so a helper's escalated ring would also open an episode no realm sees.
+  // The same with push on, so an aux terminal's escalated ring would also open an episode no realm sees.
   { seed: 103_834, length: 120 },
 ];
 const SOAK_SECONDS = Math.min(120, Number(process.env.ALERT_MODEL_SOAK ?? 0) || 0);

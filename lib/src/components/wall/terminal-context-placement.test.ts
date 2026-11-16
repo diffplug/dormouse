@@ -23,7 +23,7 @@ describe('terminal context placement', () => {
     expect(top.y + top.height).toBe(source.y + TERMINAL_CONTEXT_TEETH_PX);
     expect(top.y).toBe(wall.y);
   });
-  it('grows above helpers upward over peer headers while grazing the source top', () => {
+  it('grows above aux terminals upward over peer headers while grazing the source top', () => {
     expect(placeTerminalContext(wall, { x: 0, y: 500, width: 1200, height: 280 }, true).rect)
       .toEqual({ x: 0, y: 188, width: 1200, height: 322 });
   });

@@ -6,9 +6,9 @@
 ## The rule
 
 - **Must confirm a user close unless Reopen restores it losslessly.** Lossless is defined per kind by the [Reopenable kinds](#reopenable-kinds) table, nowhere else; a kind absent from the table confirms.
-- **Must decide at the close, from state already in memory.** Pending or unknown state (an unreported Tool dirty flag, a helper whose host inspection has not answered) confirms, so the user can always tell in advance whether a close will ask.
+- **Must decide at the close, from state already in memory.** Pending or unknown state (an unreported Tool dirty flag, an aux terminal whose host inspection has not answered) confirms, so the user can always tell in advance whether a close will ask.
 - **Never confirm on `dor` command closes**; they keep their explicit flags (`docs/specs/dor-cli.md`) and push a record exactly like a gesture close.
-- **A trivial close leaves no trace.** It is closing an untouched shell (`docs/specs/layout.md` → "Kill confirmation") that is not running and owns no helper with user input, or replacing one in place (`dor iframe`, the shell picker). **Never push a record for it**, so reopen reaches past it to the last close that mattered. Inside a Workspace or window record its Pane is kept as layout.
+- **A trivial close leaves no trace.** It is closing an untouched shell (`docs/specs/layout.md` → "Kill confirmation") that is not running and owns no aux terminal with user input, or replacing one in place (`dor iframe`, the shell picker). **Never push a record for it**, so reopen reaches past it to the last close that mattered. Inside a Workspace or window record its Pane is kept as layout.
 
 Source of truth: `closeKind` in `lib/src/components/wall/close-kind.ts`; `requestKill` and `closeSurface` in `lib/src/components/Wall.tsx`.
 
@@ -63,7 +63,7 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 | Pane or Door kill (letter prompt) | Pending kill |
 | Unsaved Tool close (Save / Discard / Cancel) | Pending kill; the parked page keeps the edits until finalize, which discards them |
 | Workspace close | Pending kill of the whole Workspace |
-| Helper Reset | Pending kill of the old helper; the fresh one starts at once |
+| Aux terminal Reset | Pending kill of the old aux terminal; the fresh one starts at once |
 | Reopenable close | Unchanged: immediate, onto the reopen stack |
 | Quit, window close | Unchanged: confirm; nothing can outlive them |
 | iframe moves, render swap to fewer tabs | Unchanged: confirm; a reload has no delayed form |
@@ -91,4 +91,4 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 
 **Must scope a drain to its selected entries**, leaving unrelated finalizers' completion and teardown status alone. Source closure and transfer use scoped drains; quit and window close use all entries.
 
-Source of truth: `lib/src/lib/pending-kills.ts`; `pendKillRef` in `lib/src/components/Wall.tsx`; `pendWorkspace` in `lib/src/components/wall/workspace-lifecycle.ts`; `resetHelper` in `lib/src/lib/helper-terminal.ts`; `lib/src/components/PendingKillOverlay.tsx`; `lib/src/lib/labs-settings.ts`.
+Source of truth: `lib/src/lib/pending-kills.ts`; `pendKillRef` in `lib/src/components/Wall.tsx`; `pendWorkspace` in `lib/src/components/wall/workspace-lifecycle.ts`; `resetAux` in `lib/src/lib/aux-terminal.ts`; `lib/src/components/PendingKillOverlay.tsx`; `lib/src/lib/labs-settings.ts`.

@@ -619,7 +619,7 @@ export function LathHost({
         el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
       }
       // Inside the paint, before `pump` calls `notifyFrames`, so the selection ring
-      // measures the Terminal Context helper where it was just painted.
+      // measures the Terminal Context aux terminal where it was just painted.
       lath.placeContext(paint);
     },
     [animator, lath, dragController],

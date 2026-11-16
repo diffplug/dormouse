@@ -39,7 +39,7 @@ import { stripTerminalControls } from '../../lib/terminal-controls';
 import { registry } from '../../lib/terminal-store';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
-import { getHelper } from '../../lib/helper-terminal';
+import { getAux } from '../../lib/aux-terminal';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
@@ -159,7 +159,7 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   /** A click on a terminal link, which asks before a page that runs its own
    *  script. Never set by a control-socket request. */
   terminalLink?: true;
-  /** The default placement reference when it is not the caller: a helper's
+  /** The default placement reference when it is not the caller: an aux terminal's
    *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
   placementSurfaceId?: string;
 };
@@ -713,7 +713,7 @@ export function useDorControl({
   isClosingSurface: (id: string) => boolean;
   /** Whether this Wall's Workspace is being closed. */
   isClosingWorkspace: () => boolean;
-  /** The user-visible closure path: helper guard, then teardown. A string means
+  /** The user-visible closure path: aux terminal guard, then teardown. A string means
    *  the closure was refused, and is why; the Surface is still here. */
   closeSurface: (id: string) => Promise<string | null>;
   /** Reveal a Surface (reattaching a Door first) and report whether it ended up
@@ -846,7 +846,7 @@ export function useDorControl({
   }, [lath, requireProvider]);
 
   /** A Surface a command may still target: not mid-fade, and not mid-closure
-   *  (`closeSurface` awaits the helper guard before it tears down; a match made
+   *  (`closeSurface` awaits the aux terminal guard before it tears down; a match made
    *  meanwhile would be acted on moments before it vanishes). */
   const isTargetable = useCallback((id: string) => !lath.isDying(id) && !isClosingSurface(id), [lath, isClosingSurface]);
 
@@ -1081,14 +1081,14 @@ export function useDorControl({
       return;
     }
 
-    // New work goes beside the target, else the caller or a helper's source,
+    // New work goes beside the target, else the caller or an aux terminal's source,
     // else focus. A source that is hidden, or disappears while lookup waits,
     // fails rather than falling back to focus, as does a closing target.
     const resolvePlacement = (resolve: typeof resolveListedSurface): ParseResult<DorSurface> => {
       const explicit = stringParam(params.from) ?? stringParam(params.surface);
       const result = resolve(explicit ?? detail.placementSurfaceId, detail.surfaceId);
       if (!result.ok && explicit === undefined && detail.placementSurfaceId) {
-        return { ok: false, message: 'The helper source Surface is not available for placement' };
+        return { ok: false, message: "The aux terminal's source Surface is not available for placement" };
       }
       if (result.ok && !isTargetable(result.value.id)) {
         return { ok: false, message: 'The placement Surface is closing' };
@@ -1338,7 +1338,7 @@ export function useDorControl({
             oscDriven: isPaneOscDriven(id),
             rawCommandLine: state.currentCommand?.rawCommandLine ?? null,
             cwdMatches: cwdPathsEqual(state.cwd?.path, toolCwd),
-            helperPresent: !!getHelper(id),
+            auxPresent: !!getAux(id),
           };
         };
         const findPreviewSlot = () => findSurfaceByParams(isPreviewSlotParams);
@@ -2249,7 +2249,7 @@ export function useDorControl({
         minimized: booleanParam(params.minimized),
         params: { surfaceType: 'browser', renderMode: 'iframe', url },
         reference: target.value,
-        preserveSource: !!detail.helperParentId,
+        preserveSource: !!detail.auxParentId,
         title: hostPathDisplay(url, true),
         focusNeutral: !focus,
       });
@@ -2555,7 +2555,7 @@ export function useDorControl({
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,
         reference: () => resolvePlacement(resolveVisibleSurface),
-        preserveSource: !!detail.helperParentId,
+        preserveSource: !!detail.auxParentId,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });

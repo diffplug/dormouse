@@ -5,7 +5,7 @@ import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
 import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
 import { invoke } from "@tauri-apps/api/core";
 import { clearTerminalActivity, flushTerminal, releaseSession } from "dormouse-lib/lib/terminal-registry";
-import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
+import { forgetAux } from "dormouse-lib/lib/aux-terminal";
 import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
@@ -458,12 +458,12 @@ async function planArrival(
 /**
  * Take an arrival this window will not keep back out, whether or not its Wall
  * mounted: Sessions released, **never killed** (the shells are the source's
- * again), helpers dropped, the record and parked plan forgotten.
+ * again), aux terminals dropped, the record and parked plan forgotten.
  * **Never removes the host's alert entry**, which the source goes on showing.
  */
 function discardArrival(payload: MovePayload): void {
   dismissWorkspaceUi(payload.workspaceId);
-  for (const id of payload.allIds) forgetHelper(id);
+  for (const id of payload.allIds) forgetAux(id);
   for (const id of new Set([...payload.terminalIds, ...payload.workspace.session.panes.map((pane) => pane.id)])) {
     if (terminalRegistry.has(id)) releaseSession(id);
     clearTerminalActivity(id);

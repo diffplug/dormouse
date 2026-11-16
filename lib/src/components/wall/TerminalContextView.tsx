@@ -43,7 +43,7 @@ const DETAILS = {
 } as const;
 type Detail = keyof typeof DETAILS;
 export interface TerminalContextViewProps {
-  terminalRole?: 'helper' | 'tool';
+  terminalRole?: 'aux' | 'tool';
   /** Properties shows the Surface's rows alone, sized to them; aux shows its terminal in the whole panel. */
   mode: ContextMode;
   onModeChange(mode: ContextMode): void;
@@ -52,7 +52,7 @@ export interface TerminalContextViewProps {
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
   origin?: { x: number; y: number };
-  surfaceId: string; cwd: string; helperCwd?: string; mismatch?: boolean;
+  surfaceId: string; cwd: string; auxCwd?: string; mismatch?: boolean;
   workspaceMove?: ReactNode;
   navigation?: ReactNode;
   titleSources: { source: string; value: string; note?: string }[];
@@ -60,7 +60,7 @@ export interface TerminalContextViewProps {
   notification?: { title: string | null; body: string | null } | null;
   /** What a Tool is running, absent at its prompt. */
   runningCommand?: string;
-  /** The helper's shell has ended. */
+  /** The aux terminal's shell has ended. */
   exited?: boolean;
   warning?: string;
   /** The providers this host can launch a browser with. */
@@ -70,7 +70,7 @@ export interface TerminalContextViewProps {
   onClose(): void; onCopyId: Action; onCopyPath: Action; onExplore: Action;
   onWatch(): void; onTodo(): void; onPort(entry: PortUrlEntry, mode: PortMode): void | Promise<void>;
   onReset: Action; onPromote: Action;
-  /** Whether Reset asks first; under Labs it makes the old helper a pending kill instead. Default true. */
+  /** Whether Reset asks first; under Labs it makes the old aux terminal a pending kill instead. Default true. */
   resetAsks?: boolean;
   /** Present only while the source is a preview slot: keep it open. */
   onKeepPreview?(): void;
@@ -126,7 +126,7 @@ const SPINNER = <CircleNotchIcon size={15} className="animate-spin motion-reduce
 const OPENING = <>{SPINNER}opening…</>;
 
 /** Drag-selectable diagnostic text. A press focuses it, so Cmd/Ctrl+C reaches
- *  `handleContextCopy` rather than the helper terminal. */
+ *  `handleContextCopy` rather than the aux terminal. */
 function ContextDiagnostic({ className, children }: { className: string; children: ReactNode }) {
   return <div role="alert" data-context-diagnostic tabIndex={-1} onPointerDown={event => event.currentTarget.focus({ preventScroll: true })}
     className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
@@ -493,7 +493,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     className={`${motionClass} ${p.closing ? 'pointer-events-none' : ''} ${properties ? 'relative flex min-h-0 flex-col' : 'absolute inset-0'} font-mono text-sm text-foreground outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
-      if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
+      if ((event.target as HTMLElement).closest('[data-aux-terminal], [data-context-terminal]') && !detail) return;
       if (detail && event.key === 'Tab') {
         event.preventDefault();
         stepFocus(Array.from(detailRoot.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? []), event.shiftKey ? -1 : 1);
@@ -560,7 +560,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         {/* The terminal ground, carried into the teeth beside and below it. */}
         <div data-context-ground className="flex min-h-0 flex-1 flex-col bg-terminal-bg"
           style={teeth && teeth !== 'top' ? { [`border${SIDE_NAME[teeth]}`]: `${DEPTH}px solid transparent` } : undefined}>
-          {p.mismatch && <ContextDiagnostic className="mx-3 my-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Aux directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Aux</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
+          {p.mismatch && <ContextDiagnostic className="mx-3 my-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Aux directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Aux</span><strong>{p.auxCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
           {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 my-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
           <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
         </div>

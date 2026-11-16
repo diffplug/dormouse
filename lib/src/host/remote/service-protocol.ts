@@ -46,7 +46,7 @@ export const BURROW_EVENT_EVENT = 'burrow:event';
 export const ASK_BUDGET_MS = 1_000;
 
 /**
- * A close answers only once it has run, which a helper's inspection or an
+ * A close answers only once it has run, which an aux terminal's inspection or an
  * editor's save can hold up, and the person is waiting on that answer.
  */
 const CLOSE_BUDGET_MS = 60_000;

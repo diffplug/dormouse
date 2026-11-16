@@ -3,7 +3,7 @@ import { surfaceIdFor } from 'dor/protocol';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../components/design';
-import { disposeHelper, getHelper } from '../lib/helper-terminal';
+import { disposeAux, getAux } from '../lib/aux-terminal';
 import { flushTerminal, getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { FakePtyAdapter, getPlatform, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { flattenScenario } from './fake-scenarios';
@@ -70,34 +70,34 @@ async function rightClickSourceHeader(source: string, mode: ContextMode = 'aux')
   await requireElement('[data-context-mode="properties"]', 'terminal context properties');
   if (mode === 'properties') return;
   await userEvent.click(within(context()).getByRole('button', { name: 'Show aux terminal' }));
-  await requireElement('[data-helper-terminal] .xterm', 'helper terminal');
-  const helper = getHelper(source)!;
+  await requireElement('[data-aux-terminal] .xterm', 'aux terminal');
+  const aux = getAux(source)!;
   // Fitting after output changes wrapping and can clip xterm's current prompt
   // line, which no later wait repairs. Release the fake shell only once it has
-  // its actual mounted grid (`fake-adapter-helper.test.ts` pins the deferral).
-  refitSession(helper.id);
-  (getPlatform() as FakePtyAdapter).resumeHelperStartup(helper.id);
+  // its actual mounted grid (`fake-adapter-aux.test.ts` pins the deferral).
+  refitSession(aux.id);
+  (getPlatform() as FakePtyAdapter).resumeAuxStartup(aux.id);
 }
 async function openContext(source: string, mode: ContextMode) {
   await rightClickSourceHeader(source, mode);
   await settleTerminalContext();
-  // Properties alone never start the helper.
-  if (mode === 'properties') { expect(getHelper(source)).toBeUndefined(); return; }
-  const helper = getHelper(source)!;
+  // Properties alone never start the aux terminal.
+  if (mode === 'properties') { expect(getAux(source)).toBeUndefined(); return; }
+  const aux = getAux(source)!;
   // Drain xterm's async parsing before the paint gate captures a wrapped narrow terminal.
   let written = false;
-  void flushTerminal(helper.id).then(() => { written = true; });
+  void flushTerminal(aux.id).then(() => { written = true; });
   await waitFor(() => expect(written).toBe(true), { timeout: 4000 });
   await settleTerminals();
-  const input = terminal(helper.id);
+  const input = terminal(aux.id);
   const text = Array.from({ length: input.buffer.active.length }, (_, i) =>
     input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
-  // A helper starts its shell and runs nothing: one prompt, wrapped cursor line included.
+  // An aux terminal starts its shell and runs nothing: one prompt, wrapped cursor line included.
   expect(text.match(/\/home\/demo\/projects\/dormouse ❯/g)).toHaveLength(1);
   expect(input.buffer.active.viewportY).toBe(input.buffer.active.baseY);
 }
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
-  // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
+  // Alone in the Wall, the aux terminal avoids the cursor; beside a neighbor, it takes the neighbor's side.
   if (zoomed || layout === 'single') return cursor === 'top' ? 'bottom' : 'top';
   if (layout === 'grid') return 'right';
   if (layout === 'wide-bottom') return 'top';
@@ -154,7 +154,7 @@ async function prepare(args: Props) {
     expect(overlap[side]).toBeCloseTo(TERMINAL_CONTEXT_TEETH_PX);
     expect(context().dataset.contextTeeth).toBe({ right: 'left', left: 'right', bottom: 'top', top: 'bottom' }[side]);
   } else {
-    // A covering helper lies flush on the source's edges, teeth toward the half it leaves visible.
+    // A covering aux terminal lies flush on the source's edges, teeth toward the half it leaves visible.
     expect(a.left - b.left).toBeCloseTo(0);
     expect(b.right - a.right).toBeCloseTo(0);
     expect(side === 'top' ? a.top - b.top : b.bottom - a.bottom).toBeCloseTo(0);
@@ -164,15 +164,15 @@ async function prepare(args: Props) {
 }
 
 const meta = {
-  title: 'App/Helper placement',
+  title: 'App/Aux placement',
   component: PlacementWall,
   // Argos replays stories for capture; unfinished input from the preceding run
-  // must not turn this run's fresh-helper fixture into a used helper.
+  // must not turn this run's fresh-aux-terminal fixture into a used aux terminal.
   beforeEach: ({ args }) => {
-    for (const role of roles(args)) disposeHelper(idOf(args, role));
+    for (const role of roles(args)) disposeAux(idOf(args, role));
     const platform = getPlatform() as FakePtyAdapter;
-    platform.deferHelperStartup = true;
-    return () => { platform.deferHelperStartup = false; };
+    platform.deferAuxStartup = true;
+    return () => { platform.deferAuxStartup = false; };
   },
   args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false, mode: 'aux' },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) } },
@@ -205,14 +205,14 @@ export const PreserveInputAndFocus = story({
   play: async ({ args, canvasElement, step }) => {
     const source = sourceId(args);
     const { expectSourceUnchanged } = await prepare(args);
-    const helper = getHelper(source)!;
-    const input = terminal(helper.id);
+    const aux = getAux(source)!;
+    const input = terminal(aux.id);
     const element = input.element!;
     const unfinished = 'echo keep-this-input';
     const bufferText = () => Array.from({ length: input.buffer.active.length }, (_, i) => input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('\n');
     const checkInput = () => {
-      expect(getHelper(source)?.id).toBe(helper.id);
-      expect(terminal(helper.id)).toBe(input);
+      expect(getAux(source)?.id).toBe(aux.id);
+      expect(terminal(aux.id)).toBe(input);
       expect(input.element).toBe(element);
       expect(bufferText()).toContain(unfinished);
       expectContained(context(), canvasElement.querySelector('.lath-host')!);
@@ -228,7 +228,7 @@ export const PreserveInputAndFocus = story({
       expectSourceUnchanged();
       checkInput();
     });
-    await step('Resize the Wall without replacing the helper or dropping focus', async () => {
+    await step('Resize the Wall without replacing the aux terminal or dropping focus', async () => {
       const frame = canvasElement.querySelector<HTMLElement>('[data-placement-frame]')!;
       const focused = document.activeElement;
       const oldColumns = input.cols;
@@ -239,7 +239,7 @@ export const PreserveInputAndFocus = story({
       expect(context().dataset.contextSide).toBe('bottom');
       checkInput();
     });
-    await step('Close and reopen the retained helper, then select the top side', async () => {
+    await step('Close and reopen the retained aux terminal, then select the top side', async () => {
       await userEvent.click(within(context()).getByRole('button', { name: 'Close terminal context' }));
       await waitFor(() => expect(document.querySelector('[data-terminal-context]')).toBeNull());
       const resizedSource = rect(sourcePane(source));

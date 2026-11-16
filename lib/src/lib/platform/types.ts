@@ -1,6 +1,6 @@
 import type { PtyInputEvent } from '../../../../dor/src/input-events';
 import type { BrowserAutomationProvider, BrowserRequest, BrowserResult } from './browser-automation';
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
+import type { AuxIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import type { AlertSessionInfo, AlertSpeak } from '../../host/alert-protocol';
@@ -19,7 +19,7 @@ import type { PersistedAlertState, PersistedWindow, WorkspaceId } from '../sessi
 import { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from 'dor-lib-common/terminal-context';
 
 export interface PtyInfo {
-  helper?: HelperIdentity;
+  aux?: AuxIdentity;
   id: string;
   alive: boolean;
   exitCode?: number;
@@ -215,7 +215,7 @@ export interface SpawnPtyOptions {
   cwd?: string;
   shell?: string;
   args?: string[];
-  helper?: HelperIdentity;
+  aux?: AuxIdentity;
   alert?: PersistedAlertState;
   /** A rehydrated Tool's `DORMOUSE_DEHYDRATE`, set on this spawn alone
    *  (`docs/specs/dor-tool.md` -> Reaping). */

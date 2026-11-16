@@ -1388,13 +1388,13 @@ describe('registry renderer ownership', () => {
     expect(fit).toHaveBeenCalledOnce();
   });
 
-  it('releases the renderer when a helper is parked', () => {
-    const entry = createSession('renderer-helper');
+  it('releases the renderer when an aux terminal is parked', () => {
+    const entry = createSession('renderer-aux');
     Object.assign(document, { body: new MockElement() });
     const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
-    mountElement('renderer-helper', createContainer() as unknown as HTMLElement);
-    parkElement('renderer-helper');
+    mountElement('renderer-aux', createContainer() as unknown as HTMLElement);
+    parkElement('renderer-aux');
     expect(unmount).toHaveBeenCalledOnce();
-    expect(getOrCreateTerminal('renderer-helper')).toBe(entry);
+    expect(getOrCreateTerminal('renderer-aux')).toBe(entry);
   });
 });

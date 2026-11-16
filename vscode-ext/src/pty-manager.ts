@@ -1,5 +1,5 @@
 import { SEND_INPUT_TIMEOUT_MS, type PtyInputEvent } from '../../dor/src/input-events';
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
+import type { AuxIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -17,7 +17,7 @@ export interface PtyCallbacks {
 }
 
 export interface PtySpawnOptions {
-  helper?: HelperIdentity;
+  aux?: AuxIdentity;
   cols?: number;
   rows?: number;
   cwd?: string;
@@ -285,7 +285,7 @@ function ensureChild(extensionPath: string): ChildProcess {
         listener({
           requestId: msg.requestId,
           surfaceId: msg.surfaceId,
-          helperParentId: msg.helperParentId,
+          auxParentId: msg.auxParentId,
           method: msg.method,
           params: msg.params,
           timeoutMs: msg.timeoutMs,
@@ -399,11 +399,11 @@ export function resetOutputFlow(ids: readonly string[]): void {
   outputFlow.reset(ids);
 }
 
-export const helperPtys = new Map<string, HelperIdentity>();
+export const auxPtys = new Map<string, AuxIdentity>();
 
 export function spawn(id: string, options?: PtySpawnOptions): void {
-  if (options?.helper) helperPtys.set(id, options.helper);
-  else helperPtys.delete(id);
+  if (options?.aux) auxPtys.set(id, options.aux);
+  else auxPtys.delete(id);
   killedPtyIds.delete(id);
   // What the id owed was the replaced generation's, which stays live if the
   // spawn fails.
@@ -419,7 +419,7 @@ export function spawn(id: string, options?: PtySpawnOptions): void {
     shell: options?.shell,
     args: options?.args,
     env: dorEnv,
-    helper: options?.helper,
+    aux: options?.aux,
     dehydrate: options?.dehydrate,
   });
 }
@@ -485,8 +485,8 @@ export function terminalContext(request: TerminalContextRequest): Promise<Termin
   return requestChild<TerminalContextInfo>({ type: 'context', request, requestId }, (msg) => msg.type === 'context' && msg.requestId === requestId, TERMINAL_CONTEXT_CHILD_TIMEOUT_MS)
     .then((result) => {
       if (!result.error && request.op === 'promote') {
-        if (request.restore) helperPtys.set(request.id, request.restore);
-        else helperPtys.delete(request.id);
+        if (request.restore) auxPtys.set(request.id, request.restore);
+        else auxPtys.delete(request.id);
       }
       return result;
     });
@@ -536,7 +536,7 @@ export function resize(id: string, cols: number, rows: number, repaint?: boolean
 }
 
 export function kill(id: string): void {
-  helperPtys.delete(id);
+  auxPtys.delete(id);
   killedPtyIds.add(id);
   ptyBuffers.delete(id);
   outputFlow.forget(id);

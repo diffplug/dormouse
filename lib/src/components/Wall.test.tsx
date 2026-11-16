@@ -16,7 +16,7 @@ import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '../lib/tool-run-hold';
 import { Wall } from './Wall';
-import * as helpers from '../lib/helper-terminal';
+import * as auxTerminals from '../lib/aux-terminal';
 import { answerClientClose } from '../remote/burrow/client-close';
 import * as browserSurface from './wall/browser-surface';
 import * as lathWallEngine from './wall/lath-wall-engine';
@@ -158,17 +158,17 @@ describe('Wall on the Lath engine', () => {
 
   describe('a close a remote Client asked for', () => {
     const TOOL_ID = 'surface:tool-door';
-    /** A Tool whose helper's inspection waits to be told: by default the second, the close's own. */
-    async function toolInHelperWait(consent: Parameters<typeof answerClientClose>[0], waitOn: 'first' | 'last' = 'last') {
+    /** A Tool whose aux terminal's inspection waits to be told: by default the second, the close's own. */
+    async function toolInAuxWait(consent: Parameters<typeof answerClientClose>[0], waitOn: 'first' | 'last' = 'last') {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialDoors={[{
         id: TOOL_ID, title: 'storybook', component: 'tool', tabComponent: 'tool',
         params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announced' },
       }]} />));
       await flush();
-      const helper: helpers.HelperTerminal = { id: 'surface:helper', parentId: TOOL_ID };
-      vi.spyOn(helpers, 'getHelper').mockImplementation((id) => (id === TOOL_ID ? helper : undefined));
+      const aux: auxTerminals.AuxTerminal = { id: 'surface:aux', parentId: TOOL_ID };
+      vi.spyOn(auxTerminals, 'getAux').mockImplementation((id) => (id === TOOL_ID ? aux : undefined));
       let inspected!: (busy: boolean) => void;
-      const inspection = vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(false);
+      const inspection = vi.spyOn(auxTerminals, 'auxHasWork').mockResolvedValue(false);
       if (waitOn === 'last') inspection.mockResolvedValueOnce(false);
       inspection.mockImplementationOnce(() => new Promise((resolve) => { inspected = resolve; }));
       const answer = answerClientClose(consent);
@@ -185,7 +185,7 @@ describe('Wall on the Lath engine', () => {
     });
 
     it('keeps edits made after it read the Tool clean', async () => {
-      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID, confirmed: true });
+      const { answer, release } = await toolInAuxWait({ surfaceId: TOOL_ID, confirmed: true });
       await act(async () => { recordToolDirty(TOOL_ID, true); });
       await release();
       expect(await answer).toEqual([{ outcome: 'refused', message: UNSAVED_TOOL_REFUSAL }]);
@@ -194,14 +194,14 @@ describe('Wall on the Lath engine', () => {
 
     it('closes through a discard, which answered those edits', async () => {
       await act(async () => { recordToolDirty(TOOL_ID, true); });
-      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID, confirmed: true, unsaved: 'discard' });
+      const { answer, release } = await toolInAuxWait({ surfaceId: TOOL_ID, confirmed: true, unsaved: 'discard' });
       await release();
       expect(await answer).toEqual([{ outcome: 'closed' }]);
       expect(stillThere()).toBe(false);
     });
 
     it('refuses a Tool that became a terminal during the wait', async () => {
-      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID, confirmed: true });
+      const { answer, release } = await toolInAuxWait({ surfaceId: TOOL_ID, confirmed: true });
       const original = browserSurface.surfaceKindFromParams;
       vi.spyOn(browserSurface, 'surfaceKindFromParams').mockImplementation((params) => (
         (params as { toolName?: string } | undefined)?.toolName ? 'terminal' : original(params)
@@ -212,7 +212,7 @@ describe('Wall on the Lath engine', () => {
     });
 
     it('reports closed for a Tool the computer closed during its wait, never a terminal', async () => {
-      const { answer, release } = await toolInHelperWait({ surfaceId: TOOL_ID }, 'first');
+      const { answer, release } = await toolInAuxWait({ surfaceId: TOOL_ID }, 'first');
       expect((await dispatchKill(TOOL_ID))?.ok).toBe(true);
       expect(stillThere()).toBe(false);
       await release();
@@ -659,13 +659,13 @@ describe('Wall on the Lath engine', () => {
     } finally { setWorkspaceTransferPending(DEFAULT_WORKSPACE_ID, false); }
   });
 
-  it('refuses a close whose helper inspection finishes after a transfer starts', async () => {
+  it('refuses a close whose aux terminal inspection finishes after a transfer starts', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
     await flush();
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a' };
-    vi.spyOn(helpers, 'getHelper').mockReturnValue(helper);
+    const aux: auxTerminals.AuxTerminal = { id: 'surface:aux-a', parentId: 'surface:a' };
+    vi.spyOn(auxTerminals, 'getAux').mockReturnValue(aux);
     let inspected!: (busy: boolean) => void;
-    vi.spyOn(helpers, 'helperHasWork').mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
+    vi.spyOn(auxTerminals, 'auxHasWork').mockImplementationOnce(() => new Promise(resolve => { inspected = resolve; }));
     const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
     const respond = vi.fn();
     handle.handleDorControl({ requestId: 'kill', method: SURFACE_CONTROL_METHODS.kill,
@@ -1305,9 +1305,9 @@ describe('Wall on the Lath engine', () => {
   });
 
   async function openPortContext(provider = 'agent-browser') {
-    // The mocked TerminalPane registers no terminal, so a real helper would
+    // The mocked TerminalPane registers no terminal, so a real aux terminal would
     // report its parent closed — an alert the context shows ahead of a port error.
-    vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'surface:context-helper', parentId: 'surface:a' });
+    vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'surface:context-aux', parentId: 'surface:a' });
     if (!fake.hasPty('surface:a')) fake.spawnPty('surface:a');
     fake.setOpenPorts('surface:a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
     await act(async () => {
@@ -3573,7 +3573,7 @@ describe('Wall on the Lath engine', () => {
   // than splitting (docs/specs/dor-tool.md -> Take-over). The handshake is the
   // point — `dor` is the pane's foreground process when the host answers, so the
   // command may only be typed once its own shell is back at a prompt.
-  it.each(['cancelled', 'helper opened', 'cwd changed'] as const)('abandons takeover if the caller becomes %s while returning to its prompt', async (change) => {
+  it.each(['cancelled', 'aux terminal opened', 'cwd changed'] as const)('abandons takeover if the caller becomes %s while returning to its prompt', async (change) => {
     const controller = new AbortController();
     const typed: string[] = [];
     try {
@@ -3591,7 +3591,7 @@ describe('Wall on the Lath engine', () => {
       await waitUntil(() => respond.mock.calls.length > 0);
       expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover', commandState: 'queued' }) }));
       if (change === 'cancelled') controller.abort();
-      if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a' } : undefined);
+      if (change === 'aux terminal opened') vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:a' ? { id: 'surface:aux-a', parentId: 'surface:a' } : undefined);
       if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('surface:a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
       act(() => promptBack('surface:a'));
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
@@ -3854,8 +3854,8 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it.each(['agent', 'helper'] as const)('splits instead of taking over a caller with an existing %s', async (reason) => {
-    if (reason === 'helper') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? { id: 'surface:helper-a', parentId: 'surface:a' } : undefined);
+  it.each(['agent', 'aux'] as const)('splits instead of taking over a caller with an existing %s', async (reason) => {
+    if (reason === 'aux') vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:a' ? { id: 'surface:aux-a', parentId: 'surface:a' } : undefined);
     const typed: string[] = [];
     const controller = new AbortController();
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(null));
@@ -4654,19 +4654,19 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  /** pane-a is an untouched shell owning a helper whose own entry is `helperEntry`. */
-  function untouchedShellWithHelper(helperEntry: Partial<TerminalEntry>): () => void {
+  /** pane-a is an untouched shell owning an aux terminal whose own entry is `auxEntry`. */
+  function untouchedShellWithAux(auxEntry: Partial<TerminalEntry>): () => void {
     registry.set('surface:a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
-    registry.set('surface:helper-a', helperEntry as TerminalEntry);
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a' };
-    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? helper : undefined);
-    vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(false);
-    vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => {});
-    return () => { registry.delete('surface:a'); registry.delete('surface:helper-a'); };
+    registry.set('surface:aux-a', auxEntry as TerminalEntry);
+    const aux: auxTerminals.AuxTerminal = { id: 'surface:aux-a', parentId: 'surface:a' };
+    vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:a' ? aux : undefined);
+    vi.spyOn(auxTerminals, 'auxHasWork').mockResolvedValue(false);
+    vi.spyOn(auxTerminals, 'closeAuxParent').mockImplementation(() => {});
+    return () => { registry.delete('surface:a'); registry.delete('surface:aux-a'); };
   }
 
-  it('confirms killing an untouched shell whose helper holds user input', async () => {
-    const cleanup = untouchedShellWithHelper({ untouched: false, helperBusy: false });
+  it('confirms killing an untouched shell whose aux terminal holds user input', async () => {
+    const cleanup = untouchedShellWithAux({ untouched: false, auxBusy: false });
     try {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
       await flush();
@@ -4681,12 +4681,12 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('reveals a helper with running work in the aux terminal when it blocks its source closing', async () => {
-    const cleanup = untouchedShellWithHelper({ untouched: false, helperBusy: true });
+  it('reveals an aux terminal with running work when it blocks its source closing', async () => {
+    const cleanup = untouchedShellWithAux({ untouched: false, auxBusy: true });
     // The context reads the source's cursor to choose its side.
     Object.assign(registry.get('surface:a')!.terminal, { rows: 24, buffer: { active: { baseY: 0, cursorY: 0, viewportY: 0 } } });
-    vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(true);
-    vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'surface:helper-a', parentId: 'surface:a' });
+    vi.spyOn(auxTerminals, 'auxHasWork').mockResolvedValue(true);
+    vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'surface:aux-a', parentId: 'surface:a' });
     try {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
       await flush();
@@ -4696,14 +4696,14 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const context = container.querySelector<HTMLElement>('[data-terminal-context]')!;
       expect(context.dataset.contextMode).toBe('aux');
-      expect(context.textContent).toContain('Helper has running work');
+      expect(context.textContent).toContain('The aux terminal has running work');
     } finally {
       cleanup();
     }
   });
 
-  it('closes a Workspace whose only shell is untouched, with an idle untouched helper, without confirming', async () => {
-    const cleanup = untouchedShellWithHelper({ untouched: true, helperBusy: false });
+  it('closes a Workspace whose only shell is untouched, with an idle untouched aux terminal, without confirming', async () => {
+    const cleanup = untouchedShellWithAux({ untouched: true, auxBusy: false });
     try {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
       await flush();
@@ -4775,13 +4775,13 @@ describe('Wall on the Lath engine', () => {
     expect(container.querySelector('[data-focused="true"]')).toBeNull();
   });
 
-  it('drops a kill gesture whose Helper inspection outlives the pane', async () => {
+  it('drops a kill gesture whose aux terminal inspection outlives the pane', async () => {
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-a', parentId: 'surface:a' };
-    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:a' ? helper : undefined);
-    vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => {});
+    const aux: auxTerminals.AuxTerminal = { id: 'surface:aux-a', parentId: 'surface:a' };
+    vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:a' ? aux : undefined);
+    vi.spyOn(auxTerminals, 'closeAuxParent').mockImplementation(() => {});
     const inspections: Array<(busy: boolean) => void> = [];
-    vi.spyOn(helpers, 'helperHasWork').mockImplementation(() => new Promise<boolean>(resolve => { inspections.push(resolve); }));
+    vi.spyOn(auxTerminals, 'auxHasWork').mockImplementation(() => new Promise<boolean>(resolve => { inspections.push(resolve); }));
     await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
     await flush();
     await act(async () => {
@@ -5543,10 +5543,10 @@ it('recedes every other pane while a context is open and restores them as it exi
   }
 });
 
-it('moves a retained helper without resizing or replacing its source, and remembers the manual side', async () => {
-  const retained: helpers.HelperTerminal = { id: 'surface:placement-helper', parentId: 'surface:placement-source' };
-  vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:placement-source' ? retained : undefined);
-  const openHelper = vi.spyOn(helpers, 'openHelper').mockResolvedValue(retained);
+it('moves a retained aux terminal without resizing or replacing its source, and remembers the manual side', async () => {
+  const retained: auxTerminals.AuxTerminal = { id: 'surface:placement-aux', parentId: 'surface:placement-source' };
+  vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:placement-source' ? retained : undefined);
+  const openAux = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue(retained);
   await act(async () => root.render(<Wall initialPaneIds={['surface:placement-source']} />));
   await flush();
   const source = container.querySelector<HTMLElement>('[data-lath-leaf="surface:placement-source"]')!;
@@ -5557,18 +5557,18 @@ it('moves a retained helper without resizing or replacing its source, and rememb
   };
   await open();
   const menu = container.querySelector<HTMLElement>('[data-terminal-context]')!;
-  // Right-click opens properties; the helper waits for its first showing.
+  // Right-click opens properties; the aux terminal waits for its first showing.
   expect(menu.dataset.contextMode).toBe('properties');
-  expect(openHelper).not.toHaveBeenCalled();
+  expect(openAux).not.toHaveBeenCalled();
   await act(async () => menu.querySelector<HTMLButtonElement>('[aria-label="Show aux terminal"]')!.click());
   await flush();
   expect(menu.dataset.contextMode).toBe('aux');
-  const terminal = menu.querySelector('[data-helper-terminal]');
+  const terminal = menu.querySelector('[data-aux-terminal]');
   expect(terminal).not.toBeNull();
   act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Place context at bottom"]')!.click());
   expect(menu.dataset.contextSide).toBe('bottom');
-  expect(menu.querySelector('[data-helper-terminal]')).toBe(terminal);
-  expect(openHelper).toHaveBeenCalledTimes(1);
+  expect(menu.querySelector('[data-aux-terminal]')).toBe(terminal);
+  expect(openAux).toHaveBeenCalledTimes(1);
   expect(source.getAttribute('style')).toBe(sourceStyle);
   expect(container.querySelector('[data-lath-leaf="surface:placement-source"]')).toBe(source);
   act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
@@ -5600,11 +5600,11 @@ it.each(['Shift', 'Meta'])('cancels an interrupted %s leader without leaving pas
   expect(container.querySelector('[data-session-id="surface:a"]')?.getAttribute('data-focused')).toBe('false');
 });
 
-describe('dor from helper terminals', () => {
-  async function issue(method: string, params: Record<string, unknown> = {}, helperParentId = 'surface:a') {
+describe('dor from aux terminals', () => {
+  async function issue(method: string, params: Record<string, unknown> = {}, auxParentId = 'surface:a') {
     const respond = vi.fn();
     await act(async () => dispatchDorControlRequest({
-      requestId: `helper-${method}`, surfaceId: 'surface:helper-a', helperParentId, method, params,
+      requestId: `aux-${method}`, surfaceId: 'surface:aux-a', auxParentId, method, params,
     }, respond));
     await flush();
     return respond;
@@ -5612,25 +5612,25 @@ describe('dor from helper terminals', () => {
   const expectStatus = (respond: ReturnType<typeof vi.fn>, status: string, extra = {}) =>
     expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status, ...extra }) }));
 
-  it('splits from the source using the helper directory, while helpers remain absent from discovery', async () => {
+  it("splits from the source using the aux terminal's directory, while aux terminals remain absent from discovery", async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} />));
     terminalRegistry.seedTerminalManualCwd('surface:a', '/source');
-    const response = await issue('surface.split', { direction: 'right', cwd: '/helper', focus: false });
+    const response = await issue('surface.split', { direction: 'right', cwd: '/aux', focus: false });
     const created = response.mock.calls[0][0].result.surfaceId;
-    expect(pendingShellOpts.get(created)?.cwd).toBe('/helper');
+    expect(pendingShellOpts.get(created)?.cwd).toBe('/aux');
     expect(leafCount()).toBe(3);
     const listed = await issue('surface.list');
     expect(listed.mock.calls[0][0].result.surfaces.map((s: { id: string }) => s.id))
       .toEqual(expect.arrayContaining(['surface:a', 'surface:b', created]));
-    expect(listed.mock.calls[0][0].result.surfaces.some((s: { id: string }) => s.id === 'surface:helper-a')).toBe(false);
+    expect(listed.mock.calls[0][0].result.surfaces.some((s: { id: string }) => s.id === 'surface:aux-a')).toBe(false);
   });
 
-  it('names the helper source when it is hidden instead of placing beside focus', async () => {
+  it("names the aux terminal's source when it is hidden instead of placing beside focus", async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} />));
     act(() => container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] [aria-label="Minimize"]')!.click());
     await flush();
     const response = await issue('surface.iframe', { url: 'http://localhost:8080' });
-    expect(response).toHaveBeenCalledWith({ ok: false, error: 'The helper source Surface is not available for placement' });
+    expect(response).toHaveBeenCalledWith({ ok: false, error: "The aux terminal's source Surface is not available for placement" });
     expect(leafCount()).toBe(1);
   });
 
@@ -5652,7 +5652,7 @@ describe('dor from helper terminals', () => {
   it.each(['agent-browser', 'playwright'] as const)('creates and reuses a %s browser without replacing the source', async provider => {
     hostBrowsers();
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
-    const params = { provider, key: 'helper-browser', session: 'helper-browser', cwd: '/helper',
+    const params = { provider, key: 'aux-browser', session: 'aux-browser', cwd: '/aux',
       initialViewport: { mode: 'fixed', width: 800, height: 600, deviceScaleFactor: 1 } };
     const response = await issue('surface.browser', params);
     await waitUntil(() => response.mock.calls.length > 0);
@@ -5664,7 +5664,7 @@ describe('dor from helper terminals', () => {
   });
 
   it.each(['surface.read', 'surface.send', 'surface.await', 'surface.kill', 'surface.move', 'surface.resolveOpen', 'surface.resolveBrowser', 'surface.split'])(
-    'rejects explicit helper self for %s before the handler can act', async method => {
+    'rejects explicit aux terminal self for %s before the handler can act', async method => {
       await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
       const response = await issue(method, { surface: 'surface:self' });
       expect(response).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
@@ -5672,39 +5672,39 @@ describe('dor from helper terminals', () => {
     },
   );
 
-  it.each(['tool', 'open', 'preview'] as const)('places a new %s in a separate pane, even if the helper was promoted before lookup finished', async verb => {
+  it.each(['tool', 'open', 'preview'] as const)('places a new %s in a separate pane, even if the aux terminal was promoted before lookup finished', async verb => {
     // The origin was captured while auxiliary. By dispatch its Session is a
     // primary leaf, with a naked invocation eligible for takeover otherwise.
     Object.assign(fake, { toolControl: vi.fn(async () => okToolLookup(null)) });
     const controller = new AbortController();
-    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:helper-a']} />));
-    terminalRegistry.seedTerminalManualCwd('surface:helper-a', '/repo');
-    reportRunning('surface:helper-a', verb === 'tool' ? 'dor tool storybook' : 'dor open README.md');
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:aux-a']} />));
+    terminalRegistry.seedTerminalManualCwd('surface:aux-a', '/repo');
+    reportRunning('surface:aux-a', verb === 'tool' ? 'dor tool storybook' : 'dor open README.md');
     const response = vi.fn();
     await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-      requestId: 'helper-tool', method: 'surface.tool', surfaceId: 'surface:helper-a', helperParentId: 'surface:a',
+      requestId: 'aux-tool', method: 'surface.tool', surfaceId: 'surface:aux-a', auxParentId: 'surface:a',
       params: { cwd: '/repo', ...(verb === 'tool' ? { name: 'storybook' } : { file: '/repo/README.md', preview: verb === 'preview' }) },
       signal: controller.signal, respond: response,
     } })));
     await flush();
     const created = Array.from(container.querySelectorAll('[data-lath-leaf]')).map(el => el.getAttribute('data-lath-leaf')!)
-      .find(id => id !== 'surface:a' && id !== 'surface:helper-a');
+      .find(id => id !== 'surface:a' && id !== 'surface:aux-a');
     try {
       expect(created).toBeDefined();
       act(() => promptBack(created!));
       await waitUntil(() => response.mock.calls.length > 0);
       expectStatus(response, 'created', { surfaceId: created });
-      expect(container.querySelector('[data-session-id="surface:helper-a"]')).not.toBeNull();
+      expect(container.querySelector('[data-session-id="surface:aux-a"]')).not.toBeNull();
     } finally { await act(async () => { controller.abort(); }); }
   });
 
-  it('reuses an ordinary ensure match from a helper', async () => {
+  it('reuses an ordinary ensure match from an aux terminal', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} />));
     act(() => {
-      terminalRegistry.applyTerminalSemanticEvents('surface:a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/helper')! }]);
+      terminalRegistry.applyTerminalSemanticEvents('surface:a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/aux')! }]);
       reportRunning('surface:a', 'pnpm dev');
     });
-    const response = await issue('surface.ensure', { command: ['pnpm', 'dev'], cwd: '/helper' });
+    const response = await issue('surface.ensure', { command: ['pnpm', 'dev'], cwd: '/aux' });
     expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'existing', surfaceId: 'surface:a' }) }));
     expect(leafCount()).toBe(1);
   });

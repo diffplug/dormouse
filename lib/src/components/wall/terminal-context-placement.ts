@@ -6,9 +6,9 @@ export type ContextSide = Edge;
  *  beside it, or a covering panel's outer edge. */
 export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[]; anchor: 'top' | 'bottom' };
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
-/** Adjacent helpers overlap the source only by their teeth, which the rect includes. */
+/** Adjacent aux terminals overlap the source only by their teeth, which the rect includes. */
 const OVERLAP = TERMINAL_CONTEXT_TEETH_PX;
-/** Above helpers extend upward over peer headers rather than further over the source. */
+/** Above aux terminals extend upward over peer headers rather than further over the source. */
 const ABOVE_EXTENSION = 32;
 // Compact source/directory/status chrome plus a useful terminal viewport.
 const MIN_WIDTH = 280;
@@ -44,7 +44,7 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
     ?? candidates.reduce<typeof candidates[number] | undefined>((best, candidate) => !best || candidate.rect.width * candidate.rect.height > best.rect.width * best.rect.height ? candidate : best, undefined);
   if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side), anchor: chosen.side === 'top' ? 'bottom' : 'top' };
 
-  // Cover the source's half on its own edges, as adjacent helpers align with theirs.
+  // Cover the source's half on its own edges, as adjacent aux terminals align with theirs.
   // Small sources may borrow Wall space for usable chrome.
   const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback;
   const width = Math.min(wall.width, Math.max(source.width, MIN_WIDTH));

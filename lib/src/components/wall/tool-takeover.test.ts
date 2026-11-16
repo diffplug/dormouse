@@ -61,7 +61,7 @@ describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb
     oscDriven: true,
     rawCommandLine: verb === 'tool' ? 'dor tool storybook' : 'dor open README.md',
     cwdMatches: true,
-    helperPresent: false,
+    auxPresent: false,
   };
 
   it('takes over the pane the invocation was typed in', () => {
@@ -75,7 +75,7 @@ describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb
       ['--preview asked for the preview slot', { preview: true }],
       ['the caller is minimized', { visible: false }],
       ['another Workspace is active', { workspaceActive: false }],
-      ['the caller has an auxiliary helper', { helperPresent: true }],
+      ['the caller has an aux terminal', { auxPresent: true }],
       ['the caller is already a tool', { kind: 'tool' }],
       ['the caller is a browser', { kind: 'browser' }],
       ['the shell reports no OSC 633', { oscDriven: false }],
@@ -104,13 +104,13 @@ describe('after the prompt wait', () => {
     oscDriven: true,
     rawCommandLine: null,
     cwdMatches: true,
-    helperPresent: false,
+    auxPresent: false,
   };
 
-  it('a transformation needs a surviving plain helper-less pane in place, regardless of Workspace selection', () => {
+  it('a transformation needs a surviving plain pane with no aux terminal in place, regardless of Workspace selection', () => {
     expect(callerStillPlaceable(passing)).toBe(true);
     expect(callerStillPlaceable({ ...passing, workspaceActive: false })).toBe(true);
-    for (const override of [ { visible: false }, { cwdMatches: false }, { kind: 'tool' as const }, { helperPresent: true }]) {
+    for (const override of [ { visible: false }, { cwdMatches: false }, { kind: 'tool' as const }, { auxPresent: true }]) {
       expect(callerStillPlaceable({ ...passing, ...override })).toBe(false);
     }
   });

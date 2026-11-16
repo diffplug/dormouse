@@ -12,13 +12,13 @@ import { ensureResizeObserver } from './wall-test-utils';
 const { rendered } = vi.hoisted(() => ({ rendered: vi.fn() }));
 vi.mock('./TerminalContext', () => ({ TerminalContext: () => {
   rendered();
-  return <section data-test-context><input aria-label="Helper input" /></section>;
+  return <section data-test-context><input aria-label="Aux terminal input" /></section>;
 } }));
 vi.mock('../../lib/terminal-registry', () => ({ getTerminalInstance: () => null }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 ensureResizeObserver();
 
-it('places from painted frames without rerendering the helper or snapping back on unrelated renders', () => {
+it('places from painted frames without rerendering the aux terminal or snapping back on unrelated renders', () => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -37,9 +37,9 @@ it('places from painted frames without rerendering the helper or snapping back o
     multiPane lath={lath} preferences={preferences} />));
   try {
     render('Original');
-    const helper = container.querySelector('[data-test-context]')!;
-    const host = helper.parentElement!;
-    const input = helper.querySelector('input')!;
+    const aux = container.querySelector('[data-test-context]')!;
+    const host = aux.parentElement!;
+    const input = aux.querySelector('input')!;
     act(() => input.focus());
     input.value = 'unfinished command';
     const renders = rendered.mock.calls.length;
@@ -53,7 +53,7 @@ it('places from painted frames without rerendering the helper or snapping back o
     render('New source title');
     expect(host.style.left).toBe('540px');
     expect(host.style.width).toBe('550px');
-    expect(container.querySelector('[data-test-context]')).toBe(helper);
+    expect(container.querySelector('[data-test-context]')).toBe(aux);
     expect(input.value).toBe('unfinished command');
     expect(document.activeElement).toBe(input);
     // Properties are only as tall as their rows, kept to the top beside a source on the right.
@@ -62,7 +62,7 @@ it('places from painted frames without rerendering the helper or snapping back o
     expect(host.style.height).toBe('');
     expect(host.style.maxHeight).toBe('600px');
     expect(host.style.transform).toBe('');
-    expect(container.querySelector('[data-test-context]')).toBe(helper);
+    expect(container.querySelector('[data-test-context]')).toBe(aux);
     render('New source title', false, 'aux');
     expect(host.style.height).toBe('600px');
     expect(host.style.maxHeight).toBe('');

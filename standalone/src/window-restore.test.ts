@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The planner is pure routing over the live PTY list; standing up real xterm
 // hosts for it needs a browser. Mocked exactly as `lib/src/lib/reconnect.test.ts`
-// does, so what stays real is the slicing and the helper store.
+// does, so what stays real is the slicing and the aux terminal store.
 const registryMocks = vi.hoisted(() => ({
   restoreBrowserSurfaceTodo: vi.fn(),
   resumeTerminal: vi.fn(),
@@ -14,7 +14,7 @@ vi.mock("dormouse-lib/lib/terminal-registry", () => registryMocks);
 import type { PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
 import { DEFAULT_WORKSPACE_ID } from "dormouse-lib/lib/session-types";
 import type { PersistedSession, PersistedWindow } from "dormouse-lib/lib/session-types";
-import { forgetHelper, getHelper } from "dormouse-lib/lib/helper-terminal";
+import { forgetAux, getAux } from "dormouse-lib/lib/aux-terminal";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { getWorkspacesSnapshot, installWorkspaceIdPool, resetWorkspaceIdPool, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
 import { installSurfaceIdPool, resetSurfaceIdPool } from "dormouse-lib/lib/surface-ids";
@@ -79,7 +79,7 @@ beforeEach(() => {
 });
 
 describe("routeUnownedPtys", () => {
-  it("routes a helper to the Workspace holding its source, not the active one", () => {
+  it("routes an aux terminal to the Workspace holding its source, not the active one", () => {
     const saved: PersistedWindow = {
       version: 2,
       workspaces: [
@@ -91,7 +91,7 @@ describe("routeUnownedPtys", () => {
     const ptys: PtyInfo[] = [
       { id: "a1", alive: true },
       { id: "b1", alive: true },
-      { id: "h1", alive: true, helper: { parentId: "b1" } },
+      { id: "h1", alive: true, aux: { parentId: "b1" } },
     ];
 
     const { extra, unowned } = routeUnownedPtys(ptys, saved);
@@ -101,7 +101,7 @@ describe("routeUnownedPtys", () => {
     expect([...unowned]).toEqual([]);
   });
 
-  it("leaves a helper whose source is itself unowned to the active Workspace", () => {
+  it("leaves an aux terminal whose source is itself unowned to the active Workspace", () => {
     const saved: PersistedWindow = {
       version: 2,
       workspaces: [{ id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1") }],
@@ -109,7 +109,7 @@ describe("routeUnownedPtys", () => {
     };
     const ptys: PtyInfo[] = [
       { id: "fresh", alive: true },
-      { id: "h1", alive: true, helper: { parentId: "fresh" } },
+      { id: "h1", alive: true, aux: { parentId: "fresh" } },
     ];
 
     const { extra, unowned } = routeUnownedPtys(ptys, saved);
@@ -120,9 +120,9 @@ describe("routeUnownedPtys", () => {
 });
 
 describe("restoreWindowOrFresh", () => {
-  it("keeps B's helper in B and leaves A's layout intact", async () => {
-    // The bug this pins: every helper is unowned by name, so routing them all to
-    // the active Workspace promoted B's helper to a top-level pane of A, and its
+  it("keeps B's aux terminal in B and leaves A's layout intact", async () => {
+    // The bug this pins: every aux terminal is unowned by name, so routing them all to
+    // the active Workspace promoted B's aux terminal to a top-level pane of A, and its
     // stray id then voided A's whole saved layout.
     const saved: PersistedWindow = {
       version: 2,
@@ -132,13 +132,13 @@ describe("restoreWindowOrFresh", () => {
       ],
       activeWorkspaceId: "ws-a",
     };
-    const helper = { parentId: "b1" };
+    const aux = { parentId: "b1" };
     const { platform } = fakePlatform(
       [
         { id: "a1", alive: true },
         { id: "a2", alive: true },
         { id: "b1", alive: true },
-        { id: "h1", alive: true, helper },
+        { id: "h1", alive: true, aux },
       ],
       saved,
     );
@@ -149,9 +149,9 @@ describe("restoreWindowOrFresh", () => {
     expect(plans["ws-a"].restoredLathLayout).toEqual(saved.workspaces[0].session.lathLayout);
     expect(plans["ws-b"].initialPaneIds).toEqual(["b1"]);
     expect(plans["ws-b"].restoredLathLayout).toEqual(saved.workspaces[1].session.lathLayout);
-    // The helper is restored as one — parked beside its source, not a pane.
-    expect(getHelper("b1")).toBeDefined();
-    forgetHelper("b1");
+    // The aux terminal is restored as one — parked beside its source, not a pane.
+    expect(getAux("b1")).toBeDefined();
+    forgetAux("b1");
   });
 
   it("restores a pin, its Workspace in the pinned group", async () => {

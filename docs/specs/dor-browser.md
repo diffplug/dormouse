@@ -30,7 +30,7 @@ Source of truth: `resolveRenderMode` and `launchFallbackFromParams` in `lib/src/
 
 ## Placement And Lifetime
 
-**Must share one placement rule across browser entry points**: replace an untouched, helper-less terminal caller in place, else split next to the reference surface. **Never replace a reference that already has a browser.** A replacement is a new Surface (`docs/specs/glossary.md` → "Invariants" I10). The pane context menu never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)); helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
+**Must share one placement rule across browser entry points**: replace an untouched terminal caller without an aux terminal in place, else split next to the reference surface. **Never replace a reference that already has a browser.** A replacement is a new Surface (`docs/specs/glossary.md` → "Invariants" I10). The pane context menu never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)); aux terminal callers follow `docs/specs/dor-cli.md` → Aux callers and targets.
 
 CLI focus follows `docs/specs/dor-cli.md` → "Focus intent"; Pane Context Menu placement and `docs/specs/layout.md` corner case #6 retain their GUI focus behavior.
 

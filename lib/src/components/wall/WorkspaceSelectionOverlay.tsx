@@ -40,7 +40,7 @@ import {
 } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
 import { unionBounds, unionRingOutline } from '../../lib/rect-union-outline';
-import type { ContextHelper, LathWallEngine } from './lath-wall-engine';
+import type { ContextPanel, LathWallEngine } from './lath-wall-engine';
 import { subscribePaneMotion } from './pane-motion';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
@@ -108,7 +108,7 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
 
 /** The frame the ring currently shows: geometry plus the per-edge motion-smear
  *  `speeds`, populated only while a tween runs; a settled ring carries null speeds,
- *  so its render is clean. `union` holds the source and helper rects while a terminal
+ *  so its render is clean. `union` holds the source and aux terminal rects while a terminal
  *  context is open; `rect` is then their bounds, and both rectangles tween together.
  *  Held in a ref and written to the DOM imperatively. */
 interface DisplayedRing extends RingFrame {
@@ -191,7 +191,7 @@ function writeSmear(
   }
 }
 
-export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode, active = true, contextHelper }: {
+export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, selectedId, selectedType, mode, active = true, contextPanel }: {
   /** The Lath store — the overlay re-measures on every commit (`revision` via
    *  `useSyncExternalStore`), so the ring tracks leaves as they move / resize / restore. */
   lathStore: LathOverlayStore;
@@ -203,8 +203,8 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   selectedType: WallSelectionKind;
   mode: WallMode;
   active?: boolean;
-  /** The open context's helper as last painted; LathHost notifies frames after placing it. */
-  contextHelper?: () => ContextHelper | null;
+  /** The open context's aux terminal as last painted; LathHost notifies frames after placing it. */
+  contextPanel?: () => ContextPanel | null;
 }) {
   const { elements: paneElements, version: paneVersion } = useContext(PaneElementsContext);
   const { elements: doorElements, version: doorVersion } = useContext(DoorElementsContext);
@@ -401,15 +401,15 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       const next = measureFrame(targetEl, selectedType);
       if (!next) return;
-      // An open helper's side joins the identity, so opening, closing and switching
+      // An open aux terminal's side joins the identity, so opening, closing and switching
       // sides tween the union while same-side motion tracks like any other re-measure.
-      const helper = selectedType === 'pane' ? contextHelper?.() : null;
-      const helperFrame = helper?.sourceId === selectedId ? measureFrame(helper.element, 'pane') : null;
-      if (helperFrame) {
-        next.union = [next.rect, helperFrame.rect];
+      const aux = selectedType === 'pane' ? contextPanel?.() : null;
+      const auxFrame = aux?.sourceId === selectedId ? measureFrame(aux.element, 'pane') : null;
+      if (auxFrame) {
+        next.union = [next.rect, auxFrame.rect];
         next.rect = unionBounds(...next.union);
       }
-      const identity = helperFrame ? `${selectionIdentity}|context:${helper!.side}` : selectionIdentity;
+      const identity = auxFrame ? `${selectionIdentity}|context:${aux!.side}` : selectionIdentity;
       const wall = targetEl.closest<HTMLElement>('[data-workspace-wall]');
       opacityRef.current = wall?.style.opacity ?? '';
 
@@ -467,7 +467,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     // The rAF loop is intentionally NOT torn down here: it is keyed to the tween
     // (a ref), so a mid-glide re-run of this effect keeps the ring moving. It is
     // cancelled on selection-clear (above), on snap, and on unmount (below).
-  }, [active, contextHelper, handoff, workspaces, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
+  }, [active, contextPanel, handoff, workspaces, subscribeLathFrames, lathRevision, selectedId, selectedType, paneVersion, doorVersion, paneElements, doorElements, applyRing]);
 
   // After any structural render (mount, variant/color/focus change) re-apply the
   // current frame imperatively so the shell's DOM matches — runs pre-paint, so a

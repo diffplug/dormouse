@@ -224,9 +224,9 @@ A Workspace moves between windows without ending anything (`docs/specs/transport
 
 - **A window whose last Workspace left closes itself**, with no confirmation and no kill.
 - **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** `standalone/src/workspace-move.test.ts` pins this order.
-- **Must preserve membership and helper ownership from preparation through settlement**: refuse Surface creation, closure, Reopen, renderer changes, Break, and helper creation, Reset, or Promote. Unfinished promotion refuses preparation.
+- **Must preserve membership and aux terminal ownership from preparation through settlement**: refuse Surface creation, closure, Reopen, renderer changes, Break, and aux terminal creation, Reset, or Promote. Unfinished promotion refuses preparation.
 - **A carrier — a payload naming `surfaceArrival` — mounts in the background and, after `adopt_done`, moves its Surface into the Workspace it names.**
-- **A pane's helper Session travels with it**, directly after its source, which lets the target's resume re-parent it; nothing else in the payload names it.
+- **A pane's aux terminal Session travels with it**, directly after its source, which lets the target's resume re-parent it; nothing else in the payload names it.
 - **A Workspace that comes back must mount from the record it brought**, never the plan it first booted with.
 
 Source of truth: `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`, `standalone/src/workspace-move.ts`, `transfer_workspace` in `standalone/src-tauri/src/lib.rs`.
@@ -305,7 +305,7 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 
 **One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types".
 
-**Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: no `beforeunload` handler kills a PTY, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
+**Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: no `beforeunload` handler kills a PTY, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except an aux terminal, which goes to the Workspace holding its source.
 
 **Nothing is deleted at boot but what the arrival merge settles and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types").
 

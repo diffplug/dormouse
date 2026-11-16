@@ -25,7 +25,7 @@ const SCENARIOS: { id: Scenario; label: string }[] = [
   { id: 'launchFailed', label: 'Browser launch failed' },
 ];
 const PARENT_DIR = '~/projects/dormouse';
-const HELPER_DIR = '~/projects/dormouse-fix';
+const AUX_DIR = '~/projects/dormouse-fix';
 
 function Prompt({ children, directory = PARENT_DIR }: { children?: ReactNode; directory?: string }) {
   return <div><span className="text-link">{directory}</span> <span className="text-muted">❯</span> {children}</div>;
@@ -55,7 +55,7 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
     <div className="flex justify-between bg-header-inactive-bg px-2 text-header-inactive-fg"><span>GNU nano 8.3</span><span>notes.md</span><span>Modified</span></div>
     <div className="pt-3"># Context menu ideas</div>
     <br />
-    <div>Keep the helper big enough for actual work.</div>
+    <div>Keep the aux terminal big enough for actual work.</div>
     <div>Make the directory mismatch impossible to miss.<Cursor /></div>
     <div className="mt-auto grid grid-cols-4 gap-x-5 pt-4 text-muted">
       <span>^G Help</span><span>^O Write Out</span><span>^W Where Is</span><span>^K Cut</span>
@@ -65,12 +65,12 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
   if (scenario === 'exited') return <Prompt>exit</Prompt>;
   if (scenario === 'differentDirectory') return <>
     <Prompt>cd ../dormouse-fix</Prompt>
-    <Prompt directory={HELPER_DIR}>git log -3 --oneline</Prompt>
+    <Prompt directory={AUX_DIR}>git log -3 --oneline</Prompt>
     <div><span className="text-link">a8d21f0</span> Fix pane focus after splitting</div>
     <div><span className="text-link">56b302e</span> Keep terminal titles stable</div>
     <div><span className="text-link">3c119a4</span> Update layout spec</div>
     <br />
-    <Prompt directory={HELPER_DIR}><Cursor /></Prompt>
+    <Prompt directory={AUX_DIR}><Cursor /></Prompt>
   </>;
   if (scenario === 'userInput') return <>
     <GitStatus />
@@ -97,7 +97,7 @@ function ContextPrototype({ scenario, initialMode, initialDetail = null, paneWid
     <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
     <pre className="m-0 p-3 leading-6 text-muted">{'~/projects/dormouse ❯ pnpm dev\n\n  VITE ready\n  ➜  Local: http://localhost:5173/'}</pre>
     <div className="absolute flex flex-col" style={contextHostStyle(placement, mode)}>
-      <TerminalContextView mode={mode} onModeChange={setMode} placement={{ ...placement, onChange: setSide }} surfaceId="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
+      <TerminalContextView mode={mode} onModeChange={setMode} placement={{ ...placement, onChange: setSide }} surfaceId="surface:3" cwd={PARENT_DIR} auxCwd={AUX_DIR} mismatch={scenario === 'differentDirectory'}
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}

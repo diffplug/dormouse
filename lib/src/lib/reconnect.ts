@@ -1,5 +1,5 @@
 import type { TerminalGrid } from './terminal-transfer';
-import { adoptOrphanedHelper, restoreHelper } from './helper-terminal';
+import { adoptOrphanedAux, restoreAux } from './aux-terminal';
 import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
@@ -231,19 +231,19 @@ function resumeLivePtys(
     const savedInfo = savedResumeInfo.get(pty.id);
     if (savedInfo?.title !== undefined) resumeInfo.title = savedInfo.title;
     if (savedInfo?.untouched) resumeInfo.untouched = true;
-    // A helper stays one only while its source is also live; helpers cannot
-    // have helpers. `ptyById` is this plan's slice, so a helper reaching a Wall
+    // An aux terminal stays one only while its source is also live; aux terminals cannot
+    // have aux terminals. `ptyById` is this plan's slice, so an aux terminal reaching a Wall
     // that does not hold its source is resumed as an ordinary pane instead — a
-    // fallback, not a route: the Window planner sends every helper to its
+    // fallback, not a route: the Window planner sends every aux terminal to its
     // source's Workspace (`routeUnownedPtys` in
     // `standalone/src/window-restore.ts`).
-    const parent = pty.helper && ptyById.get(pty.helper.parentId);
-    const helper = parent && !parent.helper ? pty.helper : undefined;
-    if (helper) resumeInfo.helper = helper;
+    const parent = pty.aux && ptyById.get(pty.aux.parentId);
+    const aux = parent && !parent.aux ? pty.aux : undefined;
+    if (aux) resumeInfo.aux = aux;
     resumeTerminal(pty.id, replayBuffer.get(pty.id) ?? null, resumeInfo);
-    if (helper) { restoreHelper(pty.id, helper); continue; }
+    if (aux) { restoreAux(pty.id, aux); continue; }
     ids.push(pty.id);
-    if (pty.helper) adoptOrphanedHelper(pty.id);
+    if (pty.aux) adoptOrphanedAux(pty.id);
   }
   // A reaped Tool has no PTY to list, yet is no stale pane: it keeps its
   // place, with no process, until it is shown (docs/specs/dor-tool.md -> Reaping).

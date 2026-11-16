@@ -8,7 +8,7 @@ import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
 import { canOpenDirectory, TerminalContext } from './TerminalContext';
 import * as terminalRegistry from '../../lib/terminal-registry';
-import * as helpers from '../../lib/helper-terminal';
+import * as auxTerminals from '../../lib/aux-terminal';
 import { TerminalContextContext, WorkspaceActiveContext } from './wall-context';
 import { ensureResizeObserver, PortalAnchoredButton } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
@@ -33,7 +33,7 @@ beforeEach(() => {
   props = { mode: 'properties', onModeChange: vi.fn(), surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
     watchRule: 'pnpm', watching: false, todo: false, explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
     onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
-    children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
+    children: <div data-aux-terminal="aux"><textarea aria-label="Aux terminal input" /></div> };
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); removeMouseSelectionState('parent'); cfg.layout.animate = previousAnimate; vi.useRealTimers(); });
 const render = () => act(() => root.render(<TerminalContextView {...props} />));
@@ -166,7 +166,7 @@ it('drops the title explanation label, then compacts the Surface id, as the head
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
-it('re-fits the title row when its helper placement buttons change', () => {
+it('re-fits the title row when its aux terminal placement buttons change', () => {
   // Observers here see only the elements they observe, so an unobserved group cannot trigger a re-fit.
   const observed = new Map<Element, Set<() => void>>();
   vi.stubGlobal('ResizeObserver', class {
@@ -271,7 +271,7 @@ it('opens title explanation as a disclosure', async () => {
   render(); expect(container.textContent).not.toContain('OSC 2'); await click('Explain this title');
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain('OSC 2');
 });
-it('keeps helper keystrokes out of context dismissal', () => {
+it('keeps aux terminal keystrokes out of context dismissal', () => {
   props.mode = 'aux';
   render(); const input = container.querySelector('textarea')!;
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
@@ -279,9 +279,9 @@ it('keeps helper keystrokes out of context dismissal', () => {
   act(() => button('Close terminal context').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(props.onClose).toHaveBeenCalledOnce();
 });
-it('keeps presses in a helper\'s portaled copy editor out of context dismissal', () => {
+it('keeps presses in an aux terminal\'s portaled copy editor out of context dismissal', () => {
   props.mode = 'aux';
-  props.children = <div data-helper-terminal="helper"><PortalAnchoredButton /></div>;
+  props.children = <div data-aux-terminal="aux"><PortalAnchoredButton /></div>;
   render();
   const editor = document.querySelector<HTMLButtonElement>('[data-portaled]')!;
   expect(container.contains(editor)).toBe(false);
@@ -290,13 +290,13 @@ it('keeps presses in a helper\'s portaled copy editor out of context dismissal',
   act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
   expect(props.onClose).toHaveBeenCalledOnce();
 });
-it('requires explicit confirmation before resetting a helper', async () => {
+it('requires explicit confirmation before resetting an aux terminal', async () => {
   props.mode = 'aux';
   render(); await click('Reset aux terminal'); await click('Keep aux terminal'); expect(props.onReset).not.toHaveBeenCalled();
   await click('Reset aux terminal'); await click('Discard and reset'); expect(props.onReset).toHaveBeenCalledOnce();
 });
 
-it('resets at once, with no question, when Labs makes the old helper a pending kill', async () => {
+it('resets at once, with no question, when Labs makes the old aux terminal a pending kill', async () => {
   props.mode = 'aux';
   props.resetAsks = false; render();
   await click('Reset aux terminal');
@@ -354,7 +354,7 @@ it('keeps the focus ring on an in-flight button while withholding only its hover
 });
 it('shows both directories in the mismatch warning', () => {
   props.mode = 'aux';
-  props.mismatch = true; props.helperCwd = '~/other'; render(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/other'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/repo');
+  props.mismatch = true; props.auxCwd = '~/other'; render(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/other'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/repo');
 });
 it('shares header and uncaptured body entry points; captured mouse has no Shift escape', () => {
   const open = vi.fn(); const value = { id: null, mounted: null, mode: 'properties' as const, setMode: vi.fn(), open, close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
@@ -374,7 +374,7 @@ it('shares header and uncaptured body entry points; captured mouse has no Shift 
 it('offers the rule covering the running script, else that script\'s own key', async () => {
   const clearRules = () => act(() => { for (const name of terminalRegistry.getWatchedCommandsSnapshot()) terminalRegistry.setCommandWatched(name, false); });
   clearRules();
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'watch-row' });
+  const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'aux', parentId: 'watch-row' });
   terminalRegistry.applyTerminalSemanticEvents('watch-row', [
     { type: 'commandLine', commandLine: 'cd web && pnpm run dev' },
     { type: 'commandStart', source: 'osc633_boundaries' },
@@ -398,7 +398,7 @@ it('offers the rule covering the running script, else that script\'s own key', a
 });
 
 it('never offers Explore for a share or device path, however the terminal reported it', async () => {
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'unc-row' });
+  const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'aux', parentId: 'unc-row' });
   const unavailable = () => container.querySelector('[aria-label="Directory unavailable on this host"]');
   try {
     for (const [cwd, explorable] of [
@@ -418,7 +418,7 @@ it('never offers Explore for a share or device path, however the terminal report
   }
 });
 
-it('offers Reset and states only an exit in the helper status row', () => {
+it('offers Reset and states only an exit in the aux terminal status row', () => {
   props.mode = 'aux';
   render();
   const row = () => container.querySelector('[aria-label="Aux terminal status"]')!;
@@ -436,22 +436,22 @@ it('shows a running Tool command that spans lines on one', () => {
   expect(container.querySelector('[title^="Running "]')?.getAttribute('title')).toBe('Running cd web pnpm dev…');
 });
 
-it('uses the Tool primary terminal without creating a helper or offering helper lifecycle actions', async () => {
-  const openHelper = vi.spyOn(helpers, 'openHelper');
+it('uses the Tool primary terminal without creating an aux terminal or offering aux terminal lifecycle actions', async () => {
+  const openAux = vi.spyOn(auxTerminals, 'openAux');
   const focusTerminal = vi.fn();
   const terminal = vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({ focus: focusTerminal } as unknown as ReturnType<typeof terminalRegistry.getTerminalInstance>);
   const focusSurface = vi.spyOn(terminalRegistry, 'focusSession');
   await act(async () => { root.render(<TerminalContext id="tool-source" mode="aux" title="Storybook" tool />); });
-  expect(openHelper).not.toHaveBeenCalled();
+  expect(openAux).not.toHaveBeenCalled();
   expect(container.querySelector('[data-context-terminal="tool-source"]')).not.toBeNull();
-  expect(container.querySelector('[data-helper-terminal]')).toBeNull();
+  expect(container.querySelector('[data-aux-terminal]')).toBeNull();
   expect(container.querySelector('[aria-label="Tool terminal status"]')).not.toBeNull();
-  expect(container.querySelector('[aria-label="Reset helper terminal"]')).toBeNull();
+  expect(container.querySelector('[aria-label="Reset aux terminal"]')).toBeNull();
   expect(container.querySelector('[aria-label="Move this terminal into a new pane"]')).toBeNull();
   act(() => container.querySelector('[data-context-terminal]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
   expect(focusTerminal).toHaveBeenCalledOnce();
   expect(focusSurface).not.toHaveBeenCalled();
-  openHelper.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
+  openAux.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
 });
 
 it('offers Keep open only for a preview slot, as a focusable button that keeps focus in the context', async () => {
@@ -530,8 +530,8 @@ it('shows properties alone, then the terminal alone, each offering the other', a
 });
 
 it('starts the aux terminal on its first showing, never for properties alone', async () => {
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'lazy-source' });
-  const visible = vi.spyOn(helpers, 'setHelperVisible');
+  const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'aux', parentId: 'lazy-source' });
+  const visible = vi.spyOn(auxTerminals, 'setAuxVisible');
   try {
     await act(async () => root.render(<TerminalContext id="lazy-source" mode="properties" />));
     expect(open).not.toHaveBeenCalled();
@@ -539,7 +539,7 @@ it('starts the aux terminal on its first showing, never for properties alone', a
     await act(async () => root.render(<TerminalContext id="lazy-source" mode="aux" />));
     expect(open).toHaveBeenCalledWith('lazy-source');
     expect(visible.mock.calls.at(-1)).toEqual(['lazy-source', true]);
-    // Back to properties: the helper stays, but stops polling.
+    // Back to properties: the aux terminal stays, but stops polling.
     await act(async () => root.render(<TerminalContext id="lazy-source" mode="properties" />));
     expect(visible.mock.calls.at(-1)).toEqual(['lazy-source', false]);
   } finally {
@@ -560,14 +560,14 @@ it('position buttons preserve input focus and report the destination', async () 
   expect(down.defaultPrevented).toBe(true);
   await click('Place context at bottom');
   expect(props.placement.onChange).toHaveBeenCalledWith('bottom');
-  expect(button('Use automatic helper placement')).toBeNull();
+  expect(button('Use automatic aux terminal placement')).toBeNull();
   expect(button('Place context at top').getAttribute('aria-pressed')).toBe('true');
   expect(document.activeElement).toBe(input);
 });
 
-it('pauses its helper while its Workspace is out of view, and resumes when it returns', async () => {
-  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'hidden-source' });
-  const visible = vi.spyOn(helpers, 'setHelperVisible');
+it('pauses its aux terminal while its Workspace is out of view, and resumes when it returns', async () => {
+  const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'aux', parentId: 'hidden-source' });
+  const visible = vi.spyOn(auxTerminals, 'setAuxVisible');
   const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" mode="aux" /></WorkspaceActiveContext.Provider>));
   try {
     await show(true);

@@ -28,7 +28,7 @@ export const NOTHING_TO_REOPEN = 'Nothing to reopen';
 export async function reopenClosed({ gesture }: { gesture: boolean }): Promise<ReopenResponse | null> {
   const recordAt = newestReopenClosedAt() ?? 0;
   // Compare the host's windows with each candidate, including after a pending
-  // helper refuses: skipping it must also lower the host's cutoff.
+  // aux terminal refuses: skipping it must also lower the host's cutoff.
   for (const kill of getPendingKills()) {
     if (kill.startedAt < recordAt) break;
     if (await reopenWindowAfter(kill.startedAt)) return { status: 'reopened', kind: 'window' };
@@ -91,7 +91,7 @@ function restoredResponse(kill: PendingKill): ReopenResponse {
   if (kill.kind === 'workspace') {
     return { status: 'reopened', kind: 'workspace', workspaceId: kill.id };
   }
-  // A helper comes back on its parent, the Surface a caller can name.
+  // An aux terminal comes back on its parent, the Surface a caller can name.
   const surfaceId = kill.surfaceId ?? kill.id;
   return { status: 'reopened', kind: 'surface', surfaceId };
 }

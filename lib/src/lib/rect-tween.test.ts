@@ -159,8 +159,8 @@ describe('sampleRingVelocity', () => {
 });
 
 it('morphs union components continuously and returns to a plain ring at close', () => {
-  const helper = { ...A.rect, left: 84 };
-  const joined: RingFrame = { rect: { ...A.rect, width: 184 }, shape: A.shape, union: [A.rect, helper] };
+  const aux = { ...A.rect, left: 84 };
+  const joined: RingFrame = { rect: { ...A.rect, width: 184 }, shape: A.shape, union: [A.rect, aux] };
   const open = startRingTween(A, joined, 0, DUR);
   expect(sampleRingTween(open, 0).rect).toEqual(A.rect);
   const mid = sampleRingTween(open, 30);

@@ -199,7 +199,7 @@ type FailMember = keyof typeof FAILURES;
 
 const failureCases = Object.fromEntries(Object.entries(FAILURES).map(([member, { call, expect }]) => [`fail:${member}`, {
   title: `settles ${member} with its documented failure when the host fails it, never a hang or a silent success`,
-  rule: member === 'terminalContext' ? 'transport.md → Auxiliary helper metadata' : `PlatformAdapter.${member} in types.ts`,
+  rule: member === 'terminalContext' ? 'transport.md → Aux terminal metadata' : `PlatformAdapter.${member} in types.ts`,
   needs: ['failRequests'],
   members: [member as FailMember],
   async observe(h: ContractHarness) {

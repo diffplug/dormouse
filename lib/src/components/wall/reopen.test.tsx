@@ -286,9 +286,9 @@ describe('Reopen', () => {
     expect(_reopenRecordsForTesting()).toHaveLength(1);
   });
 
-  it('answers a restored pending helper with the parent it went back on', async () => {
+  it('answers a restored pending aux terminal with the parent it went back on', async () => {
     await renderTerminalBesideBrowser();
-    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore: () => {}, finalize: () => {} });
+    addPendingKill({ kind: 'aux', id: 'aux-x', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Aux terminal' }, { restore: () => {}, finalize: () => {} });
     try {
       expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'surface', surfaceId: 'surface:a' });
     } finally {
@@ -302,21 +302,21 @@ describe('Reopen', () => {
     await harness.flush();
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); });
     const older = vi.fn(() => true);
-    addPendingKill({ kind: 'helper', id: 'helper-old', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore: older, finalize: () => {} });
+    addPendingKill({ kind: 'aux', id: 'aux-old', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Aux terminal' }, { restore: older, finalize: () => {} });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); });
-    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore: () => false, finalize: () => {} });
+    addPendingKill({ kind: 'aux', id: 'aux-x', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Aux terminal' }, { restore: () => false, finalize: () => {} });
     try {
       expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface', surfaceId: 'surface:a' });
       expect(older).toHaveBeenCalledOnce();
       expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface' });
       expect(await control(WINDOW_CONTROL_METHODS.reopen)).toEqual({ ok: false, error: 'Nothing to reopen' });
-      expect(getPendingKills().map(kill => kill.id)).toEqual(['helper-x']);
+      expect(getPendingKills().map(kill => kill.id)).toEqual(['aux-x']);
     } finally {
       _resetPendingKillsForTesting();
     }
   });
 
-  it.each([false, true])('rechecks closed windows after a pending helper refuses (older local record: %s)', async (withRecord) => {
+  it.each([false, true])('rechecks closed windows after a pending aux terminal refuses (older local record: %s)', async (withRecord) => {
     await renderTerminalBesideBrowser();
     if (withRecord) {
       await control(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
@@ -328,13 +328,13 @@ describe('Reopen', () => {
     Object.assign(fake, { reopenClosedWindow });
     setPlatform(fake);
     const restore = vi.fn(() => false);
-    addPendingKill({ kind: 'helper', id: 'blocked-helper', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Helper' }, { restore, finalize: () => {} });
+    addPendingKill({ kind: 'aux', id: 'blocked-aux', workspaceId: DEFAULT_WORKSPACE_ID, surfaceId: 'surface:a', title: 'shell', label: 'Aux terminal' }, { restore, finalize: () => {} });
     try {
       expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'window' });
       expect(restore).toHaveBeenCalledOnce();
       expect(reopenClosedWindow).toHaveBeenLastCalledWith(withRecord ? 500 : 0);
       expect(_reopenRecordsForTesting()).toHaveLength(withRecord ? 1 : 0);
-      expect(getPendingKills().map(kill => kill.id)).toEqual(['blocked-helper']);
+      expect(getPendingKills().map(kill => kill.id)).toEqual(['blocked-aux']);
     } finally {
       _resetPendingKillsForTesting();
     }

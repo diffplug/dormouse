@@ -16,7 +16,7 @@ A **Surface** is the durable occupant of a Pane — the content in a slot. Three
 
 A **Pane** is one Lath leaf, a slot in the tiling layout (`docs/specs/tiling-engine.md`); `lib/src/components/Wall.tsx` owns Panes and Surfaces both.
 
-A Pane holds one primary Surface today; helpers share its Pane ([Containers](#containers)). The model reserves several primary Surfaces per Pane (a future in-pane surface strip), so **`dor` targets content by Surface id (`surface:N`)**, reserving Pane refs for layout-only commands (rationale).
+A Pane holds one primary Surface today; aux terminals share its Pane ([Containers](#containers)). The model reserves several primary Surfaces per Pane (a future in-pane surface strip), so **`dor` targets content by Surface id (`surface:N`)**, reserving Pane refs for layout-only commands (rationale).
 
 **Surface kinds** — the `kind` a `dor` handle reports, derived from the Pane's params, never stored on the id:
 
@@ -55,11 +55,11 @@ The containment hierarchy `dor` handles commit to (`docs/specs/dor-cli.md`):
 Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 ```
 
-**Surface identity:** minting: `docs/specs/transport.md` → Surface ids; the id `surface:<n>` is the `dor` handle: `docs/specs/dor-cli.md` → Handle Model. A primary Surface's id is its Lath leaf id, and a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); a browser Surface's across render swaps and replacement: I10.
+**Surface identity:** minting: `docs/specs/transport.md` → Surface ids; the id `surface:<n>` is the `dor` handle: `docs/specs/dor-cli.md` → Handle Model. A primary Surface's id is its Lath leaf id, and an aux terminal receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); a browser Surface's across render swaps and replacement: I10.
 
 ## Containers
 
-**Must keep a helper as an auxiliary terminal Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, targetable id, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown helper is `Paned` within the source body; a closed context leaves it `Hidden` and DOM-parked (`Mounted`).
+**Must keep an aux terminal as a Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, targetable id, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown aux terminal is `Paned` within the source body; a closed context leaves it `Hidden` and DOM-parked (`Mounted`).
 
 Workspace and Window are containers, not Session layers — they group Surfaces rather than describing one Surface's state (containment is I7).
 
@@ -146,7 +146,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
 
 | State | Meaning |
 |---|---|
-| `Paned` | Rendered in the content area: a primary Lath leaf or its shown auxiliary helper |
+| `Paned` | Rendered in the content area: a primary Lath leaf or its shown aux terminal |
 | `Zoomed` | Subset of `Paned` — the passthrough-focused pane is maximized; acquiring zoom gives focus, losing focus returns it to `Paned` |
 | `Doored` | Rendered as a door on the baseboard. DOM survival is a rendering decision, not part of this state: browser DOM retention follows **parking** (`docs/specs/tiling-engine.md` → "Parked leaves"); a terminal Surface unmounts its element (Registry: `Orphaned`) and remounts the same xterm on reattach — nothing replays |
 | `Hidden` | In neither Pane nor Door — webview closed or mid-transition. A Surface in a hidden Workspace retains its `Paned` or `Doored` View state; Registry behavior follows `docs/specs/layout.md` → Workspace lifecycle. Process and Activity unaffected. |

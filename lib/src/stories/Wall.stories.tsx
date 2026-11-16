@@ -241,7 +241,7 @@ export const TerminalContextAux: Story = {
     await TerminalContext.play!(context);
     const show = await requireElement<HTMLButtonElement>('[data-terminal-context] button[aria-label="Show aux terminal"]', 'aux terminal switch');
     show.click();
-    await requireElement('[data-helper-terminal] .xterm', 'aux terminal');
+    await requireElement('[data-aux-terminal] .xterm', 'aux terminal');
     await settleTerminals();
   },
 };

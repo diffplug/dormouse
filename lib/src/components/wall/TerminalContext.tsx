@@ -6,7 +6,7 @@ import { MoveWorkspaceAction } from './MoveWorkspaceAction';
 import { TerminalPane } from '../TerminalPane';
 import { TerminalContextView, type ContextScan, type TerminalContextViewProps } from './TerminalContextView';
 import { TerminalContextContext, WallActionsContext, WorkspaceActiveContext, type ContextMode, type TerminalContextState } from './wall-context';
-import { getHelper, helperRevision, openHelper, resetHelper, setHelperVisible, subscribeHelpers } from '../../lib/helper-terminal';
+import { getAux, auxRevision, openAux, resetAux, setAuxVisible, subscribeAuxTerminals } from '../../lib/aux-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import { DEFAULT_WORKSPACE_ID } from '../../lib/session-types';
 import { getPlatform, IS_MAC, IS_WINDOWS } from '../../lib/platform';
@@ -34,57 +34,57 @@ export function TerminalContext({ id, mode: contextMode, title, closing, origin,
   const workspaceActive = useContext(WorkspaceActiveContext);
   const states = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const activities = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
-  useSyncExternalStore(subscribeHelpers, helperRevision);
+  useSyncExternalStore(subscribeAuxTerminals, auxRevision);
   useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const [scan, setScan] = useState<ContextScan>({ status: 'scanning' });
   const [home, setHome] = useState('');
-  const [helperError, setHelperError] = useState('');
+  const [auxError, setAuxError] = useState('');
   const platform = getPlatform();
-  const helper = tool ? undefined : getHelper(id);
+  const aux = tool ? undefined : getAux(id);
   const state = states.get(id) ?? createTerminalPaneState();
   const cwd = state.cwd?.path ? state.cwd : undefined;
-  const helperState = helper ? states.get(helper.id) : undefined;
-  const helperCwd = helperState?.cwd?.path ? helperState.cwd : undefined;
+  const auxState = aux ? states.get(aux.id) : undefined;
+  const auxCwd = auxState?.cwd?.path ? auxState.cwd : undefined;
   // A bare runner rule already covering the running script is the one the row offers.
   const watchRule = getRunningCommandWatchRule(id);
   const offeredRule = watchRule ?? getRunningCommandWatchKey(id);
   const titleSources = useMemo(() => explainTerminalTitle(state), [state]);
   const display = (location: CwdState) => cwdDisplay(location, { style: 'full', homePath: home });
-  const aux = contextMode === 'aux';
-  // The helper starts on its first showing, never for properties alone.
+  const auxMode = contextMode === 'aux';
+  // The aux terminal starts on its first showing, never for properties alone.
   useEffect(() => {
-    if (tool || !aux) return;
+    if (tool || !auxMode) return;
     let cancelled = false;
-    void openHelper(id).catch(e => { if (!cancelled) setHelperError(messageOf(e)); });
+    void openAux(id).catch(e => { if (!cancelled) setAuxError(messageOf(e)); });
     return () => { cancelled = true; };
-  }, [id, tool, aux]);
+  }, [id, tool, auxMode]);
   useEffect(() => {
     let cancelled = false;
     void platform.terminalContext?.({ op: 'home' }).then(info => { if (!cancelled) setHome(info.home ?? ''); }).catch(() => {});
     void platform.getOpenPorts(id).then(ports => { if (!cancelled) setScan({ status: 'loaded', entries: listenerUrlsByPort(ports) }); }, () => { if (!cancelled) setScan({ status: 'failed' }); });
     return () => { cancelled = true; };
   }, [id, platform]);
-  // The helper polls only while the context shows it: an exit or a switch to
+  // The aux terminal polls only while the context shows it: an exit or a switch to
   // properties pauses it at once, and so does its Workspace going out of view,
   // which leaves the context open.
   useEffect(() => {
-    if (closing || tool || !aux || !workspaceActive) return;
-    setHelperVisible(id, true);
-    return () => setHelperVisible(id, false);
-  }, [id, closing, tool, aux, workspaceActive]);
+    if (closing || tool || !auxMode || !workspaceActive) return;
+    setAuxVisible(id, true);
+    return () => setAuxVisible(id, false);
+  }, [id, closing, tool, auxMode, workspaceActive]);
   // No focus call: a passthrough source regains xterm focus through its own
   // `isFocused` once the context lets go, and in command mode the Session
   // must not hold focus, or unbound keys would reach its PTY.
   const onClose = context.close;
   const copy = async (value: string) => { if (!await writeTextToClipboard(value)) throw new Error('Could not copy to clipboard'); };
-  const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
+  const mismatch = !!aux && !!cwd && !!auxCwd && (cwd.path !== auxCwd.path || cwd.isRemote !== auxCwd.isRemote || (cwd.isRemote && cwd.host !== auxCwd.host));
   const source = wallHandleOwning(id);
-  const warning = openWarning ?? (helperError || (helper && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
-  return <TerminalContextView placement={placement} mode={contextMode} onModeChange={context.setMode} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} surfaceId={id}
+  const warning = openWarning ?? (auxError || (aux && (!cwd || !auxCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
+  return <TerminalContextView placement={placement} mode={contextMode} onModeChange={context.setMode} terminalRole={tool ? 'tool' : 'aux'} closing={closing} origin={origin} surfaceId={id}
     navigation={tool ? <ToolNavigationButtons id={id} params={params} /> : undefined}
-    workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
+    workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} auxCwd={auxCwd && display(auxCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
-    runningCommand={tool && state.currentCommand ? state.currentCommand.rawCommandLine ?? '' : undefined} exited={!!helper && registry.get(helper.id)?.exited} warning={warning}
+    runningCommand={tool && state.currentCommand ? state.currentCommand.rawCommandLine ?? '' : undefined} exited={!!aux && registry.get(aux.id)?.exited} warning={warning}
     explorerLabel={IS_MAC ? 'Reveal in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && canOpenDirectory(cwd, IS_WINDOWS)}
     browserProviders={hostBrowserProviders()} canIframe={!!platform.createIframeProxyUrl}
     onClose={onClose} onCopyId={() => copy(id)} onCopyPath={() => copy(cwd?.path ?? '')}
@@ -92,10 +92,10 @@ export function TerminalContext({ id, mode: contextMode, title, closing, origin,
     onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
     resetAsks={!isDelayedKillEnabled()}
-    onReset={async () => { await resetHelper(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, title ?? id) }); await openHelper(id); }} onPromote={() => context.promote(id)}
+    onReset={async () => { await resetAux(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, title ?? id) }); await openAux(id); }} onPromote={() => context.promote(id)}
     onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>
     {/* The Tool's xterm itself: `focusSession` would reach its browser Surface's focus handle. */}
     {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
-    {helper && <div data-helper-terminal={helper.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(helper.id, true)}><TerminalPane key={helper.id} id={helper.id} isFocused={false} /></div>}
+    {aux && <div data-aux-terminal={aux.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(aux.id, true)}><TerminalPane key={aux.id} id={aux.id} isFocused={false} /></div>}
   </TerminalContextView>;
 }

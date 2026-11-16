@@ -14,7 +14,7 @@ import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import { isMacSelectAll } from './select-all';
 import { parseOnArrival } from './parse-on-arrival';
 import type { PtyDataHandler } from './platform/types';
-import type { HelperIdentity } from './terminal-context-types';
+import type { AuxIdentity } from './terminal-context-types';
 import type { PersistedAlertState } from './session-types';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
@@ -332,7 +332,7 @@ function wireXtermHandlers(
   };
 }
 
-interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid }
+interface TerminalEntryOptions { shell?: string; untouched?: boolean; aux?: AuxIdentity; grid?: TerminalGrid }
 
 function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
   const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
@@ -361,7 +361,7 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
   };
 
   const entry: TerminalEntry = {
-    helper: options.helper,
+    aux: options.aux,
     shellKind: shellCommandKind(options.shell, PLATFORM_STRING),
     terminal,
     fit,
@@ -466,7 +466,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   const shellOpts = pendingShellOpts.get(id);
   pendingShellOpts.delete(id);
   const entry = setupTerminalEntry(id, {
-    helper: shellOpts?.helper,
+    aux: shellOpts?.aux,
     shell: shellOpts?.shell,
     untouched: shellOpts?.untouched ?? true,
   });
@@ -480,7 +480,7 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     shell: shellOpts?.shell,
     args: shellOpts?.args,
     cwd: shellOpts?.cwd,
-    helper: shellOpts?.helper,
+    aux: shellOpts?.aux,
   });
   if (shellOpts?.command) {
     seedLaunchedCommand(id, shellOpts.command, shellOpts.cwd);
@@ -504,7 +504,7 @@ export function resumeTerminal(
 
   const entry = setupTerminalEntry(id, {
     grid: exitInfo?.grid,
-    helper: exitInfo?.helper,
+    aux: exitInfo?.aux,
     shell: exitInfo?.shell,
     untouched: exitInfo?.untouched ?? false,
   });
@@ -699,33 +699,33 @@ export function flushTerminal(id: string): Promise<void> {
   return new Promise<void>((resolve) => entry.terminal.write('', resolve));
 }
 
-/** Where a hidden helper's xterm element waits between reveals: still in the
+/** Where a hidden aux terminal's xterm element waits between reveals: still in the
  *  document, preserving its DOM state and scrollback. */
-let helperParking: HTMLElement | null = null;
+let auxParking: HTMLElement | null = null;
 
-/** Park a helper Session's element out of sight without terminating anything;
+/** Park an aux terminal Session's element out of sight without terminating anything;
  *  the next `mountElement` reveals the same element. */
 export function parkElement(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
   entry.webglRenderer?.unmount();
   // Revalidated, not just cached: a host that replaces the body (a docs iframe,
-  // a test teardown) would otherwise park every helper in a detached subtree.
-  if (!helperParking?.isConnected) {
-    helperParking = document.createElement('div');
-    helperParking.hidden = true;
-    document.body.appendChild(helperParking);
+  // a test teardown) would otherwise park every aux terminal in a detached subtree.
+  if (!auxParking?.isConnected) {
+    auxParking = document.createElement('div');
+    auxParking.hidden = true;
+    document.body.appendChild(auxParking);
   }
-  helperParking.appendChild(entry.element);
+  auxParking.appendChild(entry.element);
 }
 
 /** Detach a Session's element from its pane. With `container`, only when it is
  *  still mounted there: cleanup from an older mount cannot detach a newer one.
- *  A helper's element is parked rather than removed. */
+ *  An aux terminal's element is parked rather than removed. */
 export function unmountElement(id: string, container?: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry || (container && entry.element.parentElement !== container)) return;
-  if (entry.helper) parkElement(id);
+  if (entry.aux) parkElement(id);
   else {
     entry.webglRenderer?.unmount();
     entry.element.remove();

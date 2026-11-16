@@ -67,65 +67,65 @@ describe('dor control routing', () => {
     expect(resolveDorControlRoute(request({ surfaceId: 'pane-a' }))).toEqual({ kind: 'handle', handle: owner });
   });
 
-  it('passes the actual helper id to app restart', async () => {
+  it('passes the actual aux terminal id to app restart', async () => {
     const previous = getPlatformOrNull();
     const restart = vi.fn(async () => true);
     setPlatform({ requestAppRestart: restart } as unknown as PlatformAdapter);
     try {
-      const detail = dispatch(request({ method: 'app.restart', surfaceId: 'helper', helperParentId: 'parent' }));
+      const detail = dispatch(request({ method: 'app.restart', surfaceId: 'aux', auxParentId: 'parent' }));
       await Promise.resolve();
-      expect(restart).toHaveBeenCalledExactlyOnceWith('helper');
+      expect(restart).toHaveBeenCalledExactlyOnceWith('aux');
       expect(detail.respond).toHaveBeenCalledWith({ ok: true, result: { relaunch: true } });
     } finally { setPlatform(previous!); }
   });
 
-  it('routes helper callers through their source, lending only its placement', () => {
+  it('routes aux terminal callers through their source, lending only its placement', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     const owner = handleFor(first, ['parent']);
     handleFor(createWorkspace({ id: 'other' }).id, ['other-pane']);
-    const detail = request({ surfaceId: 'helper', helperParentId: 'parent' });
+    const detail = request({ surfaceId: 'aux', auxParentId: 'parent' });
     expect(resolveDorControlRoute(detail)).toEqual({ kind: 'handle', handle: owner });
     dispatch(detail);
     expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
-      surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
+      surfaceId: undefined, auxParentId: 'parent', placementSurfaceId: 'parent',
     }));
   });
 
-  it('keeps helper origin, without a placement, when explicitly routed to another Workspace', () => {
+  it('keeps aux terminal origin, without a placement, when explicitly routed to another Workspace', () => {
     const target = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['destination']);
-    const detail = dispatch(request({ surfaceId: 'foreign-helper', helperParentId: 'foreign-parent',
+    const detail = dispatch(request({ surfaceId: 'foreign-aux', auxParentId: 'foreign-parent',
       params: { workspace: 'workspace:1' } }));
     expect(target.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
-      surfaceId: undefined, helperParentId: 'foreign-parent', placementSurfaceId: undefined,
+      surfaceId: undefined, auxParentId: 'foreign-parent', placementSurfaceId: undefined,
     }));
     const self = dispatch(request({ ...detail, method: 'surface.kill', params: { workspace: 'workspace:1', surface: 'surface:self' } }));
     expect(self.respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
     expect(target.handleDorControl).toHaveBeenCalledTimes(1);
   });
 
-  it('waits for a helper source to register, then refuses rather than using the active Workspace', async () => {
+  it("waits for an aux terminal's source to register, then refuses rather than using the active Workspace", async () => {
     vi.useFakeTimers();
     try {
       const unrelated = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['unrelated']);
-      const late = dispatch(request({ surfaceId: 'helper', helperParentId: 'late' }));
+      const late = dispatch(request({ surfaceId: 'aux', auxParentId: 'late' }));
       const owner = handleFor(createWorkspace({ id: 'workspace:late', activate: false }).id, ['late']);
       await vi.advanceTimersByTimeAsync(0);
       expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
-      const gone = dispatch(request({ surfaceId: 'helper', helperParentId: 'gone' }));
+      const gone = dispatch(request({ surfaceId: 'aux', auxParentId: 'gone' }));
       await vi.advanceTimersByTimeAsync(10);
-      expect(gone.respond).toHaveBeenCalledWith({ ok: false, error: 'The helper source Surface is no longer available' });
+      expect(gone.respond).toHaveBeenCalledWith({ ok: false, error: "The aux terminal's source Surface is no longer available" });
       expect(late.respond).not.toHaveBeenCalled();
       expect(unrelated.handleDorControl).not.toHaveBeenCalled();
     } finally { vi.useRealTimers(); }
   });
 
-  it('captures in-process helper identity from the registry without aliasing self', () => {
+  it('captures in-process aux terminal identity from the registry without aliasing self', () => {
     const owner = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['parent']);
-    registry.set('surface:9', { helper: { parentId: 'parent' } } as TerminalEntry);
+    registry.set('surface:9', { aux: { parentId: 'parent' } } as TerminalEntry);
     try {
       dispatch(request({ surfaceId: 'surface:9' }));
       expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
-        surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
+        surfaceId: undefined, auxParentId: 'parent', placementSurfaceId: 'parent',
       }));
       for (const surface of ['surface:9', 'surface:self']) {
         const detail = dispatch(request({ surfaceId: 'surface:9', params: { surface } }));
@@ -135,15 +135,15 @@ describe('dor control routing', () => {
     } finally { registry.delete('surface:9'); }
   });
 
-  it('refuses a request a pending helper makes, though it names its open parent', () => {
+  it('refuses a request a pending aux terminal makes, though it names its open parent', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     handleFor(first, ['pane-a']);
     addPendingKill(
-      { kind: 'helper', id: 'helper-1', workspaceId: first, surfaceId: 'pane-a', title: 'helper', label: 'Helper' },
+      { kind: 'aux', id: 'aux-1', workspaceId: first, surfaceId: 'pane-a', title: 'aux', label: 'Aux terminal' },
       { restore: () => true, finalize: () => {} },
     );
-    expect(resolveDorControlRoute(request({ method: 'surface.split', surfaceId: 'helper-1', helperParentId: 'pane-a' } as Partial<DorControlRequest>)))
-      .toEqual({ kind: 'error', message: "surface 'helper-1' is a pending kill" });
+    expect(resolveDorControlRoute(request({ method: 'surface.split', surfaceId: 'aux-1', auxParentId: 'pane-a' } as Partial<DorControlRequest>)))
+      .toEqual({ kind: 'error', message: "surface 'aux-1' is a pending kill" });
   });
 
   it('falls back to the active Workspace for an unknown caller', () => {

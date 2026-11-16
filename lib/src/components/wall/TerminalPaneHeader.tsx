@@ -1,4 +1,4 @@
-import { isHelperSession } from '../../lib/terminal-store';
+import { isAuxSession } from '../../lib/terminal-store';
 import { useContext, useMemo, useRef, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import {
@@ -82,7 +82,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const actions = useContext(WallActionsContext);
   const activity = activityStates.get(id) ?? DEFAULT_ACTIVITY_STATE;
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
-  const allPaneStates = useMemo(() => [...terminalStates].filter(([surfaceId]) => !isHelperSession(surfaceId)).map(([, state]) => state), [terminalStates]);
+  const allPaneStates = useMemo(() => [...terminalStates].filter(([surfaceId]) => !isAuxSession(surfaceId)).map(([, state]) => state), [terminalStates]);
   const visiblePaneStates = allPaneStates.length > 0 ? allPaneStates : [paneState];
   const derivedHeader = deriveHeader(paneState, visiblePaneStates);
   const displayTitle = resolveDisplayPrimary(derivedHeader.primary, title);

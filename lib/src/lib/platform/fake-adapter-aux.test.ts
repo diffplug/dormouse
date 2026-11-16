@@ -5,17 +5,17 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { FakePtyAdapter } from './fake-adapter';
 import { removeTerminalPaneState } from '../terminal-state-store';
 
-const ID = 'helper-reflow';
+const ID = 'aux-reflow';
 afterEach(() => { vi.restoreAllMocks(); removeTerminalPaneState(ID); });
 
-it('preserves one command echo when the helper resizes between PTY chunks', async () => {
+it('preserves one command echo when the aux terminal resizes between PTY chunks', async () => {
   const adapter = new FakePtyAdapter();
   const terminal = new Terminal({ cols: 33, rows: 7, allowProposedApi: true });
   terminal.loadAddon(new UnicodeGraphemesAddon());
   adapter.onPtyData(({ data }) => terminal.write(data));
   const drain = () => new Promise<void>(resolve => terminal.write('', resolve));
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
+    adapter.spawnPty(ID, { aux: { parentId: 'source' } });
     await Promise.resolve();
     await drain();
     // Make xterm yield after ten small writes: the echo, before its CRLF.
@@ -39,24 +39,24 @@ it('preserves one command echo when the helper resizes between PTY chunks', asyn
   } finally { terminal.dispose(); adapter.reset(); }
 });
 
-it.each([false, true])('keeps both narrow helper prompts when startup waits for fit (yield before fit: %s)', async (yieldBeforeFit) => {
+it.each([false, true])('keeps both narrow aux terminal prompts when startup waits for fit (yield before fit: %s)', async (yieldBeforeFit) => {
   const adapter = new FakePtyAdapter();
-  adapter.deferHelperStartup = true;
+  adapter.deferAuxStartup = true;
   const terminal = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const output = vi.fn(({ data }: { data: string }) => terminal.write(data));
   adapter.onPtyData(output);
   const drain = () => new Promise<void>(resolve => terminal.write('', resolve));
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
+    adapter.spawnPty(ID, { aux: { parentId: 'source' } });
     if (yieldBeforeFit) await drain();
     expect(output).not.toHaveBeenCalled();
     terminal.resize(26, 5);
     adapter.resizePty(ID, 26, 5);
     // A size notification alone does not release output before the story is ready.
     expect(output).not.toHaveBeenCalled();
-    adapter.resumeHelperStartup(ID);
-    adapter.resumeHelperStartup(ID);
+    adapter.resumeAuxStartup(ID);
+    adapter.resumeAuxStartup(ID);
     await drain();
     adapter.writePty(ID, 'git status\r');
     await drain();
@@ -76,35 +76,35 @@ it.each([false, true])('keeps both narrow helper prompts when startup waits for 
   } finally { terminal.dispose(); adapter.reset(); }
 });
 
-it.each(['kill', 'reset'] as const)('discards a deferred helper prompt on %s', async (action) => {
+it.each(['kill', 'reset'] as const)('discards a deferred aux terminal prompt on %s', async (action) => {
   const adapter = new FakePtyAdapter();
-  adapter.deferHelperStartup = true;
+  adapter.deferAuxStartup = true;
   const output = vi.fn();
   adapter.onPtyData(output);
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
+    adapter.spawnPty(ID, { aux: { parentId: 'source' } });
     if (action === 'kill') adapter.killPty(ID);
     else { adapter.reset(); adapter.onPtyData(output); }
-    // Reusing the id must not let the old helper write into the new terminal.
+    // Reusing the id must not let the old aux terminal write into the new terminal.
     adapter.spawnPty(ID);
-    adapter.resumeHelperStartup(ID);
+    adapter.resumeAuxStartup(ID);
     await Promise.resolve();
     expect(output).not.toHaveBeenCalled();
   } finally { adapter.reset(); }
 });
 
-it('does not let a queued prompt release a replacement helper early', async () => {
+it('does not let a queued prompt release a replacement aux terminal early', async () => {
   const adapter = new FakePtyAdapter();
   const output = vi.fn();
   adapter.onPtyData(output);
   try {
-    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
+    adapter.spawnPty(ID, { aux: { parentId: 'source' } });
     adapter.killPty(ID);
-    adapter.deferHelperStartup = true;
-    adapter.spawnPty(ID, { helper: { parentId: 'source' } });
+    adapter.deferAuxStartup = true;
+    adapter.spawnPty(ID, { aux: { parentId: 'source' } });
     await Promise.resolve();
     expect(output).not.toHaveBeenCalled();
-    adapter.resumeHelperStartup(ID);
+    adapter.resumeAuxStartup(ID);
     expect(output).toHaveBeenCalledTimes(1);
   } finally { adapter.reset(); }
 });

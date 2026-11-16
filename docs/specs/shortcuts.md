@@ -30,7 +30,7 @@ Modifier handling: [layout.md](layout.md#keyboard-shortcuts-command-mode).
 | `a` | Alert | Dismiss the ring if any, then open the terminal context's properties. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
 | `?` | Terminal context properties | Terminal panes only; consumed no-op on browser panes, inert on doors. |
-| `!` | Terminal context terminal | The helper, or a Tool's primary terminal. Terminal panes only; consumed no-op on browser panes, inert on doors. |
+| `!` | Terminal context terminal | The aux terminal, or a Tool's primary terminal. Terminal panes only; consumed no-op on browser panes, inert on doors. |
 
 ## Workspaces (command mode)
 
@@ -84,14 +84,14 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 |-----|--------|-------------|
 | `Esc` | Close / cancel | Dismiss a dialog or popover; cancel a rename or kill confirmation; abort an in-progress sash or pane drag. |
 | `Enter` | Confirm rename | Save the new name while renaming a pane; blur commits too. |
-| `Tab` / `Shift+Tab` | Focus cycle | Cycle popover/dialog controls. In terminal context, navigate controls into the helper; once helper xterm has focus, Tab belongs to its program. |
+| `Tab` / `Shift+Tab` | Focus cycle | Cycle popover/dialog controls. In terminal context, navigate controls into the aux terminal; once the aux terminal's xterm has focus, Tab belongs to its program. |
 | `Shift+F10` / `ContextMenu` | Workspace alert settings | On a focused baseboard alarm button (`docs/specs/alert.md` → Settings dialog). |
 | `Shift+F10` / `ContextMenu` | Workspace tab menu | On a focused Workspace tab. |
 | `↑` / `↓`, `Home` / `End` | Move in a menu | Tab menu rows; `Enter` chooses. |
 | Prompted letter (unmodified, Shift optional) | Confirm kill | Type the letter shown; prompt routing: [layout.md](layout.md#kill-confirmation). |
 | `Enter` / `Esc` (stray-key prompt) | Type / stay | Raised by a key no command-mode binding claims ([layout.md](layout.md#keyboard-shortcuts-command-mode)). |
 | `Space` (command) | Activate control | On a focused button or switch; never a stray. |
-| `⌘C` / `Ctrl+C` (terminal context) | Copy diagnostic | Copies selected diagnostic text, never the helper's. |
+| `⌘C` / `Ctrl+C` (terminal context) | Copy diagnostic | Copies selected diagnostic text, never the aux terminal's. |
 | `⌘A` (macOS) | — | Cancelled outside text fields, both modes (`docs/specs/mouse-and-clipboard.md` → "3.9 Select All"). |
 
 ## VS Code host
