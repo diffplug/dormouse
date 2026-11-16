@@ -2481,7 +2481,7 @@ fn write_file_with_permissions(
     // Atomic replace: write a sibling temp file, fsync it, then rename over the
     // target so a crash mid-write can never truncate the previous good copy.
     // Every failure below takes the temp file with it, so only a crash — never a
-    // returned error — can leave one behind for the boot sweep to find.
+    // returned error — can leave one behind.
     let written = (|| -> Result<(), String> {
         let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
         // Before any bytes land: the rename below preserves the temp file's
@@ -2539,65 +2539,6 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
     let dir = sessions_dir(window.app_handle())?;
     write_session_to(&dir, window.label(), &state)?;
     retire_saved_arrivals(&dir)
-}
-
-/// The suffix `write_file_atomically` leaves on a session snapshot's temp
-/// sibling. Pinned against the real writer by
-/// `session_temp_suffix_matches_what_the_writer_leaves`, so changing the
-/// convention cannot leave the sweep below looking for a name nothing makes.
-const SESSION_TEMP_SUFFIX: &str = ".json.tmp";
-
-/// Delete every orphaned temp write in the sessions directory, at boot.
-///
-/// The writer removes its own temp on every error path, so what remains here is
-/// a hard crash's: a kill between the temp write and the rename leaves a file
-/// `load_session` cannot see and nothing else will ever overwrite, and one an
-/// older build left may carry a transcript. Deleting is the point: those bytes
-/// have to leave the disk (docs/specs/transport.md -> "Retiring the transcripts
-/// already on disk"). Never touches a snapshot: `discard_other_formats` deletes
-/// one of another format, and the window that owns a current one rewrites it.
-fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
-    let suffix = SESSION_TEMP_SUFFIX;
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        // No sessions directory yet (a first launch) is the desired end state.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(format!("read sessions dir {}: {e}", dir.display())),
-    };
-    let mut first_error = None;
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if !name.ends_with(suffix) {
-            continue;
-        }
-        match std::fs::remove_file(entry.path()) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) if first_error.is_none() => {
-                first_error = Some(format!(
-                    "remove orphaned session temp {}: {e}",
-                    entry.path().display()
-                ));
-            }
-            Err(_) => {}
-        }
-    }
-    first_error.map_or(Ok(()), Err)
-}
-
-/// Sweeps orphaned temps in each root; `discard_other_formats` and each window
-/// own the active root's snapshots. Only debug builds have an abandoned root;
-/// never delete its layouts.
-fn sweep_session_roots(app_data: &Path) -> Vec<String> {
-    let root = state_root_from(app_data.to_path_buf());
-    let mut errors = Vec::new();
-    if let Err(e) = sweep_orphan_session_temps(&root.join("sessions")) { errors.push(e); }
-    if root != app_data {
-        let legacy = app_data.join("sessions");
-        if let Err(e) = sweep_orphan_session_temps(&legacy) { errors.push(e); }
-    }
-    errors
 }
 
 /// Delete everything a window leaves on disk: its snapshot, any temp write, and
@@ -5085,18 +5026,6 @@ pub fn run() {
             start_ui_watchdog(app.handle());
             start_console_parent_recovery(app.handle());
 
-            // A crash between a snapshot's temp write and its rename leaves a
-            // file nothing will ever read or overwrite; one written before
-            // Dormouse stopped storing transcripts carries one
-            // (docs/specs/standalone.md §Persistence). Never fatal.
-            match dormouse_data_dir(app.handle()) {
-                Ok(dir) => {
-                    for e in sweep_session_roots(&dir) {
-                        append_log(format!("[session] {e}"));
-                    }
-                }
-                Err(e) => append_log(format!("[session] {e}")),
-            }
             // A pasted image outlives a quit inside its cleanup timer.
             std::thread::spawn(|| {
                 clipboard_read::sweep_stale_drops(&env::temp_dir(), SystemTime::now());
@@ -5269,9 +5198,9 @@ mod tests {
         read_session_from, record_arrival_on_disk, record_workspace_id,
         resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
         session_file_names, state_root_from, strip_windows_verbatim_prefix,
-        sweep_orphan_session_temps, temp_write_path,
+        temp_write_path,
         write_session_to, JsonValue, OPEN_PORT_TIMEOUT_MS,
-        OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
+        OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS,
         SESSION_VERSION, WINDOWS_STATE_DIR, WINDOW_VERSION,
     };
     use super::routing;
@@ -6721,7 +6650,7 @@ mod tests {
                 Some("previous")
             );
             // The writer cleans up after itself, so a returned error never
-            // leaves the boot sweep anything to find.
+            // leaves a temp behind.
             assert!(!dir.path().join("main.json.tmp").exists());
         }
     }
@@ -7256,58 +7185,6 @@ mod tests {
         assert!(lifted());
     }
 
-    #[test]
-    fn sweep_orphan_session_temps_removes_only_temps() {
-        let dir = TempDir::new("sessions-sweep");
-        write_session_to(dir.path(), "main", r#"{"v":1,"who":"main"}"#).unwrap();
-        write_session_to(dir.path(), "win-2", r#"{"v":1,"who":"win-2"}"#).unwrap();
-        // What a crash between the temp write and the rename leaves behind. A
-        // pre-persistence one carries a transcript, and the point of the sweep is
-        // that those bytes leave the disk.
-        fs::write(dir.path().join("main.json.tmp"), b"legacy transcript").unwrap();
-        fs::write(dir.path().join("win-2.json.tmp"), b"legacy transcript").unwrap();
-        // Not ours: a sibling store's file must survive untouched.
-        fs::write(dir.path().join("notes.txt"), b"keep me").unwrap();
-
-        sweep_orphan_session_temps(dir.path()).unwrap();
-
-        assert!(!dir.path().join("main.json.tmp").exists());
-        assert!(!dir.path().join("win-2.json.tmp").exists());
-        // Every live snapshot is left exactly as it was — the window that owns
-        // one rewrites it itself.
-        assert_eq!(
-            read_session_from(dir.path(), "main").unwrap().as_deref(),
-            Some(r#"{"v":1,"who":"main"}"#),
-        );
-        assert_eq!(
-            read_session_from(dir.path(), "win-2").unwrap().as_deref(),
-            Some(r#"{"v":1,"who":"win-2"}"#),
-        );
-        assert!(dir.path().join("notes.txt").exists());
-    }
-
-    #[test]
-    fn sweeping_an_absent_sessions_directory_succeeds() {
-        // A first launch has no sessions directory yet; that is the desired end
-        // state, not an error.
-        let dir = TempDir::new("sessions-sweep-missing");
-        assert!(sweep_orphan_session_temps(&dir.path().join("nope")).is_ok());
-    }
-
-    /// The sweep's constant against the name the writer actually leaves, so the
-    /// two can never drift.
-    #[test]
-    fn session_temp_suffix_matches_what_the_writer_leaves() {
-        assert_eq!(
-            temp_write_path(Path::new(&session_file_name("main")))
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            format!("main{SESSION_TEMP_SUFFIX}"),
-        );
-    }
-
     /// On Windows the state is one folder inside the local app-data directory,
     /// which never holds the `EBWebView` profile WebView2 keeps beside it, so
     /// the owner-only lock cannot reach it; elsewhere it is that directory.
@@ -7331,22 +7208,6 @@ mod tests {
         } else {
             assert_eq!(root, app_data);
         }
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    fn debug_sweep_clears_temps_in_both_roots_and_leaves_snapshots() {
-        let dir = TempDir::new("legacy-root-temps");
-        let legacy = dir.path().join("sessions");
-        let active = state_root_from(dir.path().to_path_buf()).join("sessions");
-        write_session_to(&legacy, "main", "old layout").unwrap();
-        fs::create_dir_all(&active).unwrap();
-        fs::write(legacy.join("main.json.tmp"), "secret").unwrap();
-        fs::write(active.join("main.json.tmp"), "secret").unwrap();
-        assert!(super::sweep_session_roots(dir.path()).is_empty());
-        assert_eq!(read_session_from(&legacy, "main").unwrap().as_deref(), Some("old layout"));
-        assert!(!legacy.join("main.json.tmp").exists());
-        assert!(!active.join("main.json.tmp").exists());
     }
 
     #[test]

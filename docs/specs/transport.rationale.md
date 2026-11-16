@@ -127,7 +127,7 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 **The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store.
 
-**Why standalone stopped deleting every snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration; the boot delete that remains takes only another format's. What the unconditional delete uniquely covered — a `.json.tmp` no reader can see and no writer will ever overwrite — is exactly what the sweep still covers. Older debug snapshots sit outside the new subtree, and deleting them would remove layouts that may belong to an installed build, so debug startup sweeps only their orphaned temps. It once also stripped pane scrollback from them; that scrub was deleted 2026-11, since no current build reads those formats.
+**Why standalone stopped deleting every snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration; the boot delete that remains takes only another format's, with its temp. A crash-orphaned `.json.tmp` beside a current snapshot, which a transcript-era build could leave holding scrollback, was swept at boot until 2026-11, when any machine launched since held none. A current temp holds owner-only layout, a window box, or the arrivals journal, and one whose label never saves again now lingers (decided 2026-11).
 
 ## The governing rule
 
