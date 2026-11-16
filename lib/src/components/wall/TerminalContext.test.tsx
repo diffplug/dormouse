@@ -517,7 +517,8 @@ it('shows properties alone, then the terminal alone, each offering the other', a
   expect(container.querySelector('textarea')).toBeNull();
   expect(button('Reset aux terminal')).toBeNull();
   await click('Show aux terminal');
-  expect(props.onModeChange).toHaveBeenCalledWith('aux');
+  // Into the terminal is into its keyboard.
+  expect(props.onModeChange).toHaveBeenCalledWith('aux', true);
   // The switch leaves with its view; focus stays in the context for Escape and Tab.
   expect(document.activeElement?.hasAttribute('data-terminal-context')).toBe(true);
   props.mode = 'aux';
@@ -559,6 +560,42 @@ it('focuses the terminal once it shows when the opening asks, and the controls o
     await act(async () => root.render(<></>));
     open.mockRestore(); get.mockRestore(); focus.mockRestore();
   }
+});
+
+it('labels and answers the properties\' keys only when asked', async () => {
+  props.placement = { side: 'top', available: ['top', 'bottom'], onChange: vi.fn() };
+  const press = (key: string) => act(() => container.querySelector('[data-terminal-context]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+  render();
+  expect(container.textContent).not.toContain('[i]');
+  press('t');
+  expect(props.onTodo).not.toHaveBeenCalled();
+  props.shortcuts = true;
+  render();
+  // Every control names its key.
+  for (const [label, key] of [['Copy surface:3', 'i'], ['Explain this title', 'd'], ['Copy absolute path', 'c'], ['Reveal in Finder', 'r'], ['Open in system browser', '1'], ['Show aux terminal', '!'], ['Place context at bottom', '↓'], ['Close terminal context', 'esc']] as const) {
+    expect(button(label).textContent, label).toContain(`[${key}]`);
+  }
+  expect(container.querySelector('[data-context-alerts]')!.textContent).toContain('TODO[t]');
+  press('t');
+  expect(props.onTodo).toHaveBeenCalledOnce();
+  press('w');
+  expect(props.onWatch).toHaveBeenCalledOnce();
+  press('ArrowDown');
+  expect(props.placement.onChange).toHaveBeenCalledWith('bottom');
+  await act(async () => press('1'));
+  expect(props.onPort).toHaveBeenCalledWith(port(5173), 'system');
+  press('d');
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  // A disclosure keeps the keys from the controls under it.
+  press('t');
+  expect(props.onTodo).toHaveBeenCalledOnce();
+  press('Escape');
+  press('!');
+  expect(props.onModeChange).toHaveBeenCalledWith('aux', true);
+  // The terminal mode has no keys of its own.
+  props.mode = 'aux';
+  render();
+  expect(container.textContent).not.toContain('[');
 });
 
 it('starts the aux terminal on its first showing, never for properties alone', async () => {

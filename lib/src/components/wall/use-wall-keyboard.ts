@@ -69,6 +69,12 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       const leader = dualTap(taps, e);
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
+        // The mode-exit gesture leaves a context terminal for the context's controls, in command mode.
+        if (leader && (e.key === 'Meta' || e.key === 'Shift') && c.modeRef.current === 'passthrough') {
+          c.enterCommandMode();
+          (context as HTMLElement).focus({ preventScroll: true });
+          return;
+        }
         if (handleContextCopy(e)) return;
         if (handleEditableClipboard(e)) return;
         const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-aux-terminal], [data-context-terminal]');

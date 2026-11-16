@@ -194,13 +194,18 @@ export interface TerminalContextOpenOptions {
   mode?: ContextMode;
   /** Focus the terminal, once it shows, rather than the context's controls. */
   focusTerminal?: boolean;
+  /** Opened from a command-mode key: the properties label and answer their keys while in command mode. */
+  keyboard?: boolean;
   /** Viewport coordinates the reveal grows from. */
   origin?: { x: number; y: number };
 }
 
-/** One opening of the terminal context; `closing` while its exit plays. */
-/** The mode is held apart, so switching it never makes this a new opening. */
-export type TerminalContextState = { id: string; closing?: boolean } & Omit<TerminalContextOpenOptions, 'mode'>;
+/** One opening of the terminal context; `closing` while its exit plays. What it shows is
+ *  held apart (`ContextView`), so switching never makes a new opening. */
+export type TerminalContextState = { id: string; closing?: boolean } & Omit<TerminalContextOpenOptions, keyof ContextView>;
+
+/** What the context shows, and whether the terminal should take the keyboard once it shows. */
+export type ContextView = { mode: ContextMode; focusTerminal?: boolean };
 
 /** Whether the context mounted for `id` shows its terminal, which then belongs to it. */
 export const contextShowsTerminal = (context: { mounted: TerminalContextState | null; mode: ContextMode }, id: string) =>
@@ -213,8 +218,10 @@ export const TerminalContextContext = createContext<{
   mounted: TerminalContextState | null;
   /** What the mounted context shows; an opening sets it, and the context's own switch changes it. */
   mode: ContextMode;
-  setMode(mode: ContextMode): void;
-  open(id: string, options?: TerminalContextOpenOptions): void; close(): void;
+  focusTerminal?: boolean;
+  setMode(mode: ContextMode, focusTerminal?: boolean): void;
+  /** Whether the context opened: pending Tools, aux terminals, and closing Surfaces have none. */
+  open(id: string, options?: TerminalContextOpenOptions): boolean; close(): void;
   promote(id: string): Promise<void>;
   openPort(id: string, entry: PortUrlEntry, mode: PortMode): Promise<void>;
-}>({ id: null, mounted: null, mode: 'properties', setMode: () => {}, open: () => {}, close: () => {}, promote: async () => {}, openPort: async () => {} });
+}>({ id: null, mounted: null, mode: 'properties', setMode: () => {}, open: () => false, close: () => {}, promote: async () => {}, openPort: async () => {} });

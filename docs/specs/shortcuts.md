@@ -78,6 +78,25 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `⌘` (macOS) / `Ctrl` (others) + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. On macOS, `Ctrl` + these keys goes to the page. |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
+## Terminal context properties
+
+Live and labeled only when a command key opened the context, while in command mode; a focused list or field keeps its keys.
+
+| Key | Action |
+|-----|--------|
+| `i` / `c` | Copy the Surface id / the directory |
+| `d` | Explain the title |
+| `m` | Move to workspace |
+| `r` | Reveal the directory |
+| `p` | Choose a port |
+| `1`–`5` | Port launch actions in row order, overflow included |
+| `w` / `t` | Toggle Watch / TODO |
+| `!` | Show and focus the terminal |
+| `k` | Keep open (preview slot) |
+| `[` / `]` | Tool document Back / Forward |
+| `←` `→` `↑` `↓` | Place the context |
+| `Esc` | Close |
+
 ## Dialogs, menus & prompts
 
 | Key | Action | Description |

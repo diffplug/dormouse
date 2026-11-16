@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, 
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, InfoIcon, PlugIcon, PushPinIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
+import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, KeyHint, PORT_ACTION_KEYS } from './context-keys';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon, BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
@@ -46,7 +47,10 @@ export interface TerminalContextViewProps {
   terminalRole?: 'aux' | 'tool';
   /** Properties shows the Surface's rows alone, sized to them; aux shows its terminal in the whole panel. */
   mode: ContextMode;
-  onModeChange(mode: ContextMode): void;
+  /** `focusTerminal`: the switch means to type in the terminal. */
+  onModeChange(mode: ContextMode, focusTerminal?: boolean): void;
+  /** Label the properties' controls with their keys, and answer them (`context-keys.tsx`). */
+  shortcuts?: boolean;
   placement?: Pick<ContextPlacement, 'side' | 'available'> & { onChange(side: ContextSide): void };
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
   closing?: boolean;
@@ -80,15 +84,16 @@ export interface TerminalContextViewProps {
 /** A context action's box, shared with the port row's off-screen measurements. */
 export const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
 
-export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean }) {
+/** `shortcut`: the key that activates it while the context's keys are live (`context-keys.tsx`). */
+export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false, shortcut }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean; shortcut?: string }) {
   const windowFocused = useContext(WindowFocusedContext);
   // Native app launches can leave :hover stale until this window regains focus.
   const color = muted ? 'text-muted' : windowFocused ? SUBTLE_ACTION_COLOR_CLASS : SUBTLE_ACTION_REST_COLOR_CLASS;
   // `busy` must never reach native `disabled`: the browser blurs a button the moment it is disabled,
   // and this context's Escape and Tab handling both live on the <section> and need a focused descendant.
-  return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
+  return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} {...contextKey(shortcut)} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
     aria-pressed={pressed} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
-    className={`${ACTION_BOX_CLASS} disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
+    className={`${ACTION_BOX_CLASS} disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}<KeyHint k={shortcut} /></button>;
 }
 
 /** Visible action text is lowercase, since `iframe` and `agent-browser` cannot be
@@ -99,14 +104,14 @@ const actionText = (label: string) => label.charAt(0).toLowerCase() + label.slic
 const COPIED = <><CheckIcon size={14} weight="bold" />copied</>;
 
 /** `confirmation` replaces the face on a successful copy; an unlabeled button confirms with the check alone. */
-function ContextCopyAction({ children, label, onCopy, confirmation = COPIED }: { children: ReactNode; label: string; onCopy: () => Promise<boolean>; confirmation?: ReactNode }) {
+function ContextCopyAction({ children, label, onCopy, confirmation = COPIED, shortcut }: { children: ReactNode; label: string; onCopy: () => Promise<boolean>; confirmation?: ReactNode; shortcut?: string }) {
   const [confirmed, setConfirmed] = useState(0);
   useEffect(() => {
     if (!confirmed) return;
     const timer = setTimeout(() => setConfirmed(0), 1400);
     return () => clearTimeout(timer);
   }, [confirmed]);
-  return <ContextAction label={label} onClick={() => {
+  return <ContextAction label={label} shortcut={shortcut} onClick={() => {
     setConfirmed(0);
     void onCopy().then(success => { if (success) setConfirmed(value => value + 1); });
   }}>
@@ -133,7 +138,7 @@ function ContextDiagnostic({ className, children }: { className: string; childre
 }
 
 /** `compact`: the button shows only its icon, so opening shows only the spinner. */
-function ContextOpenAction({ children, label, disabled, compact = false, onOpen }: { children: ReactNode; label: string; disabled: boolean; compact?: boolean; onOpen: () => Promise<boolean> }) {
+function ContextOpenAction({ children, label, disabled, compact = false, onOpen, shortcut }: { children: ReactNode; label: string; disabled: boolean; compact?: boolean; onOpen: () => Promise<boolean>; shortcut?: string }) {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const opening = pending || feedback;
@@ -142,7 +147,7 @@ function ContextOpenAction({ children, label, disabled, compact = false, onOpen 
     const timer = setTimeout(() => setFeedback(false), 750);
     return () => clearTimeout(timer);
   }, [feedback]);
-  return <ContextAction label={label} disabled={disabled} busy={opening} onClick={() => {
+  return <ContextAction label={label} disabled={disabled} busy={opening} shortcut={shortcut} onClick={() => {
     setPending(true);
     setFeedback(true);
     void onOpen().then(success => { setPending(false); if (!success) setFeedback(false); });
@@ -200,13 +205,13 @@ function HeaderRow({ surfaceId, onExplain, onCopyId, actions, workspaceMove }: {
   }, [surfaceId], [actionsRef]);
   return <div ref={row} data-context-title className="relative flex min-h-7 min-w-0 items-center gap-1">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
-      <span className={ACTION_BOX_CLASS}>{surfaceId}{COPY_ICON}</span>
-      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}{EXPLAIN_TEXT}</span>
-      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{surfaceId}{COPY_ICON}<KeyHint k={CONTEXT_KEYS.copyId} /></span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}{EXPLAIN_TEXT}<KeyHint k={CONTEXT_KEYS.explain} /></span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}<KeyHint k={CONTEXT_KEYS.explain} /></span>
     </div>
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1">
-      <ContextCopyAction label={`Copy ${surfaceId}`} confirmation={compact === 2 ? COPY_CHECK : undefined} onCopy={onCopyId}>{compact < 2 && <span>{surfaceId}</span>}{COPY_ICON}</ContextCopyAction>
-      <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{compact === 0 && EXPLAIN_TEXT}</ContextAction>
+      <ContextCopyAction label={`Copy ${surfaceId}`} shortcut={CONTEXT_KEYS.copyId} confirmation={compact === 2 ? COPY_CHECK : undefined} onCopy={onCopyId}>{compact < 2 && <span>{surfaceId}</span>}{COPY_ICON}</ContextCopyAction>
+      <ContextAction label="Explain this title" shortcut={CONTEXT_KEYS.explain} onClick={onExplain}>{EXPLAIN_ICON}{compact === 0 && EXPLAIN_TEXT}</ContextAction>
       {workspaceMove}
     </div>
     <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5 self-start">{actions}</div>
@@ -228,14 +233,14 @@ function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       <span className="inline-flex">{FOLDER_ICON}</span>
       <span className="whitespace-nowrap">{cwd}</span>
-      <span className={ACTION_BOX_CLASS}>{COPY_ICON}</span>
-      <span className={ACTION_BOX_CLASS}>{EXPLORE_ICON}{text}</span>
+      <span className={ACTION_BOX_CLASS}>{COPY_ICON}<KeyHint k={CONTEXT_KEYS.copyPath} /></span>
+      <span className={ACTION_BOX_CLASS}>{EXPLORE_ICON}{text}<KeyHint k={CONTEXT_KEYS.explore} /></span>
     </div>
     {FOLDER_ICON}
     {/* Right-to-left so truncation drops the start; the isolate keeps the path's own order. */}
     <span className="min-w-0 truncate [direction:rtl]" title={cwd}><bdi>{cwd}</bdi></span>
-    <ContextCopyAction label="Copy absolute path" confirmation={COPY_CHECK} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
-    <ContextOpenAction label={canExplore ? explorerLabel : 'Directory unavailable on this host'} disabled={!canExplore} compact={compact} onOpen={onExplore}>{EXPLORE_ICON}{!compact && text}</ContextOpenAction>
+    <ContextCopyAction label="Copy absolute path" shortcut={CONTEXT_KEYS.copyPath} confirmation={COPY_CHECK} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
+    <ContextOpenAction label={canExplore ? explorerLabel : 'Directory unavailable on this host'} disabled={!canExplore} compact={compact} shortcut={CONTEXT_KEYS.explore} onOpen={onExplore}>{EXPLORE_ICON}{!compact && text}</ContextOpenAction>
   </div>;
 }
 
@@ -261,6 +266,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   onPort(mode: PortMode): Promise<boolean>;
 }) {
   const [provider, setProvider] = useBrowserProvider(providers);
+  const keysLive = useContext(ContextKeysContext);
   const offer = browserProviderSwitch(providers, provider);
   const actions: PortAction[] = [
     ...portActions(provider, providers, canIframe),
@@ -304,25 +310,29 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   return <div ref={root} data-port-actions className="relative flex flex-1 items-center gap-1" style={{ minWidth: floor }}>
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       {/* The trigger at rest and while opening, then each action's face. */}
-      <span className={ACTION_BOX_CLASS}>{MORE}</span>
-      <span className={ACTION_BOX_CLASS}>{OPENING}</span>
-      {actions.map(action => <span key={key(action)} className={ACTION_BOX_CLASS}>{action.icon}{action.text}</span>)}
+      <span className={ACTION_BOX_CLASS}>{MORE}<KeyHint k="1–5" /></span>
+      <span className={ACTION_BOX_CLASS}>{OPENING}<KeyHint k="1–5" /></span>
+      {actions.map((action, index) => <span key={key(action)} className={ACTION_BOX_CLASS}>{action.icon}{action.text}<KeyHint k={PORT_ACTION_KEYS[index]} /></span>)}
     </div>
-    {actions.slice(0, visible).map(action => {
+    {actions.slice(0, visible).map((action, index) => {
       const opening = pending !== null && pending === action.mode;
-      return <ContextAction key={key(action)} label={action.label} disabled={action.disabled} busy={opening} onClick={() => void run(action)}>
+      return <ContextAction key={key(action)} label={action.label} disabled={action.disabled} busy={opening} shortcut={PORT_ACTION_KEYS[index]} onClick={() => void run(action)}>
         <ActionFace status={opening ? OPENING : null}>{action.icon}{action.text}</ActionFace>
       </ContextAction>;
     })}
     {/* A transparent native select over a link-styled label, like the other actions. */}
     {visible < actions.length && <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
       {hiddenPending ? OPENING : MORE}
+      {/* The keys of the actions it holds. */}
+      <KeyHint k={visible + 1 < actions.length ? `${PORT_ACTION_KEYS[visible]}–${PORT_ACTION_KEYS[actions.length - 1]}` : PORT_ACTION_KEYS[visible]} />
       <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
         className="absolute inset-0 cursor-pointer appearance-none opacity-0"
         onKeyDown={closedSelectKeyDown}
         onChange={event => { const action = actions.find(item => key(item) === event.target.value); if (action) void run(action); }}>
         <option value="">More browser actions</option>
-        {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
+        {actions.slice(visible).map((action, index) => <option key={key(action)} value={key(action)} disabled={action.disabled} {...contextKey(PORT_ACTION_KEYS[visible + index])}>
+          {action.disabled ? action.label : action.text}{keysLive ? ` [${PORT_ACTION_KEYS[visible + index]}]` : ''}
+        </option>)}
       </select>
     </span>}
   </div>;
@@ -481,13 +491,16 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const properties = p.mode === 'properties';
   /** Runs `action` with focus parked on the context, for Escape and Tab, as the control that ran it leaves. */
   const holdingFocus = (action: () => void) => () => { surface.current?.focus({ preventScroll: true }); action(); };
-  const switchTo = (mode: ContextMode) => holdingFocus(() => p.onModeChange(mode));
+  // Into the terminal is into its keyboard; back to properties parks focus on the context.
+  const showAux = holdingFocus(() => p.onModeChange('aux', true));
+  const showProperties = holdingFocus(() => p.onModeChange('properties'));
+  const keysLive = !!p.shortcuts && properties && !p.closing;
   // Shared by both modes' headers; the action leaves with the mark.
-  const keepOpen = p.onKeepPreview && <ContextAction label="Keep open" onClick={holdingFocus(() => p.onKeepPreview?.())}><PushPinIcon size={15} /><span className={WIDE_LABEL_CLASS}>Keep open</span></ContextAction>;
+  const keepOpen = p.onKeepPreview && <ContextAction label="Keep open" shortcut={CONTEXT_KEYS.keepOpen} onClick={holdingFocus(() => p.onKeepPreview?.())}><PushPinIcon size={15} /><span className={WIDE_LABEL_CLASS}>Keep open</span></ContextAction>;
   const frameActions = <>
     {placement && <div role="group" aria-label="Context placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
-      <ContextAction key={side} label={`Place context at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
-    <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
+      <ContextAction key={side} label={`Place context at ${side}`} pressed={placement.side === side} keepFocus shortcut={CONTEXT_KEYS[side]} onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
+    <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /><KeyHint k={CONTEXT_KEYS.close} /></ContextAction>
   </>;
   const terminalName = isTool ? 'Tool' : 'Aux';
   return <section ref={surface} aria-label="Terminal context" data-terminal-context data-context-mode={p.mode} tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side} data-context-teeth={teeth}
@@ -499,8 +512,15 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         event.preventDefault();
         stepFocus(Array.from(detailRoot.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? []), event.shiftKey ? -1 : 1);
       }
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); return; }
+      // A list or field keeps its own keys; Escape above still closes.
+      if (keysLive && !detail && !event.metaKey && !event.ctrlKey && !event.altKey && !(event.target as HTMLElement).closest('select, input, textarea')
+        && surface.current && activateContextKey(surface.current, event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     }}>
+    <ContextKeysContext.Provider value={keysLive}>
     <div ref={panel} className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${properties ? 'relative min-h-0' : 'absolute inset-0'} flex flex-col overflow-hidden`}
       style={{ boxShadow: ELEVATED_PANE_SHADOW, clipPath: shape?.clip, ...teeth && { [`border${SIDE_NAME[teeth]}Width`]: 0 }, ...properties && detail && { minHeight: DETAIL_MIN_HEIGHT_PX } }}>
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
@@ -508,7 +528,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         <HeaderRow workspaceMove={p.workspaceMove} surfaceId={p.surfaceId} onExplain={() => setDetail('title')} onCopyId={() => attempt(p.onCopyId)} actions={<>
           {keepOpen}
           {p.navigation}
-          <ContextAction label={`Show ${terminalName.toLowerCase()} terminal`} onClick={switchTo('aux')}><TerminalIcon size={15} /><span className={WIDE_LABEL_CLASS}>{terminalName.toLowerCase()} terminal</span></ContextAction>
+          <ContextAction label={`Show ${terminalName.toLowerCase()} terminal`} shortcut={CONTEXT_KEYS.aux} onClick={showAux}><TerminalIcon size={15} /><span className={WIDE_LABEL_CLASS}>{terminalName.toLowerCase()} terminal</span></ContextAction>
           {frameActions}
         </>} />
         {/* A narrow panel moves the toggles under the rows, where they sit side by side. */}
@@ -519,7 +539,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
               {PORT_ICON}
               {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
                 <div className="flex min-w-0 max-w-[45%] shrink items-center gap-2">
-                  {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="shrink-0 text-muted">{entries.length} ports</span></>
+                  {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} {...contextKey(CONTEXT_KEYS.port)} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="flex shrink-0 items-center gap-1 text-muted">{entries.length} ports<KeyHint k={CONTEXT_KEYS.port} /></span></>
                     : <span className="truncate" title={`${selected.host}:${selected.port}${selected.processName ? ` · ${selected.processName}` : ''}`}>{selected.host}:{selected.port} <span className="text-muted">{selected.processName}</span></span>}
                 </div>
                 <span className="ml-1 h-3 shrink-0 border-l border-border" />
@@ -530,9 +550,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           {/* Stacked beside the rows they belong to, so they cost no height. */}
           <div data-context-alerts className="flex flex-wrap items-center gap-x-2 @[20rem]:grid @[20rem]:gap-x-1 @[20rem]:grid-cols-[auto_auto] @[20rem]:justify-items-end">
             {p.watchRule
-              ? <><span className="max-w-[16ch] truncate" title={`Watch all ${p.watchRule} commands`}>watch {p.watchRule}</span><OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} /></>
+              ? <><span className="flex min-w-0 items-center gap-1"><span className="max-w-[16ch] truncate" title={`Watch all ${p.watchRule} commands`}>watch {p.watchRule}</span><KeyHint k={CONTEXT_KEYS.watch} /></span><span className="contents" {...contextKey(CONTEXT_KEYS.watch)}><OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} /></span></>
               : <span className="col-span-2 flex h-6 items-center text-muted" title="No command running">no command</span>}
-            <span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" />
+            <span className="flex items-center gap-1">TODO<KeyHint k={CONTEXT_KEYS.todo} /></span><span className="contents" {...contextKey(CONTEXT_KEYS.todo)}><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></span>
           </div>
         </div></div>
         {p.notification && <div data-context-notification className="flex h-6 min-w-0 items-center gap-1 pl-1" title={[p.notification.title, p.notification.body].filter(Boolean).join('\n')}>
@@ -554,7 +574,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <div data-context-header-actions className="ml-auto flex shrink-0 items-center gap-0.5">
             {keepOpen}
             {p.navigation}
-            <ContextAction label="Show properties" onClick={switchTo('properties')}><InfoIcon size={15} /><span className={WIDE_LABEL_CLASS}>properties</span></ContextAction>
+            <ContextAction label="Show properties" onClick={showProperties}><InfoIcon size={15} /><span className={WIDE_LABEL_CLASS}>properties</span></ContextAction>
             {frameActions}
           </div>
         </div>
@@ -573,6 +593,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     </div></div>}
     </div>
     </div>
+    </ContextKeysContext.Provider>
     {teeth && shape && <svg aria-hidden="true" viewBox={shape.viewBox} preserveAspectRatio="none"
       className="pointer-events-none absolute overflow-visible" style={stripStyle(teeth)}><path d={shape.path} vectorEffect="non-scaling-stroke" className="fill-none stroke-foreground/20" /></svg>}
   </section>;

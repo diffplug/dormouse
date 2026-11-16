@@ -5,7 +5,7 @@ import { wallHandleOwning } from './wall-handles';
 import { MoveWorkspaceAction } from './MoveWorkspaceAction';
 import { TerminalPane } from '../TerminalPane';
 import { TerminalContextView, type ContextScan, type TerminalContextViewProps } from './TerminalContextView';
-import { TerminalContextContext, WallActionsContext, WorkspaceActiveContext, type ContextMode, type TerminalContextState } from './wall-context';
+import { TerminalContextContext, WallActionsContext, WorkspaceActiveContext, ModeContext, type ContextView, type TerminalContextState } from './wall-context';
 import { getAux, auxRevision, openAux, resetAux, setAuxVisible, subscribeAuxTerminals } from '../../lib/aux-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import { DEFAULT_WORKSPACE_ID } from '../../lib/session-types';
@@ -28,10 +28,13 @@ export function canOpenDirectory(cwd: CwdState, windows: boolean): boolean {
 
 /** `preview`: the Surface is its Workspace's preview slot, which the context
  *  offers to keep (`docs/specs/layout.md` -> Pane header). */
-export function TerminalContext({ id, mode: contextMode, focusTerminal = false, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & { mode: ContextMode; title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
+export function TerminalContext({ id, mode: contextMode, focusTerminal = false, keyboard = false, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & ContextView & { title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
   const workspaceActive = useContext(WorkspaceActiveContext);
+  // A keyboard opening keeps its keys while the Wall stays in command mode.
+  const wallMode = useContext(ModeContext);
+  const shortcuts = keyboard && wallMode === 'command';
   const states = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const activities = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   useSyncExternalStore(subscribeAuxTerminals, auxRevision);
@@ -95,7 +98,7 @@ export function TerminalContext({ id, mode: contextMode, focusTerminal = false, 
   const mismatch = !!aux && !!cwd && !!auxCwd && (cwd.path !== auxCwd.path || cwd.isRemote !== auxCwd.isRemote || (cwd.isRemote && cwd.host !== auxCwd.host));
   const source = wallHandleOwning(id);
   const warning = openWarning ?? (auxError || (aux && (!cwd || !auxCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
-  return <TerminalContextView placement={placement} mode={contextMode} onModeChange={context.setMode} terminalRole={tool ? 'tool' : 'aux'} closing={closing} origin={origin} surfaceId={id}
+  return <TerminalContextView placement={placement} mode={contextMode} onModeChange={context.setMode} shortcuts={shortcuts} terminalRole={tool ? 'tool' : 'aux'} closing={closing} origin={origin} surfaceId={id}
     navigation={tool ? <ToolNavigationButtons id={id} params={params} /> : undefined}
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} auxCwd={auxCwd && display(auxCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}

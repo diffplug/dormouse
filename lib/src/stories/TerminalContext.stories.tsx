@@ -85,7 +85,7 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
   return <Prompt><Cursor /></Prompt>;
 }
 
-function ContextPrototype({ scenario, initialMode, initialDetail = null, paneWidth, paneHeight, bothProviders = false }: { bothProviders?: boolean; scenario: Scenario; initialMode: ContextMode; initialDetail?: 'title' | 'reset' | null; paneWidth: number; paneHeight: number }) {
+function ContextPrototype({ scenario, initialMode, initialDetail = null, paneWidth, paneHeight, bothProviders = false, shortcuts = false }: { shortcuts?: boolean; bothProviders?: boolean; scenario: Scenario; initialMode: ContextMode; initialDetail?: 'title' | 'reset' | null; paneWidth: number; paneHeight: number }) {
   const [side, setSide] = useState<ContextSide | undefined>();
   const [mode, setMode] = useState(initialMode);
   const bounds = { x: 0, y: 0, width: paneWidth, height: paneHeight };
@@ -97,7 +97,7 @@ function ContextPrototype({ scenario, initialMode, initialDetail = null, paneWid
     <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
     <pre className="m-0 p-3 leading-6 text-muted">{'~/projects/dormouse ❯ pnpm dev\n\n  VITE ready\n  ➜  Local: http://localhost:5173/'}</pre>
     <div className="absolute flex flex-col" style={contextHostStyle(placement, mode)}>
-      <TerminalContextView mode={mode} onModeChange={setMode} placement={{ ...placement, onChange: setSide }} surfaceId="surface:3" cwd={PARENT_DIR} auxCwd={AUX_DIR} mismatch={scenario === 'differentDirectory'}
+      <TerminalContextView mode={mode} onModeChange={setMode} shortcuts={shortcuts} placement={{ ...placement, onChange: setSide }} surfaceId="surface:3" cwd={PARENT_DIR} auxCwd={AUX_DIR} mismatch={scenario === 'differentDirectory'}
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
@@ -114,7 +114,7 @@ function ContextPrototype({ scenario, initialMode, initialDetail = null, paneWid
   </div>;
 }
 
-function TerminalContextStory({ initialScenario = 'fresh', initialMode = 'properties', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false }: { bothProviders?: boolean; initialScenario?: Scenario; initialMode?: ContextMode; initialDetail?: 'title' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
+function TerminalContextStory({ initialScenario = 'fresh', initialMode = 'properties', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false, shortcuts = false }: { shortcuts?: boolean; bothProviders?: boolean; initialScenario?: Scenario; initialMode?: ContextMode; initialDetail?: 'title' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
   const [scenario, setScenario] = useState(initialScenario);
   return <main className="min-h-screen bg-app-bg p-5 font-mono text-sm text-foreground">
     <div className="mb-3 w-[900px]">
@@ -123,7 +123,7 @@ function TerminalContextStory({ initialScenario = 'fresh', initialMode = 'proper
         {SCENARIOS.map(item => <button key={item.id} type="button" aria-pressed={scenario === item.id} onClick={() => setScenario(item.id)} className={`rounded px-2 py-1 ${scenario === item.id ? 'bg-header-active-bg text-header-active-fg' : 'text-muted hover:bg-foreground/10'}`}>{item.label}</button>)}
       </div>
     </div>
-    <ContextPrototype key={scenario} bothProviders={bothProviders} scenario={scenario} initialMode={initialMode} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
+    <ContextPrototype key={scenario} shortcuts={shortcuts} bothProviders={bothProviders} scenario={scenario} initialMode={initialMode} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
   </main>;
 }
 
@@ -216,6 +216,10 @@ export const OpeningBrowser: Story = { args: { initialScenario: 'launchPending',
 export const BrowserLaunchFailed: Story = { args: { initialScenario: 'launchFailed', paneWidth: 480, paneHeight: 520 } };
 
 export const BrowserProviders: Story = { args: { bothProviders: true, paneWidth: 900, paneHeight: 900 } };
+
+/** Opened from a command key, every control carries its key. */
+export const KeyboardShortcuts: Story = { args: { shortcuts: true, initialScenario: 'multiplePorts' } };
+export const KeyboardShortcutsNarrow: Story = { args: { shortcuts: true, initialScenario: 'notification', paneWidth: 380, paneHeight: 520 } };
 
 /** The switch in each header leads to the other mode, and back. */
 export const SwitchModes: Story = {

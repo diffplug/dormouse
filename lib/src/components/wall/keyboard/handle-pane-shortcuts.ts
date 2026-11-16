@@ -13,8 +13,7 @@ function openHeaderContext(ctx: WallKeyboardCtx, id: string, mode: ContextMode):
   const header = document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
   if (!header) return;
   const rect = header.getBoundingClientRect();
-  // A key that asks for the terminal means to type in it.
-  ctx.openTerminalContext(id, { origin: { x: rect.left, y: rect.bottom }, mode, ...mode === 'aux' && { focusTerminal: true } });
+  ctx.openTerminalContext(id, { origin: { x: rect.left, y: rect.bottom }, mode });
 }
 
 /** The command keys that open the terminal context, each in its mode. */

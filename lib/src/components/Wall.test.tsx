@@ -5581,6 +5581,53 @@ it('moves a retained aux terminal without resizing or replacing its source, and 
 });
 
 
+it('labels the properties\' keys for `?` only, and takes `!` into the aux terminal in passthrough', async () => {
+  const aux: auxTerminals.AuxTerminal = { id: 'surface:keys-aux', parentId: 'surface:keys' };
+  vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:keys' ? aux : undefined);
+  vi.spyOn(auxTerminals, 'openAux').mockResolvedValue(aux);
+  const focus = vi.spyOn(terminalRegistry, 'focusSession');
+  const onEvent = vi.fn();
+  await act(async () => root.render(<Wall initialPaneIds={['surface:keys']} initialMode="command" onEvent={onEvent} />));
+  await flush();
+  const context = () => container.querySelector<HTMLElement>('[data-terminal-context]');
+  const key = (init: KeyboardEventInit, target: EventTarget = window) => act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })); });
+  const close = async () => {
+    await act(async () => context()!.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
+    await flush();
+    await flushFrame();
+  };
+  const modes = () => onEvent.mock.calls.filter(([event]) => event.type === 'modeChange').map(([event]) => event.mode);
+
+  await key({ key: '?' });
+  await flush();
+  expect(context()!.dataset.contextMode).toBe('properties');
+  expect(context()!.textContent).toContain('[i]');
+  await close();
+  // A right-click opening has no keys.
+  act(() => container.querySelector('[data-pane-header-for="surface:keys"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+  await flush();
+  expect(context()!.dataset.contextMode).toBe('properties');
+  expect(context()!.textContent).not.toContain('[i]');
+  await close();
+
+  focus.mockClear();
+  await key({ key: '!' });
+  await flush();
+  await flushFrame();
+  expect(context()!.dataset.contextMode).toBe('aux');
+  expect(modes().at(-1)).toBe('passthrough');
+  // The aux terminal takes the keyboard; the source does not.
+  expect(focus).toHaveBeenCalledWith('surface:keys-aux', true);
+  expect(focus).not.toHaveBeenCalledWith('surface:keys', true);
+
+  // The mode-exit gesture leaves the terminal for the context's controls.
+  const terminal = context()!.querySelector('[data-aux-terminal]')!;
+  await key({ key: 'Meta', location: 1, metaKey: true }, terminal);
+  await key({ key: 'Meta', location: 2, metaKey: true }, terminal);
+  expect(modes().at(-1)).toBe('command');
+  expect(document.activeElement).toBe(context());
+});
+
 it.each(['Shift', 'Meta'])('cancels an interrupted %s leader without leaving passthrough', async modifier => {
   await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
   await flush();

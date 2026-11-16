@@ -1,6 +1,6 @@
 import { captureToolParams } from './wall/tool-transfer';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
-import { TerminalContextContext, type ContextMode, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
+import { TerminalContextContext, type ContextMode, type ContextView, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
 import { TERMINAL_CONTEXT_EXIT_MS } from './design';
 import { motionIsInstant } from '../lib/ui-geometry';
 import type { PortMode } from './wall/TerminalContextView';
@@ -270,7 +270,7 @@ export function Wall({
   const activeRef = useRef(active);
   activeRef.current = active;
   const [terminalContext, setTerminalContext] = useState<TerminalContextState | null>(null);
-  const [contextMode, setContextMode] = useState<ContextMode>('properties');
+  const [contextView, setContextView] = useState<ContextView>({ mode: 'properties' });
   const terminalContextRef = useRef(terminalContext);
   terminalContextRef.current = terminalContext;
   const contextLaunchGeneration = useRef(0);
@@ -607,7 +607,7 @@ export function Wall({
     if (door) handleReattachRef.current(door, { enterPassthrough: false });
     setConfirmKill(null);
     setTerminalContext({ id, warning });
-    setContextMode('aux');
+    setContextView({ mode: 'aux' });
   }, []);
 
   /** Selection after the selected Surface is killed: in command mode, the next
@@ -815,14 +815,14 @@ export function Wall({
   /** Enter passthrough on the given panel. This only moves focus there: the
    *  human gestures acknowledge at their own handlers, and spawns, reveals, and
    *  embeds focusing themselves never do. */
-  const enterPassthrough = useCallback((id: string) => {
+  const enterPassthrough = useCallback((id: string, { focus = true }: { focus?: boolean } = {}) => {
     // Passthrough takes the keys a staged kill prompt waits for.
     setConfirmKill(null);
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');
     // Defer focus so it happens after the mousedown/click event finishes.
-    requestAnimationFrame(() => focusSession(id, true));
+    if (focus) requestAnimationFrame(() => focusSession(id, true));
   }, [selectPane]);
 
   /** Put a Door on the Baseboard at `index` (clamped), selecting it in command
@@ -2401,14 +2401,16 @@ export function Wall({
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,
-    mode: contextMode,
-    setMode: setContextMode,
+    mode: contextView.mode,
+    focusTerminal: contextView.focusTerminal,
+    setMode: (mode: ContextMode, focusTerminal = false) => setContextView({ mode, focusTerminal }),
     open: (id: string, options?: TerminalContextOpenOptions) => {
-      if (toolPendingFromParams(lath.getMeta(id)?.params) || isAuxSession(id) || isClosingSurface(id) || lath.isDying(id)) return;
+      if (toolPendingFromParams(lath.getMeta(id)?.params) || isAuxSession(id) || isClosingSurface(id) || lath.isDying(id)) return false;
       cancelContextPortLaunches();
-      const { mode = 'properties', ...rest } = options ?? {};
+      const { mode = 'properties', focusTerminal, ...rest } = options ?? {};
       setTerminalContext({ id, ...rest });
-      setContextMode(mode);
+      setContextView({ mode, focusTerminal });
+      return true;
     },
     close: () => {
       cancelContextPortLaunches();
@@ -2433,7 +2435,7 @@ export function Wall({
       enterPassthrough(aux.id);
     },
     openPort: openContextPort,
-  }), [contextSourceId, terminalContext, contextMode, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
+  }), [contextSourceId, terminalContext, contextView, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -2466,7 +2468,11 @@ export function Wall({
     enterPassthrough,
     enterCommandMode,
     minimizePane,
-    openTerminalContext: contextActions.open,
+    openTerminalContext: (id, { mode, origin }) => {
+      // `!` means to type in the terminal: it takes the keyboard, in passthrough.
+      const aux = mode === 'aux';
+      if (contextActions.open(id, { origin, mode, keyboard: true, focusTerminal: aux }) && aux) enterPassthrough(id, { focus: false });
+    },
     requestKill,
     reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,

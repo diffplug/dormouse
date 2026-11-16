@@ -19,8 +19,8 @@ export function contextHostStyle({ rect: { x, y, width, height }, anchor }: Cont
 /** One stable host per opening: moving the overlay never remounts its terminal. LathHost's
  *  paint places the host from the frame it just wrote, then publishes it to the selection
  *  ring; React re-renders only when the side or the available sides change. */
-export function TerminalContextOverlay({ context, mode, title, tool, preview = false, params, wall, source, multiPane, lath, preferences }: {
-  context: TerminalContextState; mode: ContextMode; title?: string; tool: boolean; preview?: boolean; params?: Record<string, unknown>; wall: Rect; source: Rect;
+export function TerminalContextOverlay({ context, mode, focusTerminal, title, tool, preview = false, params, wall, source, multiPane, lath, preferences }: {
+  context: TerminalContextState; mode: ContextMode; focusTerminal?: boolean; title?: string; tool: boolean; preview?: boolean; params?: Record<string, unknown>; wall: Rect; source: Rect;
   multiPane: boolean; lath: LathWallEngine; preferences: Map<string, ContextSide>;
 }) {
   const [cursorSide] = useState(() => {
@@ -73,7 +73,7 @@ export function TerminalContextOverlay({ context, mode, title, tool, preview = f
     setManual(side);
   }, [context.id, preferences]);
   // LathHost re-renders on every commit and resize frame; the panel needs only these.
-  const panel = useMemo(() => <TerminalContext {...context} mode={mode} title={title} tool={tool} preview={preview} params={params}
-    placement={{ side: shown.side, available: shown.available, onChange }} />, [context, mode, title, tool, preview, params, shown, onChange]);
+  const panel = useMemo(() => <TerminalContext {...context} mode={mode} focusTerminal={focusTerminal} title={title} tool={tool} preview={preview} params={params}
+    placement={{ side: shown.side, available: shown.available, onChange }} />, [context, mode, focusTerminal, title, tool, preview, params, shown, onChange]);
   return <div ref={host} className="absolute flex flex-col" style={{ ...initialStyle, zIndex: Z_CONTEXT }}>{panel}</div>;
 }
