@@ -348,7 +348,7 @@ Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccount
 
 ## Metrics
 
-Hosted's Workers count what they serve in aggregate daily rows; no page or desktop sends any.
+Hosted's Workers count what they serve in aggregate daily rows; no page or desktop sends Hosted any.
 
 | Event | Labels | Counted when |
 |---|---|---|

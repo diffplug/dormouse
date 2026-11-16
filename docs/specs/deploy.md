@@ -171,13 +171,15 @@ Config lives in [tauri.conf.json](../../standalone/src-tauri/tauri.conf.json) (`
 
 ### Update manifest (`standalone-latest.json`)
 
-`sign_updates` writes it after signing to `website/public/standalone-latest.json`, served via Cloudflare Pages from `dormouse.sh/standalone-latest.json` (the `plugins.updater.endpoints` entry) — giving request analytics on every update check.
+`sign_updates` writes it after signing to `website/public/standalone-latest.json`, served via Cloudflare Pages from `dormouse.sh/standalone-latest.json` (the `plugins.updater.endpoints` entry).
+
+**Every check must name its build in a `Dormouse-Build` header and nothing more**: the stamp's version (§Build stamp) for an official build, `modified-<version>` for any other, none without a stamp. **Never send it with the download**, which goes to GitHub. The site's Worker counts it (`docs/specs/website-docs.md` -> "Visit analytics"), and Privacy's description changes in the same edit.
 
 Shape: `version`, `notes`, `pub_date`, and a `platforms` map keyed `darwin-aarch64` / `windows-x86_64` / `linux-x86_64`, each with `url` and `signature` (that bundle's `.sig`, verbatim). **The script fails rather than emit a platform with an empty signature.**
 
 Manifest URLs carry the version in the *path* (`/v0.1.0/`) while the *filenames* stay stable. **The homepage's download buttons read their URLs from this same committed manifest**, so a release is only downloadable once step 7 has deployed it (`website/src/pages/Home.tsx`).
 
-Source of truth: `sign_updates` in `scripts/sign-and-deploy.sh`; `plugins.updater` in `standalone/src-tauri/tauri.conf.json`.
+Source of truth: `sign_updates` in `scripts/sign-and-deploy.sh`; `plugins.updater` in `standalone/src-tauri/tauri.conf.json`; `checkForUpdate` in `standalone/src/updater.ts`.
 
 ## Changelog
 

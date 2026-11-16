@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHECKOUT_PAGE } from "./hosted-pricing";
+import { POSTHOG_PROJECT_KEY } from "./site-analytics";
 
 type SiteWorker = {
   HOSTED_ACCOUNT_ORIGIN: string;
-  default: { fetch(request: Request, env: { ASSETS: { fetch(request: Request): Promise<Response> } }): Promise<Response> };
+  default: {
+    fetch(
+      request: Request,
+      env: { ASSETS: { fetch(request: Request): Promise<Response> } },
+      ctx?: { waitUntil(promise: Promise<unknown>): void },
+    ): Promise<Response>;
+  };
 };
 // Plain JavaScript Pages runs as is (`website/public/_worker.js`); a path
 // held in a variable keeps the type checker from asking for its declarations.
@@ -17,11 +24,17 @@ afterEach(() => {
   ASSETS.fetch.mockClear();
 });
 
-/** Sends `request` through the site's Worker with `fetch` answering `upstream`. */
-async function through(request: Request, upstream = new Response("{}")) {
-  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => upstream);
+/**
+ * Sends `request` through the site's Worker with `fetch` answering `upstream`,
+ * and settles what it left to `waitUntil`.
+ */
+async function through(request: Request, upstream: Response | (() => Promise<Response>) = new Response("{}")) {
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    typeof upstream === "function" ? upstream() : upstream);
   vi.stubGlobal("fetch", fetch);
-  const response = await worker.default.fetch(request, { ASSETS });
+  const waited: Promise<unknown>[] = [];
+  const response = await worker.default.fetch(request, { ASSETS }, { waitUntil: (promise) => waited.push(promise) });
+  await Promise.all(waited);
   return { response, fetch };
 }
 
@@ -75,5 +88,41 @@ describe("the site Worker's /api/hosted/ forward", () => {
     const { response, fetch } = await through(new Request("https://dormouse.sh/api/other"));
     expect(await response.text()).toBe("static");
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("the site Worker's update-manifest count", () => {
+  /** A check with `headers`, and what it told PostHog. */
+  async function check(headers: Record<string, string>, upstream?: () => Promise<Response>) {
+    const { response, fetch } = await through(new Request("https://dormouse.sh/standalone-latest.json", { headers }), upstream);
+    expect(await response.text()).toBe("static");
+    return fetch.mock.calls.map(([url, init]) => ({ url, body: JSON.parse(String(init?.body)), headers: [...new Headers(init?.headers).keys()] }));
+  }
+
+  it.each([
+    ["an official version", "2.0.0", "2.0.0"],
+    ["a modified build", "modified-2.0.0", "modified-2.0.0"],
+    ["anything else as other", "modified-2.0.0 d080b4f5", "other"],
+    ["no header as unreported", undefined, "unreported"],
+  ])("counts %s, with nothing else of the request's", async (_case, header, build) => {
+    const sent = await check({
+      ...(header === undefined ? {} : { "dormouse-build": header }),
+      "cf-connecting-ip": "203.0.113.9", "user-agent": "tauri", cookie: "a=b",
+    });
+    expect(sent).toEqual([{
+      url: "https://us.i.posthog.com/i/v0/e/",
+      headers: ["content-type"],
+      body: {
+        api_key: POSTHOG_PROJECT_KEY,
+        event: "update check",
+        distinct_id: "dormouse.sh update check",
+        properties: { build, $process_person_profile: false, $geoip_disable: true },
+      },
+    }]);
+  });
+
+  it("serves the manifest when the count fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await check({ "dormouse-build": "2.0.0" }, async () => { throw new Error("offline"); })).toHaveLength(1);
   });
 });

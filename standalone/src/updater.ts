@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { bakedRelayMode } from 'dormouse-lib/host/relay-origin';
+import { readBuildStamp } from 'dormouse-lib/lib/build-info';
 import { normalizeExternalUri } from 'dormouse-lib/lib/external-links';
 import { isRecord } from 'dormouse-lib/lib/is-record';
 import { loadJson, saveJson } from 'dormouse-lib/lib/local-json-store';
@@ -32,7 +33,8 @@ export function openUrl(url: string, context: string): void {
 async function checkForUpdate(): Promise<Update | null> {
   if (BROWSER_DEV_HOST) return null;
   const { check } = await import('@tauri-apps/plugin-updater');
-  return check();
+  const stamp = readBuildStamp();
+  return check(stamp ? { headers: { 'Dormouse-Build': stamp.official ? stamp.version : `modified-${stamp.version}` } } : undefined);
 }
 
 async function getAppVersion(): Promise<string> {
@@ -481,7 +483,9 @@ async function downloadApprovedUpdate(): Promise<void> {
 
   downloadPromise = (async () => {
     try {
-      await update.download();
+      // The plugin reuses the check's headers unless given its own; the
+      // build label is for dormouse.sh only, never the GitHub download.
+      await update.download(undefined, { headers: {} });
       availableUpdate = null;
       pendingUpdate = update;
       // Honor a dismissal that arrived during the download — install still
