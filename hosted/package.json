@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "@hono/node-server": "^2.0.10",
-    "@storybook/react": "11.0.0-beta.0",
+    "@storybook/react": "11.0.0-beta.3",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^24.13.6",
     "@types/react": "^19.3.0",
@@ -53,7 +53,7 @@
     "jsdom": "^30.0.0",
     "miniflare": "5.20261110.2-beta",
     "node-pg-migrate": "^9.0.0",
-    "storybook": "11.0.0-beta.0",
+    "storybook": "11.0.0-beta.3",
     "tailwindcss": "^4.3.0",
     "testcontainers": "^12.2.1",
     "tsx": "4.23.15",
