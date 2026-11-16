@@ -65,7 +65,7 @@ A Session is engaged while some present viewer focuses it.
 
 | Gesture | Acknowledges |
 |---|---|
-| typing into the pane (CSI/SS3 key encodings included), a reported wheel tick, a paste, a file drop, the mobile input bar or a gesture key, a remote Client's write | with input |
+| typing into the pane (CSI/SS3 key encodings included), a reported wheel tick, a paste, the mobile input bar or a gesture key, a remote Client's write | with input |
 | a Pane body or header click, zoom or unzoom, the dev-server chip, a Workspace tab's TODO pill on the member it enters, entering passthrough by keyboard, a Door click or `Enter`, a mobile tap | without input |
 | a terminal reply, a hover or button report, `d` reattach, a spawn, split, or promotion, a `dor` reveal, an embed focusing itself, DOM focus alone | nothing (rationale) |
 
@@ -115,7 +115,7 @@ flowchart TD
 
 Terms:
 
-- **input** — a PTY write but a terminal reply or a mouse report: a keystroke, a paste, a drop, a `dor send`, a launch. A wheel tick is input only when sent as keys; sent as a mouse report it is still a gesture with input.
+- **input** — a PTY write but a terminal reply or a mouse report: a keystroke, a paste, a `dor send`, a launch. A wheel tick is input only when sent as keys; sent as a mouse report it is still a gesture with input.
 - **gesture** — an acknowledging gesture (Engagement), *with input* or *without*.
 - **verb** — a gesture, dismiss (`a`), the TODO pill, or `t` (Clearing And TODO).
 - **output** — a painting chunk outside an Open echo window that, while the detector is quiet `NOTHING_TO_SHOW` (no candidate yet), also falls inside an Open work-start window. Any other chunk changes nothing.

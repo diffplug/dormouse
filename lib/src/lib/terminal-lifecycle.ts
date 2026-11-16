@@ -847,9 +847,9 @@ export function getSessionInputVersion(id: string): number {
 }
 
 /**
- * Write human-originated input — a keystroke, a paste, a file drop, the mobile
- * input bar — so every path acknowledges alike (`docs/specs/alert.md` ->
- * Engagement): the host acknowledges it with input as it writes it.
+ * Write human-originated input — a keystroke, a paste, the mobile input bar —
+ * so every path acknowledges alike (`docs/specs/alert.md` -> Engagement): the
+ * host acknowledges it with input as it writes it.
  */
 export function writeUserInput(id: string, data: string): void {
   // Typing, a paste, or Pocket's input bar ends a finalized selection — the

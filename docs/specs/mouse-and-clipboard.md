@@ -291,19 +291,11 @@ Every tier empty ⇒ silent no-op; **a failed native read must show a pane notic
 
 **Standalone reads the clipboard in Rust on Windows (Win32, also writing it) and Linux (GTK)**, with the same image cleanup; macOS uses the sidecar.
 
-**Must refuse the whole file-reference paste or drop (tiers 1 and 3, and §8.7) when any path carries a C0, DEL, or C1 character** (`hasShellInputControls`), bracketed or not, and show a notice on the pane (rationale).
+**Must refuse the whole file-reference paste (tiers 1 and 3) when any path carries a C0, DEL, or C1 character** (`hasShellInputControls`), bracketed or not, and show a notice on the pane (rationale).
 
-**Path escaping (tiers 1 and 3, and §8.7). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals (rationale). Each terminal captures its `shellKind` at spawn, kept across a live reconnect (`docs/specs/transport.md` -> "Reconnection protocol") and a cold restore. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). **Must type the Windows-portable form into a cmd or PowerShell Session** (`docs/specs/dor-cli.md` -> "Current Implemented Commands"), whose prompt may hold another Windows shell (rationale), **refusing the whole paste or drop, with a notice on the pane, when a path has none**. The posix escaping rules and their parser limitations live at `shellEscapePath`.
+**Path escaping (tiers 1 and 3). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals (rationale). Each terminal captures its `shellKind` at spawn, kept across a live reconnect (`docs/specs/transport.md` -> "Reconnection protocol") and a cold restore. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). **Must type the Windows-portable form into a cmd or PowerShell Session** (`docs/specs/dor-cli.md` -> "Current Implemented Commands"), whose prompt may hold another Windows shell (rationale), **refusing the whole paste, with a notice on the pane, when a path has none**. The posix escaping rules and their parser limitations live at `shellEscapePath`.
 
 Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection, control refusal), `lib/src/lib/shell-escape.ts` (dispatch + posix rules, pinned by `lib/src/lib/shell-escape.test.ts`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quoteWindowsPortableArg`), `standalone/src-tauri/src/clipboard_win.rs` and `standalone/src-tauri/src/clipboard_linux.rs` (native reads).
-
-### 8.7 Drag-to-Paste
-
-**Must route native file drops only to the selected Pane of the active Workspace**, ignoring a Door selection or a Session outside that Workspace's layout. Paste paths as tier 1 (§8.6). **Tauri's native handler is inert while `dragDropEnabled: false`** (rationale).
-
-Source of truth: `useSessionPersistence` in `lib/src/components/wall/use-session-persistence.ts`; `app.windows` in `standalone/src-tauri/tauri.conf.json`; pinned by `lib/src/components/WorkspaceWindow.test.tsx`.
-
-**Drag-to-paste is not supported in the VSCode build**: the workbench never routes OS file drops to a `WebviewView` (§9.2).
 
 ### 8.8 Right-Click and Menu Paste
 
@@ -371,7 +363,6 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 
 ### 9.2 Paste
 
-- Enable Tauri's native file drops by setting `dragDropEnabled: true`; pointer-based Lath dragging no longer needs the flag disabled (rationale at §8.7).
 - Right-click context-menu Paste, and routing Edit → Paste through §8.6's tiers.
 - A settings toggle to disable Ctrl+V interception on Windows and Linux.
 - A paste popup for previewing or transforming content before it is committed.
@@ -381,5 +372,5 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 - Multi-line paste confirmation dialogs.
 - A "literal next keystroke" terminal-level shortcut (Ctrl+Alt+V or similar) for programs without Ctrl+Q-style `quoted-insert`.
 - Middle-click paste / X11 PRIMARY selection integration on Linux.
-- Drop-position-aware pane routing (drops go to the selected Pane today, §8.7).
+- Drag-to-paste of OS file drops in standalone ([diffplug/dormouse#38](https://github.com/diffplug/dormouse/issues/38)), routed by drop position.
 - Drag-to-paste in the VSCode build — `WebviewView` is excluded from external-file drop routing and there is no API to opt in ([microsoft/vscode#111092](https://github.com/microsoft/vscode/issues/111092), closed as out-of-scope).

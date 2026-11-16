@@ -266,7 +266,7 @@ Dirty Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
 **Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and unasked kills only while the revealed pane, or the Door, is still selected in command mode; cancellation, refusal, or navigating away discards the return target.
 
-A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false, resume and restore seed the persisted value, and **missing snapshot data must default to touched**, keeping close confirmation conservative. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion, forwarded mouse reports, `dor send` input, and a Client's input, which the host owning the PTY reports to the webview as `terminal:clientInput`. Not counted: replay-shaped terminal reports and mouse reports removed by an override.
+A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false, resume and restore seed the persisted value, and **missing snapshot data must default to touched**, keeping close confirmation conservative. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, forwarded mouse reports, `dor send` input, and a Client's input, which the host owning the PTY reports to the webview as `terminal:clientInput`. Not counted: replay-shaped terminal reports and mouse reports removed by an override.
 
 Source of truth: `requestKill` in `lib/src/components/Wall.tsx`; `wireXtermHandlers` in `lib/src/lib/terminal-lifecycle.ts` (untouched input gate).
 

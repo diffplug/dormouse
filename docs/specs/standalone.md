@@ -18,7 +18,7 @@ flowchart LR
   P -- /ws/burrow --> X[(Relay)]
 ```
 
-**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, file drop, dock icon, logging), the session file store, multi-window state (§Windows), and the quit flow.
+**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, dock icon, logging), the session file store, multi-window state (§Windows), and the quit flow.
 
 ## Boot sequence
 
@@ -434,10 +434,6 @@ A restart is a quit that relaunches: the same vote, confirmation and teardown, w
 - A Windows quit holding an update relaunches by its installer instead (`docs/specs/auto-update.md` → "Platform behavior at quit").
 
 Source of truth: `quit_restart` in `standalone/src-tauri/src/lib.rs`; `QuitIntent` in `standalone/src-tauri/src/quit_state.rs`.
-
-## File drop
-
-Behavior: `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
 ## Logging
 
