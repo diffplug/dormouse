@@ -216,7 +216,7 @@ jobs:
 
       - name: Audit against the security specs
         if: steps.plan.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
@@ -287,10 +287,16 @@ jobs:
           # Each agent's prompt is a pointer, not a copy — the content
           # stays in `.github/audit/` so CI and
           # `scripts/security-audit-local.sh` cannot drift apart.
+          #
+          # `--permission-mode default`: since v1.0.273 a session with a
+          # `prompt` starts in auto mode unless `allowed_bots` is set, so the
+          # canary job below would otherwise run under different permissions
+          # than this one. Both name the mode rather than lean on that.
           claude_args: >-
             --model sonnet
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
+            --permission-mode default
             --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"remote":{"description":"Audits docs/specs/security-remote.md: remote control.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/remote.md`, and follow them exactly.","model":"opus"},"local":{"description":"Audits docs/specs/security-local.md and the desktop shells, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/local.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
           # The prompts live in `.github/audit/`, not inline here: they
           # are long enough to need real diffs in review, they must be
@@ -766,7 +772,7 @@ jobs:
       # The audit job's agent step, less `ci-and-secrets`: the same pinned
       # action, prompts, tools, and model split.
       - name: Audit the seeded checkout
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
@@ -778,6 +784,7 @@ jobs:
             --model sonnet
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
+            --permission-mode default
             --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"remote":{"description":"Audits docs/specs/security-remote.md: remote control.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/remote.md`, and follow them exactly.","model":"opus"},"local":{"description":"Audits docs/specs/security-local.md and the desktop shells, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/local.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
           prompt: |
             You are the orchestrator of this repository's security audit.
