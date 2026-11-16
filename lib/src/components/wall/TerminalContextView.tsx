@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, 
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, InfoIcon, PlugIcon, PushPinIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
-import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, KeyHint, openPicker, PORT_ACTION_KEYS, portKeyRange } from './context-keys';
+import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, KeyHint, Mnemonic, openPicker, PORT_ACTION_KEYS } from './context-keys';
 import { isEditableTarget } from '../../lib/dom';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon, BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
@@ -85,8 +85,9 @@ export interface TerminalContextViewProps {
 /** A context action's box, shared with the port row's off-screen measurements. */
 export const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
 
-/** `shortcut`: the key that activates it while the context's keys are live (`context-keys.tsx`). */
-export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false, shortcut }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean; shortcut?: string }) {
+/** `shortcut`: the key that activates it while the context's keys are live (`context-keys.tsx`),
+ *  labeled after its face unless `keyInLabel`, where a `Mnemonic` in `children` names it. */
+export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false, shortcut, keyInLabel = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean; shortcut?: string; keyInLabel?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
   // Native app launches can leave :hover stale until this window regains focus.
   const color = muted ? 'text-muted' : windowFocused ? SUBTLE_ACTION_COLOR_CLASS : SUBTLE_ACTION_REST_COLOR_CLASS;
@@ -94,7 +95,7 @@ export function ContextAction({ children, label, onClick, disabled = false, busy
   // and this context's Escape and Tab handling both live on the <section> and need a focused descendant.
   return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} {...contextKey(shortcut)} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
     aria-pressed={pressed} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
-    className={`${ACTION_BOX_CLASS} disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}<KeyHint k={shortcut} /></button>;
+    className={`${ACTION_BOX_CLASS} disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}{!keyInLabel && <KeyHint k={shortcut} />}</button>;
 }
 
 /** Visible action text is lowercase, since `iframe` and `agent-browser` cannot be
@@ -105,14 +106,14 @@ const actionText = (label: string) => label.charAt(0).toLowerCase() + label.slic
 const COPIED = <><CheckIcon size={14} weight="bold" />copied</>;
 
 /** `confirmation` replaces the face on a successful copy; an unlabeled button confirms with the check alone. */
-function ContextCopyAction({ children, label, onCopy, confirmation = COPIED, shortcut }: { children: ReactNode; label: string; onCopy: () => Promise<boolean>; confirmation?: ReactNode; shortcut?: string }) {
+function ContextCopyAction({ children, label, onCopy, confirmation = COPIED, shortcut, keyInLabel }: { children: ReactNode; label: string; onCopy: () => Promise<boolean>; confirmation?: ReactNode; shortcut?: string; keyInLabel?: boolean }) {
   const [confirmed, setConfirmed] = useState(0);
   useEffect(() => {
     if (!confirmed) return;
     const timer = setTimeout(() => setConfirmed(0), 1400);
     return () => clearTimeout(timer);
   }, [confirmed]);
-  return <ContextAction label={label} shortcut={shortcut} onClick={() => {
+  return <ContextAction label={label} shortcut={shortcut} keyInLabel={keyInLabel} onClick={() => {
     setConfirmed(0);
     void onCopy().then(success => { if (success) setConfirmed(value => value + 1); });
   }}>
@@ -139,7 +140,7 @@ function ContextDiagnostic({ className, children }: { className: string; childre
 }
 
 /** `compact`: the button shows only its icon, so opening shows only the spinner. */
-function ContextOpenAction({ children, label, disabled, compact = false, onOpen, shortcut }: { children: ReactNode; label: string; disabled: boolean; compact?: boolean; onOpen: () => Promise<boolean>; shortcut?: string }) {
+function ContextOpenAction({ children, label, disabled, compact = false, onOpen, shortcut, keyInLabel }: { children: ReactNode; label: string; disabled: boolean; compact?: boolean; onOpen: () => Promise<boolean>; shortcut?: string; keyInLabel?: boolean }) {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const opening = pending || feedback;
@@ -148,7 +149,7 @@ function ContextOpenAction({ children, label, disabled, compact = false, onOpen,
     const timer = setTimeout(() => setFeedback(false), 750);
     return () => clearTimeout(timer);
   }, [feedback]);
-  return <ContextAction label={label} disabled={disabled} busy={opening} shortcut={shortcut} onClick={() => {
+  return <ContextAction label={label} disabled={disabled} busy={opening} shortcut={shortcut} keyInLabel={keyInLabel} onClick={() => {
     setPending(true);
     setFeedback(true);
     void onOpen().then(success => { setPending(false); if (!success) setFeedback(false); });
@@ -206,13 +207,13 @@ function HeaderRow({ surfaceId, onExplain, onCopyId, actions, workspaceMove }: {
   }, [surfaceId], [actionsRef]);
   return <div ref={row} data-context-title className="relative flex min-h-7 min-w-0 items-center gap-1">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
-      <span className={ACTION_BOX_CLASS}>{surfaceId}{COPY_ICON}<KeyHint k={CONTEXT_KEYS.copyId} /></span>
-      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}{EXPLAIN_TEXT}<KeyHint k={CONTEXT_KEYS.explain} /></span>
-      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}<KeyHint k={CONTEXT_KEYS.explain} /></span>
+      <span className={ACTION_BOX_CLASS}><Mnemonic text={surfaceId} k={CONTEXT_KEYS.copyId} />{COPY_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}{EXPLAIN_TEXT}</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
     </div>
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1">
-      <ContextCopyAction label={`Copy ${surfaceId}`} shortcut={CONTEXT_KEYS.copyId} confirmation={compact === 2 ? COPY_CHECK : undefined} onCopy={onCopyId}>{compact < 2 && <span>{surfaceId}</span>}{COPY_ICON}</ContextCopyAction>
-      <ContextAction label="Explain this title" shortcut={CONTEXT_KEYS.explain} onClick={onExplain}>{EXPLAIN_ICON}{compact === 0 && EXPLAIN_TEXT}</ContextAction>
+      <ContextCopyAction label={`Copy ${surfaceId}`} shortcut={CONTEXT_KEYS.copyId} keyInLabel={compact < 2} confirmation={compact === 2 ? COPY_CHECK : undefined} onCopy={onCopyId}>{compact < 2 && <Mnemonic text={surfaceId} k={CONTEXT_KEYS.copyId} />}{COPY_ICON}</ContextCopyAction>
+      <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{compact === 0 && EXPLAIN_TEXT}</ContextAction>
       {workspaceMove}
     </div>
     <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5 self-start">{actions}</div>
@@ -235,20 +236,20 @@ function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
       <span className="inline-flex">{FOLDER_ICON}</span>
       <span className="whitespace-nowrap">{cwd}</span>
       <span className={ACTION_BOX_CLASS}>{COPY_ICON}<KeyHint k={CONTEXT_KEYS.copyPath} /></span>
-      <span className={ACTION_BOX_CLASS}>{EXPLORE_ICON}{text}<KeyHint k={CONTEXT_KEYS.explore} /></span>
+      <span className={ACTION_BOX_CLASS}>{EXPLORE_ICON}<Mnemonic text={text} k={CONTEXT_KEYS.explore} /></span>
     </div>
     {FOLDER_ICON}
     {/* Right-to-left so truncation drops the start; the isolate keeps the path's own order. */}
     <span className="min-w-0 truncate [direction:rtl]" title={cwd}><bdi>{cwd}</bdi></span>
     <ContextCopyAction label="Copy absolute path" shortcut={CONTEXT_KEYS.copyPath} confirmation={COPY_CHECK} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
-    <ContextOpenAction label={canExplore ? explorerLabel : 'Directory unavailable on this host'} disabled={!canExplore} compact={compact} shortcut={CONTEXT_KEYS.explore} onOpen={onExplore}>{EXPLORE_ICON}{!compact && text}</ContextOpenAction>
+    <ContextOpenAction label={canExplore ? explorerLabel : 'Directory unavailable on this host'} disabled={!canExplore} compact={compact} shortcut={CONTEXT_KEYS.explore} keyInLabel={!compact} onOpen={onExplore}>{EXPLORE_ICON}{!compact && <Mnemonic text={text} k={CONTEXT_KEYS.explore} />}</ContextOpenAction>
   </div>;
 }
 
-/** A switch beside its label, both carrying `shortcut`: the label names the key the switch answers. */
-function KeyedSwitch({ children, shortcut, on, onToggle, label }: { children: ReactNode; shortcut: string; on: boolean; onToggle(): void; label: string }) {
+/** A switch beside its `text`, which names the key the switch answers. */
+function KeyedSwitch({ text, shortcut, on, onToggle, label }: { text: string; shortcut: string; on: boolean; onToggle(): void; label: string }) {
   return <>
-    <span className="flex min-w-0 items-center gap-1" title={label}>{children}<KeyHint k={shortcut} /></span>
+    <span className="min-w-0 max-w-[18ch] truncate" title={label}><Mnemonic text={text} k={shortcut} /></span>
     {/* `contents`, so the switch keeps its own grid cell. */}
     <span className="contents" {...contextKey(shortcut)}><OnOffSwitch on={on} onEnable={onToggle} onDisable={onToggle} label={label} /></span>
   </>;
@@ -284,7 +285,10 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   ];
   const root = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(actions.length);
+  const [fitted, setVisible] = useState(actions.length);
+  // `+` shows the overflow in the row, so its keys are on screen before they answer.
+  const [expanded, setExpanded] = useState(false);
+  const visible = keysLive && expanded ? actions.length : fitted;
   // The row never squeezes below the trigger it falls back to; the port label truncates instead.
   const [floor, setFloor] = useState(0);
   const [pending, setPending] = useState<PortMode | null>(null);
@@ -317,12 +321,11 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
     try { await onPort(mode); } finally { setPending(null); }
   };
   const key = (action: PortAction) => action.mode ?? 'switch';
-  return <div ref={root} data-port-actions className="relative flex flex-1 items-center gap-1" style={{ minWidth: floor }}>
+  return <div ref={root} data-port-actions className={`relative flex flex-1 items-center gap-1 ${visible > fitted ? 'flex-wrap' : ''}`} style={{ minWidth: floor }}>
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       {/* The trigger at rest and while opening, then each action's face. */}
-      {/* The widest the overflow's key range can be. */}
-      <span className={ACTION_BOX_CLASS}>{MORE}<KeyHint k={portKeyRange(0, actions.length - 1)} /></span>
-      <span className={ACTION_BOX_CLASS}>{OPENING}<KeyHint k={portKeyRange(0, actions.length - 1)} /></span>
+      <span className={ACTION_BOX_CLASS}>{MORE}<KeyHint k={CONTEXT_KEYS.more} /></span>
+      <span className={ACTION_BOX_CLASS}>{OPENING}<KeyHint k={CONTEXT_KEYS.more} /></span>
       {actions.map((action, index) => <span key={key(action)} className={ACTION_BOX_CLASS}>{action.icon}{action.text}<KeyHint k={PORT_ACTION_KEYS[index]} /></span>)}
     </div>
     {actions.slice(0, visible).map((action, index) => {
@@ -331,19 +334,18 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
         <ActionFace status={opening ? OPENING : null}>{action.icon}{action.text}</ActionFace>
       </ContextAction>;
     })}
-    {/* A transparent native select over a link-styled label, like the other actions. */}
-    {visible < actions.length && <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
+    {/* With live keys, a button that shows the rest; else a transparent native select over a link-styled label, like the other actions. */}
+    {visible < actions.length && keysLive && <ContextAction label="More browser actions" shortcut={CONTEXT_KEYS.more} busy={pending !== null} onClick={() => setExpanded(true)}>
       {hiddenPending ? OPENING : MORE}
-      {/* The keys of the actions it holds. */}
-      <KeyHint k={portKeyRange(visible, actions.length - 1)} />
+    </ContextAction>}
+    {visible < actions.length && !keysLive && <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
+      {hiddenPending ? OPENING : MORE}
       <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
         className="absolute inset-0 cursor-pointer appearance-none opacity-0"
         onKeyDown={closedSelectKeyDown}
         onChange={event => { const action = actions.find(item => key(item) === event.target.value); if (action) void run(action); }}>
         <option value="">More browser actions</option>
-        {actions.slice(visible).map((action, index) => <option key={key(action)} value={key(action)} disabled={action.disabled} {...contextKey(PORT_ACTION_KEYS[visible + index])}>
-          {action.disabled ? action.label : action.text}{keysLive ? ` [${PORT_ACTION_KEYS[visible + index]}]` : ''}
-        </option>)}
+        {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
       </select>
     </span>}
   </div>;
@@ -546,11 +548,11 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         <div className="@container"><div className="grid grid-cols-[minmax(0,1fr)] items-start gap-x-2 pl-1 @[20rem]:grid-cols-[minmax(0,1fr)_auto]">
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
             <DirRow cwd={p.cwd} explorerLabel={p.explorerLabel} canExplore={p.canExplore} onExplore={() => attempt(p.onExplore)} onCopyPath={() => attempt(p.onCopyPath)} />
-            <div data-context-ports className="flex h-6 min-w-0 items-center gap-1">
+            <div data-context-ports className="flex min-h-6 min-w-0 items-center gap-1">
               {PORT_ICON}
               {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
                 <div className="flex min-w-0 max-w-[45%] shrink items-center gap-2">
-                  {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} {...contextKey(CONTEXT_KEYS.port)} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="flex shrink-0 items-center gap-1 text-muted">{entries.length} ports<KeyHint k={CONTEXT_KEYS.port} /></span></>
+                  {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} {...contextKey(CONTEXT_KEYS.port)} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="shrink-0 text-muted"><Mnemonic text={`${entries.length} ports`} k={CONTEXT_KEYS.port} /></span></>
                     : <span className="truncate" title={`${selected.host}:${selected.port}${selected.processName ? ` · ${selected.processName}` : ''}`}>{selected.host}:{selected.port} <span className="text-muted">{selected.processName}</span></span>}
                 </div>
                 <span className="ml-1 h-3 shrink-0 border-l border-border" />
@@ -561,9 +563,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           {/* Stacked beside the rows they belong to, so they cost no height. */}
           <div data-context-alerts className="flex flex-wrap items-center gap-x-2 @[20rem]:grid @[20rem]:gap-x-1 @[20rem]:grid-cols-[auto_auto] @[20rem]:justify-items-end">
             {p.watchRule
-              ? <KeyedSwitch shortcut={CONTEXT_KEYS.watch} on={p.watching} onToggle={p.onWatch} label={`Watch all ${p.watchRule} commands`}><span className="max-w-[16ch] truncate">watch {p.watchRule}</span></KeyedSwitch>
+              ? <KeyedSwitch text={`watch ${p.watchRule}`} shortcut={CONTEXT_KEYS.watch} on={p.watching} onToggle={p.onWatch} label={`Watch all ${p.watchRule} commands`} />
               : <span className="col-span-2 flex h-6 items-center text-muted" title="No command running">no command</span>}
-            <KeyedSwitch shortcut={CONTEXT_KEYS.todo} on={p.todo} onToggle={p.onTodo} label="TODO">TODO</KeyedSwitch>
+            <KeyedSwitch text="TODO" shortcut={CONTEXT_KEYS.todo} on={p.todo} onToggle={p.onTodo} label="TODO" />
           </div>
         </div></div>
         {p.notification && <div data-context-notification className="flex h-6 min-w-0 items-center gap-1 pl-1" title={[p.notification.title, p.notification.body].filter(Boolean).join('\n')}>

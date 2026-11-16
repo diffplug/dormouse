@@ -567,30 +567,35 @@ it('focuses the terminal once per request, once it shows, and the controls other
   }
 });
 
-it('labels and answers the properties\' keys only when asked', async () => {
+it('labels and answers the properties\' keys only when asked, in the label where it holds the key', async () => {
   props.placement = { side: 'top', available: ['top', 'bottom'], onChange: vi.fn() };
   const press = (key: string) => act(() => container.querySelector('[data-terminal-context]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
   render();
-  expect(container.textContent).not.toContain('[i]');
+  expect(container.textContent).not.toContain('[s]');
   press('t');
   expect(props.onTodo).not.toHaveBeenCalled();
   props.shortcuts = true;
   render();
-  // Every control names its key.
-  for (const [label, key] of [['Copy surface:3', 'i'], ['Explain this title', 'd'], ['Copy absolute path', 'c'], ['Reveal in Finder', 'r'], ['Open in system browser', '1'], ['Show aux terminal', '!'], ['Place context at bottom', '↓'], ['Close terminal context', 'Esc']] as const) {
-    expect(button(label).textContent, label).toContain(`[${key}]`);
+  // A key in the label is marked there; any other follows the face.
+  for (const [label, text] of [['Copy surface:3', '[s]urface:3'], ['Reveal in Finder', '[r]eveal in Finder'], ['Copy absolute path', '[c]'], ['Open in system browser', 'system browser[1]'], ['Show aux terminal', '[!]'], ['Place context at bottom', '[↓]'], ['Close terminal context', '[Esc]']] as const) {
+    expect(button(label).textContent, label).toContain(text);
   }
-  expect(container.querySelector('[data-context-alerts]')!.textContent).toContain('TODO[t]');
+  // The title explanation has no key.
+  expect(button('Explain this title').textContent).toBe('debug title');
+  const alerts = container.querySelector('[data-context-alerts]')!.textContent;
+  expect(alerts).toContain('[T]ODO');
+  expect(alerts).toContain('w[a]tch pnpm');
   press('t');
   expect(props.onTodo).toHaveBeenCalledOnce();
-  press('w');
+  press('a');
   expect(props.onWatch).toHaveBeenCalledOnce();
+  press('d');
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
   press('ArrowDown');
   expect(props.placement.onChange).toHaveBeenCalledWith('bottom');
   await act(async () => press('1'));
   expect(props.onPort).toHaveBeenCalledWith(port(5173), 'system');
-  press('d');
-  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  await click('Explain this title');
   // A disclosure keeps the keys from the controls under it.
   press('t');
   expect(props.onTodo).toHaveBeenCalledOnce();
@@ -601,6 +606,29 @@ it('labels and answers the properties\' keys only when asked', async () => {
   props.mode = 'aux';
   render();
   expect(container.textContent).not.toContain('[');
+});
+
+it('shows the overflowed port actions in the row on `+`, and only then answers their keys', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
+  // Room for one action beside the trigger.
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-port-actions') ? 250 : 0; });
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+  const press = (key: string) => act(async () => { container.querySelector('[data-terminal-context]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+  try {
+    props.shortcuts = true;
+    render();
+    // With live keys the trigger is a button that names its key, not an unlabeled list.
+    expect(container.querySelector('select[aria-label="More browser actions"]')).toBeNull();
+    expect(button('More browser actions').textContent).toContain('[+]');
+    expect(button('Open in iframe embed')).toBeNull();
+    await press('2');
+    expect(props.onPort).not.toHaveBeenCalled();
+    await press('+');
+    expect(button('More browser actions')).toBeNull();
+    expect(button('Open in iframe embed').textContent).toContain('[2]');
+    await press('2');
+    expect(props.onPort).toHaveBeenCalledWith(port(5173), 'iframe');
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
 it('starts the aux terminal on its first showing, never for properties alone', async () => {

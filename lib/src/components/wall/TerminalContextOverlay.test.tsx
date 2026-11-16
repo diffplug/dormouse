@@ -14,7 +14,8 @@ vi.mock('./TerminalContext', () => ({ TerminalContext: () => {
   rendered();
   return <section data-test-context><input aria-label="Aux terminal input" /></section>;
 } }));
-vi.mock('../../lib/terminal-registry', () => ({ getTerminalInstance: () => null }));
+// The source's cursor sits in its top half.
+vi.mock('../../lib/terminal-registry', () => ({ getTerminalInstance: () => ({ rows: 24, buffer: { active: { baseY: 0, cursorY: 1, viewportY: 0 } } }) }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 ensureResizeObserver();
 
@@ -94,6 +95,31 @@ it('keeps properties above their source on the edge their teeth share with it', 
     expect(host.style.top).toBe('510px');
     expect(host.style.transform).toBe('translateY(-100%)');
     expect(host.style.height).toBe('');
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});
+
+it('covers its source from the top, except for `!`, which keeps clear of the cursor', () => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const source = { x: 0, y: 0, width: 1200, height: 800 };
+  const lath = {
+    animator: { framesAt: () => new Map([['source', { rect: source }]]) },
+    setContextPlacer: () => {},
+    notifyFrames: vi.fn(),
+  } as unknown as LathWallEngine;
+  const top = (context: { id: string; keyboard?: boolean }, mode: ContextMode) => {
+    act(() => root.render(<TerminalContextOverlay key={JSON.stringify([context, mode])} context={context} mode={mode} tool={false}
+      wall={source} source={source} multiPane={false} lath={lath} preferences={new Map()} />));
+    return container.querySelector<HTMLElement>('[data-test-context]')!.parentElement!.style.top;
+  };
+  try {
+    expect(top({ id: 'source' }, 'aux')).toBe('0px');
+    expect(top({ id: 'source', keyboard: true }, 'properties')).toBe('0px');
+    expect(top({ id: 'source', keyboard: true }, 'aux')).toBe('400px');
   } finally {
     act(() => root.unmount());
     container.remove();

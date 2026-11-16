@@ -84,13 +84,13 @@ Live and labeled only when a command key opened the context, while in command mo
 
 | Key | Action |
 |-----|--------|
-| `i` / `c` | Copy the Surface id / the directory |
-| `d` | Explain the title |
-| `m` | Move to workspace |
+| `s` / `c` | Copy the Surface id / the directory |
+| `w` | Move to workspace |
 | `r` | Reveal the directory |
 | `p` | Choose a port |
-| `1`–`5` | Port launch actions in row order, overflow included |
-| `w` / `t` | Toggle Watch / TODO |
+| `1`–`5` | Port launch actions shown, in row order |
+| `+` | Show overflowed port actions |
+| `a` / `t` | Toggle Watch / TODO |
 | `!` | Show and focus the terminal |
 | `k` | Keep open (preview slot) |
 | `[` / `]` | Tool document Back / Forward |

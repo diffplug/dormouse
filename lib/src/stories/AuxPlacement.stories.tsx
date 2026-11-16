@@ -13,7 +13,8 @@ import type { ContextMode } from '../components/wall/wall-context';
 import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
 
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
-type Props = { layout: Layout; width: number; height: number; sourceAtEnd: boolean; cursor: 'top' | 'bottom'; zoomed: boolean; mode: ContextMode };
+/** `via`: a right-click on the source's header, or `!` in command mode. */
+type Props = { layout: Layout; width: number; height: number; sourceAtEnd: boolean; cursor: 'top' | 'bottom'; zoomed: boolean; mode: ContextMode; via: 'click' | 'key' };
 const SOURCE = 'source';
 type Shape = Pick<Props, 'layout' | 'sourceAtEnd'>;
 const split = (dir: 'row' | 'col', nodes: LathNode[], weights = nodes.map(() => 1)): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node, i) => ({ node, weight: weights[i] }))) });
@@ -37,7 +38,7 @@ function boot(props: Props): LathPersistedLayout {
 }
 function PlacementWall(props: Props) {
   return <div data-placement-frame className="flex shrink-0 flex-col" style={{ width: props.width, height: props.height }}>
-    <Wall key={`${props.layout}-${props.sourceAtEnd}`} restoredLathLayout={boot(props)} initialMode="passthrough" />
+    <Wall key={`${props.layout}-${props.sourceAtEnd}-${props.via}`} restoredLathLayout={boot(props)} initialMode={props.via === 'key' ? 'command' : 'passthrough'} />
   </div>;
 }
 
@@ -62,14 +63,17 @@ function expectContained(element: Element, parent: Element) {
   expect(a.right).toBeLessThanOrEqual(b.right + 1);
   expect(a.bottom).toBeLessThanOrEqual(b.bottom + 1);
 }
-/** Right-click opens properties; the aux terminal is a switch away. */
-async function rightClickSourceHeader(source: string, mode: ContextMode = 'aux') {
+/** Right-click opens properties, the aux terminal a switch away; `!` opens the aux terminal itself. */
+async function rightClickSourceHeader(source: string, mode: ContextMode = 'aux', via: Props['via'] = 'click') {
   (getPlatform() as FakePtyAdapter).setProcessCwd(source, '/home/demo/projects/dormouse');
   const header = await requireElement(`[data-pane-header-for="${source}"]`, 'source header');
-  header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-  await requireElement('[data-context-mode="properties"]', 'terminal context properties');
-  if (mode === 'properties') return;
-  await userEvent.click(within(context()).getByRole('button', { name: 'Show aux terminal' }));
+  if (via === 'key') await userEvent.keyboard('!');
+  else {
+    header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+    await requireElement('[data-context-mode="properties"]', 'terminal context properties');
+    if (mode === 'properties') return;
+    await userEvent.click(within(context()).getByRole('button', { name: 'Show aux terminal' }));
+  }
   await requireElement('[data-aux-terminal] .xterm', 'aux terminal');
   const aux = getAux(source)!;
   // Fitting after output changes wrapping and can clip xterm's current prompt
@@ -78,8 +82,8 @@ async function rightClickSourceHeader(source: string, mode: ContextMode = 'aux')
   refitSession(aux.id);
   (getPlatform() as FakePtyAdapter).resumeAuxStartup(aux.id);
 }
-async function openContext(source: string, mode: ContextMode) {
-  await rightClickSourceHeader(source, mode);
+async function openContext(source: string, mode: ContextMode, via: Props['via']) {
+  await rightClickSourceHeader(source, mode, via);
   await settleTerminalContext();
   // Properties alone never start the aux terminal.
   if (mode === 'properties') { expect(getAux(source)).toBeUndefined(); return; }
@@ -96,9 +100,9 @@ async function openContext(source: string, mode: ContextMode) {
   expect(text.match(/\/home\/demo\/projects\/dormouse ❯/g)).toHaveLength(1);
   expect(input.buffer.active.viewportY).toBe(input.buffer.active.baseY);
 }
-function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
-  // Alone in the Wall, the aux terminal avoids the cursor; beside a neighbor, it takes the neighbor's side.
-  if (zoomed || layout === 'single') return cursor === 'top' ? 'bottom' : 'top';
+function expectedSide({ layout, zoomed, cursor, sourceAtEnd, via }: Props) {
+  // Alone in the Wall, it covers the top half, but from `!` avoids the cursor; beside a neighbor, it takes the neighbor's side.
+  if (zoomed || layout === 'single') return via === 'key' && cursor === 'top' ? 'bottom' : 'top';
   if (layout === 'grid') return 'right';
   if (layout === 'wide-bottom') return 'top';
   if (layout === 'rows') return sourceAtEnd ? 'top' : 'bottom';
@@ -123,7 +127,7 @@ async function prepare(args: Props) {
     expect(rect(sourcePane(id))).toEqual(before);
     expect({ cols: source.cols, rows: source.rows }).toEqual(size);
   };
-  await openContext(id, args.mode);
+  await openContext(id, args.mode, args.via);
   expectSourceUnchanged();
   await waitFor(() => expect(document.querySelector('[data-ring="outline"]')).toHaveAttribute('data-context-union', 'true'));
   const ring = document.querySelector('[data-ring="outline"]')!.closest('svg')!.parentElement!;
@@ -174,7 +178,7 @@ const meta = {
     platform.deferAuxStartup = true;
     return () => { platform.deferAuxStartup = false; };
   },
-  args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false, mode: 'aux' },
+  args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false, mode: 'aux', via: 'click' },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) } },
   play: async ({ args }) => { await prepare(args); },
 } satisfies Meta<typeof PlacementWall>;
@@ -194,8 +198,11 @@ export const BottomRow = story({ args: { layout: 'rows', sourceAtEnd: true } });
 export const WideBottomRow = story({ args: { layout: 'wide-bottom' }, globals: { theme: 'Dark (Visual Studio)' } });
 export const Grid = story({ args: { layout: 'grid' } });
 export const UnevenColumns = story({ args: { layout: 'uneven' } });
-export const CursorAtTop = story({ args: { cursor: 'top' } });
-export const CursorAtBottom = story();
+/** From `!`, a covering context keeps clear of the cursor. */
+export const CursorAtTop = story({ args: { cursor: 'top', via: 'key' } });
+export const CursorAtBottom = story({ args: { via: 'key' } });
+/** From a click it covers the top half wherever the cursor is, under the header clicked. */
+export const CoveringFromClick = story({ args: { cursor: 'top' } });
 export const ZoomedPane = story({ args: { layout: 'grid', zoomed: true } });
 export const NarrowWindow = story({ args: { width: 294, height: 620 } });
 export const ShortWindow = story({ args: { width: 580, height: 310 } });

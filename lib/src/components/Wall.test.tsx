@@ -5601,13 +5601,13 @@ it('labels the properties\' keys for `?` only, and takes `!` into the aux termin
   await key({ key: '?' });
   await flush();
   expect(context()!.dataset.contextMode).toBe('properties');
-  expect(context()!.textContent).toContain('[i]');
+  expect(context()!.textContent).toContain('[s]');
   await close();
   // A right-click opening has no keys.
   act(() => container.querySelector('[data-pane-header-for="surface:keys"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
   await flush();
   expect(context()!.dataset.contextMode).toBe('properties');
-  expect(context()!.textContent).not.toContain('[i]');
+  expect(context()!.textContent).not.toContain('[s]');
   await close();
 
   focus.mockClear();

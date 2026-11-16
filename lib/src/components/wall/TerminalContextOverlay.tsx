@@ -23,7 +23,10 @@ export function TerminalContextOverlay({ context, mode, focusRequest, title, too
   context: TerminalContextState; mode: ContextMode; focusRequest?: number; title?: string; tool: boolean; preview?: boolean; params?: Record<string, unknown>; wall: Rect; source: Rect;
   multiPane: boolean; lath: LathWallEngine; preferences: Map<string, ContextSide>;
 }) {
-  const [cursorSide] = useState(() => {
+  // Covering its source, the context takes the top half, where a header click came from;
+  // `!` means to type, so it keeps clear of the source's visible cursor instead.
+  const [coverSide] = useState<ContextSide>(() => {
+    if (!context.keyboard || mode !== 'aux') return 'top';
     const terminal = getTerminalInstance(context.id);
     return cursorHalfSide(terminal?.buffer.active, terminal?.rows ?? 0);
   });
@@ -31,7 +34,7 @@ export function TerminalContextOverlay({ context, mode, focusRequest, title, too
   const host = useRef<HTMLDivElement>(null);
   // The last placement, its side the next one's fallback.
   const placed = useRef<ContextPlacement | undefined>(undefined);
-  const place = (painted: Rect | undefined) => placeTerminalContext(wall, painted ?? source, multiPane, manual ?? placed.current?.side, cursorSide);
+  const place = (painted: Rect | undefined) => placeTerminalContext(wall, painted ?? source, multiPane, manual ?? placed.current?.side, coverSide);
   // Mount geometry only: children measure the host in layout effects that run before LathHost paints.
   const [initial] = useState(() => (placed.current = place(lath.animator.framesAt(nowMs()).get(context.id)?.rect)));
   const [shown, setShown] = useState<Omit<ContextPlacement, 'rect'>>(initial);
@@ -57,7 +60,7 @@ export function TerminalContextOverlay({ context, mode, focusRequest, title, too
       return context.closing ? null : { sourceId: context.id, element, side: next.side };
     });
     // `place` reads exactly these inputs
-  }, [lath, context.id, context.closing, manual, multiPane, cursorSide, wall.x, wall.y, wall.width, wall.height, source.x, source.y, source.width, source.height]);
+  }, [lath, context.id, context.closing, manual, multiPane, coverSide, wall.x, wall.y, wall.width, wall.height, source.x, source.y, source.width, source.height]);
   useLayoutEffect(() => () => lath.setContextPlacer(null), [lath]);
   // Properties grow and shrink with their rows between paints; the ring follows.
   // The terminal mode's host changes size only in the placer's paint.
