@@ -290,6 +290,25 @@ export const SETUP_CODE_DEAD_MESSAGE =
   'That setup code has expired. Show a new one on the computer and scan it again.';
 
 /**
+ * Shown when a signed-in phone scans a live code minted by a computer enrolled
+ * under a different Hosted account: the session can only spend its own
+ * account's codes, and signing out lets the scan register a passkey there.
+ */
+export const SETUP_CODE_OTHER_ACCOUNT_MESSAGE =
+  'This computer is on another Hosted account. Sign out to pair it.';
+
+/**
+ * The Relay refused to retire a scanned code under this session, and the code
+ * is live but belongs to another account ({@link SETUP_CODE_OTHER_ACCOUNT_MESSAGE}).
+ */
+export class SetupCodeOtherAccountError extends Error {
+  constructor() {
+    super(SETUP_CODE_OTHER_ACCOUNT_MESSAGE);
+    this.name = 'SetupCodeOtherAccountError';
+  }
+}
+
+/**
  * The Relay refused the `setupToken` off a scanned code
  * ({@link SETUP_TOKEN_INVALID_ERROR}). Its own class for the reason
  * {@link SessionExpiredError} is: the UI must react rather than report — drop
@@ -538,8 +557,11 @@ export class PocketClient {
    * off a scanned setup code. The Relay's acknowledgement carries a session, so
    * this also signs in.
    */
-  async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
-    const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });
+  async setup(
+    { setupToken, begin: begun }: { setupToken: string; begin?: SetupBeginResponse | undefined },
+    label: string,
+  ): Promise<SetupFinishResponse> {
+    const begin = begun ?? (await this.beginSetup(setupToken));
     // Excluded from the Relay's list, not this browser's: a retry — after a
     // refusal, or on a device that stored nothing — must not silently mint a
     // duplicate of a credential the account already holds, while an orphan the
@@ -594,6 +616,29 @@ export class PocketClient {
       expiresAt: finish.expiresAt,
     });
     return finish;
+  }
+
+  /**
+   * Start a registration with a scanned setup token, which also says which
+   * account minted it and which passkeys that account holds. Pass the answer
+   * to {@link setup} to register with it. Throws {@link SetupTokenInvalidError}
+   * for a dead code.
+   */
+  async beginSetup(setupToken: string): Promise<SetupBeginResponse> {
+    return this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });
+  }
+
+  /**
+   * Whether this browser has signed in or registered with any of `credentialIds`
+   * — false for a passkey on another account, or one the Relay never got.
+   */
+  holdsAnyCredential(credentialIds: readonly string[]): boolean {
+    try {
+      const held = new Set(this.#storage.knownCredentialIds());
+      return credentialIds.some((id) => held.has(id));
+    } catch {
+      return false;
+    }
   }
 
   /**

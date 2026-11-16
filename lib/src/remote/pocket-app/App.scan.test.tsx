@@ -18,6 +18,7 @@ import {
   generateNoiseKeyPair,
   toBase64Url,
   type PairingInvitation,
+  type SetupBeginResponse,
 } from 'remote-lib-common';
 
 import App, {
@@ -41,6 +42,7 @@ import {
   BURROW_UNAVAILABLE_MESSAGE,
   PAIRING_DENIAL_MESSAGES,
   SETUP_CODE_DEAD_MESSAGE,
+  SETUP_CODE_OTHER_ACCOUNT_MESSAGE,
   RelayRefusalError,
   SessionExpiredError,
   SetupTokenInvalidError,
@@ -69,7 +71,10 @@ const fake = vi.hoisted(() => ({
   hasPriorUse: false,
   sessionToken: null as string | null,
   accountId: 'owner' as string | null,
-  setup: vi.fn<(credential: { setupToken: string }, label: string) => Promise<unknown>>(),
+  setup: vi.fn<(credential: { setupToken: string; begin?: unknown }, label: string) => Promise<unknown>>(),
+  beginSetup: vi.fn<(token: string) => Promise<SetupBeginResponse>>(),
+  /** Whether the code's account holds a passkey this browser has used. */
+  holdsCodeAccountCredential: true as boolean,
   signin: vi.fn<() => Promise<unknown>>(),
   signOut: vi.fn<() => void>(),
   getPushConfig: vi.fn<() => Promise<string | null>>(),
@@ -141,7 +146,10 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     };
     close = () => fake.clientClose();
     openSocket = async () => undefined;
-    setup = (credential: { setupToken: string }, label: string) => fake.setup(credential, label);
+    setup = (credential: { setupToken: string; begin?: unknown }, label: string) =>
+      fake.setup(credential, label);
+    beginSetup = (token: string) => fake.beginSetup(token);
+    holdsAnyCredential = () => fake.holdsCodeAccountCredential;
     signin = () => fake.signin();
     signOut = () => fake.signOut();
     retireSetupToken = (token: string) => fake.retireSetupToken(token);
@@ -188,6 +196,21 @@ vi.mock('../../lib/terminal-registry', () => ({
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+/** What `setupBegin` answers for a code minted under the signed-in account. */
+const OWNER_BEGIN: SetupBeginResponse = {
+  challenge: 'challenge',
+  rpId: 'localhost',
+  accountId: 'owner',
+  existingCredentialIds: ['cred-1'],
+};
+
+/** The same, for a code minted under a second Hosted account. */
+const OTHER_BEGIN: SetupBeginResponse = {
+  ...OWNER_BEGIN,
+  accountId: 'other',
+  existingCredentialIds: ['cred-other'],
+};
 
 /** The label Pocket sends from an installed app; see `deviceLabel`. */
 const DEVICE_LABEL = PAIRING_DEVICE_LABELS[0];
@@ -243,6 +266,8 @@ beforeEach(() => {
     fake.sessionToken = 'tok';
     return {};
   });
+  fake.beginSetup.mockReset().mockResolvedValue(OWNER_BEGIN);
+  fake.holdsCodeAccountCredential = true;
   fake.signin.mockReset().mockImplementation(async () => {
     fake.sessionToken = 'tok';
     return {};
@@ -514,6 +539,72 @@ describe('a phone that is already signed in', () => {
 
     expect(alertText(container)).toBe(SETUP_CODE_DEAD_MESSAGE);
     expect(fake.pair).not.toHaveBeenCalled();
+  });
+
+  it('says the code is another account’s when its retirement is refused but it is live', async () => {
+    const { url, invitation } = await invitationUrl();
+    fake.hasPriorUse = true;
+    fake.retireSetupToken.mockRejectedValue(new SetupTokenInvalidError());
+    fake.beginSetup.mockResolvedValue(OTHER_BEGIN);
+    await boot();
+
+    await click(container, 'Sign in with passkey');
+    await pasteCode(url);
+
+    expect(fake.beginSetup).toHaveBeenCalledWith(invitation.setupToken);
+    expect(alertText(container)).toBe(SETUP_CODE_OTHER_ACCOUNT_MESSAGE);
+    expect(fake.setup).not.toHaveBeenCalled();
+    expect(fake.pair).not.toHaveBeenCalled();
+  });
+
+  it('keeps the dead-code message when the refused code is dead to the peek too', async () => {
+    const { url } = await invitationUrl();
+    fake.hasPriorUse = true;
+    fake.retireSetupToken.mockRejectedValue(new SetupTokenInvalidError());
+    fake.beginSetup.mockRejectedValue(new SetupTokenInvalidError());
+    await boot();
+
+    await click(container, 'Sign in with passkey');
+    await pasteCode(url);
+
+    expect(alertText(container)).toBe(SETUP_CODE_DEAD_MESSAGE);
+  });
+
+  it('registers, without signing in, when the code’s account holds none of this browser’s passkeys', async () => {
+    // A Pocket used with account A, signed out, scanning a code from a
+    // computer enrolled under account B: signing in could only reach A, under
+    // which B's code cannot be spent.
+    const { url, invitation } = await invitationUrl();
+    fake.hasPriorUse = true;
+    fake.beginSetup.mockResolvedValue(OTHER_BEGIN);
+    fake.holdsCodeAccountCredential = false;
+    fake.pair.mockResolvedValue({ ok: true, record: await knownBurrow(invitation.burrowId) });
+    await boot();
+
+    await pasteCode(url);
+
+    expect(fake.signin).not.toHaveBeenCalled();
+    // The peek's challenge is the one the registration answers.
+    expect(fake.beginSetup).toHaveBeenCalledOnce();
+    expect(fake.setup).toHaveBeenCalledWith(
+      { setupToken: invitation.setupToken, begin: OTHER_BEGIN },
+      DEVICE_LABEL,
+    );
+    expect(fake.retireSetupToken).not.toHaveBeenCalled();
+    expect(fake.pair).toHaveBeenCalledOnce();
+  });
+
+  it('asks for no passkey when a signed-out scan’s code is dead', async () => {
+    const { url } = await invitationUrl();
+    fake.hasPriorUse = true;
+    fake.beginSetup.mockRejectedValue(new SetupTokenInvalidError());
+    await boot();
+
+    await pasteCode(url);
+
+    expect(alertText(container)).toBe(SETUP_CODE_DEAD_MESSAGE);
+    expect(fake.signin).not.toHaveBeenCalled();
+    expect(fake.setup).not.toHaveBeenCalled();
   });
 
   it('registers when the Relay has never heard of the credential this browser holds', async () => {
