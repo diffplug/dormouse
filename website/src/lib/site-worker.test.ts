@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHECKOUT_PAGE } from "./hosted-pricing";
+import { POSTHOG_PROJECT_KEY } from "./site-analytics";
 
 type SiteWorker = {
   HOSTED_ACCOUNT_ORIGIN: string;
-  default: { fetch(request: Request, env: { ASSETS: { fetch(request: Request): Promise<Response> } }): Promise<Response> };
+  POSTHOG_PROJECT_KEY: string;
+  default: {
+    fetch(
+      request: Request,
+      env: { ASSETS: { fetch(request: Request): Promise<Response> } },
+      ctx?: { waitUntil(promise: Promise<unknown>): void },
+    ): Promise<Response>;
+  };
 };
 // Plain JavaScript Pages runs as is (`website/public/_worker.js`); a path
 // held in a variable keeps the type checker from asking for its declarations.
@@ -75,5 +83,54 @@ describe("the site Worker's /api/hosted/ forward", () => {
     const { response, fetch } = await through(new Request("https://dormouse.sh/api/other"));
     expect(await response.text()).toBe("static");
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("the site Worker's update-manifest count", () => {
+  it("sends to the project the site's visits go to", () => {
+    expect(worker.POSTHOG_PROJECT_KEY).toBe(POSTHOG_PROJECT_KEY);
+  });
+
+  /** A check with `headers`, and what it told PostHog once the count settles. */
+  async function check(headers: Record<string, string>, upstream: () => Promise<Response> = async () => new Response("{}")) {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => upstream());
+    vi.stubGlobal("fetch", fetch);
+    const waited: Promise<unknown>[] = [];
+    const response = await worker.default.fetch(
+      new Request("https://dormouse.sh/standalone-latest.json", { headers }),
+      { ASSETS },
+      { waitUntil: (promise) => waited.push(promise) },
+    );
+    expect(await response.text()).toBe("static");
+    await Promise.all(waited);
+    return fetch.mock.calls.map(([url, init]) => ({ url, body: JSON.parse(String(init?.body)), headers: [...new Headers(init?.headers).keys()] }));
+  }
+
+  it.each([
+    ["an official version", "2.0.0", "2.0.0"],
+    ["a modified build", "modified-2.0.0", "modified-2.0.0"],
+    ["anything else as other", "modified-2.0.0 d080b4f5", "other"],
+  ])("counts %s, with nothing else of the request's", async (_case, header, build) => {
+    const sent = await check({ "dormouse-build": header, "cf-connecting-ip": "203.0.113.9", "user-agent": "tauri", cookie: "a=b" });
+    expect(sent).toEqual([{
+      url: "https://us.i.posthog.com/i/v0/e/",
+      headers: ["content-type"],
+      body: {
+        api_key: POSTHOG_PROJECT_KEY,
+        event: "update check",
+        distinct_id: "dormouse.sh update check",
+        properties: { build, $process_person_profile: false, $geoip_disable: true },
+      },
+    }]);
+  });
+
+  it("counts a check that names no build as unreported", async () => {
+    const [sent] = await check({});
+    expect(sent!.body.properties.build).toBe("unreported");
+  });
+
+  it("serves the manifest when the count fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await check({ "dormouse-build": "2.0.0" }, async () => { throw new Error("offline"); })).toHaveLength(1);
   });
 });

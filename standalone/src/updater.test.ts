@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   burrowCommand: vi.fn(),
   /** The webview's baked mode, which gates every check. */
   relayMode: 'hosted' as 'hosted' | 'self-host',
+  /** The build stamp, whose version and officialness name the check. */
+  stamp: null as { version: string; commit: string; commitsSinceVersion: number | null; dirty: boolean; official: boolean; host: 'standalone' } | null,
   platform: null as {
     requestAppRestart?: () => Promise<boolean>;
     burrow?: { command: (cmd: string) => Promise<unknown> };
@@ -45,6 +47,10 @@ vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
   IS_WINDOWS: true,
   getPlatformOrNull: () => mocks.platform,
+}));
+
+vi.mock('dormouse-lib/lib/build-info', () => ({
+  readBuildStamp: () => mocks.stamp,
 }));
 
 vi.mock('dormouse-lib/host/relay-origin', () => ({
@@ -117,6 +123,7 @@ describe('updater', () => {
     mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
     mocks.relayMode = 'hosted';
+    mocks.stamp = null;
     mocks.burrowCommand.mockImplementation(async (cmd: string) =>
       cmd === 'networkPolicy' ? CHECKS_ON : null,
     );
@@ -357,6 +364,20 @@ describe('updater', () => {
   });
 
   describe('update check', () => {
+    const stamp = (official: boolean) =>
+      ({ version: '2.0.0', commit: 'd080b4f5', commitsSinceVersion: official ? 0 : 538, dirty: !official, official, host: 'standalone' as const });
+
+    it.each([
+      ['an official build by its version', stamp(true), { headers: { 'Dormouse-Build': '2.0.0' } }],
+      ['any other build as modified, with no commit', stamp(false), { headers: { 'Dormouse-Build': 'modified-2.0.0' } }],
+      ['nothing without a stamp', null, undefined],
+    ])('names %s', async (_case, buildStamp, options) => {
+      mocks.stamp = buildStamp;
+      checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.check).toHaveBeenCalledWith(options);
+    });
+
     it('handles a failed app-version lookup without an unhandled rejection', async () => {
       mocks.getVersion.mockRejectedValueOnce(new Error('version unavailable'));
 

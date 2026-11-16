@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { bakedRelayMode } from 'dormouse-lib/host/relay-origin';
+import { readBuildStamp } from 'dormouse-lib/lib/build-info';
 import { normalizeExternalUri } from 'dormouse-lib/lib/external-links';
 import { isRecord } from 'dormouse-lib/lib/is-record';
 import { loadJson, saveJson } from 'dormouse-lib/lib/local-json-store';
@@ -29,10 +30,22 @@ export function openUrl(url: string, context: string): void {
     .catch((e) => console.error(`[updater] Failed to open ${context}:`, e));
 }
 
+/**
+ * The version label a check names (`docs/specs/deploy.md` → "Update
+ * manifest"): the release version, prefixed `modified-` for any build that is
+ * not official. Never the commit or the commits since the release.
+ */
+function buildLabel(): string | null {
+  const stamp = readBuildStamp();
+  if (!stamp) return null;
+  return stamp.official ? stamp.version : `modified-${stamp.version}`;
+}
+
 async function checkForUpdate(): Promise<Update | null> {
   if (BROWSER_DEV_HOST) return null;
   const { check } = await import('@tauri-apps/plugin-updater');
-  return check();
+  const label = buildLabel();
+  return check(label === null ? undefined : { headers: { 'Dormouse-Build': label } });
 }
 
 async function getAppVersion(): Promise<string> {

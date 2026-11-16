@@ -1,8 +1,8 @@
 /**
- * Which build this webview is, for Settings → About
- * (`docs/specs/deploy.md` → "Build stamp"). **Display only**: the stamp's
- * inputs are environment variables anyone building from source can set, so
- * nothing may decide trust, updates, or features from it.
+ * Which build this webview is, for Settings → About and the update check's
+ * version label (`docs/specs/deploy.md` → "Build stamp"). **Nothing more**:
+ * the stamp's inputs are environment variables anyone building from source can
+ * set, so nothing may decide trust, updates, or features from it.
  */
 
 import type { VersionMetadata } from 'dor/commands/types';
