@@ -12,7 +12,7 @@ import {
   TerminalIcon,
   WindowsLogoIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
 import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
@@ -20,7 +20,6 @@ import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
 import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
-import phoneMockupUrl from "../assets/phone-mockup.webp";
 import elevenLabsGrantsUrl from "../assets/elevenlabs-grants.png";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
@@ -203,6 +202,45 @@ const FEATURE_VIDEO_VARIANTS = {
   cover: "aspect-video object-cover",
   intrinsic: "h-auto",
 } as const;
+
+const PocketDemo = lazy(() => import("../components/pocket-demo/PocketDemo"));
+
+/** The real Pocket UI playing a script in a phone frame. It mounts once a third
+ *  of the phone is on screen, so the script starts in view, and unmounts once
+ *  it has scrolled away, so it starts over on return. */
+function PocketDemoPhone({ className = "" }: { className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    const phone = ref.current;
+    if (!phone) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.intersectionRatio >= 0.35) setPlaying(true);
+      else if (!entry.isIntersecting) setPlaying(false);
+    }, { threshold: [0, 0.35] });
+    observer.observe(phone);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div
+      ref={ref}
+      role="img"
+      aria-label="Dormouse Pocket on a phone: a request typed to a coding agent, its question answered with two gestures, then the README it changed, with a 3D cheese wedge turning in it"
+      className={`w-full rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 shadow-[0_24px_90px_rgba(0,0,0,0.55)] ${className}`}
+    >
+      <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
+      <div className="aspect-[390/760] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
+        <div className="h-full" aria-hidden="true" inert>
+          {playing ? (
+            <Suspense fallback={null}>
+              <PocketDemo still={prefersReducedMotion()} />
+            </Suspense>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function FeatureVideo({
   src,
@@ -854,12 +892,9 @@ export default function Home() {
           <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
         </section>
         {/* Section 2: image left, text right */}
-        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <img
-            src={phoneMockupUrl}
-            alt="Dormouse Pocket running on a phone"
-            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
-          />
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,390px)_1fr] gap-8 md:gap-12 items-start`}>
+          {/* A phone's own width: narrower, the mode bar truncates its labels. */}
+          <PocketDemoPhone className="order-2 md:order-1 mx-auto max-w-[390px]" />
           <div className="order-1 md:order-2">
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
               Push notifications you can self-host

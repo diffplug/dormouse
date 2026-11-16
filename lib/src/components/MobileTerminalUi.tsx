@@ -166,11 +166,35 @@ export interface MobileTerminalUiProps {
    */
   browserShown?: boolean;
   interactive?: boolean;
+  /**
+   * Driven by a script's synthetic events on a page someone is reading, as the
+   * homepage's Pocket demo is: the page's keys and pastes stay the page's, and
+   * opening Type focuses nothing.
+   */
+  scripted?: boolean;
   /** What heads the Sessions screen, above its own bar: the consumer's way out of the wall. */
   sessionsHeader?: ReactNode;
   fillViewport?: boolean;
   className?: string;
   style?: CSSProperties;
+}
+
+/** A scripted press (`scripted`) is a synthetic event with no live pointer
+ *  behind it, which the browser refuses to capture; a real one never throws. */
+function capturePointer(element: Element, pointerId: number): void {
+  try {
+    element.setPointerCapture(pointerId);
+  } catch {
+    // No live pointer: nothing to capture.
+  }
+}
+
+function releasePointer(element: Element, pointerId: number): void {
+  try {
+    element.releasePointerCapture(pointerId);
+  } catch {
+    // No live pointer: nothing was captured.
+  }
 }
 
 /** A physical keyboard's named keys; Enter and Tab take their Shift forms. */
@@ -711,6 +735,7 @@ export function MobileTerminalUi({
   settings,
   browserShown = false,
   interactive = true,
+  scripted = false,
   sessionsHeader,
   fillViewport = false,
   className,
@@ -789,8 +814,8 @@ export function MobileTerminalUi({
   const openComposer = useCallback(() => {
     if (!interactive) return;
     flushSync(() => setComposing(true));
-    composerFieldRef.current?.focus({ preventScroll: true });
-  }, [interactive]);
+    if (!scripted) composerFieldRef.current?.focus({ preventScroll: true });
+  }, [interactive, scripted]);
 
   const closeComposer = useCallback(() => {
     composerFieldRef.current?.blur();
@@ -853,7 +878,7 @@ export function MobileTerminalUi({
   // back from the page as a `paste` on the same targets.
   const confirming = pendingGestureConfirmation !== null;
   useEffect(() => {
-    if (!terminalInteractive || composing || confirming || view !== 'terminal') return;
+    if (scripted || !terminalInteractive || composing || confirming || view !== 'terminal') return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const root = rootRef.current;
       if (!root || event.defaultPrevented || isComposingKey(event)) return;
@@ -877,7 +902,7 @@ export function MobileTerminalUi({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('paste', onNativePaste);
     };
-  }, [activeSessionId, composing, confirming, onPaste, sendInput, terminalInteractive, view]);
+  }, [activeSessionId, composing, confirming, onPaste, scripted, sendInput, terminalInteractive, view]);
 
   useEffect(() => {
     if (!terminalInteractive || view !== 'terminal') closeComposer();
@@ -1044,7 +1069,7 @@ export function MobileTerminalUi({
       event.stopPropagation();
       cursorPointerIdRef.current = event.pointerId;
       cursorPointerTargetRef.current = targetAtPointer(event);
-      event.currentTarget.setPointerCapture(event.pointerId);
+      capturePointer(event.currentTarget, event.pointerId);
       dispatchMouseFromPointer('mousedown', event, cursorPointerTargetRef.current);
       return;
     }
@@ -1052,7 +1077,7 @@ export function MobileTerminalUi({
     if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    capturePointer(event.currentTarget, event.pointerId);
     clearGestureCompletionTimer();
     setPendingGestureConfirmation(null);
     completedGesturePointerIdRef.current = null;
@@ -1122,7 +1147,7 @@ export function MobileTerminalUi({
     event.preventDefault();
     event.stopPropagation();
     edgeScrollRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    releasePointer(event.currentTarget, event.pointerId);
     if (event.type === 'pointerup') {
       scrollEdgeLines(scroll.sessionId, scroll.motion.move(event.clientY, event.timeStamp), event.clientX, event.clientY);
       // Mouse drags still work in desktop previews, but do not fling on release.
@@ -1153,7 +1178,7 @@ export function MobileTerminalUi({
       dispatchMouseFromPointer('mouseup', event, targetAtPointer(event));
       cursorPointerIdRef.current = null;
       cursorPointerTargetRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
 
@@ -1162,20 +1187,20 @@ export function MobileTerminalUi({
       event.preventDefault();
       event.stopPropagation();
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
     if (state.phase === 'idle' && completedGesturePointerIdRef.current === event.pointerId) {
       event.preventDefault();
       event.stopPropagation();
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    releasePointer(event.currentTarget, event.pointerId);
 
     const nextState = updateMobileGesture(state, localPointerPoint(event));
     const result = finishMobileGesture(nextState);
@@ -1200,19 +1225,19 @@ export function MobileTerminalUi({
       dispatchMouseFromPointer('mouseup', event, cursorPointerTargetRef.current ?? targetAtPointer(event));
       cursorPointerIdRef.current = null;
       cursorPointerTargetRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
 
     const state = gestureStateRef.current;
     if (state.phase === 'complete' && state.pointerId === event.pointerId) {
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
     if (completedGesturePointerIdRef.current === event.pointerId) {
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
