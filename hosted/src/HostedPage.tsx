@@ -164,7 +164,10 @@ export function HostedPage({
       </>
     );
 
-  /** Checkout for `plan`, or why it cannot show; `ref` overrides the one this load arrived with. */
+  /**
+   * Checkout for `plan`, or why it cannot show. With `ref`, overriding the one
+   * this load arrived with, the plan was picked on a card.
+   */
   const checkoutFor = (plan: Plan | null, ref?: HostedRef) =>
     !summary ? (
       billingUnread
@@ -179,6 +182,7 @@ export function HostedPage({
         key={summary.founding?.cohort ?? "closed"}
         billing={summary}
         plan={plan}
+        picked={!!ref}
         busy={busy}
         onPurchase={ref ? (chosen, price) => purchase(chosen, price, ref) : purchase}
       />
@@ -343,6 +347,8 @@ export function HostedPage({
                     {confirmed && (
                       <p className={HELP_CLASS}>Buying to approve a computer? Open the link from Dormouse on it again.</p>
                     )}
+                    {/* A founder's one choice, ahead of the plan's details. */}
+                    <div className="mb-6 empty:hidden">{founders}</div>
                     <PlanConfirmation billing={{ ...summary, plan: summary.plan }} busy={busy} onManage={manageBilling} />
                     {summary.withdrawal && (
                       <WithdrawalFunction offer={summary.withdrawal} plan={summary.plan} busy={busy} onWithdraw={withdraw} />
@@ -352,9 +358,9 @@ export function HostedPage({
                   <>
                     <p className={HELP_CLASS}>This account has no plan.</p>
                     <ChoosePlan />
+                    {founders}
                   </>
                 )}
-                {founders}
                 {backToAccount}
               </section>
             ) : session ? (
