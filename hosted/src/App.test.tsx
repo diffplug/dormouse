@@ -616,7 +616,6 @@ describe("the plan section", () => {
     expect(text()).toContain("You left the founders row.");
     expect(text()).not.toContain("Leave the founders row");
   });
-
 });
 
 describe("withdrawal and closure", () => {

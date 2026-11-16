@@ -329,8 +329,8 @@ export function PlanCards({
   buy: Buy;
   /** Founding at the price it sells at; null leaves its card out. */
   founding?: Tier | null;
-  /** The Free card's button and the line under it; this site's download by default. */
-  free?: { action: ReactNode; footnote: string };
+  /** The Free card's button, to a page of the site, and the line under it; the download by default. */
+  free?: { label: string; path: string; footnote: string };
   /** The site's origin, for cards shown on another one. */
   site?: string;
 }) {
@@ -341,7 +341,13 @@ export function PlanCards({
       <div className={`grid gap-4 ${founding ? "@2xl:grid-cols-3" : "@2xl:grid-cols-2"}`}>
         <FreeCard
           to={to}
-          action={free?.action ?? <a href={`${sitePath("/")}#download`} className={ACTION_CLASS}>Download</a>}
+          action={
+            free ? (
+              <a {...to(free.path)} className={ACTION_CLASS}>{free.label}</a>
+            ) : (
+              <a href={`${sitePath("/")}#download`} className={ACTION_CLASS}>Download</a>
+            )
+          }
           footnote={free?.footnote ?? "Win/Mac/Linux or VS Code"}
         />
         <HostedCard to={to} buy={buy} />

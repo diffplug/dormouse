@@ -1,6 +1,7 @@
 import { useEffect, useRef, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
 import { CheckIcon } from "@phosphor-icons/react";
 import { DOOR_SHAPE_CLASS } from "dormouse-lib/components/design";
+import { HOSTED_REFS, type HostedRef } from "dormouse-lib/lib/hosted-links";
 import {
   ACCENT_TEXT_CLASS,
   CARD_BASE_CLASS,
@@ -73,7 +74,7 @@ export interface HostedPageProps {
   checkoutPlan?: Plan | null;
   /** Back from Stripe with a checkout this page just confirmed. */
   confirmed?: boolean;
-  purchase?: (plan: Plan, price: number) => void;
+  purchase?: (plan: Plan, price: number, ref?: HostedRef) => void;
   manageBilling?: () => void;
   saveFounder?: (shown: boolean, name: string) => void;
   /** Leaves checkout or billing for the account page. */
@@ -163,6 +164,28 @@ export function HostedPage({
       </>
     );
 
+  /** Checkout for `plan`, or why it cannot show; `ref` overrides the one this load arrived with. */
+  const checkoutFor = (plan: Plan | null, ref?: HostedRef) =>
+    !summary ? (
+      billingUnread
+    ) : summary.plan ? (
+      <>
+        <p className={HELP_CLASS}>This account already has {PLAN_NAMES[summary.plan]}.</p>
+        <ManageBilling busy={busy} onManage={manageBilling} />
+      </>
+    ) : (
+      // A new founding step asks for agreement again, both boxes unticked.
+      <Checkout
+        key={summary.founding?.cohort ?? "closed"}
+        billing={summary}
+        plan={plan}
+        busy={busy}
+        onPurchase={ref ? (chosen, price) => purchase(chosen, price, ref) : purchase}
+      />
+    );
+  // An account with no plan, sent to approve a computer, is offered the plans.
+  const offering = !!(enrolling?.code && session && noPlan);
+
   if (view === "closed")
     return (
       <HostedShell themeControl={themeControl}>
@@ -172,7 +195,7 @@ export function HostedPage({
 
   return (
     // The plan cards sit side by side, as on the Hosted page.
-    <HostedShell themeControl={themeControl} mainWidth={enrolling?.code && session && noPlan ? "max-w-4xl" : undefined}>
+    <HostedShell themeControl={themeControl} mainWidth={offering ? "max-w-4xl" : undefined}>
         <h1 className={`mb-3 text-balance leading-tight ${PAGE_TITLE_CLASS}`}>
           {enrolling
             ? enrolling.purpose === "voice"
@@ -249,7 +272,7 @@ export function HostedPage({
                 {enrolling.code ? (
                   noPlan ? (
                     <>
-                      <NoPlanOffer billing={summary} busy={busy} unread={billingUnread} onPurchase={purchase} />
+                      <NoPlanOffer billing={summary} checkout={(plan) => checkoutFor(plan, HOSTED_REFS.hostedNoPlan)} />
                       <p className={`mt-8 mb-2 ${MUTED_TEXT_CLASS}`}>
                         Subscribed with another account? Sign in with it; this
                         code stays on this page.
@@ -306,17 +329,7 @@ export function HostedPage({
               </section>
             ) : session && view === "checkout" ? (
               <section aria-label="Checkout">
-                {!summary ? (
-                  billingUnread
-                ) : summary.plan ? (
-                  <>
-                    <p className={HELP_CLASS}>This account already has {PLAN_NAMES[summary.plan]}.</p>
-                    <ManageBilling busy={busy} onManage={manageBilling} />
-                  </>
-                ) : (
-                  // A new founding step asks for agreement again, both boxes unticked.
-                  <Checkout key={summary.founding?.cohort ?? "closed"} billing={summary} plan={checkoutPlan} busy={busy} onPurchase={purchase} />
-                )}
+                {checkoutFor(checkoutPlan)}
                 {backToAccount}
               </section>
             ) : session && view === "billing" ? (

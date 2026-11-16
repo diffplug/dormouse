@@ -33,10 +33,7 @@ import {
   SECTION_CLASS,
 } from "dormouse-lib/site/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
-import {
-  fetchCohort,
-  type Cohort,
-} from "../lib/hosted-cohorts";
+import { useCohort } from "../lib/hosted-cohorts";
 import {
   CHECKOUT_OPEN,
   FOUNDING_COHORT_SIZE,
@@ -156,7 +153,7 @@ function FaqEntry({ question, children }: { question: string; children: React.Re
 }
 
 export default function Hosted() {
-  const [cohort, setCohort] = useState<Cohort>({ seatsLeft: null, founders: null });
+  const cohort = useCohort();
   const [checkoutTodo, setCheckoutTodo] = useState<Tier | null>(null);
   // The visit's ref, which checkout carries on to Stripe.
   const [ref, setRef] = useState<HostedRef | "other" | null>(null);
@@ -171,12 +168,6 @@ export default function Hosted() {
     }),
     [ref],
   );
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetchCohort(controller.signal).then(setCohort);
-    return () => controller.abort();
-  }, []);
 
   // Off the address bar on arrival, and onto this visit's pageview and checkout links.
   useEffect(() => {

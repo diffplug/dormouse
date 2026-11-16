@@ -44,7 +44,6 @@ import {
   TERMS_VERSION,
   type Plan,
 } from "../server/policy-constants";
-import { HOSTED_REFS } from "dormouse-lib/lib/hosted-links";
 import { useDocsThemedBody } from "dormouse-lib/site/docs-paint";
 import { HostedPage, type View } from "./HostedPage";
 import type { BillingSummary } from "../server/billing-summary";
@@ -444,10 +443,10 @@ export function App({
     setError(keepRead);
     history.replaceState(null, "", session ? "/account" : "/login");
   };
-  const purchase = (plan: Plan, price: number) =>
+  const purchase = (plan: Plan, price: number, ref = checkout?.ref ?? null) =>
     act("checkout", async () => {
       try {
-        await startCheckout(plan, price, checkout?.ref ?? (enrollingRef.current ? HOSTED_REFS.hostedNoPlan : null));
+        await startCheckout(plan, price, ref);
       } catch (error) {
         if (!(error instanceof PriceChangedError)) throw error;
         // Read the price checkout would charge now, and ask again.

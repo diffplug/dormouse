@@ -12,6 +12,7 @@
  * renders without it rather than showing an error. The price beside them is
  * prerendered, so a provider outage costs the page nothing it sells.
  */
+import { useEffect, useState } from "react";
 import { FOUNDING_COHORTS_CLOSED } from "./hosted-pricing";
 
 /**
@@ -77,12 +78,26 @@ function founders(value: unknown): Founders | null {
   return { total: all, shown: valid };
 }
 
+/** What the founding card shows before, or without, the endpoint's answer. */
+export const NO_COHORT: Cohort = { seatsLeft: null, founders: null };
+
+/** The open cohort, fetched once on mount. */
+export function useCohort(): Cohort {
+  const [cohort, setCohort] = useState(NO_COHORT);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchCohort(controller.signal).then(setCohort);
+    return () => controller.abort();
+  }, []);
+  return cohort;
+}
+
 export async function fetchCohort(signal?: AbortSignal): Promise<Cohort> {
   try {
     const response = await fetch(COHORT_ENDPOINT, { signal, headers: { accept: "application/json" } });
-    if (!response.ok) return { seatsLeft: null, founders: null };
+    if (!response.ok) return NO_COHORT;
     const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null) return { seatsLeft: null, founders: null };
+    if (typeof body !== "object" || body === null) return NO_COHORT;
     const fields = body as Record<string, unknown>;
     // Seats are for the cohort whose price this build prerendered: after a
     // cohort closes and before the next deploy, they would sit beside the
@@ -90,6 +105,6 @@ export async function fetchCohort(signal?: AbortSignal): Promise<Cohort> {
     const seatsLeft = fields.cohort === FOUNDING_COHORTS_CLOSED ? (count(fields.seatsLeft) ?? null) : null;
     return { seatsLeft, founders: founders(fields.founders) };
   } catch {
-    return { seatsLeft: null, founders: null };
+    return NO_COHORT;
   }
 }
