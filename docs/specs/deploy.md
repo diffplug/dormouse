@@ -219,7 +219,7 @@ Source of truth: `syncPublications` in `scripts/publish-blyg.mjs`; `.github/work
 
 ## Hosted account releases
 
-See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands. A desktop release waits on Hosted for the one-time link version ([Release checklist](#release-checklist)).
+See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands. [Release checklist](#release-checklist) owns when a desktop release waits on Hosted.
 
 ## Future
 
