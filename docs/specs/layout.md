@@ -29,13 +29,15 @@ Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"
 
 Every Pane header ends with the pane-action group: zoom/unzoom, minimize, kill.
 
-The label is the `DerivedHeader` (`docs/specs/terminal-state.md`). Click renames, except on a preview slot, whose label is drag area; right-click — or `>` in command mode — opens the terminal context.
+The label is the `DerivedHeader` (`docs/specs/terminal-state.md`). Click renames, except on a preview slot, whose label is drag area; right-click opens the terminal context ([Header context menu](#header-context-menu)).
 
 Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`.
 
 #### Header context menu
 
-**Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. A Tool's context displays its primary terminal (`docs/specs/terminal-context.md` → Tool context); application mouse ownership: `docs/specs/mouse-and-clipboard.md` → Terminal context input.
+**Must open the terminal context from terminal header, body, and command-mode `a`, `?`, and `!` entry points.** Browser-only Surfaces and Doors have no context.
+
+**Must show the context in one of two modes, each offering the other**: properties (the Surface id, directory, and port rows) or the terminal (the helper, or a Tool's primary terminal). **Must open on properties, except from `!` and a Tool's Terminal Context button, which open on the terminal**, and a refused source closure, which reveals the helper there (`docs/specs/terminal-context.md` → Promotion and source closure). A Tool's context displays its primary terminal (`docs/specs/terminal-context.md` → Tool context); application mouse ownership: `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
 **Must render one context per Wall in a stable Wall-level overlay**, anchored to the invoking source and following its painted bounds without resizing panes or remounting the helper. An outside pointer press or explicit close dismisses it; its copy editors count as inside.
 
@@ -209,7 +211,7 @@ Source of truth: `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard
 
 `docs/specs/shortcuts.md` tables every binding; this section owns the dispatch behavior behind it.
 
-**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits the symbol bindings; a letter verb matches its capital only under Caps Lock without Shift; Option/AltGr permits `|`, `%`, `"`, `>`.
+**Must leave Cmd/Ctrl/Alt chords unhandled except swaps and printed symbols** ([Spatial navigation](#spatial-navigation)): Shift permits the symbol bindings; a letter verb matches its capital only under Caps Lock without Shift; Option/AltGr permits `|`, `%`, `"`, `?`, `!`.
 
 **Must use `,` to rename the selected terminal pane or Workspace tab in command mode**, without activating an inactive Workspace.
 

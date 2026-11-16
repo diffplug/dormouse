@@ -119,18 +119,21 @@ export function BreakToolButton({ surfaceId }: { surfaceId: string }) {
   );
 }
 
-/** Toggles a Tool's Terminal Context, which shows its primary terminal
- *  (`docs/specs/terminal-context.md` -> Tool context), from under the button. */
+/** Toggles a Tool's Terminal Context showing its primary terminal
+ *  (`docs/specs/terminal-context.md` -> Tool context), from under the button;
+ *  an open properties view switches to the terminal instead. */
 export function TerminalContextButton({ surfaceId }: { surfaceId: string }) {
   const context = useContext(TerminalContextContext);
   const open = context.id === surfaceId;
+  const shown = open && context.mode === 'aux';
   return (
     <button type="button" className={`${chromeButton()} shrink-0`}
-      title="Terminal context" aria-label="Terminal context" aria-expanded={open}
+      title="Terminal context" aria-label="Terminal context" aria-expanded={shown}
       onClick={event => {
         event.stopPropagation();
-        if (open) context.close();
-        else { const rect = event.currentTarget.getBoundingClientRect(); context.open(surfaceId, { origin: { x: rect.left, y: rect.bottom } }); }
+        if (shown) context.close();
+        else if (open) context.setMode('aux');
+        else { const rect = event.currentTarget.getBoundingClientRect(); context.open(surfaceId, { origin: { x: rect.left, y: rect.bottom }, mode: 'aux' }); }
       }}><TerminalIcon size={14} /></button>
   );
 }

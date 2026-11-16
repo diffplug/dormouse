@@ -2,7 +2,9 @@ import { edgeAxis, type Edge, type Rect } from '../../lib/lath/model';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 
 export type ContextSide = Edge;
-export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[] };
+/** `anchor`: the edge a panel shorter than `rect` keeps — the one touching the source
+ *  beside it, or a covering panel's outer edge. */
+export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[]; anchor: 'top' | 'bottom' };
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
 /** Adjacent helpers overlap the source only by their teeth, which the rect includes. */
 const OVERLAP = TERMINAL_CONTEXT_TEETH_PX;
@@ -40,14 +42,14 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
   }).filter(candidate => candidate.rect.width >= MIN_WIDTH && candidate.rect.height >= MIN_HEIGHT);
   const chosen = candidates.find(candidate => candidate.side === preferred)
     ?? candidates.reduce<typeof candidates[number] | undefined>((best, candidate) => !best || candidate.rect.width * candidate.rect.height > best.rect.width * best.rect.height ? candidate : best, undefined);
-  if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side) };
+  if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side), anchor: chosen.side === 'top' ? 'bottom' : 'top' };
 
   // Cover the source's half on its own edges, as adjacent helpers align with theirs.
   // Small sources may borrow Wall space for usable chrome.
   const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback;
   const width = Math.min(wall.width, Math.max(source.width, MIN_WIDTH));
   const height = Math.min(wall.height, Math.max(source.height / 2, MIN_HEIGHT));
-  return { side, available: ['top', 'bottom'], rect: {
+  return { side, available: ['top', 'bottom'], anchor: side === 'bottom' ? 'bottom' : 'top', rect: {
     x: clamp(source.x, wall.x, right - width),
     y: clamp(side === 'bottom' ? source.y + source.height - height : source.y, wall.y, bottom - height),
     width, height,

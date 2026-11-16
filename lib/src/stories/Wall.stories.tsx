@@ -222,7 +222,7 @@ export const MultipleRingingSessions: Story = {
   },
 };
 
-/** Real context and helper lifecycle, backed by the deterministic demo shell. */
+/** Real context, backed by the deterministic demo shell: right-click opens its properties. */
 export const TerminalContext: Story = {
   args: { initialPaneIds: ['surface:1'], initialMode: 'passthrough' },
   parameters: { fakePty: { scenario: SCENARIO_SHELL_PROMPT } },
@@ -231,6 +231,18 @@ export const TerminalContext: Story = {
     const header = await requireElement('[data-pane-header-for="surface:1"]', 'terminal header');
     header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
     await settleTerminalContext();
+  },
+};
+
+/** The same context switched to its aux terminal, started on that first showing. */
+export const TerminalContextAux: Story = {
+  ...TerminalContext,
+  play: async (context) => {
+    await TerminalContext.play!(context);
+    const show = await requireElement<HTMLButtonElement>('[data-terminal-context] button[aria-label="Show aux terminal"]', 'aux terminal switch');
+    show.click();
+    await requireElement('[data-helper-terminal] .xterm', 'aux terminal');
+    await settleTerminals();
   },
 };
 

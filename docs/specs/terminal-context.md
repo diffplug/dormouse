@@ -6,14 +6,14 @@
 
 ## Helper lifecycle
 
-- **Must create at most one helper per source, lazily on first context opening.** Closing the source during startup cancels creation. Helpers cannot have helpers.
+- **Must create at most one helper per source, lazily on its first showing.** Closing the source during startup cancels creation. Helpers cannot have helpers.
 - **Must start with the configured shell in the source PTY's process directory, as the host reads it (`getCwd`), never the directory the source reports**, using the ordinary split fallback when unavailable. **Where the host cannot read it** (Windows, which has no such read, or a failed read), **must start in the local directory the source reports**; a source reporting none starts in the host default. Shell exports and virtual environments are not inherited. SSH integration is outside this feature.
 - **Never write to a helper's PTY on its own**: a helper starts its shell and runs nothing.
 - **Must keep a helper as the user left it across reopening**, its shell, scrollback, and directory, whether or not it has been used; only Reset replaces it.
 - **Must hide a retained helper without terminating its PTY**; revealing or promoting reuses the same xterm element. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
 - **Must keep a helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
-- **Must pause exit and process-inspection polling while the context is hidden**, its Workspace out of view included. Reopening publishes a helper's exit; source closure inspects work on demand.
+- **Must pause exit and process-inspection polling while the helper is not shown**, its Workspace out of view included. Reopening publishes a helper's exit; source closure inspects work on demand.
 
 **Must make Reset an explicit discard**, confirmed first; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one in the source's current directory.
 
@@ -29,7 +29,7 @@ Workspace movement: `docs/specs/standalone.md` → Transfer.
 
 **Must close an idle helper with its source**, even when it has user input or scrollback. The idle shell itself is not running work. Existing source-work confirmation remains applicable.
 
-**Must block source closure while its helper has running work**, warn, and reveal the helper. The user stops the work there and retries closure; no force-close-both or automatic promotion is offered. Failed process inspection keeps both terminals and reports the error. CLI attempts to close such a source return failure.
+**Must block source closure while its helper has running work**, warn, and show the helper. The user stops the work there and retries closure; no force-close-both or automatic promotion is offered. Failed process inspection keeps both terminals and reports the error. CLI attempts to close such a source return failure.
 
 **Must include hidden helper work in shutdown checks**, including helpers whose source Surface or Workspace is pending kill. The helper's host inspection also detects background descendants; unresolved inspection, including a process table missing the live PTY process, counts conservatively as work. An idle answer stands until the helper next receives input. **Never count a Windows shell's own processes as work**: Git Bash's MSYS bash beneath its launcher, `wsl.exe`'s relay, host and console. Inspection cannot see work inside WSL or past an MSYS exec; a foreground command there still counts through shell integration. Minimizing the source hides its context and retains the helper.
 

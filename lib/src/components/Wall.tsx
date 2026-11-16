@@ -1,6 +1,6 @@
 import { captureToolParams } from './wall/tool-transfer';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
-import { TerminalContextContext, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
+import { TerminalContextContext, type ContextMode, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
 import { TERMINAL_CONTEXT_EXIT_MS } from './design';
 import { motionIsInstant } from '../lib/ui-geometry';
 import type { PortMode } from './wall/TerminalContextView';
@@ -270,6 +270,7 @@ export function Wall({
   const activeRef = useRef(active);
   activeRef.current = active;
   const [terminalContext, setTerminalContext] = useState<TerminalContextState | null>(null);
+  const [contextMode, setContextMode] = useState<ContextMode>('properties');
   const terminalContextRef = useRef(terminalContext);
   terminalContextRef.current = terminalContext;
   const contextLaunchGeneration = useRef(0);
@@ -606,6 +607,7 @@ export function Wall({
     if (door) handleReattachRef.current(door, { enterPassthrough: false });
     setConfirmKill(null);
     setTerminalContext({ id, warning });
+    setContextMode('aux');
   }, []);
 
   /** Selection after the selected Surface is killed: in command mode, the next
@@ -2399,7 +2401,14 @@ export function Wall({
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,
-    open: (id: string, options?: TerminalContextOpenOptions) => { if (toolPendingFromParams(lath.getMeta(id)?.params) || isHelperSession(id) || isClosingSurface(id) || lath.isDying(id)) return; cancelContextPortLaunches(); setTerminalContext({ id, ...options }); },
+    mode: contextMode,
+    setMode: setContextMode,
+    open: (id: string, options?: TerminalContextOpenOptions) => {
+      if (toolPendingFromParams(lath.getMeta(id)?.params) || isHelperSession(id) || isClosingSurface(id) || lath.isDying(id)) return;
+      cancelContextPortLaunches();
+      setTerminalContext({ id, ...options });
+      setContextMode(options?.mode ?? 'properties');
+    },
     close: () => {
       cancelContextPortLaunches();
       const instant = motionIsInstant();
@@ -2423,7 +2432,7 @@ export function Wall({
       enterPassthrough(helper.id);
     },
     openPort: openContextPort,
-  }), [contextSourceId, terminalContext, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
+  }), [contextSourceId, terminalContext, contextMode, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -2456,7 +2465,7 @@ export function Wall({
     enterPassthrough,
     enterCommandMode,
     minimizePane,
-    openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
+    openTerminalContext: (id, options) => contextActions.open(id, options),
     requestKill,
     reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,

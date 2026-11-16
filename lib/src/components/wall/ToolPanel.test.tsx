@@ -6,14 +6,14 @@ import { ToolPanel } from './ToolPanel';
 import * as browserController from './agent-browser-surface-controller';
 import { commitPreviewTransition, PREVIEW_READY_FALLBACK_MS, PREVIEW_REVEAL_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
 import { beginSlotSwitch } from './preview-transition';
-import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
+import { PaneWriteContext, TerminalContextContext, WallActionsContext, type ContextMode, type PaneWriteActions, type WallActions } from './wall-context';
 import { stubWallActions } from './wall-test-utils';
 import * as navigation from './tool-navigation';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock('./TerminalPanel', () => ({
-  TerminalPanel: () => <div data-testid="terminal">terminal</div>,
+  TerminalPanel: ({ renderTerminal }: { renderTerminal?: boolean }) => <div data-testid="terminal" data-render-terminal={String(renderTerminal !== false)}>terminal</div>,
 }));
 vi.mock('./BrowserPanel', () => ({
   BrowserPanel: ({ parked, params, onReady }: { parked?: boolean; params?: Record<string, unknown>; onReady?: () => void }) => (
@@ -107,6 +107,17 @@ function half(testId: string): HTMLElement {
 }
 
 describe('ToolPanel', () => {
+  it('gives its terminal to its context only while the context shows it', () => {
+    const shown = (mode: ContextMode | null) => {
+      const context = { id: mode && 'p1', mounted: mode && { id: 'p1' }, mode: mode ?? 'properties', setMode: vi.fn(), open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
+      act(() => root.render(<TerminalContextContext.Provider value={context}><ToolPanel id="p1" title="t" params={booting} /></TerminalContextContext.Provider>));
+      return container.querySelector('[data-testid="terminal"]')!.getAttribute('data-render-terminal');
+    };
+    expect(shown(null)).toBe('true');
+    expect(shown('properties')).toBe('true');
+    expect(shown('aux')).toBe('false');
+  });
+
   it('keeps both halves mounted, whichever is forward', () => {
     show(booting);
     expect(container.querySelector('[data-testid="terminal"]')).not.toBeNull();

@@ -317,7 +317,7 @@ export function LathHost({
   workspaceDrag?: SurfaceWorkspaceDrag;
   componentsOverride?: LathComponentsOverride;
 }) {
-  const { mounted: terminalContext } = useContext(TerminalContextContext);
+  const { mounted: terminalContext, mode: contextMode } = useContext(TerminalContextContext);
   const contextPreferences = useRef(new Map<string, ContextSide>());
   const store = lath.store;
   const animator = lath.animator;
@@ -796,7 +796,7 @@ export function LathHost({
       })}
 
       {contextSource && (
-        <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!}
+        <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!} mode={contextMode}
           title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)} params={contextMeta?.params}
           lath={lath} wall={rect} source={contextSource}
           multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />

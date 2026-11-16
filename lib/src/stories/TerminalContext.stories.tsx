@@ -5,6 +5,8 @@ import { FrameCornersIcon, XIcon } from '@phosphor-icons/react';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import { placeTerminalContext, type ContextSide } from '../components/wall/terminal-context-placement';
 import { TerminalContextView } from '../components/wall/TerminalContextView';
+import { contextHostStyle } from '../components/wall/TerminalContextOverlay';
+import type { ContextMode } from '../components/wall/wall-context';
 
 // Sample terminal output with the shared context presentation.
 // Local state switches fixtures and opens visual detail treatments.
@@ -17,7 +19,7 @@ const SCENARIOS: { id: Scenario; label: string }[] = [
   { id: 'differentDirectory', label: 'Different directory' },
   { id: 'multiplePorts', label: 'Multiple ports' },
   { id: 'notification', label: 'Notification' },
-  { id: 'exited', label: 'Helper exited' },
+  { id: 'exited', label: 'Aux exited' },
   { id: 'scanFailed', label: 'Scan failed' },
   { id: 'launchPending', label: 'Opening browser' },
   { id: 'launchFailed', label: 'Browser launch failed' },
@@ -83,8 +85,9 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
   return <Prompt><Cursor /></Prompt>;
 }
 
-function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight, bothProviders = false }: { bothProviders?: boolean; scenario: Scenario; initialDetail?: 'title' | 'reset' | null; paneWidth: number; paneHeight: number }) {
+function ContextPrototype({ scenario, initialMode, initialDetail = null, paneWidth, paneHeight, bothProviders = false }: { bothProviders?: boolean; scenario: Scenario; initialMode: ContextMode; initialDetail?: 'title' | 'reset' | null; paneWidth: number; paneHeight: number }) {
   const [side, setSide] = useState<ContextSide | undefined>();
+  const [mode, setMode] = useState(initialMode);
   const bounds = { x: 0, y: 0, width: paneWidth, height: paneHeight };
   const placement = placeTerminalContext(bounds, bounds, false, side);
   const [watching, setWatching] = useState(false);
@@ -93,8 +96,8 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
   return <div className="relative overflow-hidden rounded-lg bg-terminal-bg font-mono text-sm text-terminal-fg" style={{ width: paneWidth, height: paneHeight }}>
     <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
     <pre className="m-0 p-3 leading-6 text-muted">{'~/projects/dormouse ❯ pnpm dev\n\n  VITE ready\n  ➜  Local: http://localhost:5173/'}</pre>
-    <div className="absolute" style={{ left: placement.rect.x, top: placement.rect.y, width: placement.rect.width, height: placement.rect.height }}>
-      <TerminalContextView placement={{ ...placement, onChange: setSide }} surfaceId="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
+    <div className="absolute flex flex-col" style={contextHostStyle(placement, mode)}>
+      <TerminalContextView mode={mode} onModeChange={setMode} placement={{ ...placement, onChange: setSide }} surfaceId="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
@@ -111,7 +114,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
   </div>;
 }
 
-function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false }: { bothProviders?: boolean; initialScenario?: Scenario; initialDetail?: 'title' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
+function TerminalContextStory({ initialScenario = 'fresh', initialMode = 'properties', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false }: { bothProviders?: boolean; initialScenario?: Scenario; initialMode?: ContextMode; initialDetail?: 'title' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
   const [scenario, setScenario] = useState(initialScenario);
   return <main className="min-h-screen bg-app-bg p-5 font-mono text-sm text-foreground">
     <div className="mb-3 w-[900px]">
@@ -120,7 +123,7 @@ function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null,
         {SCENARIOS.map(item => <button key={item.id} type="button" aria-pressed={scenario === item.id} onClick={() => setScenario(item.id)} className={`rounded px-2 py-1 ${scenario === item.id ? 'bg-header-active-bg text-header-active-fg' : 'text-muted hover:bg-foreground/10'}`}>{item.label}</button>)}
       </div>
     </div>
-    <ContextPrototype key={scenario} bothProviders={bothProviders} scenario={scenario} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
+    <ContextPrototype key={scenario} bothProviders={bothProviders} scenario={scenario} initialMode={initialMode} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
   </main>;
 }
 
@@ -159,8 +162,8 @@ const meta = {
     }
     const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
     const bounds = panel.getBoundingClientRect();
-    // The header, Dir, Ports, and notification rows each stay on one line at every width.
-    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-title], [data-context-dir], [data-context-ports], [data-context-notification]')) {
+    // The header, Dir, Ports, notification, and aux header rows each stay on one line at every width.
+    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-title], [data-context-dir], [data-context-ports], [data-context-notification], [data-context-aux-bar]')) {
       expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(28);
       expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
     }
@@ -176,31 +179,56 @@ const meta = {
       expect(button.scrollWidth, button.getAttribute('aria-label') ?? '').toBeLessThanOrEqual(button.clientWidth);
       expect(button.scrollHeight, button.getAttribute('aria-label') ?? '').toBeLessThanOrEqual(button.clientHeight);
     }
-    const terminal = panel.querySelector<HTMLElement>('.min-h-16.bg-terminal-bg')!;
-    expect(terminal.getBoundingClientRect().height).toBeGreaterThanOrEqual(64);
+    if (panel.dataset.contextMode === 'aux') {
+      const terminal = panel.querySelector<HTMLElement>('.min-h-16.bg-terminal-bg')!;
+      expect(terminal.getBoundingClientRect().height).toBeGreaterThanOrEqual(64);
+    } else {
+      // Properties take only their rows' height, never the whole space aux would.
+      const properties = panel.querySelector<HTMLElement>('[data-context-properties]')!;
+      expect(properties.scrollHeight).toBeLessThanOrEqual(properties.clientHeight + 1);
+      expect(bounds.height).toBeLessThan(args.paneHeight ?? 680);
+    }
   },
 } satisfies Meta<typeof TerminalContextStory>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const CommonCase: Story = {};
-export const NarrowHelperHeader: Story = { args: { initialScenario: 'userInput', paneWidth: 660 } };
+export const AuxTerminal: Story = { args: { initialMode: 'aux' } };
+export const NarrowAuxHeader: Story = { args: { initialScenario: 'userInput', initialMode: 'aux', paneWidth: 660 } };
 export const NoPorts: Story = { args: { initialScenario: 'noPorts' } };
-export const DifferentDirectory: Story = { args: { initialScenario: 'differentDirectory' } };
+export const DifferentDirectory: Story = { args: { initialScenario: 'differentDirectory', initialMode: 'aux' } };
 export const MultiplePorts: Story = { args: { initialScenario: 'multiplePorts' } };
 export const Notification: Story = { args: { initialScenario: 'notification' } };
-export const HelperExited: Story = { args: { initialScenario: 'exited' } };
+export const AuxExited: Story = { args: { initialScenario: 'exited', initialMode: 'aux' } };
 export const PortScanFailed: Story = { args: { initialScenario: 'scanFailed' } };
 export const TitleSources: Story = { args: { initialDetail: 'title' } };
-export const ResetConfirmation: Story = { args: { initialScenario: 'editor', initialDetail: 'reset' } };
+export const ResetConfirmation: Story = { args: { initialScenario: 'editor', initialMode: 'aux', initialDetail: 'reset' } };
 
 export const MinimumWidth: Story = { args: { paneWidth: 280, paneHeight: 620 } };
-export const ShortWindow: Story = { args: { paneWidth: 480, paneHeight: 280 } };
+export const MinimumWidthAux: Story = { args: { initialMode: 'aux', paneWidth: 280, paneHeight: 620 } };
+export const ShortWindow: Story = { args: { initialMode: 'aux', paneWidth: 480, paneHeight: 280 } };
 export const NarrowDetails: Story = { args: { initialScenario: 'multiplePorts', paneWidth: 380, paneHeight: 520 } };
-export const NarrowDirectoryWarning: Story = { args: { initialScenario: 'differentDirectory', paneWidth: 380, paneHeight: 520 } };
-export const NarrowResetConfirmation: Story = { args: { initialScenario: 'editor', initialDetail: 'reset', paneWidth: 380, paneHeight: 520 } };
+export const NarrowDirectoryWarning: Story = { args: { initialScenario: 'differentDirectory', initialMode: 'aux', paneWidth: 380, paneHeight: 520 } };
+export const NarrowResetConfirmation: Story = { args: { initialScenario: 'editor', initialMode: 'aux', initialDetail: 'reset', paneWidth: 380, paneHeight: 520 } };
 
 export const OpeningBrowser: Story = { args: { initialScenario: 'launchPending', paneWidth: 380, paneHeight: 520 } };
 export const BrowserLaunchFailed: Story = { args: { initialScenario: 'launchFailed', paneWidth: 480, paneHeight: 520 } };
 
 export const BrowserProviders: Story = { args: { bothProviders: true, paneWidth: 900, paneHeight: 900 } };
+
+/** The switch in each header leads to the other mode, and back. */
+export const SwitchModes: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const panel = () => canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
+    const propertiesHeight = panel().getBoundingClientRect().height;
+    await userEvent.click(canvas.getByRole('button', { name: 'Show aux terminal' }));
+    await expect(panel()).toHaveAttribute('data-context-mode', 'aux');
+    expect(panel().getBoundingClientRect().height).toBeGreaterThan(propertiesHeight);
+    await expect(panel()).toHaveFocus();
+    await userEvent.click(canvas.getByRole('button', { name: 'Show properties' }));
+    await expect(panel()).toHaveAttribute('data-context-mode', 'properties');
+    expect(panel().getBoundingClientRect().height).toBeCloseTo(propertiesHeight);
+  },
+};

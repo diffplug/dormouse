@@ -185,8 +185,13 @@ export function useDialogKeyboardOwner(active: boolean, acquireOverride?: Acquir
   useEffect(() => (active ? acquire() : undefined), [acquire, active]);
 }
 
+/** What the context shows: the Surface's properties, or its auxiliary terminal (a Tool's own). */
+export type ContextMode = 'properties' | 'aux';
+
 export interface TerminalContextOpenOptions {
   warning?: string;
+  /** Default `properties`. */
+  mode?: ContextMode;
   /** Viewport coordinates the reveal grows from. */
   origin?: { x: number; y: number };
 }
@@ -199,7 +204,10 @@ export const TerminalContextContext = createContext<{
   id: string | null;
   /** The context that is rendered, an exiting one included; read only by its leaf. */
   mounted: TerminalContextState | null;
+  /** What the mounted context shows; an opening sets it, and the context's own switch changes it. */
+  mode: ContextMode;
+  setMode(mode: ContextMode): void;
   open(id: string, options?: TerminalContextOpenOptions): void; close(): void;
   promote(id: string): Promise<void>;
   openPort(id: string, entry: PortUrlEntry, mode: PortMode): Promise<void>;
-}>({ id: null, mounted: null, open: () => {}, close: () => {}, promote: async () => {}, openPort: async () => {} });
+}>({ id: null, mounted: null, mode: 'properties', setMode: () => {}, open: () => {}, close: () => {}, promote: async () => {}, openPort: async () => {} });

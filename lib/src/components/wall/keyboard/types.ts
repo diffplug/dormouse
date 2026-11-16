@@ -1,7 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { ConfirmKill } from '../../KillConfirm';
 import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
-import type { WallActions } from '../wall-context';
+import type { ContextMode, WallActions } from '../wall-context';
 import type { WorkspaceId } from '../../../lib/session-types';
 
 /** The navigation/query seam the keyboard handlers read, backed by the Lath engine
@@ -46,9 +46,9 @@ export interface WallKeyboardCtx {
   enterPassthrough: (id: string) => void;
   enterCommandMode: () => void;
   minimizePane: (id: string) => void;
-  /** Open the terminal context for a pane, revealed from `origin`
+  /** Open the terminal context for a pane in `mode`, revealed from `origin`
    *  (`.terminal-context-enter` in `lib/src/theme.css`). */
-  openTerminalContext: (id: string, origin: { x: number; y: number }) => void;
+  openTerminalContext: (id: string, options: { origin: { x: number; y: number }; mode: ContextMode }) => void;
   /** The kill gesture: `requestKill` in `lib/src/components/Wall.tsx` decides
    *  between reattach, immediate closure, and the confirm overlay. */
   requestKill: (id: string) => void;

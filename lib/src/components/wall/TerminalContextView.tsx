@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, PlugIcon, PushPinIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, InfoIcon, PlugIcon, PushPinIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
@@ -8,7 +8,7 @@ import { BROWSER_PROVIDER_GUI } from './browser-automation';
 import { browserProviderSwitch, rememberBrowserProvider, useBrowserProvider } from './BrowserProviderSwitch';
 import type { PortUrlEntry } from './port-url';
 import { displayModeFor, type RenderMode } from './agent-browser-screen';
-import { WindowFocusedContext } from './wall-context';
+import { WindowFocusedContext, type ContextMode } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import { oppositeEdge } from '../../lib/lath/model';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
@@ -39,12 +39,15 @@ function portActions(provider: BrowserAutomationProvider, providers: readonly Br
 
 const DETAILS = {
   title: { label: 'Title sources', heading: 'Why this title?' },
-  reset: { label: 'Reset helper terminal', heading: 'Reset helper terminal?' },
+  reset: { label: 'Reset aux terminal', heading: 'Reset aux terminal?' },
 } as const;
 type Detail = keyof typeof DETAILS;
 export interface TerminalContextViewProps {
   terminalRole?: 'helper' | 'tool';
-  placement?: Omit<ContextPlacement, 'rect'> & { onChange(side: ContextSide): void };
+  /** Properties shows the Surface's rows alone, sized to them; aux shows its terminal in the whole panel. */
+  mode: ContextMode;
+  onModeChange(mode: ContextMode): void;
+  placement?: Pick<ContextPlacement, 'side' | 'available'> & { onChange(side: ContextSide): void };
   /** Exit in progress: the view is inert, and `onClose` is not called again. */
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
@@ -341,6 +344,11 @@ function PlacementIcon({ side }: { side: ContextSide }) {
  *  that JS owns: the exit length the removal timer must match, and the corner radius. */
 const SURFACE_STYLE = { '--context-exit-duration': `${TERMINAL_CONTEXT_EXIT_MS}ms`, '--context-radius': TERMINAL_SELECTION_BORDER_RADIUS } as CSSProperties;
 
+/** A header action's text, dropped for its icon where the header is narrow. */
+const WIDE_LABEL_CLASS = 'hidden @[34rem]:inline';
+/** A detail dialog's room in the properties panel, which is otherwise only as tall as its rows. */
+const DETAIL_MIN_HEIGHT_PX = 240;
+
 const SIDE_NAME: Record<ContextSide, 'Left' | 'Right' | 'Top' | 'Bottom'> = { left: 'Left', right: 'Right', top: 'Top', bottom: 'Bottom' };
 /** Past `ELEVATED_PANE_SHADOW`'s reach, so the teeth's clip keeps the halo on the other three sides. */
 const HALO_PX = 16;
@@ -349,10 +357,12 @@ const DEPTH = TERMINAL_CONTEXT_TEETH_PX;
 const stripStyle = (edge: ContextSide): CSSProperties => edge === 'left' || edge === 'right'
   ? { [edge]: 0, top: 0, width: DEPTH, height: '100%' } : { [edge]: 0, left: 0, width: '100%', height: DEPTH };
 
-/** How many 90° teeth fit along an edge `length` long; the geometry below depends on nothing else. */
-export const teethCount = (length: number) => Math.max(1, Math.round(length / (2 * DEPTH)));
+/** How many tooth-wide slots fit along an edge `length` long: always odd, so a tooth stands
+ *  at each end. The geometry below depends on nothing else. */
+export const teethSlots = (length: number) => 2 * Math.max(0, Math.round((length / (2 * DEPTH) - 1) / 2)) + 1;
 
-/** `count` 90° teeth cut corner to corner along `edge`, tips on the panel's outer edge and
+/** 90° teeth cut corner to corner along `edge` in every other of `count` slots, the slots
+ *  between left flat so each tooth reads on its own; tips on the panel's outer edge and
  *  valleys `TERMINAL_CONTEXT_TEETH_PX` inside it, relative to the box so a resize that keeps
  *  the count needs no recut. `clip` keeps the halo on the other three sides; `path` strokes
  *  the teeth, which the clip would cut in half, in a `DEPTH`-thick strip `viewBox` stretched
@@ -368,7 +378,10 @@ export function contextTeeth(edge: ContextSide, count: number): { clip: string; 
   };
   const point = (a: string, b: string) => vertical ? `${a} ${b}` : `${b} ${a}`;
   const teeth: [number, number][] = [[DEPTH, 0]];
-  for (let k = 0; k < count; k++) teeth.push([0, k + 0.5], [DEPTH, k + 1]);
+  for (let k = 0; k < count; k++) {
+    if (k % 2 === 0) teeth.push([0, k + 0.5]);
+    teeth.push([DEPTH, k + 1]);
+  }
   const clip = [
     point(across(DEPTH), along(0, -HALO_PX)), point(across('far'), along(0, -HALO_PX)),
     point(across('far'), along(1, HALO_PX)), point(across(DEPTH), along(1, HALO_PX)),
@@ -388,7 +401,7 @@ function useTeethCount(panel: RefObject<HTMLElement | null>, edge: ContextSide |
     if (!element || !edge) return;
     const recount = () => {
       const length = edge === 'left' || edge === 'right' ? element.offsetHeight : element.offsetWidth;
-      if (length) setCount(teethCount(length));
+      if (length) setCount(teethSlots(length));
     };
     recount();
     const observer = new ResizeObserver(recount);
@@ -458,15 +471,26 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const requestReset = () => { if (resetAsks) setDetail('reset'); else void submit(p.onReset); };
   const isTool = p.terminalRole === 'tool';
   // A Tool's command is whatever its shell reported, line breaks included.
-  const statusLabel = p.exited ? 'Helper exited' : p.runningCommand !== undefined ? `Running ${p.runningCommand.replace(/\s+/g, ' ')}…` : isTool ? 'At prompt' : null;
+  const statusLabel = p.exited ? 'Aux exited' : p.runningCommand !== undefined ? `Running ${p.runningCommand.replace(/\s+/g, ' ')}…` : isTool ? 'At prompt' : null;
   const placement = p.placement;
   // The edge facing the source is cut into teeth that reach over it (DESIGN.md → "Terminal Context Teeth").
   const teeth = placement && oppositeEdge(placement.side);
   const count = useTeethCount(panel, teeth);
   const shape = teeth && count ? contextTeeth(teeth, count) : undefined;
   const reach = (side: ContextSide) => (side === teeth ? DEPTH : 0);
-  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side} data-context-teeth={teeth}
-    className={`${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 font-mono text-sm text-foreground outline-none`}
+  const properties = p.mode === 'properties';
+  // Focus stays in the context, for Escape and Tab, as the switch that took it leaves.
+  const switchTo = (mode: ContextMode) => { surface.current?.focus({ preventScroll: true }); p.onModeChange(mode); };
+  // Shared by both modes' headers. The action leaves with the mark, so focus stays in the context.
+  const keepOpen = p.onKeepPreview && <ContextAction label="Keep open" onClick={() => { surface.current?.focus({ preventScroll: true }); p.onKeepPreview?.(); }}><PushPinIcon size={15} /><span className={WIDE_LABEL_CLASS}>Keep open</span></ContextAction>;
+  const frameActions = <>
+    {placement && <div role="group" aria-label="Context placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
+      <ContextAction key={side} label={`Place context at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
+    <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
+  </>;
+  const terminalName = isTool ? 'Tool' : 'Aux';
+  return <section ref={surface} aria-label="Terminal context" data-terminal-context data-context-mode={p.mode} tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side} data-context-teeth={teeth}
+    className={`${motionClass} ${p.closing ? 'pointer-events-none' : ''} ${properties ? 'relative flex min-h-0 flex-col' : 'absolute inset-0'} font-mono text-sm text-foreground outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
@@ -476,15 +500,15 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); }
     }}>
-    <div ref={panel} className={`${TERMINAL_CONTEXT_SURFACE_CLASS} absolute inset-0 flex flex-col overflow-hidden`}
-      style={{ boxShadow: ELEVATED_PANE_SHADOW, clipPath: shape?.clip, ...teeth && { [`border${SIDE_NAME[teeth]}Width`]: 0 } }}>
+    <div ref={panel} className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${properties ? 'relative min-h-0' : 'absolute inset-0'} flex flex-col overflow-hidden`}
+      style={{ boxShadow: ELEVATED_PANE_SHADOW, clipPath: shape?.clip, ...teeth && { [`border${SIDE_NAME[teeth]}Width`]: 0 }, ...properties && detail && { minHeight: DETAIL_MIN_HEIGHT_PX } }}>
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 max-h-[45%] overflow-auto pb-1" style={{ paddingLeft: 8 + reach('left'), paddingRight: 4 + reach('right'), paddingTop: reach('top') }}>
+      {properties ? <div data-context-properties className="@container min-h-0 overflow-auto pb-1" style={{ paddingLeft: 8 + reach('left'), paddingRight: 4 + reach('right'), paddingTop: reach('top'), paddingBottom: 4 + reach('bottom') }}>
         <HeaderRow workspaceMove={p.workspaceMove} surfaceId={p.surfaceId} onExplain={() => setDetail('title')} onCopyId={() => attempt(p.onCopyId)} actions={<>
+          {keepOpen}
           {p.navigation}
-          {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
-            <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
-          <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
+          <ContextAction label={`Show ${terminalName.toLowerCase()} terminal`} onClick={() => switchTo('aux')}><TerminalIcon size={15} /><span className={WIDE_LABEL_CLASS}>{terminalName.toLowerCase()} terminal</span></ContextAction>
+          {frameActions}
         </>} />
         {/* A narrow panel moves the toggles under the rows, where they sit side by side. */}
         <div className="@container"><div className="grid grid-cols-[minmax(0,1fr)] items-start gap-x-2 pl-1 @[20rem]:grid-cols-[minmax(0,1fr)_auto]">
@@ -513,30 +537,37 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         {p.notification && <div data-context-notification className="flex h-6 min-w-0 items-center gap-1 pl-1" title={[p.notification.title, p.notification.body].filter(Boolean).join('\n')}>
           {BELL_ICON}<span className="truncate">{p.notification.title && <span className="font-semibold">{p.notification.title}</span>}{p.notification.title && p.notification.body && ' '}{p.notification.body && <span className="text-muted">{p.notification.body}</span>}</span>
         </div>}
-      </div>
-      {/* The terminal ground, carried into the teeth beside and below it. */}
-      <div className="@container flex min-h-0 flex-1 flex-col bg-terminal-bg"
-        style={teeth && teeth !== 'top' ? { [`border${SIDE_NAME[teeth]}`]: `${DEPTH}px solid transparent` } : undefined}>
-        {/* Between hairlines: the helper's label, not a second header. */}
-        <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'}
-          className="flex h-7 shrink-0 items-center gap-3 whitespace-nowrap px-3 shadow-[inset_0_1px_0_var(--color-border),inset_0_-1px_0_var(--color-border)]">
-          {/* Named at every width, so a Tool's own terminal never passes for a helper. */}
-          <span className="flex shrink-0 items-center gap-2 font-semibold"><TerminalIcon size={15} /><span className="@[48rem]:hidden">{isTool ? 'Tool' : 'Helper'}</span><span className="hidden @[48rem]:inline">{isTool ? 'Tool terminal' : 'Helper terminal'}</span></span>
+        {!detail && error && <ContextDiagnostic className="mt-1 break-words border-l-4 border-error bg-error/10 px-3 py-2">{error}</ContextDiagnostic>}
+      </div> : <>
+        {/* The aux header: what the terminal is, what it can do, and the way back to properties. */}
+        <div data-context-aux-bar aria-label={`${terminalName} terminal status`}
+          className="@container box-content flex h-7 shrink-0 items-center gap-3 whitespace-nowrap shadow-[inset_0_-1px_0_var(--color-border)]"
+          style={{ paddingLeft: 12 + reach('left'), paddingRight: 4 + reach('right'), paddingTop: reach('top') }}>
+          {/* Named at every width, so a Tool's own terminal never passes for an aux terminal. */}
+          <span className="flex shrink-0 items-center gap-2 font-semibold"><TerminalIcon size={15} /><span className="@[48rem]:hidden">{terminalName}</span><span className="hidden @[48rem]:inline">{terminalName} terminal</span></span>
           {statusLabel && <div className="flex min-w-0 items-center gap-2 text-muted">{p.runningCommand !== undefined ? <CircleNotchIcon size={13} className="shrink-0 animate-spin" /> : <CheckIcon size={13} className="shrink-0" />}<span className="truncate" title={statusLabel}>{statusLabel}</span></div>}
-          {!isTool && <ContextAction label="Reset helper terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} />{resetAsks ? 'Reset…' : 'Reset'}</ContextAction>}
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            {/* The action leaves with the mark, so focus stays in the context for Escape and Tab. */}
-            {p.onKeepPreview && <ContextAction label="Keep open" onClick={() => { surface.current?.focus({ preventScroll: true }); p.onKeepPreview?.(); }}><PushPinIcon size={15} />Keep open</ContextAction>}
-            {!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}
+          {!isTool && <div className="flex shrink-0 items-center gap-1">
+            <ContextAction label="Reset aux terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} /><span className={WIDE_LABEL_CLASS}>{resetAsks ? 'Reset…' : 'Reset'}</span></ContextAction>
+            <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} /><span className={WIDE_LABEL_CLASS}>Promote</span></ContextAction>
+          </div>}
+          <div data-context-header-actions className="ml-auto flex shrink-0 items-center gap-0.5">
+            {keepOpen}
+            {p.navigation}
+            <ContextAction label="Show properties" onClick={() => switchTo('properties')}><InfoIcon size={15} /><span className={WIDE_LABEL_CLASS}>properties</span></ContextAction>
+            {frameActions}
           </div>
         </div>
-        {p.mismatch && <ContextDiagnostic className="mx-3 my-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
-        {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 my-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
-        <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
-      </div>
+        {/* The terminal ground, carried into the teeth beside and below it. */}
+        <div data-context-ground className="flex min-h-0 flex-1 flex-col bg-terminal-bg"
+          style={teeth && teeth !== 'top' ? { [`border${SIDE_NAME[teeth]}`]: `${DEPTH}px solid transparent` } : undefined}>
+          {p.mismatch && <ContextDiagnostic className="mx-3 my-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Aux directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Aux</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
+          {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 my-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
+          <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
+        </div>
+      </>}
     {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between font-semibold"><span>{DETAILS[detail].heading}</span><ContextAction label="Close details" onClick={() => setDetail(null)} muted><XIcon size={14} /></ContextAction></div>
-      {detail === 'title' ? <div className="grid grid-cols-[8rem_1fr_auto] gap-x-3 gap-y-2">{p.titleSources.map((source, index) => <div className="contents" key={index}><span className="text-muted">{source.source}</span><span>{source.value}</span><span className="text-muted">{source.note}</span></div>)}</div> : <><p>Discard this helper, including scrollback, unfinished input, and any running program? Unsaved edits will be lost.</p><p className="mb-4 mt-2 text-muted">A fresh helper starts in the parent's current directory.</p><div className="flex justify-end gap-2"><ContextAction label="Keep helper" onClick={() => setDetail(null)}>Keep helper</ContextAction><ContextAction label="Discard and reset" busy={busy} onClick={() => void submit(p.onReset)}>Discard and reset</ContextAction></div></>}
+      {detail === 'title' ? <div className="grid grid-cols-[8rem_1fr_auto] gap-x-3 gap-y-2">{p.titleSources.map((source, index) => <div className="contents" key={index}><span className="text-muted">{source.source}</span><span>{source.value}</span><span className="text-muted">{source.note}</span></div>)}</div> : <><p>Discard this aux terminal, including scrollback, unfinished input, and any running program? Unsaved edits will be lost.</p><p className="mb-4 mt-2 text-muted">A fresh aux terminal starts in the parent's current directory.</p><div className="flex justify-end gap-2"><ContextAction label="Keep aux terminal" onClick={() => setDetail(null)}>Keep aux terminal</ContextAction><ContextAction label="Discard and reset" busy={busy} onClick={() => void submit(p.onReset)}>Discard and reset</ContextAction></div></>}
       {error && <ContextDiagnostic className="mt-2 text-error">{error}</ContextDiagnostic>}
     </div></div>}
     </div>

@@ -4681,6 +4681,27 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('reveals a helper with running work in the aux terminal when it blocks its source closing', async () => {
+    const cleanup = untouchedShellWithHelper({ untouched: false, helperBusy: true });
+    // The context reads the source's cursor to choose its side.
+    Object.assign(registry.get('surface:a')!.terminal, { rows: 24, buffer: { active: { baseY: 0, cursorY: 0, viewportY: 0 } } });
+    vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(true);
+    vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'surface:helper-a', parentId: 'surface:a' });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+      await flush();
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="surface:a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+      const context = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+      expect(context.dataset.contextMode).toBe('aux');
+      expect(context.textContent).toContain('Helper has running work');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('closes a Workspace whose only shell is untouched, with an idle untouched helper, without confirming', async () => {
     const cleanup = untouchedShellWithHelper({ untouched: true, helperBusy: false });
     try {
@@ -5536,9 +5557,15 @@ it('moves a retained helper without resizing or replacing its source, and rememb
   };
   await open();
   const menu = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+  // Right-click opens properties; the helper waits for its first showing.
+  expect(menu.dataset.contextMode).toBe('properties');
+  expect(openHelper).not.toHaveBeenCalled();
+  await act(async () => menu.querySelector<HTMLButtonElement>('[aria-label="Show aux terminal"]')!.click());
+  await flush();
+  expect(menu.dataset.contextMode).toBe('aux');
   const terminal = menu.querySelector('[data-helper-terminal]');
   expect(terminal).not.toBeNull();
-  act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Place helper at bottom"]')!.click());
+  act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Place context at bottom"]')!.click());
   expect(menu.dataset.contextSide).toBe('bottom');
   expect(menu.querySelector('[data-helper-terminal]')).toBe(terminal);
   expect(openHelper).toHaveBeenCalledTimes(1);
@@ -5547,8 +5574,9 @@ it('moves a retained helper without resizing or replacing its source, and rememb
   act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
   await flush();
   await open();
+  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextMode).toBe('properties');
   expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('bottom');
-  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Place helper at top"]')!.click());
+  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Place context at top"]')!.click());
   expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('top');
 });
 

@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { contextTeeth, teethCount, TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
+import { contextTeeth, teethSlots, TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
@@ -30,7 +30,7 @@ beforeEach(() => {
   previousAnimate = cfg.layout.animate;
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
-  props = { surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
+  props = { mode: 'properties', onModeChange: vi.fn(), surfaceId: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
     watchRule: 'pnpm', watching: false, todo: false, explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
     onClose: vi.fn(), onCopyId: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
@@ -139,14 +139,14 @@ it('moves trailing actions into the dropdown on resize and dispatches hidden act
 });
 
 it('drops the title explanation label, then compacts the Surface id, as the header narrows', () => {
-  let width = 320;
+  let width = 460;
   const observers = new Set<() => void>();
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { observers.add(callback); }
     observe() {} disconnect() {} unobserve() {}
   });
   const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? width : 0; });
-  // Ten pixels a character, twenty an icon: ref 110, explanation 130 or 20 bare, close 20.
+  // Ten pixels a character, twenty an icon: ref 110, explanation 130 or 20 bare, aux switch 140, close 20.
   const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
     return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20;
   });
@@ -155,12 +155,12 @@ it('drops the title explanation label, then compacts the Surface id, as the head
     render();
     expect(button('Explain this title').textContent).toBe('debug title');
     expect(button('Copy surface:3').textContent).toBe('surface:3');
-    resize(200);
+    resize(340);
     expect(button('Explain this title').textContent).toBe('');
     expect(button('Copy surface:3').textContent).toBe('surface:3');
-    resize(140);
+    resize(280);
     expect(button('Copy surface:3').textContent).toBe('');
-    resize(320);
+    resize(460);
     expect(button('Explain this title').textContent).toBe('debug title');
     expect(button('Copy surface:3').textContent).toBe('surface:3');
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
@@ -175,7 +175,7 @@ it('re-fits the title row when its helper placement buttons change', () => {
     disconnect() { for (const callbacks of observed.values()) callbacks.delete(this.callback); }
     unobserve() {}
   });
-  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 170 : 0; });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 310 : 0; });
   // As above; each placement side and the close add a twenty-pixel icon to the actions group.
   const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
     return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20;
@@ -272,6 +272,7 @@ it('opens title explanation as a disclosure', async () => {
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain('OSC 2');
 });
 it('keeps helper keystrokes out of context dismissal', () => {
+  props.mode = 'aux';
   render(); const input = container.querySelector('textarea')!;
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(props.onClose).not.toHaveBeenCalled();
@@ -279,6 +280,7 @@ it('keeps helper keystrokes out of context dismissal', () => {
   expect(props.onClose).toHaveBeenCalledOnce();
 });
 it('keeps presses in a helper\'s portaled copy editor out of context dismissal', () => {
+  props.mode = 'aux';
   props.children = <div data-helper-terminal="helper"><PortalAnchoredButton /></div>;
   render();
   const editor = document.querySelector<HTMLButtonElement>('[data-portaled]')!;
@@ -289,18 +291,21 @@ it('keeps presses in a helper\'s portaled copy editor out of context dismissal',
   expect(props.onClose).toHaveBeenCalledOnce();
 });
 it('requires explicit confirmation before resetting a helper', async () => {
-  render(); await click('Reset helper terminal'); await click('Keep helper'); expect(props.onReset).not.toHaveBeenCalled();
-  await click('Reset helper terminal'); await click('Discard and reset'); expect(props.onReset).toHaveBeenCalledOnce();
+  props.mode = 'aux';
+  render(); await click('Reset aux terminal'); await click('Keep aux terminal'); expect(props.onReset).not.toHaveBeenCalled();
+  await click('Reset aux terminal'); await click('Discard and reset'); expect(props.onReset).toHaveBeenCalledOnce();
 });
 
 it('resets at once, with no question, when Labs makes the old helper a pending kill', async () => {
+  props.mode = 'aux';
   props.resetAsks = false; render();
-  await click('Reset helper terminal');
+  await click('Reset aux terminal');
   expect(props.onReset).toHaveBeenCalledOnce();
   expect(container.textContent).not.toContain('Discard and reset');
 });
 
 it('keeps a failed promotion visible and retryable', async () => {
+  props.mode = 'aux';
   props.onPromote = vi.fn(async () => { throw new Error('Placement failed'); }); render(); await click('Move this terminal into a new pane');
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('Placement failed'); expect(props.onClose).not.toHaveBeenCalled();
 });
@@ -348,10 +353,11 @@ it('keeps the focus ring on an in-flight button while withholding only its hover
   expect(discard.className).toBe(rest);
 });
 it('shows both directories in the mismatch warning', () => {
+  props.mode = 'aux';
   props.mismatch = true; props.helperCwd = '~/other'; render(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/other'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/repo');
 });
 it('shares header and uncaptured body entry points; captured mouse has no Shift escape', () => {
-  const open = vi.fn(); const value = { id: null, mounted: null, open, close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
+  const open = vi.fn(); const value = { id: null, mounted: null, mode: 'properties' as const, setMode: vi.fn(), open, close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
   act(() => root.render(<TerminalContextContext.Provider value={value}><TerminalPaneHeader id="parent" title={undefined} params={undefined} /><TerminalPanel id="parent" title={undefined} params={undefined} /></TerminalContextContext.Provider>));
   const header = container.querySelector('[data-pane-header-for]')!;
   const body = container.querySelector('textarea')!;
@@ -376,7 +382,7 @@ it('offers the rule covering the running script, else that script\'s own key', a
   const watchSwitch = () => container.querySelector<HTMLButtonElement>('[role="switch"][aria-label^="Watch all"]');
   try {
     act(() => terminalRegistry.setCommandWatched('pnpm', true));
-    await act(async () => root.render(<TerminalContext id="watch-row" />));
+    await act(async () => root.render(<TerminalContext id="watch-row" mode="properties" />));
     // A bare runner rule already covers `pnpm dev`, so the row names — and turns off — that rule.
     expect(watchSwitch()?.getAttribute('aria-label')).toBe('Watch all pnpm commands on');
     await act(async () => watchSwitch()!.click());
@@ -403,7 +409,7 @@ it('never offers Explore for a share or device path, however the terminal report
       [cwdFromOsc9_9('\\\\?\\C:\\repo'), false],
     ] as const) {
       terminalRegistry.applyTerminalSemanticEvents('unc-row', [{ type: 'cwd', cwd: cwd! }]);
-      await act(async () => root.render(<TerminalContext id="unc-row" />));
+      await act(async () => root.render(<TerminalContext id="unc-row" mode="properties" />));
       expect(unavailable() === null, cwd!.path).toBe(explorable);
     }
   } finally {
@@ -413,16 +419,18 @@ it('never offers Explore for a share or device path, however the terminal report
 });
 
 it('offers Reset and states only an exit in the helper status row', () => {
+  props.mode = 'aux';
   render();
-  const row = () => container.querySelector('[aria-label="Helper terminal status"]')!;
-  expect(button('Reset helper terminal')).not.toBeNull();
+  const row = () => container.querySelector('[aria-label="Aux terminal status"]')!;
+  expect(button('Reset aux terminal')).not.toBeNull();
   expect(row().querySelector('span.truncate')).toBeNull();
   props.exited = true; render();
-  expect(row().querySelector('span.truncate')?.textContent).toBe('Helper exited');
-  expect(button('Reset helper terminal')).not.toBeNull();
+  expect(row().querySelector('span.truncate')?.textContent).toBe('Aux exited');
+  expect(button('Reset aux terminal')).not.toBeNull();
 });
 
 it('shows a running Tool command that spans lines on one', () => {
+  props.mode = 'aux';
   props = { ...props, terminalRole: 'tool', runningCommand: 'cd web\npnpm dev' };
   render();
   expect(container.querySelector('[title^="Running "]')?.getAttribute('title')).toBe('Running cd web pnpm dev…');
@@ -433,7 +441,7 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
   const focusTerminal = vi.fn();
   const terminal = vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({ focus: focusTerminal } as unknown as ReturnType<typeof terminalRegistry.getTerminalInstance>);
   const focusSurface = vi.spyOn(terminalRegistry, 'focusSession');
-  await act(async () => { root.render(<TerminalContext id="tool-source" title="Storybook" tool />); });
+  await act(async () => { root.render(<TerminalContext id="tool-source" mode="aux" title="Storybook" tool />); });
   expect(openHelper).not.toHaveBeenCalled();
   expect(container.querySelector('[data-context-terminal="tool-source"]')).not.toBeNull();
   expect(container.querySelector('[data-helper-terminal]')).toBeNull();
@@ -469,27 +477,31 @@ it('offers Keep open only for a preview slot, as a focusable button that keeps f
   expect(props.onClose).toHaveBeenCalledOnce();
 });
 
-it('cuts 90° teeth corner to corner along the edge facing the source', () => {
-  expect(teethCount(200)).toBe(200 / (2 * TERMINAL_CONTEXT_TEETH_PX));
-  const { clip, path, viewBox } = contextTeeth('left', 4);
-  // In a strip one tooth deep and one unit per tooth: valleys at the depth, tips at the edge, half a tooth apart.
-  expect(viewBox).toBe(`0 0 ${TERMINAL_CONTEXT_TEETH_PX} 4`);
+it('cuts 90° teeth corner to corner in every other slot along the edge facing the source', () => {
+  // An odd count of tooth-wide slots, so a tooth stands at each end.
+  expect(teethSlots(180)).toBe(9);
+  expect(teethSlots(220)).toBe(11);
+  expect(teethSlots(5)).toBe(1);
+  const { clip, path, viewBox } = contextTeeth('left', 5);
+  // In a strip one tooth deep and one unit per slot: tips at the edge in the even slots, the odd ones flat at the depth.
+  expect(viewBox).toBe(`0 0 ${TERMINAL_CONTEXT_TEETH_PX} 5`);
   const D = TERMINAL_CONTEXT_TEETH_PX;
-  expect(path).toBe(`M${D},0 L0,0.5 L${D},1 L0,1.5 L${D},2 L0,2.5 L${D},3 L0,3.5 L${D},4`);
+  expect(path).toBe(`M${D},0 L0,0.5 L${D},1 L${D},2 L0,2.5 L${D},3 L${D},4 L0,4.5 L${D},5`);
   // The clip keeps the halo past the other three sides, never past the tips.
   expect(clip).toContain('calc(100% + 16px) calc(0% - 16px)');
-  expect(clip).toContain('0px 87.5%');
+  expect(clip).toContain('0px 90%');
   expect(clip).not.toMatch(/(^|[(,]\s*)-\d/);
   expect(contextTeeth('bottom', 1).path).toBe(`M0,0 L0.5,${D} L1,0`);
   expect(contextTeeth('bottom', 1).clip).toContain(`50% calc(100% - 0px)`);
 });
 
 it('faces its teeth toward the source and carries the terminal ground into them', () => {
+  props.mode = 'aux';
   props.placement = { side: 'right', available: ['right'], onChange: vi.fn() };
   render();
   const context = container.querySelector<HTMLElement>('[data-terminal-context]')!;
   expect(context.dataset.contextTeeth).toBe('left');
-  const ground = container.querySelector<HTMLElement>('[aria-label="Helper terminal status"]')!.parentElement!;
+  const ground = container.querySelector<HTMLElement>('[data-context-ground]')!;
   expect(ground.style.borderLeft).toBe(`${TERMINAL_CONTEXT_TEETH_PX}px solid transparent`);
   expect(ground.style.borderRight).toBe('');
   props.placement = undefined;
@@ -498,35 +510,65 @@ it('faces its teeth toward the source and carries the terminal ground into them'
   expect(ground.style.borderLeft).toBe('');
 });
 
-it('always shows context details alongside the helper', () => {
+it('shows properties alone, then the terminal alone, each offering the other', async () => {
   render();
-  expect(button('Terminal context details')).toBeNull();
-  expect(button('Open in system browser')).not.toBeNull();
-  expect(button('Explain this title')).not.toBeNull();
-  expect(button('Copy absolute path')).not.toBeNull();
+  for (const label of ['Open in system browser', 'Explain this title', 'Copy absolute path']) expect(button(label)).not.toBeNull();
   expect(container.querySelector('[role="switch"][aria-label^="TODO"]')).not.toBeNull();
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(button('Reset aux terminal')).toBeNull();
+  await click('Show aux terminal');
+  expect(props.onModeChange).toHaveBeenCalledWith('aux');
+  // The switch leaves with its view; focus stays in the context for Escape and Tab.
+  expect(document.activeElement?.hasAttribute('data-terminal-context')).toBe(true);
+  props.mode = 'aux';
+  render();
   expect(container.querySelector('textarea')).not.toBeNull();
+  for (const label of ['Reset aux terminal', 'Move this terminal into a new pane', 'Close terminal context']) expect(button(label)).not.toBeNull();
+  for (const label of ['Open in system browser', 'Explain this title', 'Copy absolute path']) expect(button(label)).toBeNull();
+  await click('Show properties');
+  expect(props.onModeChange).toHaveBeenLastCalledWith('properties');
+});
+
+it('starts the aux terminal on its first showing, never for properties alone', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'lazy-source' });
+  const visible = vi.spyOn(helpers, 'setHelperVisible');
+  try {
+    await act(async () => root.render(<TerminalContext id="lazy-source" mode="properties" />));
+    expect(open).not.toHaveBeenCalled();
+    expect(visible).not.toHaveBeenCalled();
+    await act(async () => root.render(<TerminalContext id="lazy-source" mode="aux" />));
+    expect(open).toHaveBeenCalledWith('lazy-source');
+    expect(visible.mock.calls.at(-1)).toEqual(['lazy-source', true]);
+    // Back to properties: the helper stays, but stops polling.
+    await act(async () => root.render(<TerminalContext id="lazy-source" mode="properties" />));
+    expect(visible.mock.calls.at(-1)).toEqual(['lazy-source', false]);
+  } finally {
+    await act(async () => root.render(<></>));
+    open.mockRestore();
+    visible.mockRestore();
+  }
 });
 
 it('position buttons preserve input focus and report the destination', async () => {
+  props.mode = 'aux';
   props.placement = { side: 'top', available: ['top', 'bottom'], onChange: vi.fn() };
   render();
   const input = container.querySelector('textarea')!;
   act(() => input.focus());
   const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true });
-  act(() => button('Place helper at bottom').dispatchEvent(down));
+  act(() => button('Place context at bottom').dispatchEvent(down));
   expect(down.defaultPrevented).toBe(true);
-  await click('Place helper at bottom');
+  await click('Place context at bottom');
   expect(props.placement.onChange).toHaveBeenCalledWith('bottom');
   expect(button('Use automatic helper placement')).toBeNull();
-  expect(button('Place helper at top').getAttribute('aria-pressed')).toBe('true');
+  expect(button('Place context at top').getAttribute('aria-pressed')).toBe('true');
   expect(document.activeElement).toBe(input);
 });
 
 it('pauses its helper while its Workspace is out of view, and resumes when it returns', async () => {
   const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'hidden-source' });
   const visible = vi.spyOn(helpers, 'setHelperVisible');
-  const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" /></WorkspaceActiveContext.Provider>));
+  const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" mode="aux" /></WorkspaceActiveContext.Provider>));
   try {
     await show(true);
     expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', true]);

@@ -6,6 +6,8 @@ import { TerminalContextOverlay } from './TerminalContextOverlay';
 import type { ContextPlacer, LathWallEngine } from './lath-wall-engine';
 import type { ContextSide } from './terminal-context-placement';
 import type { Rect } from '../../lib/lath/model';
+import type { ContextMode } from './wall-context';
+import { ensureResizeObserver } from './wall-test-utils';
 
 const { rendered } = vi.hoisted(() => ({ rendered: vi.fn() }));
 vi.mock('./TerminalContext', () => ({ TerminalContext: () => {
@@ -14,6 +16,7 @@ vi.mock('./TerminalContext', () => ({ TerminalContext: () => {
 } }));
 vi.mock('../../lib/terminal-registry', () => ({ getTerminalInstance: () => null }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+ensureResizeObserver();
 
 it('places from painted frames without rerendering the helper or snapping back on unrelated renders', () => {
   const container = document.createElement('div');
@@ -24,11 +27,12 @@ it('places from painted frames without rerendering the helper or snapping back o
   const lath = {
     animator: { framesAt: () => new Map([['source', { rect: source }]]) },
     setContextPlacer: (next: ContextPlacer | null) => { placer = next; },
+    notifyFrames: vi.fn(),
   } as unknown as LathWallEngine;
   const paint = (rect: Rect) => placer!(new Map([['source', { rect, opacity: 1, layer: 0 }]]));
   const preferences = new Map<string, ContextSide>();
-  const render = (title: string, closing?: boolean) => act(() => root.render(<TerminalContextOverlay
-    context={{ id: 'source', closing }} title={title} tool={false}
+  const render = (title: string, closing?: boolean, mode: ContextMode = 'aux') => act(() => root.render(<TerminalContextOverlay
+    context={{ id: 'source', closing }} mode={mode} title={title} tool={false}
     wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source}
     multiPane lath={lath} preferences={preferences} />));
   try {
@@ -52,6 +56,16 @@ it('places from painted frames without rerendering the helper or snapping back o
     expect(container.querySelector('[data-test-context]')).toBe(helper);
     expect(input.value).toBe('unfinished command');
     expect(document.activeElement).toBe(input);
+    // Properties are only as tall as their rows, kept to the top beside a source on the right.
+    render('New source title', false, 'properties');
+    expect(host.style.left).toBe('540px');
+    expect(host.style.height).toBe('');
+    expect(host.style.maxHeight).toBe('600px');
+    expect(host.style.transform).toBe('');
+    expect(container.querySelector('[data-test-context]')).toBe(helper);
+    render('New source title', false, 'aux');
+    expect(host.style.height).toBe('600px');
+    expect(host.style.maxHeight).toBe('');
     render('New source title', true);
     act(() => { published = paint(source); });
     expect(published).toBeNull();
@@ -60,4 +74,28 @@ it('places from painted frames without rerendering the helper or snapping back o
     container.remove();
   }
   expect(placer).toBeNull();
+});
+
+it('keeps properties above their source on the edge their teeth share with it', () => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  // Only the band above has room.
+  const source = { x: 0, y: 500, width: 1200, height: 300 };
+  const lath = {
+    animator: { framesAt: () => new Map([['source', { rect: source }]]) },
+    setContextPlacer: () => {},
+    notifyFrames: vi.fn(),
+  } as unknown as LathWallEngine;
+  try {
+    act(() => root.render(<TerminalContextOverlay context={{ id: 'source' }} mode="properties" tool={false}
+      wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source} multiPane lath={lath} preferences={new Map()} />));
+    const host = container.querySelector<HTMLElement>('[data-test-context]')!.parentElement!;
+    expect(host.style.top).toBe('510px');
+    expect(host.style.transform).toBe('translateY(-100%)');
+    expect(host.style.height).toBe('');
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
 });

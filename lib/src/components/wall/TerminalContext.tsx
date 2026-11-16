@@ -5,7 +5,7 @@ import { wallHandleOwning } from './wall-handles';
 import { MoveWorkspaceAction } from './MoveWorkspaceAction';
 import { TerminalPane } from '../TerminalPane';
 import { TerminalContextView, type ContextScan, type TerminalContextViewProps } from './TerminalContextView';
-import { TerminalContextContext, WallActionsContext, WorkspaceActiveContext, type TerminalContextState } from './wall-context';
+import { TerminalContextContext, WallActionsContext, WorkspaceActiveContext, type ContextMode, type TerminalContextState } from './wall-context';
 import { getHelper, helperRevision, openHelper, resetHelper, setHelperVisible, subscribeHelpers } from '../../lib/helper-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import { DEFAULT_WORKSPACE_ID } from '../../lib/session-types';
@@ -28,7 +28,7 @@ export function canOpenDirectory(cwd: CwdState, windows: boolean): boolean {
 
 /** `preview`: the Surface is its Workspace's preview slot, which the context
  *  offers to keep (`docs/specs/layout.md` -> Pane header). */
-export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & { title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
+export function TerminalContext({ id, mode: contextMode, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: Omit<TerminalContextState, 'mode'> & { mode: ContextMode; title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
   const workspaceActive = useContext(WorkspaceActiveContext);
@@ -50,20 +50,28 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const offeredRule = watchRule ?? getRunningCommandWatchKey(id);
   const titleSources = useMemo(() => explainTerminalTitle(state), [state]);
   const display = (location: CwdState) => cwdDisplay(location, { style: 'full', homePath: home });
+  const aux = contextMode === 'aux';
+  // The helper starts on its first showing, never for properties alone.
+  useEffect(() => {
+    if (tool || !aux) return;
+    let cancelled = false;
+    void openHelper(id).catch(e => { if (!cancelled) setHelperError(messageOf(e)); });
+    return () => { cancelled = true; };
+  }, [id, tool, aux]);
   useEffect(() => {
     let cancelled = false;
-    if (!tool) void openHelper(id).catch(e => { if (!cancelled) setHelperError(messageOf(e)); });
     void platform.terminalContext?.({ op: 'home' }).then(info => { if (!cancelled) setHome(info.home ?? ''); }).catch(() => {});
     void platform.getOpenPorts(id).then(ports => { if (!cancelled) setScan({ status: 'loaded', entries: listenerUrlsByPort(ports) }); }, () => { if (!cancelled) setScan({ status: 'failed' }); });
     return () => { cancelled = true; };
-  }, [id, platform, tool]);
-  // The helper polls only while the context shows: an exit pauses it at once,
-  // and so does its Workspace going out of view, which leaves the context open.
+  }, [id, platform]);
+  // The helper polls only while the context shows it: an exit or a switch to
+  // properties pauses it at once, and so does its Workspace going out of view,
+  // which leaves the context open.
   useEffect(() => {
-    if (closing || tool || !workspaceActive) return;
+    if (closing || tool || !aux || !workspaceActive) return;
     setHelperVisible(id, true);
     return () => setHelperVisible(id, false);
-  }, [id, closing, tool, workspaceActive]);
+  }, [id, closing, tool, aux, workspaceActive]);
   // No focus call: a passthrough source regains xterm focus through its own
   // `isFocused` once the context lets go, and in command mode the Session
   // must not hold focus, or unbound keys would reach its PTY.
@@ -72,7 +80,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
   const source = wallHandleOwning(id);
   const warning = openWarning ?? (helperError || (helper && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
-  return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} surfaceId={id}
+  return <TerminalContextView placement={placement} mode={contextMode} onModeChange={context.setMode} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} surfaceId={id}
     navigation={tool ? <ToolNavigationButtons id={id} params={params} /> : undefined}
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
