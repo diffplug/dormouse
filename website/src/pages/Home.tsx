@@ -259,7 +259,7 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
     >
       <div
         ref={phoneRef}
-        className="absolute left-1/2 rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3"
+        className="absolute left-1/2 rounded-[2rem] border border-white/15 bg-neutral-950 px-3 pb-6 pt-4"
         style={{
           width: PHONE_WIDTH,
           marginLeft: -PHONE_WIDTH / 2,
@@ -271,8 +271,8 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
           boxShadow: "-3px 3px 0 #3a3a3c, -6px 6px 0 #2a2a2c, -8px 8px 0 #1c1c1e, -30px 40px 90px rgba(0,0,0,0.6)",
         }}
       >
-        <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
-        <div className="aspect-[390/760] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
+        <div className="mx-auto mb-3 h-1.5 w-24 rounded-full bg-white/20" />
+        <div className="aspect-[390/760] overflow-hidden rounded-[1.25rem] border border-white/10 bg-black">
           <div className="h-full" aria-hidden="true" inert>
             {playing ? (
               <Suspense fallback={null}>
