@@ -139,6 +139,12 @@
       "separateMajorMinor": false
     },
     {
+      "description": "standalone/src-tauri declares gtk only to call the GTK that tao already links, and gtk-sys declares `links = \"gtk-3\"`, so Cargo admits one gtk line in the graph: a gtk release ahead of tao's cannot resolve (#1823). Raise this bound in the same PR that moves tauri-runtime-wry, tao, and wry onto the next gtk line",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["gtk"],
+      "allowedVersions": "<0.19"
+    },
+    {
       "description": "Tauri's CLI fails `tauri build` and `tauri dev` unless each JS binding (@tauri-apps/api, @tauri-apps/plugin-*) shares a major.minor with its crate (tauri, tauri-plugin-*), and CI runs neither, so a split bump merges green and breaks the next release. Group the npm and cargo halves of the Tauri family into one PR; standalone/scripts/tauri-lockstep.test.mjs pins this grouping and the installed pairs. Must stay after the cargo group, which it overrides for the Tauri crates",
       "matchManagers": ["npm", "cargo"],
       "matchPackageNames": ["@tauri-apps/**", "tauri", "tauri-*"],
