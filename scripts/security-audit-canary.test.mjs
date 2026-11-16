@@ -347,7 +347,7 @@ test('a canary runs alone, on main alone, with no credential to file or push', (
   const expected = agentsOf(audit);
   delete expected['ci-and-secrets'];
   assert.deepEqual(agentsOf(canary), expected);
-  for (const line of ['--model sonnet', '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"', '--disallowed-tools "Workflow"']) {
+  for (const line of ['--model sonnet', '--allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"', '--disallowed-tools "Workflow"', '--permission-mode default']) {
     assert.ok(canary.includes(`            ${line}\n`), line);
   }
   const deadline = Number(orchestrator.match(/\+ (\d+) \)\) > "\$DEADLINE_FILE"/)[1]);
