@@ -115,7 +115,7 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Surface ids
 
-**Why an unparseable counter file is overwritten, but an unreadable or other-version one is not.** Every write is atomic, so a file this version cannot parse comes only from outside damage; refusing it would leave every launch on opaque ids until someone deleted the file by hand, while overwriting it from the host's disk scan (standalone) or its own counter and the webview's floor (VS Code) risks reusing only numbers no restored Surface holds. A read that fails (a Windows virus scanner's `EBUSY`) is usually transient, and another version's file may hold a mark this build cannot read; overwriting either could lower the mark under numbers already handed out (decided 2026-10-11).
+**Why an unparseable counter file is overwritten, but an unreadable one is not.** Every write is atomic, so a file this version cannot parse comes only from outside damage or another version; refusing it would leave every launch on opaque ids until someone deleted the file by hand, while overwriting it from the host's disk scan (standalone) or its own counter and the webview's floor (VS Code) risks reusing only numbers no restored Surface holds. A read that fails (a Windows virus scanner's `EBUSY`) is usually transient, and overwriting it could lower the mark under numbers already handed out (decided 2026-10-11).
 
 ## Persisted session types
 
