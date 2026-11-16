@@ -187,8 +187,6 @@ enum IdsFile {
     Unread(PathBuf),
     /// Adopted, or absent on disk: every reservation writes here.
     Adopted(PathBuf),
-    /// Another version wrote it (`ids::LoadError`): never overwritten.
-    OtherVersion,
 }
 
 /// Read the counters' file at `path` into `counters`, logging what keeps it
@@ -202,17 +200,10 @@ fn adopt_ids_file(path: PathBuf, counters: &Mutex<ids::Counters>) -> IdsFile {
             return IdsFile::Unread(path);
         }
     };
-    match guard(counters).load(&contents) {
-        Ok(()) => IdsFile::Adopted(path),
-        Err(e @ ids::LoadError::OtherVersion(_)) => {
-            append_log(format!("[ids] WARNING: {e}; handing out no Workspace or Surface ids, and leaving it alone"));
-            IdsFile::OtherVersion
-        }
-        Err(e) => {
-            append_log(format!("[ids] WARNING: {e}; overwriting it from the disk scan"));
-            IdsFile::Adopted(path)
-        }
+    if let Err(e) = guard(counters).load(&contents) {
+        append_log(format!("[ids] WARNING: {e}; overwriting it from the disk scan"));
     }
+    IdsFile::Adopted(path)
 }
 
 /// What Reopen rebuilds a closed window from: the snapshot its webview left,
@@ -263,7 +254,7 @@ impl WindowState {
         }
         let path = match &*file {
             IdsFile::Adopted(path) => Some(path),
-            IdsFile::Absent | IdsFile::Unread(_) | IdsFile::OtherVersion => None,
+            IdsFile::Absent | IdsFile::Unread(_) => None,
         };
         let labels_only = |kind: ids::Kind| kind == ids::Kind::Window;
         let (blocks, contents) = {
@@ -6092,20 +6083,6 @@ mod tests {
         assert_eq!(windows.reserve_ids(Kind::Surface, 1, 0), 11..12);
     }
 
-    #[test]
-    fn another_versions_file_is_never_overwritten_nor_handed_out_past() {
-        use super::ids::Kind;
-        let root = TempDir::new("ids-other-version");
-        let theirs = r#"{"version":2,"surface":900,"workspace":90,"window":9}"#;
-        fs::write(root.path().join("ids.json"), theirs).unwrap();
-        let windows = boot_ids(root.path());
-        assert!(windows.reserve_id_strings(Kind::Surface, 8, 0).is_empty());
-        let boot = boot_reserve_ids_on(&windows);
-        assert!(boot.0.is_empty() && boot.1.is_empty());
-        assert_eq!(super::next_window_label(&windows), "ws-1");
-        assert_eq!(fs::read_to_string(root.path().join("ids.json")).unwrap(), theirs);
-    }
-
     #[cfg(unix)]
     #[test]
     fn a_file_it_cannot_read_hands_out_nothing_until_it_reads() {
@@ -6132,14 +6109,6 @@ mod tests {
         assert_eq!(windows.reserve_ids(Kind::Surface, 2, 0), 1..3);
         let file: JsonValue = serde_json::from_str(&fs::read_to_string(root.path().join("ids.json")).unwrap()).unwrap();
         assert_eq!((file["version"].as_u64(), file["surface"].as_u64()), (Some(1), Some(3)));
-    }
-
-    /// `boot_reserve_ids`'s two blocks, as ids.
-    fn boot_reserve_ids_on(windows: &super::WindowState) -> (Vec<String>, Vec<String>) {
-        use super::ids::Kind;
-        let blocks = windows.reserve_blocks(&[(Kind::Workspace, 4, 0), (Kind::Surface, 8, 0)]);
-        let spell = |kind: Kind, block: &std::ops::Range<u64>| block.clone().map(|n| kind.id(n)).collect::<Vec<_>>();
-        (spell(Kind::Workspace, &blocks[0]), spell(Kind::Surface, &blocks[1]))
     }
 
     #[test]

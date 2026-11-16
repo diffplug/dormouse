@@ -191,13 +191,12 @@ export function createSurfaceIdAllocator(dir: string, logger: AllocatorLog, timi
   /**
    * The persisted next number, or null when this window must hand out none:
    * a read failing for any reason but the file's absence (a Windows virus
-   * scanner's EBUSY, say) or a file another version wrote. Either may hold a
-   * mark above every number this window knows of, and handing out or writing
-   * over it would reuse numbers; another version's file is never overwritten.
+   * scanner's EBUSY, say). It may hide a mark above every number this window
+   * knows of, and handing out or writing over it would reuse numbers.
    *
-   * A file this version cannot parse at all is overwritten, from this
-   * window's own counter and the webview's floor. Every write is atomic, so
-   * only outside damage leaves one, and refusing it would leave the install
+   * A file this version cannot parse is overwritten, from this window's own
+   * counter and the webview's floor. Every write is atomic, so only outside
+   * damage or another version leaves one, and refusing it would leave the install
    * on opaque ids until someone deleted the file by hand; the cost is that
    * numbers handed out since the restored Surfaces' floor may be reused.
    * Standalone's `ids.json` takes the same policy (`Counters::load` in
@@ -219,10 +218,6 @@ export function createSurfaceIdAllocator(dir: string, logger: AllocatorLog, timi
       parsed = undefined;
     }
     const { version, surface } = (parsed !== null && typeof parsed === 'object' ? parsed : {}) as { version?: unknown; surface?: unknown };
-    if (typeof version === 'number' && version !== VERSION) {
-      logger.error(`[surface-ids] ${file} has version ${version}, not ${VERSION}; handing out no ids, and leaving it alone`);
-      return null;
-    }
     if (version === VERSION && Number.isSafeInteger(surface) && (surface as number) >= 0) return surface as number;
     logger.error(`[surface-ids] ${file} is unreadable; overwriting it from this window's counter`);
     return 0;

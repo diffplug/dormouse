@@ -161,14 +161,6 @@ describe('createSurfaceIdAllocator', () => {
     expect(logger.error).toHaveBeenCalled();
   });
 
-  it('never hands out a number past, or overwrites, a file another version wrote', async () => {
-    const theirs = JSON.stringify({ version: 2, surface: 900 });
-    await writeFile(file(), theirs);
-    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual([]);
-    expect(await readFile(file(), 'utf8')).toBe(theirs);
-    expect(hooks.writes).toBe(0);
-  });
-
   it('overwrites a file it cannot parse, from its own counter and the floor', async () => {
     await writeFile(file(), '{not json');
     expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 41)).toEqual(['surface:42']);
