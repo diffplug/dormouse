@@ -26,6 +26,11 @@ const mocks = vi.hoisted(() => ({
   writeCallbacks: [] as (() => void)[],
   invoke: vi.fn(async (_cmd: string, _args?: unknown) => undefined as unknown),
   listen: vi.fn(async () => () => {}),
+  adoptSurfaceArrival: vi.fn(async (_arrival: unknown, _hop: string) => {}),
+}));
+vi.mock("dormouse-lib/components/wall/surface-move", async (importOriginal) => ({
+  ...await importOriginal<typeof import("dormouse-lib/components/wall/surface-move")>(),
+  adoptSurfaceArrival: mocks.adoptSurfaceArrival,
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
@@ -71,6 +76,7 @@ import {
   tearOutWorkspace,
   transferWorkspaceTo,
   _resetWorkspaceMovesForTesting,
+  followOtherWindows,
 } from "./workspace-move";
 import { workspaceDropTarget, workspaceTabRect } from "./workspace-tabs";
 import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
@@ -78,7 +84,8 @@ import {
   getWorkspaceBootPlan,
   resetWorkspaceBootPlans,
 } from "dormouse-lib/components/wall/workspace-boot-plans";
-import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces, setWorkspaces } from "dormouse-lib/lib/workspace-store";
+import { createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, resetWorkspaces, setWorkspaces } from "dormouse-lib/lib/workspace-store";
+import { getOtherWindowWorkspaces } from "dormouse-lib/lib/other-window-workspaces";
 import {
   getWindowSnapshot,
   isWorkspaceTransferPending,
@@ -641,6 +648,36 @@ describe("the source half", () => {
 });
 
 describe("the target half", () => {
+
+  it("keeps a Surface's carrier in the background and moves the Surface on once adopted", async () => {
+    createWorkspace({ id: "ws-here", name: "Here" });
+    const surfaceArrival = { surfaceId: "pane-a", workspaceId: "ws-here", from: "ws-far" };
+    arrivals = [{ ...payload(), surfaceArrival } as WorkspaceTransferPayload];
+    const order: string[] = [];
+    mocks.adoptSurfaceArrival.mockImplementation(async () => { order.push("move on"); });
+    const platform = fakePlatform();
+    const invoke = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "adopt_done") order.push("adopt_done");
+      return invoke(cmd, args);
+    });
+    initWorkspaceMoves(platform);
+    await settle();
+    expect(order).toEqual(["adopt_done", "move on"]);
+    expect(mocks.adoptSurfaceArrival).toHaveBeenCalledWith(surfaceArrival, WORKSPACE_ID);
+    expect(getActiveWorkspaceId()).toBe("ws-here");
+  });
+
+  it("lists every other window's Workspaces for the Surface move picker, never this one's", async () => {
+    // The pull answers first, then a broadcast supersedes it.
+    mocks.invoke.mockImplementation(async (cmd) => (cmd === "workspace_registry" ? [{ window: "ws-3", workspaces: [] }] : undefined));
+    followOtherWindows();
+    await settle();
+    expect(getOtherWindowWorkspaces()).toEqual([{ window: "ws-3", workspaces: [] }]);
+    const far = { window: "ws-2", workspaces: [{ id: "workspace:9", name: "far" }] };
+    await emit("dormouse://workspace-registry", [{ window: "main", workspaces: [{ id: "workspace:2", name: "here" }] }, far]);
+    expect(getOtherWindowWorkspaces()).toEqual([far]);
+  });
 
   // The Sessions' alert state never left the sidecar's one manager, which
   // re-sends it to whichever window collects them. A spawn starts it over and a

@@ -157,12 +157,13 @@ async function bootstrap() {
   let initialPlans: Awaited<ReturnType<typeof restoreWindowOrFresh>> | null = null;
   let armWorkspaceMoves: (() => void) | null = null;
   if (!BROWSER_DEV_HOST) {
-    const [{ bootFromTearOut, initWorkspaceMoves }, { initDropCaret }] = await Promise.all([
+    const [{ bootFromTearOut, followOtherWindows, initWorkspaceMoves }, { initDropCaret }] = await Promise.all([
       import("./workspace-move"),
       import("./workspace-drop-caret"),
     ]);
     initialPlans = await bootFromTearOut(platform);
     armWorkspaceMoves = () => initWorkspaceMoves(platform);
+    followOtherWindows();
     initDropCaret();
   }
   initialPlans ??= await restoreWindowOrFresh(platform);

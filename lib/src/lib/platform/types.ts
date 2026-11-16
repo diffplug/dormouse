@@ -15,7 +15,7 @@ import type { GitInfoResult } from './git-types';
 
 export type { ToolControlResult, ToolHostRequest } from './tool-types';
 export type { GitInfoResult } from './git-types';
-import type { PersistedAlertState, PersistedWindow } from '../session-types';
+import type { PersistedAlertState, PersistedWindow, WorkspaceId } from '../session-types';
 import { TERMINAL_CONTEXT_CHILD_TIMEOUT_MS } from 'dor-lib-common/terminal-context';
 
 export interface PtyInfo {
@@ -40,6 +40,16 @@ export interface PtyReplayDetail {
   id: string;
   data: string;
   requestId?: string;
+}
+
+/** A Surface a Workspace transfer carries into another Window's Workspace
+ *  (`docs/specs/layout.md` → Moving Surfaces between Workspaces). */
+export interface SurfaceArrival {
+  surfaceId: string;
+  /** The destination Workspace, in the target Window. */
+  workspaceId: WorkspaceId;
+  /** The source Workspace, which the moved terminal's notice names. */
+  from: WorkspaceId;
 }
 
 /** A PTY's output position, stamped in the stream by the host for a transfer
@@ -449,8 +459,9 @@ export interface PlatformAdapter {
    *  — through the host's transfer (`docs/specs/standalone.md` → Transfer),
    *  `index` naming its slot in the target's strip (appended without one).
    *  Resolves once the target has adopted it; rejects when it was handed back.
-   *  Absent on hosts with one window. */
-  transferWorkspace?(workspaceId: string, toWindow: string, options?: { index?: number }): Promise<void>;
+   *  `surfaceArrival` marks the Workspace as the carrier of one Surface the
+   *  target moves on once it has adopted it. Absent on hosts with one window. */
+  transferWorkspace?(workspaceId: string, toWindow: string, options?: { index?: number; surfaceArrival?: SurfaceArrival }): Promise<void>;
 
   // Host-initiated session persistence
   onRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;

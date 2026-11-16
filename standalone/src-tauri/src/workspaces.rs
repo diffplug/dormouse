@@ -53,6 +53,28 @@ pub fn forget_window(registry: &mut Registry, label: &str) {
     registry.windows.remove(label);
 }
 
+/// One window's Workspaces, as every window's move picker lists them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WindowEntries {
+    pub window: String,
+    pub workspaces: Vec<Entry>,
+}
+
+/// Every window's Workspaces, `main` first and then by label number, so each
+/// webview lists its siblings in one order.
+pub fn union(registry: &Registry) -> Vec<WindowEntries> {
+    let mut windows: Vec<WindowEntries> = registry
+        .windows
+        .iter()
+        .map(|(label, entries)| WindowEntries { window: label.clone(), workspaces: entries.clone() })
+        .collect();
+    windows.sort_by_key(|entries| {
+        let label = entries.window.as_str();
+        (label != crate::routing::MAIN_LABEL, crate::routing::ws_index(label).unwrap_or(u64::MAX))
+    });
+    windows
+}
+
 /// Prefixes select exactly one interpretation, matching the CLI and webview.
 fn parse_target(target: &str) -> (String, Option<&str>) {
     if let Some(name) = target.strip_prefix("workspace-name:") {
@@ -95,6 +117,16 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
         }
+    }
+
+    #[test]
+    fn the_union_lists_main_first_then_by_label_number() {
+        let mut registry = Registry::default();
+        for label in ["ws-10", "ws-2", "main"] {
+            report(&mut registry, label, vec![entry(&format!("workspace:{label}"), "n")]);
+        }
+        let order: Vec<_> = union(&registry).into_iter().map(|entries| entries.window).collect();
+        assert_eq!(order, vec!["main", "ws-2", "ws-10"]);
     }
 
     #[test]

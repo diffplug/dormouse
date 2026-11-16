@@ -141,9 +141,10 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 - **Must allow boot and Workspace creation when reservation fails**, using `workspace:<uuid>` ids, and **retain those ids for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
 - **Must seed every counter at boot without ever lowering it**, above its persisted mark and every id a snapshot or retained arrival-journal record names; a window's report raises the Workspace counter too. **Never mint `workspace:1`**: it is a bare Wall's only Workspace.
 - **A `dor` request naming a Workspace or Window routes to the window holding it** (§Routing). A target the registry cannot place — one no window reports, or a name two windows carry — falls through to the caller's window, which refuses a name duplicated there and otherwise resolves its own. **A target routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are names.
+- **Must broadcast the union, `main` first then by label number, on every report and window loss** (`dormouse://workspace-registry`); a webview pulls it once (`workspace_registry`) for what it missed booting, and lists every other window's for the Surface move picker (`docs/specs/layout.md` → Moving Surfaces between Workspaces).
 - **Must read an id's number identically in Rust and `dor/src/protocol.ts`**, which the webview and browser harness use: `dor/test/id-cases.json` holds the shared cases.
 
-Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri/src/ids.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
+Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri/src/ids.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`; `followOtherWindows` in `standalone/src/workspace-move.ts`.
 
 ### Routing
 
@@ -224,6 +225,7 @@ A Workspace moves between windows without ending anything (`docs/specs/transport
 - **A window whose last Workspace left closes itself**, with no confirmation and no kill.
 - **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** `standalone/src/workspace-move.test.ts` pins this order.
 - **Must preserve membership and helper ownership from preparation through settlement**: refuse Surface creation, closure, Reopen, renderer changes, Break, and helper creation, Reset, or Promote. Unfinished promotion refuses preparation.
+- **A carrier — a payload naming `surfaceArrival` — mounts in the background and, after `adopt_done`, moves its Surface into the Workspace it names.**
 - **A pane's helper Session travels with it**, directly after its source, which lets the target's resume re-parent it; nothing else in the payload names it.
 - **A Workspace that comes back must mount from the record it brought**, never the plan it first booted with.
 

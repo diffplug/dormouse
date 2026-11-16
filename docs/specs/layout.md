@@ -150,13 +150,14 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 - **Must move a Pane or Door on release over another Workspace tab**, inserting beside the destination's last selected live pane. **Never activate on hover.** A header or Door press owns a pane drag; a tab press owns reorder and cross-Window tear-out. A drop on a strip gap, the source tab, or a disabled target moves nothing; Escape and pointer cancellation change nothing.
 - **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Otherwise disable both, and refuse CLI `--new-workspace`.
 - **Must offer Move to workspace in terminal and Tool context.** **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
+- **Must list every other Window's Workspaces in Move to workspace, under a header per Window**, from the host's registry (`docs/specs/standalone.md` → Workspace registry). Such a move takes the Surface, even a sole one, into a new background Workspace that transfers to that Window (`docs/specs/standalone.md` → Transfer), where the Surface moves on and is followed; consent and refusals are the source's. **A handed-back transfer must return the Surface to its source when that remains**; a refused onward move leaves it in its carrier, activated, with the reason.
 - **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. **Never close a departing Session.** A moved preview slot is pinned, and a moved browser drops its `--key`, reachable by id.
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with the typed-letter Workspace confirmation ([Workspace lifecycle](#workspace-lifecycle)): the Surface reopens at its last-known saved URL, possibly losing page state. Doors remain minimized while waiting. CLI consent: `docs/specs/dor-cli.md` → dor move.
 - **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Iframe consent never bypasses a dirty or pending refusal.
 - **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus: `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors unless it is pinned, which refills instead; if Doors remain but no pane does, refill normally.
 - **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom and metadata. Refs: `docs/specs/dor-cli.md` → Handle Model; durable publication: `docs/specs/transport.md` → Persisted session types.
 
-Source of truth: `moveSurface` in `lib/src/components/wall/surface-move.ts`.
+Source of truth: `moveSurface` and `requestSurfaceMoveToWindow` in `lib/src/components/wall/surface-move.ts`.
 
 ### Workspace lifecycle
 
