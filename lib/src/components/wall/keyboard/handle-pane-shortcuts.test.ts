@@ -317,7 +317,8 @@ describe('handlePaneShortcuts header context menu', () => {
 
     expect(handlePaneShortcuts(keydown(key), ctx, { current: null })).toBe(true);
 
-    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { origin: { x: 10, y: 30 }, mode });
+    // The terminal key also takes focus into the terminal, to type there.
+    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { origin: { x: 10, y: 30 }, mode, ...mode === 'aux' && { focusTerminal: true } });
   });
 
   it('`a` dismisses the ring and opens the properties', () => {

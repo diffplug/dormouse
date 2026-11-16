@@ -45,7 +45,7 @@ Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHe
 
 **Must keep port actions on one line, overflowing into a dropdown that launches an action only on a choice from its open list.**
 
-**Must focus context controls on opening.** Explicit entry into the aux terminal's xterm gives it terminal keys, Escape there included. Escape from controls closes the innermost disclosure, then the context. Terminal clipboard routing uses the focused aux terminal rather than the selected source.
+**Must focus context controls on opening, except from `!`, which focuses its terminal once shown.** Explicit entry into the aux terminal's xterm gives it terminal keys, Escape there included. Escape from controls closes the innermost disclosure, then the context. Terminal clipboard routing uses the focused aux terminal rather than the selected source.
 
 **Must promote by adopting the aux terminal Session into a new split beside the source**, preserving identity and focusing it. Aux terminal lifetime and source closure: `docs/specs/terminal-context.md`.
 

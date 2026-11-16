@@ -30,7 +30,7 @@ Modifier handling: [layout.md](layout.md#keyboard-shortcuts-command-mode).
 | `a` | Alert | Dismiss the ring if any, then open the terminal context's properties. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
 | `?` | Terminal context properties | Terminal panes only; consumed no-op on browser panes, inert on doors. |
-| `!` | Terminal context terminal | The aux terminal, or a Tool's primary terminal. Terminal panes only; consumed no-op on browser panes, inert on doors. |
+| `!` | Terminal context terminal | Focuses the aux terminal, or a Tool's primary terminal. Terminal panes only; consumed no-op on browser panes, inert on doors. |
 
 ## Workspaces (command mode)
 

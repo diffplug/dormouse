@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { registry } from '../../lib/terminal-store';
 import { messageOf } from '../../lib/errors';
 import { wallHandleOwning } from './wall-handles';
@@ -28,7 +28,7 @@ export function canOpenDirectory(cwd: CwdState, windows: boolean): boolean {
 
 /** `preview`: the Surface is its Workspace's preview slot, which the context
  *  offers to keep (`docs/specs/layout.md` -> Pane header). */
-export function TerminalContext({ id, mode: contextMode, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & { mode: ContextMode; title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
+export function TerminalContext({ id, mode: contextMode, focusTerminal = false, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & { mode: ContextMode; title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
   const workspaceActive = useContext(WorkspaceActiveContext);
@@ -51,6 +51,21 @@ export function TerminalContext({ id, mode: contextMode, title, closing, origin,
   const titleSources = useMemo(() => explainTerminalTitle(state), [state]);
   const display = (location: CwdState) => cwdDisplay(location, { style: 'full', homePath: home });
   const auxMode = contextMode === 'aux';
+  // Asked to focus the terminal, the opening does so once it shows; the aux terminal may still be starting.
+  // A frame later, as the Wall focuses passthrough: the xterm's mount settles first.
+  const focusedTerminal = useRef(false);
+  const terminalId = !auxMode ? undefined : tool ? id : aux?.id;
+  useEffect(() => {
+    // An exit ends the opening; one reopened over it asks afresh.
+    if (closing) focusedTerminal.current = false;
+    if (!focusTerminal || closing || !terminalId || focusedTerminal.current) return;
+    const frame = requestAnimationFrame(() => {
+      focusedTerminal.current = true;
+      if (tool) getTerminalInstance(id)?.focus();
+      else focusSession(terminalId, true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusTerminal, closing, terminalId, tool, id]);
   // The aux terminal starts on its first showing, never for properties alone.
   useEffect(() => {
     if (tool || !auxMode) return;

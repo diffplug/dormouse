@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { surfaceIdFor } from 'dor/protocol';
+import { expect, userEvent, waitFor } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from './fake-scenarios';
@@ -242,6 +243,19 @@ export const TerminalContextAux: Story = {
     const show = await requireElement<HTMLButtonElement>('[data-terminal-context] button[aria-label="Show aux terminal"]', 'aux terminal switch');
     show.click();
     await requireElement('[data-aux-terminal] .xterm', 'aux terminal');
+    await settleTerminals();
+  },
+};
+
+/** `!` in command mode opens the aux terminal and puts the keyboard in it, to type at once. */
+export const TerminalContextAuxKey: Story = {
+  args: { initialPaneIds: ['surface:1'], initialMode: 'command' },
+  parameters: { fakePty: { scenario: SCENARIO_SHELL_PROMPT } },
+  play: async () => {
+    await settleTerminals();
+    await userEvent.keyboard('!');
+    const aux = await requireElement<HTMLElement>('[data-aux-terminal] .xterm', 'aux terminal');
+    await waitFor(() => expect(aux.contains(document.activeElement)).toBe(true));
     await settleTerminals();
   },
 };

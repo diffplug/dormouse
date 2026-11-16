@@ -529,6 +529,38 @@ it('shows properties alone, then the terminal alone, each offering the other', a
   expect(props.onModeChange).toHaveBeenLastCalledWith('properties');
 });
 
+it('focuses the terminal once it shows when the opening asks, and the controls otherwise', async () => {
+  const aux = { id: 'focus-aux', parentId: 'focus-source' };
+  const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue(aux);
+  const get = vi.spyOn(auxTerminals, 'getAux').mockReturnValue(undefined);
+  const focus = vi.spyOn(terminalRegistry, 'focusSession').mockImplementation(() => {});
+  const frame = () => act(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+  try {
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" />));
+    get.mockReturnValue(aux);
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" />));
+    await frame();
+    expect(focus).not.toHaveBeenCalled();
+    await act(async () => root.render(<></>));
+    // Still starting: the focus waits for the aux terminal.
+    get.mockReturnValue(undefined);
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusTerminal />));
+    await frame();
+    expect(focus).not.toHaveBeenCalled();
+    get.mockReturnValue(aux);
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusTerminal />));
+    await frame();
+    expect(focus).toHaveBeenCalledExactlyOnceWith('focus-aux', true);
+    // Once per opening: the user may have moved on.
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusTerminal title="renamed" />));
+    await frame();
+    expect(focus).toHaveBeenCalledOnce();
+  } finally {
+    await act(async () => root.render(<></>));
+    open.mockRestore(); get.mockRestore(); focus.mockRestore();
+  }
+});
+
 it('starts the aux terminal on its first showing, never for properties alone', async () => {
   const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'aux', parentId: 'lazy-source' });
   const visible = vi.spyOn(auxTerminals, 'setAuxVisible');

@@ -192,6 +192,8 @@ export interface TerminalContextOpenOptions {
   warning?: string;
   /** Default `properties`. */
   mode?: ContextMode;
+  /** Focus the terminal, once it shows, rather than the context's controls. */
+  focusTerminal?: boolean;
   /** Viewport coordinates the reveal grows from. */
   origin?: { x: number; y: number };
 }
