@@ -28,7 +28,9 @@ class SameOriginRedirect(urllib.request.HTTPRedirectHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--initialize", action="store_true", help="Set a NEW installation's owner password in Cloudflare first")
-    parser.add_argument("--publish", action="store_true", help="Sync released changelog entries after renewing access")
+    publish = parser.add_mutually_exclusive_group()
+    publish.add_argument("--publish-version", metavar="X.Y.Z", help="Sync only this stable public release after renewing access")
+    publish.add_argument("--publish", action="store_true", help="Sync released changelog entries after renewing access")
     args = parser.parse_args()
     password = getpass.getpass("Choose the new Dormouse Studio owner password: " if args.initialize else "Dormouse Studio owner password: ")
     if not password:
@@ -61,7 +63,7 @@ def main():
 
     old = api("GET", "/authorizations")["items"]
     grant = api("POST", "/authorizations", {"name": NAME, "resource": "api", "scope": ["owner:read", "owner:draft", "owner:publish"]})
-    token = grant["access_token"]
+    token = grant["accessToken"]
     try:
         subprocess.run(["gh", "secret", "set", "BLYG_API_TOKEN", "--repo", "diffplug/dormouse", "--env", "blyg-publish"], input=token, text=True, check=True)
     except Exception:
@@ -74,8 +76,9 @@ def main():
             api("DELETE", "/authorizations/" + urllib.parse.quote(prior["id"], safe=""))
     expires = datetime.datetime.fromtimestamp(grant["authorization"]["expiresAt"], datetime.timezone.utc)
     print(f"Publishing token saved to GitHub environment blyg-publish; expires {expires.isoformat()}.")
-    if args.publish:
-        subprocess.run(["node", "scripts/publish-blyg.mjs"], cwd=ROOT, env={**os.environ, "BLYG_API_TOKEN": token}, check=True)
+    if args.publish or args.publish_version:
+        version_args = ["--version", args.publish_version] if args.publish_version else []
+        subprocess.run(["pnpm", "exec", "node", "scripts/publish-blyg.mjs", *version_args], cwd=ROOT, env={**os.environ, "BLYG_API_TOKEN": token}, check=True)
 
 
 if __name__ == "__main__":

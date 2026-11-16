@@ -1,6 +1,6 @@
 {
-  "deployedAt": "2026-10-08",
-  "studioVersion": "0.36.1",
+  "deployedAt": "2026-11-16T06:00:18.021810+00:00",
+  "studioVersion": "0.61.0",
   "initialWorkerVersion": "a444cea0-f883-41a7-8b66-2b34bc8dd22c",
   "publicUrl": "https://blyg.dormouse.sh/",
   "verified": {
@@ -10,8 +10,15 @@
     "archiveIndex": 200,
     "anonymousSettings": 401,
     "webmentionAdvertised": true,
-    "ownerLogin": true,
-    "publishedReleases": 16,
-    "pinnedRevisions": 16
-  }
+    "ownerLogin": null,
+    "publishedReleases": 17,
+    "pinnedRevisions": 33,
+    "existingRevisionsPreserved": 33,
+    "importedDatesInspected": 0,
+    "importedDatesRepaired": 0
+  },
+  "protocolVersion": "0.4",
+  "privateApiVersion": "5.10.0",
+  "workerVersion": "9aa0db05-eff7-451c-ab4e-5e118afc831e",
+  "lastMigration": "0046_background.sql"
 }

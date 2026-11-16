@@ -13,12 +13,12 @@ The publication contract is in `docs/specs/deploy.md` → “Blyg changelog”; 
 Run these from the repository root:
 
 ```sh
-node scripts/publish-blyg.mjs --plan
-node scripts/publish-blyg.mjs --dry-run
-node scripts/publish-blyg.mjs
+pnpm exec node scripts/publish-blyg.mjs --plan
+pnpm exec node scripts/publish-blyg.mjs --dry-run
+pnpm exec node scripts/publish-blyg.mjs
 ```
 
-`--plan` checks public GitHub release eligibility without Studio credentials. `--dry-run` reads Studio to compare entries but makes no writes or pins. The other two commands need `BLYG_API_TOKEN` in their environment. Never paste credentials into command arguments or Git. The renewal helper below passes its token to a local synchronization without saving it.
+`--version X.Y.Z` restricts any mode to one stable public release and fails if it is ineligible. `--plan` checks public GitHub release eligibility without Studio credentials. `--dry-run` reads Studio to compare entries but makes no writes or pins. The other two commands need `BLYG_API_TOKEN` in their environment. Never paste credentials into command arguments or Git. The renewal helper below passes its token to a local synchronization without saving it.
 
 Make release corrections in `CHANGELOG.md`. Studio remains useful for responses, subscriptions, settings and independently authored posts. The publisher identifies its entries by their opening “Dormouse VERSION” heading and matching GitHub release link; retain both. Do not run local publication while the Actions publisher is running. After a failed or timed-out write, rerun the publisher: it reconciles existing drafts and versions before doing more work. A conflicting draft or deliberately withdrawn item stops the run for operator review.
 
@@ -30,7 +30,9 @@ Stock Studio grants expire after 30 days; OAuth refresh does not extend that dea
 python3 deploy/blyg/authorize.py --publish
 ```
 
-The helper prompts for the Studio owner password with terminal echo disabled, logs in over HTTPS, creates a REST token with read/draft/publish permissions, and pipes it directly to GitHub's `blyg-publish` environment secret `BLYG_API_TOKEN`. It revokes the previous grants named “Dormouse release publisher” after saving the replacement, then synchronizes pending releases. It never saves the password, session cookie or token to disk. Requires Python 3, Node, and `gh` authenticated with permission to set this environment's secrets. Run between publisher jobs so rotating the token does not interrupt an active run.
+The helper prompts for the Studio owner password with terminal echo disabled, logs in over HTTPS, creates a REST token with read/draft/publish permissions, and pipes it directly to GitHub's `blyg-publish` environment secret `BLYG_API_TOKEN`. It revokes the previous grants named “Dormouse release publisher” after saving the replacement, then synchronizes pending releases. It never saves the password, session cookie or token to disk. Requires Python 3, pnpm, and `gh` authenticated with permission to set this environment's secrets. Run between publisher jobs so rotating the token does not interrupt an active run.
+
+Manual Actions dispatch accepts the optional `version` input for the same restriction. For a single failed release, use `python3 deploy/blyg/authorize.py --publish-version 2.0.0` to renew access and publish only that version.
 
 Only for a new installation, `--initialize --publish` first sets the chosen owner password through Wrangler's stdin. It requires the separate random `COOKIE_SECRET` to already exist. Do not use `--initialize` during ordinary token renewal: it changes the owner password. No AI-provider credential is needed for release publication.
 
@@ -39,14 +41,22 @@ Only for a new installation, `--initialize --publish` first sets the chosen owne
 Commands below start at the repository root. Run Wrangler from a temporary directory with an absolute config path, or under the repository's pinned Node runtime; ambient `npx` inside this monorepo may reject pnpm's `devEngines` setting.
 
 ```sh
-node deploy/blyg/install-bundle.mjs
+pnpm exec node deploy/blyg/install-bundle.mjs
 pnpm exec npx --yes wrangler@4.141.0 deploy --dry-run --config deploy/blyg/wrangler.jsonc
 pnpm exec npx --yes wrangler@4.141.0 deploy --config deploy/blyg/wrangler.jsonc
 ```
 
 `install-bundle.mjs` downloads the exact official GitHub archive, verifies its pinned hash, checks archive paths and file types, and extracts the bundle without running upstream hooks. It does not deploy. The upstream MIT license and installation guide are retained in `.bundle/LICENSE` and `.bundle/README.md`.
 
-For an update, read every intervening [upstream changelog entry](https://github.com/blygger/blygger-studio/blob/main/CHANGELOG.md) and the target release instructions. Verify its published checksum, update `release.json`, and run the installer. Preserve this installation's configuration and secrets, incorporating only required config changes. Back up D1 and original R2 media before migrations; apply the official migrations with `d1 migrations apply DB --remote --config deploy/blyg/wrangler.jsonc`, then deploy. A Git revert does not reverse database migrations. Check the manifest's generator version, RSS, archive index, existing posts and pins, Studio login, and anonymous `/api/settings` returning 401. Commit the release pin and verified deployment record together.
+For an update, read every intervening [upstream changelog entry](https://github.com/blygger/blygger-studio/blob/main/CHANGELOG.md) and the target release instructions. Verify its published checksum, update `release.json`, and run the installer. Preserve this installation's configuration and secrets, incorporating only required config changes. Back up D1 and original R2 media before migrations; apply the official migrations with `d1 migrations apply DB --remote --config deploy/blyg/wrangler.jsonc`, then run the bundled imported-date repair and deploy. A Git revert does not reverse database migrations. Check the manifest's generator version, RSS, archive index, existing posts and pins, Studio login, and anonymous `/api/settings` returning 401. Commit the release pin and verified deployment record together.
+
+Studio 0.61.0 implements public protocol 0.4 and private API 5.10.0. This publisher uses camelCase fields, cursor pages and conditional item writes; older publisher code cannot run against it. Finish pending Studio edits before migrations and avoid editing through deployment. The 0.36.1 → 0.61.0 upgrade applies migrations 0026–0046 (0037 is absent upstream), then normalizes imported timestamps with the official bundled repair:
+
+```sh
+pnpm exec node deploy/blyg/.bundle/normalize-import-dates.mjs --remote --config deploy/blyg/wrangler.jsonc
+```
+
+The repair invokes upstream's `npx wrangler@4`; run it under `pnpm exec` to supply the pinned Node. It is safe to rerun. Existing published text and pins are preserved; the manifest and served item documents advertise the new protocol version.
 
 ## Backups
 

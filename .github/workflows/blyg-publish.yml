@@ -8,6 +8,11 @@ on:
     branches: [main]
     paths: [CHANGELOG.md]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Publish only this stable release (X.Y.Z); blank synchronizes all releases'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -35,7 +40,13 @@ jobs:
           package-manager-cache: false
       - run: node --test scripts/publish-blyg.test.mjs
       - name: Publish and pin released changelog entries
-        run: node scripts/publish-blyg.mjs
+        run: |
+          if [[ -n "$BLYG_RELEASE_VERSION" ]]; then
+            node scripts/publish-blyg.mjs --version "$BLYG_RELEASE_VERSION"
+          else
+            node scripts/publish-blyg.mjs
+          fi
         env:
+          BLYG_RELEASE_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
           BLYG_API_TOKEN: ${{ secrets.BLYG_API_TOKEN }}
