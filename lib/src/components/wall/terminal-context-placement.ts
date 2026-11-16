@@ -23,7 +23,7 @@ export function cursorHalfSide(buffer: { baseY: number; cursorY: number; viewpor
 }
 
 /** Bounds are in Wall coordinates. Overlays may cover peers, never resize them.
- *  `avoid` is never chosen, though it stays available to choose by hand. */
+ *  `avoid` is never the automatic choice; `preferred` still takes it, and it stays available. */
 export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolean, preferred?: ContextSide, fallback: ContextSide = 'top', avoid?: ContextSide): ContextPlacement {
   const right = wall.x + wall.width;
   const bottom = wall.y + wall.height;
@@ -41,14 +41,13 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
       width, height,
     } };
   }).filter(candidate => candidate.rect.width >= MIN_WIDTH && candidate.rect.height >= MIN_HEIGHT);
-  const choices = candidates.filter(candidate => candidate.side !== avoid);
-  const chosen = choices.find(candidate => candidate.side === preferred)
-    ?? choices.reduce<typeof choices[number] | undefined>((best, candidate) => !best || candidate.rect.width * candidate.rect.height > best.rect.width * best.rect.height ? candidate : best, undefined);
+  const chosen = candidates.find(candidate => candidate.side === preferred)
+    ?? candidates.reduce<typeof candidates[number] | undefined>((best, candidate) => candidate.side !== avoid && (!best || candidate.rect.width * candidate.rect.height > best.rect.width * best.rect.height) ? candidate : best, undefined);
   if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side), anchor: chosen.side === 'top' ? 'bottom' : 'top' };
 
   // Cover the source's half on its own edges, as adjacent aux terminals align with theirs.
   // Small sources may borrow Wall space for usable chrome.
-  const side = ([preferred, fallback, 'top'] as const).find(edge => (edge === 'top' || edge === 'bottom') && edge !== avoid) ?? 'top';
+  const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback !== avoid ? fallback : fallback === 'top' ? 'bottom' : 'top';
   const width = Math.min(wall.width, Math.max(source.width, MIN_WIDTH));
   const height = Math.min(wall.height, Math.max(source.height / 2, MIN_HEIGHT));
   return { side, available: ['top', 'bottom'], anchor: side === 'bottom' ? 'bottom' : 'top', rect: {

@@ -285,7 +285,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   ];
   const root = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
-  const [fitted, setVisible] = useState(actions.length);
+  const [fitted, setFitted] = useState(actions.length);
   // `+` shows the overflow in the row, so its keys are on screen before they answer.
   const [expanded, setExpanded] = useState(false);
   const visible = keysLive && expanded ? actions.length : fitted;
@@ -301,7 +301,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
     setFloor(trigger);
     const widths = faces.map(face => Math.max(face, opening));
     const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap;
-    if (total <= width) { setVisible(widths.length); return; }
+    if (total <= width) { setFitted(widths.length); return; }
     let used = trigger;
     let count = 0;
     for (const value of widths) {
@@ -309,7 +309,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
       used += gap + value;
       count++;
     }
-    setVisible(count);
+    setFitted(count);
   }, [labels, hiddenPending]);
   const run = async ({ mode, disabled }: PortAction) => {
     if (pending !== null || disabled) return;
@@ -334,11 +334,9 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
         <ActionFace status={opening ? OPENING : null}>{action.icon}{action.text}</ActionFace>
       </ContextAction>;
     })}
-    {/* With live keys, a button that shows the rest; else a transparent native select over a link-styled label, like the other actions. */}
-    {visible < actions.length && keysLive && <ContextAction label="More browser actions" shortcut={CONTEXT_KEYS.more} busy={pending !== null} onClick={() => setExpanded(true)}>
-      {hiddenPending ? OPENING : MORE}
-    </ContextAction>}
-    {visible < actions.length && !keysLive && <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
+    {/* With live keys, a button that shows the rest, whose keys answer only once shown; else a
+        transparent native select over a link-styled label, like the other actions. */}
+    {visible < actions.length && (keysLive ? <ContextAction label="More browser actions" shortcut={CONTEXT_KEYS.more} busy={pending !== null} onClick={() => setExpanded(true)}>{MORE}</ContextAction> : <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
       {hiddenPending ? OPENING : MORE}
       <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
         className="absolute inset-0 cursor-pointer appearance-none opacity-0"
@@ -347,7 +345,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
         <option value="">More browser actions</option>
         {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
       </select>
-    </span>}
+    </span>)}
   </div>;
 }
 

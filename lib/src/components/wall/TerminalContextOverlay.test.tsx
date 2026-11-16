@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import { TerminalContextOverlay } from './TerminalContextOverlay';
 import type { ContextPlacer, LathWallEngine } from './lath-wall-engine';
@@ -77,84 +77,63 @@ it('places from painted frames without rerendering the aux terminal or snapping 
   expect(placer).toBeNull();
 });
 
-it('keeps properties above their source on the edge their teeth share with it', () => {
+/** A root and an engine whose last paint left the source at `source`, torn down after `run`. */
+function withOverlay(source: Rect, run: (root: Root, container: HTMLElement, lath: LathWallEngine) => void) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  // Only the band above has room.
-  const source = { x: 0, y: 500, width: 1200, height: 300 };
   const lath = {
     animator: { framesAt: () => new Map([['source', { rect: source }]]) },
     setContextPlacer: () => {},
     notifyFrames: vi.fn(),
   } as unknown as LathWallEngine;
-  try {
+  try { run(root, container, lath); } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+}
+
+it('keeps properties above their source on the edge their teeth share with it', () => {
+  // Only the band above has room.
+  const source = { x: 0, y: 500, width: 1200, height: 300 };
+  withOverlay(source, (root, container, lath) => {
     act(() => root.render(<TerminalContextOverlay context={{ id: 'source' }} mode="properties" tool={false}
       wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source} multiPane lath={lath} preferences={new Map()} />));
     const host = container.querySelector<HTMLElement>('[data-test-context]')!.parentElement!;
     expect(host.style.top).toBe('510px');
     expect(host.style.transform).toBe('translateY(-100%)');
     expect(host.style.height).toBe('');
-  } finally {
-    act(() => root.unmount());
-    container.remove();
-  }
+  });
 });
 
 it('covers its source from the top, except for `!`, which keeps clear of the cursor', () => {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const root = createRoot(container);
   const source = { x: 0, y: 0, width: 1200, height: 800 };
-  const lath = {
-    animator: { framesAt: () => new Map([['source', { rect: source }]]) },
-    setContextPlacer: () => {},
-    notifyFrames: vi.fn(),
-  } as unknown as LathWallEngine;
-  const top = (context: { id: string; keyboard?: boolean }, mode: ContextMode) => {
-    act(() => root.render(<TerminalContextOverlay key={JSON.stringify([context, mode])} context={context} mode={mode} tool={false}
-      wall={source} source={source} multiPane={false} lath={lath} preferences={new Map()} />));
-    return container.querySelector<HTMLElement>('[data-test-context]')!.parentElement!.style.top;
-  };
-  try {
+  withOverlay(source, (root, container, lath) => {
+    const top = (context: { id: string; keyboard?: boolean }, mode: ContextMode) => {
+      act(() => root.render(<TerminalContextOverlay key={JSON.stringify([context, mode])} context={context} mode={mode} tool={false}
+        wall={source} source={source} multiPane={false} lath={lath} preferences={new Map()} />));
+      return container.querySelector<HTMLElement>('[data-test-context]')!.parentElement!.style.top;
+    };
     expect(top({ id: 'source' }, 'aux')).toBe('0px');
     expect(top({ id: 'source', keyboard: true }, 'properties')).toBe('0px');
     expect(top({ id: 'source', keyboard: true }, 'aux')).toBe('400px');
-  } finally {
-    act(() => root.unmount());
-    container.remove();
-  }
+  });
 });
 
 it('opens properties above a source with room only below, though a remembered side was below', () => {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const root = createRoot(container);
   const source = { x: 0, y: 0, width: 1200, height: 396 };
-  const lath = {
-    animator: { framesAt: () => new Map([['source', { rect: source }]]) },
-    setContextPlacer: () => {},
-    notifyFrames: vi.fn(),
-  } as unknown as LathWallEngine;
-  const side = (mode: ContextMode) => {
-    let placed: ContextSide | undefined;
-    act(() => root.render(<TerminalContextOverlay key={mode} context={{ id: 'source' }} mode={mode} tool={false}
-      wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source} multiPane lath={{ ...lath, setContextPlacer: (placer: ContextPlacer | null) => { placed = placer?.(new Map())?.side; } } as LathWallEngine} preferences={new Map([['source', 'bottom']])} />));
-    return placed;
-  };
-  try {
-    expect(side('aux')).toBe('bottom');
-    expect(side('properties')).toBe('top');
-    // A terminal below that switches to properties stays below.
+  withOverlay(source, (root, _container, lath) => {
     let placer: ContextPlacer | null = null;
-    const render = (mode: ContextMode) => act(() => root.render(<TerminalContextOverlay key="switch" context={{ id: 'source' }} mode={mode} tool={false}
-      wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source} multiPane lath={{ ...lath, setContextPlacer: (next: ContextPlacer | null) => { placer = next; } } as LathWallEngine} preferences={new Map()} />));
-    render('aux');
-    expect(placer!(new Map())?.side).toBe('bottom');
-    render('properties');
-    expect(placer!(new Map())?.side).toBe('bottom');
-  } finally {
-    act(() => root.unmount());
-    container.remove();
-  }
+    const render = (key: string, mode: ContextMode, preferences = new Map<string, ContextSide>()) => {
+      act(() => root.render(<TerminalContextOverlay key={key} context={{ id: 'source' }} mode={mode} tool={false}
+        wall={{ x: 0, y: 0, width: 1200, height: 800 }} source={source} multiPane lath={{ ...lath, setContextPlacer: (next: ContextPlacer | null) => { placer = next; } } as LathWallEngine} preferences={preferences} />));
+      return placer!(new Map())?.side;
+    };
+    const remembered = () => new Map<string, ContextSide>([['source', 'bottom']]);
+    expect(render('aux', 'aux', remembered())).toBe('bottom');
+    expect(render('properties', 'properties', remembered())).toBe('top');
+    // A terminal below that switches to properties stays below.
+    expect(render('switch', 'aux')).toBe('bottom');
+    expect(render('switch', 'properties')).toBe('bottom');
+  });
 });

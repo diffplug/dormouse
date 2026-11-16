@@ -64,7 +64,7 @@ function expectContained(element: Element, parent: Element) {
   expect(a.bottom).toBeLessThanOrEqual(b.bottom + 1);
 }
 /** Right-click opens properties, the aux terminal a switch away; `!` opens the aux terminal itself. */
-async function rightClickSourceHeader(source: string, mode: ContextMode = 'aux', via: Props['via'] = 'click') {
+async function openSourceContext(source: string, mode: ContextMode = 'aux', via: Props['via'] = 'click') {
   (getPlatform() as FakePtyAdapter).setProcessCwd(source, '/home/demo/projects/dormouse');
   const header = await requireElement(`[data-pane-header-for="${source}"]`, 'source header');
   if (via === 'key') await userEvent.keyboard('!');
@@ -83,7 +83,7 @@ async function rightClickSourceHeader(source: string, mode: ContextMode = 'aux',
   (getPlatform() as FakePtyAdapter).resumeAuxStartup(aux.id);
 }
 async function openContext(source: string, mode: ContextMode, via: Props['via']) {
-  await rightClickSourceHeader(source, mode, via);
+  await openSourceContext(source, mode, via);
   await settleTerminalContext();
   // Properties alone never start the aux terminal.
   if (mode === 'properties') { expect(getAux(source)).toBeUndefined(); return; }
@@ -254,7 +254,7 @@ export const PreserveInputAndFocus = story({
       await userEvent.click(within(context()).getByRole('button', { name: 'Close terminal context' }));
       await waitFor(() => expect(document.querySelector('[data-terminal-context]')).toBeNull());
       const resizedSource = rect(sourcePane(source));
-      await rightClickSourceHeader(source);
+      await openSourceContext(source);
       // The right-click opened properties, which never go below, though below was chosen before.
       expect(context().dataset.contextSide).toBe('top');
       expect(rect(sourcePane(source))).toEqual(resizedSource);
