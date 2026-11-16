@@ -176,7 +176,7 @@ overrides:
   archiver-utils>glob@<14.0.2: 14.0.6
   node-pg-migrate>glob@<14.0.2: 14.0.6
   '@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2': 14.0.6
-  '@vscode/vsce>minimatch@<11.0.1': 11.0.5
+  '@vscode/vsce>minimatch@<11.0.1': 11.0.8
 
 importers:
 
@@ -5605,8 +5605,8 @@ packages:
   minimalistic-assert@1.0.1:
     resolution: {integrity: sha512-UtJcAD4yEaGtjPezWuO9wC4nwUnVH/8/Im3yEHQP4b67cXlD/Qr9hdITCU1xDbSEXg2XKNaP8jsReV7vQd00/A==}
 
-  minimatch@11.0.5:
-    resolution: {integrity: sha512-snPlVppFcYWfLLFQGhDxUyBcHNtMlWmn3jtj7pEaO+DP8pqL0IvAzXhMYmn1z9ASNtgmwLBdFxSf4tMUB0OTKA==}
+  minimatch@11.0.8:
+    resolution: {integrity: sha512-nFQuYSTVrGvysVBps5Ih+0BdnYFN/Cj3C816r6+p7yK+FHrVLGE4O4N9AFwykrlNlvM2HYt+Rad1Uiro6h88Ig==}
     engines: {node: 20 || >=22}
 
   minimatch@5.1.9:
@@ -10051,7 +10051,7 @@ snapshots:
       jsonc-parser: 3.3.1
       marked: 18.1.1
       mime: 1.6.0
-      minimatch: 11.0.5
+      minimatch: 11.0.8
       parse5: 8.0.1
       proper-lockfile: 4.1.2
       read: 1.0.7
@@ -11035,7 +11035,7 @@ snapshots:
 
   glob@14.0.6:
     dependencies:
-      minimatch: 11.0.5
+      minimatch: 11.0.8
       minipass: 7.1.3
       path-scurry: 3.0.0
 
@@ -11952,7 +11952,7 @@ snapshots:
 
   minimalistic-assert@1.0.1: {}
 
-  minimatch@11.0.5:
+  minimatch@11.0.8:
     dependencies:
       '@isaacs/nonrecursive-glob-match': 1.1.0
       brace-expansion: 5.0.12
