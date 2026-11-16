@@ -306,8 +306,8 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'pty:kill', id });
   }
 
-  getCwd(id: string): Promise<string | null> {
-    return this.requestResponse('pty:getCwd', 'pty:cwd', { id }, (msg) => msg.cwd);
+  async getCwd(id: string): Promise<string | null> {
+    return (await this.getCwds([id]))[id] ?? null;
   }
 
   /** One round trip and one pty-host scan for every pane a save probes —
@@ -327,12 +327,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
-    const result = await this.requestResponse<OpenPort[]>(
-      'pty:getOpenPorts', 'pty:openPorts', { id },
-      (msg) => msg.ports as OpenPort[],
-      openPortRequestTimeoutMs(1, 2),
-    );
-    return result ?? [];
+    return (await this.getOpenPortsMany([id]))[id] ?? [];
   }
 
   async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {

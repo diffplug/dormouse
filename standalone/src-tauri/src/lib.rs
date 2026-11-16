@@ -1283,14 +1283,6 @@ fn sidecar_line(event: &str, data: impl Serialize) -> String {
     serde_json::to_string(&Line { event, data }).expect("a sidecar line is plain JSON")
 }
 
-fn request_from_sidecar(
-    state: &SidecarState,
-    event: &str,
-    data: JsonValue,
-) -> Result<JsonValue, String> {
-    request_from_sidecar_timeout(state, event, data, Duration::from_secs(1))
-}
-
 /// The waiter for `request_id`'s answer, or `None` once the sidecar has exited:
 /// nothing will ever answer, so the caller fails at once instead of waiting out
 /// its timeout.
@@ -1332,7 +1324,7 @@ fn deliver_sidecar_exit(app: &AppHandle) {
     }
 }
 
-/// INVARIANT: every `#[tauri::command]` that reaches these two blocking helpers
+/// INVARIANT: every `#[tauri::command]` that reaches this blocking helper
 /// must be declared `#[tauri::command(async)]` (or be an `async fn`). Tauri runs
 /// a plain sync command on the **main thread**, where the `recv_timeout` below
 /// stops the webview from painting for the whole round trip — up to
@@ -1662,17 +1654,6 @@ fn pty_context(state: tauri::State<'_, SidecarState>, request: JsonValue) -> Res
     request_from_sidecar_timeout(&state, "pty:context", request, Duration::from_secs(10))
 }
 
-#[tauri::command(async)]
-fn pty_get_cwd(
-    state: tauri::State<'_, SidecarState>,
-    id: String,
-) -> Result<Option<String>, String> {
-    let response = request_from_sidecar(&state, "pty:getCwd", serde_json::json!({ "id": id }))?;
-    Ok(response
-        .get("cwd")
-        .and_then(|cwd| cwd.as_str().map(String::from)))
-}
-
 /// Every id's cwd in one sidecar round trip. A save probes each terminal pane,
 /// and the sidecar resolves N pids with one process scan rather than N spawns
 /// (docs/specs/transport.md -> "Persisted session").
@@ -1704,30 +1685,13 @@ const OPEN_PORT_TIMEOUT_PER_ID_MS: u64 = 100;
 // Mirrors platform/types.ts; pinned by mirrored-constants.test.ts.
 const OPEN_PORT_ROUND_TRIP_MARGIN_MS: u64 = 1000;
 
-/// Budget for either port command over `count` ids, plus `OPEN_PORT_ROUND_TRIP_MARGIN_MS` for IPC. The sidecar runs two
+/// Budget for the port command over `count` ids, plus `OPEN_PORT_ROUND_TRIP_MARGIN_MS` for IPC. The sidecar runs two
 /// scans serially: the process table under `OPEN_PORT_TIMEOUT_MS`, then one
 /// socket scan under that cap plus `OPEN_PORT_TIMEOUT_PER_ID_MS` per id
 /// (`getOpenPortsForPids` in `standalone/sidecar/pty-core.js`) — so the whole
 /// Window is not held to one terminal's budget, and the reply outlasts both.
 fn open_ports_many_timeout(count: usize) -> Duration {
     Duration::from_millis(2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count as u64 + OPEN_PORT_ROUND_TRIP_MARGIN_MS)
-}
-
-#[tauri::command(async)]
-fn pty_get_open_ports(
-    state: tauri::State<'_, SidecarState>,
-    id: String,
-) -> Result<JsonValue, String> {
-    let response = request_from_sidecar_timeout(
-        &state,
-        "pty:getOpenPorts",
-        serde_json::json!({ "id": id }),
-        open_ports_many_timeout(1),
-    )?;
-    Ok(response
-        .get("ports")
-        .cloned()
-        .unwrap_or_else(|| JsonValue::Array(Vec::new())))
 }
 
 /// Every id's listening ports in one sidecar round trip, for a listing that spans
@@ -5203,10 +5167,8 @@ pub fn run() {
             pty_ack,
             pty_theme_colors,
             pty_kill,
-            pty_get_cwd,
             pty_get_cwds,
             pty_context,
-            pty_get_open_ports,
             pty_get_open_ports_many,
             pty_graceful_kill,
             capture_agent_recovery,

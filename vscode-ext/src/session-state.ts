@@ -70,26 +70,28 @@ export async function refreshSavedSessionStateFromPtys(
   const ptys = ptyManager.getBufferedPtys();
   log.info(`[session] refreshFromPtys: ${saved.panes.length} saved panes, ${ptys.size} live PTYs`);
 
-  const panes = await Promise.all(
-    saved.panes.map(async (pane) => {
-      if (pane.surfaceType === 'browser') {
-        log.info(`[session] ${pane.id}: browser surface, skipping PTY refresh`);
-        return browserPersistedPane(pane, toPersistedAlert(undefined, pane.alert));
-      }
+  const live = saved.panes.filter((pane) => pane.surfaceType !== 'browser' && ptys.has(pane.id)).map((pane) => pane.id);
+  // One pty-host scan, bounded inside the shutdown step that runs this.
+  const cwds = live.length ? await ptyManager.getCwds(live, 1000) : {};
 
-      const alert = toPersistedAlert(alertStates?.get(pane.id), pane.alert);
+  const panes = saved.panes.map((pane) => {
+    if (pane.surfaceType === 'browser') {
+      log.info(`[session] ${pane.id}: browser surface, skipping PTY refresh`);
+      return browserPersistedPane(pane, toPersistedAlert(undefined, pane.alert));
+    }
 
-      if (!ptys.has(pane.id)) {
-        log.info(`[session] ${pane.id}: not in live PTYs, keeping saved cwd=${pane.cwd}`);
-        return { ...pane, alert };
-      }
+    const alert = toPersistedAlert(alertStates?.get(pane.id), pane.alert);
 
-      const cwd = await ptyManager.getCwd(pane.id);
-      log.info(`[session] ${pane.id}: live PTY cwd=${cwd}`);
+    if (!ptys.has(pane.id)) {
+      log.info(`[session] ${pane.id}: not in live PTYs, keeping saved cwd=${pane.cwd}`);
+      return { ...pane, alert };
+    }
 
-      return { ...pane, cwd: cwd ?? pane.cwd, alert };
-    }),
-  );
+    const cwd = cwds[pane.id] ?? null;
+    log.info(`[session] ${pane.id}: live PTY cwd=${cwd}`);
+
+    return { ...pane, cwd: cwd ?? pane.cwd, alert };
+  });
 
   await saveSessionState(context, {
     ...saved,

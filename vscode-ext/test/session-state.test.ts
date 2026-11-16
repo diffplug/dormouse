@@ -5,7 +5,7 @@ import type { PersistedSession } from '../../lib/src/lib/session-types';
 
 const ptyManager = vi.hoisted(() => ({
   getBufferedPtys: vi.fn(),
-  getCwd: vi.fn(),
+  getCwds: vi.fn(),
 }));
 
 vi.mock('../src/pty-manager', () => ptyManager);
@@ -37,7 +37,7 @@ describe('VS Code session alert persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ptyManager.getBufferedPtys.mockReturnValue(new Map());
-    ptyManager.getCwd.mockResolvedValue(null);
+    ptyManager.getCwds.mockResolvedValue({});
   });
 
   it('projects live alert state before a periodic save', () => {

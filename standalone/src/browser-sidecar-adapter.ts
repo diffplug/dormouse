@@ -175,7 +175,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   async getCwd(id: string): Promise<string | null> {
-    try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
+    return (await this.getCwds([id]))[id] ?? null;
   }
 
   /** See TauriAdapter: one round trip, one process scan, for the whole save —
@@ -204,7 +204,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // quit last wrote (docs/specs/standalone.md -> "Agent recovery").
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
-    try { return await this.host.invoke("pty_get_open_ports", { id }); } catch { return []; }
+    return (await this.getOpenPortsMany([id]))[id] ?? [];
   }
 
   /** See TauriAdapter: one round trip, one process scan, for a whole listing. */

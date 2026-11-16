@@ -69,8 +69,6 @@ vi.mock('../src/peer-link', () => ({
 const ptys = vi.hoisted(() => ({
   callbacks: null as { onData(id: string, data: string): void; onExit(id: string, code: number): void } | null,
   cwd: null as string | null,
-  cwdAsked: [] as string[],
-  cwdWait: null as Promise<void> | null,
   sendInput: vi.fn<(...args: unknown[]) => Promise<void>>(),
   cancelSendInput: vi.fn(),
   buffered: new Map<string, { alive: boolean }>(),
@@ -97,11 +95,6 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   sendInput: ptys.sendInput,
   cancelSendInput: ptys.cancelSendInput,
   getCwds: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, ptys.cwd])),
-  getCwd: async (id: string) => {
-    ptys.cwdAsked.push(id);
-    await ptys.cwdWait;
-    return ptys.cwd;
-  },
   kill: (id: string) => {
     ptys.order.push(`kill ${id}`);
     ptys.buffered.delete(id);
@@ -178,8 +171,6 @@ beforeEach(async () => {
   wiring.invalidations = 0;
   wiring.pushes = [];
   ptys.cwd = null;
-  ptys.cwdAsked = [];
-  ptys.cwdWait = null;
   ptys.buffered.clear();
   ptys.scrollback.clear();
   ptys.order = [];

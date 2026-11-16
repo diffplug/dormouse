@@ -167,10 +167,8 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Direction | Message | Contract |
 | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink; revalidation: `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks". |
-| Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. On Windows these include programs a Git Bash shell ran across MSYS execs, and processes in a running WSL distro whose environment carries the pane's `DORMOUSE_SURFACE_ID` (rationale). |
-| Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`; empty when the PTY is gone or enumeration fails. |
-| Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
-| Host → webview | `pty:openPortsMany` | `[]` for an id with no live PTY. |
+| Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan: TCP listening ports of each PTY's shell **and all of its descendant subprocesses**. On Windows these include programs a Git Bash shell ran across MSYS execs, and processes in a running WSL distro whose environment carries the pane's `DORMOUSE_SURFACE_ID` (rationale). |
+| Host → webview | `pty:openPortsMany` | De-duplicated by `(family, address, port)`; `[]` for an id with no live PTY or when enumeration fails. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. |
 | Webview → host | `pty:ack` / `pty_ack` (standalone) | `{ id, chars }` ("Output flow control"). |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |

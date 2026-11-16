@@ -506,24 +506,15 @@ export async function sendInput(id: string, events: readonly PtyInputEvent[], in
   if (!result?.delivered) throw new Error(result?.error ?? 'PTY input delivery was not acknowledged');
 }
 
-export function getCwd(id: string): Promise<string | null> {
-  return requestChild<{ cwd: string | null }>({ type: 'getCwd', id }, (msg) => msg.type === 'cwd' && msg.id === id, 1000)
-    .then((msg) => msg.cwd, () => null);
-}
-
 let cwdsSequence = 0;
 /**
  * Every id's cwd from one pty-host scan, so a save of N panes spawns one
  * process scan rather than N. Bounded like standalone's `pty_get_cwds`.
  */
-export function getCwds(ids: string[]): Promise<Record<string, string | null>> {
+export function getCwds(ids: string[], timeoutMs = 2000): Promise<Record<string, string | null>> {
   const requestId = `cwds-${++cwdsSequence}`;
-  return requestChild<{ cwds?: Record<string, string | null> }>({ type: 'getCwds', ids, requestId }, (msg) => msg.type === 'cwds' && msg.requestId === requestId, 2000)
+  return requestChild<{ cwds?: Record<string, string | null> }>({ type: 'getCwds', ids, requestId }, (msg) => msg.type === 'cwds' && msg.requestId === requestId, timeoutMs)
     .then((msg) => msg.cwds || {}, () => ({}));
-}
-
-export function getOpenPorts(id: string): Promise<OpenPort[]> {
-  return getOpenPortsMany([id]).then((ports) => ports[id] ?? []);
 }
 
 let openPortsSequence = 0;
