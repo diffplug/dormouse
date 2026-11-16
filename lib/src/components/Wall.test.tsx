@@ -5581,7 +5581,7 @@ it('moves a retained aux terminal without resizing or replacing its source, and 
 });
 
 
-it('labels the properties\' keys for `?` only, and takes `!` into the aux terminal in passthrough', async () => {
+it('labels the properties\' keys for `?` only, and takes `!` into the aux terminal, focus there meaning passthrough', async () => {
   const aux: auxTerminals.AuxTerminal = { id: 'surface:keys-aux', parentId: 'surface:keys' };
   vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:keys' ? aux : undefined);
   vi.spyOn(auxTerminals, 'openAux').mockResolvedValue(aux);
@@ -5615,13 +5615,15 @@ it('labels the properties\' keys for `?` only, and takes `!` into the aux termin
   await flush();
   await flushFrame();
   expect(context()!.dataset.contextMode).toBe('aux');
-  expect(modes().at(-1)).toBe('passthrough');
-  // The aux terminal takes the keyboard; the source does not.
+  // The aux terminal takes the keyboard, which is passthrough; the source takes none.
   expect(focus).toHaveBeenCalledWith('surface:keys-aux', true);
+  const terminal = context()!.querySelector('[data-aux-terminal]')!;
+  await act(async () => { terminal.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); });
+  await flushFrame();
+  expect(modes().at(-1)).toBe('passthrough');
   expect(focus).not.toHaveBeenCalledWith('surface:keys', true);
 
   // The mode-exit gesture leaves the terminal for the context's controls.
-  const terminal = context()!.querySelector('[data-aux-terminal]')!;
   await key({ key: 'Meta', location: 1, metaKey: true }, terminal);
   await key({ key: 'Meta', location: 2, metaKey: true }, terminal);
   expect(modes().at(-1)).toBe('command');

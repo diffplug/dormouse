@@ -11,8 +11,15 @@ export const CONTEXT_KEYS = {
 /** The port row's launch actions, in row order, overflow included. */
 export const PORT_ACTION_KEYS = ['1', '2', '3', '4', '5'] as const;
 
-const GLYPH: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Escape: 'esc' };
+const GLYPH: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Escape: 'Esc' };
 export const keyGlyph = (key: string) => GLYPH[key] ?? key;
+/** The keys of the port actions from `from` to `to`, as one label. */
+export const portKeyRange = (from: number, to: number) => (from < to ? `${PORT_ACTION_KEYS[from]}–${PORT_ACTION_KEYS[to]}` : PORT_ACTION_KEYS[from]);
+
+/** Opens `select`'s list where the browser allows; focused, its own keys open it otherwise. */
+export function openPicker(select: HTMLSelectElement) {
+  try { select.showPicker(); } catch { /* not allowed or unsupported */ }
+}
 
 export const ContextKeysContext = createContext(false);
 
@@ -40,7 +47,7 @@ export function activateContextKey(root: HTMLElement, key: string): boolean {
   if (!control || (control as HTMLButtonElement).disabled || control.getAttribute('aria-disabled') === 'true') return false;
   if (control instanceof HTMLSelectElement) {
     control.focus();
-    try { control.showPicker(); } catch { /* focused, its own keys open it */ }
+    openPicker(control);
   } else control.click();
   return true;
 }

@@ -271,6 +271,7 @@ export function Wall({
   activeRef.current = active;
   const [terminalContext, setTerminalContext] = useState<TerminalContextState | null>(null);
   const [contextView, setContextView] = useState<ContextView>({ mode: 'properties' });
+  const focusRequests = useRef(0);
   const terminalContextRef = useRef(terminalContext);
   terminalContextRef.current = terminalContext;
   const contextLaunchGeneration = useRef(0);
@@ -879,6 +880,8 @@ export function Wall({
     setMode('command');
     const id = selectedIdRef.current;
     if (id) focusSession(id, false);
+    // Leaving a context terminal keeps the keyboard on its context's controls.
+    document.activeElement?.closest<HTMLElement>('[data-terminal-context]')?.focus({ preventScroll: true });
   }, [releaseZoomExcept]);
 
   // --- Lath seed + auto-spawn ---
@@ -2402,15 +2405,19 @@ export function Wall({
     id: contextSourceId,
     mounted: terminalContext,
     mode: contextView.mode,
-    focusTerminal: contextView.focusTerminal,
-    setMode: (mode: ContextMode, focusTerminal = false) => setContextView({ mode, focusTerminal }),
+    focusRequest: contextView.focusRequest,
+    setMode: (mode: ContextMode, focusTerminal = false) => setContextView(view => view.mode === mode && !focusTerminal ? view : { mode, focusRequest: focusTerminal ? ++focusRequests.current : undefined }),
+    terminalFocused: () => {
+      const id = terminalContextRef.current?.id;
+      // The source keeps no focus while its context holds the keyboard.
+      if (id && modeRef.current !== 'passthrough') enterPassthrough(id, { focus: false });
+    },
     open: (id: string, options?: TerminalContextOpenOptions) => {
-      if (toolPendingFromParams(lath.getMeta(id)?.params) || isAuxSession(id) || isClosingSurface(id) || lath.isDying(id)) return false;
+      if (toolPendingFromParams(lath.getMeta(id)?.params) || isAuxSession(id) || isClosingSurface(id) || lath.isDying(id)) return;
       cancelContextPortLaunches();
       const { mode = 'properties', focusTerminal, ...rest } = options ?? {};
       setTerminalContext({ id, ...rest });
-      setContextView({ mode, focusTerminal });
-      return true;
+      setContextView({ mode, focusRequest: focusTerminal ? ++focusRequests.current : undefined });
     },
     close: () => {
       cancelContextPortLaunches();
@@ -2468,11 +2475,8 @@ export function Wall({
     enterPassthrough,
     enterCommandMode,
     minimizePane,
-    openTerminalContext: (id, { mode, origin }) => {
-      // `!` means to type in the terminal: it takes the keyboard, in passthrough.
-      const aux = mode === 'aux';
-      if (contextActions.open(id, { origin, mode, keyboard: true, focusTerminal: aux }) && aux) enterPassthrough(id, { focus: false });
-    },
+    // `!` means to type in the terminal: it takes the keyboard.
+    openTerminalContext: (id, { mode, origin }) => contextActions.open(id, { origin, mode, keyboard: true, focusTerminal: mode === 'aux' }),
     requestKill,
     reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,

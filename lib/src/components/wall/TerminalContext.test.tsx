@@ -357,7 +357,7 @@ it('shows both directories in the mismatch warning', () => {
   props.mismatch = true; props.auxCwd = '~/other'; render(); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/other'); expect(container.querySelector('[role="alert"]')?.textContent).toContain('~/repo');
 });
 it('shares header and uncaptured body entry points; captured mouse has no Shift escape', () => {
-  const open = vi.fn(); const value = { id: null, mounted: null, mode: 'properties' as const, setMode: vi.fn(), open, close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
+  const open = vi.fn(); const value = { id: null, mounted: null, mode: 'properties' as const, setMode: vi.fn(), terminalFocused: vi.fn(), open, close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
   act(() => root.render(<TerminalContextContext.Provider value={value}><TerminalPaneHeader id="parent" title={undefined} params={undefined} /><TerminalPanel id="parent" title={undefined} params={undefined} /></TerminalContextContext.Provider>));
   const header = container.querySelector('[data-pane-header-for]')!;
   const body = container.querySelector('textarea')!;
@@ -530,7 +530,7 @@ it('shows properties alone, then the terminal alone, each offering the other', a
   expect(props.onModeChange).toHaveBeenLastCalledWith('properties');
 });
 
-it('focuses the terminal once it shows when the opening asks, and the controls otherwise', async () => {
+it('focuses the terminal once per request, once it shows, and the controls otherwise', async () => {
   const aux = { id: 'focus-aux', parentId: 'focus-source' };
   const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue(aux);
   const get = vi.spyOn(auxTerminals, 'getAux').mockReturnValue(undefined);
@@ -545,17 +545,22 @@ it('focuses the terminal once it shows when the opening asks, and the controls o
     await act(async () => root.render(<></>));
     // Still starting: the focus waits for the aux terminal.
     get.mockReturnValue(undefined);
-    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusTerminal />));
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusRequest={1} />));
     await frame();
     expect(focus).not.toHaveBeenCalled();
     get.mockReturnValue(aux);
-    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusTerminal />));
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusRequest={1} />));
     await frame();
     expect(focus).toHaveBeenCalledExactlyOnceWith('focus-aux', true);
     // Once per opening: the user may have moved on.
-    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusTerminal title="renamed" />));
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusRequest={1} title="renamed" />));
     await frame();
     expect(focus).toHaveBeenCalledOnce();
+    // A later request, after a trip through properties, focuses again.
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="properties" />));
+    await act(async () => root.render(<TerminalContext id="focus-source" mode="aux" focusRequest={2} />));
+    await frame();
+    expect(focus).toHaveBeenCalledTimes(2);
   } finally {
     await act(async () => root.render(<></>));
     open.mockRestore(); get.mockRestore(); focus.mockRestore();
@@ -572,7 +577,7 @@ it('labels and answers the properties\' keys only when asked', async () => {
   props.shortcuts = true;
   render();
   // Every control names its key.
-  for (const [label, key] of [['Copy surface:3', 'i'], ['Explain this title', 'd'], ['Copy absolute path', 'c'], ['Reveal in Finder', 'r'], ['Open in system browser', '1'], ['Show aux terminal', '!'], ['Place context at bottom', '↓'], ['Close terminal context', 'esc']] as const) {
+  for (const [label, key] of [['Copy surface:3', 'i'], ['Explain this title', 'd'], ['Copy absolute path', 'c'], ['Reveal in Finder', 'r'], ['Open in system browser', '1'], ['Show aux terminal', '!'], ['Place context at bottom', '↓'], ['Close terminal context', 'Esc']] as const) {
     expect(button(label).textContent, label).toContain(`[${key}]`);
   }
   expect(container.querySelector('[data-context-alerts]')!.textContent).toContain('TODO[t]');

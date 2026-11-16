@@ -63,7 +63,7 @@ afterEach(() => {
   clearTerminalActivity(ID);
 });
 
-const context = { id: null, mounted: null, mode: 'properties' as const, setMode: vi.fn(), open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
+const context = { id: null, mounted: null, mode: 'properties' as const, setMode: vi.fn(), terminalFocused: vi.fn(), open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
 
 function renderHeader(params: Record<string, unknown>, actions: WallActions = stubActions(), options: { renaming?: boolean; title?: string } = {}) {
   const props: PaneProps = { id: ID, title: options.title ?? 'viewer', params };

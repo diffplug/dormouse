@@ -109,7 +109,7 @@ function half(testId: string): HTMLElement {
 describe('ToolPanel', () => {
   it('gives its terminal to its context only while the context shows it', () => {
     const shown = (mode: ContextMode | null) => {
-      const context = { id: mode && 'p1', mounted: mode && { id: 'p1' }, mode: mode ?? 'properties', setMode: vi.fn(), open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
+      const context = { id: mode && 'p1', mounted: mode && { id: 'p1' }, mode: mode ?? 'properties', setMode: vi.fn(), terminalFocused: vi.fn(), open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
       act(() => root.render(<TerminalContextContext.Provider value={context}><ToolPanel id="p1" title="t" params={booting} /></TerminalContextContext.Provider>));
       return container.querySelector('[data-testid="terminal"]')!.getAttribute('data-render-terminal');
     };

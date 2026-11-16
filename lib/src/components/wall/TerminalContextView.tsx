@@ -2,7 +2,8 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, 
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, InfoIcon, PlugIcon, PushPinIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
-import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, KeyHint, PORT_ACTION_KEYS } from './context-keys';
+import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, KeyHint, openPicker, PORT_ACTION_KEYS, portKeyRange } from './context-keys';
+import { isEditableTarget } from '../../lib/dom';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon, BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
@@ -244,6 +245,15 @@ function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
   </div>;
 }
 
+/** A switch beside its label, both carrying `shortcut`: the label names the key the switch answers. */
+function KeyedSwitch({ children, shortcut, on, onToggle, label }: { children: ReactNode; shortcut: string; on: boolean; onToggle(): void; label: string }) {
+  return <>
+    <span className="flex min-w-0 items-center gap-1" title={label}>{children}<KeyHint k={shortcut} /></span>
+    {/* `contents`, so the switch keeps its own grid cell. */}
+    <span className="contents" {...contextKey(shortcut)}><OnOffSwitch on={on} onEnable={onToggle} onDisable={onToggle} label={label} /></span>
+  </>;
+}
+
 const MORE = <span className="inline-flex items-center gap-1">more…<CaretDownIcon size={10} weight="fill" /></span>;
 /** Keys that open, close, or leave a closed select. Chromium on Windows and Linux
  *  lets any other key change a closed select's value, which here would launch. */
@@ -253,7 +263,7 @@ export function closedSelectKeyDown(event: KeyboardEvent<HTMLSelectElement>): vo
   if (SELECT_PASSTHROUGH_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
   event.preventDefault();
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-    try { event.currentTarget.showPicker(); } catch { /* Space and Alt+↓ still open it */ }
+    openPicker(event.currentTarget);
   }
 }
 
@@ -310,8 +320,9 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   return <div ref={root} data-port-actions className="relative flex flex-1 items-center gap-1" style={{ minWidth: floor }}>
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       {/* The trigger at rest and while opening, then each action's face. */}
-      <span className={ACTION_BOX_CLASS}>{MORE}<KeyHint k="1–5" /></span>
-      <span className={ACTION_BOX_CLASS}>{OPENING}<KeyHint k="1–5" /></span>
+      {/* The widest the overflow's key range can be. */}
+      <span className={ACTION_BOX_CLASS}>{MORE}<KeyHint k={portKeyRange(0, actions.length - 1)} /></span>
+      <span className={ACTION_BOX_CLASS}>{OPENING}<KeyHint k={portKeyRange(0, actions.length - 1)} /></span>
       {actions.map((action, index) => <span key={key(action)} className={ACTION_BOX_CLASS}>{action.icon}{action.text}<KeyHint k={PORT_ACTION_KEYS[index]} /></span>)}
     </div>
     {actions.slice(0, visible).map((action, index) => {
@@ -324,7 +335,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
     {visible < actions.length && <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
       {hiddenPending ? OPENING : MORE}
       {/* The keys of the actions it holds. */}
-      <KeyHint k={visible + 1 < actions.length ? `${PORT_ACTION_KEYS[visible]}–${PORT_ACTION_KEYS[actions.length - 1]}` : PORT_ACTION_KEYS[visible]} />
+      <KeyHint k={portKeyRange(visible, actions.length - 1)} />
       <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
         className="absolute inset-0 cursor-pointer appearance-none opacity-0"
         onKeyDown={closedSelectKeyDown}
@@ -514,7 +525,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); return; }
       // A list or field keeps its own keys; Escape above still closes.
-      if (keysLive && !detail && !event.metaKey && !event.ctrlKey && !event.altKey && !(event.target as HTMLElement).closest('select, input, textarea')
+      if (keysLive && !detail && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableTarget(event.target) && !(event.target instanceof HTMLSelectElement)
         && surface.current && activateContextKey(surface.current, event.key)) {
         event.preventDefault();
         event.stopPropagation();
@@ -550,9 +561,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           {/* Stacked beside the rows they belong to, so they cost no height. */}
           <div data-context-alerts className="flex flex-wrap items-center gap-x-2 @[20rem]:grid @[20rem]:gap-x-1 @[20rem]:grid-cols-[auto_auto] @[20rem]:justify-items-end">
             {p.watchRule
-              ? <><span className="flex min-w-0 items-center gap-1"><span className="max-w-[16ch] truncate" title={`Watch all ${p.watchRule} commands`}>watch {p.watchRule}</span><KeyHint k={CONTEXT_KEYS.watch} /></span><span className="contents" {...contextKey(CONTEXT_KEYS.watch)}><OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} /></span></>
+              ? <KeyedSwitch shortcut={CONTEXT_KEYS.watch} on={p.watching} onToggle={p.onWatch} label={`Watch all ${p.watchRule} commands`}><span className="max-w-[16ch] truncate">watch {p.watchRule}</span></KeyedSwitch>
               : <span className="col-span-2 flex h-6 items-center text-muted" title="No command running">no command</span>}
-            <span className="flex items-center gap-1">TODO<KeyHint k={CONTEXT_KEYS.todo} /></span><span className="contents" {...contextKey(CONTEXT_KEYS.todo)}><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></span>
+            <KeyedSwitch shortcut={CONTEXT_KEYS.todo} on={p.todo} onToggle={p.onTodo} label="TODO">TODO</KeyedSwitch>
           </div>
         </div></div>
         {p.notification && <div data-context-notification className="flex h-6 min-w-0 items-center gap-1 pl-1" title={[p.notification.title, p.notification.body].filter(Boolean).join('\n')}>

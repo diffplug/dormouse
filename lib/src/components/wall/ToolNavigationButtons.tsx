@@ -12,8 +12,7 @@ export function ToolNavigationButtons({ id, params }: { id: string; params?: Rec
       const available = !toolNavigationPending(params) && next >= 0 && next < history.entries.length;
       const Icon = direction === 'back' ? ArrowLeftIcon : ArrowRightIcon;
       const label = direction === 'back' ? 'Back to previous file' : 'Forward to next file';
-      // In a Terminal Context with live keys, `[` and `]`.
-      const key = CONTEXT_KEYS[direction === 'back' ? 'back' : 'forward'];
+      const key = CONTEXT_KEYS[direction];
       return <button key={direction} type="button" className={chromeButton()} disabled={!available} aria-label={label} {...contextKey(key)}
         title={available ? `${label}: ${history.entries[next].target}` : label}
         onMouseDown={event => { event.preventDefault(); event.stopPropagation(); }}
