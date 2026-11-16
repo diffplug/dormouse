@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 
 export const ORIGIN = 'https://blyg.dormouse.sh';
@@ -31,17 +32,21 @@ export function changelogEntries(markdown) {
   return entries;
 }
 
-export function publicationPlan(markdown, releases) {
+export function publicationPlan(markdown, releases, version) {
+  if (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid release version');
   const entries = changelogEntries(markdown);
-  return releases
+  const plan = releases
     .filter(release => !release.draft && !release.prerelease && release.published_at && /^v\d+\.\d+\.\d+$/.test(release.tag_name))
+    .filter(release => version === undefined || release.tag_name === `v${version}`)
     .sort((a, b) => a.published_at.localeCompare(b.published_at))
     .flatMap(release => {
       const entry = entries.get(release.tag_name.slice(1));
       if (!entry) throw new Error(`Published ${release.tag_name} is missing from CHANGELOG.md`);
       const { version, date, body } = entry;
-      return [{ version, content_md: `# Dormouse ${version}\n\nReleased ${date}. [Download](https://github.com/${REPOSITORY}/releases/tag/v${version}).\n\n${body}\n\n---\n\n🔌 VS Code extension only · 🖥️ Desktop app only · Unmarked changes apply to both.\n` }];
+      return [{ version, contentMd: `# Dormouse ${version}\n\nReleased ${date}. [Download](https://github.com/${REPOSITORY}/releases/tag/v${version}).\n\n${body}\n\n---\n\n🔌 VS Code extension only · 🖥️ Desktop app only · Unmarked changes apply to both.\n` }];
     });
+  if (version !== undefined && !plan.length) throw new Error(`No stable public GitHub release for ${version}`);
+  return plan;
 }
 
 export function apiClient(token, fetcher = fetch) {
@@ -78,33 +83,49 @@ function itemPath(item) {
 }
 
 export async function syncPublications(plan, api, { dryRun = false, log = console.log } = {}) {
+  // Each write consumes the revision returned by the previous read or write. A
+  // conflict stops the run: never retry against text we have not reconciled.
+  function expected(item) {
+    if (!Number.isSafeInteger(item.revision) || item.revision < 1) throw new Error('Invalid Studio item revision');
+    return { expectedRevision: item.revision };
+  }
+  async function pin(item) {
+    const result = await api('PUT', `${itemPath(item)}/versions/${item.version}/pin`, expected(item));
+    return { ...item, revision: result.revision };
+  }
   const byVersion = new Map();
-  for (let offset = 0; ; ) {
-    const page = await api('GET', `/items?limit=100&offset=${offset}`);
-    if (!Array.isArray(page.items) || !Number.isInteger(page.total)) throw new Error('Invalid Studio item listing');
+  const cursors = new Set();
+  for (let cursor; ; ) {
+    const page = await api('GET', `/items?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+    const next = page.page?.nextCursor;
+    if (!Array.isArray(page.items) || !(next === null || (typeof next === 'string' && next.length > 0))) {
+      throw new Error('Invalid Studio item listing');
+    }
     for (const item of page.items) {
-      const version = releaseVersion(item.content_md);
+      if (typeof item.contentMd !== 'string') throw new Error('Invalid Studio item content');
+      const version = releaseVersion(item.contentMd);
       if (!version) continue;
       if (byVersion.has(version)) throw new Error(`Multiple Studio items claim Dormouse ${version}; refusing to publish`);
       byVersion.set(version, item);
     }
-    offset += page.items.length;
-    if (offset >= page.total) break;
-    if (!page.items.length) throw new Error('Studio pagination stopped before total');
+    if (next === null) break;
+    if (!page.items.length || cursors.has(next)) throw new Error('Studio pagination did not advance');
+    cursors.add(next);
+    cursor = next;
   }
   for (const entry of plan) {
     let item = byVersion.get(entry.version);
     if (item) {
       item = await api('GET', itemPath(item));
-      if (item.status === 'withdrawn' || item.kind === 'withdrawn') throw new Error(`Dormouse ${entry.version} was withdrawn; refusing to restore it automatically`);
+      if (item.status === 'withdrawn') throw new Error(`Dormouse ${entry.version} was withdrawn; refusing to restore it automatically`);
       if (item.kind !== 'thread') throw new Error(`Dormouse ${entry.version} is not a thread`);
       // An interrupted PATCH leaves our exact intended working copy. Resume it;
       // anything else dirty may be a human's work and must not be overwritten.
-      if ((item.dirty || item.version === 0) && item.content_md !== entry.content_md) {
+      if ((item.dirty || item.version === 0) && item.contentMd !== entry.contentMd) {
         throw new Error(`Dormouse ${entry.version} has conflicting draft edits; resolve them in Studio first`);
       }
-      if (item.version > 0 && !item.dirty && item.content_md === entry.content_md) {
-        if (!dryRun) await api('PUT', `${itemPath(item)}/versions/${item.version}/pin`);
+      if (item.version > 0 && !item.dirty && item.contentMd === entry.contentMd) {
+        if (!dryRun) await pin(item);
         log(`Unchanged Dormouse ${entry.version}: ${ORIGIN}/t/${item.id}/`);
         continue;
       }
@@ -114,21 +135,22 @@ export async function syncPublications(plan, api, { dryRun = false, log = consol
       continue;
     }
     if (!item) {
-      item = await api('POST', '/items', { kind: 'thread', content_md: entry.content_md });
+      item = await api('POST', '/items', { kind: 'thread', contentMd: entry.contentMd });
       byVersion.set(entry.version, item);
     } else {
       // Preserve the last live text before publishing a correction, even when a
       // previous run reached publish but failed before its pin request completed.
-      if (item.version > 0) await api('PUT', `${itemPath(item)}/versions/${item.version}/pin`);
-      if (item.content_md !== entry.content_md) {
-        await api('PATCH', itemPath(item), { content_md: entry.content_md });
+      if (item.version > 0) item = await pin(item);
+      if (item.contentMd !== entry.contentMd) {
+        item = await api('PATCH', itemPath(item), { contentMd: entry.contentMd, ...expected(item) });
       }
     }
     const result = await api('POST', `${itemPath(item)}/publish`, {
+      ...expected(item),
       note: item.version > 0 ? 'Updated from the Dormouse changelog.' : 'Published from the Dormouse changelog.',
     });
     if (!Number.isInteger(result.version) || result.version < 1) throw new Error('Invalid published version');
-    await api('PUT', `${itemPath(item)}/versions/${result.version}/pin`);
+    await pin({ ...item, ...result });
     log(`Published Dormouse ${entry.version} (revision ${result.version}): ${ORIGIN}/t/${item.id}/`);
   }
 }
@@ -149,15 +171,16 @@ async function githubReleases() {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  if (args.some(arg => !['--dry-run', '--plan'].includes(arg))) throw new Error('Usage: node scripts/publish-blyg.mjs [--plan | --dry-run]');
+  const { values } = parseArgs({ options: {
+    'dry-run': { type: 'boolean' }, plan: { type: 'boolean' }, version: { type: 'string' },
+  } });
   const markdown = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
-  const plan = publicationPlan(markdown, await githubReleases());
-  if (args.includes('--plan')) {
-    for (const entry of plan) console.log(`Eligible: Dormouse ${entry.version} (${entry.content_md.length} characters)`);
+  const plan = publicationPlan(markdown, await githubReleases(), values.version);
+  if (values.plan) {
+    for (const entry of plan) console.log(`Eligible: Dormouse ${entry.version} (${entry.contentMd.length} characters)`);
     return;
   }
-  await syncPublications(plan, apiClient(process.env.BLYG_API_TOKEN), { dryRun: args.includes('--dry-run') });
+  await syncPublications(plan, apiClient(process.env.BLYG_API_TOKEN), { dryRun: values['dry-run'] });
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
