@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { networkPolicyResult, type NetworkLevel } from 'dormouse-lib/remote/network-policy';
+import type { BuildStamp } from 'dormouse-lib/lib/build-info';
 
 // --- Mocks ---
 
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   /** The webview's baked mode, which gates every check. */
   relayMode: 'hosted' as 'hosted' | 'self-host',
   /** The build stamp, whose version and officialness name the check. */
-  stamp: null as { version: string; commit: string; commitsSinceVersion: number | null; dirty: boolean; official: boolean; host: 'standalone' } | null,
+  stamp: null as BuildStamp | null,
   platform: null as {
     requestAppRestart?: () => Promise<boolean>;
     burrow?: { command: (cmd: string) => Promise<unknown> };

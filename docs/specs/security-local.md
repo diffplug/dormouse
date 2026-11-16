@@ -150,7 +150,7 @@ Source of truth: `startCapabilityViewer` in `dor-tools-builtin/src/viewer-server
 | Guarantee | Feature | Pinned by |
 | --- | --- | --- |
 | **Under Settings → Network → Nowhere, a new install's level, Dormouse initiates no connection on its own**: no relay socket, one-time link, push, managed voice, or update check. What you click, and what your terminals, browser panes, and agents reach, restored ones included, are yours. |  | `scripts/outbound-lint.mjs`, `lib/src/host/remote/outbound.test.ts`, `vscode-ext/test/outbound.test.ts`, `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, `standalone/src/updater.test.ts` |
-| **Dormouse sends no usage telemetry.** No analytics library ships in the app, the VS Code extension, or the phone pages; only the dormouse.sh website counts visits. |  | `scripts/outbound-lint.mjs` |
+| **Dormouse sends no usage telemetry.** No analytics library ships in the app, the VS Code extension, or the phone pages; only the dormouse.sh website counts visits, and update checks by the version label each names and nothing more. |  | `scripts/outbound-lint.mjs`, `website/src/lib/site-worker.test.ts` |
 
 The scope of independent host and runtime activity is `docs/specs/security.md` -> "What is not defended" (rationale). `docs/specs/remote-network.md` -> "Policy" owns the implementation these checks audit.
 

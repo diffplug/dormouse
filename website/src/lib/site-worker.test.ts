@@ -4,7 +4,6 @@ import { POSTHOG_PROJECT_KEY } from "./site-analytics";
 
 type SiteWorker = {
   HOSTED_ACCOUNT_ORIGIN: string;
-  POSTHOG_PROJECT_KEY: string;
   default: {
     fetch(
       request: Request,
@@ -25,11 +24,17 @@ afterEach(() => {
   ASSETS.fetch.mockClear();
 });
 
-/** Sends `request` through the site's Worker with `fetch` answering `upstream`. */
-async function through(request: Request, upstream = new Response("{}")) {
-  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => upstream);
+/**
+ * Sends `request` through the site's Worker with `fetch` answering `upstream`,
+ * and settles what it left to `waitUntil`.
+ */
+async function through(request: Request, upstream: Response | (() => Promise<Response>) = new Response("{}")) {
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    typeof upstream === "function" ? upstream() : upstream);
   vi.stubGlobal("fetch", fetch);
-  const response = await worker.default.fetch(request, { ASSETS });
+  const waited: Promise<unknown>[] = [];
+  const response = await worker.default.fetch(request, { ASSETS }, { waitUntil: (promise) => waited.push(promise) });
+  await Promise.all(waited);
   return { response, fetch };
 }
 
@@ -87,22 +92,10 @@ describe("the site Worker's /api/hosted/ forward", () => {
 });
 
 describe("the site Worker's update-manifest count", () => {
-  it("sends to the project the site's visits go to", () => {
-    expect(worker.POSTHOG_PROJECT_KEY).toBe(POSTHOG_PROJECT_KEY);
-  });
-
-  /** A check with `headers`, and what it told PostHog once the count settles. */
-  async function check(headers: Record<string, string>, upstream: () => Promise<Response> = async () => new Response("{}")) {
-    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => upstream());
-    vi.stubGlobal("fetch", fetch);
-    const waited: Promise<unknown>[] = [];
-    const response = await worker.default.fetch(
-      new Request("https://dormouse.sh/standalone-latest.json", { headers }),
-      { ASSETS },
-      { waitUntil: (promise) => waited.push(promise) },
-    );
+  /** A check with `headers`, and what it told PostHog. */
+  async function check(headers: Record<string, string>, upstream?: () => Promise<Response>) {
+    const { response, fetch } = await through(new Request("https://dormouse.sh/standalone-latest.json", { headers }), upstream);
     expect(await response.text()).toBe("static");
-    await Promise.all(waited);
     return fetch.mock.calls.map(([url, init]) => ({ url, body: JSON.parse(String(init?.body)), headers: [...new Headers(init?.headers).keys()] }));
   }
 
@@ -110,8 +103,12 @@ describe("the site Worker's update-manifest count", () => {
     ["an official version", "2.0.0", "2.0.0"],
     ["a modified build", "modified-2.0.0", "modified-2.0.0"],
     ["anything else as other", "modified-2.0.0 d080b4f5", "other"],
+    ["no header as unreported", undefined, "unreported"],
   ])("counts %s, with nothing else of the request's", async (_case, header, build) => {
-    const sent = await check({ "dormouse-build": header, "cf-connecting-ip": "203.0.113.9", "user-agent": "tauri", cookie: "a=b" });
+    const sent = await check({
+      ...(header === undefined ? {} : { "dormouse-build": header }),
+      "cf-connecting-ip": "203.0.113.9", "user-agent": "tauri", cookie: "a=b",
+    });
     expect(sent).toEqual([{
       url: "https://us.i.posthog.com/i/v0/e/",
       headers: ["content-type"],
@@ -122,11 +119,6 @@ describe("the site Worker's update-manifest count", () => {
         properties: { build, $process_person_profile: false, $geoip_disable: true },
       },
     }]);
-  });
-
-  it("counts a check that names no build as unreported", async () => {
-    const [sent] = await check({});
-    expect(sent!.body.properties.build).toBe("unreported");
   });
 
   it("serves the manifest when the count fails", async () => {

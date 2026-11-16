@@ -5,7 +5,7 @@
   "docs/compatible-agents.md": 1850,
   "docs/specs/alert.md": 7650,
   "docs/specs/auto-update.md": 1050,
-  "docs/specs/deploy.md": 2450,
+  "docs/specs/deploy.md": 2350,
   "docs/specs/dor-browser.md": 6650,
   "docs/specs/dor-cli.md": 6150,
   "docs/specs/dor-tool.md": 7250,
@@ -27,7 +27,7 @@
   "docs/specs/security-audit.md": 5450,
   "docs/specs/security-ci.md": 3400,
   "docs/specs/security-hosted.md": 4850,
-  "docs/specs/security-local.md": 7250,
+  "docs/specs/security-local.md": 7300,
   "docs/specs/security-remote.md": 8050,
   "docs/specs/security-supply-chain.md": 1650,
   "docs/specs/security.md": 3800,
@@ -42,5 +42,5 @@
   "docs/specs/tutorial.md": 1750,
   "docs/specs/vscode.md": 4600,
   "docs/specs/webgl-text.md": 750,
-  "docs/specs/website-docs.md": 3350
+  "docs/specs/website-docs.md": 3400
 }
