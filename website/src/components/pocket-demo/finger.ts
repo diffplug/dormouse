@@ -53,11 +53,15 @@ export class Finger {
     }
   }
 
-  /** Moves onto `element`'s center and taps it. */
+  /** Moves onto `element`'s center and taps it. The center comes from layout
+   *  offsets, not client boxes, which the phone's 3D turn skews. */
   async tap(element: HTMLElement): Promise<void> {
-    const box = element.getBoundingClientRect();
-    const screen = this.screen.getBoundingClientRect();
-    await this.moveTo({ x: box.left + box.width / 2 - screen.left, y: box.top + box.height / 2 - screen.top }, 520);
+    const center = { x: element.offsetWidth / 2, y: element.offsetHeight / 2 };
+    for (let node: HTMLElement | null = element; node && node !== this.screen; node = node.offsetParent as HTMLElement | null) {
+      center.x += node.offsetLeft;
+      center.y += node.offsetTop;
+    }
+    await this.moveTo(center, 520);
     await this.press(true);
     element.click();
     await this.sleep(110);

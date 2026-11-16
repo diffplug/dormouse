@@ -226,7 +226,13 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
       ref={ref}
       role="img"
       aria-label="Dormouse Pocket on a phone: a request typed to a coding agent, its question answered with two gestures, then the README it changed, with a 3D cheese wedge turning in it"
-      className={`w-full rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 shadow-[0_24px_90px_rgba(0,0,0,0.55)] ${className}`}
+      className={`w-full rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 ${className}`}
+      style={{
+        // Turned toward the text, as a photographed phone would be; the
+        // stacked shadows read as its near edge's thickness.
+        transform: "perspective(1600px) rotateY(16deg) rotateX(6deg) rotateZ(-2deg)",
+        boxShadow: "-3px 3px 0 #3a3a3c, -6px 6px 0 #2a2a2c, -8px 8px 0 #1c1c1e, -30px 40px 90px rgba(0,0,0,0.6)",
+      }}
     >
       <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
       <div className="aspect-[390/760] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
