@@ -3128,7 +3128,7 @@
       "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
       "homepage": "https://github.com/micromark/micromark/tree/main/packages/micromark",
       "versions": [
-        "4.0.2"
+        "4.0.3"
       ]
     },
     {
@@ -3345,6 +3345,15 @@
       "homepage": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-string",
       "versions": [
         "2.0.1"
+      ]
+    },
+    {
+      "name": "micromark-util-edit-map",
+      "license": "MIT",
+      "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
+      "homepage": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-edit-map",
+      "versions": [
+        "1.0.0"
       ]
     },
     {
