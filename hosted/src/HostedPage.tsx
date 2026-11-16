@@ -114,7 +114,7 @@ export interface HostedPageProps {
   submit: (event: FormEvent) => void;
   setEmail: Dispatch<SetStateAction<string>>;
   setCode: Dispatch<SetStateAction<string>>;
-  setEnterCode: Dispatch<SetStateAction<boolean>>;
+  haveCode: () => void;
   sendCode: () => Promise<void>;
   noteContinued: () => void;
   social: (provider: Provider, linking: boolean) => Promise<void>;
@@ -130,7 +130,7 @@ export function HostedPage({
   session, enabled, accounts, hostedVoice, turnOffDialog, computers, passkeys,
   enrolling, noPlan, loading, busy, error, notice, email, code, enterCode,
   fresh, themeControl = false, act, refresh, approve, signOut, clearEnrollment, turnOffVoice,
-  removeOne, removeKey, submit, setEmail, setCode, setEnterCode, changeEmail,
+  removeOne, removeKey, submit, setEmail, setCode, haveCode, changeEmail,
   sendCode, noteContinued, social,
 }: HostedPageProps) {
   const codeInput = useRef<HTMLInputElement>(null);
@@ -247,14 +247,16 @@ export function HostedPage({
             {error && (
               <div className={`mb-6 [overflow-wrap:anywhere] ${STATUS_BAD_TEXT_CLASS}`} role="alert">
                 <p>{error.message}</p>
-                <button
-                  type="button"
-                  className={TEXT_BUTTON_CLASS}
-                  disabled={!!busy}
-                  onClick={() => void act("retry", refresh)}
-                >
-                  Retry connection
-                </button>
+                {!error.wait && (
+                  <button
+                    type="button"
+                    className={TEXT_BUTTON_CLASS}
+                    disabled={!!busy}
+                    onClick={() => void act("retry", refresh)}
+                  >
+                    Retry connection
+                  </button>
+                )}
               </div>
             )}
             {notice && (
@@ -663,7 +665,7 @@ export function HostedPage({
                         onClick={(event) => {
                           const field = event.currentTarget.form?.elements.namedItem("email");
                           if ((field as HTMLInputElement | null)?.reportValidity())
-                            setEnterCode(true);
+                            haveCode();
                         }}
                       >
                         I already have a code

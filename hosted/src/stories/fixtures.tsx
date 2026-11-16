@@ -78,7 +78,7 @@ function HostedStory({ phone, light, ...args }: HostedStoryArgs) {
     sendCode={idle} noteContinued={nothing} social={idle}
     {...args}
     email={email} code={code} enterCode={enterCode}
-    setEmail={setEmail} setCode={setCode} setEnterCode={setEnterCode} turnOffDialog={turnOffDialog}
+    setEmail={setEmail} setCode={setCode} haveCode={() => setEnterCode(true)} turnOffDialog={turnOffDialog}
     changeEmail={() => { setEnterCode(false); setCode(""); }}
   /></HostedFrame>;
 }

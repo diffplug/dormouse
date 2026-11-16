@@ -500,6 +500,11 @@ export function App({
   // failed read leaves it null, which never reads as no plan.
   const noPlan = refusedPlan || hostedVoice?.entitled === false;
 
+  const haveCode = () => {
+    setEnterCode(true);
+    setNotice(null);
+    setError(keepRead);
+  };
   const changeEmail = () => {
     setEnterCode(false);
     setCode("");
@@ -518,7 +523,7 @@ export function App({
     fresh={fresh} themeControl act={act} refresh={refresh} approve={approve}
     signOut={signOut} clearEnrollment={clearEnrollment} turnOffVoice={turnOffVoice}
     removeOne={removeOne} removeKey={removeKey} submit={submit} setEmail={setEmail}
-    setCode={setCode} setEnterCode={setEnterCode} changeEmail={changeEmail}
+    setCode={setCode} haveCode={haveCode} changeEmail={changeEmail}
     sendCode={sendCode} noteContinued={noteContinued} social={social}
   />;
 }

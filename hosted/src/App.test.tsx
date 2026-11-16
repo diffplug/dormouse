@@ -223,6 +223,24 @@ it("an approval that completes after a newer link opened keeps the newer code", 
   expect(api.approveEnrollment).toHaveBeenLastCalledWith("9PRW-H3NC", undefined, "47");
 });
 
+describe("a rate-limited code send", () => {
+  beforeEach(async () => {
+    vi.mocked(api.post).mockRejectedValue(new api.RateLimitedError("Too many attempts. Wait a minute before trying again."));
+    await mount(null);
+    await input("email", "member@example.com");
+    await submit();
+  });
+  it("asks the user to wait, without offering to retry a connection", () => {
+    expect(container.querySelector("[role=alert]")?.textContent).toContain("Too many attempts.");
+    expect(container.textContent).not.toContain("Retry connection");
+  });
+  it("drops the error once the user switches to a code they already have", async () => {
+    await click("I already have a code");
+    expect(container.querySelector("#code")).not.toBeNull();
+    expect(container.textContent).not.toContain("Too many attempts.");
+  });
+});
+
 describe("Natural Voice confirmation", () => {
   beforeEach(() => {
     vi.mocked(api.getSession).mockResolvedValue(login());
