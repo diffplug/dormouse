@@ -483,7 +483,9 @@ async function downloadApprovedUpdate(): Promise<void> {
 
   downloadPromise = (async () => {
     try {
-      await update.download();
+      // The plugin reuses the check's headers unless given its own; the
+      // build label is for dormouse.sh only, never the GitHub download.
+      await update.download(undefined, { headers: {} });
       availableUpdate = null;
       pendingUpdate = update;
       // Honor a dismissal that arrived during the download — install still

@@ -379,6 +379,17 @@ describe('updater', () => {
       expect(mocks.check).toHaveBeenCalledWith(options);
     });
 
+    it('sends the download no build label', async () => {
+      mocks.stamp = stamp(true);
+      const update = makeUpdate();
+      mocks.check.mockResolvedValue(update);
+      checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(update.download).toHaveBeenCalledWith(undefined, { headers: {} });
+    });
+
     it('handles a failed app-version lookup without an unhandled rejection', async () => {
       mocks.getVersion.mockRejectedValueOnce(new Error('version unavailable'));
 

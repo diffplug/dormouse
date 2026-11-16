@@ -173,7 +173,7 @@ Config lives in [tauri.conf.json](../../standalone/src-tauri/tauri.conf.json) (`
 
 `sign_updates` writes it after signing to `website/public/standalone-latest.json`, served via Cloudflare Pages from `dormouse.sh/standalone-latest.json` (the `plugins.updater.endpoints` entry).
 
-**Every check must name its build in a `Dormouse-Build` header and nothing more**: the stamp's version (§Build stamp) for an official build, `modified-<version>` for any other, none without a stamp. The site's Worker counts it (`docs/specs/website-docs.md` -> "Visit analytics"), and Privacy's description changes in the same edit.
+**Every check must name its build in a `Dormouse-Build` header and nothing more**: the stamp's version (§Build stamp) for an official build, `modified-<version>` for any other, none without a stamp. **Never send it with the download**, which goes to GitHub. The site's Worker counts it (`docs/specs/website-docs.md` -> "Visit analytics"), and Privacy's description changes in the same edit.
 
 Shape: `version`, `notes`, `pub_date`, and a `platforms` map keyed `darwin-aarch64` / `windows-x86_64` / `linux-x86_64`, each with `url` and `signature` (that bundle's `.sig`, verbatim). **The script fails rather than emit a platform with an empty signature.**
 
