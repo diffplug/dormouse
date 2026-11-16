@@ -4,13 +4,12 @@ import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "d
 import { initPlatform } from "dormouse-lib/lib/platform";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { disposeAllSessions, initAlertStateReceiver, writeUserInput } from "dormouse-lib/lib/terminal-registry";
+import { setNativeFieldValue } from "dormouse-lib/lib/dom";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
-import cheeseUrl from "../../assets/cheese-wedge.glb?url";
 import { DemoAgent } from "./demo-agent";
 import { DemoReadme } from "./DemoReadme";
 import { DemoStopped, Finger, FINGER_CLASS } from "./finger";
-import { loadGlb } from "./GlbSpinner";
 
 /**
  * The homepage's Pocket demo: the real mobile composition on a fake PTY,
@@ -35,8 +34,6 @@ const APP_TYPE_SCALE = {
   "--font-mono": "var(--vscode-editor-font-family)",
   "--font-sans": "var(--vscode-editor-font-family)",
 } as CSSProperties;
-
-const setTextareaValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
 
 function find(root: ParentNode, selector: string, text?: string): HTMLElement {
   const match = [...root.querySelectorAll<HTMLElement>(selector)].find((element) => text === undefined || element.textContent?.includes(text));
@@ -73,7 +70,6 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
     initAlertStateReceiver();
     for (const id of [AGENT, README]) fake.setScenario(id, { name: "none", chunks: [] });
     setAdapter(fake);
-    void loadGlb(cheeseUrl).catch(() => {});
     return () => {
       disposeAllSessions();
       fake.reset();
@@ -109,8 +105,7 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
         const field = find(screen, "[data-mobile-composer] textarea") as HTMLTextAreaElement;
         await finger.moveTo({ x: screen.clientWidth * 0.78, y: screen.clientHeight * 0.55 }, 400);
         for (let i = 1; i <= REQUEST.length; i++) {
-          setTextareaValue?.call(field, REQUEST.slice(0, i));
-          field.dispatchEvent(new Event("input", { bubbles: true }));
+          setNativeFieldValue(field, REQUEST.slice(0, i));
           await finger.sleep(REQUEST[i - 1] === " " ? 70 : 38);
         }
         await finger.sleep(350);
@@ -152,7 +147,7 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
       if (!(error instanceof DemoStopped)) console.error(error);
     });
     return () => {
-      controller.abort();
+      controller.abort(new DemoStopped());
       agent?.dispose();
       adapter.clearInputHandler(AGENT);
     };
@@ -168,11 +163,10 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
             onActiveSessionChange={setActiveId}
             onShowSessions={() => setView("sessions")}
             showKillButton={false}
-            browser={readmeShown ? <DemoReadme modelUrl={cheeseUrl} spinning={!still} /> : null}
+            browser={readmeShown ? <DemoReadme spinning={!still} /> : null}
             browserShown={readmeShown}
           />
         ) : null}
-        scripted
         activeView={view}
         onViewChange={setView}
         sessions={sessionItems}

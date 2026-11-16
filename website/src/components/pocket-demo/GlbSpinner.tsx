@@ -1,10 +1,51 @@
 import { useEffect, useRef, useState } from "react";
-import { parseGlb, type GlbMesh } from "./glb";
+import cheeseUrl from "../../assets/cheese-wedge.glb?url";
 
 /**
- * A `.glb` model turning in place, drawn with raw WebGL: one lit, vertex-colored
- * mesh needs a few dozen lines of shader and matrix math, not a 3D library.
+ * The demo's cheese wedge turning in place, drawn with raw WebGL: one lit,
+ * vertex-colored mesh needs a few dozen lines of shader and matrix math, not a
+ * 3D library.
  */
+
+interface Mesh {
+  positions: Float32Array;
+  normals: Float32Array;
+  colors: Float32Array;
+  min: number[];
+  max: number[];
+}
+
+/**
+ * Reads `cheese-wedge.glb` as exported, not as any `.glb`: one primitive whose
+ * POSITION, NORMAL, and COLOR_0 are tightly packed float VEC3s, and whose
+ * indices run 0..n-1, so it draws as plain triangles.
+ */
+function parseGlb(buffer: ArrayBuffer): Mesh {
+  const jsonLength = new DataView(buffer).getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 20, jsonLength)));
+  const binStart = 20 + jsonLength + 8;
+  const { attributes } = json.meshes[0].primitives[0];
+  const vec3 = (index: number) => {
+    const accessor = json.accessors[index];
+    const offset = binStart + (json.bufferViews[accessor.bufferView].byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+    return { values: new Float32Array(buffer, offset, accessor.count * 3), min: accessor.min, max: accessor.max };
+  };
+  const position = vec3(attributes.POSITION);
+  return {
+    positions: position.values,
+    normals: vec3(attributes.NORMAL).values,
+    colors: vec3(attributes.COLOR_0).values,
+    min: position.min,
+    max: position.max,
+  };
+}
+
+/** Fetched as the demo's chunk loads, so the README step draws at once. */
+const MODEL = fetch(cheeseUrl).then((response) => {
+  if (!response.ok) throw new Error(`GET ${cheeseUrl}: ${response.status}`);
+  return response.arrayBuffer();
+}).then(parseGlb);
+MODEL.catch(() => {});
 
 const VERTEX_SHADER = `
 attribute vec3 aPosition;
@@ -92,74 +133,60 @@ function attribute(gl: WebGLRenderingContext, program: WebGLProgram, name: strin
   gl.vertexAttribPointer(location, 3, gl.FLOAT, false, 0, 0);
 }
 
-/** Uploads the mesh once and returns a draw for any turn angle. */
-function createRenderer(canvas: HTMLCanvasElement, mesh: GlbMesh): ((yaw: number) => void) | null {
+/** Uploads the mesh once; `draw` renders any turn angle, `dispose` frees the
+ *  context at once rather than leaving one per mount for the GC to find. */
+function createRenderer(canvas: HTMLCanvasElement, mesh: Mesh): { draw: (yaw: number) => void; dispose: () => void } | null {
   const gl = canvas.getContext("webgl", { alpha: true, antialias: true, premultipliedAlpha: true });
   if (!gl) return null;
-  const wideIndices = mesh.indices instanceof Uint32Array;
-  if (wideIndices && !gl.getExtension("OES_element_index_uint")) return null;
+  const dispose = () => gl.getExtension("WEBGL_lose_context")?.loseContext();
 
   const program = gl.createProgram();
   gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERTEX_SHADER));
   gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER));
   gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    dispose();
+    return null;
+  }
   gl.useProgram(program);
 
   attribute(gl, program, "aPosition", mesh.positions);
   attribute(gl, program, "aNormal", mesh.normals);
-  attribute(gl, program, "aColor", mesh.colors ?? new Float32Array(mesh.positions.length).fill(0.8));
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
+  attribute(gl, program, "aColor", mesh.colors);
   gl.enable(gl.DEPTH_TEST);
+  gl.clearColor(0, 0, 0, 0);
 
   const center = mesh.min.map((low, axis) => (low + mesh.max[axis]) / 2);
   const radius = Math.hypot(...mesh.min.map((low, axis) => mesh.max[axis] - low)) / 2;
   const distance = radius * 3.1;
-  const eye = new Float32Array([0, 0, distance]);
   const recenter = translation(-center[0], -center[1], -center[2]);
+  const tilt = rotationX(0.42);
+  const view = translation(0, 0, -distance);
   const uModel = gl.getUniformLocation(program, "uModel");
   const uViewProjection = gl.getUniformLocation(program, "uViewProjection");
-  gl.uniform3fv(gl.getUniformLocation(program, "uEye"), eye);
-  const indexType = wideIndices ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+  gl.uniform3f(gl.getUniformLocation(program, "uEye"), 0, 0, distance);
+  const vertexCount = mesh.positions.length / 3;
+  let sized = "";
 
-  return (yaw: number) => {
+  const draw = (yaw: number) => {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
     const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
-    if (canvas.width !== width || canvas.height !== height) {
+    if (sized !== `${width}x${height}`) {
+      sized = `${width}x${height}`;
       canvas.width = width;
       canvas.height = height;
+      gl.viewport(0, 0, width, height);
+      gl.uniformMatrix4fv(uViewProjection, false, multiply(perspective(0.7, width / height, radius * 0.1, radius * 10), view));
     }
-    gl.viewport(0, 0, width, height);
-    gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const model = multiply(rotationX(0.42), multiply(rotationY(yaw), recenter));
-    const viewProjection = multiply(perspective(0.7, width / height, radius * 0.1, radius * 10), translation(0, 0, -distance));
-    gl.uniformMatrix4fv(uModel, false, model);
-    gl.uniformMatrix4fv(uViewProjection, false, viewProjection);
-    gl.drawElements(gl.TRIANGLES, mesh.indices.length, indexType, 0);
+    gl.uniformMatrix4fv(uModel, false, multiply(tilt, multiply(rotationY(yaw), recenter)));
+    gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
   };
+  return { draw, dispose };
 }
 
-const meshes = new Map<string, Promise<GlbMesh>>();
-
-/** Fetched and parsed once per page, so the demo's next loop draws at once. */
-export function loadGlb(src: string): Promise<GlbMesh> {
-  let mesh = meshes.get(src);
-  if (!mesh) {
-    mesh = fetch(src).then((response) => {
-      if (!response.ok) throw new Error(`GET ${src}: ${response.status}`);
-      return response.arrayBuffer();
-    }).then(parseGlb);
-    meshes.set(src, mesh);
-    mesh.catch(() => meshes.delete(src));
-  }
-  return mesh;
-}
-
-export function GlbSpinner({ src, spinning, label, className }: {
-  src: string;
+export function GlbSpinner({ spinning, label, className }: {
   /** Still, it rests at a three-quarter view. */
   spinning: boolean;
   label: string;
@@ -171,14 +198,16 @@ export function GlbSpinner({ src, spinning, label, className }: {
   useEffect(() => {
     let frame = 0;
     let cancelled = false;
-    loadGlb(src).then((mesh) => {
+    let renderer: ReturnType<typeof createRenderer> = null;
+    MODEL.then((mesh) => {
       const canvas = canvasRef.current;
       if (cancelled || !canvas) return;
-      const draw = createRenderer(canvas, mesh);
-      if (!draw) {
+      renderer = createRenderer(canvas, mesh);
+      if (!renderer) {
         setFailed(true);
         return;
       }
+      const { draw } = renderer;
       const restingYaw = -0.6;
       if (!spinning) {
         draw(restingYaw);
@@ -196,8 +225,9 @@ export function GlbSpinner({ src, spinning, label, className }: {
     return () => {
       cancelled = true;
       cancelAnimationFrame(frame);
+      renderer?.dispose();
     };
-  }, [spinning, src]);
+  }, [spinning]);
 
   return failed ? (
     <div className={`grid place-items-center text-xs opacity-60 ${className ?? ""}`}>{label}</div>

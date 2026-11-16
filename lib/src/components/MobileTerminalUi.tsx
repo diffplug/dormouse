@@ -166,12 +166,6 @@ export interface MobileTerminalUiProps {
    */
   browserShown?: boolean;
   interactive?: boolean;
-  /**
-   * Driven by a script's synthetic events on a page someone is reading, as the
-   * homepage's Pocket demo is: the page's keys and pastes stay the page's, and
-   * opening Type focuses nothing.
-   */
-  scripted?: boolean;
   /** What heads the Sessions screen, above its own bar: the consumer's way out of the wall. */
   sessionsHeader?: ReactNode;
   fillViewport?: boolean;
@@ -179,8 +173,8 @@ export interface MobileTerminalUiProps {
   style?: CSSProperties;
 }
 
-/** A scripted press (`scripted`) is a synthetic event with no live pointer
- *  behind it, which the browser refuses to capture; a real one never throws. */
+/** A synthetic press (the homepage's scripted demo) has no live pointer behind
+ *  it, which the browser refuses to capture; a real one never throws. */
 function capturePointer(element: Element, pointerId: number): void {
   try {
     element.setPointerCapture(pointerId);
@@ -249,9 +243,10 @@ function hardwareKeySequence(event: globalThis.KeyboardEvent, sessionId: string 
 }
 
 /** Where a physical key reaches the terminal: nothing focused, or a non-control
- *  element of this composition. A focused field or control keeps its keys. */
+ *  element of this composition. A focused field or control keeps its keys, and
+ *  an inert composition (a demo on a page someone is reading) takes none. */
 function isHardwareKeyTarget(root: HTMLElement, target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
+  if (!(target instanceof Element) || root.closest('[inert]')) return false;
   if (target === target.ownerDocument.body) return true;
   if (!root.contains(target)) return false;
   return target.closest('button, input, textarea, select, a[href], [contenteditable="true"]') === null;
@@ -735,7 +730,6 @@ export function MobileTerminalUi({
   settings,
   browserShown = false,
   interactive = true,
-  scripted = false,
   sessionsHeader,
   fillViewport = false,
   className,
@@ -814,8 +808,8 @@ export function MobileTerminalUi({
   const openComposer = useCallback(() => {
     if (!interactive) return;
     flushSync(() => setComposing(true));
-    if (!scripted) composerFieldRef.current?.focus({ preventScroll: true });
-  }, [interactive, scripted]);
+    composerFieldRef.current?.focus({ preventScroll: true });
+  }, [interactive]);
 
   const closeComposer = useCallback(() => {
     composerFieldRef.current?.blur();
@@ -878,7 +872,7 @@ export function MobileTerminalUi({
   // back from the page as a `paste` on the same targets.
   const confirming = pendingGestureConfirmation !== null;
   useEffect(() => {
-    if (scripted || !terminalInteractive || composing || confirming || view !== 'terminal') return;
+    if (!terminalInteractive || composing || confirming || view !== 'terminal') return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const root = rootRef.current;
       if (!root || event.defaultPrevented || isComposingKey(event)) return;
@@ -902,7 +896,7 @@ export function MobileTerminalUi({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('paste', onNativePaste);
     };
-  }, [activeSessionId, composing, confirming, onPaste, scripted, sendInput, terminalInteractive, view]);
+  }, [activeSessionId, composing, confirming, onPaste, sendInput, terminalInteractive, view]);
 
   useEffect(() => {
     if (!terminalInteractive || view !== 'terminal') closeComposer();

@@ -14,7 +14,7 @@ import { GlbSpinner } from "./GlbSpinner";
  * `.glb` beside it, once the demo's agent has taught it to. A picture of the
  * editor, not the editor: the real one is a separate runtime bundle.
  */
-export function DemoReadme({ modelUrl, spinning }: { modelUrl: string; spinning: boolean }) {
+export function DemoReadme({ spinning }: { spinning: boolean }) {
   const icon = { size: 15 } as const;
   return (
     <div className="flex h-full flex-col bg-[var(--vscode-editor-background)] text-[var(--vscode-editor-foreground)]">
@@ -36,7 +36,7 @@ export function DemoReadme({ modelUrl, spinning }: { modelUrl: string; spinning:
           beside this README and link it like an image.
         </p>
         <figure className="mb-3 overflow-hidden rounded-md border border-border bg-black/20">
-          <GlbSpinner src={modelUrl} spinning={spinning} label="A cheese wedge, turning" className="block aspect-[4/3] w-full" />
+          <GlbSpinner spinning={spinning} label="A cheese wedge, turning" className="block aspect-[4/3] w-full" />
           <figcaption className="border-t border-border px-2 py-1 font-mono text-[0.65rem] text-muted">cheese.glb</figcaption>
         </figure>
         <h2 className="mb-1 text-base font-semibold">Usage</h2>

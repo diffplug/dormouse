@@ -293,6 +293,17 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onSendInput.mock.calls).toEqual([['a'], ['\r'], ['\x1b[A'], ['\t'], ['😀'], ['\x03']]);
   });
 
+  it('leaves keys and pastes to the page while inert', () => {
+    const onSendInput = vi.fn();
+    const onPaste = vi.fn();
+    const { container } = renderUi({ onSendInput, onPaste });
+    container.setAttribute('inert', '');
+    expect(keydown(document.body, { key: ' ' }).defaultPrevented).toBe(false);
+    expect(nativePaste(document.body, 'page text').defaultPrevented).toBe(false);
+    expect(onSendInput).not.toHaveBeenCalled();
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
   it('sends the arrows, Home and End in their application form while the program set DECCKM', () => {
     const onSendInput = vi.fn();
     const modes = { applicationCursorKeysMode: true };
