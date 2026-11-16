@@ -12,7 +12,7 @@ import { presentedLines } from "../server/disclosure";
 import { CHECKOUT_CLOSED, ENROLLMENT_POLL_INTERVAL_S, PRICE_CHANGED, TERMS_VERSION, VOICE_DAILY_CAP, termsArchiveUrl } from "../server/policy-constants";
 import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import { MODEL_WITHDRAWAL_FORM, WITHDRAWAL_STATEMENT } from "../../website/src/lib/hosted-withdrawal";
-import { FOUNDING_LADDER, LIST_ANNUAL } from "../../website/src/lib/hosted-pricing";
+import { FOUNDING_LADDER } from "../../website/src/lib/hosted-pricing";
 
 vi.mock("./api", async (original) => ({
   ...await original<typeof import("./api")>(),
@@ -270,35 +270,50 @@ describe("an account with no plan", () => {
     expect(container.querySelector("#confirm-digits")).toBeNull();
     expect(noPlanShown()).toBe(true);
     expect(button("Don’t approve").disabled).toBe(false);
-    const plans = container.querySelector<HTMLAnchorElement>('a[href="https://dormouse.sh/hosted/?ref=hosted-no-plan#pricing"]')!;
-    // In another tab, so this one keeps the code that lives only in memory.
-    expect(plans.target).toBe("_blank");
-    // Natural Voice has no self-hosted equivalent; a Relay does.
-    expect(container.querySelectorAll('a[href="https://dormouse.sh/self-host/"]').length).toBe(purpose === "remote" ? 2 : 0);
+    // The Hosted page's three cards; Free is self-hosting, in another tab, so
+    // this one keeps the code that lives only in memory.
+    expect(buyButton("Hosted monthly")).not.toBeNull();
+    expect(buyButton("Founding")).not.toBeNull();
+    const selfHost = [...container.querySelectorAll<HTMLAnchorElement>("a")].find((a) => a.textContent === "Self-host")!;
+    expect(selfHost.href).toBe("https://dormouse.sh/self-host/");
+    expect(selfHost.target).toBe("_blank");
   });
 
-  it("offers a lapsed founder the list price, never founding", async () => {
+  it("never offers a lapsed founder founding", async () => {
     vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
     vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: null, foundingLapsed: true });
     await mount(ENROLLMENT);
     expect(noPlanShown()).toBe(true);
-    expect(container.textContent).not.toContain("Founding price");
-    expect(container.textContent).toContain("$100/year");
+    expect(buyButton("Hosted monthly")).not.toBeNull();
+    expect(buyButton("Founding")).toBeNull();
   });
 
-  it("offers the price checkout charges: the server's open cohort, or yearly once founding closed", async () => {
+  it("offers founding at the server's open cohort, the price checkout charges", async () => {
     vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
     vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: { cohort: 1, seatsLeft: 3 } });
     await mount(ENROLLMENT);
-    expect(noPlanShown()).toBe(true);
-    expect(container.textContent).toContain(`$${FOUNDING_LADDER[1]}/year`);
+    expect(text()).toContain(`3 of 100 seats left at $${FOUNDING_LADDER[1]}`);
+  });
 
-    vi.mocked(api.getBilling).mockResolvedValue({ ...NO_PLAN, founding: null });
-    await act(async () => root.unmount());
-    root = createRoot(container);
+  it("buys a plan from its card, carrying the no-plan ref", async () => {
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
     await mount(ENROLLMENT);
-    expect(container.textContent).not.toContain("Founding price");
-    expect(container.textContent).toContain(`$${LIST_ANNUAL}/year`);
+    await act(async () => buyButton("Hosted monthly")!.click());
+    expect(container.querySelector<HTMLInputElement>('input[value="monthly"]')!.checked).toBe(true);
+    await tick("agree-terms");
+    await tick("agree-renewal");
+    await click("Continue to payment");
+    expect(api.startCheckout).toHaveBeenCalledWith("monthly", 10, "hosted-no-plan");
+    await click("Back to the plans");
+    expect(buyButton("Founding")).not.toBeNull();
+  });
+
+  it("says checkout is closed when a card's button is pressed before it opens", async () => {
+    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
+    await mount(ENROLLMENT);
+    await act(async () => buyButton("Founding")!.click());
+    expect(text()).toContain(CHECKOUT_CLOSED);
   });
 
   it("is told when the approval is refused for want of a plan", async () => {
@@ -380,6 +395,7 @@ const FOUNDING: BillingSummary = {
   consent: { termsVersion: TERMS_VERSION, consentedAt: "2026-10-21T12:00:00Z" },
 };
 const text = () => container.textContent!;
+const buyButton = (plan: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="Buy ${plan}"]`);
 
 describe("checkout", () => {
   const heading = () => container.querySelector("h1")?.textContent;
@@ -601,13 +617,6 @@ describe("the plan section", () => {
     expect(text()).not.toContain("Leave the founders row");
   });
 
-  it("sends an account with no plan, enrolling, to checkout in another tab once it is open", async () => {
-    vi.mocked(api.getHostedVoice).mockResolvedValue({ entitled: false, on: false });
-    vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
-    await mount(ENROLLMENT);
-    const plans = container.querySelector<HTMLAnchorElement>('a[href="/checkout?ref=hosted-no-plan"]')!;
-    expect(plans.target).toBe("_blank");
-  });
 });
 
 describe("withdrawal and closure", () => {

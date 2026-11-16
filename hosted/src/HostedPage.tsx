@@ -40,8 +40,6 @@ import { WithdrawalAcknowledgement, WithdrawalFunction } from "./Withdrawal";
 import type { Enrollment } from "./enrollment";
 import type { Notice, PageError } from "./settle";
 
-const SELF_HOST_URL = "https://dormouse.sh/self-host/";
-
 const ROW_CLASS = `flex min-h-14 items-center justify-between gap-4 py-1.5 ${DASHED_ROW_CLASS}`;
 const DETAIL_CLASS = `block text-sm ${MUTED_TEXT_CLASS}`;
 const FOOTNOTE_CLASS = `mt-10 text-sm ${MUTED_TEXT_CLASS}`;
@@ -52,20 +50,6 @@ function computerName(burrowId: string, computers: Computer[] | null): string {
 }
 /** A computer's id in the shape the app draws a minimized Pane: a door. */
 const DOOR_CLASS = `${DOOR_SHAPE_CLASS} ml-1.5 inline-flex items-center justify-center border-b border-[var(--color-text)]/30 bg-[var(--color-text)]/[0.12] px-2.5`;
-
-/** The free alternative to a plan, for remote control only: Natural Voice has
- * no self-hosted equivalent. */
-function SelfHostLine() {
-  return (
-    <>
-      Rather run your own Relay for free? See{" "}
-      <a className={LINK_CLASS} href={SELF_HOST_URL} target="_blank" rel="noopener">
-        how to self-host
-      </a>
-      .
-    </>
-  );
-}
 
 /** A state already in words, ticked as the plan cards tick theirs. */
 function Ticked({ children }: { children: string }) {
@@ -187,7 +171,8 @@ export function HostedPage({
     );
 
   return (
-    <HostedShell themeControl={themeControl}>
+    // The plan cards sit side by side, as on the Hosted page.
+    <HostedShell themeControl={themeControl} mainWidth={enrolling?.code && session && noPlan ? "max-w-4xl" : undefined}>
         <h1 className={`mb-3 text-balance leading-tight ${PAGE_TITLE_CLASS}`}>
           {enrolling
             ? enrolling.purpose === "voice"
@@ -213,7 +198,7 @@ export function HostedPage({
                 ? noPlan
                   ? enrolling.purpose === "voice"
                     ? "Dormouse asked to turn on Natural Voice, but this account has no Hosted plan yet."
-                    : <>Dormouse asked to enroll remote control, but this account has no Hosted plan yet. <SelfHostLine /></>
+                    : "Dormouse asked to enroll remote control, but this account has no Hosted plan yet."
                   : enrolling.purpose === "voice"
                     ? "Dormouse asked to turn on Natural Voice with this account."
                     : "Dormouse asked to enroll remote control with this account."
@@ -264,12 +249,7 @@ export function HostedPage({
                 {enrolling.code ? (
                   noPlan ? (
                     <>
-                      <NoPlanOffer purpose={enrolling.purpose} checkoutOpen={!!summary} founding={summary?.founding} foundingLapsed={summary?.foundingLapsed} />
-                      {enrolling.purpose !== "voice" && (
-                        <p className={`mt-6 ${MUTED_TEXT_CLASS}`}>
-                          <SelfHostLine />
-                        </p>
-                      )}
+                      <NoPlanOffer billing={summary} busy={busy} unread={billingUnread} onPurchase={purchase} />
                       <p className={`mt-8 mb-2 ${MUTED_TEXT_CLASS}`}>
                         Subscribed with another account? Sign in with it; this
                         code stays on this page.
@@ -346,6 +326,10 @@ export function HostedPage({
                   billingUnread
                 ) : summary.plan ? (
                   <>
+                    {/* Checkout from `/enroll` lands here without its code. */}
+                    {confirmed && (
+                      <p className={HELP_CLASS}>Buying to approve a computer? Open the link from Dormouse on it again.</p>
+                    )}
                     <PlanConfirmation billing={{ ...summary, plan: summary.plan }} busy={busy} onManage={manageBilling} />
                     {summary.withdrawal && (
                       <WithdrawalFunction offer={summary.withdrawal} plan={summary.plan} busy={busy} onWithdraw={withdraw} />

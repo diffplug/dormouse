@@ -44,6 +44,7 @@ import {
   TERMS_VERSION,
   type Plan,
 } from "../server/policy-constants";
+import { HOSTED_REFS } from "dormouse-lib/lib/hosted-links";
 import { useDocsThemedBody } from "dormouse-lib/site/docs-paint";
 import { HostedPage, type View } from "./HostedPage";
 import type { BillingSummary } from "../server/billing-summary";
@@ -446,7 +447,7 @@ export function App({
   const purchase = (plan: Plan, price: number) =>
     act("checkout", async () => {
       try {
-        await startCheckout(plan, price, checkout?.ref ?? null);
+        await startCheckout(plan, price, checkout?.ref ?? (enrollingRef.current ? HOSTED_REFS.hostedNoPlan : null));
       } catch (error) {
         if (!(error instanceof PriceChangedError)) throw error;
         // Read the price checkout would charge now, and ask again.

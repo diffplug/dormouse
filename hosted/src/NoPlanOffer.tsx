@@ -1,86 +1,73 @@
-import { ArrowSquareOutIcon, CheckIcon } from "@phosphor-icons/react";
-import {
-  ACCENT_TEXT_CLASS,
-  ACTION_CLASS,
-  CARD_ACCENT_CLASS,
-  CARD_MUTED_TEXT_CLASS,
-  DASHED_ROW_CLASS,
-} from "dormouse-lib/site/docs-tokens";
-import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
-import { foundingTier, HOSTED_YEARLY, LIST_MONTHLY } from "../../website/src/lib/hosted-pricing.ts";
+import { useEffect, useState, type ReactNode } from "react";
+import { ACTION_CLASS } from "dormouse-lib/site/docs-tokens";
+import { PlanCards } from "../../website/src/components/PlanCards.tsx";
+import { fetchCohort, type Cohort } from "../../website/src/lib/hosted-cohorts.ts";
+import { foundingTier } from "../../website/src/lib/hosted-pricing.ts";
+import { SITE_ORIGIN } from "../../website/src/lib/site-meta.ts";
 import type { BillingSummary } from "../server/billing-summary";
+import type { Plan } from "../server/policy-constants";
 import { planOffers } from "./billing";
+import { Checkout } from "./Checkout";
+import { TEXT_BUTTON_CLASS } from "./classes";
 
-/** The Hosted page's plan cards, in a new tab so this one keeps its code. */
-export const HOSTED_PLANS_URL = withHostedRef("https://dormouse.sh/hosted/", HOSTED_REFS.hostedNoPlan, "pricing");
-/** This origin's checkout, once open: also a new tab, for the same reason. */
-export const CHECKOUT_URL = withHostedRef("/checkout", HOSTED_REFS.hostedNoPlan);
-
-const VOICE = "Natural Voice for spoken alarms";
-const POCKET = "Dormouse Pocket on your phone through the Hosted Relay";
-const PUSH = "Sealed push notifications when a terminal needs you";
-const NO_LIMIT = "No device limit, no per-device charge";
+const SELF_HOST_URL = `${SITE_ORIGIN}/self-host/`;
 
 /**
- * What a plan would give the account that could not approve this computer,
- * leading with what Dormouse asked for. Coming back to this tab re-reads the
- * account, so a plan bought in the other one shows the digits here.
+ * The Hosted page's plan cards, for the account that could not approve this
+ * computer; a buy button opens checkout for its plan here. Stripe returns to
+ * `/billing`, leaving the code behind, so Dormouse's link opens this page
+ * again afterwards.
  */
 export function NoPlanOffer({
-  purpose,
-  checkoutOpen = false,
-  founding = null,
-  foundingLapsed = false,
+  billing,
+  busy,
+  unread,
+  onPurchase,
 }: {
-  purpose: "remote" | "voice" | undefined;
-  /** Billing is open, so the plans link goes to checkout. */
-  checkoutOpen?: boolean;
-  /** The founding cohort checkout sells this account, as the server read it; null once closed or lapsed. */
-  founding?: BillingSummary["founding"];
-  /** This account subscribes again at list, so the offer is. */
-  foundingLapsed?: boolean;
+  billing: BillingSummary | null;
+  busy: string;
+  /** What shows in place of checkout while billing is closed or unread. */
+  unread: ReactNode;
+  onPurchase: (plan: Plan, price: number) => void;
 }) {
-  const voice = purpose === "voice";
-  // With checkout open, its own first offer, so the price is one it charges.
-  const tier = checkoutOpen ? planOffers(founding)[0]! : foundingLapsed ? HOSTED_YEARLY : foundingTier();
+  const [buying, setBuying] = useState<Plan | null>(null);
+  const [cohort, setCohort] = useState<Cohort>({ seatsLeft: null, founders: null });
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchCohort(controller.signal).then(setCohort);
+    return () => controller.abort();
+  }, []);
+
+  if (buying)
+    return (
+      <div className="max-w-[30rem]">
+        {billing ? (
+          <Checkout key={billing.founding?.cohort ?? "closed"} billing={billing} plan={buying} busy={busy} onPurchase={onPurchase} />
+        ) : (
+          unread
+        )}
+        <button type="button" className={`mt-6 flex ${TEXT_BUTTON_CLASS}`} disabled={!!busy} onClick={() => setBuying(null)}>
+          Back to the plans
+        </button>
+      </div>
+    );
+  // Founding as checkout sells it to this account: at the server's open
+  // cohort, and never to a lapsed founder or once the ladder has closed.
+  const founding = billing ? (planOffers(billing.founding).find((offer) => offer.id === "founding") ?? null) : foundingTier();
   return (
-    <div className={CARD_ACCENT_CLASS}>
-      <h2 className="font-display text-xl text-balance">
-        {voice ? "Natural Voice" : "Remote control"} comes with Dormouse Hosted
-      </h2>
-      <ul className="mt-3 text-sm">
-        {(voice ? [VOICE, POCKET, PUSH] : [POCKET, PUSH, NO_LIMIT, VOICE]).map((item) => (
-          <li key={item} className={`flex gap-2.5 py-2 leading-snug ${DASHED_ROW_CLASS}`}>
-            <CheckIcon
-              size={16}
-              weight="bold"
-              className={`mt-0.5 shrink-0 ${ACCENT_TEXT_CLASS}`}
-              aria-hidden="true"
-            />
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
-      <p className="mt-5 flex flex-wrap items-baseline gap-x-2">
-        {tier.listPrice && <s className={`font-display text-xl ${CARD_MUTED_TEXT_CLASS}`}>${tier.listPrice}</s>}
-        <span className="font-display text-4xl">${tier.price}</span>
-        <span className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>{tier.per}</span>
-      </p>
-      <p className={`mt-1 text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-        {tier === HOSTED_YEARLY ? "Yearly" : "Founding price, locked while you stay subscribed"}. Or ${LIST_MONTHLY}/month.
-      </p>
-      <a
-        className={`mt-5 gap-2 ${ACTION_CLASS}`}
-        href={checkoutOpen ? CHECKOUT_URL : HOSTED_PLANS_URL}
-        target="_blank"
-        rel="noopener"
-      >
-        See Hosted plans
-        <ArrowSquareOutIcon size={18} aria-hidden="true" />
-      </a>
-      <p className={`mt-2 text-center text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-        30-day refund. This code waits here while you look.
-      </p>
-    </div>
+    <PlanCards
+      site={SITE_ORIGIN}
+      cohort={billing?.founding ? { ...cohort, seatsLeft: billing.founding.seatsLeft } : cohort}
+      founding={founding}
+      buy={{ onBuy: (tier) => setBuying(tier.id), href: () => null }}
+      free={{
+        action: (
+          <a className={ACTION_CLASS} href={SELF_HOST_URL} target="_blank" rel="noopener">
+            Self-host
+          </a>
+        ),
+        footnote: "Run your own Relay",
+      }}
+    />
   );
 }

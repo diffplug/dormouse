@@ -23,12 +23,16 @@ export const NoPlan: Story = {
   },
 };
 export const NoPlanVoice: Story = { args: { ...Voice.args, noPlan: true } };
-/** Billing open: the plans link opens checkout on this origin, in another tab. */
+/** Billing open: a card's buy button opens checkout for its plan on this page. */
 export const NoPlanCheckoutOpen: Story = {
   args: { noPlan: true, billing: NO_PLAN },
   play: async ({ canvasElement }) => {
     const canvas = await settledFrame(canvasElement);
-    await expect(canvas.getByRole("link", { name: "See Hosted plans" })).toHaveAttribute("href", "/checkout?ref=hosted-no-plan");
+    // Pressed directly: the button unmounts as it is pressed, which the
+    // instrumented focus of a user click cannot follow across the frame.
+    canvas.getByRole("button", { name: "Buy Founding" }).click();
+    await expect(await canvas.findByRole("radio", { name: /Founding/ })).toBeChecked();
+    await expect(canvas.getByRole("button", { name: "Continue to payment" })).toBeDisabled();
   },
 };
 export const InvalidLink: Story = { args: { enrolling: { code: null } } };

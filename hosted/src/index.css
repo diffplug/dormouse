@@ -17,6 +17,8 @@
 @import "../../lib/src/site/site.css";
 
 @source ".";
+/* The plan cards, shared with the Hosted page. */
+@source "../../website/src/components/PlanCards.tsx";
 
 body {
   min-width: 280px;
