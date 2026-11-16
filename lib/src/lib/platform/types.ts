@@ -358,8 +358,6 @@ export interface PlatformAdapter {
   // click has lost its user activation (diffplug/dormouse#1090). Pocket omits
   // it, since its copies belong on the phone, never the Burrow's machine.
   writeClipboardText?(text: string): Promise<void>;
-  // Only present on adapters with a native (non-DOM) drag-drop source. Currently inert in Tauri; see diffplug/dormouse#38 and tauri-apps/tauri#14373.
-  onFilesDropped?(handler: (paths: string[]) => void): () => void;
 
   // Open a sanitized external URI. Implementations must revalidate because
   // terminal output is untrusted. A host whose opener answers returns a

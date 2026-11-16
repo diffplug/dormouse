@@ -1057,9 +1057,6 @@ export function Wall({
     doors,
     doorsRef,
     ownsSurface,
-    selectedIdRef,
-    selectedTypeRef,
-    activeRef,
     workspaceId,
   });
 

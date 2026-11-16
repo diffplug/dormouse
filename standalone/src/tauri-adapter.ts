@@ -97,7 +97,6 @@ export class TauriAdapter implements PlatformAdapter {
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
-  private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private static STATE_KEY = 'dormouse.session';
   private sessionStore = new TauriSessionStore();
   private windowSlot = windowStateSlot(this.sessionStore, TauriAdapter.STATE_KEY, 'tauri-adapter');
@@ -208,13 +207,6 @@ export class TauriAdapter implements PlatformAdapter {
 
       listenToWindow<PtyMarkedDetail>("pty:marked", (event) => {
         for (const handler of this.markedHandlers) handler(event.payload);
-      }),
-
-      // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
-      listenToWindow<{ paths: string[] }>("dormouse://files-dropped", (event) => {
-        const paths = event.payload.paths ?? [];
-        if (paths.length === 0) return;
-        for (const handler of this.filesDroppedHandlers) handler(paths);
       }),
 
       listenToWindow<BurrowResult>(BURROW_RESULT_EVENT, (event) => {
@@ -357,9 +349,7 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async getCwd(id: string): Promise<string | null> {
-    try {
-      return await rawInvoke<string | null>("pty_get_cwd", { id });
-    } catch { return null; }
+    return (await this.getCwds([id]))[id] ?? null;
   }
 
   /** One sidecar round trip, and one process scan inside it, for every pane a
@@ -394,14 +384,12 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
-    try {
-      return await rawInvoke<OpenPort[]>("pty_get_open_ports", { id });
-    } catch { return []; }
+    return (await this.getOpenPortsMany([id]))[id] ?? [];
   }
 
   /** Every terminal of a listing in one round trip, so a `dor list --ports` that
    *  spans Workspaces costs the sidecar one process scan rather than one per
-   *  terminal. Fails soft to no ports, exactly as the per-id call does. */
+   *  terminal. Fails soft to no ports. */
   async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
     try {
       return await rawInvoke<Record<string, OpenPort[]>>("pty_get_open_ports_many", { ids });
@@ -489,11 +477,6 @@ export class TauriAdapter implements PlatformAdapter {
     const normalized = normalizeExternalUri(uri);
     if (!normalized) return Promise.resolve("Dormouse does not open this link.");
     return open(normalized).then(() => undefined, errMessage);
-  }
-
-  onFilesDropped(handler: (paths: string[]) => void): () => void {
-    this.filesDroppedHandlers.add(handler);
-    return () => { this.filesDroppedHandlers.delete(handler); };
   }
 
   onPtyData(handler: PtyDataHandler): void {

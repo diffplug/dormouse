@@ -74,32 +74,6 @@ impl ArrivalQueue {
     }
 }
 
-/// An approved quit waits for destroyed windows to journal their hand-backs.
-#[derive(Default)]
-pub struct CleanupGate {
-    pending: usize,
-    pub exit_requested: bool,
-    forced: bool,
-}
-
-impl CleanupGate {
-    pub fn begin(&mut self) { self.pending += 1; }
-    pub fn request_exit(&mut self) -> bool {
-        if self.pending == 0 || self.forced { return true; }
-        self.exit_requested = true;
-        false
-    }
-    pub fn force_if_waiting(&mut self) -> bool {
-        if self.pending == 0 || !self.exit_requested { return false; }
-        self.forced = true;
-        true
-    }
-    pub fn finish(&mut self) -> bool {
-        self.pending -= 1;
-        self.pending == 0 && std::mem::take(&mut self.exit_requested)
-    }
-}
-
 /// What a quit does once it exits (docs/specs/standalone.md -> "Restart").
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct QuitIntent {
@@ -195,8 +169,8 @@ impl QuitMachine {
         self.seq += 1;
         let idle = self.phase == QuitPhase::Idle;
         // Only the trigger leaving `Idle` unapproved sets the intent: a repeat
-        // keeps it, and an approved exit parked on the cleanup gate is `Idle`
-        // too, where a Cmd+Q must not rewrite what that exit does.
+        // keeps it, and an approved exit still under way is `Idle` too, where
+        // a Cmd+Q must not rewrite what that exit does.
         if idle && !self.approved {
             self.intent = intent;
         }
@@ -521,32 +495,6 @@ mod tests {
         assert!(!queue.blocks_transfer("main", "ws-2"));
     }
 
-    #[test]
-    fn stalled_cleanup_cannot_block_an_approved_exit_forever() {
-        let mut gate = CleanupGate::default();
-        gate.begin();
-        assert!(!gate.force_if_waiting()); // no quit requested yet
-        assert!(!gate.request_exit());
-        assert!(gate.force_if_waiting()); // cleanup watchdog expired
-        assert!(gate.request_exit());
-        assert!(gate.finish()); // late completion remains safe
-        assert!(!gate.force_if_waiting());
-    }
-
-    #[test]
-    fn quit_waits_for_every_destroyed_window_handback() {
-        let mut gate = CleanupGate::default();
-        gate.begin();
-        gate.begin();
-        assert!(!gate.request_exit());
-        assert!(!gate.finish());
-        assert!(!gate.request_exit());
-        assert!(gate.finish());
-        assert!(gate.request_exit());
-        gate.begin();
-        assert!(!gate.finish()); // ordinary close does not request a quit
-    }
-
     fn labels(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
     }
@@ -829,8 +777,8 @@ mod tests {
         assert!(walking.relaunches());
     }
 
-    /// An approved exit parked on the cleanup gate sits in `Idle`, and the
-    /// macOS menu's Cmd+Q still reaches `request_quit` there.
+    /// An approved exit still under way sits in `Idle`, and the macOS menu's
+    /// Cmd+Q still reaches `request_quit` there.
     #[test]
     fn a_trigger_after_approval_cannot_rewrite_the_exit() {
         let mut restart = QuitMachine::default();

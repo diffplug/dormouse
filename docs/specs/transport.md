@@ -140,7 +140,7 @@ Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`.
 A Workspace can move from one webview to another with its Sessions still running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore:
 
 - **Release, never dispose, and only once the target has adopted the Workspace.** The source detaches its half of each Session and **never kills the PTY**. **Never reachable from a webview unmount** — a reload or a StrictMode double-mount would strand every PTY the window still owns (rationale). A move the target never took leaves the Workspace exactly as it was.
-- **Split at a mark stamped in the stream, then suppress until the replay.** The host routes an id's output to the source until its `pty:marked` line — behind every `pty:data` already sent, ahead of every later one — and drops it from there until the target's replay reaches it. The source serializes its buffer at the mark as the arrival's content; the target writes it, then the since-mark replay: no duplicate or lost bytes at the seam, and the source xterm's retained screen and scrollback survive beyond the host's bounded tail (output already trimmed from xterm is not recovered). **An id the host never marked is serialized anyway and replayed whole.** Suppression fails open after a bound (rationale); the message sequence and hand-back are `docs/specs/standalone.md` → "Arrival queue".
+- **Split at a mark stamped in the stream, then suppress until the replay.** The host routes an id's output to the source until its `pty:marked` line — behind every `pty:data` already sent, ahead of every later one — and drops it from there until the target's replay reaches it. The source serializes its buffer at the mark as the arrival's content; the target writes it, then the since-mark replay: no duplicate or lost bytes at the seam, and the source xterm's retained screen and scrollback survive beyond the host's bounded tail (output already trimmed from xterm is not recovered). **An id the host never marked is serialized anyway and replayed whole.** The message sequence and hand-back are `docs/specs/standalone.md` → "Arrival queue".
 - **Must list retained, naturally exited buffers among named ids**, `alive: false` with their exit code, replaying since the mark or whole; discovery naming none stays live-only.
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names them, and a marked id replays only its output since the mark. **Omitted ids are not empty ids**: a computed set that came out empty is a no-op, never every PTY in the process.
 - **Must preserve an app's modes across a transfer**, beyond the serializer's: SGR mouse encodings, kitty flags and stack, win32-input-mode, color-scheme reports, cursor style (rationale). **May drop** inactive alternate-screen kitty state, tab stops, G0 charset, saved cursor.
@@ -167,10 +167,8 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Direction | Message | Contract |
 | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink; revalidation: `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks". |
-| Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. On Windows these include programs a Git Bash shell ran across MSYS execs, and processes in a running WSL distro whose environment carries the pane's `DORMOUSE_SURFACE_ID` (rationale). |
-| Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`; empty when the PTY is gone or enumeration fails. |
-| Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
-| Host → webview | `pty:openPortsMany` | `[]` for an id with no live PTY. |
+| Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan: TCP listening ports of each PTY's shell **and all of its descendant subprocesses**. On Windows these include programs a Git Bash shell ran across MSYS execs, and processes in a running WSL distro whose environment carries the pane's `DORMOUSE_SURFACE_ID` (rationale). |
+| Host → webview | `pty:openPortsMany` | De-duplicated by `(family, address, port)`; `[]` for an id with no live PTY or when enumeration fails. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. |
 | Webview → host | `pty:ack` / `pty_ack` (standalone) | `{ id, chars }` ("Output flow control"). |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
@@ -214,7 +212,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 **Must mint every Surface id as `surface:<n>` off one host counter** — standalone's Rust for every window, the VS Code extension host for every window of the install, else the page alone — handed to the webview in blocks so a Wall mints synchronously. Each reservation names a floor, the highest `surface:<n>` the webview restored, and every number it returns is above it. A helper's id is minted at its birth. The id is the `dor` handle (`docs/specs/dor-cli.md` → Handle Model); beyond its number, it is opaque.
 
 - **A host must persist its counter's high-water mark before handing out a number at or above it**, so no number is reused across launches, **and never past the block it hands out**, so a relaunch skips only the ids a webview held unused at exit; where each host keeps it: `docs/specs/standalone.md` → "Workspace registry", `docs/specs/vscode.md` → "Surface id minting".
-- **Never hand out a number while the counter's file cannot be read or another version wrote it, and never overwrite another version's**; a file this version cannot parse is overwritten from what the host still knows (rationale).
+- **Never hand out a number while the counter's file cannot be read**; a file this version cannot parse, another version's included, is overwritten from what the host still knows (rationale).
 - **Must allow creation when a reservation fails**, minting `surface:<uuid>`.
 
 Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone); `surface:reserveIds` → `surface:reservedIds` (VS Code). Source of truth: `lib/src/lib/surface-ids.ts`.
@@ -255,10 +253,9 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 ### Retiring the transcripts already on disk
 
-**Must remove legacy transcript bytes from disk** (rationale). **No writer accepts a transcript-bearing Session shape.**
+**Must remove legacy transcript-bearing snapshots from disk** (rationale). **No writer accepts a transcript-bearing Session shape.**
 
 - **Never parse a transcript-bearing blob**: it is of an older format (Persisted session types). Standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence); VS Code deletes such a `workspaceState` blob at activation (`discardUnreadableSessionState` in `vscode-ext/src/session-state.ts`), and a panel's first save overwrites its `setState` blob.
-- **Standalone sweeps orphaned session temp files at boot**, the only path that can retire a transcript a crash left in one, and **never touches a live snapshot**. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
 
 ### The governing rule
 

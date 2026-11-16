@@ -175,7 +175,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   async getCwd(id: string): Promise<string | null> {
-    try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
+    return (await this.getCwds([id]))[id] ?? null;
   }
 
   /** See TauriAdapter: one round trip, one process scan, for the whole save —
@@ -204,7 +204,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // quit last wrote (docs/specs/standalone.md -> "Agent recovery").
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
-    try { return await this.host.invoke("pty_get_open_ports", { id }); } catch { return []; }
+    return (await this.getOpenPortsMany([id]))[id] ?? [];
   }
 
   /** See TauriAdapter: one round trip, one process scan, for a whole listing. */
@@ -274,12 +274,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     const normalized = normalizeExternalUri(uri);
     if (normalized) window.open(normalized, "_blank", "noopener,noreferrer");
   }
-
-  // No `onFilesDropped`: the optional member is a capability probe for adapters
-  // with a native (non-DOM) drag-drop source (PlatformAdapter in
-  // dormouse-lib/lib/platform/types). This harness runs in a plain browser tab,
-  // where a drop yields `File` objects and no host paths, so there is nothing to
-  // report. Implementing it would claim the capability and never fire.
 
   onPtyData(handler: PtyDataHandler): void { this.ptyData.add(handler); }
   offPtyData(handler: PtyDataHandler): void { this.ptyData.delete(handler); }

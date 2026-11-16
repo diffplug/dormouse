@@ -18,7 +18,7 @@ flowchart LR
   P -- /ws/burrow --> X[(Relay)]
 ```
 
-**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, file drop, dock icon, logging), the session file store, multi-window state (§Windows), and the quit flow.
+**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, dock icon, logging), the session file store, multi-window state (§Windows), and the quit flow.
 
 ## Boot sequence
 
@@ -183,9 +183,9 @@ Source of truth: `note_geometry` / `restore_windows` / `fit_geometry` in `standa
 
 ### What a window's `Destroyed` settles
 
-**Must clear label-keyed ownership, registry, geometry, and close state in the `Destroyed` arm**, when Tauri has removed the window from `webview_windows()` (rationale), and send the remaining live labels to the sidecar. **Must remove incoming arrivals from the reap before killing orphaned PTYs**; the source still holds those Sessions. **Must defer every approved exit until every hand-back worker has completed**, on every exit path, and **force it after `QUIT_PHASE_TIMEOUT_MS`**, logging the timeout, so a stalled disk operation cannot trap the app.
+**Must clear label-keyed ownership, registry, geometry, and close state in the `Destroyed` arm**, when Tauri has removed the window from `webview_windows()` (rationale), and send the remaining live labels to the sidecar. **Must remove incoming arrivals from the reap before killing orphaned PTYs**; the source still holds those Sessions.
 
-Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
@@ -274,7 +274,6 @@ sequenceDiagram
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed at `begin_arrival`, retiring only the record it was armed for.
 - **A hand-back replays what the marked ids missed** (rationale): each marked id stays suppressed until its since-mark replay lands in the source's existing xterm; an id never stamped goes straight back. **Must retain source cuts from `pty:marked` through target replay and natural exit until settlement, and discard them on explicit kill.** **Must apply a handed-back PTY's exit status after its replay**, leaving its pane dead with no running command.
 - **`take_arrivals` does not consume**; the record settles at `adopt_done` or `adopt_failed`. **Never run two arrival drains in one window at once** (rationale).
-- **`AWAITING_REPLAY_MAX` fails open only for suppressions no arrival claims** (rationale).
 - **`begin_arrival` journals the arrival in `sessions/arrivals.json` before ownership moves**, never in either window's snapshot (rationale); **a failed write refuses the move with nothing changed**. **Must retain the record until both snapshots reflect the outcome** — marked settled at adoption, its durable destination reversed on hand-back — and **tombstone settled arrivals into a deliberately closed Window until both snapshots omit them**; failed writes are logged and block nothing live.
 - **A record left at boot merges into its recorded destination before `restore_windows`**, so the Workspace restores once, with fresh shells. **Must retain a failed merge's record for retry, roll back the target if trimming the source fails, and preserve a settled arrival's newer target record.**
 
@@ -306,7 +305,7 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 
 **Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: no `beforeunload` handler kills a PTY, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
 
-**Nothing is deleted at boot but orphaned session temp files, what the arrival merge settles, and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types").
+**Nothing is deleted at boot but what the arrival merge settles and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types").
 
 **Never back the session blob with WebKit `localStorage`** — a WAL that grows without bound (rationale). The blob rides the `SessionKeyValueStore` seam over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection still persists on `localStorage` (`docs/specs/theme.md`).
 
@@ -372,9 +371,9 @@ Every trigger funnels into `request_quit(app)`:
 | Arm | Fired by | Guard |
 |---|---|---|
 | `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless approved; refused outright while the walk runs. Only the **last** window's close is a quit (§Per-window close) |
-| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the cleanup gate (§What a window's `Destroyed` settles); its `code` is ignored |
+| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved; its `code` is ignored |
 | the app menu's Quit item | the menu and its `Cmd+Q` | a **custom** `MenuItem`, never `PredefinedMenuItem::quit` (macOS; rationale) |
-| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` once the cleanup gate clears (macOS; rationale) |
+| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` (macOS; rationale) |
 | the `quit_restart` command | the update notice (`docs/specs/auto-update.md`), `dor app restart` | `request_quit` with the restart intent (§Restart) |
 
 **Never refuse an OS terminate** (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
@@ -399,7 +398,7 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 | 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
 | 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 
-**Phase 3's budget must exceed the webview's teardown ceiling and the install phase's sidecar-kill cap** (`docs/specs/auto-update.md` → "Sidecar teardown on Windows"); `lib/src/lib/mirrored-constants.test.ts` pins the ceiling, nothing pins the install phase. Watchdog exits also pass the cleanup gate.
+**Phase 3's budget must exceed the webview's teardown ceiling and the install phase's sidecar-kill cap** (`docs/specs/auto-update.md` → "Sidecar teardown on Windows"); `lib/src/lib/mirrored-constants.test.ts` pins the ceiling, nothing pins the install phase.
 
 **Must use the Workspace typed-letter confirmation for window close and quit**, naming every Workspace in the window, hidden ones included. It opens for running Sessions; an all-idle quit proceeds without a prompt. The letter rule is `docs/specs/layout.md` → Workspaces.
 
@@ -435,10 +434,6 @@ A restart is a quit that relaunches: the same vote, confirmation and teardown, w
 - A Windows quit holding an update relaunches by its installer instead (`docs/specs/auto-update.md` → "Platform behavior at quit").
 
 Source of truth: `quit_restart` in `standalone/src-tauri/src/lib.rs`; `QuitIntent` in `standalone/src-tauri/src/quit_state.rs`.
-
-## File drop
-
-Behavior: `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
 ## Logging
 

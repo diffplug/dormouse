@@ -199,9 +199,7 @@ function handleLine(line) {
         });
         break;
       case 'pty:context': mgr.context(data, data.requestId); break;
-      case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
-      case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
       case 'pty:getOpenPortsMany': mgr.getOpenPortsMany(data.ids, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       // Quit teardown, first step: press ^C, detect each agent's resume

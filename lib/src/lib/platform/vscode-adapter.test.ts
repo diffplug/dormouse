@@ -465,15 +465,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
     it('guards request/response replies too, so a forged reply cannot beat the real one', async () => {
       const adapter = new VSCodeAdapter();
       const pending = adapter.getCwd('pane-1');
+      // The request leaves once the microtask other saves may join has drained.
+      await Promise.resolve();
 
       const [request] = postMessage.mock.calls[0] as [{ requestId: string }];
 
       // A forged reply matching type and requestId, racing ahead of the host's.
       windowTarget.dispatchEvent(forgedMessage({
-        type: 'pty:cwd', id: 'pane-1', cwd: '/attacker', requestId: request.requestId,
+        type: 'pty:cwds', cwds: { 'pane-1': '/attacker' }, requestId: request.requestId,
       }));
       windowTarget.dispatchEvent(hostMessage({
-        type: 'pty:cwd', id: 'pane-1', cwd: '/real/project', requestId: request.requestId,
+        type: 'pty:cwds', cwds: { 'pane-1': '/real/project' }, requestId: request.requestId,
       }));
 
       expect(await pending).toBe('/real/project');
@@ -680,7 +682,7 @@ describe('VSCodeAdapter port deadline', () => {
     const request = postMessage.mock.calls.at(-1)![0];
     await vi.advanceTimersByTimeAsync(7500);
     const ports = [{ address: '127.0.0.1', port: 5173, pid: 1 }];
-    windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPorts', requestId: request.requestId, ports }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPortsMany', requestId: request.requestId, ports: { 'pane-1': ports } }));
     expect(await answer).toEqual(ports);
   });
 

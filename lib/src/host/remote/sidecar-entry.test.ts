@@ -1126,7 +1126,7 @@ describe('the sidecar host', () => {
   });
 
   it('leaves every other command to main.js', () => {
-    expect(host.handleCommand('pty:getCwd', { id: 'pty-1' })).toBe(false);
+    expect(host.handleCommand('pty:getCwds', { ids: ['pty-1'] })).toBe(false);
     expect(calls).toEqual([]);
   });
 });

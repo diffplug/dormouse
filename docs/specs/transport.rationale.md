@@ -20,7 +20,7 @@ A second close before `onExit` crashed the Node process in the native test.
 
 **Why after the parse.** The renderer can only acknowledge what it receives, the parse's `data`, and the parse strips OSCs: a raw count in `pty-core` would never be paid back. VS Code's node-pty runs in the pty-host child while its parse and `pty:data` are the extension host's, so the count lives there and the pause crosses the IPC.
 
-**Why Rust acknowledges what it drops.** After a transfer mark Rust drops an id's output until the target's replay; a suppression no arrival claims fails open after `AWAITING_REPLAY_MAX` with no `requestInit` behind it, which would have left the PTY paused on output no window ever saw.
+**Why Rust acknowledges what it drops.** No renderer parses a chunk Rust drops, so nothing else would pay it back: an ownerless id has no `requestInit` coming to forgive its debt, and neither does a suppressed id whose replay never arrives, which would leave the PTY paused on output no window ever saw.
 
 **The constants** (measured 2026-11-11, macOS 27 on Apple silicon, node-pty 1.2.0-beta.18, Node 24.22): the real `pty-core` and node-pty, the host counter, and a renderer child process parsing with real xterm over Node IPC (headless, so faster than a webview that also renders), with 0, 2 or 5 ms added each way. Median of three, MB/s of parsed output; `yes` is `y\n`, logs are 80-column lines:
 
@@ -97,8 +97,6 @@ The earlier list of private-mode resets missed insert mode, scroll margins, and 
 
 ## Transferring a Workspace
 
-The suppression is bounded and fails open because the two failures are not symmetric: duplicated bytes are a cosmetic repeat the user can scroll past, and a permanently silenced pane is a terminal they have to kill. The host's own measurements and the ordering the guarantee rests on are `docs/specs/standalone.rationale.md` → Arrival queue.
-
 Release-without-kill is a separate verb rather than a flag on the closure path because the closure path is reachable from an unmount and this must not be. The two differ in exactly one line, and that line is the whole difference between moving a Workspace and losing it.
 
 **Why an app's modes have to travel.** An app sets them once, at startup, and has no signal that its terminal was rebuilt under it. Claude Code in a moved Workspace kept running with flags back at 0, so Shift+Enter arrived as a plain Enter and submitted the prompt until the app restarted. Kitty state replays as pushes rather than one set so that the app's later pops land where they would have, and so that the Windows arbiter, which counts only pushes and pops, turns win32-input-mode off in the arriving terminal.
@@ -115,7 +113,7 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Surface ids
 
-**Why an unparseable counter file is overwritten, but an unreadable or other-version one is not.** Every write is atomic, so a file this version cannot parse comes only from outside damage; refusing it would leave every launch on opaque ids until someone deleted the file by hand, while overwriting it from the host's disk scan (standalone) or its own counter and the webview's floor (VS Code) risks reusing only numbers no restored Surface holds. A read that fails (a Windows virus scanner's `EBUSY`) is usually transient, and another version's file may hold a mark this build cannot read; overwriting either could lower the mark under numbers already handed out (decided 2026-10-11).
+**Why an unparseable counter file is overwritten, but an unreadable one is not.** Every write is atomic, so a file this version cannot parse comes only from outside damage or another version; refusing it would leave every launch on opaque ids until someone deleted the file by hand, while overwriting it from the host's disk scan (standalone) or its own counter and the webview's floor (VS Code) risks reusing only numbers no restored Surface holds. A read that fails (a Windows virus scanner's `EBUSY`) is usually transient, and overwriting it could lower the mark under numbers already handed out (decided 2026-10-11).
 
 ## Persisted session types
 
@@ -127,7 +125,7 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 **The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store.
 
-**Why standalone stopped deleting every snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration; the boot delete that remains takes only another format's. What the unconditional delete uniquely covered — a `.json.tmp` no reader can see and no writer will ever overwrite — is exactly what the sweep still covers. Older debug snapshots sit outside the new subtree, and deleting them would remove layouts that may belong to an installed build, so debug startup sweeps only their orphaned temps. It once also stripped pane scrollback from them; that scrub was deleted 2026-11, since no current build reads those formats.
+**Why standalone stopped deleting every snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration; the boot delete that remains takes only another format's, with its temp. A crash-orphaned `.json.tmp` beside a current snapshot, which a transcript-era build could leave holding scrollback, was swept at boot until 2026-11, when any machine launched since held none. A current temp holds owner-only layout, a window box, or the arrivals journal, and one whose label never saves again now lingers (decided 2026-11).
 
 ## The governing rule
 

@@ -6,13 +6,11 @@ export interface StripTerminalControlsOptions {
   boundaries?: boolean;
 }
 
-type TerminalControlStreamState = 'ground' | 'escape' | 'osc' | 'string' | 'stringEscape';
-
 // --- The one string-control grammar -----------------------------------------
 //
-// Two state machines run over PTY output: `TerminalProtocolParser`
+// Two scanners run over PTY output: `TerminalProtocolParser`
 // (`terminal-protocol.ts`), which must locate a sequence to consume or forward
-// it, and the filter below, which only has to drop payload. They differ in what
+// it, and `removeStringControls` below, which only has to drop payload. They differ in what
 // they emit and agree on where a string control starts and stops, so the byte
 // sets and the kind mapping live here and nowhere else
 // (`docs/specs/terminal-escapes.md` → Families).
@@ -53,110 +51,36 @@ export function stringControlEndScan(kind: StringControlKind): RegExp {
 }
 
 /**
- * Removes OSC/DCS/SOS/PM/APC strings without promoting payload bytes to text
- * when a PTY read ends in the middle of one. The returned stream deliberately
- * keeps every other control for `stripTerminalControls` to interpret with its
- * boundary option at the point of use.
- *
- * Runs on every byte of every pane's output, so it emits whole runs between
- * introducers rather than stepping per character, and returns a chunk with no
- * introducer untouched.
+ * Removes OSC/DCS/SOS/PM/APC strings, an unterminated one swallowing the rest of
+ * the input, and a trailing bare ESC that may begin one. Every other control
+ * stays for `stripTerminalControls` to interpret with its boundary option.
  */
-export class TerminalControlStreamFilter {
-  private state: TerminalControlStreamState = 'ground';
-
-  process(input: string): string {
-    if (
-      this.state === 'ground' &&
-      !input.endsWith('\x1b') &&
-      !STRING_CONTROL_INTRODUCER.test(input)
-    ) {
-      return input;
-    }
-
-    let output = '';
-    let i = 0;
-
-    while (i < input.length) {
-      switch (this.state) {
-        case 'ground': {
-          STRING_CONTROL_INTRODUCER_SCAN.lastIndex = i;
-          const match = STRING_CONTROL_INTRODUCER_SCAN.exec(input);
-          if (!match) {
-            // A chunk ending in bare ESC may be a string introducer split
-            // across PTY reads, so hold the byte rather than emitting it.
-            const held = input.endsWith('\x1b') ? 1 : 0;
-            if (held) this.state = 'escape';
-            output += input.slice(i, input.length - held);
-            i = input.length;
-            break;
-          }
-          output += input.slice(i, match.index);
-          const introducer = match[0];
-          this.state = stringControlKind(introducer) === 'osc' ? 'osc' : 'string';
-          i = match.index + introducer.length;
-          break;
-        }
-
-        case 'escape': {
-          const char = input[i];
-          if (char === ']') {
-            this.state = 'osc';
-            i += 1;
-          } else if (char === 'P' || char === 'X' || char === '^' || char === '_') {
-            this.state = 'string';
-            i += 1;
-          } else {
-            // It was an ordinary ESC sequence. Preserve the introducer and
-            // re-read this byte in ground state so the stateless stripper sees
-            // the complete sequence, even when ESC ended the previous chunk.
-            output += '\x1b';
-            this.state = 'ground';
-          }
-          break;
-        }
-
-        case 'osc':
-        case 'string': {
-          const scan = stringControlEndScan(this.state === 'osc' ? 'osc' : 'other');
-          scan.lastIndex = i;
-          const match = scan.exec(input);
-          if (!match) {
-            i = input.length;
-            break;
-          }
-          // The payload is dropped either way; only ESC needs a follow-up byte
-          // to tell an ST terminator from a string-cancelling new sequence.
-          this.state = input.charCodeAt(match.index) === 0x1b ? 'stringEscape' : 'ground';
-          i = match.index + 1;
-          break;
-        }
-
-        case 'stringEscape': {
-          if (input[i] === '\\') {
-            this.state = 'ground';
-            i += 1;
-          } else {
-            // A bare ESC cancels the string and starts a new escape sequence.
-            this.state = 'escape';
-          }
-          break;
-        }
-      }
-    }
-
-    return output;
+export function removeStringControls(input: string): string {
+  let output = '';
+  for (let i = 0; i < input.length; ) {
+    STRING_CONTROL_INTRODUCER_SCAN.lastIndex = i;
+    const introducer = STRING_CONTROL_INTRODUCER_SCAN.exec(input);
+    if (!introducer) return output + input.slice(i, input.endsWith('\x1b') ? -1 : undefined);
+    output += input.slice(i, introducer.index);
+    const end = stringControlEndScan(stringControlKind(introducer[0]));
+    end.lastIndex = introducer.index + introducer[0].length;
+    const stop = end.exec(input);
+    if (!stop) return output;
+    // ST ends the string; a bare ESC cancels it and opens the next sequence.
+    i = input.charCodeAt(stop.index) !== 0x1b ? stop.index + 1
+      : input.charCodeAt(stop.index + 1) === 0x5c ? stop.index + 2 : stop.index;
   }
+  return output;
 }
 
 /** Remove presentation controls safely from slices that may start or end
  * mid-sequence. */
 export function stripTerminalControls(input: string, options: StripTerminalControlsOptions = {}): string {
   // OSC/DCS/SOS/PM/APC strings, including an unterminated one, whose tail is
-  // swallowed rather than promoted to visible text. Shared with the streaming
-  // filter above so one grammar cannot drift into two — which is also why a
+  // swallowed rather than promoted to visible text. Shared with the parser
+  // through the tables above so one grammar cannot drift into two — which is also why a
   // bare C1 introducer counts here, as it does everywhere else.
-  return stripPresentationControls(new TerminalControlStreamFilter().process(input), !!options.boundaries);
+  return stripPresentationControls(removeStringControls(input), !!options.boundaries);
 }
 
 /**
@@ -164,10 +88,10 @@ export function stripTerminalControls(input: string, options: StripTerminalContr
  * control into a line break, `plain` simply removes it. Comparing the two is
  * what tells a real trailing newline from a trailing boundary
  * (`docs/specs/terminal-state.md` → "Keystroke fallback"), and taking them
- * together runs the stateful string-control pass once rather than twice.
+ * together runs the string-control pass once rather than twice.
  */
 export function stripTerminalControlsBothWays(input: string): { boundaries: string; plain: string } {
-  const stringsRemoved = new TerminalControlStreamFilter().process(input);
+  const stringsRemoved = removeStringControls(input);
   return {
     boundaries: stripPresentationControls(stringsRemoved, true),
     plain: stripPresentationControls(stringsRemoved, false),

