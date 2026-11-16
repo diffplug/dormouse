@@ -550,23 +550,13 @@ export function deriveSurfaceLabel(
   return resolveDisplayPrimary(deriveHeader(pane, []).primary, fallbackTitle);
 }
 
-export function notificationDisplayTitle(
-  notification: TerminalNotificationTitleLike | null | undefined,
-): string | null {
-  if (notification?.source === 'OSC 9') {
-    const body = notification.body?.trim();
-    if (body) return body;
-  }
-  return null;
-}
-
 export function terminalTitleFromNotification(
   notification: TerminalNotificationTitleLike | null | undefined,
   updatedAt = Date.now(),
 ): TerminalTitle | null {
   if (!notification) return null;
   if (notification.source === 'OSC 9') {
-    const title = notificationDisplayTitle(notification);
+    const title = notification.body?.trim();
     return title ? { title, source: 'osc9', updatedAt } : null;
   }
   if (notification.source === 'OSC 99') {

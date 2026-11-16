@@ -20,7 +20,6 @@ import {
   deriveHeader,
   explainTerminalTitle,
   deriveSurfaceLabel,
-  notificationDisplayTitle,
   reduceTerminalState,
   shortestUniqueCwdLabels,
   summarizeCommandLine,
@@ -760,8 +759,6 @@ describe('header and grouping derivation', () => {
   });
 
   it('does not use rich notification titles as tab title overrides', () => {
-    expect(notificationDisplayTitle({ source: 'OSC 777', title: 'Tests', body: '341 passed' })).toBeNull();
-    expect(notificationDisplayTitle({ source: 'OSC 99', title: 'Build', body: 'Finished successfully' })).toBeNull();
     expect(terminalTitleFromNotification({ source: 'OSC 777', title: 'Tests', body: '341 passed' }, 2)).toEqual({
       title: 'Tests',
       source: 'osc777',
