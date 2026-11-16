@@ -183,9 +183,9 @@ Source of truth: `note_geometry` / `restore_windows` / `fit_geometry` in `standa
 
 ### What a window's `Destroyed` settles
 
-**Must clear label-keyed ownership, registry, geometry, and close state in the `Destroyed` arm**, when Tauri has removed the window from `webview_windows()` (rationale), and send the remaining live labels to the sidecar. **Must remove incoming arrivals from the reap before killing orphaned PTYs**; the source still holds those Sessions. **Must defer every approved exit until every hand-back worker has completed**, on every exit path, and **force it after `QUIT_PHASE_TIMEOUT_MS`**, logging the timeout, so a stalled disk operation cannot trap the app.
+**Must clear label-keyed ownership, registry, geometry, and close state in the `Destroyed` arm**, when Tauri has removed the window from `webview_windows()` (rationale), and send the remaining live labels to the sidecar. **Must remove incoming arrivals from the reap before killing orphaned PTYs**; the source still holds those Sessions.
 
-Source of truth: `CleanupGate` in `standalone/src-tauri/src/quit_state.rs`; `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
@@ -372,9 +372,9 @@ Every trigger funnels into `request_quit(app)`:
 | Arm | Fired by | Guard |
 |---|---|---|
 | `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless approved; refused outright while the walk runs. Only the **last** window's close is a quit (§Per-window close) |
-| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the cleanup gate (§What a window's `Destroyed` settles); its `code` is ignored |
+| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved; its `code` is ignored |
 | the app menu's Quit item | the menu and its `Cmd+Q` | a **custom** `MenuItem`, never `PredefinedMenuItem::quit` (macOS; rationale) |
-| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` once the cleanup gate clears (macOS; rationale) |
+| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` (macOS; rationale) |
 | the `quit_restart` command | the update notice (`docs/specs/auto-update.md`), `dor app restart` | `request_quit` with the restart intent (§Restart) |
 
 **Never refuse an OS terminate** (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
@@ -399,7 +399,7 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 | 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
 | 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 
-**Phase 3's budget must exceed the webview's teardown ceiling and the install phase's sidecar-kill cap** (`docs/specs/auto-update.md` → "Sidecar teardown on Windows"); `lib/src/lib/mirrored-constants.test.ts` pins the ceiling, nothing pins the install phase. Watchdog exits also pass the cleanup gate.
+**Phase 3's budget must exceed the webview's teardown ceiling and the install phase's sidecar-kill cap** (`docs/specs/auto-update.md` → "Sidecar teardown on Windows"); `lib/src/lib/mirrored-constants.test.ts` pins the ceiling, nothing pins the install phase.
 
 **Must use the Workspace typed-letter confirmation for window close and quit**, naming every Workspace in the window, hidden ones included. It opens for running Sessions; an all-idle quit proceeds without a prompt. The letter rule is `docs/specs/layout.md` → Workspaces.
 

@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
-use crate::{append_log, exit_after_cleanup, forget_restart, quit_approved, request_quit, QuitIntent};
+use crate::{append_log, forget_restart, quit_approved, request_quit, QuitIntent};
 
 /// The handle the spliced method answers on behalf of. Set once, at `Ready`.
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -42,9 +42,8 @@ const SHOULD_TERMINATE_TYPES: &[u8] = b"Q@:@\0";
 /// Our `applicationShouldTerminate:`.
 ///
 /// Holds the terminate and starts the flow, whose exit or cancel answers it.
-/// An approved pass is the OS asking while an exit already under way waits on
-/// the bounded hand-back cleanup gate: `Now` once the gate permits, else held
-/// for the gate's own exit. Panic-free by construction: every Rust panic aborts
+/// An approved pass is the OS asking while an exit is already under way, and
+/// gets `Now`. Panic-free by construction: every Rust panic aborts
 /// (`panic_policy`), and this runs inside AppKit's stack.
 unsafe extern "C-unwind" fn should_terminate(
     _this: *mut AnyObject,
@@ -55,18 +54,15 @@ unsafe extern "C-unwind" fn should_terminate(
         // Nothing is managed yet, so there is no session to lose.
         return NSApplicationTerminateReply::TerminateNow;
     };
-    let approved = quit_approved(app);
-    if approved && exit_after_cleanup(app) {
+    if quit_approved(app) {
         // A terminate the OS asked for never relaunches.
         forget_restart(app);
         return NSApplicationTerminateReply::TerminateNow;
     }
     // Held before the flow starts: a flow with no window to ask exits at once.
     HELD.store(true, Ordering::SeqCst);
-    if !approved {
-        append_log("[quit] holding an AppKit terminate (Dock, logout, or script) for the quit flow");
-        request_quit(app, QuitIntent::default());
-    }
+    append_log("[quit] holding an AppKit terminate (Dock, logout, or script) for the quit flow");
+    request_quit(app, QuitIntent::default());
     NSApplicationTerminateReply::TerminateLater
 }
 
