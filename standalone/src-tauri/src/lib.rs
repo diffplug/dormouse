@@ -14,7 +14,7 @@ mod workspaces;
 mod macos_terminate;
 #[cfg(target_os = "macos")]
 mod macos_siri_affordance;
-use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine};
+use quit_state::{ArrivalQueue, CloseMachine, QuitAction, QuitIntent, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
@@ -681,33 +681,6 @@ fn send_window_labels(app: &AppHandle) {
 struct QuitState {
     machine: Mutex<QuitMachine>,
     close: Mutex<CloseMachine>,
-    cleanup: Mutex<CleanupGate>,
-}
-
-fn exit_after_cleanup(app: &AppHandle) -> bool {
-    let Some(state) = app.try_state::<QuitState>() else { return true; };
-    let (exit, start_watchdog) = {
-        let mut gate = guard(&state.cleanup);
-        let was_waiting = gate.exit_requested;
-        let exit = gate.request_exit();
-        (exit, !exit && !was_waiting)
-    };
-    if start_watchdog {
-        let app = app.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            std::thread::sleep(Duration::from_millis(QUIT_PHASE_TIMEOUT_MS));
-            let force = app.try_state::<QuitState>()
-                .is_some_and(|state| guard(&state.cleanup).force_if_waiting());
-            if force {
-                append_log("[quit] hand-back cleanup timed out; forcing exit");
-                if let Some(state) = app.try_state::<QuitState>() {
-                    guard(&state.machine).approved = true;
-                }
-                app.exit(0);
-            }
-        });
-    }
-    exit
 }
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
@@ -777,7 +750,6 @@ fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
                 }
             }
             QuitAction::Exit => {
-                if !exit_after_cleanup(app) { continue; }
                 if let Some(state) = app.try_state::<QuitState>() {
                     guard(&state.machine).approved = true;
                 }
@@ -5034,7 +5006,7 @@ pub fn run() {
                 }
                 // The window is gone: clear its label-keyed state here, after
                 // Tauri removes it from `webview_windows()`. Journal hand-backs
-                // run off-thread behind the approved-exit gate.
+                // run off-thread.
                 WindowEvent::Destroyed => {
                     let label = window.label().to_string();
                     if let Some(watchdog) = app.try_state::<UiWatchdog>() {
@@ -5049,24 +5021,13 @@ pub fn run() {
                         lost
                     } else { Vec::new() };
                     if !lost.is_empty() {
-                        if let Some(state) = app.try_state::<QuitState>() {
-                            guard(&state.cleanup).begin();
-                        }
-                        let cleanup_app = app.clone();
+                        let hand_back_app = app.clone();
                         tauri::async_runtime::spawn_blocking(move || {
-                            if let Some(state) = cleanup_app.try_state::<WindowState>() {
+                            if let Some(state) = hand_back_app.try_state::<WindowState>() {
                                 for arrival in lost {
-                                    hand_back_arrival(&cleanup_app, &state, &arrival,
+                                    hand_back_arrival(&hand_back_app, &state, &arrival,
                                         "the target window closed mid-arrival");
                                 }
-                            }
-                            let finish_app = cleanup_app.clone();
-                            if let Err(err) = cleanup_app.run_on_main_thread(move || {
-                                let exit = finish_app.try_state::<QuitState>()
-                                    .is_some_and(|state| guard(&state.cleanup).finish());
-                                if exit { apply_quit_actions(&finish_app, vec![QuitAction::Exit]); }
-                            }) {
-                                append_log(format!("[quit] could not complete hand-back cleanup: {err}"));
                             }
                         });
                     }
@@ -5277,7 +5238,7 @@ pub fn run() {
                 if !quit_approved(app) {
                     api.prevent_exit();
                     request_quit(app, QuitIntent::default());
-                } else if !exit_after_cleanup(app) || answer_held_terminate(app, true) {
+                } else if answer_held_terminate(app, true) {
                     api.prevent_exit();
                 }
             }
@@ -6046,14 +6007,9 @@ mod tests {
     }
 
     #[test]
-    fn every_approved_exit_path_checks_cleanup() {
+    fn every_exit_path_answers_a_held_terminate() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
-        let action = source.split("QuitAction::Exit => {").nth(1).unwrap().split("app.exit(0)").next().unwrap();
-        assert!(action.contains("!exit_after_cleanup(app)"));
         let event = source.split("RunEvent::ExitRequested { api, .. } => {").nth(1).unwrap().split("RunEvent::Exit =>").next().unwrap();
-        assert!(event.contains("!exit_after_cleanup(app)"));
-        let gate = source.split("fn exit_after_cleanup").nth(1).unwrap().split("\n}").next().unwrap();
-        assert!(gate.contains("if start_watchdog") && gate.contains("force_if_waiting") && gate.contains("QUIT_PHASE_TIMEOUT_MS"));
         // A held OS terminate must be answered on every exit (all pass through
         // this arm) and on cancel; refusing one aborts a logout outright
         // (docs/specs/standalone.md -> "Trigger interception").
@@ -6062,7 +6018,7 @@ mod tests {
         assert!(cancel.contains("answer_held_terminate(&app, false)"));
         let macos = include_str!("macos_terminate.rs");
         let delegate = macos.split("fn should_terminate(").nth(1).unwrap().split("\n}").next().unwrap();
-        assert!(delegate.contains("exit_after_cleanup(app)") && delegate.contains("TerminateLater"));
+        assert!(delegate.contains("TerminateLater"));
         assert!(!delegate.contains("TerminateCancel"));
         // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
         assert!(delegate.contains("forget_restart(app)"));
