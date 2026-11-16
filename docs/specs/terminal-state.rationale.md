@@ -64,8 +64,6 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 ## Header Derivation
 
-**Why an absent `osc9` candidate makes the app title trustworthy.** The alert manager's `OSC 9` text and the pane's `osc9` candidate come off the same stream, so when both exist they share a timestamp and the staleness window applies. One with no matching candidate was injected without going through the parser and has no timestamp to judge; trusting it preserves the behavior that predates the staleness rule.
-
 **Why app-sent titles are filtered.** Under Windows ConPTY the console title is relayed for every child process whether or not it chose one, so an `OSC 0`/`OSC 2` title is frequently just the child's image path (`C:\WINDOWS\system32\cmd.exe`, which pnpm's script shell broadcasts) — no command information, so letting it through replaces a correctly detected command label with noise. A title carrying arguments or prose did come from a program that chose it.
 
 **Why the fail glyph lives in `primary` rather than only in the flag.** Plain-text title consumers — OS window titles, tab titles — render `primary` and nothing else, so a flag-only signal would lose the failure there.

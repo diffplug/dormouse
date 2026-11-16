@@ -26,7 +26,6 @@ import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner, Workspa
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
 import {
-  buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
   getActivitySnapshot,
   getAlertSpeechSnapshot,
@@ -121,10 +120,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const { workspaceId, overrides, policy: settings } = useWorkspaceAlertPolicy();
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const dirtyTools = useSyncExternalStore(subscribeToToolDirty, getToolDirtySnapshot);
-  const appTitleForPane = useMemo(
-    () => buildAppTitleResolver(terminalStates, activityStates),
-    [terminalStates, activityStates],
-  );
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [startIndex, setStartIndex] = useState(0);
@@ -341,7 +336,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const doorProps = (item: DoorChip) => {
     const activity = activityOf(item);
     return {
-      title: deriveDisplayedSurfaceLabel(item.kind, item.id, item.title, terminalStates, appTitleForPane),
+      title: deriveDisplayedSurfaceLabel(item.kind, item.id, item.title, terminalStates),
       browserDisplay: item.browserDisplay,
       toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
       preview: item.preview === true,

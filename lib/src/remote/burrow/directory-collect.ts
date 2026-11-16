@@ -10,11 +10,9 @@
 
 import type { DirectoryEntry } from 'remote-lib-common';
 import {
-  buildAppTitleResolver,
   deriveHeader,
   getActivitySnapshot,
   getTerminalPaneState,
-  getTerminalPaneStateSnapshot,
   resolveDisplayPrimary,
 } from '../../lib/terminal-registry';
 import { isHelperSession, registry } from '../../lib/terminal-store';
@@ -48,9 +46,7 @@ function collectWorkspaces(): DirectoryWorkspaceInput[] {
 }
 
 export function collectDirectorySnapshot(): DirectoryEntry[] {
-  const paneStates = getTerminalPaneStateSnapshot();
   const activityStates = getActivitySnapshot();
-  const appTitleForPane = buildAppTitleResolver(paneStates, activityStates);
 
   const pending = new Set(pendingKillSessionIds());
   const ids = [...registry.keys()].filter((id) => !isHelperSession(id) && !pending.has(id));
@@ -76,7 +72,7 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
     // 150ms-debounced snapshot, to build a value nothing reads. Compare the
     // pane against only itself so that scan is O(1); `primary` is identical.
     const title = resolveDisplayPrimary(
-      deriveHeader(pane, [pane], { appTitleForPane }).primary,
+      deriveHeader(pane, [pane]).primary,
       null,
     );
     // A pane whose PTY exited lingers in the registry (showing "[Process

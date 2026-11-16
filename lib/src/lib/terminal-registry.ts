@@ -110,7 +110,6 @@ export {
   cwdFromOsc7,
   cwdFromOsc9_9,
   cwdFromProcessPath,
-  buildAppTitleResolver,
   deriveHeader,
   resolveDisplayPrimary,
   summarizeCommandLine,
