@@ -28,7 +28,7 @@ export function canOpenDirectory(cwd: CwdState, windows: boolean): boolean {
 
 /** `preview`: the Surface is its Workspace's preview slot, which the context
  *  offers to keep (`docs/specs/layout.md` -> Pane header). */
-export function TerminalContext({ id, mode: contextMode, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: Omit<TerminalContextState, 'mode'> & { mode: ContextMode; title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
+export function TerminalContext({ id, mode: contextMode, title, closing, origin, warning: openWarning, tool = false, preview = false, placement, params }: TerminalContextState & { mode: ContextMode; title?: string; tool?: boolean; preview?: boolean; params?: Record<string, unknown> } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
   const workspaceActive = useContext(WorkspaceActiveContext);
@@ -95,7 +95,7 @@ export function TerminalContext({ id, mode: contextMode, title, closing, origin,
     onReset={async () => { await resetAux(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, title ?? id) }); await openAux(id); }} onPromote={() => context.promote(id)}
     onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>
     {/* The Tool's xterm itself: `focusSession` would reach its browser Surface's focus handle. */}
-    {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
-    {aux && <div data-aux-terminal={aux.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(aux.id, true)}><TerminalPane key={aux.id} id={aux.id} isFocused={false} /></div>}
+    {auxMode && tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
+    {auxMode && aux && <div data-aux-terminal={aux.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(aux.id, true)}><TerminalPane key={aux.id} id={aux.id} isFocused={false} /></div>}
   </TerminalContextView>;
 }

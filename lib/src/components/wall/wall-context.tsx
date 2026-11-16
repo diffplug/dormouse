@@ -197,7 +197,12 @@ export interface TerminalContextOpenOptions {
 }
 
 /** One opening of the terminal context; `closing` while its exit plays. */
-export type TerminalContextState = { id: string; closing?: boolean } & TerminalContextOpenOptions;
+/** The mode is held apart, so switching it never makes this a new opening. */
+export type TerminalContextState = { id: string; closing?: boolean } & Omit<TerminalContextOpenOptions, 'mode'>;
+
+/** Whether the context mounted for `id` shows its terminal, which then belongs to it. */
+export const contextShowsTerminal = (context: { mounted: TerminalContextState | null; mode: ContextMode }, id: string) =>
+  context.mounted?.id === id && context.mode === 'aux';
 
 export const TerminalContextContext = createContext<{
   /** The Session holding the context's input — null while none is open or one is exiting. */

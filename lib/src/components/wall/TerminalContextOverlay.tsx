@@ -28,39 +28,46 @@ export function TerminalContextOverlay({ context, mode, title, tool, preview = f
     return cursorHalfSide(terminal?.buffer.active, terminal?.rows ?? 0);
   });
   const [manual, setManual] = useState(() => preferences.get(context.id));
-  const lastSide = useRef<ContextSide | undefined>(undefined);
   const host = useRef<HTMLDivElement>(null);
-  const place = (painted: Rect | undefined) => placeTerminalContext(wall, painted ?? source, multiPane, manual ?? lastSide.current, cursorSide);
+  // The last placement, its side the next one's fallback.
+  const placed = useRef<ContextPlacement | undefined>(undefined);
+  const place = (painted: Rect | undefined) => placeTerminalContext(wall, painted ?? source, multiPane, manual ?? placed.current?.side, cursorSide);
   // Mount geometry only: children measure the host in layout effects that run before LathHost paints.
-  const [initial] = useState(() => place(lath.animator.framesAt(nowMs()).get(context.id)?.rect));
+  const [initial] = useState(() => (placed.current = place(lath.animator.framesAt(nowMs()).get(context.id)?.rect)));
   const [shown, setShown] = useState<Omit<ContextPlacement, 'rect'>>(initial);
   const [initialStyle] = useState(() => contextHostStyle(initial, mode));
-  const placed = useRef(initial);
+  // The placer reads the mode as it paints.
+  const modeRef = useRef(mode);
+  // A switched mode restyles the host at once, without waiting for a paint, and the ring follows.
   useLayoutEffect(() => {
-    // A switched mode resizes the host now; the paint the new placer wakes may be a frame away.
-    if (host.current) Object.assign(host.current.style, contextHostStyle(placed.current, mode));
+    if (modeRef.current === mode) return;
+    modeRef.current = mode;
+    if (host.current) Object.assign(host.current.style, contextHostStyle(placed.current ?? initial, mode));
+    lath.notifyFrames(true);
+  }, [lath, mode]);
+  useLayoutEffect(() => {
     lath.setContextPlacer(paint => {
       const element = host.current;
       if (!element) return null;
       const next = place(paint.get(context.id)?.rect);
-      lastSide.current = next.side;
       placed.current = next;
-      Object.assign(element.style, contextHostStyle(next, mode));
+      Object.assign(element.style, contextHostStyle(next, modeRef.current));
       setShown(previous => previous.side === next.side && previous.available.join() === next.available.join() ? previous : next);
       // Dismissal returns the ring to the source alone while the exit plays.
       return context.closing ? null : { sourceId: context.id, element, side: next.side };
     });
     // `place` reads exactly these inputs
-  }, [lath, context.id, context.closing, mode, manual, multiPane, cursorSide, wall.x, wall.y, wall.width, wall.height, source.x, source.y, source.width, source.height]);
+  }, [lath, context.id, context.closing, manual, multiPane, cursorSide, wall.x, wall.y, wall.width, wall.height, source.x, source.y, source.width, source.height]);
   useLayoutEffect(() => () => lath.setContextPlacer(null), [lath]);
   // Properties grow and shrink with their rows between paints; the ring follows.
+  // The terminal mode's host changes size only in the placer's paint.
   useLayoutEffect(() => {
     const element = host.current;
-    if (!element) return;
+    if (!element || mode !== 'properties') return;
     const observer = new ResizeObserver(() => lath.notifyFrames(true));
     observer.observe(element);
     return () => observer.disconnect();
-  }, [lath]);
+  }, [lath, mode]);
   const onChange = useCallback((side: ContextSide) => {
     preferences.set(context.id, side);
     setManual(side);

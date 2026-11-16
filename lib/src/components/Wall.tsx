@@ -2406,8 +2406,9 @@ export function Wall({
     open: (id: string, options?: TerminalContextOpenOptions) => {
       if (toolPendingFromParams(lath.getMeta(id)?.params) || isAuxSession(id) || isClosingSurface(id) || lath.isDying(id)) return;
       cancelContextPortLaunches();
-      setTerminalContext({ id, ...options });
-      setContextMode(options?.mode ?? 'properties');
+      const { mode = 'properties', ...rest } = options ?? {};
+      setTerminalContext({ id, ...rest });
+      setContextMode(mode);
     },
     close: () => {
       cancelContextPortLaunches();
@@ -2465,7 +2466,7 @@ export function Wall({
     enterPassthrough,
     enterCommandMode,
     minimizePane,
-    openTerminalContext: (id, options) => contextActions.open(id, options),
+    openTerminalContext: contextActions.open,
     requestKill,
     reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,

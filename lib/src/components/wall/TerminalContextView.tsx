@@ -479,10 +479,11 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const shape = teeth && count ? contextTeeth(teeth, count) : undefined;
   const reach = (side: ContextSide) => (side === teeth ? DEPTH : 0);
   const properties = p.mode === 'properties';
-  // Focus stays in the context, for Escape and Tab, as the switch that took it leaves.
-  const switchTo = (mode: ContextMode) => { surface.current?.focus({ preventScroll: true }); p.onModeChange(mode); };
-  // Shared by both modes' headers. The action leaves with the mark, so focus stays in the context.
-  const keepOpen = p.onKeepPreview && <ContextAction label="Keep open" onClick={() => { surface.current?.focus({ preventScroll: true }); p.onKeepPreview?.(); }}><PushPinIcon size={15} /><span className={WIDE_LABEL_CLASS}>Keep open</span></ContextAction>;
+  /** Runs `action` with focus parked on the context, for Escape and Tab, as the control that ran it leaves. */
+  const holdingFocus = (action: () => void) => () => { surface.current?.focus({ preventScroll: true }); action(); };
+  const switchTo = (mode: ContextMode) => holdingFocus(() => p.onModeChange(mode));
+  // Shared by both modes' headers; the action leaves with the mark.
+  const keepOpen = p.onKeepPreview && <ContextAction label="Keep open" onClick={holdingFocus(() => p.onKeepPreview?.())}><PushPinIcon size={15} /><span className={WIDE_LABEL_CLASS}>Keep open</span></ContextAction>;
   const frameActions = <>
     {placement && <div role="group" aria-label="Context placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
       <ContextAction key={side} label={`Place context at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
@@ -507,7 +508,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         <HeaderRow workspaceMove={p.workspaceMove} surfaceId={p.surfaceId} onExplain={() => setDetail('title')} onCopyId={() => attempt(p.onCopyId)} actions={<>
           {keepOpen}
           {p.navigation}
-          <ContextAction label={`Show ${terminalName.toLowerCase()} terminal`} onClick={() => switchTo('aux')}><TerminalIcon size={15} /><span className={WIDE_LABEL_CLASS}>{terminalName.toLowerCase()} terminal</span></ContextAction>
+          <ContextAction label={`Show ${terminalName.toLowerCase()} terminal`} onClick={switchTo('aux')}><TerminalIcon size={15} /><span className={WIDE_LABEL_CLASS}>{terminalName.toLowerCase()} terminal</span></ContextAction>
           {frameActions}
         </>} />
         {/* A narrow panel moves the toggles under the rows, where they sit side by side. */}
@@ -553,7 +554,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <div data-context-header-actions className="ml-auto flex shrink-0 items-center gap-0.5">
             {keepOpen}
             {p.navigation}
-            <ContextAction label="Show properties" onClick={() => switchTo('properties')}><InfoIcon size={15} /><span className={WIDE_LABEL_CLASS}>properties</span></ContextAction>
+            <ContextAction label="Show properties" onClick={switchTo('properties')}><InfoIcon size={15} /><span className={WIDE_LABEL_CLASS}>properties</span></ContextAction>
             {frameActions}
           </div>
         </div>

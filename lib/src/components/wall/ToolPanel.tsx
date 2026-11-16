@@ -14,7 +14,7 @@ import { ToolApproval } from './ToolApproval';
 import { ToolPortConflict } from './ToolPortConflict';
 import { toolFace, type ToolFace } from './browser-surface';
 import { BROWSER_LAYER_ATTRIBUTE, usePreviewSlotView } from './preview-transition';
-import { PaneWriteContext, TerminalContextContext, WallActionsContext } from './wall-context';
+import { contextShowsTerminal, PaneWriteContext, TerminalContextContext, WallActionsContext } from './wall-context';
 import { toolView, type ToolViewRequest } from './tool-navigation';
 import type { PaneProps } from './pane-props';
 
@@ -155,7 +155,7 @@ export function ToolPanel(props: PaneProps) {
       </div>}
       {/* Revealed over the browser's ghost, which follows it. */}
       <Half face="terminal" state={roleState(terminal, instant)} className={terminal === 'revealing' && 'z-10'}>
-        <TerminalPanel {...props} renderTerminal={context.mounted?.id !== props.id || context.mode !== 'aux'} parked={props.parked || terminal === 'hidden' || transition !== null} />
+        <TerminalPanel {...props} renderTerminal={!contextShowsTerminal(context, props.id)} parked={props.parked || terminal === 'hidden' || transition !== null} />
       </Half>
       <Half face="browser" state={roleState(showSecond ? 'live' : 'hidden', instant)}>
         {/* A conflict and a browser are mutually exclusive by construction —
