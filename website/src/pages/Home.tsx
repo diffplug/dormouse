@@ -269,7 +269,6 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
           // stacked shadows read as its near edge's thickness.
           transform: `scale(${fit?.scale ?? 1}) perspective(6000px) rotateY(16deg) rotateX(6deg) rotateZ(-2deg)`,
           boxShadow: "-3px 3px 0 #3a3a3c, -6px 6px 0 #2a2a2c, -8px 8px 0 #1c1c1e, -30px 40px 90px rgba(0,0,0,0.6)",
-          visibility: fit ? undefined : "hidden",
         }}
       >
         <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
