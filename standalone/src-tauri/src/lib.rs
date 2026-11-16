@@ -31,7 +31,7 @@ use std::{
 };
 use tauri::{
     menu::{Menu, PredefinedMenuItem, Submenu},
-    AppHandle, DragDropEvent, Emitter, Manager, RunEvent, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, WebviewWindowBuilder, WindowEvent,
 };
 #[cfg(target_os = "macos")]
 use tauri::menu::MenuItem;
@@ -4978,19 +4978,6 @@ pub fn run() {
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
-                // Inert while tauri.conf.json sets dragDropEnabled=false. Nothing
-                // needs the flag off any more — Lath's pane drag is pointer-based —
-                // so flipping it is a deliberate, separate change
-                // (docs/specs/mouse-and-clipboard.md -> "8.7 Drag-to-Paste").
-                // See diffplug/dormouse#38 and tauri-apps/tauri#14373.
-                WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
-                    let payload: Vec<String> = paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .collect();
-                    // `emit` broadcasts to every window; the drop belongs to this one.
-                    let _ = app.emit_to(window.label(), "dormouse://files-dropped", serde_json::json!({ "paths": payload }));
-                }
                 // Focus order is the drag hit test's z-order stand-in and the
                 // fallback owner for a `dor` request naming no Surface.
                 WindowEvent::Focused(true) => {
@@ -7434,14 +7421,6 @@ mod tests {
         }
         assert!(offenders.is_empty(), "these open a window without send_window_labels: {offenders:?}");
         assert!(src.contains("restore_windows(app.handle()"), "setup must still restore windows itself");
-    }
-
-    #[test]
-    fn a_file_drop_reaches_only_its_own_window() {
-        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
-        let arm = src.split("WindowEvent::DragDrop(DragDropEvent::Drop").nth(1).unwrap()
-            .split("WindowEvent::").next().unwrap();
-        assert!(arm.contains("emit_to(window.label(), \"dormouse://files-dropped\""), "{arm}");
     }
 
     #[test]

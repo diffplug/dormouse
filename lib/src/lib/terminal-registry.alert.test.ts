@@ -427,7 +427,7 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched(id)).toBe(false);
   });
 
-  it('marks paste and file-drop path insertion as touched', () => {
+  it('marks file-reference paste as touched', () => {
     const id = 'paste-touched';
     createSession(id);
 
@@ -1001,7 +1001,7 @@ describe('terminal-registry alert behavior', () => {
   });
 
   it.each([
-    ['a file drop', async (id: string) => pasteFilePaths(id, ['/tmp/a.txt'])],
+    ['a file-reference paste', async (id: string) => pasteFilePaths(id, ['/tmp/a.txt'])],
     ['a text paste', async (id: string) => {
       // An optional port `FakePtyAdapter` leaves out, so it is set through the interface.
       const platform: PlatformAdapter = fakePlatform;

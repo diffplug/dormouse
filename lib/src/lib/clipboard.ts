@@ -19,7 +19,7 @@ function writePasteToPty(terminalId: string, text: string): void {
   // a bare LF as `^J`.
   const lines = text.replace(/\r?\n/g, '\r');
   const payload = bracketed ? `\x1b[200~${defangPasteEscapes(lines)}\x1b[201~` : lines;
-  // Paste and file-drop input bypass xterm's onData handler, so they take the
+  // Paste input bypasses xterm's onData handler, so it takes the
   // keystroke path's write here: touched, acknowledged, then written.
   writeUserInput(terminalId, payload);
 }

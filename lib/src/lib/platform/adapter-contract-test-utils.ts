@@ -115,7 +115,6 @@ const MEMBERS = {
   readClipboardText: ['--TH-', FAIL('readClipboardText')],
   // `nativeClipboardWriter`: macOS and Windows only.
   writeClipboardText: ['-Vth-', FAIL('writeClipboardText')],
-  onFilesDropped: ['--T--', 'browser-sidecar-adapter.test.ts "does not claim native file-drop support"'],
   openExternal: ['FVTH-', 'tauri-adapter.test.ts "revalidates every URI"; vscode-adapter.test.ts "posts external hyperlink open requests"'],
   opensOtherApps: ['--T--', 'tauri-adapter.test.ts "admits IPv6-literal web links"'],
   runWorkbenchCommand: ['-V---', 'vscode-adapter.test.ts "posts allowlisted VS Code workbench commands"'],

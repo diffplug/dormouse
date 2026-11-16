@@ -1,6 +1,5 @@
 import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-types';
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { assemblePersistedSession, buildPersistedSession, cwdSurfaceIds, saveSession, type SaveOptions } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
@@ -16,7 +15,7 @@ import {
 import { surfaceKindFromParams } from './browser-surface';
 import { persistableLeafMeta } from './lath-wall-engine';
 import type { LathWallEngine } from './lath-wall-engine';
-import type { DooredItem, WallSelectionKind } from './wall-types';
+import type { DooredItem } from './wall-types';
 import type { PersistedDoor, PersistedSession, WorkspaceId } from '../../lib/session-types';
 import type { SessionFlushRequest } from '../../lib/platform/types';
 
@@ -38,9 +37,6 @@ export function useSessionPersistence({
   lath,
   doors,
   doorsRef,
-  selectedIdRef,
-  selectedTypeRef,
-  activeRef,
   ownsSurface,
   workspaceId,
 }: {
@@ -54,10 +50,6 @@ export function useSessionPersistence({
   // the only signal — it keeps a future setDoors-only path from going unpersisted.
   doors: DooredItem[];
   doorsRef: RefObject<DooredItem[]>;
-  selectedIdRef: RefObject<string | null>;
-  selectedTypeRef: RefObject<WallSelectionKind>;
-  /** Only the visible Workspace receives user-originated native drops. */
-  activeRef: RefObject<boolean>;
   /** Whether a Surface belongs to this Wall — panes AND Doors. The adapter fans
    *  every Session's traffic to every mounted Wall, so this is what keeps one
    *  Workspace from persisting on another's keystroke. Must be stable: the
@@ -298,25 +290,12 @@ export function useSessionPersistence({
     if (ownsHostFlush) platform.onRequestSessionFlush(handleSessionFlushRequest);
     window.addEventListener('pagehide', handlePageHide);
 
-    // Never fires in Tauri standalone today: `dragDropEnabled: false` keeps the
-    // native drop handler from ever emitting
-    // (docs/specs/mouse-and-clipboard.md -> "8.7 Drag-to-Paste").
-    // See diffplug/dormouse#38 and tauri-apps/tauri#14373.
-    const unsubFilesDropped = platform.onFilesDropped?.((paths) => {
-      if (!activeRef.current || paths.length === 0) return;
-      const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
-      if (!sid) return;
-      if (!ownsSurface(sid)) return;
-      pasteFilePaths(sid, paths);
-    });
-
     return () => {
       if (sessionSaveTimerRef.current) {
         clearTimeout(sessionSaveTimerRef.current);
         sessionSaveTimerRef.current = null;
       }
       window.removeEventListener('pagehide', handlePageHide);
-      unsubFilesDropped?.();
       if (ownsHostFlush) platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
       platform.offPtyData(handlePtyData);
@@ -345,9 +324,6 @@ export function useSessionPersistence({
     ownsHostFlush,
     persistSessionNow,
     scheduleSessionSave,
-    selectedIdRef,
-    selectedTypeRef,
-    activeRef,
   ]);
 
   return { flush: flushSessionSave, serialize, serializeNow, serializeReported };

@@ -275,12 +275,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     if (normalized) window.open(normalized, "_blank", "noopener,noreferrer");
   }
 
-  // No `onFilesDropped`: the optional member is a capability probe for adapters
-  // with a native (non-DOM) drag-drop source (PlatformAdapter in
-  // dormouse-lib/lib/platform/types). This harness runs in a plain browser tab,
-  // where a drop yields `File` objects and no host paths, so there is nothing to
-  // report. Implementing it would claim the capability and never fire.
-
   onPtyData(handler: PtyDataHandler): void { this.ptyData.add(handler); }
   offPtyData(handler: PtyDataHandler): void { this.ptyData.delete(handler); }
   acknowledgePtyData(id: string, chars: number): void { this.host.send("pty_ack", { id, chars }); }
