@@ -216,7 +216,7 @@ jobs:
 
       - name: Audit against the security specs
         if: steps.plan.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
@@ -766,7 +766,7 @@ jobs:
       # The audit job's agent step, less `ci-and-secrets`: the same pinned
       # action, prompts, tools, and model split.
       - name: Audit the seeded checkout
-        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         env:
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
