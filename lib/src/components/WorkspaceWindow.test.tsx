@@ -10,7 +10,9 @@ import { flushSync } from 'react-dom';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS, WINDOW_CONTROL_METHODS } from 'dor/protocol';
-import { moveSurface } from './wall/surface-move';
+import { adoptSurfaceArrival, moveSurface, requestSurfaceMoveToWindow } from './wall/surface-move';
+import { MoveWorkspaceAction } from './wall/MoveWorkspaceAction';
+import { setOtherWindowWorkspaces } from '../lib/other-window-workspaces';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { browserLeafMeta, toolLeafMeta } from './wall/lath-wall-engine';
 import { leafTree } from '../lib/lath/model';
@@ -1379,6 +1381,64 @@ describe('Surface moves between Workspaces', () => {
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
     await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, false); expect(await pending).toBeNull(); });
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+  });
+  describe('into another Window', () => {
+    const arrival = (source: string) => ({ surfaceId: 'surface:a', workspaceId: 'workspace:9', from: source });
+    afterEach(() => setOtherWindowWorkspaces([]));
+
+    it('lists other Windows under their own headers and carries the Surface there in a background Workspace', async () => {
+      const transferWorkspace = vi.fn(async () => {});
+      Object.assign(fake, { transferWorkspace });
+      setOtherWindowWorkspaces([{ window: 'ws-2', workspaces: [{ id: 'workspace:9', name: 'far' }] }]);
+      const source = await twoWalls();
+      await act(async () => { root.render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { initialPaneIds: ['surface:a', 'surface:b'] }, 'workspace:2': { initialPaneIds: ['pane-x'] } }} /><MoveWorkspaceAction id="surface:a" sourceId={source} /></>); });
+      const select = container.querySelector<HTMLSelectElement>('select[aria-label="Move to workspace"]')!;
+      expect([...select.querySelectorAll('optgroup')].map(group => group.label)).toEqual(['This window', 'window:ws-2']);
+      await act(async () => {
+        select.value = 'ws-2 workspace:9';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await flush();
+      const hop = (transferWorkspace.mock.calls[0] as unknown[])[0] as string;
+      expect(transferWorkspace).toHaveBeenCalledWith(hop, 'ws-2', { surfaceArrival: arrival(source) });
+      expect(getWallHandle(hop)!.surfaceIds()).toEqual(['surface:a']);
+      // Nothing follows the hop: the destination Window activates its own.
+      expect(getActiveWorkspaceId()).toBe(source);
+    });
+
+    it('returns the Surface to its source when the transfer is handed back', async () => {
+      Object.assign(fake, { transferWorkspace: vi.fn(async () => { throw new Error('target closed'); }) });
+      const source = await twoWalls();
+      await act(async () => { requestSurfaceMoveToWindow('surface:a', 'ws-2', 'workspace:9'); });
+      await flush();
+      expect(getWallHandle(source)!.surfaceIds()).toContain('surface:a');
+      expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual([source, 'workspace:2']);
+      expect(getWorkspaceUiSnapshot().moveError).toEqual({ id: source, reason: 'target closed' });
+    });
+
+    it('takes a sole Surface, and the destination Window moves it on into the picked Workspace', async () => {
+      const transferWorkspace = vi.fn(async () => {});
+      Object.assign(fake, { transferWorkspace });
+      const source = await twoWalls(['surface:a']);
+      await act(async () => { requestSurfaceMoveToWindow('surface:a', 'ws-2', 'workspace:9'); });
+      await flush();
+      const hop = (transferWorkspace.mock.calls[0] as unknown[])[0] as string;
+      expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual(['workspace:2', hop]);
+      // The destination's leg, played here with workspace:2 as the destination.
+      await act(async () => { await adoptSurfaceArrival({ ...arrival(source), workspaceId: 'workspace:2' }, hop); });
+      expect(getWallHandle('workspace:2')!.surfaceIds()).toEqual(['pane-x', 'surface:a']);
+      expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual(['workspace:2']);
+      expect(getActiveWorkspaceId()).toBe('workspace:2');
+    });
+
+    it('leaves an arrival it cannot move on in its carrier, shown with the reason', async () => {
+      const source = await twoWalls(['surface:a']);
+      await act(async () => { setActiveWorkspace('workspace:2'); });
+      await act(async () => { await adoptSurfaceArrival(arrival('workspace:7'), source); });
+      expect(getWallHandle(source)!.surfaceIds()).toEqual(['surface:a']);
+      expect(getActiveWorkspaceId()).toBe(source);
+      expect(getWorkspaceUiSnapshot().moveError?.id).toBe(source);
+    });
   });
 });
 

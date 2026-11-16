@@ -25,6 +25,7 @@ import type {
   ToolControlResult,
   ToolHostRequest,
   SessionFlushRequest,
+  SurfaceArrival,
   SpawnPtyOptions,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
@@ -544,12 +545,12 @@ export class TauriAdapter implements PlatformAdapter {
    *  adopted the Workspace, rejected with the host's reason when it was handed
    *  back. Imported on use: `workspace-move` pulls the whole move protocol in,
    *  which a window that never moves anything need not load. */
-  async transferWorkspace(workspaceId: string, toWindow: string, options: { index?: number } = {}): Promise<void> {
+  async transferWorkspace(workspaceId: string, toWindow: string, options: { index?: number; surfaceArrival?: SurfaceArrival } = {}): Promise<void> {
     const { tearOutWorkspace, transferWorkspaceTo } = await import("./workspace-move");
     // A torn-out window has one tab, so an index names no slot there.
     const outcome = toWindow === "new"
       ? await tearOutWorkspace(workspaceId, { x: 0, y: 0 })
-      : await transferWorkspaceTo(workspaceId, toWindow, undefined, options.index);
+      : await transferWorkspaceTo(workspaceId, toWindow, undefined, options.index, [], options.surfaceArrival);
     if (!outcome.moved) throw new Error(outcome.reason);
   }
 

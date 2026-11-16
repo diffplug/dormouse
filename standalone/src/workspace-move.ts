@@ -34,13 +34,15 @@ import {
   createWorkspace,
   getWorkspacesSnapshot,
   moveWorkspace,
-  setActiveWorkspace,
 } from "dormouse-lib/lib/workspace-store";
 import type { PlatformAdapter, PtyInfo, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
 import type { TerminalGrid } from "dormouse-lib/lib/terminal-transfer";
 import { metaFromRecord, PERSISTED_WINDOW_VERSION, workspaceRecord, type WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
-import { listenToWindow } from "./window-label";
+import { currentWindowLabel, listenToWindow } from "./window-label";
+import { setOtherWindowWorkspaces, type OtherWindowWorkspaces } from "dormouse-lib/lib/other-window-workspaces";
+import { adoptSurfaceArrival } from "dormouse-lib/components/wall/surface-move";
+import type { SurfaceArrival } from "dormouse-lib/lib/platform/types";
 import { workspaceDropTarget } from "./workspace-tabs";
 
 /**
@@ -81,6 +83,9 @@ interface MovePayload extends WorkspaceTransferPayload, Partial<WorkspaceTransfe
    *  the cursor. Rust turns it into the window's position, because only Rust
    *  knows where the cursor is on the screen. */
   grab?: { x: number; y: number };
+  /** The one Surface this Workspace carries into another of the target's
+   *  Workspaces (`requestSurfaceMoveToWindow`): moved on once adopted. */
+  surfaceArrival?: SurfaceArrival;
 }
 
 /**
@@ -259,6 +264,7 @@ export async function transferWorkspaceTo(
   at?: { x: number; y: number },
   index?: number,
   discardedEditors: readonly string[] = [],
+  surfaceArrival?: SurfaceArrival,
 ): Promise<MoveOutcome> {
   return startMove(workspaceId, "transfer_workspace", (payload) => ({
     to,
@@ -266,6 +272,7 @@ export async function transferWorkspaceTo(
       ...payload,
       ...(at ? { at } : {}),
       ...(index === undefined ? {} : { index }),
+      ...(surfaceArrival ? { surfaceArrival } : {}),
     } satisfies MovePayload,
   }), discardedEditors);
 }
@@ -494,9 +501,10 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     const index = payload.index ?? (payload.at ? workspaceDropTarget(payload.at.x, payload.workspace.pinned).index : undefined);
     // A pinned Workspace arrives pinned, in this window's pinned group, and the
     // index below clamps within that group: no index is that group's end.
-    createWorkspace(metaFromRecord(payload.workspace));
+    // A carrier stays in the background: its Surface moves on and activates
+    // its destination instead.
+    createWorkspace({ ...metaFromRecord(payload.workspace), activate: !payload.surfaceArrival });
     moveWorkspace(id, index ?? Number.MAX_SAFE_INTEGER);
-    setActiveWorkspace(id);
     // Last, and only now: it is what tells the source to let the Workspace go.
     // Awaited, because a refusal is the one signal that the transaction was
     // retired underneath this window.
@@ -510,7 +518,9 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
       // new move here can fail on a Tool that is still starting.
       console.error("[workspace-move] adopt_done refused; unwinding the mount", err);
       discardArrival(payload);
+      return;
     }
+    if (payload.surfaceArrival) await adoptSurfaceArrival(payload.surfaceArrival, id);
   } catch (err) {
     console.error("[workspace-move] adoption failed; handing the Workspace back", err);
     discardArrival(payload);
@@ -535,6 +545,23 @@ async function drainArrivals(): Promise<MovePayload[]> {
     console.error("[workspace-move] take_arrivals failed", err);
     return [];
   }
+}
+
+/** The registry's union less this window, for the Surface move picker. */
+function showOtherWindows(union: readonly OtherWindowWorkspaces[]): void {
+  setOtherWindowWorkspaces(union.filter((entries) => entries.window !== currentWindowLabel()));
+}
+
+/** Follow the other windows' Workspaces a Surface can move into: pulled once
+ *  for the broadcasts sent before this listener, then followed. */
+export function followOtherWindows(): void {
+  let broadcast = false;
+  void listenToWindow<OtherWindowWorkspaces[]>("dormouse://workspace-registry", (event) => {
+    broadcast = true;
+    showOtherWindows(event.payload);
+  }).then(() => invoke<OtherWindowWorkspaces[]>("workspace_registry"))
+    .then((union) => { if (!broadcast) showOtherWindows(union); })
+    .catch((err) => console.error("[workspace-move] workspace_registry failed", err));
 }
 
 /** Listen for Workspaces arriving in, and leaving, this window. */

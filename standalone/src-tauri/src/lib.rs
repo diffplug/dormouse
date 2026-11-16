@@ -3812,9 +3812,11 @@ fn boot_reserve_ids(windows: tauri::State<'_, WindowState>, workspaces: u64, sur
     BootIds { workspaces: ids.next().unwrap_or_default(), surfaces: ids.next().unwrap_or_default() }
 }
 
-/// A window's Workspace list, as it stands: `dor` routing reads the union.
+/// A window's Workspace list, as it stands: `dor` routing reads the union,
+/// and every window's move picker is sent it.
 #[tauri::command]
 fn workspace_report(
+    app: AppHandle,
     window: tauri::Window,
     windows: tauri::State<'_, WindowState>,
     entries: Vec<workspaces::Entry>,
@@ -3823,7 +3825,23 @@ fn workspace_report(
     // build, say) must never be minted again.
     let above = ids::seed_next(ids::Kind::Workspace, entries.iter().map(|entry| entry.id.as_str()));
     guard(&windows.ids).seed(ids::Kind::Workspace, above);
-    workspaces::report(&mut guard(&windows.registry), window.label(), entries);
+    change_registry(&app, &windows, |registry| workspaces::report(registry, window.label(), entries));
+}
+
+/// Change the registry, then broadcast every window's Workspaces; a webview's
+/// pull (`workspace_registry`) covers the broadcasts it missed while booting.
+fn change_registry(app: &AppHandle, windows: &WindowState, change: impl FnOnce(&mut workspaces::Registry)) {
+    let union = {
+        let mut registry = guard(&windows.registry);
+        change(&mut registry);
+        workspaces::union(&registry)
+    };
+    let _ = app.emit("dormouse://workspace-registry", union);
+}
+
+#[tauri::command]
+fn workspace_registry(windows: tauri::State<'_, WindowState>) -> Vec<workspaces::WindowEntries> {
+    workspaces::union(&guard(&windows.registry))
 }
 
 /// Every Workspace in flight into this window, oldest first.
@@ -4850,7 +4868,7 @@ pub fn run() {
                         // returned arrivals need the blocking journal worker.
                         let (lost, orphaned) = state.drop_window(&label);
                         reap_orphaned_ptys(app, &label, orphaned);
-                        workspaces::forget_window(&mut guard(&state.registry), &label);
+                        change_registry(app, &state, |registry| workspaces::forget_window(registry, &label));
                         lost
                     } else { Vec::new() };
                     if !lost.is_empty() {
@@ -5023,6 +5041,7 @@ pub fn run() {
             surface_reserve_ids,
             boot_reserve_ids,
             workspace_report,
+            workspace_registry,
             remove_window_session,
             push_closed_window,
             reopen_closed_window,

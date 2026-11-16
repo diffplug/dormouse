@@ -6,10 +6,13 @@ import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, set
 import type { WorkspaceId } from '../../lib/session-types';
 import { sanitizeText } from '../../lib/osc-sanitize';
 import { getTerminalInstance } from '../../lib/terminal-registry';
+import { getPlatformOrNull } from '../../lib/platform/current';
+import type { SurfaceArrival } from '../../lib/platform/types';
 import { randomKillChar } from '../KillConfirm';
 import { messageOf } from '../../lib/errors';
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from './workspace-boot-plans';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
+import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 
 /** The move in flight, if any. A declined consent releases it synchronously,
  *  so whichever verb cancelled it can start at once. */
@@ -18,12 +21,14 @@ let moving: object | null = null;
 const IFRAME_FLAG_REQUIRED = 'Moving this iframe reopens at its saved URL; pass --dangerously-destroy-iframe-page-state to accept losing page state';
 
 /** Why `source` cannot move a Surface to `destination`, or null when it can:
- *  the coordinator, the drag's targets and the picker share it. */
-export function surfaceMoveRefusal(source: WallHandle | null, destination: { workspace: WorkspaceId } | { new: true }): string | null {
+ *  the coordinator, the drag's targets and the picker share it. A move bound
+ *  for another Window passes through a new Workspace, which its only Surface
+ *  may take (`soleMayLeave`). */
+export function surfaceMoveRefusal(source: WallHandle | null, destination: { workspace: WorkspaceId } | { new: true }, soleMayLeave = false): string | null {
   if (!source?.canMoveSurfaces) return 'This host does not support moving Surfaces between Workspaces';
   const target = 'workspace' in destination ? destination.workspace : null;
   if (target === source.workspaceId) return 'The Surface is already in that Workspace';
-  if (!target && source.surfaceIds().length <= 1) return 'The only Surface is already in its own Workspace';
+  if (!target && !soleMayLeave && source.surfaceIds().length <= 1) return 'The only Surface is already in its own Workspace';
   if (isWorkspaceTransferPending(source.workspaceId) || (target && isWorkspaceTransferPending(target))) return 'A Workspace is already moving';
   return null;
 }
@@ -52,10 +57,19 @@ function discardWorkspace(id: WorkspaceId): void {
   dismissWorkspaceUi(id);
 }
 
+/** How one leg of a move between Windows differs from a plain move. */
+interface MoveLeg {
+  /** Into the background Workspace a Window transfer carries: the only
+   *  Surface may leave, and nothing follows it. */
+  hop?: boolean;
+  /** The Workspace the notice names as the origin; null prints none. */
+  noticeFrom?: WorkspaceId | null;
+}
+
 /** One coordinator for GUI and dor. Preparation and consent change no membership;
  * after the last await, departure, adoption and both records' publication run
  * in one synchronous step, reversible until both Walls finish. */
-export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 'surface' | 'workspace'>, gui = false): Promise<MoveSurfaceResponse | null> {
+export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 'surface' | 'workspace'>, gui = false, leg: MoveLeg = {}): Promise<MoveSurfaceResponse | null> {
   // A move still awaiting its consent is answered no and released here.
   const isCurrent = cancelPendingConfirmation();
   if (moving) throw new Error('Another Surface move is in progress');
@@ -64,7 +78,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
   const resolved = 'workspace' in destination ? resolveWorkspaceRef(destination.workspace) : null;
   if (resolved && !resolved.ok) throw new Error(resolved.message);
   let targetId = resolved?.ok ? resolved.id : null;
-  const refusal = surfaceMoveRefusal(owner, targetId ? { workspace: targetId } : { new: true });
+  const refusal = surfaceMoveRefusal(owner, targetId ? { workspace: targetId } : { new: true }, leg.hop);
   if (refusal) throw new Error(refusal);
   const source = owner!;
   const toNew = !targetId;
@@ -72,7 +86,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
   /** Rechecked after every await: either Wall may close or remount meanwhile. */
   const checkEndpoints = () => {
     if (!hasWorkspace(source.workspaceId) || getWallHandle(source.workspaceId) !== source) throw new Error('The source Surface is no longer available');
-    if (toNew && source.surfaceIds().length <= 1) throw new Error('The only Surface is already in its own Workspace');
+    if (toNew && !leg.hop && source.surfaceIds().length <= 1) throw new Error('The only Surface is already in its own Workspace');
     if (targetId && (!hasWorkspace(targetId) || !target?.canMoveSurfaces || getWallHandle(targetId) !== target)) throw new Error('The destination Workspace is unavailable');
   };
   checkEndpoints();
@@ -157,15 +171,16 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     const sourceEmpty = source.surfaceIds().length === 0 && !keepSource;
     flushSync(() => {
       if (sourceEmpty) discardWorkspace(source.workspaceId);
-      if (gui || request.focus) {
+      if ((gui && !leg.hop) || request.focus) {
         setActiveWorkspace(targetId!);
         receiver.focusSurface(id, gui);
       } else if (sourceEmpty && activeBefore === source.workspaceId) {
         setActiveWorkspace(targetId!); receiver.enterCommandMode();
       }
     });
-    if (prepared.terminal) {
-      const moved = `Moved ${id} from ${source.workspaceId} to ${targetId}.`;
+    const noticeFrom = leg.noticeFrom === undefined ? source.workspaceId : leg.noticeFrom;
+    if (prepared.terminal && noticeFrom) {
+      const moved = `Moved ${id} from ${noticeFrom} to ${targetId}.`;
       const terminal = getTerminalInstance(id);
       if (terminal?.buffer.active.type === 'alternate') {
         receiver.showMoveNotice(id, `${moved} Unscoped dor ensure can duplicate work left behind.`);
@@ -198,4 +213,52 @@ export function requestSurfaceMove(id: string, destination: MoveSurfaceRequest['
   void moveSurface(id, { destination, focus: true, dangerouslyDestroyIframePageState: false }, true).catch(error => {
     if (source) setWorkspaceMoveError({ id: source.workspaceId, reason: messageOf(error) });
   });
+}
+
+/**
+ * A GUI move into another Window's Workspace, composed from moves that exist:
+ * into a new background Workspace here, which the host transfers to that Window
+ * (`docs/specs/standalone.md` → Transfer), where `adoptSurfaceArrival` moves it
+ * on. A transfer handed back returns the Surface to its source when that is
+ * still here, else leaves it in the new Workspace.
+ */
+export function requestSurfaceMoveToWindow(id: string, toWindow: string, workspaceId: WorkspaceId): void {
+  const from = wallHandleOwning(id)?.workspaceId;
+  let hop: WorkspaceId | undefined;
+  const report = (error: unknown) => {
+    const shown = from && hasWorkspace(from) ? from : hop;
+    if (shown) setWorkspaceMoveError({ id: shown, reason: messageOf(error) });
+  };
+  void (async () => {
+    const platform = getPlatformOrNull();
+    if (!from || !platform?.transferWorkspace) throw new Error('This host has one window');
+    const moved = await moveSurface(id, { destination: { new: true }, focus: false, dangerouslyDestroyIframePageState: false }, true, { hop: true, noticeFrom: null });
+    if (!moved) return;
+    hop = moved.workspaceId;
+    try {
+      await platform.transferWorkspace(hop, toWindow, { surfaceArrival: { surfaceId: id, workspaceId, from } });
+    } catch (error) {
+      if (hasWorkspace(from)) {
+        await moveSurface(id, { destination: { workspace: from }, focus: true, dangerouslyDestroyIframePageState: true }, true, { noticeFrom: null })
+          .catch((back: unknown) => console.error('[surface-move] could not return the Surface to its source', back));
+      } else if (hasWorkspace(hop)) setActiveWorkspace(hop);
+      throw error;
+    }
+  })().catch(report);
+}
+
+/**
+ * The destination Window's leg: the transferred Workspace `hop` has been
+ * adopted, so move its Surface on into the Workspace the user picked. Consent
+ * was the source's. A refusal leaves it in `hop`, shown with the reason.
+ */
+export async function adoptSurfaceArrival(arrival: SurfaceArrival, hop: WorkspaceId): Promise<void> {
+  try {
+    if (!await awaitWallHandle(hop)) throw new Error(mountingRefusal(hop));
+    await moveSurface(arrival.surfaceId, { destination: { workspace: arrival.workspaceId }, focus: true, dangerouslyDestroyIframePageState: true }, true, { noticeFrom: arrival.from });
+  } catch (error) {
+    if (!hasWorkspace(hop)) return;
+    setActiveWorkspace(hop);
+    setWorkspaceMoveError({ id: hop, reason: messageOf(error) });
+  }
 }
