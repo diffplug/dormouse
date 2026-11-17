@@ -12,10 +12,10 @@ import {
   type ScreenController,
 } from '../../components/wall/agent-browser-screen';
 import { isPendingKillSession } from '../../lib/pending-kills';
-import { isHelperSession } from '../../lib/terminal-store';
+import { isAuxSession } from '../../lib/terminal-store';
 
 function pageOf(controller: ScreenController): DirectoryBrowser | null {
-  if (isHelperSession(controller.id) || isPendingKillSession(controller.id)) return null;
+  if (isAuxSession(controller.id) || isPendingKillSession(controller.id)) return null;
   if (controller.snapshot().renderMode !== 'iframe') return null;
   const { url, title } = controller.chrome();
   // Only what the iframe proxy fronts (`docs/specs/dor-browser.md` → "Iframe Renderer").

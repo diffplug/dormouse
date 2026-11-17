@@ -52,12 +52,12 @@ export async function awaitWallHandle(id: WorkspaceId): Promise<WallHandle | nul
  * re-checked by every consumer of the caller id. `surfaceId` is the caller only
  * as a Surface this Wall holds: dropped otherwise, so `surface:self` names
  * nothing and an omitted target falls back to the Workspace's focused Surface.
- * A helper is never a Surface, even once promoted after its request was
+ * An aux terminal is never a Surface, even once promoted after its request was
  * captured; it only lends its source as `placementSurfaceId`, so nothing takes
  * over, retargets, or marks the source as the caller.
  */
 export function requestForWall(handle: WallHandle, detail: DorControlRequest): DorControlRequest {
   const owned = (id: string | undefined) => (id && handle.ownsSurface(id) ? id : undefined);
-  if (detail.helperParentId) return { ...detail, surfaceId: undefined, placementSurfaceId: owned(detail.helperParentId) };
+  if (detail.auxParentId) return { ...detail, surfaceId: undefined, placementSurfaceId: owned(detail.auxParentId) };
   return detail.surfaceId === owned(detail.surfaceId) ? detail : { ...detail, surfaceId: undefined };
 }

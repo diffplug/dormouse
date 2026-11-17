@@ -1,13 +1,13 @@
 import type { TerminalWebglRenderer } from './terminal-webgl';
 import type { SerializeAddon } from '@xterm/addon-serialize';
-import type { HelperIdentity } from './terminal-context-types';
+import type { AuxIdentity } from './terminal-context-types';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { ShellCommandKind } from 'dor/commands/shell-quote';
 
 export interface TerminalEntry {
-  helper?: HelperIdentity;
-  helperBusy?: boolean;
+  aux?: AuxIdentity;
+  auxBusy?: boolean;
   inputVersion?: number;
   /** Parser family of the shell this Session launched. Unlike the app-global
    *  default, this remains stable when the user selects a different shell for
@@ -51,7 +51,7 @@ export interface TerminalOverlayDims {
 }
 
 export interface PendingShellOpts {
-  helper?: HelperIdentity;
+  aux?: AuxIdentity;
   shell?: string;
   args?: string[];
   cwd?: string;
@@ -70,10 +70,10 @@ export interface PendingShellOpts {
 
 export const registry = new Map<string, TerminalEntry>();
 
-/** Whether a helper Session may hold running work: anything short of the
+/** Whether an aux terminal Session may hold running work: anything short of the
  *  host's answer that it is idle, unless it has exited. */
-export function helperMayBeBusy(entry: TerminalEntry): boolean {
-  return !entry.exited && entry.helperBusy !== false;
+export function auxMayBeBusy(entry: TerminalEntry): boolean {
+  return !entry.exited && entry.auxBusy !== false;
 }
 
 /** Human input reached this Session: it is no longer `untouched`, which is
@@ -86,7 +86,7 @@ export function markSessionTouched(id: string): void {
   entry.inputVersion = (entry.inputVersion ?? 0) + 1;
   const flipped = entry.untouched;
   entry.untouched = false;
-  if (entry.helper) entry.helperBusy = undefined;
+  if (entry.aux) entry.auxBusy = undefined;
   if (flipped) for (const listener of touchedListeners) listener(id);
 }
 
@@ -99,7 +99,7 @@ export function subscribeToSessionTouched(listener: (id: string) => void): () =>
   touchedListeners.add(listener);
   return () => { touchedListeners.delete(listener); };
 }
-/** Helper Sessions are private to their source: excluded from alerts, public `dor` targets, remote projections, and cross-pane derivations. */
-export const isHelperSession = (id: string): boolean => !!registry.get(id)?.helper;
+/** Aux terminal Sessions are private to their source: excluded from alerts, public `dor` targets, remote projections, and cross-pane derivations. */
+export const isAuxSession = (id: string): boolean => !!registry.get(id)?.aux;
 export const pendingShellOpts = new Map<string, PendingShellOpts>();
 

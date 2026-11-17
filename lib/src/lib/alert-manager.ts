@@ -307,18 +307,18 @@ export class AlertManager {
   private removeListeners = new Set<(id: string) => void>();
   private lastEmitted = new Map<string, AlertState>();
   private watchedCommands = new Set<string>();
-  /** Helper Sessions alert no one until promotion (docs/specs/alert.md → Pane
+  /** Aux terminal Sessions alert no one until promotion (docs/specs/alert.md → Pane
    *  Header). They still build command state and feed the detector, so one
    *  promoted mid-command knows what it is running; everything else — reports,
    *  controls, awaits, completion dispatch, publishing — drops them, so a host
    *  marks the id once instead of guarding each call. */
-  private helpers = new Set<string>();
+  private auxTerminals = new Set<string>();
 
-  setHelper(id: string, helper: boolean): void {
-    if (helper) this.helpers.add(id);
-    else this.helpers.delete(id);
-    // Promotion publishes the state the helper built up — nothing that was
-    // suppressed, since a helper's completions were never kept. A failed
+  setAux(id: string, aux: boolean): void {
+    if (aux) this.auxTerminals.add(id);
+    else this.auxTerminals.delete(id);
+    // Promotion publishes the state the aux terminal built up — nothing that was
+    // suppressed, since an aux terminal's completions were never kept. A failed
     // placement's demotion takes back whatever the Session had published.
     if (this.entries.has(id)) this.notify(id);
   }
@@ -473,8 +473,8 @@ export class AlertManager {
    * never rings, never sets TODO, and never stores a notification.
    */
   private dispatchCompletion(id: string, entry: AlertEntry, event: CompletionEvent): boolean {
-    // A helper's completion reaches no one, and is not kept for promotion.
-    if (this.helpers.has(id)) return false;
+    // An aux terminal's completion reaches no one, and is not kept for promotion.
+    if (this.auxTerminals.has(id)) return false;
     // Every await is offered the event, not only the first to take it.
     let claimed = false;
     this.eachWaiter(id, (waiter) => {
@@ -551,7 +551,7 @@ export class AlertManager {
    * no TODO and clears none.
    */
   awaitCompletion(id: string, options: AwaitOptions): AwaitHandle {
-    if (this.helpers.has(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
+    if (this.auxTerminals.has(id)) return settledAwait({ kind: 'cancelled', waitedMs: 0 });
     if (
       !Number.isFinite(options.timeoutMs)
       || options.timeoutMs <= 0
@@ -671,7 +671,7 @@ export class AlertManager {
   // --- Terminal reports ---
 
   notifyFromProtocol(id: string, notification: ActivityNotification): void {
-    if (this.helpers.has(id)) return;
+    if (this.auxTerminals.has(id)) return;
     const entry = this.streamEntry(id);
     if (!entry) return;
     const normalized = normalizeActivityNotification(notification);
@@ -682,7 +682,7 @@ export class AlertManager {
 
   /** `OSC 9;4`: active updates move the cycle; its end is a report completion. */
   updateProtocolProgress(id: string, progress: ProtocolProgressUpdate): void {
-    if (this.helpers.has(id)) return;
+    if (this.auxTerminals.has(id)) return;
     const entry = this.streamEntry(id);
     if (!entry) return;
     const { progress: live } = entry;
@@ -960,7 +960,7 @@ export class AlertManager {
 
     for (const { id, was } of touched) {
       const entry = this.entries.get(id);
-      if (!entry || this.helpers.has(id) || this.isEngaged(id) === was) continue;
+      if (!entry || this.auxTerminals.has(id) || this.isEngaged(id) === was) continue;
       if (!was) {
         this.endLeaveGrace(entry);
         this.markSeen(entry);
@@ -992,14 +992,14 @@ export class AlertManager {
    * (`clearRingForUser`) and whatever it held, and mark the running command
    * seen; without `input` a cleared ring becomes a TODO, while `input` — keys,
    * a paste, a drop, acknowledged as the host writes them — turns TODO off and
-   * opens the echo window, a helper's included, since its detector runs. Never creates an
+   * opens the echo window, an aux terminal's included, since its detector runs. Never creates an
    * entry: an id with none — a browser Surface — has nothing to clear.
    */
   acknowledge(id: string, { input }: { input: boolean }): void {
     const entry = this.entries.get(id);
     if (!entry) return;
     if (input) entry.echoUntil = Date.now() + cfg.alert.echoWindow;
-    if (this.helpers.has(id)) return;
+    if (this.auxTerminals.has(id)) return;
     this.markSeen(entry);
     if (input) {
       // Answered: it lands in the echo window just opened, so only an await sees it.
@@ -1055,14 +1055,14 @@ export class AlertManager {
   /**
    * The user went idle, or left the host: each held source takes the path it
    * would have taken unengaged, with the richest held detail. A Session made a
-   * helper since the hold drops them, as `dispatchCompletion` drops a helper's
-   * fresh completion: a helper never rings.
+   * aux terminal since the hold drops them, as `dispatchCompletion` drops an aux terminal's
+   * fresh completion: an aux terminal never rings.
    */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
     if (held === null) return;
     entry.held = null;
-    if (this.helpers.has(id)) return;
+    if (this.auxTerminals.has(id)) return;
     eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail, true));
   }
 
@@ -1081,14 +1081,14 @@ export class AlertManager {
   // --- Todo controls ---
 
   toggleTodo(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.auxTerminals.has(id)) return;
     const entry = this.streamEntry(id);
     if (!entry) return;
     this.setTodoForUser(id, entry, !entry.todo);
   }
 
   clearTodo(id: string): void {
-    if (this.helpers.has(id)) return;
+    if (this.auxTerminals.has(id)) return;
     const entry = this.streamEntry(id);
     if (entry) this.setTodoForUser(id, entry, false);
   }
@@ -1107,7 +1107,7 @@ export class AlertManager {
 
   getState(id: string): AlertState {
     const entry = this.entries.get(id);
-    if (!entry || this.helpers.has(id)) return DEFAULT_ALERT_STATE;
+    if (!entry || this.auxTerminals.has(id)) return DEFAULT_ALERT_STATE;
     return {
       status: this.getProjectedStatus(id, entry),
       watchingEnabled: this.isWatching(entry),
@@ -1118,16 +1118,16 @@ export class AlertManager {
     };
   }
 
-  /** Whether `id` has state to publish: an entry that is not a helper's.
+  /** Whether `id` has state to publish: an entry that is not an aux terminal's.
    *  Exactly the ids {@link getAllStates} answers. */
   has(id: string): boolean {
-    return this.entries.has(id) && !this.helpers.has(id);
+    return this.entries.has(id) && !this.auxTerminals.has(id);
   }
 
   getAllStates(): Map<string, AlertState> {
     const result = new Map<string, AlertState>();
     for (const [id] of this.entries) {
-      if (!this.helpers.has(id)) result.set(id, this.getState(id));
+      if (!this.auxTerminals.has(id)) result.set(id, this.getState(id));
     }
     return result;
   }
@@ -1173,9 +1173,9 @@ export class AlertManager {
       this.entries.delete(id);
       this.notify(id);
     }
-    // Last, so `notify` still knows a helper that never published has nothing
+    // Last, so `notify` still knows an aux terminal that never published has nothing
     // for subscribers to forget.
-    this.helpers.delete(id);
+    this.auxTerminals.delete(id);
   }
 
   /**
@@ -1184,7 +1184,7 @@ export class AlertManager {
    * detail survive, and the fresh entry holds nothing else to resurrect.
    */
   seed(id: string, state: { todo: unknown; notification?: unknown }): void {
-    if (this.helpers.has(id)) return;
+    if (this.auxTerminals.has(id)) return;
     const entry = this.getOrCreateEntry(id);
     entry.todo = state.todo === true;
     entry.notification = entry.todo ? normalizeActivityNotification(state.notification) : null;
@@ -1200,7 +1200,7 @@ export class AlertManager {
     }
     this.entries.clear();
     this.removed.clear();
-    this.helpers.clear();
+    this.auxTerminals.clear();
     this.awaits.clear();
     this.viewers.clear();
     this.listeners.clear();
@@ -1259,8 +1259,8 @@ export class AlertManager {
   private notify(id: string): void {
     const state = this.getState(id);
     const last = this.lastEmitted.get(id);
-    // A helper publishes nothing, but takes back what it published before a demotion.
-    if (last ? alertStatesEqual(last, state) : this.helpers.has(id)) return;
+    // An aux terminal publishes nothing, but takes back what it published before a demotion.
+    if (last ? alertStatesEqual(last, state) : this.auxTerminals.has(id)) return;
     if (this.entries.has(id)) {
       this.lastEmitted.set(id, state);
     } else {

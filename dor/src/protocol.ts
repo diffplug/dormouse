@@ -243,9 +243,9 @@ export function parseSurfaceTarget(target: string): ParsedSurfaceTarget {
 export interface DorControlRequestPayload {
   requestId: string;
   surfaceId?: string;
-  /** Host-derived helper origin, captured before cross-window routing. Never
+  /** Host-derived aux terminal origin, captured before cross-window routing. Never
    *  accepted from the socket client; does not change the caller's identity. */
-  helperParentId?: string;
+  auxParentId?: string;
   method: string;
   params?: Record<string, unknown>;
   /**

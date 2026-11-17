@@ -209,7 +209,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 
 ## Surface ids
 
-**Must mint every Surface id as `surface:<n>` off one host counter** — standalone's Rust for every window, the VS Code extension host for every window of the install, else the page alone — handed to the webview in blocks so a Wall mints synchronously. Each reservation names a floor, the highest `surface:<n>` the webview restored, and every number it returns is above it. A helper's id is minted at its birth. The id is the `dor` handle (`docs/specs/dor-cli.md` → Handle Model); beyond its number, it is opaque.
+**Must mint every Surface id as `surface:<n>` off one host counter** — standalone's Rust for every window, the VS Code extension host for every window of the install, else the page alone — handed to the webview in blocks so a Wall mints synchronously. Each reservation names a floor, the highest `surface:<n>` the webview restored, and every number it returns is above it. An aux terminal's id is minted at its birth. The id is the `dor` handle (`docs/specs/dor-cli.md` → Handle Model); beyond its number, it is opaque.
 
 - **A host must persist its counter's high-water mark before handing out a number at or above it**, so no number is reused across launches, **and never past the block it hands out**, so a relaunch skips only the ids a webview held unused at exit; where each host keeps it: `docs/specs/standalone.md` → "Workspace registry", `docs/specs/vscode.md` → "Surface id minting".
 - **Never hand out a number while the counter's file cannot be read**; a file this version cannot parse, another version's included, is overwritten from what the host still knows (rationale).
@@ -309,11 +309,11 @@ Source of truth: `OpenPort` in `lib/src/lib/platform/types.ts`; `getOpenPortsFor
 
 Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`; `open_ports_many_timeout` in `standalone/src-tauri/src/lib.rs`; `createPortScanner` in `standalone/sidecar/port-scanner.js`.
 
-## Auxiliary helper metadata
+## Aux terminal metadata
 
-**Must carry helper parent identity in live PTY metadata**, validating that the parent is owned and is not itself a helper. Promotion clears that association without restarting the PTY. Reconnect restores helper entries as helpers, outside the primary layout and its orphan-pane recovery; a missing parent recovers its helper as an ordinary Pane. Helper scrollback and editor buffers are never written to a Session snapshot.
+**Must carry aux terminal parent identity in live PTY metadata**, validating that the parent is owned and is not itself an aux terminal. Promotion clears that association without restarting the PTY. Reconnect restores aux terminal entries as aux terminals, outside the primary layout and its orphan-pane recovery; a missing parent recovers its aux terminal as an ordinary Pane. Aux terminal scrollback and editor buffers are never written to a Session snapshot.
 
-**Must expose terminal context operations through correlated host requests**, reporting errors and timeouts: each adapter forwards every `TerminalContextRequest` to its PTY host and answers on the same correlation. The VS Code router checks Workspace ownership for per-terminal operations and helper parent metadata. Directory opening follows `docs/specs/security-local.md` → Terminal context directory actions, and inspection failure `docs/specs/terminal-context.md` → Helper lifecycle.
+**Must expose terminal context operations through correlated host requests**, reporting errors and timeouts: each adapter forwards every `TerminalContextRequest` to its PTY host and answers on the same correlation. The VS Code router checks Workspace ownership for per-terminal operations and aux terminal parent metadata. Directory opening follows `docs/specs/security-local.md` → Terminal context directory actions, and inspection failure `docs/specs/terminal-context.md` → Aux terminal lifecycle.
 
 Source of truth: `TerminalContextRequest` in `lib/src/lib/terminal-context-types.ts`; `PtyInfo` in `lib/src/lib/platform/types.ts`; `resumeOrRestore` in `lib/src/lib/reconnect.ts`; `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`.
 

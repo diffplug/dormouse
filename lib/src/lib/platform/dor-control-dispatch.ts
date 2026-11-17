@@ -41,7 +41,7 @@ export function dispatchDorControlRequest(
     detail: {
       requestId,
       surfaceId: payload.surfaceId,
-      helperParentId: payload.helperParentId,
+      auxParentId: payload.auxParentId,
       method: payload.method,
       params: payload.params ?? {},
       // Set only for a Session's own OSC 367 `open` (`tool-open-requests.ts`);

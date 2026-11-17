@@ -30,7 +30,7 @@ import { withFreshWindowIds } from "dormouse-lib/components/wall/window-reopen";
 
 /**
  * How a live PTY that no saved Workspace names is routed. Two kinds reach here:
- * a helper, which belongs wherever its source does, and everything else — a pane
+ * an aux terminal, which belongs wherever its source does, and everything else — a pane
  * created inside the last save's debounce, or one left by a Workspace that is
  * gone — which goes to the active Workspace rather than being stranded with no
  * Wall.
@@ -45,11 +45,11 @@ export interface LivePtyRouting {
 /**
  * Route the live PTYs no saved Workspace names.
  *
- * A helper PTY is never a persisted pane, so by name it is always unowned. It
+ * An aux terminal PTY is never a persisted pane, so by name it is always unowned. It
  * must still land in the Workspace holding its source: routed anywhere else it
  * misses that plan's slice, is resumed as an ordinary top-level pane, and its id
  * — absent from that Workspace's saved panes — makes the whole saved layout
- * unusable, costing the Workspace its splits and Doors. A helper whose
+ * unusable, costing the Workspace its splits and Doors. An aux terminal whose
  * source is itself unowned follows it into the active Workspace.
  */
 export function routeUnownedPtys(
@@ -66,9 +66,9 @@ export function routeUnownedPtys(
   for (const pty of ptys) {
     if (ownerByPaneId.has(pty.id)) continue;
     // Parents are resolved across the WHOLE saved Window, not one Workspace's
-    // slice — the point of the routing is that source and helper end up in the
+    // slice — the point of the routing is that source and aux terminal end up in the
     // same slice afterwards.
-    const owner = pty.helper ? ownerByPaneId.get(pty.helper.parentId) : undefined;
+    const owner = pty.aux ? ownerByPaneId.get(pty.aux.parentId) : undefined;
     if (owner === undefined) {
       unowned.add(pty.id);
       continue;

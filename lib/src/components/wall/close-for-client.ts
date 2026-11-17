@@ -9,9 +9,9 @@ export interface CloseForClientDeps {
   gone(): boolean;
   isTerminal(): boolean;
   transferRefusal(): string | null;
-  /** Running helper work, which also shows at the computer. */
-  helperRefusal(): Promise<string | null>;
-  /** The state the close leaves behind, read after the helper's answer. */
+  /** Running aux terminal work, which also shows at the computer. */
+  auxRefusal(): Promise<string | null>;
+  /** The state the close leaves behind, read after the aux terminal's answer. */
   needsConfirm(): boolean;
   isDirty(): boolean;
   label(): string;
@@ -38,8 +38,8 @@ export async function closeForClient(
   if (terminal()) return { outcome: 'refused', message: TERMINAL_CLOSE_REFUSAL };
   const transferring = deps.transferRefusal();
   if (transferring) return { outcome: 'refused', message: transferring };
-  const helper = await deps.helperRefusal();
-  if (helper) return { outcome: 'refused', message: helper };
+  const aux = await deps.auxRefusal();
+  if (aux) return { outcome: 'refused', message: aux };
   if (deps.gone()) return { outcome: 'closed' };
   if (!confirmed && deps.needsConfirm()) return { outcome: 'confirm' };
   const dirty = deps.isDirty();

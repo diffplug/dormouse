@@ -109,20 +109,20 @@ describe("PlaygroundShellRegistry", () => {
 });
 
 describe("PlaygroundShellRegistry with a filesystem", () => {
-  it("prompts in the filesystem's directory as each non-helper terminal spawns", async () => {
+  it("prompts in the filesystem's directory as each non-aux terminal spawns", async () => {
     const adapter = new FakePtyAdapter();
-    const output: Record<string, string> = { one: "", helper: "" };
+    const output: Record<string, string> = { one: "", aux: "" };
     adapter.onPtyData((detail) => { output[detail.id] += detail.data; });
     const fs = new VirtualFs({ "/home/demo/p/a": "" });
     const registry = new PlaygroundShellRegistry(adapter, () => createProgram(), { fs, cwd: "/home/demo/p" });
 
     adapter.spawnPty("one");
-    adapter.spawnPty("helper", { helper: { parentId: "one" } });
+    adapter.spawnPty("aux", { aux: { parentId: "one" } });
     await Promise.resolve();
 
     expect(output.one).toContain("~/p");
     expect(registry.cwdOf("one")).toBe("/home/demo/p");
-    expect(registry.cwdOf("helper")).toBeNull();
+    expect(registry.cwdOf("aux")).toBeNull();
     registry.disposeAll();
   });
 });

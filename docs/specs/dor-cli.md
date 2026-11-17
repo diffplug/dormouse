@@ -141,7 +141,7 @@ Source of truth: `standalone/sidecar/dor-control-server.js`, `dor/src/control-cl
 
 Invariants:
 
-- **A Surface's handle is its id, `surface:<n>`** (a fallback `surface:<uuid>`), the one spelling `DORMOUSE_SURFACE_ID`, `--json`, and text output all carry; unique across its host (`docs/specs/transport.md` → "Surface ids"). Layout churn, render swaps, helper promotion, and moves between Workspaces or Windows leave it unchanged. **An id naming a killed Surface must fail; numbers are never reused.** `surface:focused` selects the focused Surface in the current Workspace; `surface:self` the invoking Surface from `DORMOUSE_SURFACE_ID`. An omitted target falls back to the caller, then to the focused Surface. Helper callers follow [Helper callers and targets](#helper-callers-and-targets).
+- **A Surface's handle is its id, `surface:<n>`** (a fallback `surface:<uuid>`), the one spelling `DORMOUSE_SURFACE_ID`, `--json`, and text output all carry; unique across its host (`docs/specs/transport.md` → "Surface ids"). Layout churn, render swaps, aux terminal promotion, and moves between Workspaces or Windows leave it unchanged. **An id naming a killed Surface must fail; numbers are never reused.** `surface:focused` selects the focused Surface in the current Workspace; `surface:self` the invoking Surface from `DORMOUSE_SURFACE_ID`. An omitted target falls back to the caller, then to the focused Surface. Aux terminal callers follow [Aux callers and targets](#aux-callers-and-targets).
 - **Must route a moved caller by its id**: unscoped `ensure` searches the destination and may duplicate work left behind. After a successful move, the moved terminal gets one renderer-local notice naming its id and new Workspace (a pane notice in alternate-screen programs), never PTY input or an Activity change.
 - Surface targets also accept `title:<exact display title>`; titles drift, so automation should prefer ids. Action commands (`read`, `send`, `await`, `kill`, `dor agent-browser --surface`) resolve against listed Surfaces, **minimized ones included**; `split` and `ensure --from` resolve their *reference* the same way, so minimized peers participate in ambiguity checks. Browser placement commands (`iframe`, browser creation) resolve against visible Surfaces. **If multiple Surfaces in the relevant scope match, the command fails and lists the matching ids.**
 - **Must refuse every other Surface target** — a bare number, `pane:N`, `surface-N`, a bare string — naming the `surface:N` form. Pane refs stay reserved for future layout-only commands.
@@ -152,7 +152,7 @@ Invariants:
 flowchart TD
   R[request] --> AT{app.*, tool.* or window.*?}
   AT -- yes --> WIN[the Window answers]
-  AT -- no --> BAD{malformed or helper Surface reference, or another --window?}
+  AT -- no --> BAD{malformed or aux terminal Surface reference, or another --window?}
   BAD -- yes --> REF[refuse]
   BAD -- no --> C{workspace verb, list --all?}
   C -- yes --> WIN
@@ -162,9 +162,9 @@ flowchart TD
   WS -- unregistered --> P["retry, then refuse if still unmounted"]
   WS -- absent --> ST{id target held?}
   ST -- yes --> H
-  ST -- no --> CA{caller or helper source held?}
+  ST -- no --> CA{caller or aux terminal source held?}
   CA -- yes --> H
-  CA -- no, helper --> P
+  CA -- no, aux terminal --> P
   CA -- no --> AC{active Wall registered?}
   AC -- yes --> H
   AC -- no --> P
@@ -329,20 +329,20 @@ Source of truth: `dor/src/commands/skill.ts`, whose printed text is pinned byte-
 
 - **Must always send `focus`**, true only for `--focus`.
 - **Must reject `--focus` with `--minimize` before side effects.** A focused reuse reveals a Door.
-- **Never send `focus` from the webview's own requests** (link clicks, OSC 367 `open`, document navigation), the only requests without it: they create focus-neutrally and focus what they reveal, except a quiet preview slot. A helper is never the caller ([Helper callers and targets](#helper-callers-and-targets)).
+- **Never send `focus` from the webview's own requests** (link clicks, OSC 367 `open`, document navigation), the only requests without it: they create focus-neutrally and focus what they reveal, except a quiet preview slot. An aux terminal is never the caller ([Aux callers and targets](#aux-callers-and-targets)).
 - Workspace creation stays in the background; activation uses `dor workspace switch`.
 
 Source of truth: `handleDorControl` in `lib/src/components/wall/use-dor-control.ts`.
 
-## Helper callers and targets
+## Aux callers and targets
 
-**Must derive helper-origin metadata from the PTY host before routing across Windows**, preserving the actual caller Session id. **Never accept that metadata from a control-socket client.**
+**Must derive aux-origin metadata from the PTY host before routing across Windows**, preserving the actual caller Session id. **Never accept that metadata from a control-socket client.**
 
-- **Must route an unscoped helper-origin request through the source's Workspace.** A missing source refuses rather than falling back to the active Workspace.
-- **Must keep unpromoted helpers out of discovery, matching, and explicit targeting**, including `surface:self`, the helper's id, and its `surface:<n>`. Never substitute the source for an explicit helper target or mark the source as the caller in a listing. Promotion makes its id targetable without changing Session identity.
-- **Must use the source as the helper's default placement reference, never as its caller.** A helper is never the caller a Wall sees, even once promoted, so nothing marks, takes over, or retargets the source on its behalf.
-- **Never promote, take over, or replace a helper or placement reference to fulfill a helper-origin creation**, including for a request accepted before promotion; matching, keyed reuse, and preview slots still apply. A captured placement reference disappearing before creation fails.
-- **Must retain the actual helper Session as an app-restart requester**, without exempting its source from running-work checks.
+- **Must route an unscoped aux-origin request through the source's Workspace.** A missing source refuses rather than falling back to the active Workspace.
+- **Must keep unpromoted aux terminals out of discovery, matching, and explicit targeting**, including `surface:self`, the aux terminal's id, and its `surface:<n>`. Never substitute the source for an explicit aux terminal target or mark the source as the caller in a listing. Promotion makes its id targetable without changing Session identity.
+- **Must use the source as the aux terminal's default placement reference, never as its caller.** An aux terminal is never the caller a Wall sees, even once promoted, so nothing marks, takes over, or retargets the source on its behalf.
+- **Never promote, take over, or replace an aux terminal or placement reference to fulfill an aux-origin creation**, including for a request accepted before promotion; matching, keyed reuse, and preview slots still apply. A captured placement reference disappearing before creation fails.
+- **Must retain the actual aux terminal Session as an app-restart requester**, without exempting its source from running-work checks.
 
 Source of truth: `createDorControlServer` in `standalone/sidecar/dor-control-server.js` (host); `installDorControlRouter` in `lib/src/components/wall/dor-control-router.ts` (renderer).
 

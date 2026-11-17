@@ -1,6 +1,6 @@
-import { getHelper } from '../../lib/helper-terminal';
+import { getAux } from '../../lib/aux-terminal';
 import { getTerminalPaneState, isUntouched } from '../../lib/terminal-registry';
-import { helperMayBeBusy, registry } from '../../lib/terminal-store';
+import { auxMayBeBusy, registry } from '../../lib/terminal-store';
 import { getToolDirty } from '../../lib/tool-dirty-store';
 import { isToolParams, resolveRenderMode, surfaceKindFromParams, toolScopeFromParams } from './browser-surface';
 
@@ -15,17 +15,17 @@ import { isToolParams, resolveRenderMode, surfaceKindFromParams, toolScopeFromPa
 export type CloseKind = 'trivial' | 'reopenable' | 'confirm';
 
 /**
- * An untouched shell that is not running and owns no helper with user work.
- * Pending or unknown state is not idle: a helper the host has not yet answered
+ * An untouched shell that is not running and owns no aux terminal with user work.
+ * Pending or unknown state is not idle: an aux terminal the host has not yet answered
  * for confirms.
  */
 function isTrivialShell(id: string): boolean {
   if (!isUntouched(id)) return false;
   if (getTerminalPaneState(id).activity.kind === 'running') return false;
-  const helper = getHelper(id);
-  if (!helper) return true;
-  const helperEntry = registry.get(helper.id);
-  return isUntouched(helper.id) && !!helperEntry && !helperMayBeBusy(helperEntry);
+  const aux = getAux(id);
+  if (!aux) return true;
+  const auxEntry = registry.get(aux.id);
+  return isUntouched(aux.id) && !!auxEntry && !auxMayBeBusy(auxEntry);
 }
 
 /**

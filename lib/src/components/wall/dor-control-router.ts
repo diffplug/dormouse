@@ -1,5 +1,5 @@
 import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS } from 'dor/protocol';
-import { registry, isHelperSession } from '../../lib/terminal-store';
+import { registry, isAuxSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getPendingKill, isPendingKillSession } from '../../lib/pending-kills';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../lib/workspace-store';
@@ -47,10 +47,10 @@ type DorControlRoute =
 /** The host supplies this before cross-window routing. In-process requests
  * (OSC, fake adapter) capture the same origin from the renderer registry, once
  * on arrival, so a promotion during route retries cannot clear it. */
-function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
-  if (detail.helperParentId || !detail.surfaceId) return detail;
-  const parent = registry.get(detail.surfaceId)?.helper?.parentId;
-  return parent ? { ...detail, helperParentId: parent } : detail;
+function withAuxOrigin(detail: DorControlRequest): DorControlRequest {
+  if (detail.auxParentId || !detail.surfaceId) return detail;
+  const parent = registry.get(detail.surfaceId)?.aux?.parentId;
+  return parent ? { ...detail, auxParentId: parent } : detail;
 }
 
 /**
@@ -66,8 +66,8 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   if (route.kind === 'handle' && getPendingKill('workspace', route.handle.workspaceId)) {
     return { kind: 'error', message: `workspace '${route.handle.workspaceId}' is a pending kill` };
   }
-  // A helper's request names its parent; a pending helper is itself the caller.
-  const caller = [detail.surfaceId, detail.helperParentId].find(id => id && isPendingKillSession(id));
+  // An aux terminal's request names its parent; a pending aux terminal is itself the caller.
+  const caller = [detail.surfaceId, detail.auxParentId].find(id => id && isPendingKillSession(id));
   if (caller) return { kind: 'error', message: `surface '${caller}' is a pending kill` };
   return route;
 }
@@ -83,9 +83,9 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (reference !== undefined && typeof reference !== 'string') return { kind: 'error', message: 'Surface reference must be a string' };
   // A malformed handle names nothing anywhere, so no Wall need answer it.
   if (target?.kind === 'invalid') return { kind: 'error', message: target.message };
-  if ((target?.kind === 'self' && detail.helperParentId)
-    || (target?.kind === 'id' && isHelperSession(target.id))) {
-    return { kind: 'error', message: 'Helper terminals are not public Surface targets; promote the helper first' };
+  if ((target?.kind === 'self' && detail.auxParentId)
+    || (target?.kind === 'id' && isAuxSession(target.id))) {
+    return { kind: 'error', message: 'Aux terminals are not public Surface targets; promote the aux terminal first' };
   }
   // Typed before use: `params` is whatever crossed the control socket, and a
   // non-string ref reaching `.trim()` would throw out of the window listener,
@@ -117,11 +117,11 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (owningTarget) return { kind: 'handle', handle: owningTarget };
   // The caller's own Workspace: `dor split` from a background Workspace lands
   // beside its caller, not in whichever Workspace the user is looking at.
-  const callerAnchor = detail.helperParentId ?? detail.surfaceId;
+  const callerAnchor = detail.auxParentId ?? detail.surfaceId;
   const owner = callerAnchor ? wallHandleOwning(callerAnchor) : null;
   if (owner) return { kind: 'handle', handle: owner };
   // The source's Wall may still be registering (a reload, a Workspace transfer).
-  if (detail.helperParentId) return { kind: 'pending', message: 'The helper source Surface is no longer available' };
+  if (detail.auxParentId) return { kind: 'pending', message: "The aux terminal's source Surface is no longer available" };
   // An unknown caller (a shell started outside Dormouse, a killed Surface's
   // late request) is served by the Workspace the user is in.
   const activeId = getActiveWorkspaceId();
@@ -181,7 +181,7 @@ export const installDorControlRouter = createRefCount({
     const listener = (event: Event) => {
       const detail = (event as CustomEvent<DorControlRequest>).detail;
       if (!detail) return;
-      dispatchDorControl(withHelperOrigin(detail), 0);
+      dispatchDorControl(withAuxOrigin(detail), 0);
     };
     window.addEventListener('dormouse:control-request', listener);
     return () => window.removeEventListener('dormouse:control-request', listener);

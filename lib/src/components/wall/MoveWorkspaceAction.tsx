@@ -9,6 +9,7 @@ import { WindowFocusedContext } from './wall-context';
 import { requestSurfaceMove, requestSurfaceMoveToWindow, surfaceMoveRefusal } from './surface-move';
 import { getWallHandle } from './wall-handles';
 import { ACTION_BOX_CLASS, closedSelectKeyDown } from './TerminalContextView';
+import { CONTEXT_KEYS, contextKey, Mnemonic } from './context-keys';
 
 /** Native picker matches the context's browser actions and escapes its clipping.
  *  With other Windows open, each Window's Workspaces sit under its own header. */
@@ -30,8 +31,8 @@ export function MoveWorkspaceAction({ id, sourceId }: { id: string; sourceId: Wo
     <option value="+" disabled={!!newRefusal} title={newRefusal}>New workspace</option>
   </>;
   return <span className={`relative ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${focused ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
-    move to workspace…<CaretDownIcon size={10} weight="fill" />
-    <select aria-label="Move to workspace" title="Move to workspace" value="" className="absolute inset-0 cursor-pointer appearance-none opacity-0"
+    <Mnemonic text="move to workspace…" k={CONTEXT_KEYS.move} /><CaretDownIcon size={10} weight="fill" />
+    <select aria-label="Move to workspace" title="Move to workspace" {...contextKey(CONTEXT_KEYS.move)} value="" className="absolute inset-0 cursor-pointer appearance-none opacity-0"
       onKeyDown={closedSelectKeyDown}
       onChange={event => {
         const value = event.target.value;

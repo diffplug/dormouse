@@ -54,8 +54,8 @@ export interface ToolTakeoverGate {
   /** Whether the tool's resolved cwd is the caller pane's own directory: the
    *  command is typed into that shell, so it runs where the shell already is. */
   cwdMatches: boolean;
-  /** An existing auxiliary helper belongs to the plain terminal. Preserve it. */
-  helperPresent: boolean;
+  /** An existing aux terminal belongs to the plain terminal. Preserve it. */
+  auxPresent: boolean;
 }
 
 /**
@@ -83,13 +83,13 @@ export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
 
 /**
  * The placement facts that can change while the caller's shell returns to its
- * prompt, re-read once it has: still a pane, still a plain helper-less
- * terminal, still in the tool's directory. The command line is not among them —
+ * prompt, re-read once it has: still a pane, still a plain terminal
+ * with no aux terminal, still in the tool's directory. The command line is not among them —
  * by then it has finished. Workspace activation is only an initial gate.
  */
 export function callerStillPlaceable(gate: ToolTakeoverGate): boolean {
   return gate.visible
     && gate.cwdMatches
     && gate.kind === 'terminal'
-    && !gate.helperPresent;
+    && !gate.auxPresent;
 }

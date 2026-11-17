@@ -3,16 +3,18 @@ import { surfaceIdFor } from 'dor/protocol';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../components/design';
-import { disposeHelper, getHelper } from '../lib/helper-terminal';
+import { disposeAux, getAux } from '../lib/aux-terminal';
 import { flushTerminal, getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { FakePtyAdapter, getPlatform, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { flattenScenario } from './fake-scenarios';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
+import type { ContextMode } from '../components/wall/wall-context';
 import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
 
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
-type Props = { layout: Layout; width: number; height: number; sourceAtEnd: boolean; cursor: 'top' | 'bottom'; zoomed: boolean };
+/** `via`: a right-click on the source's header, or `!` in command mode. */
+type Props = { layout: Layout; width: number; height: number; sourceAtEnd: boolean; cursor: 'top' | 'bottom'; zoomed: boolean; mode: ContextMode; via: 'click' | 'key' };
 const SOURCE = 'source';
 type Shape = Pick<Props, 'layout' | 'sourceAtEnd'>;
 const split = (dir: 'row' | 'col', nodes: LathNode[], weights = nodes.map(() => 1)): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node, i) => ({ node, weight: weights[i] }))) });
@@ -36,7 +38,7 @@ function boot(props: Props): LathPersistedLayout {
 }
 function PlacementWall(props: Props) {
   return <div data-placement-frame className="flex shrink-0 flex-col" style={{ width: props.width, height: props.height }}>
-    <Wall key={`${props.layout}-${props.sourceAtEnd}`} restoredLathLayout={boot(props)} initialMode="passthrough" />
+    <Wall key={`${props.layout}-${props.sourceAtEnd}-${props.via}`} restoredLathLayout={boot(props)} initialMode={props.via === 'key' ? 'command' : 'passthrough'} />
   </div>;
 }
 
@@ -61,37 +63,50 @@ function expectContained(element: Element, parent: Element) {
   expect(a.right).toBeLessThanOrEqual(b.right + 1);
   expect(a.bottom).toBeLessThanOrEqual(b.bottom + 1);
 }
-async function rightClickSourceHeader(source: string) {
+/** Right-click opens properties, the aux terminal a switch away; `!` opens the aux terminal itself. */
+async function openSourceContext(source: string, mode: ContextMode = 'aux', via: Props['via'] = 'click') {
   (getPlatform() as FakePtyAdapter).setProcessCwd(source, '/home/demo/projects/dormouse');
   const header = await requireElement(`[data-pane-header-for="${source}"]`, 'source header');
-  header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
-  await requireElement('[data-helper-terminal] .xterm', 'helper terminal');
-  const helper = getHelper(source)!;
+  if (via === 'key') await userEvent.keyboard('!');
+  else {
+    header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+    await requireElement('[data-context-mode="properties"]', 'terminal context properties');
+    if (mode === 'properties') return;
+    await userEvent.click(within(context()).getByRole('button', { name: 'Show aux terminal' }));
+  }
+  await requireElement('[data-aux-terminal] .xterm', 'aux terminal');
+  const aux = getAux(source)!;
   // Fitting after output changes wrapping and can clip xterm's current prompt
   // line, which no later wait repairs. Release the fake shell only once it has
-  // its actual mounted grid (`fake-adapter-helper.test.ts` pins the deferral).
-  refitSession(helper.id);
-  (getPlatform() as FakePtyAdapter).resumeHelperStartup(helper.id);
+  // its actual mounted grid (`fake-adapter-aux.test.ts` pins the deferral).
+  refitSession(aux.id);
+  (getPlatform() as FakePtyAdapter).resumeAuxStartup(aux.id);
 }
-async function openContext(source: string) {
-  await rightClickSourceHeader(source);
+async function openContext(source: string, mode: ContextMode, via: Props['via']) {
+  await openSourceContext(source, mode, via);
   await settleTerminalContext();
-  const helper = getHelper(source)!;
+  // Properties alone never start the aux terminal.
+  if (mode === 'properties') { expect(getAux(source)).toBeUndefined(); return; }
+  const aux = getAux(source)!;
   // Drain xterm's async parsing before the paint gate captures a wrapped narrow terminal.
   let written = false;
-  void flushTerminal(helper.id).then(() => { written = true; });
+  void flushTerminal(aux.id).then(() => { written = true; });
   await waitFor(() => expect(written).toBe(true), { timeout: 4000 });
   await settleTerminals();
-  const input = terminal(helper.id);
+  const input = terminal(aux.id);
   const text = Array.from({ length: input.buffer.active.length }, (_, i) =>
     input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
-  // A helper starts its shell and runs nothing: one prompt, wrapped cursor line included.
+  // An aux terminal starts its shell and runs nothing: one prompt, wrapped cursor line included.
   expect(text.match(/\/home\/demo\/projects\/dormouse ❯/g)).toHaveLength(1);
   expect(input.buffer.active.viewportY).toBe(input.buffer.active.baseY);
 }
-function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
-  // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
-  if (zoomed || layout === 'single') return cursor === 'top' ? 'bottom' : 'top';
+/** Whether the context covers its source rather than sitting beside it: alone in the Wall, or
+ *  opened on properties (a right-click) where its only room is below. */
+const covers = ({ layout, zoomed, sourceAtEnd, via }: Props) => zoomed || layout === 'single' || (via === 'click' && layout === 'rows' && !sourceAtEnd);
+function expectedSide(args: Props) {
+  const { layout, cursor, sourceAtEnd, via } = args;
+  // Covering, it takes the top half, but from `!` avoids the cursor; beside a neighbor, it takes the neighbor's side.
+  if (covers(args)) return via === 'key' && cursor === 'top' ? 'bottom' : 'top';
   if (layout === 'grid') return 'right';
   if (layout === 'wide-bottom') return 'top';
   if (layout === 'rows') return sourceAtEnd ? 'top' : 'bottom';
@@ -116,7 +131,7 @@ async function prepare(args: Props) {
     expect(rect(sourcePane(id))).toEqual(before);
     expect({ cols: source.cols, rows: source.rows }).toEqual(size);
   };
-  await openContext(id);
+  await openContext(id, args.mode, args.via);
   expectSourceUnchanged();
   await waitFor(() => expect(document.querySelector('[data-ring="outline"]')).toHaveAttribute('data-context-union', 'true'));
   const ring = document.querySelector('[data-ring="outline"]')!.closest('svg')!.parentElement!;
@@ -136,18 +151,18 @@ async function prepare(args: Props) {
   const side = expectedSide(args);
   expect(context().dataset.contextSide).toBe(side);
   if (args.layout === 'grid' && !args.zoomed) {
-    expect(within(context()).getByRole('button', { name: 'Place helper at right' })).toBeVisible();
-    expect(within(context()).getByRole('button', { name: 'Place helper at bottom' })).toBeVisible();
+    expect(within(context()).getByRole('button', { name: 'Place context at right' })).toBeVisible();
+    expect(within(context()).getByRole('button', { name: 'Place context at bottom' })).toBeVisible();
   }
   const a = context().getBoundingClientRect();
   const b = sourcePane(id).getBoundingClientRect();
-  if (!args.zoomed && args.layout !== 'single') {
+  if (!covers(args)) {
     const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
     // Only the teeth reach over the source, and they face it.
     expect(overlap[side]).toBeCloseTo(TERMINAL_CONTEXT_TEETH_PX);
     expect(context().dataset.contextTeeth).toBe({ right: 'left', left: 'right', bottom: 'top', top: 'bottom' }[side]);
   } else {
-    // A covering helper lies flush on the source's edges, teeth toward the half it leaves visible.
+    // A covering aux terminal lies flush on the source's edges, teeth toward the half it leaves visible.
     expect(a.left - b.left).toBeCloseTo(0);
     expect(b.right - a.right).toBeCloseTo(0);
     expect(side === 'top' ? a.top - b.top : b.bottom - a.bottom).toBeCloseTo(0);
@@ -157,17 +172,17 @@ async function prepare(args: Props) {
 }
 
 const meta = {
-  title: 'App/Helper placement',
+  title: 'App/Aux placement',
   component: PlacementWall,
   // Argos replays stories for capture; unfinished input from the preceding run
-  // must not turn this run's fresh-helper fixture into a used helper.
+  // must not turn this run's fresh-aux-terminal fixture into a used aux terminal.
   beforeEach: ({ args }) => {
-    for (const role of roles(args)) disposeHelper(idOf(args, role));
+    for (const role of roles(args)) disposeAux(idOf(args, role));
     const platform = getPlatform() as FakePtyAdapter;
-    platform.deferHelperStartup = true;
-    return () => { platform.deferHelperStartup = false; };
+    platform.deferAuxStartup = true;
+    return () => { platform.deferAuxStartup = false; };
   },
-  args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false },
+  args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false, mode: 'aux', via: 'click' },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) } },
   play: async ({ args }) => { await prepare(args); },
 } satisfies Meta<typeof PlacementWall>;
@@ -187,8 +202,11 @@ export const BottomRow = story({ args: { layout: 'rows', sourceAtEnd: true } });
 export const WideBottomRow = story({ args: { layout: 'wide-bottom' }, globals: { theme: 'Dark (Visual Studio)' } });
 export const Grid = story({ args: { layout: 'grid' } });
 export const UnevenColumns = story({ args: { layout: 'uneven' } });
-export const CursorAtTop = story({ args: { cursor: 'top' } });
-export const CursorAtBottom = story();
+/** From `!`, a covering context keeps clear of the cursor. */
+export const CursorAtTop = story({ args: { cursor: 'top', via: 'key' } });
+export const CursorAtBottom = story({ args: { via: 'key' } });
+/** From a click it covers the top half wherever the cursor is, under the header clicked. */
+export const CoveringFromClick = story({ args: { cursor: 'top' } });
 export const ZoomedPane = story({ args: { layout: 'grid', zoomed: true } });
 export const NarrowWindow = story({ args: { width: 294, height: 620 } });
 export const ShortWindow = story({ args: { width: 580, height: 310 } });
@@ -198,14 +216,14 @@ export const PreserveInputAndFocus = story({
   play: async ({ args, canvasElement, step }) => {
     const source = sourceId(args);
     const { expectSourceUnchanged } = await prepare(args);
-    const helper = getHelper(source)!;
-    const input = terminal(helper.id);
+    const aux = getAux(source)!;
+    const input = terminal(aux.id);
     const element = input.element!;
     const unfinished = 'echo keep-this-input';
     const bufferText = () => Array.from({ length: input.buffer.active.length }, (_, i) => input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('\n');
     const checkInput = () => {
-      expect(getHelper(source)?.id).toBe(helper.id);
-      expect(terminal(helper.id)).toBe(input);
+      expect(getAux(source)?.id).toBe(aux.id);
+      expect(terminal(aux.id)).toBe(input);
       expect(input.element).toBe(element);
       expect(bufferText()).toContain(unfinished);
       expectContained(context(), canvasElement.querySelector('.lath-host')!);
@@ -215,13 +233,13 @@ export const PreserveInputAndFocus = story({
       await userEvent.keyboard(unfinished);
       await waitFor(() => expect(bufferText()).toContain(unfinished));
       const focused = document.activeElement;
-      await userEvent.click(within(context()).getByRole('button', { name: 'Place helper at bottom' }));
+      await userEvent.click(within(context()).getByRole('button', { name: 'Place context at bottom' }));
       await waitFor(() => expect(context().dataset.contextSide).toBe('bottom'));
       expect(document.activeElement).toBe(focused);
       expectSourceUnchanged();
       checkInput();
     });
-    await step('Resize the Wall without replacing the helper or dropping focus', async () => {
+    await step('Resize the Wall without replacing the aux terminal or dropping focus', async () => {
       const frame = canvasElement.querySelector<HTMLElement>('[data-placement-frame]')!;
       const focused = document.activeElement;
       const oldColumns = input.cols;
@@ -232,23 +250,41 @@ export const PreserveInputAndFocus = story({
       expect(context().dataset.contextSide).toBe('bottom');
       checkInput();
     });
-    await step('Close and reopen the retained helper, then select the top side', async () => {
+    await step('Close and reopen the retained aux terminal above, as properties open, then select the bottom side', async () => {
       await userEvent.click(within(context()).getByRole('button', { name: 'Close terminal context' }));
       await waitFor(() => expect(document.querySelector('[data-terminal-context]')).toBeNull());
       const resizedSource = rect(sourcePane(source));
-      await rightClickSourceHeader(source);
-      expect(context().dataset.contextSide).toBe('bottom');
+      await openSourceContext(source);
+      // The right-click opened properties, which never go below, though below was chosen before.
+      expect(context().dataset.contextSide).toBe('top');
       expect(rect(sourcePane(source))).toEqual(resizedSource);
       checkInput();
       input.focus();
       const focused = document.activeElement;
-      await userEvent.click(within(context()).getByRole('button', { name: 'Place helper at top' }));
-      await waitFor(() => expect(within(context()).getByRole('button', { name: 'Place helper at top' })).toHaveAttribute('aria-pressed', 'true'));
-      expect(context().dataset.contextSide).toBe('top');
+      await userEvent.click(within(context()).getByRole('button', { name: 'Place context at bottom' }));
+      await waitFor(() => expect(within(context()).getByRole('button', { name: 'Place context at bottom' })).toHaveAttribute('aria-pressed', 'true'));
+      expect(context().dataset.contextSide).toBe('bottom');
       expect(document.activeElement).toBe(focused);
       checkInput();
     });
   },
 });
+
+/** Properties are only as tall as their rows, held to the edge their teeth share with the source. */
+export const PropertiesAbove = story({ args: { layout: 'wide-bottom', mode: 'properties' } });
+export const PropertiesBeside = story({ args: { layout: 'columns', mode: 'properties' } });
+/** Properties never go below on their own: with room only there, they cover the source's top half. */
+export const PropertiesNeverBelow = story({ args: { layout: 'rows', mode: 'properties' } });
+/** `!` opens the terminal below where that is the room; switching to properties keeps it there. */
+export const AuxBelowFromKey = story({
+  args: { layout: 'rows', via: 'key' },
+  play: async ({ args }) => {
+    await prepare(args);
+    await userEvent.click(within(context()).getByRole('button', { name: 'Show properties' }));
+    await waitFor(() => expect(context().dataset.contextMode).toBe('properties'));
+    expect(context().dataset.contextSide).toBe('bottom');
+  },
+});
+export const PropertiesCovering = story({ args: { cursor: 'top', mode: 'properties' } });
 
 export const TwoColumnsDark = story({ args: { layout: 'columns' }, globals: { theme: 'Dark (Visual Studio)' } });

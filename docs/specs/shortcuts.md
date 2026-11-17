@@ -27,9 +27,10 @@ Modifier handling: [layout.md](layout.md#keyboard-shortcuts-command-mode).
 | `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; a reopenable or trivial close skips it. |
 | `u` | Reopen | Reopens the last closed Surface, Workspace, or window, whatever is selected; macOS `⌘⇧T` works in both modes. |
 | `,` | Rename selected item | Rename the selected terminal or Tool pane or Workspace tab; consumed no-op on browser surfaces, doors, and `+`. |
-| `a` | Alert | Dismiss the ring if any, then open the terminal context. Terminal Surfaces only; doors excluded. |
+| `a` | Alert | Dismiss the ring if any, then open the terminal context's properties. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
-| `>` | Terminal context | Terminal panes only; consumed no-op on browser panes, inert on doors. |
+| `?` | Terminal context properties | Terminal panes only; consumed no-op on browser panes, inert on doors. |
+| `!` | Terminal context terminal | Focuses the aux terminal, or a Tool's primary terminal. Terminal panes only; consumed no-op on browser panes, inert on doors. |
 
 ## Workspaces (command mode)
 
@@ -77,20 +78,39 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `⌘` (macOS) / `Ctrl` (others) + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. On macOS, `Ctrl` + these keys goes to the page. |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
+## Terminal context properties
+
+Live and labeled only when a command key opened the context, while in command mode; a focused list or field keeps its keys.
+
+| Key | Action |
+|-----|--------|
+| `s` / `c` | Copy the Surface id / the directory |
+| `w` | Move to workspace |
+| `r` | Reveal the directory |
+| `p` | Choose a port |
+| `1`–`5` | Port launch actions shown, in row order |
+| `+` | Show overflowed port actions |
+| `a` / `t` | Toggle Watch / TODO |
+| `!` | Show and focus the terminal |
+| `k` | Keep open (preview slot) |
+| `[` / `]` | Tool document Back / Forward |
+| `←` `→` `↑` `↓` | Place the context |
+| `Esc` | Close |
+
 ## Dialogs, menus & prompts
 
 | Key | Action | Description |
 |-----|--------|-------------|
 | `Esc` | Close / cancel | Dismiss a dialog or popover; cancel a rename or kill confirmation; abort an in-progress sash or pane drag. |
 | `Enter` | Confirm rename | Save the new name while renaming a pane; blur commits too. |
-| `Tab` / `Shift+Tab` | Focus cycle | Cycle popover/dialog controls. In terminal context, navigate controls into the helper; once helper xterm has focus, Tab belongs to its program. |
+| `Tab` / `Shift+Tab` | Focus cycle | Cycle popover/dialog controls. In terminal context, navigate controls into the aux terminal; once the aux terminal's xterm has focus, Tab belongs to its program. |
 | `Shift+F10` / `ContextMenu` | Workspace alert settings | On a focused baseboard alarm button (`docs/specs/alert.md` → Settings dialog). |
 | `Shift+F10` / `ContextMenu` | Workspace tab menu | On a focused Workspace tab. |
 | `↑` / `↓`, `Home` / `End` | Move in a menu | Tab menu rows; `Enter` chooses. |
 | Prompted letter (unmodified, Shift optional) | Confirm kill | Type the letter shown; prompt routing: [layout.md](layout.md#kill-confirmation). |
 | `Enter` / `Esc` (stray-key prompt) | Type / stay | Raised by a key no command-mode binding claims ([layout.md](layout.md#keyboard-shortcuts-command-mode)). |
 | `Space` (command) | Activate control | On a focused button or switch; never a stray. |
-| `⌘C` / `Ctrl+C` (terminal context) | Copy diagnostic | Copies selected diagnostic text, never the helper's. |
+| `⌘C` / `Ctrl+C` (terminal context) | Copy diagnostic | Copies selected diagnostic text, never the aux terminal's. |
 | `⌘A` (macOS) | — | Cancelled outside text fields, both modes (`docs/specs/mouse-and-clipboard.md` → "3.9 Select All"). |
 
 ## VS Code host

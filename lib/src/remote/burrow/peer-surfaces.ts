@@ -25,7 +25,7 @@ import {
   releaseSizeHold,
   subscribeToSizeHolds,
 } from '../../lib/size-hold-store';
-import { isHelperSession, registry } from '../../lib/terminal-store';
+import { isAuxSession, registry } from '../../lib/terminal-store';
 import { isPendingKillSession } from '../../lib/pending-kills';
 import { readTerminalModes } from '../../lib/terminal-modes';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
@@ -138,7 +138,7 @@ function driveOwnSurface({
     return [];
   }
   // A pending kill is out of the user's sight, so out of every Client's too.
-  const entry = isHelperSession(surfaceId) || isPendingKillSession(surfaceId) ? undefined : registry.get(surfaceId);
+  const entry = isAuxSession(surfaceId) || isPendingKillSession(surfaceId) ? undefined : registry.get(surfaceId);
   if (!entry) return [];
 
   const term = entry.terminal;

@@ -32,8 +32,8 @@ export class PlaygroundShellRegistry {
     // Every spawn, not only a visible pane's: a Door spawns without `paneAdded`.
     // A microtask, so a page's own spawn handler can launch a program first.
     if (fsOptions) {
-      this.stopSpawn = adapter.onPtySpawn(({ id, helper }) => {
-        if (helper) return;
+      this.stopSpawn = adapter.onPtySpawn(({ id, aux }) => {
+        if (aux) return;
         const shell = this.ensureShell(id);
         queueMicrotask(() => shell.showInitialPrompt());
       });

@@ -439,7 +439,7 @@ export interface SidecarHostOptions {
 
 export interface SidecarHost {
   /** The app's one `AlertManager` (`docs/specs/standalone.md` → "Alerts").
-   *  `pty-core` reports each helper decision to it. */
+   *  `pty-core` reports each aux terminal decision to it. */
   readonly alerts: AlertManager;
   /**
    * One stdin command, if it is this module's — the PTY commands the alerts

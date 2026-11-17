@@ -106,45 +106,45 @@ test('a Windows shell\'s own plumbing is no work, but what runs beneath it is', 
   assert.equal(await shellHasWork(42, cmdPath, table([[42, 1, 'cmd.exe']])), false);
 });
 
-test('helper ownership survives a live listing and promotion preserves the PTY and replay', () => {
+test('aux terminal ownership survives a live listing and promotion preserves the PTY and replay', () => {
   const events = [];
   const spawned = [];
-  // Every helper decision, as the host's alerts hear it.
+  // Every aux terminal decision, as the host's alerts hear it.
   const decisions = [];
   const manager = create((event, data) => events.push({ event, data }), {
     spawn() {
       const terminal = { pid: 42, write() {}, resize() {}, kill() {}, onData(callback) { this.output = callback; }, onExit() {} };
       spawned.push(terminal); return terminal;
     },
-  }, { replay: true, onHelper: (id, helper) => decisions.push([id, helper]) });
+  }, { replay: true, onAux: (id, aux) => decisions.push([id, aux]) });
   manager.spawn('parent');
-  manager.spawn('helper', { helper: { parentId: 'parent' } });
-  assert.deepEqual(decisions, [['parent', false], ['helper', true]]);
-  assert.equal(manager.getHelperParentId('helper'), 'parent');
-  assert.equal(manager.getHelperParentId('parent'), undefined);
+  manager.spawn('aux', { aux: { parentId: 'parent' } });
+  assert.deepEqual(decisions, [['parent', false], ['aux', true]]);
+  assert.equal(manager.getAuxParentId('aux'), 'parent');
+  assert.equal(manager.getAuxParentId('parent'), undefined);
   spawned[1].output('unsaved editor text');
   manager.list();
-  assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys[1].helper, { parentId: 'parent' });
+  assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys[1].aux, { parentId: 'parent' });
   assert.equal(events.findLast(e => e.event === 'replay').data.data, 'unsaved editor text');
-  manager.context({ op: 'promote', id: 'helper' }, 'promote-1');
-  assert.deepEqual(decisions.at(-1), ['helper', false]);
-  assert.equal(manager.getHelperParentId('helper'), undefined);
+  manager.context({ op: 'promote', id: 'aux' }, 'promote-1');
+  assert.deepEqual(decisions.at(-1), ['aux', false]);
+  assert.equal(manager.getAuxParentId('aux'), undefined);
   manager.list();
-  assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper, undefined);
+  assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].aux, undefined);
   assert.equal(spawned.length, 2);
   assert.equal(events.findLast(e => e.event === 'replay').data.data, 'unsaved editor text');
-  manager.context({ op: 'promote', id: 'helper', restore: { parentId: 'parent' } }, 'restore-1');
+  manager.context({ op: 'promote', id: 'aux', restore: { parentId: 'parent' } }, 'restore-1');
   manager.list();
-  assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper.parentId, 'parent');
-  assert.deepEqual(decisions.at(-1), ['helper', true]);
+  assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].aux.parentId, 'parent');
+  assert.deepEqual(decisions.at(-1), ['aux', true]);
   const decided = decisions.length;
   manager.context({ op: 'promote', id: 'parent', restore: { parentId: 'parent' } }, 'invalid-self');
-  assert.match(events.at(-1).data.error, /Invalid helper owner/);
+  assert.match(events.at(-1).data.error, /Invalid aux terminal owner/);
   // A refused promotion decides nothing.
   assert.equal(decisions.length, decided);
   manager.spawn('other');
   manager.context({ op: 'promote', id: 'other', restore: { parentId: 'parent' } }, 'invalid-duplicate');
-  assert.match(events.at(-1).data.error, /Invalid helper owner/);
+  assert.match(events.at(-1).data.error, /Invalid aux terminal owner/);
   manager.killAll();
 });
 
@@ -162,15 +162,15 @@ test('replay retains the complete bounded tail across unequal output chunks', ()
   manager.killAll();
 });
 
-test('a helper cannot own another helper or reference an absent owner', () => {
+test('an aux terminal cannot own another aux terminal or reference an absent owner', () => {
   const events = []; let spawns = 0;
   const manager = create((event, data) => events.push({ event, data }), {
     spawn() { spawns++; return { pid: 42, write() {}, resize() {}, kill() {}, onData() {}, onExit() {} }; },
   });
   manager.spawn('parent');
-  manager.spawn('helper', { helper: { parentId: 'parent' } });
-  manager.spawn('nested', { helper: { parentId: 'helper' } });
-  manager.spawn('orphan', { helper: { parentId: 'missing' } });
+  manager.spawn('aux', { aux: { parentId: 'parent' } });
+  manager.spawn('nested', { aux: { parentId: 'aux' } });
+  manager.spawn('orphan', { aux: { parentId: 'missing' } });
   assert.equal(spawns, 2);
   assert.deepEqual(events.filter(e => e.event === 'exit').map(e => e.data.id), ['nested', 'orphan']);
   manager.killAll();
@@ -198,9 +198,9 @@ test('directory opening touches the path only through the host resolver', async 
 });
 
 // `helper-terminal.json` is what an earlier build saved. Nothing here may read
-// it, rewrite it, or let its command reach a helper.
-test('a stored helper command reaches nothing: no answer, no write, no rewrite', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-helper-settings-'));
+// it, rewrite it, or let its command reach an aux terminal.
+test('a stored aux terminal command reaches nothing: no answer, no write, no rewrite', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dor-aux-settings-'));
   const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   process.env.HOME = process.env.USERPROFILE = home;
   try {
@@ -219,17 +219,17 @@ test('a stored helper command reaches nothing: no answer, no write, no rewrite',
     };
     assert.deepEqual(await answer({ op: 'home' }), { requestId: 'context', home, hostname: os.hostname() });
     manager.spawn('parent');
-    manager.spawn('helper', { helper: { parentId: 'parent' } });
-    assert.equal(manager.getHelperParentId('helper'), 'parent');
+    manager.spawn('aux', { aux: { parentId: 'parent' } });
+    assert.equal(manager.getAuxParentId('aux'), 'parent');
     assert.deepEqual(writes, []);
     // An older webview's edit is refused, its shape otherwise harmless.
     assert.match((await answer({ op: 'settings', command: 'echo edited' })).error, /Unknown/);
     assert.equal(fs.readFileSync(stored, 'utf8'), contents);
     manager.spawn('older-parent');
-    manager.spawn('older', { helper: { parentId: 'older-parent', command: 'git status' } });
-    assert.equal(manager.getHelperParentId('older'), 'older-parent');
+    manager.spawn('older', { aux: { parentId: 'older-parent', command: 'git status' } });
+    assert.equal(manager.getAuxParentId('older'), 'older-parent');
     manager.list();
-    assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys.find(pty => pty.id === 'older').helper, { parentId: 'older-parent' });
+    assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys.find(pty => pty.id === 'older').aux, { parentId: 'older-parent' });
     assert.deepEqual(writes, []);
     manager.killAll();
   } finally {

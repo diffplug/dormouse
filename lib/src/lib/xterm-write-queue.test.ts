@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { Terminal } from '@xterm/xterm';
 
 /**
- * `flushTerminal` (terminal-lifecycle.ts) and the fake adapter's helper shell
+ * `flushTerminal` (terminal-lifecycle.ts) and the fake adapter's aux terminal shell
  * rely on `resize()` flushing xterm's write queue without losing or replaying
  * any of it. Builds before xtermjs/xterm.js#6201 did both.
  */

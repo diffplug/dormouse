@@ -1,12 +1,12 @@
 import { captureToolParams } from './wall/tool-transfer';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
-import { TerminalContextContext, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
+import { TerminalContextContext, type ContextMode, type ContextView, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
 import { TERMINAL_CONTEXT_EXIT_MS } from './design';
 import { motionIsInstant } from '../lib/ui-geometry';
 import type { PortMode } from './wall/TerminalContextView';
 import type { PortUrlEntry } from './wall/port-url';
-import { beginPromotion, cancelPromotion, closeHelperParent, finishPromotion, getHelper, helperHasWork } from '../lib/helper-terminal';
-import { isHelperSession } from '../lib/terminal-store';
+import { beginPromotion, cancelPromotion, closeAuxParent, finishPromotion, getAux, auxHasWork } from '../lib/aux-terminal';
+import { isAuxSession } from '../lib/terminal-store';
 import { useRef, useState, useEffect, useCallback, useMemo, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { Baseboard } from './Baseboard';
 import { revealWorkspaceTab, workspaceTabElement } from './workspace-tab-elements';
@@ -270,6 +270,8 @@ export function Wall({
   const activeRef = useRef(active);
   activeRef.current = active;
   const [terminalContext, setTerminalContext] = useState<TerminalContextState | null>(null);
+  const [contextView, setContextView] = useState<ContextView>({ mode: 'properties' });
+  const focusRequests = useRef(0);
   const terminalContextRef = useRef(terminalContext);
   terminalContextRef.current = terminalContext;
   const contextLaunchGeneration = useRef(0);
@@ -299,8 +301,8 @@ export function Wall({
    *  trivial close: input to either of its capabilities is input to the Tool
    *  (docs/specs/dor-tool.md → The tool capability set). */
   const closeKindOf = (id: string): CloseKind => closeKind(id, lath.getMeta(id)?.params);
-  /** A blank shell may be replaced in place; one that owns a helper is not blank. */
-  const isReplaceableShell = (id: string): boolean => closeKindOf(id) === 'trivial' && !getHelper(id);
+  /** A blank shell may be replaced in place; one that owns an aux terminal is not blank. */
+  const isReplaceableShell = (id: string): boolean => closeKindOf(id) === 'trivial' && !getAux(id);
   // One reference-counted lease per open dialog: overlapping dialogs each hold
   // their own, so the one closing cannot release the other's suppression.
   const dialogKeyboardActiveRef = useRef(false);
@@ -477,7 +479,7 @@ export function Wall({
   // elsewhere, a mode change, or a kill prompt takes it down.
   useEffect(dismissStrayKey, [dismissStrayKey, mode, selectedId, selectedType, active, confirmKill]);
 
-  // --- Helpers ---
+  // --- Aux terminals ---
 
   /** Zoom belongs to the focused passthrough pane (docs/specs/layout.md → "Zoom"),
    *  so every focus transition off its owner starts the return to the tiled layout.
@@ -579,33 +581,34 @@ export function Wall({
     return reason;
   }, [effectiveWorkspaceId, showShellSpawnNotice]);
 
-  /** Why the helper's running work (or a failed inspection) blocks closing its
+  /** Why the aux terminal's running work (or a failed inspection) blocks closing its
    *  source, or null when the source may close
    *  (docs/specs/terminal-context.md → Promotion and source closure). */
-  const helperRefusal = useCallback(async (id: string): Promise<string | null> => {
-    let helper = getHelper(id);
-    while (helper) {
+  const auxRefusal = useCallback(async (id: string): Promise<string | null> => {
+    let aux = getAux(id);
+    while (aux) {
       let warning: string | null = null;
       try {
-        if (await helperHasWork(helper)) warning = 'Helper has running work. Stop it in the helper, then close this terminal again.';
+        if (await auxHasWork(aux)) warning = 'The aux terminal has running work. Stop it there, then close this terminal again.';
       } catch (error) {
-        warning = `Could not inspect helper processes: ${messageOf(error)}`;
+        warning = `Could not inspect aux terminal processes: ${messageOf(error)}`;
       }
       // A reset or promotion can finish while host inspection is pending; the
       // replacement is inspected in turn.
-      if (getHelper(id) === helper) return warning;
-      helper = getHelper(id);
+      if (getAux(id) === aux) return warning;
+      aux = getAux(id);
     }
     return null;
   }, []);
 
-  /** Reveal a source whose closure its helper refused, with the reason. */
+  /** Reveal a source whose closure its aux terminal refused, with the reason. */
   const revealRefusal = useCallback((id: string, warning: string) => {
     const door = doorsRef.current.find(item => item.id === id);
     // Command mode, as `requestKill`'s own Door path: the overlay takes focus.
     if (door) handleReattachRef.current(door, { enterPassthrough: false });
     setConfirmKill(null);
     setTerminalContext({ id, warning });
+    setContextView({ mode: 'aux' });
   }, []);
 
   /** Selection after the selected Surface is killed: in command mode, the next
@@ -634,9 +637,9 @@ export function Wall({
     fireEvent({ type: 'kill', id });
   }, [fireEvent, lath]);
 
-  /** Tear a Surface down after its helper guard. */
+  /** Tear a Surface down after its aux terminal guard. */
   const killPaneImmediately = useCallback((id: string): void => {
-    closeHelperParent(id);
+    closeAuxParent(id);
     setTerminalContext(current => current?.id === id ? null : current);
     // A second kill for a pane already mid-fade is a no-op (idempotent) — it must
     // not re-fire the event, re-dispose, or schedule a second removal.
@@ -686,7 +689,7 @@ export function Wall({
     fireEvent({ type: 'kill', id });
   }, [fireEvent, removeDoor, selectAfterKill, disposeDetached, lath, nav]);
 
-  /** This Wall's own pending Surfaces and helpers. */
+  /** This Wall's own pending Surfaces and aux terminals. */
   const ownPendingKill = (kill: PendingKill): boolean => isOwnPendingKill(kill, effectiveWorkspaceId);
 
   /** Make a close that would ask a pending kill instead (set below, once
@@ -700,7 +703,7 @@ export function Wall({
   const pushSurfaceRecordRef = useRef<(id: string) => void>(() => {});
 
   /**
-   * A permanent Surface closure checks helper work before teardown
+   * A permanent Surface closure checks aux terminal work before teardown
    * (`docs/specs/terminal-context.md` → "Promotion and source closure"), then a
    * dirty Tool's consent (`docs/specs/dor-tool.md` → Closing unsaved Tools): a
    * gesture passes `ask`, a Workspace close the ids it already asked about, and
@@ -717,7 +720,7 @@ export function Wall({
     if (pendingSurfaceCloses.current.has(id)) return 'This terminal is already closing';
     pendingSurfaceCloses.current.add(id);
     try {
-      const refused = await helperRefusal(id);
+      const refused = await auxRefusal(id);
       if (refused) { revealRefusal(id, refused); return refused; }
       if (isToolDirty(id, lath.getMeta(id)?.params)
         && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
@@ -734,7 +737,7 @@ export function Wall({
       if (doorKillReturnRef.current?.id === id) doorKillReturnRef.current = null;
       pendingSurfaceCloses.current.delete(id);
     }
-  }, [killPaneImmediately, helperRefusal, revealRefusal, lath, transferRefusal]);
+  }, [killPaneImmediately, auxRefusal, revealRefusal, lath, transferRefusal]);
   const closeSurfaceRef = useRef(closeSurface);
   closeSurfaceRef.current = closeSurface;
 
@@ -744,8 +747,8 @@ export function Wall({
       gone: () => lath.getMeta(id) === undefined,
       isTerminal: () => surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal',
       transferRefusal: () => transferRefusal(id),
-      helperRefusal: async () => {
-        const refused = await helperRefusal(id);
+      auxRefusal: async () => {
+        const refused = await auxRefusal(id);
         if (refused) revealRefusal(id, refused);
         return refused;
       },
@@ -755,13 +758,13 @@ export function Wall({
       save: () => saveToolEditor(id),
       close: (discard, stillRefused) => closeSurface(id, discard ? [id] : [], stillRefused),
     });
-  }, [closeSurface, helperRefusal, lath, revealRefusal, transferRefusal]);
+  }, [closeSurface, auxRefusal, lath, revealRefusal, transferRefusal]);
 
   /**
    * The kill gesture on a Surface, from the header, the keyboard, or a Door: a
    * close that would not confirm (`closeKindOf`) runs at once, a Door's in
    * place; one that would goes pending under Labs delayed kill, else stages the
-   * confirm overlay (a Door reattaching first). A source whose helper has
+   * confirm overlay (a Door reattaching first). A source whose aux terminal has
    * running work is revealed with the reason instead, and nothing is staged.
    */
   const requestKill = useCallback((id: string) => {
@@ -781,19 +784,19 @@ export function Wall({
         else handleReattachRef.current(door, { enterPassthrough: false, afterRestore: 'confirm-kill' });
         return;
       }
-      // The helper inspection below can outlive the Surface (an exit, a `dor
+      // The aux terminal inspection below can outlive the Surface (an exit, a `dor
       // kill`); a confirm overlay for a gone pane would never clear itself.
       if (!nav.hasPane(id) || lath.isDying(id)) return;
       doorKillReturnRef.current = null;
-      // `ask`: a Tool that turns dirty during the helper check prompts rather
+      // `ask`: a Tool that turns dirty during the aux terminal check prompts rather
       // than refusing a gesture in silence.
       if (closeKindOf(id) !== 'confirm') { void closeSurface(id, 'ask'); return; }
       if (isDelayedKillEnabled()) { pendKillRef.current(id); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
-    if (!getHelper(id)) { stage(); return; }
-    void helperRefusal(id).then(refused => (refused ? revealRefusal(id, refused) : stage()));
-  }, [closeSurface, helperRefusal, revealRefusal, lath, nav, transferRefusal]);
+    if (!getAux(id)) { stage(); return; }
+    void auxRefusal(id).then(refused => (refused ? revealRefusal(id, refused) : stage()));
+  }, [closeSurface, auxRefusal, revealRefusal, lath, nav, transferRefusal]);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
@@ -813,14 +816,14 @@ export function Wall({
   /** Enter passthrough on the given panel. This only moves focus there: the
    *  human gestures acknowledge at their own handlers, and spawns, reveals, and
    *  embeds focusing themselves never do. */
-  const enterPassthrough = useCallback((id: string) => {
+  const enterPassthrough = useCallback((id: string, { focus = true }: { focus?: boolean } = {}) => {
     // Passthrough takes the keys a staged kill prompt waits for.
     setConfirmKill(null);
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');
     // Defer focus so it happens after the mousedown/click event finishes.
-    requestAnimationFrame(() => focusSession(id, true));
+    if (focus) requestAnimationFrame(() => focusSession(id, true));
   }, [selectPane]);
 
   /** Put a Door on the Baseboard at `index` (clamped), selecting it in command
@@ -877,6 +880,8 @@ export function Wall({
     setMode('command');
     const id = selectedIdRef.current;
     if (id) focusSession(id, false);
+    // Leaving a context terminal keeps the keyboard on its context's controls.
+    document.activeElement?.closest<HTMLElement>('[data-terminal-context]')?.focus({ preventScroll: true });
   }, [releaseZoomExcept]);
 
   // --- Lath seed + auto-spawn ---
@@ -1090,11 +1095,11 @@ export function Wall({
 
   /**
    * Close every Surface in this Workspace, each through the same coordinator a
-   * manual close uses (helper guard → kill), in order. Resolves null once the
+   * manual close uses (aux terminal guard → kill), in order. Resolves null once the
    * Wall is empty and safe to unmount, or the first refusal's message with the
    * Workspace left open — Surfaces ahead of the refusing one already closed — and
    * the strip then reveals it so the refusal is visible. Callers refuse running
-   * helper work before this starts, so that partial close takes a refusal that
+   * aux terminal work before this starts, so that partial close takes a refusal that
    * arises mid-walk.
    */
   const closeAll = useCallback(async (editors: readonly string[] = []): Promise<string | null> => {
@@ -1116,7 +1121,7 @@ export function Wall({
       for (const id of pending) {
         attempted.add(id);
         // Re-checked per iteration: an earlier closure can take a Surface with it
-        // (a helper's source, a replaced leaf).
+        // (an aux terminal's source, a replaced leaf).
         if (!ownsSurface(id)) continue;
         const refusal = await closeSurfaceRef.current(id, editors);
         if (refusal) {
@@ -1196,7 +1201,7 @@ export function Wall({
           setConfirmKill({ id: item.id, char: randomKillChar() });
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           // Atomic identity swap in place — no transient add/remove.
-          closeHelperParent(item.id);
+          closeAuxParent(item.id);
           lath.store.replaceLeaf(item.id, afterRestore.newId, terminalLeafMeta());
           disposeSession(item.id);
           selectPane(afterRestore.newId);
@@ -1273,7 +1278,7 @@ export function Wall({
         if (focus) enterPassthrough(id);
       },
       finalize: () => {
-        closeHelperParent(id);
+        closeAuxParent(id);
         disposeDetached(id);
       },
     });
@@ -1758,7 +1763,7 @@ export function Wall({
         const key = namespacedToolKey(resolved.name, resolved.key);
         const match = !pending.fresh && key ? findSurfaceByParams(candidate => matchesToolKey(candidate, resolved.scope, key)) : null;
         if (match) {
-          // A helper refusal retains the pending pane and never restarts the match.
+          // An aux terminal's refusal retains the pending pane and never restarts the match.
           if (await closeSurface(id)) return;
           if (toolsPaused()
             || !lath.getMeta(match.id) || lath.isDying(match.id) || isClosingSurface(match.id)) return;
@@ -1864,7 +1869,7 @@ export function Wall({
       const meta = lath.getMeta(id);
       if (!ownsSurface(id) || !meta) throw new Error('The Surface is no longer in this Workspace');
       if (closingWorkspaceRef.current || lath.isDying(id) || isClosingSurface(id)) throw new Error('The Surface is closing');
-      if (getHelper(id)?.promoting) throw new Error('Wait for helper promotion before moving this Surface');
+      if (getAux(id)?.promoting) throw new Error('Wait for aux terminal promotion before moving this Surface');
       if (isToolDirty(id, meta.params)) throw new Error('Save or discard Tool edits before moving this Surface');
       captureToolParams(lath, [id]);
       if ((meta.params?.launchSession && !meta.params?.session) || getAgentBrowserSurfaceController(id)?.snapshot().phase === 'launching') throw new Error('Wait for the browser to connect before moving this Surface');
@@ -2399,7 +2404,21 @@ export function Wall({
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,
-    open: (id: string, options?: TerminalContextOpenOptions) => { if (toolPendingFromParams(lath.getMeta(id)?.params) || isHelperSession(id) || isClosingSurface(id) || lath.isDying(id)) return; cancelContextPortLaunches(); setTerminalContext({ id, ...options }); },
+    mode: contextView.mode,
+    focusRequest: contextView.focusRequest,
+    setMode: (mode: ContextMode, focusTerminal = false) => setContextView(view => view.mode === mode && !focusTerminal ? view : { mode, focusRequest: focusTerminal ? ++focusRequests.current : undefined }),
+    terminalFocused: () => {
+      const id = terminalContextRef.current?.id;
+      // The source keeps no focus while its context holds the keyboard.
+      if (id && modeRef.current !== 'passthrough') enterPassthrough(id, { focus: false });
+    },
+    open: (id: string, options?: TerminalContextOpenOptions) => {
+      if (toolPendingFromParams(lath.getMeta(id)?.params) || isAuxSession(id) || isClosingSurface(id) || lath.isDying(id)) return;
+      cancelContextPortLaunches();
+      const { mode = 'properties', focusTerminal, ...rest } = options ?? {};
+      setTerminalContext({ id, ...rest });
+      setContextView({ mode, focusRequest: focusTerminal ? ++focusRequests.current : undefined });
+    },
     close: () => {
       cancelContextPortLaunches();
       const instant = motionIsInstant();
@@ -2411,19 +2430,19 @@ export function Wall({
     },
     promote: async (id: string) => {
       if (isClosingSurface(id)) throw new Error('This terminal is closing');
-      if (!getHelper(id) || !nav.hasPane(id)) throw new Error('Helper cannot be placed beside this terminal');
-      const helper = await beginPromotion(id);
-      const placed = lath.store.addLeaf(helper.id, terminalLeafMeta(), { refId: id, edge: lath.store.autoEdgeFor(id) });
+      if (!getAux(id) || !nav.hasPane(id)) throw new Error('Aux terminal cannot be placed beside this terminal');
+      const aux = await beginPromotion(id);
+      const placed = lath.store.addLeaf(aux.id, terminalLeafMeta(), { refId: id, edge: lath.store.autoEdgeFor(id) });
       if (!placed.ok) {
         await cancelPromotion(id);
         throw new Error('Could not split the source pane');
       }
       finishPromotion(id);
       setTerminalContext(null);
-      enterPassthrough(helper.id);
+      enterPassthrough(aux.id);
     },
     openPort: openContextPort,
-  }), [contextSourceId, terminalContext, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
+  }), [contextSourceId, terminalContext, contextView, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -2456,7 +2475,8 @@ export function Wall({
     enterPassthrough,
     enterCommandMode,
     minimizePane,
-    openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
+    // `!` means to type in the terminal: it takes the keyboard.
+    openTerminalContext: (id, { mode, origin }) => contextActions.open(id, { origin, mode, keyboard: true, focusTerminal: mode === 'aux' }),
     requestKill,
     reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,
@@ -2559,7 +2579,7 @@ export function Wall({
                   onExternalDrop={onExternalDrop}
                   workspaceDrag={workspaceId !== undefined ? surfaceWorkspaceDrag : undefined}
                 />
-                <WorkspaceSelectionOverlay lathStore={lath.store} subscribeLathFrames={lath.subscribeFrames} selectedId={terminalContext?.id ?? selectedId} selectedType={terminalContext ? 'pane' : selectedType} mode={mode} active={active} contextHelper={lath.contextHelper} />
+                <WorkspaceSelectionOverlay lathStore={lath.store} subscribeLathFrames={lath.subscribeFrames} selectedId={terminalContext?.id ?? selectedId} selectedType={terminalContext ? 'pane' : selectedType} mode={mode} active={active} contextPanel={lath.contextPanel} />
               </div>
             </div>
 

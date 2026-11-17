@@ -20,11 +20,11 @@ vi.mock('./agent-browser-surface-controller', () => ({
   disposeAgentBrowserSurfaceController: (id: string) => void disposedBrowsers.push(id),
 }));
 
-const helpers = new Map<string, { id: string; promoting?: boolean }>();
+const auxTerminals = new Map<string, { id: string; promoting?: boolean }>();
 const forgotten: string[] = [];
-vi.mock('../../lib/helper-terminal', () => ({
-  getHelper: (parentId: string) => helpers.get(parentId),
-  forgetHelper: (parentId: string) => void forgotten.push(parentId),
+vi.mock('../../lib/aux-terminal', () => ({
+  getAux: (parentId: string) => auxTerminals.get(parentId),
+  forgetAux: (parentId: string) => void forgotten.push(parentId),
 }));
 
 const SESSION: PersistedSession = { version: 4, panes: [{ id: 'pane-a', title: 'a', cwd: '/tmp', untouched: false, alert: null }] };
@@ -34,7 +34,7 @@ beforeEach(() => {
   released.length = 0;
   forgotten.length = 0;
   disposedBrowsers.length = 0;
-  helpers.clear();
+  auxTerminals.clear();
 });
 
 function deps(order: string[] = [], overrides: Partial<Parameters<typeof prepareWorkspaceTransfer>[0]> = {}) {
@@ -111,9 +111,9 @@ describe('prepareWorkspaceTransfer', () => {
   });
 });
 
-it('refuses transfer while a helper promotion is awaiting the host', async () => {
-  helpers.set('pane-a', { id: 'helper-a', promoting: true });
-  await expect(prepareWorkspaceTransfer(deps())).rejects.toThrow('Wait for helper promotion');
+it('refuses transfer while an aux terminal promotion is awaiting the host', async () => {
+  auxTerminals.set('pane-a', { id: 'aux-a', promoting: true });
+  await expect(prepareWorkspaceTransfer(deps())).rejects.toThrow('Wait for aux terminal promotion');
   expect(released).toEqual([]);
   expect(forgotten).toEqual([]);
 });

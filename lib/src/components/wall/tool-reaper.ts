@@ -8,7 +8,7 @@ import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-q
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { toolReapIdleMsOverride } from '../../lib/feature-flags';
-import { getHelper } from '../../lib/helper-terminal';
+import { getAux } from '../../lib/aux-terminal';
 import { isPendingKillSession } from '../../lib/pending-kills';
 import { toolNavigationPending } from './tool-navigation';
 import { isToolCommandArgv } from '../../lib/session-types';
@@ -73,7 +73,7 @@ export function toolReapBlocker(id: string, params: Record<string, unknown> | un
   if (announce?.dehydrate !== true) return 'it never declared itself safe to stop';
   if (announce.persist === 'never') return 'it announced persist: never';
   if (getToolDirty(id) === true) return 'it reports unsaved changes';
-  if (getHelper(id)) return 'it has an auxiliary helper';
+  if (getAux(id)) return 'it has an aux terminal';
   return null;
 }
 

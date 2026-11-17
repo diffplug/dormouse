@@ -117,7 +117,7 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Persisted session types
 
-**Why a reported directory is saved.** It is terminal-reported, the value splits, helpers, and Reopen already use, and it is saved only where the host's probe has no answer: every pane on Windows, where the probe resolves nothing (2026-11). A save that skips the probe (the post-kill quit flush, a Surface move) keeps the previous record first, because a shell without integration reports only its spawn directory, which would overwrite the probe's last good answer. Before, every Windows row was saved with `cwd: null`, so a relaunch opened every shell in the home directory and typed an auto-resumed agent's command there.
+**Why a reported directory is saved.** It is terminal-reported, the value splits, aux terminals, and Reopen already use, and it is saved only where the host's probe has no answer: every pane on Windows, where the probe resolves nothing (2026-11). A save that skips the probe (the post-kill quit flush, a Surface move) keeps the previous record first, because a shell without integration reports only its spawn directory, which would overwrite the probe's last good answer. Before, every Windows row was saved with `cwd: null`, so a relaunch opened every shell in the home directory and typed an auto-resumed agent's command there.
 
 **What a cwd probe costs.** On macOS `getCwd` is an `lsof` subprocess in the sidecar, on every debounced save and every 30 s heartbeat; per pane, and per Workspace in a quit flush that fans out to every Wall at once, it would be N spawns on the sidecar's only event loop.
 
@@ -141,7 +141,7 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Universal invariants
 
-**Why no synchronous subprocess.** Measured on Windows, 2026-10-02: the installed 1.1.0 sidecar blocked its event loop for 1.7–2.3 seconds during PowerShell process/listener scans, and a real node-pty raw-echo probe measured 767–855 ms input delay during scans, versus 1 ms without. Tool discovery and dev-server chips request these in the background, so ordinary input waited behind decorative work; scheduling the request in webview idle time did not make the host's scan idle-safe, and batching limits subprocess work without keeping the loop free. The same blocking sat in helper busy checks (a Win32_Process scan), macOS cwd saves (`lsof` with no timeout) and WSL detection (`reg.exe`).
+**Why no synchronous subprocess.** Measured on Windows, 2026-10-02: the installed 1.1.0 sidecar blocked its event loop for 1.7–2.3 seconds during PowerShell process/listener scans, and a real node-pty raw-echo probe measured 767–855 ms input delay during scans, versus 1 ms without. Tool discovery and dev-server chips request these in the background, so ordinary input waited behind decorative work; scheduling the request in webview idle time did not make the host's scan idle-safe, and batching limits subprocess work without keeping the loop free. The same blocking sat in aux terminal busy checks (a Win32_Process scan), macOS cwd saves (`lsof` with no timeout) and WSL detection (`reg.exe`).
 
 **Async spawns over a worker.** A per-scan worker thread kept stalls at 1 ms but covered ports only, and needed its own entry file in every bundle of `pty-core.js`. Async `execFile` covers every probe; on the same machine a full port scan (~900 ms) stalled the loop at most 13–21 ms, the spawns' own cost, against 880–950 ms synchronously (2026-10-02).
 

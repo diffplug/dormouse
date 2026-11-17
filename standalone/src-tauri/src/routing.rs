@@ -252,7 +252,7 @@ pub struct Arrival {
     /// The window that still shows the Workspace until the target adopts it.
     pub from: String,
     pub to: String,
-    /// Exactly the PTYs whose ownership moved, helpers included.
+    /// Exactly the PTYs whose ownership moved, aux terminals included.
     pub terminal_ids: Vec<String>,
     /// What the target mounts the Workspace from.
     pub payload: JsonValue,
@@ -962,17 +962,17 @@ mod tests {
     #[test]
     fn arrival_ids_are_per_arrival_not_per_window() {
         let mut arrivals = Arrivals::new();
-        queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["a", "a-helper"]));
+        queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["a", "a-aux"]));
         queue_arrival(&mut arrivals, arrival("w2", "ws-9", "ws-2", &["b"]));
 
         assert_eq!(
             find_arrival(&arrivals, "w1").unwrap().terminal_ids,
-            vec!["a".to_string(), "a-helper".to_string()]
+            vec!["a".to_string(), "a-aux".to_string()]
         );
         assert_eq!(find_arrival(&arrivals, "w2").unwrap().terminal_ids, vec!["b".to_string()]);
         assert_eq!(
             arrival_ids(&arrivals),
-            ["a", "a-helper", "b"].iter().map(|id| (*id).to_string()).collect::<HashSet<_>>()
+            ["a", "a-aux", "b"].iter().map(|id| (*id).to_string()).collect::<HashSet<_>>()
         );
     }
 

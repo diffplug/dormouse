@@ -93,7 +93,7 @@ export type AlertModelEvent =
   | { k: 'remove' }
   /** A new PTY generation; `todo`/`clean` seed it from a persisted state. */
   | { k: 'respawn'; seed: 'none' | 'todo' | 'clean' }
-  | { k: 'helper'; on: boolean }
+  | { k: 'aux'; on: boolean }
   | { k: 'sink'; sink: AlertSink; on: boolean }
   | { k: 'wait'; ms: number }
   /** Run exactly the next timer. */
@@ -252,7 +252,7 @@ class World {
           manager.seed(S, event.seed === 'todo' ? { todo: true, notification: RESTORED } : { todo: false, notification: null });
         }
         return;
-      case 'helper': return manager.setHelper(S, event.on);
+      case 'aux': return manager.setAux(S, event.on);
       case 'wait':
         vi.advanceTimersByTime(event.ms);
         return;
@@ -292,7 +292,7 @@ interface Latch {
 export interface Snap {
   now: number;
   entry: object | null;
-  helper: boolean;
+  aux: boolean;
   /** The id is retired: removed, no new generation since. */
   retired: boolean;
   /** Each present viewer's focus, as the manager holds it. */
@@ -354,7 +354,7 @@ function read(world: World): Snap {
   return {
     now,
     entry: entry ?? null,
-    helper: !world.disposed && manager['helpers'].has(S),
+    aux: !world.disposed && manager['auxTerminals'].has(S),
     retired: !world.disposed && manager['removed'].has(S),
     viewers,
     engaged: !world.disposed && manager.isEngaged(S),
@@ -401,11 +401,11 @@ const input = (s: Step) => is(s, 'key', 'send');
 /** An acknowledging gesture, with input or without (Engagement). */
 const gesture = (s: Step) => is(s, 'key', 'wheel', 'click');
 const gestureWithInput = (s: Step) => is(s, 'key', 'wheel');
-/** A user verb that acts: a helper's gestures and TODO controls do not
+/** A user verb that acts: an aux terminal's gestures and TODO controls do not
  *  (`docs/specs/alert.md` -> Pane Header). */
-const verb = (s: Step) => s.ev.k === 'dismiss' || (is(s, 'key', 'wheel', 'click', 'pill', 't') && !s.pre.helper);
-const activeProgress = (s: Step) => s.ev.k === 'progress' && !s.pre.helper && isActiveProgress(s.ev);
-const endProgress = (s: Step) => s.ev.k === 'progress' && !s.pre.helper && !isActiveProgress(s.ev);
+const verb = (s: Step) => s.ev.k === 'dismiss' || (is(s, 'key', 'wheel', 'click', 'pill', 't') && !s.pre.aux);
+const activeProgress = (s: Step) => s.ev.k === 'progress' && !s.pre.aux && isActiveProgress(s.ev);
+const endProgress = (s: Step) => s.ev.k === 'progress' && !s.pre.aux && !isActiveProgress(s.ev);
 function isActiveProgress(ev: Of<'progress'>): boolean {
   return ev.state === 'warning' || ev.state === 'indeterminate' || (ev.state === 'normal' && ev.percent !== 100);
 }
@@ -425,11 +425,11 @@ const progressReport = (s: Step) => (time(s) || boundary(s)) && s.pre.state.Prog
 /** Held sources going back to Dispatch: an idle lapse, or the leave grace with no viewer present. */
 const escalated = (s: Step) => (s.ev.k === 'idle' && s.pre.state.Hold === 'Held')
   || (time(s) && s.pre.state.Hold === 'Leaving' && s.post.viewers.size === 0);
-/** A completion Dispatch may ring or hold, past the helper gate: a settle
+/** A completion Dispatch may ring or hold, past the aux terminal gate: a settle
  *  while watched, a command finish from Seen, or a report
  *  (`docs/specs/alert.md` -> Completion events); or a held source going back
  *  to Dispatch, which passes that gate and goes on at Engaged?. */
-const completion = (s: Step) => !s.pre.helper && (escalated(s)
+const completion = (s: Step) => !s.pre.aux && (escalated(s)
   || (settled(s) && watched(s.pre))
   || (is(s, 'finish', 'prompt', 'exit') && s.pre.state.Command === 'Seen')
   || s.ev.k === 'report' || progressReport(s));
@@ -476,8 +476,8 @@ const arriving = (s: Step) => s.await !== undefined && s.await.arrivedStep === s
 const settledNow = (s: Step) => s.await !== undefined && s.await.settledStep === s.index && s.await.arrivedStep !== s.index;
 const outcomeIs = (s: Step, kind: AwaitOutcome['kind']) => s.await?.outcome?.kind === kind;
 const invalidTimeout = (ms: number) => !Number.isFinite(ms) || ms <= 0 || ms > MAX_AWAIT_TIMEOUT_MS;
-/** The arrival fails at once: an invalid request, a helper, a removed Session. */
-const failsOnArrival = (s: Step) => invalidTimeout(s.await!.timeoutMs) || s.pre.helper || s.pre.retired;
+/** The arrival fails at once: an invalid request, an aux terminal, a removed Session. */
+const failsOnArrival = (s: Step) => invalidTimeout(s.await!.timeoutMs) || s.pre.aux || s.pre.retired;
 /**
  * The causes a latched source offers an await arriving now: a report always
  * (`bell`), `exit` only with nothing running, `watching` only under `quiet`
@@ -522,8 +522,8 @@ const due = (s: Step) => time(s) && s.post.now >= s.delivery!.dueAt;
 const blocked = (s: Step) => s.delivery!.sink === 'speech' ? s.post.engaged : s.post.viewers.size > 0;
 /** The episode is one Ringing stretch of the Ring. */
 const episodeEnded = (s: Step) => s.post.ring?.episode !== s.delivery!.episode;
-/** The Session was made a helper (Pane Header), which ends no episode. */
-const demoted = (s: Step) => s.ev.k === 'helper' && s.ev.on && !s.pre.helper;
+/** The Session was made an aux terminal (Pane Header), which ends no episode. */
+const demoted = (s: Step) => s.ev.k === 'aux' && s.ev.on && !s.pre.aux;
 
 // ---------------------------------------------------------------------------
 // Every drawn edge, by its exact text, and the step that fires it.
@@ -593,7 +593,7 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Progress: Active --> NoCycle: command boundary or host interrupt': (s) => boundary(s) || is(s, 'interrupt'),
       'Progress: Ending --> Active: normal below 100, warning, or indeterminate': activeProgress,
       'Progress: Ending --> Ending: normal 100, clear, or error, the first end standing': endProgress,
-      'Progress: Ending --> NoCycle: the end grace elapses, a gesture with input, or a command boundary — a reset, then a report': (s) => time(s) || (gestureWithInput(s) && !s.pre.helper) || boundary(s),
+      'Progress: Ending --> NoCycle: the end grace elapses, a gesture with input, or a command boundary — a reset, then a report': (s) => time(s) || (gestureWithInput(s) && !s.pre.aux) || boundary(s),
       'Progress: Ending --> NoCycle: host interrupt': (s) => is(s, 'interrupt'),
       'Progress: NoCycle --> NoCycle: normal 100, clear, or error': endProgress,
     },
@@ -603,7 +603,7 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Command: [*] --> NoCommand': always,
       'Command: NoCommand --> Seen: start while Engaged': (s) => s.ev.k === 'start' && s.pre.engaged,
       'Command: NoCommand --> Unseen: start while NotEngaged': (s) => s.ev.k === 'start' && !s.pre.engaged,
-      'Command: Unseen --> Seen: Engaged, or a gesture': (s) => engagedAgain(s) || (gesture(s) && !s.pre.helper),
+      'Command: Unseen --> Seen: Engaged, or a gesture': (s) => engagedAgain(s) || (gesture(s) && !s.pre.aux),
       'Command: Unseen --> NoCommand: finish, prompt, or PTY exit — an unseen command finish': (s) => is(s, 'finish', 'prompt', 'exit'),
       'Command: Seen --> NoCommand: finish, prompt, or PTY exit — a command finish': (s) => is(s, 'finish', 'prompt', 'exit'),
       'Command: Unseen --> NoCommand: host interrupt, or another start before its own start edge': (s) => is(s, 'interrupt', 'start'),
@@ -638,11 +638,11 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
     accept: {
       'Todo: [*] --> Off': always,
       'Todo: [*] --> On: restored': (s) => s.ev.k === 'respawn' && s.ev.seed === 'todo',
-      'Todo: Off --> On: hold, t, or a gesture without input or dismiss while Ringing': (s) => hold(s) || (s.ev.k === 't' && !s.pre.helper)
-        || (s.pre.state.Ring === 'Ringing' && ((s.ev.k === 'click' && !s.pre.helper) || s.ev.k === 'dismiss')),
+      'Todo: Off --> On: hold, t, or a gesture without input or dismiss while Ringing': (s) => hold(s) || (s.ev.k === 't' && !s.pre.aux)
+        || (s.pre.state.Ring === 'Ringing' && ((s.ev.k === 'click' && !s.pre.aux) || s.ev.k === 'dismiss')),
       "Todo: On --> On: hold or receipt, detail only if richer, or a gesture without input or dismiss while Ringing, taking the ring's detail": (s) => completion(s)
-        || (s.pre.state.Ring === 'Ringing' && ((s.ev.k === 'click' && !s.pre.helper) || s.ev.k === 'dismiss')),
-      'Todo: On --> Off: a gesture with input, the pill, or t': (s) => is(s, 'key', 'wheel', 'pill', 't') && !s.pre.helper,
+        || (s.pre.state.Ring === 'Ringing' && ((s.ev.k === 'click' && !s.pre.aux) || s.ev.k === 'dismiss')),
+      'Todo: On --> Off: a gesture with input, the pill, or t': (s) => is(s, 'key', 'wheel', 'pill', 't') && !s.pre.aux,
     },
   },
   Acked: {
@@ -659,7 +659,7 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Delivery: [*] --> Pending: the episode opens, the sink on': (s) => opening(s) && s.delivery!.onAtOpen,
       'Delivery: [*] --> Spent: the episode opens, the sink off': (s) => opening(s) && !s.delivery!.onAtOpen,
       'Delivery: Pending --> Delivered: due, not blocked': (s) => due(s) && !blocked(s),
-      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends': (s) =>
+      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to aux terminal, or the episode ends': (s) =>
         (due(s) && blocked(s)) || sinkTurnedOff(s) || demoted(s) || episodeEnded(s),
       'Delivery: Delivered --> [*]': always,
       'Delivery: Spent --> [*]': always,
@@ -667,14 +667,14 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
     // Pending and Spent read alike, so every trigger out of Pending is exact.
     exact: new Set([
       'Delivery: Pending --> Delivered: due, not blocked',
-      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends',
+      'Delivery: Pending --> Spent: due while blocked, the sink turned off, a demotion to aux terminal, or the episode ends',
     ]),
   },
   Await: {
     accept: {
       'Await: [*] --> arrive': arriving,
-      'Await: arrive --> Failed: an invalid request or a helper Session — cancelled': (s) => arriving(s) && outcomeIs(s, 'cancelled')
-        && (invalidTimeout(s.await!.timeoutMs) || s.pre.helper),
+      'Await: arrive --> Failed: an invalid request or an aux terminal Session — cancelled': (s) => arriving(s) && outcomeIs(s, 'cancelled')
+        && (invalidTimeout(s.await!.timeoutMs) || s.pre.aux),
       'Await: arrive --> Failed: the Session already removed — died': (s) => arriving(s) && outcomeIs(s, 'died') && s.pre.retired,
       'Await: arrive --> Resolved: Ringing, else a hold, with a source it accepts — withdraw it': (s) => arriving(s) && !failsOnArrival(s)
         && s.await!.outcome?.kind === 'resolved' && offeredCauses(s.pre, s.await!.until).has(s.await!.outcome.cause),
@@ -736,7 +736,7 @@ export const INVARIANTS: readonly Invariant[] = [
     key: 'Public State: status is the first matching rung of the ladder',
     check(s) {
       const { post } = s;
-      if (!post.entry || post.helper) return null;
+      if (!post.entry || post.aux) return null;
       const { state, published } = post;
       const detector = state.Detector === 'Quiet' || state.Detector === 'Candidate' ? 'NOTHING_TO_SHOW' : state.Detector;
       const expected = state.Ring === 'Ringing' ? 'ALERT_RINGING'
@@ -897,13 +897,13 @@ export const INVARIANTS: readonly Invariant[] = [
     },
   },
   {
-    key: 'Pane Header: a helper never rings or holds',
-    check: (s) => s.pre.helper && s.pre.entry === s.post.entry && (ringOpened(s) || (s.pre.held === null && s.post.held !== null))
-      ? `a helper ${ringOpened(s) ? 'rang' : 'held'}` : null,
+    key: 'Pane Header: an aux terminal never rings or holds',
+    check: (s) => s.pre.aux && s.pre.entry === s.post.entry && (ringOpened(s) || (s.pre.held === null && s.post.held !== null))
+      ? `an aux terminal ${ringOpened(s) ? 'rang' : 'held'}` : null,
   },
   {
-    key: 'Pane Header: a helper publishes only the default state',
-    check: (s) => s.post.helper && realmView(s.post.published) !== realmView(DEFAULT_ALERT_STATE) ? 'a helper published state' : null,
+    key: 'Pane Header: an aux terminal publishes only the default state',
+    check: (s) => s.post.aux && realmView(s.post.published) !== realmView(DEFAULT_ALERT_STATE) ? 'an aux terminal published state' : null,
   },
   {
     key: 'Alarm settings: at most one delivery per sink per episode',
@@ -1193,7 +1193,7 @@ function draw(rng: () => number, snap: Snap, world: World, without: ReadonlySet<
     ['interrupt', 0.8, () => ({ k: 'interrupt' })],
     ['remove', 0.25, () => ({ k: 'remove' })],
     ['respawn', snap.retired ? 3 : 0.4, () => ({ k: 'respawn', seed: pick(rng, ['none', 'todo', 'clean'] as const) })],
-    ['helper', snap.helper ? 2 : 0.3, () => ({ k: 'helper', on: !snap.helper })],
+    ['aux', snap.aux ? 2 : 0.3, () => ({ k: 'aux', on: !snap.aux })],
     ['sink', 1, () => ({ k: 'sink', sink: pick(rng, ['speech', 'push'] as const), on: rng() < 0.5 })],
   ];
   const allowed = options.filter(([kind, weight]) => weight > 0 && !without.has(kind));

@@ -29,7 +29,7 @@ delete process.env.DORMOUSE_CONTROL_SOCKET;
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
-  getHelperParentId: mgr.getHelperParentId,
+  getAuxParentId: mgr.getAuxParentId,
   send(event, data) {
     process.send({ type: event, ...data });
   },
@@ -39,7 +39,7 @@ let dorControlEnv = null;
 
 process.on('message', (msg) => {
   switch (msg.type) {
-    case 'spawn':   mgr.spawn(msg.id, { cols: msg.cols, rows: msg.rows, cwd: msg.cwd, shell: msg.shell, args: msg.args, helper: msg.helper, dehydrate: msg.dehydrate, env: { ...msg.env, ...dorControlEnv } }); break;
+    case 'spawn':   mgr.spawn(msg.id, { cols: msg.cols, rows: msg.rows, cwd: msg.cwd, shell: msg.shell, args: msg.args, aux: msg.aux, dehydrate: msg.dehydrate, env: { ...msg.env, ...dorControlEnv } }); break;
     case 'cancelInput': mgr.cancelSendInput(msg.id, msg.inputId); break;
     case 'sendInput':
       mgr.sendInput(msg.id, msg.events, msg.inputId).then(

@@ -47,7 +47,7 @@ export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<vo
   }
 }
 
-/** Hold until an open terminal context has mounted and every terminal, its helper's included, has painted. */
+/** Hold until an open terminal context has mounted and every terminal, its aux terminal's included, has painted. */
 export async function settleTerminalContext(opts?: { timeoutMs?: number }): Promise<void> {
   await requireElement('[data-terminal-context]', 'terminal context');
   await settleTerminals(opts);
