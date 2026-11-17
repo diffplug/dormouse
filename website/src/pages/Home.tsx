@@ -211,21 +211,31 @@ const PHONE_WIDTH = 390;
 const PHONE_VIEWPORT_MARGIN = 140;
 
 /** The real Pocket UI playing a script in a phone frame. It lays out at a
- *  phone's width and scales down to fit one screen and its column. It mounts
- *  once a third of the phone is on screen, so the script starts in view, and
- *  unmounts once it has scrolled away, so it starts over on return. */
+ *  phone's width and scales down to fit one screen and its column. It mounts a
+ *  screen ahead, so the phone is already on when it scrolls in; its script
+ *  starts once a third of the phone is on screen, and once it has scrolled
+ *  away the demo remounts, so it starts over on return. */
 function PocketDemoPhone({ className = "" }: { className?: string }) {
   const slotRef = useRef<HTMLDivElement>(null);
   const phoneRef = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [run, setRun] = useState(0);
   const [fit, setFit] = useState<{ scale: number; height: number; top: number } | null>(null);
   useEffect(() => {
     const slot = slotRef.current;
     const phone = phoneRef.current;
     if (!slot || !phone) return;
+    const nearby = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setNear(true);
+    }, { rootMargin: "100% 0px" });
+    nearby.observe(slot);
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.intersectionRatio >= 0.35) setPlaying(true);
-      else if (!entry.isIntersecting) setPlaying(false);
+      else if (!entry.isIntersecting) {
+        setPlaying(false);
+        setRun((count) => count + 1);
+      }
     }, { threshold: [0, 0.35] });
     observer.observe(slot);
     // The projection's size at scale 1: its drawn box over the scale it was drawn at.
@@ -243,6 +253,7 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
     resize.observe(slot);
     window.addEventListener("resize", refit);
     return () => {
+      nearby.disconnect();
       observer.disconnect();
       resize.disconnect();
       window.removeEventListener("resize", refit);
@@ -274,9 +285,9 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
         <div className="mx-auto mb-3 h-1.5 w-24 rounded-full bg-white/20" />
         <div className="aspect-[390/760] overflow-hidden rounded-[1.25rem] border border-white/10 bg-black">
           <div className="h-full" aria-hidden="true" inert>
-            {playing ? (
+            {near ? (
               <Suspense fallback={null}>
-                <PocketDemo still={prefersReducedMotion()} />
+                <PocketDemo key={run} playing={playing} still={prefersReducedMotion()} />
               </Suspense>
             ) : null}
           </div>

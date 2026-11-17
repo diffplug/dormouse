@@ -15,7 +15,8 @@ import { DemoStopped, Finger, FINGER_CLASS } from "./finger";
  * The homepage's Pocket demo: the real mobile composition on a fake PTY,
  * driven by a script. A request typed into Type, an agent's question answered
  * with two gestures, then the README it changed, opened from the Sessions
- * screen, with its new 3D embed turning. It loops while on screen.
+ * screen, with its new 3D embed turning. Mounted, it shows the agent at its
+ * prompt; the script loops while `playing`.
  */
 
 const AGENT = "pocket-demo-agent";
@@ -52,10 +53,22 @@ function waitForPty(adapter: FakePtyAdapter, id: string): Promise<void> {
   });
 }
 
-export default function PocketDemo({ still = false }: { still?: boolean }) {
+/** A fresh agent at an empty prompt, on a cleared screen, in place of `ref`'s. */
+function freshAgent(adapter: FakePtyAdapter, ref: { current: DemoAgent | null }): DemoAgent {
+  ref.current?.dispose();
+  adapter.sendOutput(AGENT, "\x1b[2J\x1b[3J\x1b[H");
+  const agent = new DemoAgent((data) => adapter.sendOutput(AGENT, data));
+  ref.current = agent;
+  adapter.setInputHandler(AGENT, (data) => agent.handleInput(data));
+  agent.start();
+  return agent;
+}
+
+export default function PocketDemo({ playing, still = false }: { playing: boolean; still?: boolean }) {
   useRestoredTheme(DOCS_THEME_ID);
   const screenRef = useRef<HTMLDivElement>(null);
   const fingerRef = useRef<HTMLDivElement>(null);
+  const agentRef = useRef<DemoAgent | null>(null);
   const [adapter, setAdapter] = useState<FakePtyAdapter | null>(null);
   const [sessions, setSessions] = useState<MobileWallSession[]>(still ? [AGENT_SESSION, README_SESSION] : [AGENT_SESSION]);
   const [activeId, setActiveId] = useState(still ? README : AGENT);
@@ -76,32 +89,34 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
     };
   }, []);
 
+  // The phone is on before the script plays: the agent waits at its prompt.
+  useEffect(() => {
+    if (!adapter) return;
+    let live = true;
+    void waitForPty(adapter, AGENT).then(() => {
+      if (live && !agentRef.current) freshAgent(adapter, agentRef);
+    });
+    return () => {
+      live = false;
+      agentRef.current?.dispose();
+      agentRef.current = null;
+      adapter.clearInputHandler(AGENT);
+    };
+  }, [adapter]);
+
   const handleSendInput = useCallback((data: string) => writeUserInput(activeId, data), [activeId]);
 
   useEffect(() => {
     const screen = screenRef.current;
     const dot = fingerRef.current;
-    if (!adapter || still || !screen || !dot) return;
+    if (!adapter || !playing || still || !screen || !dot) return;
     const controller = new AbortController();
     const finger = new Finger(screen, dot, controller.signal);
-    let agent: DemoAgent | null = null;
-
-    /** A fresh agent at an empty prompt, on a cleared screen. */
-    const freshAgent = (): DemoAgent => {
-      agent?.dispose();
-      adapter.sendOutput(AGENT, "\x1b[2J\x1b[3J\x1b[H");
-      const current = new DemoAgent((data) => adapter.sendOutput(AGENT, data));
-      agent = current;
-      adapter.setInputHandler(AGENT, (data) => current.handleInput(data));
-      current.start();
-      return current;
-    };
-
     const play = async () => {
       await waitForPty(adapter, AGENT);
-      let current = freshAgent();
+      let current = agentRef.current ?? freshAgent(adapter, agentRef);
       finger.show(true);
-      await finger.sleep(1_200);
+      await finger.sleep(600);
       for (;;) {
         await finger.tap(find(screen, 'button[aria-label="Type"]'));
         const field = find(screen, "[data-mobile-composer] textarea") as HTMLTextAreaElement;
@@ -118,12 +133,12 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
         const terminal = find(screen, ".xterm-screen");
         const press = { x: screen.clientWidth * 0.62, y: screen.clientHeight * 0.66 };
         await finger.moveTo(press, 500);
-        await finger.drag(terminal, [{ x: 0, y: 92, ms: 420 }]);
+        await finger.drag(terminal, [{ x: 0, y: 92, ms: 840 }]);
         await finger.sleep(650);
         await finger.moveTo(press, 380);
         await finger.drag(terminal, [
-          { x: 62, y: 62, ms: 380, holdMs: 420 },
-          { x: -4, y: -4, ms: 360 },
+          { x: 62, y: 62, ms: 760, holdMs: 840 },
+          { x: -4, y: -4, ms: 720 },
         ]);
 
         await current.waitFor("done");
@@ -133,7 +148,7 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
         await finger.sleep(600);
         await finger.tap(find(screen, 'section[aria-label="Sessions"] button', "README.md"));
         // Behind the README, the agent starts over, so returning finds it empty.
-        current = freshAgent();
+        current = freshAgent(adapter, agentRef);
         await finger.moveTo({ x: screen.clientWidth * 0.82, y: screen.clientHeight * 0.88 }, 700);
         await finger.sleep(6_000);
 
@@ -149,10 +164,9 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
     });
     return () => {
       controller.abort(new DemoStopped());
-      agent?.dispose();
-      adapter.clearInputHandler(AGENT);
+      finger.show(false);
     };
-  }, [adapter, still]);
+  }, [adapter, playing, still]);
 
   return (
     <div ref={screenRef} className="relative h-full overflow-hidden" style={APP_TYPE_SCALE}>
