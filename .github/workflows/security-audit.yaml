@@ -132,8 +132,8 @@ jobs:
       # a model each night (docs/specs/security-audit.md -> "Deterministic
       # checks"). Its fragment rides `AUDIT_FRAGMENTS` like a domain's, so a
       # FAIL here fails the run through the reporting steps below. It must
-      # not stop the domains: a crash leaves no fragment, which the
-      # reporting step's guard reports as an unfinished audit.
+      # not stop the domains: a crash leaves no fragment, which the report
+      # builder reports as a domain that left no report.
       - name: Check GitHub state
         id: ghstate
         continue-on-error: true
