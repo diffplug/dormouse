@@ -108,9 +108,12 @@ export class Finger {
   }
 }
 
-/** Centered on its position by the negative margin, half its 34px size. */
+/** Centered on its position by the negative margin, half its 34px size. A
+ *  press fills it and rings it with a halo, never resizing it: a scale would
+ *  compose with the translate that places it and shift it. */
 export const FINGER_CLASS = [
   "pointer-events-none absolute left-0 top-0 z-50 -m-[17px] h-[34px] w-[34px] rounded-full",
-  "border-2 border-white/80 bg-white/35 shadow-[0_2px_10px_rgba(0,0,0,0.45)]",
-  "transition-[opacity,scale] duration-150 data-[pressed=true]:scale-[0.82] data-[pressed=true]:bg-white/55",
+  "border-2 border-white/80 bg-white/20 shadow-[0_2px_10px_rgba(0,0,0,0.45)]",
+  "transition-[opacity,background-color,box-shadow] duration-150",
+  "data-[pressed=true]:bg-white/70 data-[pressed=true]:shadow-[0_0_0_7px_rgba(255,255,255,0.22),0_2px_10px_rgba(0,0,0,0.45)]",
 ].join(" ");
