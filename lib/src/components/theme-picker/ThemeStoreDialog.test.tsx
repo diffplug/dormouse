@@ -108,6 +108,20 @@ describe('ThemeStoreDialog', () => {
     }
   });
 
+  it('shows Searching, not No themes found, while the debounce is pending', () => {
+    vi.useFakeTimers();
+    try {
+      render();
+      typeQuery('dracula');
+
+      expect(searchThemesMock).not.toHaveBeenCalled();
+      expect(container.textContent).toContain('Searching...');
+      expect(container.textContent).not.toContain('No themes found');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('stops searching when the box is emptied while a request is in flight', async () => {
     let resolveSearch!: (result: OpenVSXSearchResult) => void;
     searchThemesMock.mockImplementationOnce(

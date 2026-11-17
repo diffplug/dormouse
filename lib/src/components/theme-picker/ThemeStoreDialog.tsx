@@ -65,6 +65,9 @@ export function ThemeStoreDialog({
 
   const handleInput = (value: string) => {
     setQuery(value);
+    // Searching from the keystroke, not from when the debounce fires: until
+    // then the empty results would otherwise read as "No themes found".
+    setLoading(Boolean(value.trim()));
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSearch(value), 300);
   };
