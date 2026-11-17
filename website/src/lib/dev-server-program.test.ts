@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { OpenPort } from "dormouse-lib/lib/platform/types";
 import type { InteractiveProgram } from "./tutorial-shell";
-import { startDevServer } from "./dev-server-program";
+import { devServerPage, startDevServer } from "./dev-server-program";
+import { YOUTUBE_MUSIC_VIDEO } from "./youtube";
 
 const ports = new Map<string, OpenPort[]>();
 const reporter = { setOpenPorts: (id: string, open: OpenPort[]) => { ports.set(id, open); } };
@@ -43,5 +44,16 @@ describe("npm run dev", () => {
     expect(install.output()).toContain("npm run dev");
     expect(ports.has("a")).toBe(false);
     expect(startDevServer("node", [], reporter, "a", () => {}, () => {})).toBeNull();
+  });
+
+  it("sends a system browser for a running server's port to the music video, and nothing else", () => {
+    const server = launch("a");
+    expect(devServerPage("http://127.0.0.1:5173/")).toBe(YOUTUBE_MUSIC_VIDEO);
+    expect(devServerPage("http://localhost:5173/app")).toBe(YOUTUBE_MUSIC_VIDEO);
+    expect(devServerPage("http://127.0.0.1:5174/")).toBe("http://127.0.0.1:5174/");
+    expect(devServerPage("https://example.com:5173/")).toBe("https://example.com:5173/");
+    expect(devServerPage("not a url")).toBe("not a url");
+    server.program.handleInput("\x03");
+    expect(devServerPage("http://127.0.0.1:5173/")).toBe("http://127.0.0.1:5173/");
   });
 });

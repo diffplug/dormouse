@@ -1,12 +1,15 @@
 import { BOLD, DIM, RESET, fg } from "dormouse-lib/lib/ansi";
+import { isLoopbackHostname } from "dormouse-lib/lib/ip-literal";
 import type { OpenPort } from "dormouse-lib/lib/platform/types";
+import { YOUTUBE_MUSIC_VIDEO } from "./youtube";
 import type { InteractiveProgram, SendOutput } from "./tutorial-shell";
 
 /**
  * The pretend dev server the Ports and browsers section has the user run
  * (`npm run dev`). Like Vite, each one takes the first free port from 5173, so
  * two of them listen on different ports, which their panes' properties show.
- * It serves nothing: the playground cannot frame a page it has no server for.
+ * It serves nothing, so a system browser opening one gets the music video
+ * instead ({@link devServerPage}).
  */
 
 /** The names `startDevServer` runs, for the shell to complete and suggest. */
@@ -64,6 +67,18 @@ class DevServerProgram implements InteractiveProgram {
     this.port = null;
     this.ports.setOpenPorts(this.terminalId, []);
   }
+}
+
+/** What a system browser shows for `uri`: the music video when it names a
+ *  running dev server's port on this machine, else `uri` itself. */
+export function devServerPage(uri: string): string {
+  try {
+    const url = new URL(uri);
+    if (isLoopbackHostname(url.hostname) && portsInUse.has(Number(url.port))) return YOUTUBE_MUSIC_VIDEO;
+  } catch {
+    // Not a URL: nothing to redirect.
+  }
+  return uri;
 }
 
 /** `npm run dev` as a dev server; any other `npm` command says what runs here. */

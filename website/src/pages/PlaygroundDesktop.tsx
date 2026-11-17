@@ -12,7 +12,7 @@ import { TutDetector } from "../lib/tut-detector";
 import { trackTutorialCompletion } from "../lib/site-analytics";
 import { TutRunner } from "../lib/tut-runner";
 import { startAlertProgram } from "../lib/alert-programs";
-import { startDevServer } from "../lib/dev-server-program";
+import { devServerPage, startDevServer } from "../lib/dev-server-program";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import {
@@ -133,7 +133,14 @@ function PlaygroundDesktopExperience() {
       adapter.clearDefaultScenario();
       shellDefaults.setDefaultShellOpts({ shell: "/bin/fake" });
       const fsHost = playgroundFs.installPlaygroundFs(adapter);
-      disposeFsRef.current = fsHost.dispose;
+      // A pretend dev server's port opens the music video in a system browser.
+      const openExternal = adapter.openExternal.bind(adapter);
+      adapter.openExternal = (uri: string) => openExternal(devServerPage(uri));
+      disposeFsRef.current = () => {
+        fsHost.dispose();
+        // Back to the prototype's, for the Pocket page sharing this adapter.
+        delete (adapter as { openExternal?: unknown }).openExternal;
+      };
 
       const tutorialState = new TutorialState(DESKTOP_TUTORIAL_PROFILE.sections);
       stopCompletionTracking = trackTutorialCompletion(tutorialState, "desktop");
