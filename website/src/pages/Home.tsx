@@ -881,7 +881,7 @@ export default function Home() {
                 <a href={sitePath("/self-host")} className={SITE_LINK_CLASS}>self-host your own</a>.
               </p>
               <p className="text-lg leading-relaxed opacity-70">
-                The data travels over an encrypted WebRTC session between your laptop and your phone.
+                The data is end-to-end encrypted between your laptop and your phone, peer-to-peer over WebRTC whenever the network allows it.
                 You're not relying on any cloud services for access control,
                 and the full application gets audited every night with heavier pentest audits every month.
                 More info in our <a href={sitePath("/security")} className={SITE_LINK_CLASS}>security docs</a>.
