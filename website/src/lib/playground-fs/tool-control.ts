@@ -8,6 +8,7 @@ import { defaultBrowserViewportConfig } from "dor-lib-common/browser-viewports";
 import type { IframeProxyResult } from "dormouse-lib/lib/platform/iframe-proxy-types";
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
 import { builtinOpenResult, noUserToolMessage, offerBuiltins } from "dormouse-lib/lib/tool-open-builtin";
+import { isLoopbackHostname } from "dormouse-lib/lib/ip-literal";
 import { USER_CONFIG, type VirtualFs } from "./vfs";
 import { VIEWER_SCOPE } from "./viewers";
 
@@ -51,12 +52,12 @@ export function playgroundToolControl(fs: VirtualFs) {
 }
 
 /** Fronts only the playground's own viewers: `useToolServing` frames an
- * announced port at `localhost`, and the page that answers is this origin's
- * `/playground-fs/` service worker. Every other page is refused, since
- * nothing here can proxy it. */
+ * announced port at its listener's loopback address, and the page that answers
+ * is this origin's `/playground-fs/` service worker. Every other page is
+ * refused, since nothing here can proxy it. */
 export async function playgroundIframeUrl(targetUrl: string): Promise<IframeProxyResult> {
   const url = new URL(targetUrl);
-  return url.hostname === "localhost" && url.pathname.startsWith(VIEWER_SCOPE)
+  return isLoopbackHostname(url.hostname) && url.pathname.startsWith(VIEWER_SCOPE)
     ? { ok: true, url: `${location.origin}${url.pathname}${url.search}${url.hash}` }
     : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers" };
 }

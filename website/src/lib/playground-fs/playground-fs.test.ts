@@ -8,6 +8,7 @@ import { parseToolFile } from "dormouse-lib/host/tool-registry";
 import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES } from "./snapshot";
 import { respond, type RelayMessage } from "./sw-relay";
 import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
+import { listenerUrlsByPort } from "dormouse-lib/components/wall/port-url";
 import { PlaygroundViewers, type ViewerRequest, type ViewerResponse } from "./viewers";
 import { StockTree, USER_CONFIG, VirtualFs } from "./vfs";
 
@@ -127,8 +128,11 @@ describe("playgroundIframeUrl", () => {
   it("frames an announced viewer at this origin and refuses every other page", async () => {
     vi.stubGlobal("location", { origin: "https://dormouse.sh" });
     try {
-      expect(await playgroundIframeUrl("http://localhost:40000/playground-fs/t/view?x=1#section"))
+      // The URL Tool serving frames for the listener the playground's `dor` reports.
+      const [{ url: origin }] = listenerUrlsByPort([{ protocol: "tcp", family: "IPv4", address: "127.0.0.1", port: 40000, pid: 1 }]);
+      expect(await playgroundIframeUrl(`${origin}playground-fs/t/view?x=1#section`))
         .toEqual({ ok: true, url: "https://dormouse.sh/playground-fs/t/view?x=1#section" });
+      expect(await playgroundIframeUrl("http://localhost:40000/playground-fs/t/view")).toMatchObject({ ok: true });
       expect(await playgroundIframeUrl("http://localhost:5173/")).toMatchObject({ ok: false, reason: "scheme" });
       expect(await playgroundIframeUrl("http://example.com/playground-fs/t/view")).toMatchObject({ ok: false });
     } finally {
