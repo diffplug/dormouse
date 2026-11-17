@@ -324,13 +324,6 @@ export const ComposerPassword: Story = {
   },
 };
 
-export const NonInteractivePhoneMockup: Story = {
-  args: {
-    interactive: false,
-  },
-  render: (args) => <StoryFrame {...args} />,
-};
-
 export const CursorTouchAvailable: Story = {
   args: {
     cursorTouchAvailable: true,

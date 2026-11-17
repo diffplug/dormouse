@@ -237,7 +237,6 @@ export function PocketWall({ adapter, browsers, onError, persist = true, session
         />
       }
       browserShown={browserShown}
-      interactive
       activeTouchMode={touchMode}
       onTouchModeChange={setTouchMode}
       activeView={view}

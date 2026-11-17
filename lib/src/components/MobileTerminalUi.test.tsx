@@ -889,7 +889,7 @@ describe('MobileTerminalUi edge scroll', () => {
     expect(scrollLines.mock.calls).toEqual([[2]]);
   });
 
-  it.each(['touch', 'second finger', 'session', 'mode', 'disabled', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
+  it.each(['touch', 'second finger', 'session', 'mode', 'browser', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
     startClock();
     const { pointer, scrollLines, props, renderWith, viewport } = setup();
     flick(pointer);
@@ -899,7 +899,7 @@ describe('MobileTerminalUi edge scroll', () => {
     if (stop === 'second finger') pointer('pointerdown', 100, 200, { pointerId: 8, isPrimary: false });
     if (stop === 'session') renderWith({ ...props, sessions: [{ id: 'other', title: 'other', active: true, episode: null }] });
     if (stop === 'mode') renderWith({ ...props, activeTouchMode: 'selection' });
-    if (stop === 'disabled') renderWith({ ...props, interactive: false });
+    if (stop === 'browser') renderWith({ ...props, browserShown: true });
     if (stop === 'unmount') act(() => roots.pop()!.unmount());
     if (stop === 'hidden') {
       vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
@@ -995,7 +995,7 @@ describe('MobileTerminalUi edge scroll', () => {
   });
 
   it.each<Partial<MobileTerminalUiProps>>([
-    { interactive: false },
+    { browserShown: true },
     { activeTouchMode: 'selection' },
     { sessions: [{ id: 'other', title: 'other', active: true, episode: null }] },
   ])('cancels an edge drag when its context changes: %j', (change) => {
