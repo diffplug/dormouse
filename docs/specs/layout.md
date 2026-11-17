@@ -369,12 +369,12 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 **Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction; `cfg.terminal.webglRenderer` disables it (rationale). **Must report the active renderer as `data-renderer="webgl"|"dom"`** on the persistent terminal host.
 
-- **Must acquire GPU resources at mount, never at Session creation, and release them on unmount/minimize, Workspace deactivation, aux terminal parking, and Session disposal** (rationale), never letting a release failure abort teardown. The xterm, grid, buffers, PTY, and other addons survive the release, and a reattach loads a fresh addon without resizing the terminal.
+- **Must acquire GPU resources only once the mounted pane's geometry has settled and its first fit has run (none while a size hold owns the grid; [Animations](#animations)), never at Session creation, and release them on unmount/minimize, Workspace deactivation, aux terminal parking, and Session disposal** (rationale), never letting a release failure abort teardown. The xterm, grid, buffers, PTY, and other addons survive the release, and a reattach loads a fresh addon without resizing the terminal.
 - **Must attempt WebGL at most once per mount**: failure or context loss stays on DOM until the next remount (re-arming: [Future](#re-arming-the-webgl-renderer-after-context-loss)).
 - **Must preserve the addon's shared atlas cache** across compatible mounted terminals (rationale).
 - **Every `@xterm/*` pin must be exact, every addon's core peer must equal `^<core pin>`, and each `standalone` pin must equal `lib`'s**: the packages share a repo but carry independent beta counters (rationale). `scripts/xterm-lint.mjs` owns the check list; `pnpm bump:xterm` writes the newest coherent set.
 
-Source of truth: `TerminalWebglRenderer` in `lib/src/lib/terminal-webgl.ts`; `scripts/xterm-lint.mjs`; `scripts/xterm-bump.mjs`.
+Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `TerminalWebglRenderer` in `lib/src/lib/terminal-webgl.ts`; `scripts/xterm-lint.mjs`; `scripts/xterm-bump.mjs`.
 
 ### Inline graphics
 

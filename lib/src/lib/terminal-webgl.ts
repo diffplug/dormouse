@@ -8,7 +8,9 @@ export class TerminalWebglRenderer {
   private loseContext: (() => void) | undefined;
   private attempted = false;
 
-  constructor(private terminal: Terminal, private host: HTMLElement) {}
+  constructor(private terminal: Terminal, private host: HTMLElement) {
+    this.markDom();
+  }
 
   mount(): void {
     // A failed or evicted renderer stays on DOM until a real unmount/remount;

@@ -666,14 +666,24 @@ export function rehydrateTerminal(id: string, opts: Omit<SpawnSeed, 'cwd'> & { c
   launchCommand(id, opts.command, opts.cwd, true);
 }
 
-/** Reveal a Session's element in `container`. The caller owns fitting: only it knows
- *  whether the container's geometry has settled (`docs/specs/layout.md` -> Animations). */
+/** Reveal a Session's element in `container`, on xterm's DOM renderer. The caller owns
+ *  fitting and then `mountRenderer`: only it knows whether the container's geometry has
+ *  settled (`docs/specs/layout.md` -> Animations). */
 export function mountElement(id: string, container: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry) return;
   container.appendChild(entry.element);
   // The renderer owns only this mount's GPU resources; xterm state survives it.
-  (entry.webglRenderer ??= new TerminalWebglRenderer(entry.terminal, entry.element)).mount();
+  entry.webglRenderer ??= new TerminalWebglRenderer(entry.terminal, entry.element);
+}
+
+/** Acquire the GPU renderer of the Session mounted in `container`, after its pane's
+ *  first fit to settled geometry (`docs/specs/layout.md` -> Renderer). A caller from an
+ *  older mount is a no-op. */
+export function mountRenderer(id: string, container: HTMLElement): void {
+  const entry = registry.get(id);
+  if (!entry || entry.element.parentElement !== container) return;
+  entry.webglRenderer?.mount();
 }
 
 /**

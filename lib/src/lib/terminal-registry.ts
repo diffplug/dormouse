@@ -38,6 +38,7 @@ export {
   getSessionInputVersion,
   isUntouched,
   mountElement,
+  mountRenderer,
   writeUserInput,
   refitSession,
   registerSurfaceFocusHandle,
