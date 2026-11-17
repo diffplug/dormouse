@@ -1,9 +1,10 @@
 // `pty-host.js` is the VS Code side's only bridge from IPC messages to the shared
-// `pty-core`, and it is plain JS that loads only as a forked child: neither
-// `pnpm typecheck` nor a runtime test reaches it. A handler naming a manager
-// function `pty-core` no longer exports throws a TypeError inside the child, and
-// the caller just waits out its timeout. These source checks pin the wiring
-// both ways, as `standalone/sidecar/main-wiring.test.js` does for the sidecar.
+// `pty-core`, and it is plain JS that `pnpm typecheck` never checks. The VM runs
+// in `pty-host-flow.test.ts` and `standalone/sidecar/pty-host-wiring.test.js`
+// reach only the messages they send. A handler naming a manager function
+// `pty-core` no longer exports throws a TypeError inside the child, and the
+// caller just waits out its timeout. These source checks pin every handler's
+// wiring both ways, as `standalone/sidecar/main-wiring.test.js` does for the sidecar.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';

@@ -113,7 +113,7 @@ export async function runCli(rawArgv: string[], options: CliOptions): Promise<Cl
 
 
   // Some commands need argv validated *before* stricli parses it (the `--` command
-  // tail in `dor ensure`, `dor send`'s input-flag ordering). Each owns that check
+  // tail in `dor ensure`, `dor send`'s removed `--raw`). Each owns that check
   // as `Command.preParse`, defined next to its flags in the command module; here we
   // just dispatch it. A help invocation never runs the command func, so it skips it.
   if (command?.preParse && helpTarget === undefined) {

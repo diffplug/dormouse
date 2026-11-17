@@ -74,8 +74,8 @@ jobs:
       # The per-domain fragment filenames, then the deterministic
       # GitHub-state check's, in one place. They are
       # named by the redactor's argv, its fail-closed `rm -f`, the
-      # encrypted archive, the reporting step's guard loop, and the public
-      # body builder, and drift between two of those lists is precisely
+      # encrypted archive, and the report builder
+      # (`scripts/security-audit-report.mjs`), and drift between two of those lists is precisely
       # what the `FAIL IF` on the redactor exists to catch — a sink that
       # stops being redacted but keeps being published. Every use
       # word-splits this deliberately, so the names must stay
@@ -132,8 +132,8 @@ jobs:
       # a model each night (docs/specs/security-audit.md -> "Deterministic
       # checks"). Its fragment rides `AUDIT_FRAGMENTS` like a domain's, so a
       # FAIL here fails the run through the reporting steps below. It must
-      # not stop the domains: a crash leaves no fragment, which the
-      # reporting step's guard reports as an unfinished audit.
+      # not stop the domains: a crash leaves no fragment, which the report
+      # builder reports as a domain that left no report.
       - name: Check GitHub state
         id: ghstate
         continue-on-error: true
@@ -355,8 +355,8 @@ jobs:
           # agent output like any other: a subagent that shells out and
           # prints an environment lands the value in its own fragment,
           # not in the merged report. The fragment names come from the
-          # job-level `AUDIT_FRAGMENTS` so this list and the guard loop in
-          # the reporting step cannot drift; both expansions below are
+          # job-level `AUDIT_FRAGMENTS` so this list and the report builder
+          # cannot drift; both expansions below are
           # unquoted on purpose (shellcheck SC2086) because the value is a
           # filename list. Keep every shell comment outside the
           # single-quoted script — inside it, Node parses it as
