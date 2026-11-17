@@ -11,6 +11,7 @@ import { builtinOpenResult, noUserToolMessage, offerBuiltins } from "dormouse-li
 import { isLoopbackHostname } from "dormouse-lib/lib/ip-literal";
 import { USER_CONFIG, type VirtualFs } from "./vfs";
 import { VIEWER_SCOPE } from "./viewers";
+import { YOUTUBE_MUSIC_VIDEO, youtubeEmbedUrl } from "../youtube";
 
 export function playgroundToolControl(fs: VirtualFs) {
   /** `input` as an existing snapshot path and its built-in candidates, or the host's error. */
@@ -51,13 +52,15 @@ export function playgroundToolControl(fs: VirtualFs) {
   };
 }
 
-/** Fronts only the playground's own viewers: `useToolServing` frames an
- * announced port at its listener's loopback address, and the page that answers
- * is this origin's `/playground-fs/` service worker. Every other page is
- * refused, since nothing here can proxy it. */
+/** Fronts the playground's own viewers and frames the music video embed
+ * unproxied: `useToolServing` frames an announced port at its listener's
+ * loopback address, and the page that answers is this origin's
+ * `/playground-fs/` service worker. Every other page is refused, since nothing
+ * here can proxy it. */
 export async function playgroundIframeUrl(targetUrl: string): Promise<IframeProxyResult> {
   const url = new URL(targetUrl);
+  if (url.href === youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO)) return { ok: true, url: url.href };
   return isLoopbackHostname(url.hostname) && url.pathname.startsWith(VIEWER_SCOPE)
     ? { ok: true, url: `${location.origin}${url.pathname}${url.search}${url.hash}` }
-    : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers" };
+    : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers and the music video" };
 }

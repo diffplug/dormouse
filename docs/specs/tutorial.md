@@ -33,7 +33,7 @@ Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` i
 ## Layout
 
 - **The desktop page must restore its own theme** with `useRestoredTheme(DOCS_THEME_ID)` (rationale).
-- `/playground/desktop` runs `WorkspaceWindow` (`FakePtyAdapter`, `initialMode="passthrough"`) from one fresh Workspace. **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale).
+- `/playground/desktop` runs `WorkspaceWindow` (`FakePtyAdapter`, `initialMode="passthrough"`) from one fresh Workspace. **Must seed its four-pane layout as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each terminal seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale).
 
 Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`.
 
@@ -85,7 +85,7 @@ The desktop shells share one filesystem, a snapshot of the tracked files of `dor
 - **Must abandon a playground `dor` run on interruption or disposal**, including a pending CLI load, picker, and control requests; never send later requests or output.
 - **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
 - **Must serve the real viewer pages, CSPs, and contracts on the Node viewers' routes** (`docs/specs/dor-tools-builtin.md`); a PNG or JPEG the image editor can edit opens in it, and view-only images and other non-text formats are refused.
-- **`createIframeProxyUrl` must map only a loopback URL under `/playground-fs/` to this origin, preserving path, query, and fragment**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
+- **`createIframeProxyUrl` must map only a loopback URL under `/playground-fs/` to this origin, preserving path, query, and fragment, and pass through only the music video's embed URL**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
 - **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below, bodies as Blobs (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
 
 ```mermaid

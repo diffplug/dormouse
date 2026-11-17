@@ -215,7 +215,7 @@ function PlaygroundDesktopExperience() {
         if (adapter.hasPty(pane.id)) tryAutoStart(pane);
       }
 
-      // A revisit starts from one Workspace and re-seeds the L-shape rather
+      // A revisit starts from one Workspace and re-seeds the layout rather
       // than finding the last visit's Workspaces.
       workspaceWindow.resetWorkspaceWindow();
       // A user's name, so auto-naming never retitles it from its panes' cwd.
@@ -242,7 +242,7 @@ function PlaygroundDesktopExperience() {
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
 
   const handleWallEvent = useCallback((event: WallEvent) => {
-    // Every visible pane (the three seed panes + any the user splits off) gets a
+    // Every visible pane (the seed panes + any the user splits off) gets a
     // fake shell. `paneAdded` fires once per pane that becomes visible, before the
     // pane's terminal spawns.
     if (event.type === "paneAdded") {

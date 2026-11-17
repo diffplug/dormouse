@@ -9,6 +9,7 @@ import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES } from "./snapshot";
 import { respond, type RelayMessage } from "./sw-relay";
 import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
 import { listenerUrlsByPort } from "dormouse-lib/components/wall/port-url";
+import { YOUTUBE_MUSIC_VIDEO, youtubeEmbedUrl } from "../youtube";
 import { PlaygroundViewers, type ViewerRequest, type ViewerResponse } from "./viewers";
 import { StockTree, USER_CONFIG, VirtualFs } from "./vfs";
 
@@ -135,6 +136,9 @@ describe("playgroundIframeUrl", () => {
       expect(await playgroundIframeUrl("http://localhost:40000/playground-fs/t/view")).toMatchObject({ ok: true });
       expect(await playgroundIframeUrl("http://localhost:5173/")).toMatchObject({ ok: false, reason: "scheme" });
       expect(await playgroundIframeUrl("http://example.com/playground-fs/t/view")).toMatchObject({ ok: false });
+      const video = youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO);
+      expect(await playgroundIframeUrl(video)).toEqual({ ok: true, url: video });
+      expect(await playgroundIframeUrl("https://www.youtube-nocookie.com/embed/other")).toMatchObject({ ok: false });
     } finally {
       vi.unstubAllGlobals();
     }
