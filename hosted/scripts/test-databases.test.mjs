@@ -53,14 +53,15 @@ test("failed startup is cleaned even without services.json", async (t) => {
 });
 
 test("a later invocation reaps dead runners but preserves live runners and unrelated directories", async (t) => {
+  // Fixed PIDs: the default, process.pid, can itself be 12345 on a CI runner.
   const f = await fixture(t, { isAlive: (pid) => pid !== 12345 });
   const dead = await f.create({ pid: 12345 });
   await mkdir(join(dead.root, ".pgstencil"));
   const unrelated = join(f.directory, "pgstencil-development");
   await mkdir(unrelated);
-  const live = await f.create();
+  const live = await f.create({ pid: 23456 });
   await missing(dead.root);
-  const next = await f.create();
+  const next = await f.create({ pid: 34567 });
   await access(live.root);
   await access(unrelated);
   assert.equal(f.calls.length, 1);
