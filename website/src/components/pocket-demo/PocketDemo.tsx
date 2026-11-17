@@ -123,7 +123,7 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
         await finger.moveTo({ x: screen.clientWidth * 0.78, y: screen.clientHeight * 0.55 }, 400);
         for (let i = 1; i <= REQUEST.length; i++) {
           setNativeFieldValue(field, REQUEST.slice(0, i));
-          await finger.sleep(REQUEST[i - 1] === " " ? 35 : 19);
+          await finger.sleep(REQUEST[i - 1] === " " ? 18 : 10);
         }
         await finger.sleep(350);
         await finger.tap(find(screen, "[data-mobile-composer] button", "Send"));
@@ -149,8 +149,7 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
         await finger.tap(find(screen, 'section[aria-label="Sessions"] button', "README.md"));
         // Behind the README, the agent starts over, so returning finds it empty.
         current = freshAgent(adapter, agentRef);
-        await finger.moveTo({ x: screen.clientWidth * 0.82, y: screen.clientHeight * 0.88 }, 700);
-        await finger.sleep(6_000);
+        await finger.sleep(1_300);
 
         await finger.tap(find(screen, 'button[title="Show sessions"]'));
         await finger.sleep(600);

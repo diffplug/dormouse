@@ -89,7 +89,7 @@ export class DemoAgent {
   private read(): void {
     this.setPhase("reading");
     this.send("\r\n\r\n");
-    this.steps("Reading", READING, 1_200, () => {
+    this.steps("Reading", READING, 600, () => {
       this.send(`\r\n${ACCENT}?${RESET} ${QUESTION}\r\n\r\n${this.choices()}\x1b[?25l`);
       this.setPhase("asking");
     });
@@ -111,7 +111,7 @@ export class DemoAgent {
   private answer(): void {
     this.send(`\x1b[${CHOICES.length - 1}A\r\x1b[J${OK}✓${RESET} ${CHOICES[this.choice]}\r\n\x1b[?25h\r\n`);
     this.setPhase("working");
-    this.steps("Chugging", WORKING, 3_250, () => {
+    this.steps("Chugging", WORKING, 1_625, () => {
       this.send(`\r\n${DONE}\r\n\r\n${PROMPT}`);
       this.setPhase("done");
     });
