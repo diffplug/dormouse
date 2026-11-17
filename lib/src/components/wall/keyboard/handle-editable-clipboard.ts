@@ -25,7 +25,9 @@ export function handleEditableClipboard(e: KeyboardEvent): boolean {
   e.preventDefault();
   e.stopImmediatePropagation();
   if (key === 'v') void pasteIntoField(el);
-  else void copyFromField(el, key === 'x');
+  // A browser never copies or cuts a password field's text; the chord is
+  // still consumed so the wall's own Cmd/Ctrl+C handling never sees it.
+  else if (!(el instanceof HTMLInputElement && el.type === 'password')) void copyFromField(el, key === 'x');
   return true;
 }
 
