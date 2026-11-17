@@ -209,6 +209,20 @@ const PocketDemo = lazy(() => import("../components/pocket-demo/PocketDemo"));
 const PHONE_WIDTH = 390;
 /** Viewport height the phone leaves free: the site header and some air. */
 const PHONE_VIEWPORT_MARGIN = 140;
+/** Turned toward the text, as a photographed phone would be, through a long
+ *  lens (a far vanishing point), so it does not distort. */
+const PHONE_TURN = "perspective(6000px) rotateY(16deg) rotateX(6deg) rotateZ(-2deg)";
+
+/** The size of a `width`×`height` box turned by `PHONE_TURN` about its center. */
+function turnedSize(width: number, height: number): { width: number; height: number } {
+  const turn = new DOMMatrix(PHONE_TURN);
+  const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => {
+    const point = turn.transformPoint(new DOMPoint((x * width) / 2, (y * height) / 2));
+    return [point.x / point.w, point.y / point.w];
+  });
+  const span = (axis: 0 | 1) => Math.max(...corners.map((c) => c[axis])) - Math.min(...corners.map((c) => c[axis]));
+  return { width: span(0), height: span(1) };
+}
 
 /** The real Pocket UI playing a script in a phone frame. It lays out at a
  *  phone's width and scales down to fit one screen and its column. It mounts a
@@ -227,35 +241,35 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
     const phone = phoneRef.current;
     if (!slot || !phone) return;
     const nearby = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) setNear(true);
+      if (!entry.isIntersecting) return;
+      setNear(true);
+      nearby.disconnect();
     }, { rootMargin: "100% 0px" });
     nearby.observe(slot);
+    let played = false;
     const observer = new IntersectionObserver(([entry]) => {
-      if (entry.intersectionRatio >= 0.35) setPlaying(true);
-      else if (!entry.isIntersecting) {
+      if (entry.intersectionRatio >= 0.35) {
+        played = true;
+        setPlaying(true);
+      } else if (!entry.isIntersecting && played) {
+        played = false;
         setPlaying(false);
         setRun((count) => count + 1);
       }
     }, { threshold: [0, 0.35] });
     observer.observe(slot);
-    // The projection's size at scale 1: its drawn box over the scale it was drawn at.
-    let drawnScale = 1;
+    // The layout box ignores transforms, so its turned size is fixed.
+    const turned = turnedSize(PHONE_WIDTH, phone.offsetHeight);
     const refit = () => {
-      const box = phone.getBoundingClientRect();
-      const width = box.width / drawnScale;
-      const height = box.height / drawnScale;
-      drawnScale = Math.min(1, slot.clientWidth / width, (window.innerHeight - PHONE_VIEWPORT_MARGIN) / height);
+      const scale = Math.min(1, slot.clientWidth / turned.width, (window.innerHeight - PHONE_VIEWPORT_MARGIN) / turned.height);
       // Turned about its center, so centering the layout box centers the projection.
-      setFit({ scale: drawnScale, height: height * drawnScale, top: (height * drawnScale - phone.offsetHeight) / 2 });
+      setFit((prev) => prev?.scale === scale ? prev : { scale, height: turned.height * scale, top: (turned.height * scale - phone.offsetHeight) / 2 });
     };
     refit();
-    const resize = new ResizeObserver(refit);
-    resize.observe(slot);
     window.addEventListener("resize", refit);
     return () => {
       nearby.disconnect();
       observer.disconnect();
-      resize.disconnect();
       window.removeEventListener("resize", refit);
     };
   }, []);
@@ -264,9 +278,9 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
       ref={slotRef}
       role="img"
       aria-label="Dormouse Pocket on a phone: a request typed to a coding agent, its question answered with two gestures, then the README it changed, with a 3D cheese wedge turning in it"
-      className={`relative w-full max-w-[390px] ${className}`}
+      className={`relative w-full ${className}`}
       // Unfitted (prerendered), the slot holds the phone's natural proportions.
-      style={fit ? { height: fit.height } : { aspectRatio: "390 / 750" }}
+      style={{ maxWidth: PHONE_WIDTH, ...(fit ? { height: fit.height } : { aspectRatio: `${PHONE_WIDTH} / 750` }) }}
     >
       <div
         ref={phoneRef}
@@ -275,10 +289,8 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
           width: PHONE_WIDTH,
           marginLeft: -PHONE_WIDTH / 2,
           top: fit?.top ?? 0,
-          // Turned toward the text, as a photographed phone would be, through a
-          // long lens (a far vanishing point), so it does not distort. The
-          // stacked shadows read as its near edge's thickness.
-          transform: `scale(${fit?.scale ?? 1}) perspective(6000px) rotateY(16deg) rotateX(6deg) rotateZ(-2deg)`,
+          // The stacked shadows read as its near edge's thickness.
+          transform: `scale(${fit?.scale ?? 1}) ${PHONE_TURN}`,
           boxShadow: "-3px 3px 0 #3a3a3c, -6px 6px 0 #2a2a2c, -8px 8px 0 #1c1c1e, -30px 40px 90px rgba(0,0,0,0.6)",
         }}
       >
@@ -948,7 +960,6 @@ export default function Home() {
         </section>
         {/* Section 2: image left, text right */}
         <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,390px)_1fr] gap-8 md:gap-12 items-start`}>
-          {/* A phone's own width: narrower, the mode bar truncates its labels. */}
           <PocketDemoPhone className="order-2 md:order-1 mx-auto" />
           <div className="order-1 md:order-2">
             <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">

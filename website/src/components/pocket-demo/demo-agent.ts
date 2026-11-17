@@ -1,4 +1,4 @@
-import { BOLD, CLEAR_LINE, DIM, RESET, fg } from "dormouse-lib/lib/ansi";
+import { BOLD, CLEAR_LINE, CLEAR_SCREEN, CURSOR_HOME, DIM, ESC, RESET, fg } from "dormouse-lib/lib/ansi";
 
 /**
  * The pretend coding agent in the homepage's Pocket demo. It takes one request
@@ -48,8 +48,12 @@ export class DemoAgent {
 
   constructor(private readonly send: (data: string) => void) {}
 
-  start(): void {
-    this.send("\x1b]2;agent\x07");
+  /** Back to an empty prompt on a cleared screen, whatever it was doing. */
+  restart(): void {
+    this.dispose();
+    this.phase = "prompt";
+    this.choice = 0;
+    this.send(`${CLEAR_SCREEN}${ESC}3J${CURSOR_HOME}\x1b]2;agent\x07`);
     this.send(`${ACCENT}✻${RESET} ${BOLD}agent${RESET} ${DIM}~/dormouse${RESET}\r\n\r\n${PROMPT}`);
   }
 

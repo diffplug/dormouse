@@ -104,13 +104,12 @@ export class Finger {
   }
 
   private place(): void {
-    this.dot.style.transform = `translate(${this.position.x}px, ${this.position.y}px)`;
+    this.dot.style.translate = `${this.position.x}px ${this.position.y}px`;
   }
 }
 
 /** Centered on its position by the negative margin, half its 34px size. A
- *  press fills it and rings it with a halo, never resizing it: a scale would
- *  compose with the translate that places it and shift it. */
+ *  press fills it and rings it with a halo. */
 export const FINGER_CLASS = [
   "pointer-events-none absolute left-0 top-0 z-50 -m-[17px] h-[34px] w-[34px] rounded-full",
   "border-2 border-white/80 bg-white/20 shadow-[0_2px_10px_rgba(0,0,0,0.45)]",

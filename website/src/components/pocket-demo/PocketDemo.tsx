@@ -53,23 +53,11 @@ function waitForPty(adapter: FakePtyAdapter, id: string): Promise<void> {
   });
 }
 
-/** A fresh agent at an empty prompt, on a cleared screen, in place of `ref`'s. */
-function freshAgent(adapter: FakePtyAdapter, ref: { current: DemoAgent | null }): DemoAgent {
-  ref.current?.dispose();
-  adapter.sendOutput(AGENT, "\x1b[2J\x1b[3J\x1b[H");
-  const agent = new DemoAgent((data) => adapter.sendOutput(AGENT, data));
-  ref.current = agent;
-  adapter.setInputHandler(AGENT, (data) => agent.handleInput(data));
-  agent.start();
-  return agent;
-}
-
 export default function PocketDemo({ playing, still = false }: { playing: boolean; still?: boolean }) {
   useRestoredTheme(DOCS_THEME_ID);
   const screenRef = useRef<HTMLDivElement>(null);
   const fingerRef = useRef<HTMLDivElement>(null);
-  const agentRef = useRef<DemoAgent | null>(null);
-  const [adapter, setAdapter] = useState<FakePtyAdapter | null>(null);
+  const [demo, setDemo] = useState<{ agent: DemoAgent; ready: Promise<void> } | null>(null);
   const [sessions, setSessions] = useState<MobileWallSession[]>(still ? [AGENT_SESSION, README_SESSION] : [AGENT_SESSION]);
   const [activeId, setActiveId] = useState(still ? README : AGENT);
   const [view, setView] = useState<MobileTerminalView>("terminal");
@@ -82,39 +70,29 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
     fake.reset();
     initAlertStateReceiver();
     for (const id of [AGENT, README]) fake.setScenario(id, { name: "none", chunks: [] });
-    setAdapter(fake);
+    const agent = new DemoAgent((data) => fake.sendOutput(AGENT, data));
+    fake.setInputHandler(AGENT, (data) => agent.handleInput(data));
+    // The phone is on before the script plays: the agent waits at its prompt.
+    const ready = waitForPty(fake, AGENT).then(() => agent.restart());
+    setDemo({ agent, ready });
     return () => {
+      agent.dispose();
       disposeAllSessions();
       fake.reset();
     };
   }, []);
-
-  // The phone is on before the script plays: the agent waits at its prompt.
-  useEffect(() => {
-    if (!adapter) return;
-    let live = true;
-    void waitForPty(adapter, AGENT).then(() => {
-      if (live && !agentRef.current) freshAgent(adapter, agentRef);
-    });
-    return () => {
-      live = false;
-      agentRef.current?.dispose();
-      agentRef.current = null;
-      adapter.clearInputHandler(AGENT);
-    };
-  }, [adapter]);
 
   const handleSendInput = useCallback((data: string) => writeUserInput(activeId, data), [activeId]);
 
   useEffect(() => {
     const screen = screenRef.current;
     const dot = fingerRef.current;
-    if (!adapter || !playing || still || !screen || !dot) return;
+    if (!demo || !playing || still || !screen || !dot) return;
+    const { agent } = demo;
     const controller = new AbortController();
     const finger = new Finger(screen, dot, controller.signal);
     const play = async () => {
-      await waitForPty(adapter, AGENT);
-      let current = agentRef.current ?? freshAgent(adapter, agentRef);
+      await demo.ready;
       finger.show(true);
       await finger.sleep(600);
       for (;;) {
@@ -128,7 +106,7 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
         await finger.sleep(350);
         await finger.tap(find(screen, "[data-mobile-composer] button", "Send"));
 
-        await current.waitFor("asking");
+        await agent.waitFor("asking");
         await finger.sleep(700);
         const terminal = find(screen, ".xterm-screen");
         const press = { x: screen.clientWidth * 0.62, y: screen.clientHeight * 0.66 };
@@ -141,14 +119,14 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
           { x: -4, y: -4, ms: 720 },
         ]);
 
-        await current.waitFor("done");
+        await agent.waitFor("done");
         setSessions([AGENT_SESSION, README_SESSION]);
         await finger.sleep(1_400);
         await finger.tap(find(screen, 'button[title="Show sessions"]'));
         await finger.sleep(600);
         await finger.tap(find(screen, 'section[aria-label="Sessions"] button', "README.md"));
         // Behind the README, the agent starts over, so returning finds it empty.
-        current = freshAgent(adapter, agentRef);
+        agent.restart();
         await finger.sleep(1_300);
 
         await finger.tap(find(screen, 'button[title="Show sessions"]'));
@@ -165,12 +143,12 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
       controller.abort(new DemoStopped());
       finger.show(false);
     };
-  }, [adapter, playing, still]);
+  }, [demo, playing, still]);
 
   return (
     <div ref={screenRef} className="relative h-full overflow-hidden" style={APP_TYPE_SCALE}>
       <MobileTerminalUi
-        terminal={adapter ? (
+        terminal={demo ? (
           <MobileWall
             sessions={sessions}
             activeSessionId={activeId}
