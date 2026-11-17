@@ -33,7 +33,7 @@ function DesktopPocketPlaygroundPage() {
         style={STATIC_PAGE_HEADER_STYLE}
         controls={<ThemePicker variant="compact" offerStore />}
       />
-      <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(0,1fr)_minmax(320px,390px)] md:px-8 md:pt-28">
+      <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(320px,390px)_minmax(0,1fr)] md:px-8 md:pt-28">
         <section className="max-w-2xl">
           <h1 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">
             Walk away. Keep going.
@@ -61,7 +61,7 @@ function DesktopPocketPlaygroundPage() {
           />
         </section>
 
-        <PocketDemoPhone className="mx-auto" />
+        <PocketDemoPhone className="mx-auto md:order-first" />
       </main>
     </div>
   );
