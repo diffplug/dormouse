@@ -20,6 +20,7 @@ import {
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
+import { hideYoutubeCaptions } from "../lib/youtube";
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
@@ -240,6 +241,9 @@ function PlaygroundDesktopExperience() {
       disposeFsRef.current = null;
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
+
+  // The music video burns in its own captions.
+  useEffect(() => hideYoutubeCaptions(), []);
 
   const handleWallEvent = useCallback((event: WallEvent) => {
     // Every visible pane (the seed panes + any the user splits off) gets a
