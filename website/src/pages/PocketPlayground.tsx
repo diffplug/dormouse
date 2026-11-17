@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { PocketTerminalExperience } from "../components/PocketTerminalExperience";
+import { PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 import { ShareUrlButton } from "../components/ShareUrlButton";
@@ -16,7 +17,7 @@ function MobilePocketPlaygroundPage() {
   return (
     <main className="fixed inset-0 bg-[var(--color-app-bg)] text-[var(--color-app-fg)]">
       {/* Its Sessions screen's Settings page picks the theme. */}
-      <PocketTerminalExperience interactive fillViewport />
+      <PocketTerminalExperience />
     </main>
   );
 }
@@ -60,16 +61,7 @@ function DesktopPocketPlaygroundPage() {
           />
         </section>
 
-        <section aria-label="Dormouse Pocket phone preview" className="mx-auto w-full max-w-[390px]">
-          <div className="rounded-[2.4rem] border border-white/15 bg-neutral-950 p-3 shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
-            <div className="mx-auto mb-2 h-1.5 w-24 rounded-full bg-white/20" />
-            <div className="aspect-[390/812] overflow-hidden rounded-[1.8rem] border border-white/10 bg-black">
-              <div className="h-full pointer-events-none" aria-hidden="true" inert>
-                <PocketTerminalExperience interactive={false} />
-              </div>
-            </div>
-          </div>
-        </section>
+        <PocketDemoPhone className="mx-auto" />
       </main>
     </div>
   );

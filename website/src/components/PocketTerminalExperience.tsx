@@ -39,13 +39,7 @@ const POCKET_AUTOSTART_COMMANDS = new Map<string, string>([
 const GITHUB_URL = "https://github.com/diffplug/dormouse";
 const POCKET_NOTIFY_URL = withHostedRef("/hosted/", HOSTED_REFS.tutorial, "remote-control");
 
-export function PocketTerminalExperience({
-  interactive,
-  fillViewport = false,
-}: {
-  interactive: boolean;
-  fillViewport?: boolean;
-}) {
+export function PocketTerminalExperience() {
   useRestoredTheme(DOCS_THEME_ID);
   useMobileFontSize(true);
   const [terminalReady, setTerminalReady] = useState(false);
@@ -253,8 +247,7 @@ export function PocketTerminalExperience({
           />
         ) : null
       }
-      interactive={interactive}
-      fillViewport={fillViewport}
+      fillViewport
       activeTouchMode={touchMode}
       onTouchModeChange={handleTouchModeChange}
       activeView={view}
