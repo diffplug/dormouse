@@ -58,7 +58,6 @@ export const productSections = [
 // run for them. Any new workspace requires classification here or a runtime
 // edge from a product root.
 export const excludedWorkspacePackages = [
-  "canopy", // Storybook-only rendering lab; no production build imports it.
   "dormouse-website", // Visitor browser code; no installed artifact, key, or session.
 ];
 

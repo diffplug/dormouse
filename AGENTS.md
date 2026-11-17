@@ -47,7 +47,6 @@ pnpm build       # typecheck lib; build vscode extension, Pocket, frame origin, 
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
 - **`dor-tools-builtin/`** — The built-in Tools (`builtin:file` viewer and editors, `builtin:code` source editor, `builtin:folder`), loaded by `dor` from a separate runtime bundle; lib and the hosts import its pure format module.
 - **`dor-tools-lib/`** — The Tool integration protocol (OSC 367 and the iframe save channel) for Tools and their hosts; MIT, no runtime dependencies, private until 1.0.
-- **`canopy/`** — Experimental 3D/WebXR terminal-rendering lab (Storybook-only, not in the production build). Consumes `@diffplug/xterm-addon-webgl-sdf` — the webgl addon from our [xterm.js fork](https://github.com/diffplug/xterm.js) (`sdf` branch).
 
 **Burrow, Client, Relay** — the three remote-control roles — are defined in `docs/specs/glossary.md` -> "Roles". *Host* is reserved for the platform host, the `Host` header, hostnames, and self-hosting; *server* for HTTP servers and dev servers.
 
@@ -81,7 +80,6 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/mobile-terminal-ui.md`** — The mobile composition (`MobileTerminalUi` / `MobileWall`): full-screen terminal panned above the keyboard, touch modes, the radial gesture menu, the Type composer, the Sessions screen and its Settings; shipped in the Pocket playground and the Pocket app.
 - **`docs/specs/tutorial.md`** — Website playground tutorial: device-specific routes, the `tutorial` runner and progress state, desktop and Pocket profiles, the desktop's copy-on-write in-memory filesystem and playground `dor`, the lib hooks for tutorial observability.
 - **`docs/specs/website-docs.md`** — Public documentation on the marketing site: the generated references, the Markdown rendering contract they share, the left rail across the docs section, `vscode-ext/README.md` as the canonical guide published off-site, and the lint that pins their links.
-- **`docs/specs/webgl-text.md`** — SDF text rendering for the 3D/WebXR effort: the diffplug/xterm.js fork pipeline and its version lockstep, the reserved SDF texel layout, the canopy Storybook lab.
 - **`docs/specs/remote-security-model.md`** — Remote-control trust model: one Noise channel per ceremony, passkeys proving presence inside it, per-Burrow Client statics, the Burrow (not the Relay) authorizing the pair. Read first for anything remote.
 - **`docs/specs/remote-network.md`** — The network policy (Nowhere / Local networks only / Anywhere / Anywhere, through your Relay): its choke points, the update reminder, the Local networks path check, Cloudflare STUN, and each level's paired-phone path.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
@@ -137,7 +135,7 @@ Eight sibling lints run in `pnpm test`. Seven enforce one invariant a spec state
 | Lint | Enforces |
 |---|---|
 | `scripts/public-docs-lint.mjs` (`pnpm lint:public-docs`) | The public-doc contracts in `docs/specs/website-docs.md`, every inventory derived from the file that owns it. |
-| `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) | The `@xterm/*` version lockstep in `docs/specs/webgl-text.md`. |
+| `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) | The `@xterm/*` version lockstep in `docs/specs/layout.md` -> "Renderer". |
 | `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) | `docs/specs/security-local.md` -> "Loopback Listeners": a loopback bind is not an access control — a new listener references a guard module or is allowlisted with a reason; and "Network policy": nothing shipped binds beyond loopback. |
 | `scripts/outbound-lint.mjs` (`pnpm lint:outbound`) | `docs/specs/security-local.md` -> "Network policy": every network primitive in shipped code is classified with a reason, guarded files take the guarded transport, and no CSP, Tauri plugin, capability, or Rust client reaches past this machine. |
 | `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) | `docs/specs/security-remote.md` -> "Credentials at rest" and "Network posture (self-hosted)": the installer controls binding all three of `deploy/local/install-{macos,windows,linux}`. |

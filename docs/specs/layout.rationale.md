@@ -94,6 +94,8 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Verification status.** In the standalone browser-dev harness (Chromium 150, 2026-09), 24 unmount/remount cycles explicitly lost every old context, retained the same terminal buffer, selection, and grid, emitted zero terminal resize events, and reused a second mounted terminal’s atlas canvas. Inline-image storage survived the swap and its layer repainted. The lifecycle change has not been verified inside Tauri’s WKWebView; the performance measurements above are Safari 26.5.
 
+**Why `@xterm/*` pins are commit-coupled.** Each addon's peer range is exactly `^<the core version published from the same commit>`, and `^6.1.0-beta.301` happily admits `6.1.0-beta.302`, so npm and pnpm say nothing when "latest of each" spans two commits — while the addons compile against core internals, so the mismatch is real. The newest coherent per-commit set is often an *older* core than Renovate proposed, because Renovate takes the latest of each package independently; run `pnpm bump:xterm --dry-run` before accepting its version.
+
 ## Inline graphics
 
 **Why the memory ceilings are below the addon's defaults.** ImageAddon storage is per Terminal instance, while Dormouse keeps minimized Sessions and their xterm instances alive. The upstream 128 MB cache and 16,777,216-pixel ceiling can therefore multiply across every visible and minimized pane. The 8,388,608-pixel ceiling admits a 3840×2160 image while halving the addon's worst decode-buffer footprint.

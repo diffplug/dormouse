@@ -67,7 +67,6 @@ pnpm lint:specs   # docs/specs conventions only
 | `dor-tools-lib/` | The Tool integration protocol, for Tools and their hosts (MIT) |
 | `remote-lib-common/`, `dor-lib-common/` | Shared remote-control security and wire code; shared process spawning |
 | `deploy/` | Self-host Relay installers and the Blyg changelog site |
-| `canopy/` | Experimental 3D/WebXR terminal rendering (Storybook only) |
 | `docs/specs/` | Internal specs — the reference for how everything actually behaves |
 
 ### Agent strategy
