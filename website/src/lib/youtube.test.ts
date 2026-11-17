@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { YOUTUBE_MUSIC_VIDEO, hideYoutubeCaptions, youtubeEmbedUrl } from "./youtube";
+import { YOUTUBE_MUSIC_VIDEO, hideYoutubeCaptions, pauseYoutube, youtubeEmbedUrl } from "./youtube";
 
 const ORIGIN = "https://www.youtube-nocookie.com";
 
@@ -45,5 +45,11 @@ describe("hideYoutubeCaptions", () => {
     } finally {
       stop();
     }
+  });
+
+  it("pauses an embed over the embed API", () => {
+    const { frame, posted } = mountEmbed();
+    pauseYoutube(frame);
+    expect(posted).toEqual([{ event: "command", func: "pauseVideo", args: [], id: 1, channel: "widget" }]);
   });
 });

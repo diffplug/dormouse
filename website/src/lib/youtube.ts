@@ -12,13 +12,21 @@ export function youtubeEmbedUrl(shareUrl: string): string {
   return `${EMBED_ORIGIN}/embed${new URL(shareUrl).pathname}?enablejsapi=1`;
 }
 
+function postToPlayer(frame: HTMLIFrameElement, message: Record<string, unknown>): void {
+  frame.contentWindow?.postMessage(JSON.stringify({ ...message, id: 1, channel: "widget" }), EMBED_ORIGIN);
+}
+
+/** Pauses the video in an embed from {@link youtubeEmbedUrl}. */
+export function pauseYoutube(frame: HTMLIFrameElement): void {
+  postToPlayer(frame, { event: "command", func: "pauseVideo", args: [] });
+}
+
 /** Keeps YouTube's own captions off every embed in the document, for videos
  *  that burn theirs in. YouTube ignores `cc_load_policy=0` and reloads its
  *  captions each time playback starts, so this subscribes to each player over
  *  the embed API and unloads them whenever one starts playing. */
 export function hideYoutubeCaptions(): () => void {
-  const post = (frame: HTMLIFrameElement, message: Record<string, unknown>) =>
-    frame.contentWindow?.postMessage(JSON.stringify({ ...message, id: 1, channel: "widget" }), EMBED_ORIGIN);
+  const post = postToPlayer;
   const subscribed = new WeakSet<HTMLIFrameElement>();
   const subscribe = () => {
     for (const frame of document.querySelectorAll<HTMLIFrameElement>(EMBED_FRAMES)) {
