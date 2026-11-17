@@ -47,7 +47,7 @@ Source of truth: `PlaygroundDesktop` in `website/src/pages/PlaygroundDesktop.tsx
 
 **Must capture the mouse only on this screen**, and **must stop animation and release capture on leaving or disposal.** Reduced motion disables idle animation, retaining scroll movement.
 
-Source of truth: `TutRunner` and `GestureStarfield` in `website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
+Source of truth: `TutRunner` and `Starfield` in `website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
 
 ## Menu and navigation behavior
 

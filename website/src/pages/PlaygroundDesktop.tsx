@@ -100,11 +100,12 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs, clipboardFailure] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, terminalTheme, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs, clipboardFailure] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
         import("dormouse-lib/lib/themes"),
+        import("dormouse-lib/lib/terminal-theme"),
         import("dormouse-lib/lib/alert-settings"),
         import("dormouse-lib/lib/alert-delivery-model"),
         import("dormouse-lib/components/WorkspaceWindow"),
@@ -170,6 +171,8 @@ function PlaygroundDesktopExperience() {
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
               onOpenGithub: handleOpenGithub,
               onOpenPocket: handleOpenPocket,
+              getTerminalTheme: terminalTheme.getTerminalTheme,
+              subscribeToTerminalTheme: terminalTheme.onTerminalThemeChange,
             });
           }
           if (name === "ascii-splash" || name === "splash") {

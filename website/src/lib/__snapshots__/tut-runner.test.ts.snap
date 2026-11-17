@@ -21,91 +21,12 @@ exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] 
 "
 `;
 
-exports[`TutRunner snapshots > renders Keyboard navigation with all items complete 1`] = `
-"[H[2J
-  [1mKeyboard navigation[0m  [2m7/7 complete[0m
-  [2m[36mEsc[39m to go back[0m
+exports[`TutRunner snapshots > renders Keyboard navigation with all items complete 1`] = `"[H[2J[0m[2;1H[0m  [1mKeyboard navigation[0m  [2m7/7 complete[0m[3;1H[0m  [2m[36mEsc[39m to go back[0m[5;1H[0m   [32m✓[0m  [2mEnter command mode[0m[6;1H[0m   [32m✓[0m  [2mAdd a horizontal divider[0m[7;1H[0m   [32m✓[0m  [2mMove between panes with arrow keys[0m[8;1H[0m   [32m✓[0m  [2mAdd a vertical divider[0m[9;1H[0m   [32m✓[0m  [2mMinimize a pane[0m[10;1H[0m   [32m✓[0m  [2mKill a pane[0m[11;1H[0m   [32m✓[0m  [2mMove a pane with [36mCmd/Ctrl + arrow[39m[0m[13;1H[0m  [2mtmux shortcuts also work — [36m%[39m [36m"[39m [36md[39m [36mx[39m.[0m[15;1H[0m  [32mSection complete.[0m [2mPress [36mEsc[39m to go back.[0m"`;
 
-   [32m✓[0m  [2mEnter command mode[0m
-   [32m✓[0m  [2mAdd a horizontal divider[0m
-   [32m✓[0m  [2mMove between panes with arrow keys[0m
-   [32m✓[0m  [2mAdd a vertical divider[0m
-   [32m✓[0m  [2mMinimize a pane[0m
-   [32m✓[0m  [2mKill a pane[0m
-   [32m✓[0m  [2mMove a pane with [36mCmd/Ctrl + arrow[39m[0m
+exports[`TutRunner snapshots > renders Keyboard navigation with all items incomplete 1`] = `"[H[2J[0m[2;1H[0m  [1mKeyboard navigation[0m  [2m0/7 complete[0m[3;1H[0m  [2m[36mEsc[39m to go back[0m[5;1H[0m   [33m●[0m  [1mEnter command mode[0m[6;1H[0m        [3mPress [36mLShift[39m then [36mRShift[39m quickly (or [36mLCmd[39m then [36mRCmd[39m on Mac).[0m[7;1H[0m   [2m·[0m  Add a horizontal divider[8;1H[0m   [2m·[0m  Move between panes with arrow keys[9;1H[0m   [2m·[0m  Add a vertical divider[10;1H[0m   [2m·[0m  Minimize a pane[11;1H[0m   [2m·[0m  Kill a pane[12;1H[0m   [2m·[0m  Move a pane with [36mCmd/Ctrl + arrow[39m[14;1H[0m  [2mtmux shortcuts also work — [36m%[39m [36m"[39m [36md[39m [36mx[39m.[0m"`;
 
-  [2mtmux shortcuts also work — [36m%[39m [36m"[39m [36md[39m [36mx[39m.[0m
+exports[`TutRunner snapshots > renders the alert section with all items incomplete 1`] = `"[H[2J[0m[2;1H[0m  [1mAlerts and attention[0m  [2m0/8 complete[0m[3;1H[0m  [2m[36mEsc[39m to go back[0m[5;1H[0m   [33m●[0m  [1mRun [36magent[39m, then come back here[0m[6;1H[0m        [3mSplit off a new pane (the split button in any pane header, or [36m|[39m in[0m[7;1H[0m        [3mcommand mode), run [36magent[39m in it, then click back into this pane. When it[0m[8;1H[0m        [3mneeds you, its pane rings: no setup, the program asked. Dormouse waits[0m[9;1H[0m        [3mfor its screen to settle first.[0m[10;1H[0m   [2m·[0m  Look at it[11;1H[0m   [2m·[0m  Answer it[12;1H[0m   [2m·[0m  Stay and watch[13;1H[0m   [2m·[0m  Run [36mbuild[39m, then come back here[14;1H[0m   [2m·[0m  An agent that never asks[15;1H[0m   [2m·[0m  Mark a pane for later[16;1H[0m   [2m·[0m  Hear it out loud[18;1H[0m  [2mA pane rings when it needs you and you are not looking at it. Look, and it[0m[19;1H[0m  [2mbecomes a TODO; deal with it, and it is gone.[0m"`;
 
-  [32mSection complete.[0m [2mPress [36mEsc[39m to go back.[0m
-"
-`;
+exports[`TutRunner snapshots > renders the top-level menu 1`] = `"[H[2J[0m[2;1H[0m  [1mDormouse Playground Tutorial[0m[3;1H[0m  [2m[36mEsc[39m/[36mq[39m to exit · [36mEnter[39m to open · [36m↑↓[39m to navigate[0m[5;1H[0m  [36m❯[0m [1mMake it yours[0m  [2m[0/1 complete][0m[6;1H[0m    Keyboard navigation  [2m[0/7 complete][0m[7;1H[0m    dor open  [2m[0/7 complete][0m[8;1H[0m    Alerts and attention  [2m[0/8 complete][0m[9;1H[0m    Copy paste  [2m[0/4 complete][0m[10;1H[0m    Starred on GitHub  [2m[not yet][0m[11;1H[0m    🐭 FlappyTerm 🐭  [2m[LOCKED 0/27][0m[13;1H[0m    [2mReset progress[0m"`;
 
-exports[`TutRunner snapshots > renders Keyboard navigation with all items incomplete 1`] = `
-"[H[2J
-  [1mKeyboard navigation[0m  [2m0/7 complete[0m
-  [2m[36mEsc[39m to go back[0m
-
-   [33m●[0m  [1mEnter command mode[0m
-        [3mPress [36mLShift[39m then [36mRShift[39m quickly (or [36mLCmd[39m then [36mRCmd[39m on Mac).[0m
-   [2m·[0m  Add a horizontal divider
-   [2m·[0m  Move between panes with arrow keys
-   [2m·[0m  Add a vertical divider
-   [2m·[0m  Minimize a pane
-   [2m·[0m  Kill a pane
-   [2m·[0m  Move a pane with [36mCmd/Ctrl + arrow[39m
-
-  [2mtmux shortcuts also work — [36m%[39m [36m"[39m [36md[39m [36mx[39m.[0m
-"
-`;
-
-exports[`TutRunner snapshots > renders the alert section with all items incomplete 1`] = `
-"[H[2J
-  [1mAlerts and attention[0m  [2m0/8 complete[0m
-  [2m[36mEsc[39m to go back[0m
-
-   [33m●[0m  [1mRun [36magent[39m, then come back here[0m
-        [3mSplit off a new pane (the split button in any pane header, or [36m|[39m in[0m
-        [3mcommand mode), run [36magent[39m in it, then click back into this pane. When it[0m
-        [3mneeds you, its pane rings: no setup, the program asked. Dormouse waits[0m
-        [3mfor its screen to settle first.[0m
-   [2m·[0m  Look at it
-   [2m·[0m  Answer it
-   [2m·[0m  Stay and watch
-   [2m·[0m  Run [36mbuild[39m, then come back here
-   [2m·[0m  An agent that never asks
-   [2m·[0m  Mark a pane for later
-   [2m·[0m  Hear it out loud
-
-  [2mA pane rings when it needs you and you are not looking at it. Look, and it[0m
-  [2mbecomes a TODO; deal with it, and it is gone.[0m
-"
-`;
-
-exports[`TutRunner snapshots > renders the top-level menu 1`] = `
-"[H[2J
-  [1mDormouse Playground Tutorial[0m
-  [2m[36mEsc[39m/[36mq[39m to exit · [36mEnter[39m to open · [36m↑↓[39m to navigate[0m
-
-  [36m❯[0m [1mMake it yours[0m  [2m[0/1 complete][0m
-    Keyboard navigation  [2m[0/7 complete][0m
-    dor open  [2m[0/7 complete][0m
-    Alerts and attention  [2m[0/8 complete][0m
-    Copy paste  [2m[0/4 complete][0m
-    Starred on GitHub  [2m[not yet][0m
-    🐭 FlappyTerm 🐭  [2m[LOCKED 0/27][0m
-
-    [2mReset progress[0m
-
-"
-`;
-
-exports[`TutRunner snapshots > starts the desktop tutorial inside Make it yours 1`] = `
-"[H[2J
-  [1mMake it yours[0m  [2m0/1 complete[0m
-  [2m[36mEsc[39m to go back[0m
-
-   [33m●[0m  [1mChange the theme[0m
-        [3mClick the [36msliders[39m icon at the bottom-right to open Settings, then pick a[0m
-        [3mtheme.[0m
-"
-`;
+exports[`TutRunner snapshots > starts the desktop tutorial inside Make it yours 1`] = `"[H[2J[0m[2;1H[0m  [1mMake it yours[0m  [2m0/1 complete[0m[3;1H[0m  [2m[36mEsc[39m to go back[0m[5;1H[0m   [33m●[0m  [1mChange the theme[0m[6;1H[0m        [3mClick the [36msliders[39m icon at the bottom-right to open Settings, then pick a[0m[7;1H[0m        [3mtheme.[0m"`;

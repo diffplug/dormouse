@@ -46,7 +46,7 @@ const STARFIELD_WIDTH = 128;
 const STAR_COUNT = 1152;
 /** Share of each twinkle cycle a star spends fully dark. */
 const STAR_DARK_SHARE = 0.15;
-export const GESTURE_BACKGROUND_TICK_MS = 33;
+export const STARFIELD_TICK_MS = 33;
 
 interface Star {
   x: number;
@@ -63,7 +63,7 @@ interface Star {
 /** Each star twinkles through one cosine cycle and relocates at the cycle
  *  boundary, which falls inside its dark interval, so relocation never moves a
  *  visible star. Offscreen stars advance too, independent of scroll. */
-class GestureStarfield {
+class Starfield {
   private seed = 42;
   private frame = 0;
   readonly stars: readonly Star[] = Array.from({ length: STAR_COUNT }, () => {
@@ -93,7 +93,7 @@ class GestureStarfield {
   }
 
   private settle(): void {
-    const seconds = this.frame * GESTURE_BACKGROUND_TICK_MS / 1000;
+    const seconds = this.frame * STARFIELD_TICK_MS / 1000;
     for (const star of this.stars) {
       const age = seconds / star.pulseSeconds + star.phase;
       const cycle = Math.floor(age);
@@ -130,6 +130,13 @@ function starPalette(theme: Record<string, string> | undefined): readonly string
   return Array.from({ length: 256 }, (_, level) => foreground && background
     ? `\x1b[38;2;${background.map((channel, i) => Math.round(channel + (foreground[i] - channel) * level / 255)).join(";")}m`
     : `${DIM}${FG_DEFAULT}`);
+}
+/** Columns a frame line fills: escapes and `highlightKeys` markers take none,
+ *  emoji-presentation characters two. */
+function visibleWidth(line: string): number {
+  let width = 0;
+  for (const ch of line.replace(/\x1b\[[0-9;]*m|`/g, "")) width += /\p{Emoji_Presentation}/u.test(ch) ? 2 : 1;
+  return width;
 }
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
@@ -199,7 +206,7 @@ interface TutRunnerOptions {
   /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
   getPocketTouchMode?: () => PocketTutorialTouchMode;
   subscribeToPocketTouchMode?: (listener: () => void) => () => void;
-  /** Terminal colors the Pocket gesture starfield blends between. */
+  /** Terminal colors the starfield blends between. */
   getTerminalTheme?: () => Record<string, string>;
   subscribeToTerminalTheme?: (listener: () => void) => () => void;
 }
@@ -239,11 +246,12 @@ export class TutRunner implements InteractiveProgram {
   private gestureScrollDirections = new Set<number>();
   private gestureArrows = new Set<MobileGestureInputId>();
   private backgroundOffset = 0;
-  private starfield: GestureStarfield | null = null;
+  private starfield: Starfield | null = null;
   /** Rebuilt on the first paint after entering the screen or a theme change. */
   private starColors: readonly string[] | null = null;
   private backgroundTimer: ReturnType<typeof setInterval> | null = null;
   private capturingMouse = false;
+  private starfieldShown = false;
   /** Whether its Session is on screen; see {@link setShown}. */
   private shown = true;
 
@@ -296,7 +304,7 @@ export class TutRunner implements InteractiveProgram {
     this.backgroundTimer = setInterval(() => {
       this.starfield?.advance();
       this.render();
-    }, GESTURE_BACKGROUND_TICK_MS);
+    }, STARFIELD_TICK_MS);
   }
 
   private stopBackgroundTicks(): void {
@@ -305,11 +313,11 @@ export class TutRunner implements InteractiveProgram {
     this.backgroundTimer = null;
   }
 
-  /** Whether its Session is on screen: the gesture background moves only while it is. */
+  /** Whether its Session is on screen: the starfield moves only while it is. */
   setShown(shown: boolean): void {
     this.shown = shown;
     if (!shown) this.stopBackgroundTicks();
-    else if (this.capturingMouse && !this.disposed && !prefersReducedMotion()) this.startBackgroundTicks();
+    else if (this.starfieldShown && !this.disposed && !prefersReducedMotion()) this.startBackgroundTicks();
   }
 
   private resetFlappyGame(): void {
@@ -409,6 +417,14 @@ export class TutRunner implements InteractiveProgram {
 
   private isPocketGestureScreen(): boolean {
     return !this.disposed && this.profile.id === "pocket" && this.screen === "section" && this.sectionId === "gesture";
+  }
+
+  /** Pocket draws the starfield behind its Gesture navigation screen alone; the
+   *  desktop behind every screen but FlappyTerm, which paints its own grid, and
+   *  Copy paste, whose text the user selects and would copy stars with. */
+  private isStarfieldScreen(): boolean {
+    if (this.profile.id === "pocket") return this.isPocketGestureScreen();
+    return !this.disposed && this.screen !== "flappy" && !(this.screen === "section" && this.sectionId === "copy");
   }
 
   handleGestureScroll(lines: number): void {
@@ -672,7 +688,7 @@ export class TutRunner implements InteractiveProgram {
 
   private render(): void {
     if (this.disposed) return;
-    const gestureScreen = this.syncGestureScreen();
+    const starfieldScreen = this.syncScreenModes();
     if (this.screen === "flappy") {
       this.renderFlappy();
       return;
@@ -683,8 +699,8 @@ export class TutRunner implements InteractiveProgram {
         : this.screen === "reset"
         ? this.renderReset()
         : this.renderSection();
-    if (gestureScreen) {
-      this.renderGestureBackground(lines);
+    if (starfieldScreen) {
+      this.renderOverStarfield(lines);
       return;
     }
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
@@ -695,14 +711,18 @@ export class TutRunner implements InteractiveProgram {
   }
 
   /** Level-triggered from render and cleanup: the Pocket gesture screen alone
-   *  captures the mouse and animates its background. */
-  private syncGestureScreen(): boolean {
+   *  captures the mouse, and the starfield animates only behind its screens. */
+  private syncScreenModes(): boolean {
     const gestureScreen = this.isPocketGestureScreen();
     if (gestureScreen !== this.capturingMouse) {
       this.capturingMouse = gestureScreen;
       this.write(gestureScreen ? MOUSE_ENABLE : MOUSE_DISABLE);
+    }
+    const starfieldScreen = this.isStarfieldScreen();
+    if (starfieldScreen !== this.starfieldShown) {
+      this.starfieldShown = starfieldScreen;
       this.starColors = null;
-      if (gestureScreen) {
+      if (starfieldScreen) {
         this.themeUnsub = this.subscribeToTerminalTheme?.(() => {
           this.starColors = null;
           this.render();
@@ -714,30 +734,43 @@ export class TutRunner implements InteractiveProgram {
         this.stopBackgroundTicks();
       }
     }
-    return gestureScreen;
+    return starfieldScreen;
   }
 
-  private renderGestureBackground(lines: string[]): void {
+  private renderOverStarfield(lines: string[]): void {
     const { cols, rows } = this.adapter.getPtySize(this.terminalId);
-    const starfield = (this.starfield ??= new GestureStarfield());
+    // Lay the text out as the terminal will, soft wraps included, and keep
+    // stars off each row's text plus the cell after it.
+    const textEnds = new Array<number>(rows).fill(0);
+    const textRows: { row: number; line: string }[] = [];
+    let row = 0;
+    for (const line of lines) {
+      if (row >= rows) break;
+      const width = visibleWidth(line);
+      if (width) textRows.push({ row, line });
+      const height = Math.max(1, Math.ceil(width / cols));
+      for (let i = 0; i < height && row + i < rows; i++) {
+        textEnds[row + i] = width ? Math.min(cols, width - i * cols) + 1 : 0;
+      }
+      row += height;
+    }
+    const starfield = (this.starfield ??= new Starfield());
     const colors = (this.starColors ??= starPalette(this.getTerminalTheme?.()));
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
     for (const star of starfield.stars) {
       const y = (star.y - this.backgroundOffset + STARFIELD_HEIGHT) % STARFIELD_HEIGHT;
       if (y >= rows || star.x >= cols || star.opacity === 0) continue;
       const color = colors[Math.round(star.opacity * (colors.length - 1))];
-      for (let row = y; row < rows; row += STARFIELD_HEIGHT) {
+      for (let r = y; r < rows; r += STARFIELD_HEIGHT) {
         for (let col = star.x; col < cols; col += STARFIELD_WIDTH) {
-          out += `${moveTo(row + 1, col + 1)}${color}${star.glyph}`;
+          if (col >= textEnds[r]) out += `${moveTo(r + 1, col + 1)}${color}${star.glyph}`;
         }
       }
     }
     out += RESET;
     // Absolute cursor positions keep the foreground fixed and prevent a final
     // newline at the bottom of the viewport from scrolling the whole screen.
-    lines.slice(0, rows).forEach((line, row) => {
-      if (line.trim()) out += `${moveTo(row + 1, 1)}${RESET}${highlightKeys(line)} `;
-    });
+    for (const text of textRows) out += `${moveTo(text.row + 1, 1)}${RESET}${highlightKeys(text.line)}`;
     this.write(out);
   }
 
@@ -1019,7 +1052,7 @@ export class TutRunner implements InteractiveProgram {
     const isActive = !complete && index === activeIndex;
     const mark = complete ? DONE_MARK : isActive ? ACTIVE_MARK : `${DIM}·${RESET}`;
     const style = complete ? DIM : isActive ? BOLD : "";
-    // The gesture screen places rows absolutely, so a title must not soft-wrap.
+    // Wrapping keeps a long title's continuation clear of the gesture screen's mark column.
     const lines = this.isPocketGestureScreen()
       ? this.wrapText(item.title, 6).map((part, i) => `${i === 0 ? `   ${mark}  ` : "      "}${style}${part}${RESET}`)
       : [`   ${mark}  ${style ? `${style}${item.title}${RESET}` : item.title}`];
@@ -1080,7 +1113,7 @@ export class TutRunner implements InteractiveProgram {
   private cleanup(notifyExit: boolean): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.syncGestureScreen();
+    this.syncScreenModes();
     this.stopFlappyTicks();
     this.flappy = null;
     this.stateUnsub?.();

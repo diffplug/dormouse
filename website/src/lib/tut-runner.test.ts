@@ -6,7 +6,7 @@ import {
   type ItemId,
   type TutorialProfile,
 } from "./tut-items";
-import { GESTURE_BACKGROUND_TICK_MS, STARFIELD_HEIGHT, TutRunner } from "./tut-runner";
+import { STARFIELD_TICK_MS, STARFIELD_HEIGHT, TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
 import { BOLD, RESET, fg } from "dormouse-lib/lib/ansi";
 
@@ -15,6 +15,8 @@ const WHEEL_UP = "\x1b[<64;2;2M";
 const WHEEL_DOWN = "\x1b[<65;2;2M";
 
 const FRAME_RESET = "\x1b[H\x1b[2J";
+/** One star drawn by the starfield: a cursor move, a truecolor foreground, a glyph. */
+const STAR_DRAW = /\x1b\[(\d+);(\d+)H\x1b\[38;2;\d+;\d+;\d+m[·+✦]/g;
 
 // Both profiles open inside a section (`initialSectionId`), so menu-driven
 // tests pop out with Esc first. Menu rows are addressed by name rather than
@@ -93,6 +95,13 @@ function mountRunner(
       pocketTouchMode = mode;
       for (const listener of pocketTouchModeListeners) listener();
     },
+    /** The last frame without its stars, so snapshots hold only the text. */
+    textFrame: () => {
+      const all = frames.join("");
+      const i = all.lastIndexOf(FRAME_RESET);
+      return (i >= 0 ? all.slice(i) : all).replace(STAR_DRAW, "");
+    },
+    output: () => frames.join(""),
     exitCount: () => exitCount,
     dispose: () => runner.dispose(),
   };
@@ -161,7 +170,7 @@ describe("TutRunner snapshots", () => {
       // Wrap the periodic field repeatedly without reaching a scroll boundary.
       sendKeys(WHEEL_UP.repeat(2 * STARFIELD_HEIGHT));
       expect(lastFrame()).toBe(original);
-      vi.advanceTimersByTime(GESTURE_BACKGROUND_TICK_MS);
+      vi.advanceTimersByTime(STARFIELD_TICK_MS);
       expect(lastFrame()).not.toBe(original);
       expect(foreground(lastFrame())).toBe(foreground(original));
       sendKeys(ESC);
@@ -182,11 +191,68 @@ describe("TutRunner snapshots", () => {
     try {
       const original = lastFrame();
       runner.setShown(false);
-      vi.advanceTimersByTime(10 * GESTURE_BACKGROUND_TICK_MS);
+      vi.advanceTimersByTime(10 * STARFIELD_TICK_MS);
       expect(lastFrame() === original).toBe(true);
       runner.setShown(true);
-      vi.advanceTimersByTime(GESTURE_BACKGROUND_TICK_MS);
+      vi.advanceTimersByTime(STARFIELD_TICK_MS);
       expect(lastFrame() === original).toBe(false);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("twinkles the starfield behind the desktop menu without capturing the mouse, and never under text", () => {
+    vi.useFakeTimers();
+    const { sendKeys, lastFrame, textFrame, dispose } = mountRunner();
+    try {
+      sendKeys(toMenu);
+      const menu = lastFrame();
+      const stars = [...menu.matchAll(STAR_DRAW)];
+      expect(stars.length).toBeGreaterThan(0);
+      expect(menu).not.toContain("\x1b[?1000h");
+      // Each star lies past its row's text and the cell after it.
+      const rowText = new Map<number, string>();
+      for (const [, row, text] of textFrame().matchAll(/\x1b\[(\d+);1H\x1b\[0m([^\x1b]*(?:\x1b(?!\[\d+;1H)[^\x1b]*)*)/g)) {
+        rowText.set(Number(row), text.replace(/\x1b\[[0-9;]*m/g, ""));
+      }
+      for (const [, row, col] of stars) {
+        expect(Number(col)).toBeGreaterThan([...(rowText.get(Number(row)) ?? "")].length + 1);
+      }
+      const textOnly = textFrame();
+      vi.advanceTimersByTime(STARFIELD_TICK_MS);
+      expect(lastFrame()).not.toBe(menu);
+      expect(textFrame()).toBe(textOnly);
+      // Wheels on the desktop never pan the field.
+      const ticked = lastFrame();
+      sendKeys(WHEEL_UP);
+      expect(lastFrame()).toBe(ticked);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps stars off the desktop Copy paste section and stops them for FlappyTerm", () => {
+    vi.useFakeTimers();
+    const allIds = SECTIONS.flatMap((section) => section.items.map((item) => item.id));
+    const { sendKeys, lastFrame, output, dispose } = mountRunner(allIds);
+    try {
+      sendKeys(sectionRow("copy") + ENTER);
+      const copy = lastFrame();
+      expect([...copy.matchAll(STAR_DRAW)]).toHaveLength(0);
+      vi.advanceTimersByTime(1000);
+      expect(lastFrame()).toBe(copy);
+      // Back on the menu, the cursor still rests on Copy paste.
+      sendKeys(ESC + DOWN.repeat(SECTIONS.length + 1 - SECTIONS.findIndex((section) => section.id === "copy")));
+      const beforeFlappy = output().length;
+      sendKeys(ENTER);
+      // FlappyTerm opens with its own clear, the other order from FRAME_RESET.
+      expect(output().slice(beforeFlappy).startsWith("\x1b[2J\x1b[H")).toBe(true);
+      vi.advanceTimersByTime(1000);
+      expect([...output().slice(beforeFlappy).matchAll(STAR_DRAW)]).toHaveLength(0);
+      sendKeys(ESC);
+      expect([...lastFrame().matchAll(STAR_DRAW)].length).toBeGreaterThan(0);
     } finally {
       dispose();
       vi.useRealTimers();
@@ -233,36 +299,36 @@ describe("TutRunner snapshots", () => {
   // The desktop profile opens inside its first section (`initialSectionId`), so
   // every menu-driven test below pops out with a leading Esc first.
   it("starts the desktop tutorial inside Make it yours", () => {
-    const { lastFrame, dispose } = mountRunner();
-    expect(lastFrame()).toMatchSnapshot();
+    const { textFrame, dispose } = mountRunner();
+    expect(textFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("renders the top-level menu", () => {
-    const { sendKeys, lastFrame, dispose } = mountRunner();
+    const { sendKeys, textFrame, dispose } = mountRunner();
     sendKeys(toMenu);
-    expect(lastFrame()).toMatchSnapshot();
+    expect(textFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("renders Keyboard navigation with all items incomplete", () => {
-    const { sendKeys, lastFrame, dispose } = mountRunner();
+    const { sendKeys, textFrame, dispose } = mountRunner();
     sendKeys(sectionRow("keyboard") + ENTER);
-    expect(lastFrame()).toMatchSnapshot();
+    expect(textFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("renders the alert section with all items incomplete", () => {
-    const { sendKeys, lastFrame, dispose } = mountRunner();
+    const { sendKeys, textFrame, dispose } = mountRunner();
     sendKeys(sectionRow("alert") + ENTER);
-    expect(lastFrame()).toMatchSnapshot();
+    expect(textFrame()).toMatchSnapshot();
     dispose();
   });
 
   it("renders Copy paste with all items incomplete", () => {
-    const { sendKeys, lastFrame, dispose } = mountRunner();
+    const { sendKeys, textFrame, dispose } = mountRunner();
     sendKeys(sectionRow("copy") + ENTER);
-    expect(lastFrame()).toMatchSnapshot();
+    expect(textFrame()).toMatchSnapshot();
     dispose();
   });
 
@@ -318,9 +384,9 @@ describe("TutRunner snapshots", () => {
 
   it("renders Keyboard navigation with all items complete", () => {
     const allKeyboardIds = SECTIONS.find((s) => s.id === "keyboard")!.items.map((i) => i.id);
-    const { sendKeys, lastFrame, dispose } = mountRunner(allKeyboardIds);
+    const { sendKeys, textFrame, dispose } = mountRunner(allKeyboardIds);
     sendKeys(sectionRow("keyboard") + ENTER);
-    expect(lastFrame()).toMatchSnapshot();
+    expect(textFrame()).toMatchSnapshot();
     dispose();
   });
 
