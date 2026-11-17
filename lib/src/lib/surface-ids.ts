@@ -24,7 +24,7 @@ const pool = createIdPool({
   label: 'surface-ids',
   idFor: surfaceIdFor,
   localStart: 0,
-  // Every Surface the page holds: a terminal's Session (a helper's too, which
+  // Every Surface the page holds: a terminal's Session (an aux terminal's too, which
   // has no Lath leaf), and any kind of Surface a mounted Wall publishes.
   inUse: (id) => registry.has(id) || isWorkspaceSurface(id),
   logSkips: true,

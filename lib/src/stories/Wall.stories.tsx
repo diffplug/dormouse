@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { surfaceIdFor } from 'dor/protocol';
+import { expect, userEvent, waitFor } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from './fake-scenarios';
@@ -222,7 +223,7 @@ export const MultipleRingingSessions: Story = {
   },
 };
 
-/** Real context and helper lifecycle, backed by the deterministic demo shell. */
+/** Real context, backed by the deterministic demo shell: right-click opens its properties. */
 export const TerminalContext: Story = {
   args: { initialPaneIds: ['surface:1'], initialMode: 'passthrough' },
   parameters: { fakePty: { scenario: SCENARIO_SHELL_PROMPT } },
@@ -231,6 +232,31 @@ export const TerminalContext: Story = {
     const header = await requireElement('[data-pane-header-for="surface:1"]', 'terminal header');
     header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
     await settleTerminalContext();
+  },
+};
+
+/** The same context switched to its aux terminal, started on that first showing. */
+export const TerminalContextAux: Story = {
+  ...TerminalContext,
+  play: async (context) => {
+    await TerminalContext.play!(context);
+    const show = await requireElement<HTMLButtonElement>('[data-terminal-context] button[aria-label="Show aux terminal"]', 'aux terminal switch');
+    show.click();
+    await requireElement('[data-aux-terminal] .xterm', 'aux terminal');
+    await settleTerminals();
+  },
+};
+
+/** `!` in command mode opens the aux terminal and puts the keyboard in it, to type at once. */
+export const TerminalContextAuxKey: Story = {
+  args: { initialPaneIds: ['surface:1'], initialMode: 'command' },
+  parameters: { fakePty: { scenario: SCENARIO_SHELL_PROMPT } },
+  play: async () => {
+    await settleTerminals();
+    await userEvent.keyboard('!');
+    const aux = await requireElement<HTMLElement>('[data-aux-terminal] .xterm', 'aux terminal');
+    await waitFor(() => expect(aux.contains(document.activeElement)).toBe(true));
+    await settleTerminals();
   },
 };
 

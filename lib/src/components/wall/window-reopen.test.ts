@@ -58,27 +58,27 @@ describe('closing one window of several', () => {
     }
   });
 
-  it.each(['surface', 'workspace'] as const)('asks for hidden helper work belonging to a pending %s', (kind) => {
+  it.each(['surface', 'workspace'] as const)('asks for hidden aux terminal work belonging to a pending %s', (kind) => {
     twoWorkspaces(null);
     setWorkspaceSurfaces('ws-2', ['parent']);
-    const helper = { helper: { parentId: 'parent' }, helperBusy: false } as TerminalEntry;
-    registry.set('helper', helper);
-    applyTerminalSemanticEvents('helper', [{ type: 'promptStart' }]);
+    const aux = { aux: { parentId: 'parent' }, auxBusy: false } as TerminalEntry;
+    registry.set('aux', aux);
+    applyTerminalSemanticEvents('aux', [{ type: 'promptStart' }]);
     addPendingKill({ kind, id: kind === 'workspace' ? 'ws-2' : 'parent', workspaceId: 'ws-2', title: 'shell', label: kind }, { restore: () => {}, finalize: () => {} });
     try {
       expect(windowNeedsCloseConfirmation()).toBe(false);
-      // Hiding the helper invalidates the last idle inspection. Its parent
-      // need not have a foreground command for the helper to hold work.
-      helper.helperBusy = undefined;
+      // Hiding the aux terminal invalidates the last idle inspection. Its parent
+      // need not have a foreground command for the aux terminal to hold work.
+      aux.auxBusy = undefined;
       expect(windowNeedsCloseConfirmation()).toBe(true);
       expect(windowReopenSnapshot()).toBeNull();
-      helper.helperBusy = true;
+      aux.auxBusy = true;
       expect(windowNeedsCloseConfirmation()).toBe(true);
-      helper.exited = true;
+      aux.exited = true;
       expect(windowNeedsCloseConfirmation()).toBe(false);
     } finally {
-      registry.delete('helper');
-      removeTerminalPaneState('helper');
+      registry.delete('aux');
+      removeTerminalPaneState('aux');
       resetWorkspaceSurfaces();
       _resetPendingKillsForTesting();
     }

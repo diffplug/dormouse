@@ -6,7 +6,7 @@ import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/wi
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
 import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, isWorkspacePinned, moveWorkspace, renameWorkspace, resumeAutoWorkspaceName, setActiveWorkspace, setWorkspacePinned } from '../../lib/workspace-store';
 import { addPendingKill } from '../../lib/pending-kills';
-import { getHelper, helperHasWork } from '../../lib/helper-terminal';
+import { getAux, auxHasWork } from '../../lib/aux-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import { workspaceRecord, type PersistedSession, type WorkspaceId } from '../../lib/session-types';
 import { pushReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
@@ -51,9 +51,9 @@ export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
 }
 
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
-/** Why a Workspace close kills nothing: a member's helper has running work,
+/** Why a Workspace close kills nothing: a member's aux terminal has running work,
  *  or could not be inspected. */
-const HELPER_WORK_REFUSAL = 'A helper in this Workspace has running work. Stop it, then close the Workspace again.';
+const AUX_WORK_REFUSAL = 'An aux terminal in this Workspace has running work. Stop it, then close the Workspace again.';
 const TRANSFERRING_REFUSAL = 'Workspace is transferring';
 
 /** Why a pinned Workspace stays open: only its Window's close takes it
@@ -86,7 +86,7 @@ export function workspaceMetadataRefusal(id: WorkspaceId): string | null {
 /**
  * Close every member Surface through the closure coordinator, then drop the
  * Workspace itself. Resolves the first refusal's message with the Workspace left
- * open, or null once it is gone. A helper with running work, or one that cannot
+ * open, or null once it is gone. An aux terminal with running work, or one that cannot
  * be inspected, refuses before any member closes; only a refusal that arises
  * during the close itself leaves the members ahead of it closed and recorded
  * nowhere for reopen. Membership is cleared by the Wall's own unmount.
@@ -120,16 +120,16 @@ export async function closeWorkspaceWithSurfaces(
       flushSync(() => { setActiveWorkspace(id); handle.selectWorkspaceTab(); });
     }
     // Ahead of the Tool question too: nothing asked about can close anyway.
-    // Probed only where a helper exists, so a close with none still reaches
+    // Probed only where an aux terminal exists, so a close with none still reaches
     // the question, or `closeAll`, in the tick it was asked.
     const members = handle.surfaceIds();
-    const busy = members.some(member => getHelper(member)) ? await busyHelperSource(members) : null;
+    const busy = members.some(member => getAux(member)) ? await busyAuxSource(members) : null;
     if (busy !== null) {
       if (mode === 'prompt') {
         setActiveWorkspace(id);
-        handle.revealRefusal(busy, HELPER_WORK_REFUSAL);
+        handle.revealRefusal(busy, AUX_WORK_REFUSAL);
       }
-      return HELPER_WORK_REFUSAL;
+      return AUX_WORK_REFUSAL;
     }
     // One question for every dirty Tool, before any Surface closes; a command
     // close refuses instead (`docs/specs/dor-tool.md` → Closing unsaved Tools).
@@ -193,8 +193,8 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
   if (!isCurrent() || workspaceCloseRefusal(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
-    // Running helper work refuses a close outright; it is no pending kill.
-    const pend = isDelayedKillEnabled() && await busyHelperSource(handle.surfaceIds()) === null;
+    // Running aux terminal work refuses a close outright; it is no pending kill.
+    const pend = isDelayedKillEnabled() && await busyAuxSource(handle.surfaceIds()) === null;
     if (!isCurrent() || workspaceCloseRefusal(id)) return;
     if (pend) {
       pendWorkspace(id);
@@ -231,12 +231,12 @@ export function subscribeToHeldWorkspaces(listener: () => void): () => void {
   return () => { heldListeners.delete(listener); };
 }
 
-/** The first of these Surfaces whose helper still has work, or null; a failed
+/** The first of these Surfaces whose aux terminal still has work, or null; a failed
  *  probe counts as busy. */
-async function busyHelperSource(ids: readonly string[]): Promise<string | null> {
+async function busyAuxSource(ids: readonly string[]): Promise<string | null> {
   const busy = await Promise.all(ids.map(id => {
-    const helper = getHelper(id);
-    return helper ? helperHasWork(helper).catch(() => true) : false;
+    const aux = getAux(id);
+    return aux ? auxHasWork(aux).catch(() => true) : false;
   }));
   return ids[busy.indexOf(true)] ?? null;
 }
@@ -278,13 +278,13 @@ function pendWorkspace(id: WorkspaceId): void {
       const handle = getWallHandle(id);
       let refusal: string | null = null;
       if (handle) {
-        // Helper work started during the countdown refuses before any member
+        // Aux terminal work started during the countdown refuses before any member
         // closes; teardown, which can join while this probes, closes anyway.
-        const busy = !context.teardown && await busyHelperSource(handle.surfaceIds()) !== null;
+        const busy = !context.teardown && await busyAuxSource(handle.surfaceIds()) !== null;
         // Unsaved Tool edits are discarded: the pending kill was the decision.
-        refusal = busy && !context.teardown ? HELPER_WORK_REFUSAL : await handle.closeAll(handle.dirtyToolIds());
+        refusal = busy && !context.teardown ? AUX_WORK_REFUSAL : await handle.closeAll(handle.dirtyToolIds());
       }
-      // Work that refuses to close (a helper's) brings the Workspace back to
+      // Work that refuses to close (an aux terminal's) brings the Workspace back to
       // say so, except when the window is going anyway.
       if (refusal && !context.teardown) restore(false);
       else release();

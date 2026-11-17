@@ -19,7 +19,7 @@ vi.mock('./terminal-registry', () => ({
 
 import { collectLivePtys, resumeOrRestore, resumeOrRestoreFrom } from './reconnect';
 import { mintSurfaceId, resetSurfaceIdPool } from './surface-ids';
-import { getHelper, forgetHelper } from './helper-terminal';
+import { getAux, forgetAux } from './aux-terminal';
 import { setPlatform } from './platform';
 import type { LathNode } from './lath/model';
 import { parseReplay, setReplayLocalHost } from './platform/replay-parse';
@@ -110,15 +110,15 @@ describe('resumeOrRestore', () => {
     expect(platform.spawnPty).not.toHaveBeenCalled();
   });
 
-  it('restores helpers outside the primary layout', async () => {
+  it('restores aux terminals outside the primary layout', async () => {
     const layout = lathLayoutFor('parent');
-    const helper = { parentId: 'parent' };
-    const result = await resumeOrRestore(createPlatform([{ id: 'parent', alive: true }, { id: 'helper', alive: true, helper }], {
+    const aux = { parentId: 'parent' };
+    const result = await resumeOrRestore(createPlatform([{ id: 'parent', alive: true }, { id: 'aux', alive: true, aux }], {
       version: 4, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null, untouched: false }],
     }));
     expect(result.paneIds).toEqual(['parent']); expect(result.lathLayout).toEqual(layout);
-    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('helper', 'helper-replay', { alive: true, exitCode: undefined, helper });
-    expect(getHelper('parent')).toBeDefined(); forgetHelper('parent');
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('aux', 'aux-replay', { alive: true, exitCode: undefined, aux });
+    expect(getAux('parent')).toBeDefined(); forgetAux('parent');
   });
 
   it('restores saved visible layout and minimized doors for matching live PTYs', async () => {
@@ -477,33 +477,33 @@ describe('resumeOrRestoreFrom', () => {
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('b1', 'b1-replay', expect.anything());
   });
 
-  it('keeps a helper with the Workspace that holds its source', async () => {
-    const helper = { parentId: 'a1' };
+  it('keeps an aux terminal with the Workspace that holds its source', async () => {
+    const aux = { parentId: 'a1' };
     const { platform, live: collected } = await live([
       { id: 'a1', alive: true },
-      { id: 'a-helper', alive: true, helper },
+      { id: 'a-aux', alive: true, aux },
       { id: 'b1', alive: true },
     ]);
 
     const a = resumeOrRestoreFrom(platform, collected, {
       savedSession: savedFor('a1'),
-      ptyIds: new Set(['a1', 'a-helper']),
+      ptyIds: new Set(['a1', 'a-aux']),
     });
     expect(a.paneIds).toEqual(['a1']);
-    expect(getHelper('a1')).toBeDefined();
-    forgetHelper('a1');
+    expect(getAux('a1')).toBeDefined();
+    forgetAux('a1');
 
-    // The same helper handed to a Workspace WITHOUT its source is an ordinary
+    // The same aux terminal handed to a Workspace WITHOUT its source is an ordinary
     // pane there: `ptyById` is the slice, so the parent lookup misses and the
-    // orphan is adopted rather than restored as a helper.
+    // orphan is adopted rather than restored as an aux terminal.
     vi.clearAllMocks();
     setPlatform(platform);
     const b = resumeOrRestoreFrom(platform, collected, {
       savedSession: null,
-      ptyIds: new Set(['b1', 'a-helper']),
+      ptyIds: new Set(['b1', 'a-aux']),
     });
-    expect(b.paneIds).toEqual(['a-helper', 'b1']);
-    expect(getHelper('a1')).toBeUndefined();
+    expect(b.paneIds).toEqual(['a-aux', 'b1']);
+    expect(getAux('a1')).toBeUndefined();
   });
 
   it('claims a live PTY no saved Workspace names for the plan that asks', async () => {

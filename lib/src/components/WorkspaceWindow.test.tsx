@@ -24,7 +24,7 @@ import * as uiGeometry from '../lib/ui-geometry';
 import { LATH_MOTION_MS } from '../lib/lath/animator';
 import { closeWorkspaceWithSurfaces, requestWorkspaceClose } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
-import * as helperTerminal from '../lib/helper-terminal';
+import * as auxTerminal from '../lib/aux-terminal';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
@@ -1610,9 +1610,9 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(leafIdsIn('workspace:2')).toContain(leaf);
   });
 
-  it('asks as before, pending nothing, when a member\'s helper runs a command', async () => {
-    vi.spyOn(helperTerminal, 'getHelper').mockImplementation(id => /^surface:/.test(id) ? { id: 'surface:helper', parentId: id } : undefined);
-    vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValue(true);
+  it('asks as before, pending nothing, when a member\'s aux terminal runs a command', async () => {
+    vi.spyOn(auxTerminal, 'getAux').mockImplementation(id => /^surface:/.test(id) ? { id: 'surface:aux', parentId: id } : undefined);
+    vi.spyOn(auxTerminal, 'auxHasWork').mockResolvedValue(true);
     createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['surface:a']} /></>);
     await act(async () => { requestWorkspaceClose('workspace:2'); });
@@ -1647,7 +1647,7 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     const drain = finalizePendingKills(undefined, { teardown }).then(() => { drained = true; });
     await act(async () => { await Promise.resolve(); });
     expect(drained).toBe(false);
-    await act(async () => { answer('helper has work'); await drain; });
+    await act(async () => { answer('aux terminal has work'); await drain; });
     await flush();
     expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(
       teardown ? [first, 'workspace:3'] : [first, 'workspace:2', 'workspace:3'],

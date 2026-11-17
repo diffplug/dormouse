@@ -151,7 +151,7 @@ function serverTimeoutFor(clientTimeoutMs, fallbackMs) {
 // `socketPath` and `socketDir` are test seams: production callers leave both
 // unset and take the hardened path this module picks, which they then hand to
 // spawned shells.
-function createDorControlServer({ socketPath, socketDir, token, send, getHelperParentId = () => undefined, timeoutMs = 65000 }) {
+function createDorControlServer({ socketPath, socketDir, token, send, getAuxParentId = () => undefined, timeoutMs = 65000 }) {
   if (!token) return null;
 
   const effectiveSocketPath = socketPath || resolveControlSocketPath(socketDir);
@@ -268,9 +268,9 @@ function createDorControlServer({ socketPath, socketDir, token, send, getHelperP
     }
 
     const surfaceId = typeof request.surfaceId === 'string' ? request.surfaceId : undefined;
-    // Only the host knows a helper's source before cross-window routing; the
-    // renderer refuses helper targets (docs/specs/dor-cli.md -> Helper callers).
-    const helperParentId = getHelperParentId(surfaceId);
+    // Only the host knows an aux terminal's source before cross-window routing; the
+    // renderer refuses aux terminal targets (docs/specs/dor-cli.md -> Aux callers and targets).
+    const auxParentId = getAuxParentId(surfaceId);
 
     const timeout = setTimeout(() => {
       reap(request.requestId);
@@ -282,7 +282,7 @@ function createDorControlServer({ socketPath, socketDir, token, send, getHelperP
     send('dor:controlRequest', {
       requestId: request.requestId,
       surfaceId,
-      ...(helperParentId ? { helperParentId } : {}),
+      ...(auxParentId ? { auxParentId } : {}),
       method: request.method,
       params: request.params ?? {},
     });

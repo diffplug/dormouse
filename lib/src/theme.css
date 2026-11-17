@@ -96,7 +96,7 @@ body {
  * so there are no CSS entrance/exit classes. */
 
 /* Terminal context reveal and dismissal (docs/specs/layout.md → "Header context menu").
- * Reveal at the final layout size so helper xterm fits once, immediately; the shell
+ * Reveal at the final layout size so the aux terminal's xterm fits once, immediately; the shell
  * establishes depth before initialization becomes visible. TerminalContextView sets
  * the inline custom properties: `--context-origin-x/y` (the opening pointer's offsets
  * inside the surface, clamped here so an outside origin sits on the edge),

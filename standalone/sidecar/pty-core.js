@@ -1511,7 +1511,7 @@ async function getOpenPortsForPids(rootList, runtime = {}) {
     msysPs ? runTextLenient(runtime, msysPs, ['-a'], { timeout: OPEN_PORT_TIMEOUT_MS }).then(parseMsysPs) : [],
   ]);
   const { pairs } = tables;
-  // A failed scan is tolerated here (unlike helper-work inspection): each root
+  // A failed scan is tolerated here (unlike aux terminal work inspection): each root
   // then owns only itself.
   const children = pairs ? childrenIndex(pairs) : new Map();
   const owned = new Map(roots.map((root) => [root, descendantsIn(children, root)]));
@@ -1625,8 +1625,8 @@ function isProcessAlive(pid) {
 // it as an option keeps this file — and its `node --test` suite — free of any
 // build artifact. `main.js` supplies the real one.
 //
-// `onHelper(id, isHelper)` hears every helper decision — each spawn and each
-// promotion that succeeds — so the host's alerts, which keep a helper inert,
+// `onAux(id, isAux)` hears every aux terminal decision — each spawn and each
+// promotion that succeeds — so the host's alerts, which keep an aux terminal inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
 //
 // `onInputWritten(id)` hears each slice of queued input (`sendInput`'s paced
@@ -1638,7 +1638,7 @@ function isProcessAlive(pid) {
 // same reason: `canonicalLocalDirectory` in `lib/src/host/local-directory.ts`,
 // which `main.js` takes from `git-info.cjs` and VS Code's `pty-host.js`
 // bundles. The default opens nothing.
-module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })), processAlive = isProcessAlive, onInputWritten = () => {} } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onAux = () => {}, canonicalDirectory = async () => null, resolveBinary = () => undefined, readLocale = platform === 'darwin' ? readAppleLocale : async () => null, scanPorts = createPortScanner((roots, count) => getOpenPortsForPids(roots, { budgetCount: count })), processAlive = isProcessAlive, onInputWritten = () => {} } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1648,7 +1648,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
 
   const pty = ptyModule;
   const ptys = new Map(); // id -> pty.IPty
-  const helpers = new Map(); // id -> { parentId } for helper PTYs
+  const auxTerminals = new Map(); // id -> { parentId } for aux terminal PTYs
   // Every spawned, unkilled PTY (exited ones included). Only the standalone host
   // asks for `replay`; VS Code's extension host keeps its own buffers.
   // `chars` is what the buffer currently holds (a trim decrements it);
@@ -1728,10 +1728,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     }
   }
 
-  function validHelperOwner(id, helper) {
-    return typeof helper.parentId === 'string'
-      && helper.parentId !== id && sessions.has(helper.parentId) && !helpers.has(helper.parentId)
-      && ![...helpers].some(([otherId, other]) => otherId !== id && other.parentId === helper.parentId);
+  function validAuxOwner(id, aux) {
+    return typeof aux.parentId === 'string'
+      && aux.parentId !== id && sessions.has(aux.parentId) && !auxTerminals.has(aux.parentId)
+      && ![...auxTerminals].some(([otherId, other]) => otherId !== id && other.parentId === aux.parentId);
   }
 
   function failSpawn(id, err) {
@@ -1755,13 +1755,13 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       failSpawn(id, err);
       return;
     }
-    if (options?.helper && validHelperOwner(id, options.helper)) {
-      helpers.set(id, { parentId: options.helper.parentId });
-    } else if (options?.helper) {
+    if (options?.aux && validAuxOwner(id, options.aux)) {
+      auxTerminals.set(id, { parentId: options.aux.parentId });
+    } else if (options?.aux) {
       send("exit", { id, exitCode: 1 });
       return;
-    } else helpers.delete(id);
-    onHelper(id, helpers.has(id));
+    } else auxTerminals.delete(id);
+    onAux(id, auxTerminals.has(id));
 
     let p;
     try {
@@ -2072,7 +2072,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   }
 
   function kill(id) {
-    helpers.delete(id);
+    auxTerminals.delete(id);
     sessions.delete(id);
     cancelRepaint(id);
     cancelInput(id);
@@ -2092,7 +2092,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     }
     ptys.clear();
     ptyShells.clear();
-    helpers.clear();
+    auxTerminals.clear();
     sessions.clear();
   }
 
@@ -2117,7 +2117,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
       : [...ptys.keys()];
     const result = targets.map((id) => ({
       id, alive: ptys.has(id), shell: sessions.get(id)?.shell,
-      ...(!ptys.has(id) ? { exitCode: sessions.get(id)?.exitCode } : {}), ...(helpers.has(id) ? { helper: helpers.get(id) } : {}),
+      ...(!ptys.has(id) ? { exitCode: sessions.get(id)?.exitCode } : {}), ...(auxTerminals.has(id) ? { aux: auxTerminals.get(id) } : {}),
     }));
     const addressed = {
       ...(forWindow ? { forWindow } : {}),
@@ -2167,10 +2167,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
             || (platform !== 'win32' && !!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
       } else if (request.op === 'promote') {
         if (request.restore) {
-          if (!sessions.has(request.id) || !validHelperOwner(request.id, request.restore)) throw new Error('Invalid helper owner');
-          helpers.set(request.id, { parentId: request.restore.parentId });
-        } else helpers.delete(request.id);
-        onHelper(request.id, helpers.has(request.id));
+          if (!sessions.has(request.id) || !validAuxOwner(request.id, request.restore)) throw new Error('Invalid aux terminal owner');
+          auxTerminals.set(request.id, { parentId: request.restore.parentId });
+        } else auxTerminals.delete(request.id);
+        onAux(request.id, auxTerminals.has(request.id));
       } else if (request.op === 'openDirectory') {
         // The resolver is the only thing that touches the path: a `stat` or
         // `realpath` here would follow a link to a share and reach its host.
@@ -2328,7 +2328,7 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   }
 
   return { spawn, setParentWindow, write, sendInput, cancelSendInput, resize, pause, resume, hasPty, kill, killAll, list, context,
-    getHelperParentId: (id) => helpers.get(id)?.parentId,
+    getAuxParentId: (id) => auxTerminals.get(id)?.parentId,
     getCwds, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };
 };

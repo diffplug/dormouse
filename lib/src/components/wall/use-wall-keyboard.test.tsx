@@ -92,12 +92,12 @@ describe('useWallKeyboard keyup', () => {
 });
 
 describe('useWallKeyboard inside the terminal context', () => {
-  // The helper's copy editor owns its keys however the context was opened:
+  // The aux terminal's copy editor owns its keys however the context was opened:
   // `a` leaves the Wall in command mode, a right-click enters passthrough.
-  it('hands keys from the helper terminal to its selection as passthrough input', async () => {
+  it('hands keys from the aux terminal to its selection as passthrough input', async () => {
     const context = document.createElement('div');
     context.setAttribute('data-terminal-context', '');
-    context.innerHTML = '<div data-helper-terminal="helper-1"><textarea></textarea></div>';
+    context.innerHTML = '<div data-aux-terminal="aux-1"><textarea></textarea></div>';
     document.body.appendChild(context);
     function Harness() {
       useWallKeyboard({ ...makeCtx(), modeRef: { current: 'command' }, selectedIdRef: { current: 'surface:a' } } as unknown as WallKeyboardCtx);
@@ -108,7 +108,7 @@ describe('useWallKeyboard inside the terminal context', () => {
     try {
       copyEditor.seen = [];
       context.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-      expect(copyEditor.seen).toEqual([{ id: 'helper-1', mode: 'passthrough' }]);
+      expect(copyEditor.seen).toEqual([{ id: 'aux-1', mode: 'passthrough' }]);
     } finally {
       await act(async () => root.unmount());
       context.remove();

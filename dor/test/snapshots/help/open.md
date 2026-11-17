@@ -21,7 +21,7 @@ builtin:code opens any text file, Markdown and HTML included, as source in the c
 
 The selected Tool receives the canonical absolute path as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
 
-Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --from, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
+Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with an aux terminal, --minimize, --from, or --cwd elsewhere split instead. Once the command exits the pane is a plain terminal again; opening from its prompt takes it over afresh. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
 
 Focuses the created or reused Surface only with --focus; otherwise focus stays where it is. --focus with --minimize is an error.
 

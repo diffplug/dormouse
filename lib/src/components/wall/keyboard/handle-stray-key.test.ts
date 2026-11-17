@@ -174,7 +174,7 @@ describe('stray keys in command mode', () => {
     expect(ctx.raiseStrayKey).toHaveBeenCalledExactlyOnceWith(key);
   });
 
-  it.each(['t', 'a', '>', ','])('does not call a bound key a stray where its verb is inert (%j on a Door)', async key => {
+  it.each(['t', 'a', '?', '!', ','])('does not call a bound key a stray where its verb is inert (%j on a Door)', async key => {
     const { ctx } = await mount('ws');
     ctx.selectedTypeRef.current = 'door';
     press(key);

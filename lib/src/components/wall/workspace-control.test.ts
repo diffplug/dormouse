@@ -18,8 +18,8 @@ import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspac
 import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { setPlatform } from '../../lib/platform';
-import * as helperTerminal from '../../lib/helper-terminal';
-import type { HelperTerminal } from '../../lib/helper-terminal';
+import * as auxTerminal from '../../lib/aux-terminal';
+import type { AuxTerminal } from '../../lib/aux-terminal';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
 
 const disposers: Array<() => void> = [];
@@ -328,19 +328,19 @@ describe('workspace.close', () => {
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 
-  it('refuses running helper work even with force, closing no member', async () => {
+  it('refuses running aux terminal work even with force, closing no member', async () => {
     const second = createWorkspace({ id: 'workspace:2', name: 'build', activate: false }).id;
     const closeAll = vi.fn(async () => null);
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     handleFor(second, { needsCloseConfirmation: () => true, closeAll, surfaceIds: () => ['surface:a', 'surface:b'] });
-    vi.spyOn(helperTerminal, 'getHelper').mockImplementation((id) =>
-      id === 'surface:b' ? { id: 'surface:helper', parentId: 'surface:b' } as HelperTerminal : undefined);
-    vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValue(true);
+    vi.spyOn(auxTerminal, 'getAux').mockImplementation((id) =>
+      id === 'surface:b' ? { id: 'surface:aux', parentId: 'surface:b' } as AuxTerminal : undefined);
+    vi.spyOn(auxTerminal, 'auxHasWork').mockResolvedValue(true);
 
     const forced = request('workspace.close', { workspace: 'workspace:2', force: true });
     await handleWorkspaceControl(forced);
     expect(answer(forced)).toBe(
-      "workspace 'workspace:2' was not closed: A helper in this Workspace has running work. Stop it, then close the Workspace again.",
+      "workspace 'workspace:2' was not closed: An aux terminal in this Workspace has running work. Stop it, then close the Workspace again.",
     );
     expect(closeAll).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);

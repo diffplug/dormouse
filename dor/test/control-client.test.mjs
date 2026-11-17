@@ -79,7 +79,7 @@ test('a browser bind waits past the host\'s browser request timeout, not the cli
   });
 });
 
-test('a surface kill waits past the client default, as the host inspects the helper', skipOnWindows, async () => {
+test('a surface kill waits past the client default, as the host inspects the aux terminal', skipOnWindows, async () => {
   await withTempSocket(async (socketPath) => {
     const server = createDorControlServer({
       socketPath,

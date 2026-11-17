@@ -5,7 +5,7 @@ const deps = (overrides: Partial<CloseForClientDeps> = {}): CloseForClientDeps =
   gone: () => false,
   isTerminal: () => false,
   transferRefusal: () => null,
-  helperRefusal: async () => null,
+  auxRefusal: async () => null,
   needsConfirm: () => false,
   isDirty: () => false,
   label: () => 'notes.md',
@@ -21,11 +21,11 @@ describe('closeForClient', () => {
     expect(d.close).toHaveBeenCalledOnce();
   });
 
-  it('asks nothing about a Surface gone during the helper wait', async () => {
+  it('asks nothing about a Surface gone during the aux terminal wait', async () => {
     let gone = false;
     const d = deps({
       gone: () => gone,
-      helperRefusal: async () => {
+      auxRefusal: async () => {
         gone = true;
         return null;
       },
@@ -102,7 +102,7 @@ describe('closeForClient', () => {
   it('passes on the desktop\'s refusals, and consent never skips them', async () => {
     for (const d of [
       deps({ transferRefusal: () => 'moving' }),
-      deps({ helperRefusal: async () => 'moving' }),
+      deps({ auxRefusal: async () => 'moving' }),
       deps({ close: vi.fn(async () => 'moving') }),
     ]) {
       expect(await closeForClient({ confirmed: true, unsaved: 'discard' }, d)).toEqual({ outcome: 'refused', message: 'moving' });

@@ -177,10 +177,10 @@ export function shouldParkOnMinimize(meta: LeafMeta): boolean {
   return meta.component === 'browser' || meta.component === 'tool';
 }
 
-/** The open terminal context's helper host, outlined by the selection ring with its source. */
-export type ContextHelper = { sourceId: string; element: HTMLElement; side: Edge };
-/** Places the open context's helper from one painted frame; null hides it from the ring. */
-export type ContextPlacer = (paint: ReadonlyMap<string, Frame>) => ContextHelper | null;
+/** The open terminal context's aux terminal host, outlined by the selection ring with its source. */
+export type ContextPanel = { sourceId: string; element: HTMLElement; side: Edge };
+/** Places the open context's aux terminal from one painted frame; null hides it from the ring. */
+export type ContextPlacer = (paint: ReadonlyMap<string, Frame>) => ContextPanel | null;
 
 export type LathWallEngine = {
   /** The underlying headless store — the state machine + geometry every state op and
@@ -208,13 +208,13 @@ export type LathWallEngine = {
    *  without a store commit (`markDying`, `setContextPlacer`). Returns an unsubscribe. */
   subscribeWake(cb: () => void): () => void;
   /** Register the open context's placer (null on unmount) and wake the tick loop, so
-   *  the helper is repainted and chrome re-measures it. */
+   *  the aux terminal is repainted and chrome re-measures it. */
   setContextPlacer(placer: ContextPlacer | null): void;
   /** LathHost's paint calls this with the frames it just wrote, before `notifyFrames`,
-   *  so chrome measures the helper where it is painted. */
+   *  so chrome measures the aux terminal where it is painted. */
   placeContext(paint: ReadonlyMap<string, Frame>): void;
-  /** The helper the last paint placed, or null. */
-  contextHelper(): ContextHelper | null;
+  /** The aux terminal the last paint placed, or null. */
+  contextPanel(): ContextPanel | null;
 
   // --- reads / projections over the store ---
   /** Visible leaves in tree pre-order, each with its meta title + params. Parked
@@ -262,7 +262,7 @@ export function createLathWallEngine(
   const frameListeners = new Set<(settled: boolean) => void>();
   const wakeListeners = new Set<() => void>();
   let contextPlacer: ContextPlacer | null = null;
-  let contextHelper: ContextHelper | null = null;
+  let contextPanel: ContextPanel | null = null;
 
   return {
     store,
@@ -292,9 +292,9 @@ export function createLathWallEngine(
       for (const l of wakeListeners) l();
     },
     placeContext(paint) {
-      contextHelper = contextPlacer?.(paint) ?? null;
+      contextPanel = contextPlacer?.(paint) ?? null;
     },
-    contextHelper: () => contextHelper,
+    contextPanel: () => contextPanel,
 
     listPanes() {
       const meta = snapshot().leafMeta;

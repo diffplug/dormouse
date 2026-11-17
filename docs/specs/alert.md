@@ -72,7 +72,7 @@ A Session is engaged while some present viewer focuses it.
 - **Must write all human-originated PTY input through `writeUserInput`**, the mobile input bar's included: it carries `userInput`, and the host acknowledges it with input before the bytes reach the PTY, in the one message (rationale).
 - **A remote Client's write must acknowledge the same way unless it holds only hover or button reports**, the Burrow having dropped a mirror's terminal replies (rationale).
 - **Never create an Activity entry to acknowledge**, the host's one check, so a browser Surface keeps its own TODO.
-- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, a helper's included. Output inside it is ignored entirely — detector, `workSince`, the acknowledged state, an await's grace — and a completion inside it neither rings nor is held, though an await may still claim it (Dispatch; rationale).
+- **User input must open the echo window** (`cfg.alert.echoWindow`) even when acknowledging clears nothing, an aux terminal's included. Output inside it is ignored entirely — detector, `workSince`, the acknowledged state, an await's grace — and a completion inside it neither rings nor is held, though an await may still claim it (Dispatch; rationale).
 
 Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; `createPresenceTracker` in `lib/src/lib/presence.ts`; `retainEngagementReporter` in `lib/src/lib/engagement.ts`; `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`; `alertedPty` in `lib/src/host/owner-pty.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
@@ -132,7 +132,7 @@ Dispatch — each completion takes the first exit that applies:
 
 ```mermaid
 flowchart TD
-  C["settle, command finish (seen or unseen), or report"] --> H{"a helper Session?"}
+  C["settle, command finish (seen or unseen), or report"] --> H{"an aux terminal Session?"}
   HS["a held source"] --> H
   H -- yes --> X["dropped"]
   H -- "no, held" --> G
@@ -307,7 +307,7 @@ stateDiagram-v2
     [*] --> Pending: the episode opens, the sink on
     [*] --> Spent: the episode opens, the sink off
     Pending --> Delivered: due, not blocked
-    Pending --> Spent: due while blocked, the sink turned off, a demotion to helper, or the episode ends
+    Pending --> Spent: due while blocked, the sink turned off, a demotion to aux terminal, or the episode ends
     Delivered --> [*]
     Spent --> [*]
   }
@@ -334,7 +334,7 @@ stateDiagram-v2
     state arrive <<choice>>
     state "Failed, absorbing nothing" as Failed
     [*] --> arrive
-    arrive --> Failed: an invalid request or a helper Session — cancelled
+    arrive --> Failed: an invalid request or an aux terminal Session — cancelled
     arrive --> Failed: the Session already removed — died
     arrive --> Resolved: Ringing, else a hold, with a source it accepts — withdraw it
     arrive --> Parked: Seen or Unseen
@@ -524,7 +524,7 @@ Application alarm defaults live beside the WATCHING rule set, edited in Settings
 
 **The host must decide when to deliver, in `createAlertHost` beside the manager** (rationale):
 
-- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing; a sink turned off, a ring cleared, or a demotion to helper first consumes it. Due but blocked also consumes it: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
+- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing; a sink turned off, a ring cleared, or a demotion to aux terminal first consumes it. Due but blocked also consumes it: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
 - **Enabling or promotion must never replay an episode**, one that began disabled included (rationale). Delay edits never move a deadline; speech reads the current voice at engine admission.
 - **Each realm must publish every Session it shows** — Pane label and Workspace overrides — as one `sessions` op, label changes throttled (rationale).
 - **A publication must overwrite each Session it names, whichever realm published it last, and never drop one the manager holds state for**; one its realm omits with none is forgotten (rationale). The host keeps each Session's entry until the Session is removed, through its realm's end and a respawn under its id; an unpublished Session uses the defaults.
@@ -627,11 +627,11 @@ Where it surfaces is host-specific:
 - **Must offer user additions to WATCHING only in the terminal context**, whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removals there or in Settings. Removing a rule drops it for every Session running that command.
 - The mobile composition dismisses by acknowledgement alone — a tap, leaving a TODO, or a keystroke, clearing it (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
 
-**Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. **Must suppress helper alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, acknowledgement, or TODO control, and only the default state published. A helper still tracks its command and feeds its detector, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale).
+**Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. **Must suppress aux terminal alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, acknowledgement, or TODO control, and only the default state published. An aux terminal still tracks its command and feeds its detector, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale).
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. Its look and motion — one arrival burst per episode, never replayed by a remount — live at `AlertRingIndicator` and `useAlertRingBurst`; its layering: `docs/specs/layout.md` → Alarm overlay.
 
-Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setHelper` in `lib/src/lib/alert-manager.ts`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `useAlertRingBurst` in `lib/src/components/alert-ring.tsx`.
+Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `setAux` in `lib/src/lib/alert-manager.ts`; `lib/src/components/TodoPillBody.tsx`; `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndicator.tsx`; `useAlertRingBurst` in `lib/src/components/alert-ring.tsx`.
 
 ### Door
 

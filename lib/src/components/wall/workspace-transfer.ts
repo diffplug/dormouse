@@ -6,7 +6,7 @@ import type { ToolAnnounce } from 'dor-tools-lib/osc';
 import { snapshotTerminalState, type TransferredTerminalState } from '../../lib/terminal-state-store';
 import { dismissWorkspaceUi } from '../../lib/workspace-ui-store';
 import type { TerminalGrid } from '../../lib/terminal-transfer';
-import { forgetHelper, getHelper } from '../../lib/helper-terminal';
+import { forgetAux, getAux } from '../../lib/aux-terminal';
 import { releaseSession, serializeTerminal, getTerminalInstance } from '../../lib/terminal-registry';
 import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
 import { workspaceRecord, type PersistedSession, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
@@ -26,12 +26,12 @@ export interface WorkspaceTransferPayload {
   workspaceId: WorkspaceId;
   /** What the target restores the Workspace from. */
   workspace: PersistedWorkspace;
-  /** Member Surfaces holding a PTY, **plus each one's helper Session**: exactly
-   *  what changes ownership. A helper is not a member Surface — it has no pane
+  /** Member Surfaces holding a PTY, **plus each one's aux terminal Session**: exactly
+   *  what changes ownership. An aux terminal is not a member Surface — it has no pane
    *  — but it is a live shell owned by this Window, and one left
    *  behind is a leaked process plus a stray pane on the source's next reload.
    *  The target re-parents it: `routeUnownedPtys` and `resumeLivePtys` both
-   *  place a helper by its `parentId`, which travels with it. */
+   *  place an aux terminal by its `parentId`, which travels with it. */
   terminalIds: string[];
   /** Every member Surface, browser ones included. */
   allIds: string[];
@@ -91,17 +91,17 @@ export async function prepareWorkspaceTransfer(
   // alone, reaped (docs/specs/dor-tool.md -> Reaping).
   const reaped = allIds.filter((id) => deps.hasTerminal(id) && isToolReaped(id));
   const panes = allIds.filter((id) => deps.hasTerminal(id) && !isToolReaped(id));
-  // A helper rides with its source, in that order: the target's resume needs the
+  // An aux terminal rides with its source, in that order: the target's resume needs the
   // parent in the same slice to re-parent it.
-  const helpers = new Map<string, string>();
+  const auxTerminals = new Map<string, string>();
   for (const id of panes) {
-    const helper = getHelper(id);
-    if (helper?.promoting) throw new Error('Wait for helper promotion before moving this Workspace');
-    if (helper) helpers.set(id, helper.id);
+    const aux = getAux(id);
+    if (aux?.promoting) throw new Error('Wait for aux terminal promotion before moving this Workspace');
+    if (aux) auxTerminals.set(id, aux.id);
   }
   const terminalIds = panes.flatMap((id) => {
-    const helper = helpers.get(id);
-    return helper ? [id, helper] : [id];
+    const aux = auxTerminals.get(id);
+    return aux ? [id, aux] : [id];
   });
 
   const tools = deps.captureTools?.();
@@ -117,8 +117,8 @@ export async function prepareWorkspaceTransfer(
     commit() {
       dismissWorkspaceUi(deps.workspaceId);
       // Forgotten before its Session goes, so the status poller stops and the
-      // source pane does not re-open the helper it no longer holds.
-      for (const parentId of helpers.keys()) forgetHelper(parentId);
+      // source pane does not re-open the aux terminal it no longer holds.
+      for (const parentId of auxTerminals.keys()) forgetAux(parentId);
       // A browser's session lives in the host, and the target attaches to it
       // from the persisted params; this Window only lets go of its viewer, or
       // a popped-out one would keep streaming here and both would auto-revert

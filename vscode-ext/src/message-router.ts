@@ -495,7 +495,7 @@ export function attachRouter(
       type: 'dor:controlRequest',
       requestId: request.requestId,
       surfaceId: request.surfaceId,
-      helperParentId: request.helperParentId,
+      auxParentId: request.auxParentId,
       method: request.method,
       params: request.params ?? {},
     } satisfies ExtensionMessage).then(
@@ -581,13 +581,13 @@ export function attachRouter(
           break;
         }
         ptyManager.terminalContext(request).then(result => {
-          if (!result.error && request.op === 'promote') alertManager.setHelper(request.id, !!request.restore);
+          if (!result.error && request.op === 'promote') alertManager.setAux(request.id, !!request.restore);
           post({ type: 'pty:contextResult', requestId: msg.requestId, result });
         }, error => post({ type: 'pty:contextResult', requestId: msg.requestId, result: { error: String(error) } }));
         break;
       }
       case 'pty:spawn': {
-        if (msg.options?.helper && (!ownedPtyIds.has(msg.options.helper.parentId) || ptyManager.helperPtys.has(msg.options.helper.parentId))) {
+        if (msg.options?.aux && (!ownedPtyIds.has(msg.options.aux.parentId) || ptyManager.auxPtys.has(msg.options.aux.parentId))) {
           post({ type: 'pty:exit', id: msg.id, exitCode: 1 });
           break;
         }
@@ -599,7 +599,7 @@ export function attachRouter(
         // the parser is retired rather than let its half-read sequence splice
         // onto the new PTY's first bytes.
         alertHost.respawn(msg.id, alert);
-        if (msg.options?.helper) alertManager.setHelper(msg.id, true);
+        if (msg.options?.aux) alertManager.setAux(msg.id, true);
         processedPtyStreams.endGeneration(msg.id);
         ownerPtyStreams.delete(msg.id);
         if (!spawnOptions.cwd) {
@@ -838,7 +838,7 @@ export function attachRouter(
           type: 'pty:list',
           ptys: Array.from(reconnectable.entries()).map(([id, info]) => ({
             id, alive: info.alive, exitCode: info.exitCode, shell: info.shell,
-            ...(ptyManager.helperPtys.has(id) ? { helper: ptyManager.helperPtys.get(id) } : {}),
+            ...(ptyManager.auxPtys.has(id) ? { aux: ptyManager.auxPtys.get(id) } : {}),
           })),
         };
         post(list);

@@ -178,7 +178,7 @@ describe("per-window close", () => {
     const { addPendingKill } = await import("dormouse-lib/lib/pending-kills");
     vi.spyOn(console, "warn").mockImplementation(() => {});
     addPendingKill({ kind: "surface", id: "p", workspaceId: "w1", title: "t", label: "Terminal" }, {
-      restore: vi.fn(), finalize: () => { throw new Error("Helper promotion is in progress"); },
+      restore: vi.fn(), finalize: () => { throw new Error("Aux terminal promotion is in progress"); },
     });
     initWindowClose(fakeAdapter());
     closeRequested();

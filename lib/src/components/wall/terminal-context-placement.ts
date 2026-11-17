@@ -2,11 +2,13 @@ import { edgeAxis, type Edge, type Rect } from '../../lib/lath/model';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 
 export type ContextSide = Edge;
-export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[] };
+/** `anchor`: the edge a panel shorter than `rect` keeps — the one touching the source
+ *  beside it, or a covering panel's outer edge. */
+export type ContextPlacement = { rect: Rect; side: ContextSide; available: ContextSide[]; anchor: 'top' | 'bottom' };
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
-/** Adjacent helpers overlap the source only by their teeth, which the rect includes. */
+/** Adjacent aux terminals overlap the source only by their teeth, which the rect includes. */
 const OVERLAP = TERMINAL_CONTEXT_TEETH_PX;
-/** Above helpers extend upward over peer headers rather than further over the source. */
+/** Above aux terminals extend upward over peer headers rather than further over the source. */
 const ABOVE_EXTENSION = 32;
 // Compact source/directory/status chrome plus a useful terminal viewport.
 const MIN_WIDTH = 280;
@@ -20,8 +22,9 @@ export function cursorHalfSide(buffer: { baseY: number; cursorY: number; viewpor
   return row >= 0 && row < rows / 2 ? 'bottom' : 'top';
 }
 
-/** Bounds are in Wall coordinates. Overlays may cover peers, never resize them. */
-export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolean, preferred?: ContextSide, fallback: ContextSide = 'top'): ContextPlacement {
+/** Bounds are in Wall coordinates. Overlays may cover peers, never resize them.
+ *  `avoid` is never the automatic choice; `preferred` still takes it, and it stays available. */
+export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolean, preferred?: ContextSide, fallback: ContextSide = 'top', avoid?: ContextSide): ContextPlacement {
   const right = wall.x + wall.width;
   const bottom = wall.y + wall.height;
   const candidates = !multiPane ? [] : SIDES.map(side => {
@@ -39,15 +42,15 @@ export function placeTerminalContext(wall: Rect, source: Rect, multiPane: boolea
     } };
   }).filter(candidate => candidate.rect.width >= MIN_WIDTH && candidate.rect.height >= MIN_HEIGHT);
   const chosen = candidates.find(candidate => candidate.side === preferred)
-    ?? candidates.reduce<typeof candidates[number] | undefined>((best, candidate) => !best || candidate.rect.width * candidate.rect.height > best.rect.width * best.rect.height ? candidate : best, undefined);
-  if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side) };
+    ?? candidates.reduce<typeof candidates[number] | undefined>((best, candidate) => candidate.side !== avoid && (!best || candidate.rect.width * candidate.rect.height > best.rect.width * best.rect.height) ? candidate : best, undefined);
+  if (chosen) return { ...chosen, available: candidates.map(candidate => candidate.side), anchor: chosen.side === 'top' ? 'bottom' : 'top' };
 
-  // Cover the source's half on its own edges, as adjacent helpers align with theirs.
+  // Cover the source's half on its own edges, as adjacent aux terminals align with theirs.
   // Small sources may borrow Wall space for usable chrome.
-  const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback;
+  const side = preferred === 'top' || preferred === 'bottom' ? preferred : fallback !== avoid ? fallback : fallback === 'top' ? 'bottom' : 'top';
   const width = Math.min(wall.width, Math.max(source.width, MIN_WIDTH));
   const height = Math.min(wall.height, Math.max(source.height / 2, MIN_HEIGHT));
-  return { side, available: ['top', 'bottom'], rect: {
+  return { side, available: ['top', 'bottom'], anchor: side === 'bottom' ? 'bottom' : 'top', rect: {
     x: clamp(source.x, wall.x, right - width),
     y: clamp(side === 'bottom' ? source.y + source.height - height : source.y, wall.y, bottom - height),
     width, height,

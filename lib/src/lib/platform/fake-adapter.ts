@@ -28,8 +28,8 @@ export interface FakeScenario {
   endsWithPrompt?: boolean;
 }
 
-/** `helper` marks a helper terminal's spawn, which runs the fake helper shell. */
-export interface PtySpawnDetail { id: string; helper: boolean }
+/** `aux` marks an aux terminal's spawn, which runs the fake aux terminal shell. */
+export interface PtySpawnDetail { id: string; aux: boolean }
 
 export interface FakePtySize {
   cols: number;
@@ -51,12 +51,12 @@ export class FakePtyAdapter implements PlatformAdapter {
   private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
   private spawnHandlers = new Set<(detail: PtySpawnDetail) => void>();
   private terminals = new Set<string>();
-  /** The deterministic demo shell behind each helper (docs/specs/terminal-context.md). */
-  private helpers = new Map<string, { cwd: string; busy: boolean }>();
+  /** The deterministic demo shell behind each aux terminal (docs/specs/terminal-context.md). */
+  private auxTerminals = new Map<string, { cwd: string; busy: boolean }>();
   private processCwds = new Map<string, string>();
-  /** Placement stories release each helper after fitting its mounted terminal. */
-  deferHelperStartup = false;
-  private pendingHelperPrompts = new Map<string, () => void>();
+  /** Placement stories release each aux terminal after fitting its mounted terminal. */
+  deferAuxStartup = false;
+  private pendingAuxPrompts = new Map<string, () => void>();
   private terminalSizes = new Map<string, FakePtySize>();
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
   private defaultScenario: FakeScenario | null = null;
@@ -163,9 +163,9 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
     this.activeTimers.clear();
     this.terminals.clear();
-    this.helpers.clear();
-    this.pendingHelperPrompts.clear();
-    this.deferHelperStartup = false;
+    this.auxTerminals.clear();
+    this.pendingAuxPrompts.clear();
+    this.deferAuxStartup = false;
     this.terminalSizes.clear();
     this.defaultScenario = null;
     this.scenarioMap.clear();
@@ -194,9 +194,9 @@ export class FakePtyAdapter implements PlatformAdapter {
     // A new generation starts its alert state over, from what a cold restore
     // persisted, as every host's spawn does.
     this.alertHost.respawn(id, options?.alert);
-    if (options?.helper) {
-      this.helpers.set(id, { cwd: options.cwd ?? '/home/demo/projects/dormouse', busy: false });
-      this.alertManager.setHelper(id, true);
+    if (options?.aux) {
+      this.auxTerminals.set(id, { cwd: options.cwd ?? '/home/demo/projects/dormouse', busy: false });
+      this.alertManager.setAux(id, true);
     }
     this.terminals.add(id);
     this.ownerStreams.set(id, this.createOwnerStream(id));
@@ -205,9 +205,9 @@ export class FakePtyAdapter implements PlatformAdapter {
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
     });
     for (const handler of this.spawnHandlers) {
-      handler({ id, helper: !!options?.helper });
+      handler({ id, aux: !!options?.aux });
     }
-    if (options?.helper) { this.startHelperShell(id); return; }
+    if (options?.aux) { this.startAuxShell(id); return; }
     const scenario = this.resolveScenario(id);
     if (scenario) {
       this.playScenario(id, scenario);
@@ -219,10 +219,10 @@ export class FakePtyAdapter implements PlatformAdapter {
       case 'home':
         return { home: '/home/demo' };
       case 'info':
-        return { busy: this.helpers.get(request.id)?.busy ?? false };
+        return { busy: this.auxTerminals.get(request.id)?.busy ?? false };
       case 'promote':
-        if (!request.restore) this.helpers.delete(request.id);
-        this.alertManager.setHelper(request.id, !!request.restore);
+        if (!request.restore) this.auxTerminals.delete(request.id);
+        this.alertManager.setAux(request.id, !!request.restore);
         return {};
       case 'openDirectory':
         // Refused, so the context shows why its button did nothing.
@@ -230,20 +230,20 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
   }
 
-  private startHelperShell(id: string): void {
-    const helper = this.helpers.get(id)!;
+  private startAuxShell(id: string): void {
+    const aux = this.auxTerminals.get(id)!;
     let input = '';
-    const prompt = () => `\x1b]633;A\x07${helper.cwd} ❯ \x1b]633;B\x07`;
+    const prompt = () => `\x1b]633;A\x07${aux.cwd} ❯ \x1b]633;B\x07`;
     this.inputHandlers.set(id, data => {
-      if (data === '\x03') { helper.busy = false; input = ''; this.sendOutput(id, '^C\r\n\x1b]633;D;130\x07' + prompt()); return; }
-      if (helper.busy) return;
+      if (data === '\x03') { aux.busy = false; input = ''; this.sendOutput(id, '^C\r\n\x1b]633;D;130\x07' + prompt()); return; }
+      if (aux.busy) return;
       let output = '';
       for (const char of data) {
         if (char === '\r' || char === '\n') {
           const command = input; input = '';
           output += `\r\n\x1b]633;E;${command}\x07\x1b]633;C\x07`;
-          if (/^(sleep|nano|vim)\b/.test(command)) { helper.busy = true; output += 'Demo process running. Ctrl+C stops it.\r\n'; continue; }
-          const result = command === 'git status' ? 'On branch main\r\nnothing to commit, working tree clean' : command.startsWith('echo ') ? command.slice(5) : command === 'pwd' ? helper.cwd : command ? `Demo shell: ${command}` : '';
+          if (/^(sleep|nano|vim)\b/.test(command)) { aux.busy = true; output += 'Demo process running. Ctrl+C stops it.\r\n'; continue; }
+          const result = command === 'git status' ? 'On branch main\r\nnothing to commit, working tree clean' : command.startsWith('echo ') ? command.slice(5) : command === 'pwd' ? aux.cwd : command ? `Demo shell: ${command}` : '';
           if (result) output += result + '\r\n';
           output += '\x1b]633;D;0\x07' + prompt();
         } else if (char === '\x7f') { if (input) { input = input.slice(0, -1); output += '\b \b'; } }
@@ -252,17 +252,17 @@ export class FakePtyAdapter implements PlatformAdapter {
       if (output) this.sendOutput(id, output);
     });
     const start = () => this.sendOutput(id, prompt());
-    this.pendingHelperPrompts.set(id, start);
-    if (!this.deferHelperStartup) queueMicrotask(() => {
+    this.pendingAuxPrompts.set(id, start);
+    if (!this.deferAuxStartup) queueMicrotask(() => {
       // A killed or replaced shell cannot start a newer generation's prompt.
-      if (this.pendingHelperPrompts.get(id) === start) this.resumeHelperStartup(id);
+      if (this.pendingAuxPrompts.get(id) === start) this.resumeAuxStartup(id);
     });
   }
 
-  /** Release a deferred first prompt once; retained helpers already have one. */
-  resumeHelperStartup(id: string): void {
-    const start = this.pendingHelperPrompts.get(id);
-    this.pendingHelperPrompts.delete(id);
+  /** Release a deferred first prompt once; retained aux terminals already have one. */
+  resumeAuxStartup(id: string): void {
+    const start = this.pendingAuxPrompts.get(id);
+    this.pendingAuxPrompts.delete(id);
     start?.();
   }
 
@@ -312,14 +312,14 @@ export class FakePtyAdapter implements PlatformAdapter {
       this.activeTimers.delete(id);
     }
     this.terminals.delete(id);
-    this.pendingHelperPrompts.delete(id);
+    this.pendingAuxPrompts.delete(id);
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
     this.ownerStreams.delete(id);
     this.openPortsMap.delete(id);
     // The Session is over, so its alert state goes with it.
     this.alertManager.remove(id);
-    this.helpers.delete(id);
+    this.auxTerminals.delete(id);
     if (!running) return;
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
@@ -345,7 +345,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.exitHandlers.delete(handler);
   }
 
-  async getCwd(id: string): Promise<string | null> { return this.helpers.get(id)?.cwd ?? this.processCwds.get(id) ?? null; }
+  async getCwd(id: string): Promise<string | null> { return this.auxTerminals.get(id)?.cwd ?? this.processCwds.get(id) ?? null; }
 
   /** The process directory a test wants a host read of `id` to answer. */
   setProcessCwd(id: string, cwd: string): void {

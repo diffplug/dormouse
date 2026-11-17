@@ -103,7 +103,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     const current = episodes.get(id);
     // Every sink is armed once, as its episode first shows. An episode that
     // stops showing consumes what it had pending, whether it ended or its
-    // Session was made a helper; a promotion showing it again is no new
+    // Session was made an aux terminal; a promotion showing it again is no new
     // episode, so it delivers nothing twice.
     if (current?.episodeId === episode?.id) return;
     if (current) {

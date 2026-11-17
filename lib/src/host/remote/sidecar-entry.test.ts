@@ -729,7 +729,7 @@ describe('the sidecar host', () => {
   let out: Array<{ event: string; data: unknown }>;
   /** Each PTY-manager call, with the Session's alert state as the call landed. */
   let calls: Array<{ op: string; args: unknown[]; state?: Pick<AlertState, 'status' | 'todo'> }>;
-  /** Run inside `mgr.spawn`, as `pty-core` reports a helper decision there. */
+  /** Run inside `mgr.spawn`, as `pty-core` reports an aux terminal decision there. */
   let duringSpawn: ((id: string) => void) | null;
 
   const stateOf = (id: unknown) => {
@@ -799,11 +799,11 @@ describe('the sidecar host', () => {
     ]);
   });
 
-  it('keeps a helper `pty-core` reports at its spawn inert', () => {
-    duringSpawn = (id) => host.alerts.setHelper(id, true);
-    host.handleCommand('pty:spawn', { id: 'helper-1', options: { helper: { parentId: 'pty-1' } } });
-    host.alerts.notifyFromProtocol('helper-1', REPORT);
-    expect(states('helper-1')).toEqual([]);
+  it('keeps an aux terminal `pty-core` reports at its spawn inert', () => {
+    duringSpawn = (id) => host.alerts.setAux(id, true);
+    host.handleCommand('pty:spawn', { id: 'aux-1', options: { aux: { parentId: 'pty-1' } } });
+    host.alerts.notifyFromProtocol('aux-1', REPORT);
+    expect(states('aux-1')).toEqual([]);
   });
 
   it('acknowledges human input before its write, and nothing else that is written', () => {
@@ -882,12 +882,12 @@ describe('the sidecar host', () => {
   it('answers a window collecting its PTYs with their state, behind the list', () => {
     host.alerts.notifyFromProtocol('pty-1', REPORT);
     host.alerts.toggleTodo('pty-2');
-    host.alerts.setHelper('helper-1', true);
-    host.alerts.onData('helper-1');
+    host.alerts.setAux('aux-1', true);
+    host.alerts.onData('aux-1');
     out = [];
 
-    host.handleCommand('pty:requestInit', { ids: ['pty-1', 'never-seen', 'helper-1'], forWindow: 'main', requestId: 'r1' });
-    expect(calls.map((call) => [call.op, call.args])).toEqual([['list', [['pty-1', 'never-seen', 'helper-1'], 'main', 'r1', undefined]]]);
+    host.handleCommand('pty:requestInit', { ids: ['pty-1', 'never-seen', 'aux-1'], forWindow: 'main', requestId: 'r1' });
+    expect(calls.map((call) => [call.op, call.args])).toEqual([['list', [['pty-1', 'never-seen', 'aux-1'], 'main', 'r1', undefined]]]);
     expect(out.map((line) => (line.data as { id: string }).id)).toEqual(['pty-1']);
 
     out = [];

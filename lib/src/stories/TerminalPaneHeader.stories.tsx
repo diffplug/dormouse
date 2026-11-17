@@ -31,7 +31,7 @@ function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {
 }
 
 const LONG_TITLE = 'my-extremely-long-running-background-process-with-a-very-descriptive-name';
-// Where the fake helper terminal opens, so the context finds the two directories
+// Where the fake aux terminal opens, so the context finds the two directories
 // comparable instead of warning that one never reported.
 const PANE_CWD = cwdFromOsc633('/home/demo/projects/dormouse', 0);
 

@@ -535,11 +535,11 @@ test('authenticated null and non-object requests are rejected without crashing t
   } finally { server.close(); }
 });
 
-test('host helper identity survives forwarding and cannot be supplied by the client', async () => {
-  const socketPath = testSocketPath('helper-origin');
+test('host aux terminal identity survives forwarding and cannot be supplied by the client', async () => {
+  const socketPath = testSocketPath('aux-origin');
   const forwarded = [];
   const server = createDorControlServer({ socketPath, token: 'secret',
-    getHelperParentId: id => id === 'helper' ? 'parent' : undefined,
+    getAuxParentId: id => id === 'aux' ? 'parent' : undefined,
     send(event, data) {
       if (event !== 'dor:controlRequest') return;
       forwarded.push(data);
@@ -548,12 +548,12 @@ test('host helper identity survives forwarding and cannot be supplied by the cli
   });
   await server.ready;
   try {
-    for (const surfaceId of ['helper', 'ordinary']) {
+    for (const surfaceId of ['aux', 'ordinary']) {
       await sendSocketRequest(socketPath, { requestId: surfaceId, surfaceId,
-        helperParentId: 'forged', method: 'surface.split', params: { workspace: 'workspace:other' } });
+        auxParentId: 'forged', method: 'surface.split', params: { workspace: 'workspace:other' } });
     }
-    assert.equal(forwarded[0].surfaceId, 'helper');
-    assert.equal(forwarded[0].helperParentId, 'parent');
-    assert.equal(forwarded[1].helperParentId, undefined);
+    assert.equal(forwarded[0].surfaceId, 'aux');
+    assert.equal(forwarded[0].auxParentId, 'parent');
+    assert.equal(forwarded[1].auxParentId, undefined);
   } finally { server.close(); }
 });

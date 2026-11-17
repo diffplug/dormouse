@@ -90,7 +90,7 @@ In September 2026 the former `SurfaceHandle.release` was a no-op in `createAskSu
 
 **Why the phone asks, not the laptop.** An earlier plan had a Burrow confirm a phone's destructive step on the laptop. A person closing a Tool from their phone is usually away from the laptop, so that prompt would wait for no one. A paired phone can already type `exit` into any terminal, so asking at the phone adds little authority; holding terminals out keeps the new verb as narrow as the feature needs (Ned, 2026-11-01).
 
-**Why a close has its own budget.** It answers only once it has run, and a helper's inspection or an editor's save can hold that up past `ASK_BUDGET_MS`.
+**Why a close has its own budget.** It answers only once it has run, and an aux terminal's inspection or an editor's save can hold that up past `ASK_BUDGET_MS`.
 
 ## Frames
 

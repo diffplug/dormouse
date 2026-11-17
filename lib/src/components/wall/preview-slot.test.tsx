@@ -34,7 +34,7 @@ import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-
 import { PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
 import { PREVIEW_INTERRUPT_GRACE_MS, PREVIEW_OUTPUT_QUIET_MS, PROMPT_RETURN_TIMEOUT_MS } from './use-dor-control';
 import { setDevServerResolution } from './agent-browser-ports';
-import * as helpers from '../../lib/helper-terminal';
+import * as auxTerminals from '../../lib/aux-terminal';
 import { decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 import { setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 
@@ -567,11 +567,11 @@ describe('dor open --preview', () => {
 
   it('leaves one marked slot when a preview arrives during the slot\'s close and the close is refused', async () => {
     await mountSlot();
-    // Running helper work refuses the close, once the held inspection answers.
-    const helper: helpers.HelperTerminal = { id: 'surface:helper-slot', parentId: 'surface:slot' };
-    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:slot' ? helper : undefined);
+    // Running aux terminal work refuses the close, once the held inspection answers.
+    const aux: auxTerminals.AuxTerminal = { id: 'surface:aux-slot', parentId: 'surface:slot' };
+    vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'surface:slot' ? aux : undefined);
     const inspection = Promise.withResolvers<boolean>();
-    vi.spyOn(helpers, 'helperHasWork').mockReturnValue(inspection.promise);
+    vi.spyOn(auxTerminals, 'auxHasWork').mockReturnValue(inspection.promise);
     let kill!: ReturnType<typeof vi.fn>;
     await act(async () => { kill = dispatch(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:slot', confirmation: { mode: 'dangerously' } }); });
     const result = await answer(await request({ file: 'b.md', preview: true }));

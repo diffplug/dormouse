@@ -21,7 +21,7 @@ import {
   type PaneElementsState,
 } from './wall-context';
 import type { WallMode, WallSelectionKind } from './wall-types';
-import type { ContextHelper } from './lath-wall-engine';
+import type { ContextPanel } from './lath-wall-engine';
 import { cfg } from '../../cfg';
 import { ringPerimeter } from '../../lib/ring-geometry';
 import type { RingFrame } from '../../lib/rect-tween';
@@ -61,7 +61,7 @@ function paneCtx(elements: Map<string, HTMLElement>): PaneElementsState {
   return { elements, version: 0, bumpVersion: () => {} };
 }
 
-function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors = new Map(), active = true, subscribeFrames = null, contextHelper }: {
+function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors = new Map(), active = true, subscribeFrames = null, contextPanel }: {
   selectedId: string | null;
   selectedType?: WallSelectionKind;
   mode: WallMode;
@@ -70,7 +70,7 @@ function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors 
   doors?: Map<string, HTMLElement>;
   active?: boolean;
   subscribeFrames?: ((cb: (settled: boolean) => void) => () => void) | null;
-  contextHelper?: () => ContextHelper | null;
+  contextPanel?: () => ContextPanel | null;
 }) {
   return (
     <PaneElementsContext.Provider value={paneCtx(panes)}>
@@ -83,7 +83,7 @@ function Harness({ selectedId, selectedType = 'pane', mode, store, panes, doors 
             selectedType={selectedType}
             mode={mode}
             active={active}
-            contextHelper={contextHelper}
+            contextPanel={contextPanel}
           />
         </WindowFocusedContext.Provider>
       </DoorElementsContext.Provider>
@@ -523,7 +523,7 @@ describe('SelectionRing motion smear', () => {
   });
 });
 
-it('animates the source/helper union on opening, side changes and interrupted close, tracking same-side resizes 1:1', async () => {
+it('animates the source/aux terminal union on opening, side changes and interrupted close, tracking same-side resizes 1:1', async () => {
   const store = makeStore();
   const source = document.createElement('div');
   const element = document.createElement('div');
@@ -531,12 +531,12 @@ it('animates the source/helper union on opening, side changes and interrupted cl
   stubRect(source, { left: 0, top: 0, width: 500, height: 600 });
   stubRect(element, { left: 484, top: 0, width: 400, height: 300 });
   const panes = new Map([['a', source]]);
-  // LathHost's paint: publish the placed helper, then notify frames.
-  let helper: ContextHelper | null = null;
+  // LathHost's paint: publish the placed aux terminal, then notify frames.
+  let aux: ContextPanel | null = null;
   const frames = new Set<(settled: boolean) => void>();
   const subscribeFrames = (cb: (settled: boolean) => void) => { frames.add(cb); return () => { frames.delete(cb); }; };
-  const paint = (next: ContextHelper | null) => act(async () => { helper = next; for (const cb of frames) cb(true); });
-  const harness = (mode: WallMode) => <Harness selectedId="a" mode={mode} store={store} panes={panes} subscribeFrames={subscribeFrames} contextHelper={() => helper} />;
+  const paint = (next: ContextPanel | null) => act(async () => { aux = next; for (const cb of frames) cb(true); });
+  const harness = (mode: WallMode) => <Harness selectedId="a" mode={mode} store={store} panes={panes} subscribeFrames={subscribeFrames} contextPanel={() => aux} />;
   try {
     await act(async () => root.render(harness('passthrough')));
     const sourceBounds = ringRect();

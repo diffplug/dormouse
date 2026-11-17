@@ -85,7 +85,7 @@ export interface WallHandle {
   /** Close every member Surface through the closure coordinator, one at a time.
    *  Resolves null once the Wall is empty, else the first refusal's message with
    *  the Workspace left open: members closed before the refusal stay closed, with
-   *  no reopen record. Its callers refuse running helper work before calling it,
+   *  no reopen record. Its callers refuse running aux terminal work before calling it,
    *  so only a refusal that arises mid-walk does that. `editors` are the dirty
    *  Tools whose close was consented. */
   closeAll(editors?: readonly string[]): Promise<string | null>;

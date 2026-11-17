@@ -46,7 +46,7 @@ Every preview-slot retarget of a serving Tool (the built-in file viewer, `builti
 
 ## Lifecycle
 
-The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's Reset and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
+The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The aux terminal's Reset and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 
 ## Reaping
 
@@ -68,7 +68,7 @@ The stop commits at the interrupt (decided 2026-10-21, PR #1286 review). By the 
 
 A taken-over Tool is excluded because `dehydrate: true` vouches for the Tool, never for a shell it did not start (decided 2026-11-09). A reap keeps scrollback, title, and cwd and starts a fresh shell, lossless only when the host spawned that shell for the Tool. After a take-over the PTY is the user's own shell: killing it sends its background jobs SIGHUP, drops its exported variables, virtualenv, agents, directory stack, and unsaved history, and breaks Take-over's promise that quitting the Tool returns the user to their prompt. Stopping only the Tool with Ctrl+C and keeping the shell was considered and not built: it changes the stop sequence for one placement to save an idle viewer's memory. The mark is saved, so a resume onto the same shell keeps it (a webview reload otherwise made the Tool reapable again), and dropped wherever a restore spawns a fresh PTY: a cold restore, a Reopen.
 
-A preview slot is excluded because its retarget interrupts and retypes in place (Preview slot), which a Session with no shell cannot take. A Tool with an auxiliary helper keeps a second shell alive anyway, and killing the parent would orphan it.
+A preview slot is excluded because its retarget interrupts and retypes in place (Preview slot), which a Session with no shell cannot take. A Tool with an aux terminal keeps a second shell alive anyway, and killing the parent would orphan it.
 
 ## Naming
 
@@ -146,7 +146,7 @@ Host save request ids restart at 1 on a replacement connection. A completion tha
 
 ## Run end
 
-A retained designation outlived its purpose (2026-10-03): `dor o` took over a plain terminal, the viewer exited, and the pane looked and behaved like an ordinary shell, yet its Terminal Context, still in Tool mode, showed the pane's own terminal. Claude, then `ls`, appeared live in what read as the helper slot, with no Reset or Promote and the "Tool terminal" label hidden below 48rem. The app log showed no helper PTY spawned all afternoon until the user moved to a fresh pane.
+A retained designation outlived its purpose (2026-10-03): `dor o` took over a plain terminal, the viewer exited, and the pane looked and behaved like an ordinary shell, yet its Terminal Context, still in Tool mode, showed the pane's own terminal. Claude, then `ls`, appeared live in what read as the aux terminal slot, with no Reset or Promote and the "Tool terminal" label hidden below 48rem. The app log showed no aux terminal PTY spawned all afternoon until the user moved to a fresh pane.
 
 Ned chose an end on command exit over an end on the next different command (2026-10-03): an exited Tool has nothing left to present, and the host's own interrupts need one hold anyway to keep them from ringing, so the same hold exempts them here.
 
