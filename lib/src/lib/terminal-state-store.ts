@@ -1,5 +1,5 @@
 import { recordToolDirty } from './tool-dirty-store';
-import { helperMayBeBusy, registry } from './terminal-store';
+import { auxMayBeBusy, registry } from './terminal-store';
 import {
   commandWatchKey,
   createTerminalPaneState,
@@ -101,7 +101,7 @@ function countRunning(scope: ReadonlySet<string> | null, except: string | null |
   for (const [id, state] of paneStates) {
     if ((scope && !scope.has(id)) || id === except) continue;
     const entry = registry.get(id);
-    if (state.activity.kind === 'running' || (entry?.helper && helperMayBeBusy(entry))) count++;
+    if (state.activity.kind === 'running' || (entry?.aux && auxMayBeBusy(entry))) count++;
   }
   return count;
 }

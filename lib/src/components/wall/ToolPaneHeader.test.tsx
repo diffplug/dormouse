@@ -63,7 +63,7 @@ afterEach(() => {
   clearTerminalActivity(ID);
 });
 
-const context = { id: null, mounted: null, open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
+const context = { id: null, mounted: null, mode: 'properties' as const, setMode: vi.fn(), terminalFocused: vi.fn(), open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
 
 function renderHeader(params: Record<string, unknown>, actions: WallActions = stubActions(), options: { renaming?: boolean; title?: string } = {}) {
   const props: PaneProps = { id: ID, title: options.title ?? 'viewer', params };
@@ -130,11 +130,11 @@ describe('ToolPaneHeader — a serving Tool', () => {
     expect(cleared).toHaveBeenCalledWith(ID);
   });
 
-  it('opens its Terminal Context from under the button', () => {
+  it('opens its Terminal Context on its terminal from under the button, and on properties from the header', () => {
     renderHeader(SERVING);
     context.open.mockClear();
     act(() => labelled('Terminal context')!.click());
-    expect(context.open).toHaveBeenCalledWith(ID, { origin: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }) });
+    expect(context.open).toHaveBeenCalledWith(ID, { origin: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }), mode: 'aux' });
     act(() => header().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 30, clientY: 12 })));
     expect(context.open).toHaveBeenLastCalledWith(ID, { origin: { x: 30, y: 12 } });
   });

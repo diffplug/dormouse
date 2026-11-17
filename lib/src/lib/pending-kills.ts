@@ -7,7 +7,7 @@ import { registry } from './terminal-store';
  * close that would have confirmed instead leaves the layout at once while its
  * process lives on, until a countdown finalizes it or the user restores it.
  * One store per Window; the owner of each entry — a Wall, the Workspace
- * lifecycle, a helper — supplies how to restore and finalize it.
+ * lifecycle, an aux terminal — supplies how to restore and finalize it.
  */
 
 /**
@@ -16,15 +16,15 @@ import { registry } from './terminal-store';
  */
 export const PENDING_KILL_MS = 10_000;
 
-export type PendingKillKind = 'surface' | 'workspace' | 'helper';
+export type PendingKillKind = 'surface' | 'workspace' | 'aux';
 
 export interface PendingKill {
   kind: PendingKillKind;
-  /** The Surface's id (a helper's own Session id), or the Workspace's. */
+  /** The Surface's id (an aux terminal's own Session id), or the Workspace's. */
   id: string;
   /** The Workspace it belongs to, or is. */
   workspaceId: WorkspaceId;
-  /** The public Surface a restore brings back: a helper's parent. */
+  /** The public Surface a restore brings back: an aux terminal's parent. */
   surfaceId?: string;
   title: string;
   /** What it is, as the overlay names it. */
@@ -199,23 +199,23 @@ export function getPendingKill(kind: PendingKillKind, id: string): PendingKill |
 }
 
 /** Whether this Session is out of the user's sight on its way to a kill: a
- *  pending Surface or helper, or a member of a pending Workspace. Hidden from
+ *  pending Surface or aux terminal, or a member of a pending Workspace. Hidden from
  *  Clients and silenced (`docs/specs/reopen.md`). */
 export function isPendingKillSession(id: string): boolean {
   return pendingKillSessionIds().includes(id);
 }
 
-/** Every Session a pending kill keeps alive, including the auxiliary helpers
+/** Every Session a pending kill keeps alive, including the aux terminals
  *  of its Surface or Workspace members. */
 export function pendingKillSessionIds(): string[] {
   if (entries.size === 0 && finalizing.size === 0) return [];
   const membership = getWorkspaceSurfacesSnapshot();
   const kills = [...snapshot, ...[...finalizing].map(flight => flight.kill)];
   const ids = new Set(kills.flatMap(kill => kill.kind === 'workspace' ? membership.get(kill.id) ?? [] : [kill.id]));
-  // Workspace membership holds primary Surfaces; helper work must still reach
+  // Workspace membership holds primary Surfaces; aux terminal work must still reach
   // the shutdown gate while its source is out of the layout.
   for (const [id, entry] of registry) {
-    if (entry.helper && ids.has(entry.helper.parentId)) ids.add(id);
+    if (entry.aux && ids.has(entry.aux.parentId)) ids.add(id);
   }
   return [...ids];
 }

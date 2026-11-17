@@ -1,8 +1,8 @@
 /** Host-owned auxiliary identity survives live renderer reconnection. */
-export interface HelperIdentity { parentId: string }
+export interface AuxIdentity { parentId: string }
 export type TerminalContextRequest =
   | { op: 'info'; id: string }
-  | { op: 'promote'; id: string; restore?: HelperIdentity }
+  | { op: 'promote'; id: string; restore?: AuxIdentity }
   | { op: 'openDirectory'; id: string; path: string }
   | { op: 'home' };
 /** Each operation fills only the fields it answers. */

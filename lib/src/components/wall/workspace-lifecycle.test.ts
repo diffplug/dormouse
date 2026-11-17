@@ -18,8 +18,8 @@ import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../../lib/labs-settings';
 import { _resetPendingKillsForTesting, finalizePendingKill, getPendingKills, pendingKillKey } from '../../lib/pending-kills';
-import * as helperTerminal from '../../lib/helper-terminal';
-import type { HelperTerminal } from '../../lib/helper-terminal';
+import * as auxTerminal from '../../lib/aux-terminal';
+import type { AuxTerminal } from '../../lib/aux-terminal';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
@@ -160,23 +160,23 @@ describe('closeWorkspaceWithSurfaces', () => {
     expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
   });
 
-  it('refuses running helper work before closing any member, saying so only to a gesture', async () => {
+  it('refuses running aux terminal work before closing any member, saying so only to a gesture', async () => {
     const [first] = ids();
     createWorkspace({ id: 'workspace:2' });
     const closeAll = vi.fn(async () => null);
     const revealRefusal = vi.fn();
     handleFor('workspace:2', { closeAll, revealRefusal, surfaceIds: () => ['surface:a', 'surface:b'] });
-    // Both members have a helper; only the second's is busy.
-    vi.spyOn(helperTerminal, 'getHelper').mockImplementation((id) => ({ id: `helper:${id}`, parentId: id }) as HelperTerminal);
+    // Both members have an aux terminal; only the second's is busy.
+    vi.spyOn(auxTerminal, 'getAux').mockImplementation((id) => ({ id: `aux:${id}`, parentId: id }) as AuxTerminal);
     let secondProbe: () => Promise<boolean> = async () => true;
-    vi.spyOn(helperTerminal, 'helperHasWork').mockImplementation((helper) =>
-      helper.parentId === 'surface:b' ? secondProbe() : Promise.resolve(false));
+    vi.spyOn(auxTerminal, 'auxHasWork').mockImplementation((aux) =>
+      aux.parentId === 'surface:b' ? secondProbe() : Promise.resolve(false));
 
-    const refusal = 'A helper in this Workspace has running work. Stop it, then close the Workspace again.';
+    const refusal = 'An aux terminal in this Workspace has running work. Stop it, then close the Workspace again.';
     expect(await closeWorkspaceWithSurfaces('workspace:2', 'silent')).toBe(refusal);
     expect(revealRefusal).not.toHaveBeenCalled();
-    // A helper that cannot be inspected refuses as a busy one does, and a
-    // gesture reveals the member whose helper refused.
+    // An aux terminal that cannot be inspected refuses as a busy one does, and a
+    // gesture reveals the member whose aux terminal refused.
     secondProbe = async () => { throw new Error('no host'); };
     expect(await closeWorkspaceWithSurfaces('workspace:2')).toBe(refusal);
     expect(revealRefusal).toHaveBeenCalledExactlyOnceWith('surface:b', refusal);
@@ -218,7 +218,7 @@ describe('requestWorkspaceClose', () => {
     expect(ids()).toEqual([first, 'workspace:2']);
   });
 
-  it('restores a pending Workspace whose helper started work, closing no member', async () => {
+  it('restores a pending Workspace whose aux terminal started work, closing no member', async () => {
     const fake = new FakePtyAdapter();
     Object.assign(fake, { offersLabs: true });
     setPlatform(fake);
@@ -227,9 +227,9 @@ describe('requestWorkspaceClose', () => {
     createWorkspace({ id: 'workspace:2' });
     const closeAll = vi.fn(async () => null);
     handleFor('workspace:2', { closeAll, needsCloseConfirmation: () => true, surfaceIds: () => ['surface:a'] });
-    vi.spyOn(helperTerminal, 'getHelper').mockReturnValue({ id: 'surface:helper', parentId: 'surface:a' } as HelperTerminal);
+    vi.spyOn(auxTerminal, 'getAux').mockReturnValue({ id: 'surface:aux', parentId: 'surface:a' } as AuxTerminal);
     // Idle when the close is pended, busy by the time its countdown ends.
-    vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValueOnce(false).mockResolvedValue(true);
+    vi.spyOn(auxTerminal, 'auxHasWork').mockResolvedValueOnce(false).mockResolvedValue(true);
     requestWorkspaceClose('workspace:2');
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(getPendingKills().map((kill) => kill.id)).toEqual(['workspace:2']);
@@ -241,7 +241,7 @@ describe('requestWorkspaceClose', () => {
     expect(ids()).toContain('workspace:2');
   });
 
-  it('raises nothing when a newer question arrives while it probes helper work', async () => {
+  it('raises nothing when a newer question arrives while it probes aux terminal work', async () => {
     const fake = new FakePtyAdapter();
     Object.assign(fake, { offersLabs: true });
     setPlatform(fake);
@@ -250,12 +250,12 @@ describe('requestWorkspaceClose', () => {
     const [first] = ids();
     createWorkspace({ id: 'workspace:2' });
     handleFor('workspace:2', { needsCloseConfirmation: () => true, surfaceIds: () => ['surface:a'] });
-    vi.spyOn(helperTerminal, 'getHelper').mockReturnValue({ id: 'surface:helper', parentId: 'surface:a' } as HelperTerminal);
+    vi.spyOn(auxTerminal, 'getAux').mockReturnValue({ id: 'surface:aux', parentId: 'surface:a' } as AuxTerminal);
     let finishProbe!: (busy: boolean) => void;
-    vi.spyOn(helperTerminal, 'helperHasWork').mockReturnValue(new Promise((resolve) => { finishProbe = resolve; }));
+    vi.spyOn(auxTerminal, 'auxHasWork').mockReturnValue(new Promise((resolve) => { finishProbe = resolve; }));
     requestWorkspaceClose('workspace:2');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(helperTerminal.helperHasWork).toHaveBeenCalled();
+    expect(auxTerminal.auxHasWork).toHaveBeenCalled();
 
     const answer = vi.fn();
     requestConfirmation({ id: first, char: 'x', answer });

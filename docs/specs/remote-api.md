@@ -111,7 +111,7 @@ Reserved: further `capabilities` fields (screencast formats, window support) lan
 
 ## Directory (the phone's picker)
 
-**Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. **Must list an embedded page — an `http:` page on this machine the iframe renderer shows, for a browser Surface or a serving Tool — as `browser`**, on the browser Surface's own `type: 'browser'` entry or on the Tool's terminal entry, read off the chrome both renderers register. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
+**Must list registered terminal Surfaces, excluding aux terminal Sessions.** A Tool remains listed through its terminal even while showing its browser capability. **Must list an embedded page — an `http:` page on this machine the iframe renderer shows, for a browser Surface or a serving Tool — as `browser`**, on the browser Surface's own `type: 'browser'` entry or on the Tool's terminal entry, read off the chrome both renderers register. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
 
 **Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref`, the Workspace id, is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
 
@@ -197,7 +197,7 @@ Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `t
 `surface.close` closes a Tool or an embedded page as the person at the Burrow would: Client→Burrow, on a session whose hello declared `capabilities.frames`. The Burrow's window decides, and what it needs of the person comes back for the Client to ask.
 
 - **Must close only a Tool or an embedded page, refusing a terminal whatever consent came**, the owning Wall judging by the Surface's kind.
-- **Must decide in the kill gesture's order, with its refusals and prompts in their words** (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools"): a transfer or a helper's running work refuses, a close that must confirm answers `confirm`, unsaved edits answer `unsaved`, and anything else closes. Consent answers a prompt and skips no refusal.
+- **Must decide in the kill gesture's order, with its refusals and prompts in their words** (`docs/specs/reopen.md` -> "The rule", `docs/specs/layout.md` -> "Kill confirmation", `docs/specs/dor-tool.md` -> "Closing unsaved Tools"): a transfer or an aux terminal's running work refuses, a close that must confirm answers `confirm`, unsaved edits answer `unsaved`, and anything else closes. Consent answers a prompt and skips no refusal.
 - **A close must reach one window's copy**, and close nothing when no owner answers (`docs/specs/vscode.md` -> "Peer surfaces").
 - **Must leave a reopen record as the gesture does**, and log `closed` in the access log.
 - **A Client must ask about its own copy's unsaved edits first, and hold that page still until the close ends**, since the Burrow cannot see them: a frame is its own document.

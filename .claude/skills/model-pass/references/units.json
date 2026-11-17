@@ -65,18 +65,16 @@
         "^lib/src/lib/(?:session\\-types|session\\-save|session\\-restore|session\\-remap|session\\-dirty|session\\-label|session\\-activity\\-store|reopen\\-stack|pending\\-kills|terminal\\-lifecycle|terminal\\-registry|terminal\\-store|terminal\\-transfer|id\\-pool|surface\\-ids|reconnect|local\\-json\\-store|resume\\-patterns|coding\\-agents|ref\\-count|settle\\-within|throttle|terminal\\-webgl|xterm\\-options|xterm\\-test\\-mock|test\\-local\\-storage|errors|is\\-record|elapsed)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/components/(?:PendingKillOverlay|TerminalPane)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/components/wall/(?:TerminalPanel)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
-        "^lib/src/host/(?:recovery\\-capture|recovery\\-store|recovery|owner\\-pty|atomic\\-json\\-file|pty\\-flow\\-host)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
-        "^canopy/"
+        "^lib/src/host/(?:recovery\\-capture|recovery\\-store|recovery|owner\\-pty|atomic\\-json\\-file|pty\\-flow\\-host)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
       ],
       "tests": null,
       "specs": [
         "docs/specs/layout.md",
         "docs/specs/reopen.md",
-        "docs/specs/transport.md",
-        "docs/specs/webgl-text.md"
+        "docs/specs/transport.md"
       ],
-      "what": "session persistence and restore, terminal lifecycle and registry, id pools, reconnect, Reopen and the close paths, pending (delayed) kills, the host-side recovery capture and store, atomic JSON files, and the small `canopy/` WebGL lab.",
-      "read": "**Specs you own** (read first, in the snapshot): the session-lifecycle and persistence-recovery sections of `docs/specs/layout.md`, all of `docs/specs/reopen.md` + rationale, the persisted-session types and reconnection parts of `docs/specs/transport.md`, `docs/compatible-agents.md` + `docs/compatible-agents.rationale.md` (the hidden recovery contract: shutdown capture, detection, single-use records, cold-restore execution), and `docs/specs/webgl-text.md` for `canopy/` and `terminal-webgl.ts`. Report spec-vs-code disagreements in both directions.",
+      "what": "session persistence and restore, terminal lifecycle and registry, id pools, reconnect, Reopen and the close paths, pending (delayed) kills, the host-side recovery capture and store, atomic JSON files, and the WebGL renderer lifecycle.",
+      "read": "**Specs you own** (read first, in the snapshot): the session-lifecycle and persistence-recovery sections of `docs/specs/layout.md`, all of `docs/specs/reopen.md` + rationale, the persisted-session types and reconnection parts of `docs/specs/transport.md`, `docs/compatible-agents.md` + `docs/compatible-agents.rationale.md` (the hidden recovery contract: shutdown capture, detection, single-use records, cold-restore execution), and the \"Renderer\" section of `docs/specs/layout.md` for `terminal-webgl.ts`. Report spec-vs-code disagreements in both directions.",
       "focus": [
         "Save → restore round trips: what is lost, malformed or truncated persisted data, older shapes, a restore that meets missing PTYs, and writes that race a quit. Persisted formats have reached early users, so treat format changes as `Sure-fix: no`.",
         "Id pools and surface ids: counters must be durable and never reused, including across a crash between allocating and saving.",
@@ -119,7 +117,7 @@
     {
       "unit": "termstate",
       "rules": [
-        "^lib/src/lib/(?:terminal\\-state|terminal\\-state\\-store|terminal\\-protocol|processed\\-pty\\-stream|terminal\\-report\\-filter|osc\\-sanitize|keyboard\\-protocol\\-arbiter|terminal\\-prompt\\-shape|terminal\\-command\\-input|helper\\-terminal|terminal\\-context\\-types|shell\\-store|shell\\-defaults|shell\\-escape|posix\\-escape|terminal\\-buffer\\-read|buffer\\-cells|ansi|terminal\\-controls)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
+        "^lib/src/lib/(?:terminal\\-state|terminal\\-state\\-store|terminal\\-protocol|processed\\-pty\\-stream|terminal\\-report\\-filter|osc\\-sanitize|keyboard\\-protocol\\-arbiter|terminal\\-prompt\\-shape|terminal\\-command\\-input|aux\\-terminal|terminal\\-context\\-types|shell\\-store|shell\\-defaults|shell\\-escape|posix\\-escape|terminal\\-buffer\\-read|buffer\\-cells|ansi|terminal\\-controls)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/components/wall/(?:TerminalContextView|TerminalContext|TerminalContextOverlay|terminal\\-context\\-placement)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$",
         "^lib/src/host/(?:git\\-info|git\\-remote\\-url|git\\-upstream|git\\-cli|local\\-directory)(?:[.-][A-Za-z0-9.-]*)?\\.(?:tsx?|mjs|js|css)$"
       ],
@@ -129,7 +127,7 @@
         "docs/specs/terminal-context.md",
         "docs/specs/terminal-escapes.md"
       ],
-      "what": "per-Session semantic state: `terminal-state.ts` (1,609 lines), its store, `terminal-protocol.ts` (1,091 lines), the processed PTY stream, the report filter, OSC sanitization, the keyboard-protocol arbiter, prompt and command lifecycle, shell store and escaping, the helper terminal and unified terminal context views, and the host-side git info helpers.",
+      "what": "per-Session semantic state: `terminal-state.ts` (1,609 lines), its store, `terminal-protocol.ts` (1,091 lines), the processed PTY stream, the report filter, OSC sanitization, the keyboard-protocol arbiter, prompt and command lifecycle, shell store and escaping, the aux terminal and unified terminal context views, and the host-side git info helpers.",
       "read": "**Specs you own** (read first, in the snapshot): `docs/specs/terminal-state.md`, `docs/specs/terminal-context.md`, `docs/specs/terminal-escapes.md`, each with its `.rationale.md`. `terminal-escapes.md` is a registry: every sequence the code parses, answers, or ignores must have a row, and every row must match code. Check both directions and list each mismatch.",
       "focus": [
         "Parsing across chunk boundaries: an OSC, CSI, DCS, or APC split between two PTY chunks, an unterminated sequence that grows a buffer without bound, ST vs BEL terminators, 8-bit C1 controls, invalid UTF-8.",
@@ -137,7 +135,7 @@
         "`terminal-report-filter.ts`: replies to queries (DA, DSR, color queries, XTVERSION, kitty keyboard) must never let program output inject keyboard input, and must not be answered twice (once by xterm.js and once by Dormouse).",
         "`keyboard-protocol-arbiter.ts`: push/pop balance, state after a program crashes without popping, state across reconnect.",
         "Prompt and command lifecycle (OSC 133/633 and friends): states that get stuck, command text mis-attributed, title and header derivation and grouping keys.",
-        "The helper terminal: lifecycle, promotion, source closure, as `terminal-context.md` states them.",
+        "The aux terminal: lifecycle, promotion, source closure, as `terminal-context.md` states them.",
         "Host git helpers: how often git is spawned (per cwd change? per render?), timeouts, a cwd that is deleted, huge repos, paths with spaces or newlines.",
         "Per-chunk cost: regexes that can backtrack on long lines, repeated string concatenation of large buffers, state recomputed for every chunk.",
         "Dead code: parsed fields nothing reads, protocol branches no shell integration script emits (compare with `standalone/sidecar/shell-integration/`)."
@@ -237,7 +235,7 @@
       "focus": [
         "The method table: every method the CLI can send has a handler, and every handler has a CLI caller. List methods on one side only.",
         "Reply discipline: every request gets exactly one reply on every path, including thrown errors, a surface killed mid-request, a Workspace closed mid-request, and a client that disconnects while waiting. Find hung requests and double replies.",
-        "Handle resolution: `surface:N`, `surface:self`, `surface:focused`, `title:<exact>`, `workspace:<n>`, `workspace-name:<name>`, `window:<label>`. Look for a stale or reused id retargeting a destructive verb (`kill`, `send`), helper terminals leaking into listings or matching, and Workspace scoping mistakes (`--workspace`, `--all`).",
+        "Handle resolution: `surface:N`, `surface:self`, `surface:focused`, `title:<exact>`, `workspace:<n>`, `workspace-name:<name>`, `window:<label>`. Look for a stale or reused id retargeting a destructive verb (`kill`, `send`), aux terminals leaking into listings or matching, and Workspace scoping mistakes (`--workspace`, `--all`).",
         "`ensure`: the command + cwd identity key, matching against live commands, `--restart` keeping layout place, races between two simultaneous `ensure` calls creating duplicates.",
         "`await`: `--until quiet` and `--until exit` semantics, waiter cleanup on kill or disconnect, alert absorption, timeouts.",
         "`send`: text, key, stdin, and sequence modes; pacing; what happens to a queue when the target dies.",
@@ -547,8 +545,7 @@
         "The Storybook config: `main.ts` globs that miss story files or match none, addons configured and unused, the Tauri stubs and window mock against what the components now import, `preview.ts` runtime imports that defeat build caching or pull the whole app into every story, themes listed against the themes that exist.",
         "`vitest.argos.config.ts` and the Argos workflow: which stories are captured, in which browsers and viewports, what is excluded and why.",
         "The helper modules (`settle-terminals.ts`, `story-selection.ts`, `PhoneFrame.tsx`, the Hosted `fixtures.tsx`, `HostedFrame.tsx`, `EmailFrame.tsx`): correctness and dead exports.",
-        "Duplicated story setup that should be one decorator.",
-        "Canopy's Storybook (`canopy/.storybook/`) is the `session` unit's; skip it."
+        "Duplicated story setup that should be one decorator."
       ]
     },
     {
@@ -752,7 +749,7 @@
         "`kill`: `--confirm-if-read` (the four-non-whitespace-character minimum, what screen text is compared) and `--confirm-dangerously`.",
         "`ensure` and `split`: cwd resolution, `--restart`, the missing `--` case (a bare `dor split` steals focus: is that still true and still documented?).",
         "`await`: timeouts, exit codes, what is printed.",
-        "`list`: filters ANDed together, `--port`/`--ports`, `--json` shape stability, the `(you)` and `*` markers, helper terminals excluded.",
+        "`list`: filters ANDed together, `--port`/`--ports`, `--json` shape stability, the `(you)` and `*` markers, aux terminals excluded.",
         "`browser-cli.ts`, `agent-browser.ts`, `playwright.ts`: identity flags (`--key`, `--surface`, `--session`) mutual exclusion, argument pass-through to the native CLI (injection, flag collisions), navigation targets (`:port`, `host:port`, `surface:N`), `dor-embed-size`.",
         "`open`, `open-picker.ts`, `fuzzy.ts`, `file-list.ts`: path handling (relative, `~`, spaces, symlinks, WSL and Windows paths, a URL passed where a path is required), the picker's cost on a huge directory.",
         "`app restart`, `move`, `reopen`, `workspace`: destructive verbs and their guards.",
@@ -1177,11 +1174,11 @@
       "tests": null,
       "specs": [
         "docs/specs/website-docs.md",
-        "docs/specs/webgl-text.md",
+        "docs/specs/layout.md",
         "docs/specs/security-local.md"
       ],
       "what": "the repository's own lints and their self-tests in `scripts/`: `spec-lint.mjs` (809 lines) with `spec-md.mjs`, its self-test, and `spec-word-budgets.json`; `e2e-lint.mjs` (940) and its self-test; `outbound-lint.mjs` (765) and its self-test; `public-docs-lint.mjs` (671); `loopback-lint.mjs` and its self-test; `xterm-lint.mjs` and `xterm-bump.mjs`; `lint-kit.mjs`; the Markdown tooling (`md-unwrap.mjs`, `md-merge.mjs`, `setup-git.mjs`); `prose-audit.mjs`; `docs-surfaces.mjs`; the isolation test. `deploy-lint`, `ps1-cmdlet-lint`, `workflow-lint`, and the security-audit scripts belong to other units.",
-      "read": "**Specs you own** (read first, in the snapshot): the \"Specs\", \"Spec lifecycle\", and \"Markdown\" sections of `AGENTS.md` (they state what each lint enforces and the conventions `spec-lint` checks: its header comment lists the checks), `docs/prose-audit.md`, `docs/specs/website-docs.md` for `public-docs-lint`, `docs/specs/webgl-text.md` for `xterm-lint`, and the sections of `docs/specs/security-local.md` and `security-remote.md` that the loopback, outbound, and e2e lints name. Report disagreements between what a document says a lint enforces and what it enforces.",
+      "read": "**Specs you own** (read first, in the snapshot): the \"Specs\", \"Spec lifecycle\", and \"Markdown\" sections of `AGENTS.md` (they state what each lint enforces and the conventions `spec-lint` checks: its header comment lists the checks), `docs/prose-audit.md`, `docs/specs/website-docs.md` for `public-docs-lint`, `docs/specs/layout.md` -> \"Renderer\" for `xterm-lint`, and the sections of `docs/specs/security-local.md` and `security-remote.md` that the loopback, outbound, and e2e lints name. Report disagreements between what a document says a lint enforces and what it enforces.",
       "before": [
         "**The central question for each lint: can it pass while the thing it guards is broken?** A lint that silently checks nothing is worse than no lint."
       ],
@@ -1242,7 +1239,7 @@
     {
       "unit": "x-dead",
       "what": "a tool-driven, whole-repository hunt for code that is no longer needed. The per-feature reviewers read the code by hand; your job is the mechanical sweep they cannot do: build the import graph and report what nothing reaches. Work in the live checkout `{{CHECKOUT}}` (it has `node_modules`), strictly read-only; put scripts and their output under `SP/probes/x-dead/`.",
-      "focusHeading": "**Produce, for every workspace package** (`lib`, `standalone`, `standalone/sidecar`, `vscode-ext`, `website`, `relay`, `hosted`, `dor`, `dor-lib-common`, `dor-tools-builtin`, `dor-tools-lib`, `remote-lib-common`, `canopy`) **and for `scripts/`:**",
+      "focusHeading": "**Produce, for every workspace package** (`lib`, `standalone`, `standalone/sidecar`, `vscode-ext`, `website`, `relay`, `hosted`, `dor`, `dor-lib-common`, `dor-tools-builtin`, `dor-tools-lib`, `remote-lib-common`) **and for `scripts/`:**",
       "numbered": true,
       "focus": [
         "**Unreachable files**: source files no entrypoint reaches. Entrypoints include each `package.json`'s `main`/`exports`/`bin`/scripts, every Vite, esbuild, vitest, Storybook, wrangler, and Tauri config, HTML files, service-worker and Worker entries, `scripts/` invoked from any `package.json` or any workflow in `.github/workflows/`, and dynamic `import()`/`require()`/`new Worker(new URL(...))`/`fork()` strings. A file reached only from tests or stories is its own class (\"test-only\").",
@@ -1260,13 +1257,13 @@
       "unit": "x-deps",
       "what": "dependency hygiene across the pnpm workspace and the Rust crate. Read from the snapshot; use the live checkout `{{CHECKOUT}}` for read-only commands (`pnpm why`, `pnpm ls`, reading `node_modules`); put scripts under `SP/probes/x-deps/`. Never run `pnpm install`, `add`, `update`, or `dedupe`, and never touch the lockfile.",
       "read": "**Specs to read first** (in the snapshot): `docs/specs/security-supply-chain.md` + rationale (disclosure of everything that reaches a user's machine, the bundled runtime pin, dependency cooldown), and the comments in `pnpm-workspace.yaml`.",
-      "focusHeading": "**Answer each of these with evidence, per package** (`lib`, `standalone`, `standalone/sidecar`, `vscode-ext`, `website`, `relay`, `hosted`, `dor`, `dor-lib-common`, `dor-tools-builtin`, `dor-tools-lib`, `remote-lib-common`, `canopy`, and the root):",
+      "focusHeading": "**Answer each of these with evidence, per package** (`lib`, `standalone`, `standalone/sidecar`, `vscode-ext`, `website`, `relay`, `hosted`, `dor`, `dor-lib-common`, `dor-tools-builtin`, `dor-tools-lib`, `remote-lib-common`, and the root):",
       "numbered": true,
       "focus": [
         "**Declared but unused**: every `dependencies`/`devDependencies`/`optionalDependencies`/`peerDependencies` entry that no source file, config, script, or CLI invocation uses. Search imports, `require`, config plugin strings, `package.json` scripts (binaries), Vite/esbuild externals, and type-only uses (`@types/*`).",
         "**Used but undeclared** (phantom dependencies that resolve only through hoisting or another package).",
         "**Misplaced**: a runtime import of a `devDependency` in code that ships unbundled, or a build-only tool in `dependencies` (this matters for the dependency disclosure: `website/scripts/generate-deps.js` publishes the production dependency list, so a misplaced entry is a false disclosure in either direction).",
-        "**Version skew**: one package required at different versions or ranges across workspace packages (React, xterm, TypeScript, Vite, vitest, hono, zod, and so on). Check the `@xterm/*` lockstep rule in `docs/specs/webgl-text.md`.",
+        "**Version skew**: one package required at different versions or ranges across workspace packages (React, xterm, TypeScript, Vite, vitest, hono, zod, and so on). Check the `@xterm/*` lockstep rule in `docs/specs/layout.md` -> \"Renderer\".",
         "**Overrides and allowances** in `pnpm-workspace.yaml`: for each `overrides` entry, each `peerDependencyRules.allowedVersions` entry, and each `allowBuilds` entry, is it still needed today? The comments state the removal condition for each: evaluate the condition against the current lockfile (`pnpm why <pkg>` helps) and report entries whose condition is now met, and entries naming packages that are no longer installed.",
         "**Duplicates in the lockfile** for heavy libraries (several copies of the same major version) that a single range would collapse.",
         "**Rust**: every crate and feature in `standalone/src-tauri/Cargo.toml` against `use`/path references in `standalone/src-tauri/src/` and `build.rs`; target-specific dependencies used on the wrong `cfg`; features enabled and unused.",

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as helpers from '../../lib/helper-terminal';
+import * as auxTerminals from '../../lib/aux-terminal';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/terminal-state-store';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
@@ -12,9 +12,9 @@ function shell(id: string, entry: Partial<TerminalEntry>): void {
   registry.set(id, entry as TerminalEntry);
 }
 
-function withHelper(entry: Partial<TerminalEntry>): void {
-  vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane' ? { id: 'helper', parentId: 'pane' } : undefined);
-  shell('helper', entry);
+function withAux(entry: Partial<TerminalEntry>): void {
+  vi.spyOn(auxTerminals, 'getAux').mockImplementation(id => id === 'pane' ? { id: 'aux', parentId: 'pane' } : undefined);
+  shell('aux', entry);
 }
 
 afterEach(() => {
@@ -47,24 +47,24 @@ describe('closeKind', () => {
     expect(closeKind('pane', TOOL)).toBe('confirm');
   });
 
-  it('confirms an untouched shell whose helper holds user input', () => {
+  it('confirms an untouched shell whose aux terminal holds user input', () => {
     shell('pane', { untouched: true });
-    withHelper({ untouched: false, helperBusy: false });
+    withAux({ untouched: false, auxBusy: false });
     expect(closeKind('pane', SHELL)).toBe('confirm');
   });
 
-  it('confirms an untouched shell whose helper the host has not answered for', () => {
+  it('confirms an untouched shell whose aux terminal the host has not answered for', () => {
     shell('pane', { untouched: true });
-    withHelper({ untouched: true });
+    withAux({ untouched: true });
     expect(closeKind('pane', SHELL)).toBe('confirm');
   });
 
   it.each([
-    ['idle', { untouched: true, helperBusy: false }],
+    ['idle', { untouched: true, auxBusy: false }],
     ['exited', { untouched: true, exited: true }],
-  ])('takes an untouched shell whose untouched helper is %s without asking', (_label, helperEntry) => {
+  ])('takes an untouched shell whose untouched aux terminal is %s without asking', (_label, auxEntry) => {
     shell('pane', { untouched: true });
-    withHelper(helperEntry);
+    withAux(auxEntry);
     expect(closeKind('pane', SHELL)).toBe('trivial');
   });
 });

@@ -134,7 +134,7 @@
 
 **Why a publication never drops a Session with state.** Dropping an entry rechecked it against the defaults, consuming a sink only its override enabled, and enabling never replays an episode, so the realm's next, whole publication could not re-arm it. A reload, or a window mounting its Walls one at a time, publishes a partial set first (review, 2026-09-23). A Session with no state has no episode to consume; forgetting it keeps the host's copy bounded by what realms show, browser Surfaces included, which the manager never removes.
 
-**Why a demotion spends an episode and a promotion never delivers it again.** The scheduler followed the published state, which a helper holds at the default, so a demotion read as the episode ending, and the promotion that showed the same ring again armed it as new, its deadlines past: it spoke and pushed at once, a second time if it had already been delivered (model test, 2026-11-11). An alarm is delivered at most once per ring episode (decision, 2026-11-11), and a helper alerts no one, so a demotion silences what was pending and the episode stays spent.
+**Why a demotion spends an episode and a promotion never delivers it again.** The scheduler followed the published state, which an aux terminal holds at the default, so a demotion read as the episode ending, and the promotion that showed the same ring again armed it as new, its deadlines past: it spoke and pushed at once, a second time if it had already been delivered (model test, 2026-11-11). An alarm is delivered at most once per ring episode (decision, 2026-11-11), and an aux terminal alerts no one, so a demotion silences what was pending and the episode stays spent.
 
 **Why labels wait on a throttle and overrides do not.** Claude Code animates its terminal title about ten times a second (2026-09), and each frame changes the label: publishing every one would cross into the host ten times a second per Session for a value read only when a push comes due. An override change goes at once because disabling a sink must consume its pending push before it fires.
 
@@ -170,9 +170,9 @@ Disconnect failure (2026-10): the atomic writer can fail while the old token rem
 
 ## Pane Header
 
-**Why a helper tracks its command before promotion.** A helper dropped every semantic event, so one promoted while running `claude` had no command watch until its next command: no WATCHING, and no command-exit arm (audit, 2026-09-23). Command state alerts no one by itself; only dispatch and publishing have to wait for promotion.
+**Why an aux terminal tracks its command before promotion.** An aux terminal dropped every semantic event, so one promoted while running `claude` had no command watch until its next command: no WATCHING, and no command-exit arm (audit, 2026-09-23). Command state alerts no one by itself; only dispatch and publishing have to wait for promotion.
 
-**Why a hold coming due on a helper is dropped.** A failed placement's restore, or a detached helper put back, makes a helper of a Session that may hold a completion from while it was promoted. Its leave grace then escalated the hold straight to Engaged?, past the helper gate, and rang a helper; the ring showed once it was promoted again (model test, 2026-11-11). A helper never rings, however the ring would arise (decision, 2026-11-11), so a held source re-enters Dispatch at the helper gate and is dropped as a fresh one is, leaving the TODO the hold set.
+**Why a hold coming due on an aux terminal is dropped.** A failed placement's restore, or a detached aux terminal put back, makes an aux terminal of a Session that may hold a completion from while it was promoted. Its leave grace then escalated the hold straight to Engaged?, past the aux terminal gate, and rang an aux terminal; the ring showed once it was promoted again (model test, 2026-11-11). An aux terminal never rings, however the ring would arise (decision, 2026-11-11), so a held source re-enters Dispatch at the aux terminal gate and is dropped as a fresh one is, leaving the TODO the hold set.
 
 ## Text And Security
 

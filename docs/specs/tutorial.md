@@ -79,7 +79,7 @@ The desktop shells share one filesystem, a snapshot of the tracked files of `dor
 
 - **Must report the shell's directory with every prompt (`OSC 633 ; P ; Cwd=`)**: take-over and launch matching compare it (`docs/specs/dor-tool.md` → Take-over). `cd`, `ls`, and `pwd` are the filesystem builtins; only the viewers write.
 - **Must never write the snapshot; keep each window's writes, text or bytes, in an in-memory copy-on-write overlay every reader sees, persisting none** (rationale). A whiteout hides a renamed stock file.
-- **Must print each spawned non-helper terminal's first prompt from `PlaygroundShellRegistry`**; no scenario plays on the desktop, and a split Tool waits on that prompt's integration (rationale).
+- **Must print each spawned non-aux terminal's first prompt from `PlaygroundShellRegistry`**; no scenario plays on the desktop, and a split Tool waits on that prompt's integration (rationale).
 - **Must name `/bin/fake` as the default shell**, so a Windows visitor's Tool commands quote as posix rather than being refused as `cmd` (rationale).
 - **The playground `dor` must run the real CLI (`runCli` in `dor/src/cli-core.ts`) over a playground `CliHost` and a `ControlClient` that sends each request to the Wall; what needs Node must fail `UNSUPPORTED IN PLAYGROUND`.** It serves the `__view-*` entries itself. `FakePtyAdapter.toolControl` answers `open` and `open-handlers` from the snapshot as a host with no user `dormouse.yml` does.
 - **Must abandon a playground `dor` run on interruption or disposal**, including a pending CLI load, picker, and control requests; never send later requests or output.

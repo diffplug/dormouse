@@ -1,7 +1,7 @@
 # Dor Tools
 
 > - See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
-> - Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`; the built-in Tools themselves to `docs/specs/dor-tools-builtin.md`; the integration library to `docs/specs/dor-tools-lib.md`; the audited local boundaries to `docs/specs/security-local.md` → Dor Tool configuration.
+> - Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; aux terminals belong to `docs/specs/terminal-context.md`; the built-in Tools themselves to `docs/specs/dor-tools-builtin.md`; the integration library to `docs/specs/dor-tools-lib.md`; the audited local boundaries to `docs/specs/security-local.md` → Dor Tool configuration.
 
 ## Availability
 
@@ -73,7 +73,7 @@ A repo-local named Tool runs only after a recorded grant; anonymous command invo
 3. A grant comes only from the approval controls in Dormouse chrome. The prompt names the proposed command and is not itself executable terminal content (rationale).
 4. **Must require `trust-recorded` before re-resolving the named entry**, staging the resolved command, renderer, port strategy, key, and target before exposing its terminal. A rejected grant keeps the approval with its error; a failed re-resolution keeps it with its error and no PTY, offering Retry (lookup only) and Close (permission kept). A closed approval never starts later or shows a stale error.
 5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. A now-redundant approval closes before the match is revealed or restarted; a failed closure retains the approval and sends no command.
-6. **Must close a declined approval through the ordinary close coordinator and record no denial**; a helper refusal may retain the pane (rationale).
+6. **Must close a declined approval through the ordinary close coordinator and record no denial**; an aux terminal's refusal may retain the pane (rationale).
 7. **Must record each grant as its own atomically written file** under the host's state directory, so hosts sharing one never lock or merge; a host that supplies no state directory keeps grants in memory for that process only, never inventing a location the user cannot find to revoke.
 8. **Never content-hash grants or re-prompt solely because the config changed** (rationale).
 
@@ -130,7 +130,7 @@ Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`.
 
 A Tool is designated for one run of its command, not for the life of its Surface.
 
-**Must turn a Tool whose designated run ended into a plain terminal in place**: the user's Ctrl+C or quit, a crash, a failed boot, a suspend (the shell's prompt is the only signal; a resumed run is an ordinary terminal's, its announcements inert as [OSC 367](#osc-367) has them). Keep the Session id, Surface id, scrollback, and a user rename; retire the browser, announcements, and unsaved state ([Serving](#serving)); drop a preview mark. Only a finished run ends it: the designated command's, including one that starts and finishes in one output chunk, or any command once a host replacement has lapsed; booting, pending approval, and a takeover waiting for its prompt have ended nothing. It then persists as a terminal, keyed reuse never matches it, and Terminal Context gives it a helper (`docs/specs/terminal-context.md` → Tool context). (rationale)
+**Must turn a Tool whose designated run ended into a plain terminal in place**: the user's Ctrl+C or quit, a crash, a failed boot, a suspend (the shell's prompt is the only signal; a resumed run is an ordinary terminal's, its announcements inert as [OSC 367](#osc-367) has them). Keep the Session id, Surface id, scrollback, and a user rename; retire the browser, announcements, and unsaved state ([Serving](#serving)); drop a preview mark. Only a finished run ends it: the designated command's, including one that starts and finishes in one output chunk, or any command once a host replacement has lapsed; booting, pending approval, and a takeover waiting for its prompt have ended nothing. It then persists as a terminal, keyed reuse never matches it, and Terminal Context gives it an aux terminal (`docs/specs/terminal-context.md` → Tool context). (rationale)
 
 **Must keep the designation while the host replaces a run**: an in-place restart (idle keyed match, `dor ensure --restart`, approval match), a preview retarget with its kept or restored retypes ([Preview slot](#preview-slot)), and a reap's stop until rehydrate ([Reaping](#reaping)). One host hold both exempts the end here and silences its command-exit alert (`docs/specs/alert.md` → Command-exit Track). A replacement the host gives up on ends the run; so does a rehydrate's failed run (Error tier).
 
@@ -142,7 +142,7 @@ Source of truth: `useToolRunEnd` in `lib/src/components/wall/use-tool-run-end.ts
 
 A reap stops an idle Tool's Session, shell included; rehydrate starts it again in the same Surface, which keeps its leaf, Tool metadata, scrollback, rename, and alert, and reads as an exited Session meanwhile.
 
-**Must reap only a Tool whose running designated command declared itself safe to stop** with `dehydrate: true` in the run's latest `serve` ([OSC 367](#osc-367)): its args alone restart it, and a payload only adds fidelity. Clean or unreported state never qualifies (rationale). **Never reap a Tool** that reports unsaved changes, announced `persist: "never"`, is a marked preview slot or popped out, awaits approval or document navigation, has an auxiliary helper, is a pending kill (`docs/specs/reopen.md`), or belongs to a closing or transferring Workspace (rationale). **Never reap a Tool that took over its caller's shell** ([Take-over](#take-over)); a cold-restored one has its own shell (rationale).
+**Must reap only a Tool whose running designated command declared itself safe to stop** with `dehydrate: true` in the run's latest `serve` ([OSC 367](#osc-367)): its args alone restart it, and a payload only adds fidelity. Clean or unreported state never qualifies (rationale). **Never reap a Tool** that reports unsaved changes, announced `persist: "never"`, is a marked preview slot or popped out, awaits approval or document navigation, has an aux terminal, is a pending kill (`docs/specs/reopen.md`), or belongs to a closing or transferring Workspace (rationale). **Never reap a Tool that took over its caller's shell** ([Take-over](#take-over)); a cold-restored one has its own shell (rationale).
 
 **Must reap only after 30 minutes continuously out of sight and without PTY output** — Doored, in an inactive Workspace, or in a hidden webview (rationale): never on the minimize or switch itself, and never for memory pressure. The stop:
 
@@ -330,7 +330,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 
 ## Take-over
 
-**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds**, after the earlier rungs of [CLI](#cli) (rationale). Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
+**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds**, after the earlier rungs of [CLI](#cli) (rationale). Aux terminal callers follow `docs/specs/dor-cli.md` → Aux callers and targets.
 
 | Condition | Required state |
 | --- | --- |
@@ -339,7 +339,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
 | Placement | Neither `--from` nor `--minimize` supplied |
-| Helper | No existing auxiliary helper; preserve it by splitting |
+| Aux terminal | No existing aux terminal; preserve it by splitting |
 | Quoting | A cmd or PowerShell caller's argv has a Windows-portable form |
 
 A taken-over Surface is a Tool for one run ([Run end](#run-end)), in the caller's own shell ([Reaping](#reaping)): once that run ends, a later invocation from its prompt takes the plain terminal over afresh.
@@ -360,7 +360,7 @@ sequenceDiagram
 
 **Must answer `takeover` before waiting for the calling shell's prompt**: the answer promises placement, not command startup.
 
-- **Must leave the caller unchanged on prompt timeout or cancellation**, rechecking transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace (rationale).
+- **Must leave the caller unchanged on prompt timeout or cancellation**, rechecking transfer/closing state, pane membership, CWD, kind, and aux terminal presence after the wait. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace (rationale).
 - **Must retain the Session id, Surface id, scrollback, and any user rename** through the transformation.
 - **Must report an error when the caller is its own keyed match and that match is not running**, instead of reporting a misleading `existing` result.
 - **May interleave user keystrokes arriving between the prompt and command injection.**

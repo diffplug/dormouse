@@ -299,7 +299,7 @@ describe('handlePaneShortcuts Cmd-Arrow swap (nav seam)', () => {
   });
 });
 
-describe('handlePaneShortcuts `>` header context menu', () => {
+describe('handlePaneShortcuts header context menu', () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => { document.body.innerHTML = ''; });
 
@@ -311,37 +311,45 @@ describe('handlePaneShortcuts `>` header context menu', () => {
     return el;
   }
 
-  it('opens the context from the selected pane header\'s bottom-left corner', () => {
+  it.each([['?', 'properties'], ['!', 'aux']] as const)('`%s` opens the context on %s from the selected pane header\'s bottom-left corner', (key, mode) => {
     makeHeaderEl('pane-a');
     const ctx = makeCtx();
 
-    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(true);
+    expect(handlePaneShortcuts(keydown(key), ctx, { current: null })).toBe(true);
 
-    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { x: 10, y: 30 });
+    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { origin: { x: 10, y: 30 }, mode });
   });
 
-  it('`a` dismisses the ring and opens the context', () => {
+  it('`a` dismisses the ring and opens the properties', () => {
     makeHeaderEl('pane-a');
     const ctx = makeCtx();
 
     expect(handlePaneShortcuts(keydown('a'), ctx, { current: null })).toBe(true);
 
     expect(terminalRegistryMocks.dismissSessionAlert).toHaveBeenCalledWith('pane-a');
-    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { x: 10, y: 30 });
+    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { origin: { x: 10, y: 30 }, mode: 'properties' });
   });
 
-  it('consumes `>` without throwing when no header element matches', () => {
+  it('no longer binds `>`', () => {
+    makeHeaderEl('pane-a');
+    const ctx = makeCtx();
+    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(false);
+    expect(ctx.openTerminalContext).not.toHaveBeenCalled();
+  });
+
+  it('consumes `?` without throwing when no header element matches', () => {
     const ctx = makeCtx();
     expect(document.querySelector('[data-pane-header-for="pane-a"]')).toBeNull();
-    expect(() => handlePaneShortcuts(keydown('>'), ctx, { current: null })).not.toThrow();
-    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(true);
+    expect(() => handlePaneShortcuts(keydown('?'), ctx, { current: null })).not.toThrow();
+    expect(handlePaneShortcuts(keydown('?'), ctx, { current: null })).toBe(true);
   });
 
   it('does nothing when a door is selected', () => {
     makeHeaderEl('pane-a');
     const ctx = makeCtx({ selectedTypeRef: { current: 'door' } });
 
-    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(false);
+    expect(handlePaneShortcuts(keydown('!'), ctx, { current: null })).toBe(false);
     expect(ctx.openTerminalContext).not.toHaveBeenCalled();
   });
 });
+

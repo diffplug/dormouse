@@ -32,122 +32,122 @@ describe('AlertManager in isolation', () => {
     runCommand(manager, id, commandLine);
   }
 
-  describe('helper Sessions', () => {
-    const HELPER = 'helper';
+  describe('aux terminal Sessions', () => {
+    const AUX = 'aux';
 
     it('alerts no one, publishes nothing, and accepts no report or control until promoted', () => {
       const states: string[] = [];
       manager.onStateChange((id) => states.push(id));
-      manager.setHelper(HELPER, true);
-      runWatchedCommand(HELPER);
-      driveToBusy(manager, HELPER);
+      manager.setAux(AUX, true);
+      runWatchedCommand(AUX);
+      driveToBusy(manager, AUX);
       settle();
-      applyTerminalEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
-      applyTerminalEvents(manager, HELPER, [{ kind: 'progress', progress: { state: 'normal', percent: 40 } }]);
-      engage(manager, HELPER);
-      manager.acknowledge(HELPER, { input: true });
+      applyTerminalEvents(manager, AUX, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
+      applyTerminalEvents(manager, AUX, [{ kind: 'progress', progress: { state: 'normal', percent: 40 } }]);
+      engage(manager, AUX);
+      manager.acknowledge(AUX, { input: true });
       leave(manager);
-      manager.toggleTodo(HELPER);
-      manager.clearTodo(HELPER);
-      manager.seed(HELPER, { todo: true });
-      press(manager, HELPER);
-      finishCommand(manager, HELPER, 1);
-      manager.onExit(HELPER, 0);
+      manager.toggleTodo(AUX);
+      manager.clearTodo(AUX);
+      manager.seed(AUX, { todo: true });
+      press(manager, AUX);
+      finishCommand(manager, AUX, 1);
+      manager.onExit(AUX, 0);
       vi.advanceTimersByTime(10_000);
 
       expect(states).toEqual([]);
-      expect(manager.getState(HELPER)).toEqual(DEFAULT_ALERT_STATE);
-      expect(manager.getAllStates().has(HELPER)).toBe(false);
-      // Removing a helper that never published tells subscribers nothing either.
-      manager.remove(HELPER);
+      expect(manager.getState(AUX)).toEqual(DEFAULT_ALERT_STATE);
+      expect(manager.getAllStates().has(AUX)).toBe(false);
+      // Removing an aux terminal that never published tells subscribers nothing either.
+      manager.remove(AUX);
       expect(states).toEqual([]);
     });
 
-    it('cancels an await on a helper', async () => {
-      manager.setHelper(HELPER, true);
-      await expect(manager.awaitCompletion(HELPER, { until: 'quiet', timeoutMs: 10_000 }).promise)
+    it('cancels an await on an aux terminal', async () => {
+      manager.setAux(AUX, true);
+      await expect(manager.awaitCompletion(AUX, { until: 'quiet', timeoutMs: 10_000 }).promise)
         .resolves.toEqual({ kind: 'cancelled', waitedMs: 0 });
     });
 
-    it('keeps the command a helper was running when it is promoted mid-command', () => {
+    it('keeps the command an aux terminal was running when it is promoted mid-command', () => {
       manager.setWatchedCommands(['claude']);
-      manager.setHelper(HELPER, true);
-      runCommand(manager, HELPER, 'claude');
-      driveToBusy(manager, HELPER);
+      manager.setAux(AUX, true);
+      runCommand(manager, AUX, 'claude');
+      driveToBusy(manager, AUX);
 
       const states: boolean[] = [];
-      manager.onStateChange((id, state) => { if (id === HELPER) states.push(state.watchingEnabled); });
-      manager.setHelper(HELPER, false);
-      // Promotion publishes what the helper built up: WATCHING on `claude`, now.
+      manager.onStateChange((id, state) => { if (id === AUX) states.push(state.watchingEnabled); });
+      manager.setAux(AUX, false);
+      // Promotion publishes what the aux terminal built up: WATCHING on `claude`, now.
       expect(states).toEqual([true]);
-      expect(manager.getState(HELPER)).toMatchObject({ watchingEnabled: true, status: 'BUSY' });
+      expect(manager.getState(AUX)).toMatchObject({ watchingEnabled: true, status: 'BUSY' });
 
       // Its next unattended settle rings like any watched Session's.
       settle();
-      expect(manager.getState(HELPER).status).toBe('ALERT_RINGING');
+      expect(manager.getState(AUX).status).toBe('ALERT_RINGING');
     });
 
-    it('never counts the echo of input into a helper as work', () => {
+    it('never counts the echo of input into an aux terminal as work', () => {
       manager.setWatchedCommands(['claude']);
-      manager.setHelper(HELPER, true);
-      runCommand(manager, HELPER, 'claude');
-      manager.onData(HELPER);
+      manager.setAux(AUX, true);
+      runCommand(manager, AUX, 'claude');
+      manager.onData(AUX);
       // Typing a draft at ~7 keys a second, each key echoed.
       for (let t = 0; t < 3_000; t += 140) {
-        manager.acknowledge(HELPER, { input: true });
+        manager.acknowledge(AUX, { input: true });
         vi.advanceTimersByTime(8);
-        manager.onData(HELPER);
+        manager.onData(AUX);
         vi.advanceTimersByTime(132);
       }
-      manager.setHelper(HELPER, false);
-      expect(manager.getState(HELPER).status).toBe('NOTHING_TO_SHOW');
+      manager.setAux(AUX, false);
+      expect(manager.getState(AUX).status).toBe('NOTHING_TO_SHOW');
     });
 
     it('never replays a completion suppressed before promotion', () => {
       manager.setWatchedCommands(['claude']);
-      manager.setHelper(HELPER, true);
-      runCommand(manager, HELPER, 'claude');
-      driveToBusy(manager, HELPER);
+      manager.setAux(AUX, true);
+      runCommand(manager, AUX, 'claude');
+      driveToBusy(manager, AUX);
       settle();
-      applyTerminalEvents(manager, HELPER, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
+      applyTerminalEvents(manager, AUX, [{ kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'done' } }]);
 
-      manager.setHelper(HELPER, false);
+      manager.setAux(AUX, false);
       vi.advanceTimersByTime(10_000);
-      expect(manager.getState(HELPER)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false, notification: null });
+      expect(manager.getState(AUX)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: false, notification: null });
     });
 
     it('does not ring the exit of a command it never saw engaged', () => {
-      manager.setHelper(HELPER, true);
-      runCommand(manager, HELPER, 'npm run build');
-      manager.setHelper(HELPER, false);
+      manager.setAux(AUX, true);
+      runCommand(manager, AUX, 'npm run build');
+      manager.setAux(AUX, false);
       vi.advanceTimersByTime(30_000);
-      finishCommand(manager, HELPER);
-      expect(manager.getState(HELPER).status).toBe('WATCHING_DISABLED');
+      finishCommand(manager, AUX);
+      expect(manager.getState(AUX).status).toBe('WATCHING_DISABLED');
 
       // The ordinary seen rule applies from promotion on.
-      runCommand(manager, HELPER, 'npm run build');
-      engage(manager, HELPER);
+      runCommand(manager, AUX, 'npm run build');
+      engage(manager, AUX);
       leave(manager);
       vi.advanceTimersByTime(30_000);
-      finishCommand(manager, HELPER);
-      expect(manager.getState(HELPER).status).toBe('ALERT_RINGING');
+      finishCommand(manager, AUX);
+      expect(manager.getState(AUX).status).toBe('ALERT_RINGING');
     });
 
-    it('never rings a completion held before it became a helper: the hold coming due drops it, as a fresh one is', () => {
-      manager.onData(HELPER);
-      engage(manager, HELPER);
-      manager.notifyFromProtocol(HELPER, REPORT);
+    it('never rings a completion held before it became an aux terminal: the hold coming due drops it, as a fresh one is', () => {
+      manager.onData(AUX);
+      engage(manager, AUX);
+      manager.notifyFromProtocol(AUX, REPORT);
       leave(manager);
-      // A failed placement hands the Session back to its parent as a helper.
-      manager.setHelper(HELPER, true);
+      // A failed placement hands the Session back to its parent as an aux terminal.
+      manager.setAux(AUX, true);
       vi.advanceTimersByTime(cfg.alert.leaveGrace);
 
-      manager.setHelper(HELPER, false);
-      expect(manager.getState(HELPER)).toMatchObject({ status: 'WATCHING_DISABLED', episode: null, todo: true, notification: REPORT });
+      manager.setAux(AUX, false);
+      expect(manager.getState(AUX)).toMatchObject({ status: 'WATCHING_DISABLED', episode: null, todo: true, notification: REPORT });
       // Nothing is left held to ring later either.
-      engage(manager, HELPER);
-      goIdle(manager, HELPER);
-      expect(manager.getState(HELPER).status).toBe('WATCHING_DISABLED');
+      engage(manager, AUX);
+      goIdle(manager, AUX);
+      expect(manager.getState(AUX).status).toBe('WATCHING_DISABLED');
     });
   });
 

@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type Mock } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
-import { type ContextHelper, createLathWallEngine } from './lath-wall-engine';
+import { type ContextPanel, createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
@@ -575,8 +575,8 @@ describe('LathHost — terminal context placement', () => {
     const { engine } = mount(store);
     const element = document.createElement('div');
     const placedWidths: number[] = [];
-    const seen: (ContextHelper | null)[] = [];
-    const unsubscribe = engine.subscribeFrames(() => seen.push(engine.contextHelper()));
+    const seen: (ContextPanel | null)[] = [];
+    const unsubscribe = engine.subscribeFrames(() => seen.push(engine.contextPanel()));
     act(() => engine.setContextPlacer(paint => {
       placedWidths.push(paint.get('a')!.rect.width);
       return { sourceId: 'a', element, side: 'right' };

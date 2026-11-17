@@ -21,7 +21,8 @@ export const COMMAND_KEYS: ReadonlyArray<readonly [keys: string, label: string]>
   [',', 'rename'],
   ['t', 'TODO'],
   ['a', 'alert'],
-  ['>', 'context'],
+  ['?', 'properties'],
+  ['!', 'aux terminal'],
 ];
 
 /** Bound only on a Wall with Workspaces; a bare Wall's digits are strays. */

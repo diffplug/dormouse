@@ -1150,14 +1150,14 @@ fn read_log_tail(path: &Path, max_bytes: usize) -> Result<String, String> {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct PtySpawnOptions {
-    helper: Option<JsonValue>,
+    aux: Option<JsonValue>,
     cols: Option<u16>,
     rows: Option<u16>,
     cwd: Option<String>,
     shell: Option<String>,
     args: Option<Vec<String>>,
     /// A cold restore's persisted alert state, seeded by the sidecar's
-    /// AlertManager behind the spawn. Opaque here, like `helper`.
+    /// AlertManager behind the spawn. Opaque here, like `aux`.
     alert: Option<JsonValue>,
     /// A rehydrated Tool's `DORMOUSE_DEHYDRATE` value; the PTY core bounds it
     /// (docs/specs/dor-tool.md -> Reaping). Opaque here.

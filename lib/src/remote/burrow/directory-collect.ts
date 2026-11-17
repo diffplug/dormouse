@@ -1,7 +1,7 @@
 /**
  * The impure half of the directory: reads the live terminal registry, pane
  * state store, and activity store to produce the `DirectoryEntry[]` the phone's
- * picker renders. It projects registered terminal Surfaces except helper
+ * picker renders. It projects registered terminal Surfaces except aux terminal
  * Sessions, including a Tool's terminal while its browser face is displayed,
  * and every Workspace's — a hidden Wall's terminals stay registered. Browser
  * Surfaces never enter the xterm registry, so they come from the pages their
@@ -15,7 +15,7 @@ import {
   getTerminalPaneState,
   resolveDisplayPrimary,
 } from '../../lib/terminal-registry';
-import { isHelperSession, registry } from '../../lib/terminal-store';
+import { isAuxSession, registry } from '../../lib/terminal-store';
 import { getWorkspacesSnapshot, workspaceIdsSpanWindows } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { pendingKillSessionIds } from '../../lib/pending-kills';
@@ -49,7 +49,7 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
   const activityStates = getActivitySnapshot();
 
   const pending = new Set(pendingKillSessionIds());
-  const ids = [...registry.keys()].filter((id) => !isHelperSession(id) && !pending.has(id));
+  const ids = [...registry.keys()].filter((id) => !isAuxSession(id) && !pending.has(id));
   // Reuse these per-pane states in the map below rather than re-fetching (each
   // miss would allocate a fresh default twice).
   const allPanes = ids.map((id) => getTerminalPaneState(id));

@@ -135,28 +135,28 @@ describe('the delivery scheduler', () => {
     expect(delivered).toEqual([]);
   });
 
-  // A failed placement makes a promoted Session a helper again, and the next
+  // A failed placement makes a promoted Session an aux terminal again, and the next
   // placement promotes it, its ring still the same episode.
   it('delivers an episode once, though a demotion and a promotion show it again', () => {
     ring();
     vi.advanceTimersByTime(PUSH_MS);
     expect(sinks()).toEqual(['speech', 'push']);
 
-    manager.setHelper(PANE, true);
-    manager.setHelper(PANE, false);
+    manager.setAux(PANE, true);
+    manager.setAux(PANE, false);
     expect(manager.getState(PANE).status).toBe('ALERT_RINGING');
     vi.advanceTimersByTime(10 * PUSH_MS);
     expect(sinks()).toEqual(['speech', 'push']);
   });
 
-  it('silences what a demotion to helper leaves pending, and never delivers it on promotion', () => {
+  it('silences what a demotion to aux terminal leaves pending, and never delivers it on promotion', () => {
     ring();
     vi.advanceTimersByTime(SPEAK_MS / 2);
-    manager.setHelper(PANE, true);
+    manager.setAux(PANE, true);
     vi.advanceTimersByTime(PUSH_MS);
     expect(delivered).toEqual([]);
 
-    manager.setHelper(PANE, false);
+    manager.setAux(PANE, false);
     vi.advanceTimersByTime(10 * PUSH_MS);
     expect(delivered).toEqual([]);
   });

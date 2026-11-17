@@ -69,13 +69,15 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       const leader = dualTap(taps, e);
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
+        // Only the completing press: other bare modifiers inside a context are its own.
+        if (leader && handleDualTap(e, c, leader)) return;
         if (handleContextCopy(e)) return;
         if (handleEditableClipboard(e)) return;
-        const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
-        const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;
+        const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-aux-terminal], [data-context-terminal]');
+        const auxId = terminalElement?.dataset.auxTerminal ?? terminalElement?.dataset.contextTerminal;
         // A focused context terminal takes the keyboard whatever the Wall's
         // mode, so its copy editor gets its passthrough keys.
-        if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId }, modeRef: { current: 'passthrough' } });
+        if (auxId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: auxId }, modeRef: { current: 'passthrough' } });
         return;
       }
       if (handleDualTap(e, c, leader)) return;

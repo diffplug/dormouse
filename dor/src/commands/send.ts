@@ -41,7 +41,7 @@ function inlineInputs(args: readonly string[]): Array<SendInputEvent | { stdin: 
   return inputs;
 }
 
-export function validateSendFlags(args: string[]): ParseResult<void> {
+function validateSendFlags(args: string[]): ParseResult<void> {
   if (args.slice(0, args.indexOf('--') < 0 ? args.length : args.indexOf('--')).includes('--raw')) {
     return { ok: false, message: '--raw was removed; --text is always literal' };
   }

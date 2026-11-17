@@ -172,7 +172,7 @@ Source of truth: `cwdIdentity` in `lib/src/lib/terminal-state.ts`.
 
 **Must derive title explanation from the header's winning-title functions**, including user override, eligible OSC candidate, and command fallback. Retain the last command's captured title when later shell OSCs replace live candidates; the diagnostic table is not an OSC history.
 
-**Must abbreviate home only at a complete path boundary**, retaining the absolute path for copying and native directory operations. Compare helper and source host identity as well as directory paths.
+**Must abbreviate home only at a complete path boundary**, retaining the absolute path for copying and native directory operations. Compare aux terminal and source host identity as well as directory paths.
 
 Source of truth: `explainTerminalTitle` / `cwdDisplay` in `lib/src/lib/terminal-state.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`.
 

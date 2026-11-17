@@ -86,10 +86,10 @@ const mgr = create((event, data) => {
   if (event !== 'data') send(`pty:${event}`, data);
   // `sliceSince` comes from the shared bundle above rather than living in
   // pty-core, so this host and the VS Code extension host read their replay
-  // buffers through one implementation. Each helper decision pty-core makes
-  // reaches the alerts, which keep a helper inert (docs/specs/alert.md), and
+  // buffers through one implementation. Each aux terminal decision pty-core makes
+  // reaches the alerts, which keep an aux terminal inert (docs/specs/alert.md), and
   // each paced slice it writes reaches the flow control, as every write does.
-}, nodePty, { replay: true, sliceSince, onHelper: (id, helper) => host.alerts.setHelper(id, helper), onInputWritten: (id) => host.inputWritten(id), canonicalDirectory: canonicalLocalDirectory, resolveBinary: resolveBinaryPath });
+}, nodePty, { replay: true, sliceSince, onAux: (id, aux) => host.alerts.setAux(id, aux), onInputWritten: (id) => host.inputWritten(id), canonicalDirectory: canonicalLocalDirectory, resolveBinary: resolveBinaryPath });
 
 const host = createSidecarHost({
   send,
@@ -117,7 +117,7 @@ delete process.env.DORMOUSE_CONTROL_SOCKET;
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
-  getHelperParentId: mgr.getHelperParentId,
+  getAuxParentId: mgr.getAuxParentId,
   send,
 });
 

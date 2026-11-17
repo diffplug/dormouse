@@ -13,7 +13,7 @@ The rest of this guide is how to do everything well.
 
 ## Start here
 
-Run `dor list` before creating or driving surfaces, and check that its `(you)` row is your own terminal. It shows what is already running, marks the user's focus `*`, and proves the control connection works — a successful `dor skill` only prints bundled text. An auxiliary helper has no public row or `(you)` marker; this is expected. Otherwise, if the listing fails or has no `(you)` row, see "When `dor` cannot connect" at the end.
+Run `dor list` before creating or driving surfaces, and check that its `(you)` row is your own terminal. It shows what is already running, marks the user's focus `*`, and proves the control connection works — a successful `dor skill` only prints bundled text. An aux terminal has no public row or `(you)` marker; this is expected. Otherwise, if the listing fails or has no `(you)` row, see "When `dor` cannot connect" at the end.
 
 Then run `dor tool --list` to see the Tools this project and the user declare (see Dor Tools below).
 
@@ -50,9 +50,9 @@ Text output is designed for you to read: it is terse and carries the same ids. R
 
 Bare numbers and `pane:N` are not valid handles; dor refuses them and names the `surface:N` form.
 
-## Helpers
+## Aux terminals
 
-From an auxiliary helper, `dor` commands work on ordinary Surfaces. New panes default to beside the helper's source, using the helper's working directory; Tool and browser creation never takes over the helper or its source. Helpers stay out of `dor list` and matching, and cannot be explicit targets, including `surface:self`: promote one through the UI first if you need to target it. A Tool's terminal context is its ordinary Session, not an auxiliary helper.
+From an aux terminal, `dor` commands work on ordinary Surfaces. New panes default to beside the aux terminal's source, using the aux terminal's working directory; Tool and browser creation never takes over the aux terminal or its source. Aux terminals stay out of `dor list` and matching, and cannot be explicit targets, including `surface:self`: promote one through the UI first if you need to target it. A Tool's terminal context is its ordinary Session, not an aux terminal.
 
 ## Terminals
 

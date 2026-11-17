@@ -52,10 +52,10 @@ describe('pending kills', () => {
 
   it('stay pending, their countdown untouched, when a restore refuses', () => {
     const actions = { restore: vi.fn(() => false), finalize: vi.fn() };
-    addPendingKill({ kind: 'helper', id: 'h', workspaceId: 'ws', title: 'h', label: 'Helper' }, actions);
+    addPendingKill({ kind: 'aux', id: 'h', workspaceId: 'ws', title: 'h', label: 'Aux terminal' }, actions);
     const [before] = getPendingKills();
     vi.advanceTimersByTime(4_000);
-    expect(restorePendingKill(pendingKillKey('helper', 'h'))).toBe(false);
+    expect(restorePendingKill(pendingKillKey('aux', 'h'))).toBe(false);
     expect(getPendingKills()).toEqual([before]);
     vi.advanceTimersByTime(PENDING_KILL_MS - 4_000);
     expect(actions.finalize).toHaveBeenCalledTimes(1);

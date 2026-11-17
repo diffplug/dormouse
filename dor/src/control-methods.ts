@@ -124,7 +124,7 @@ export abstract class MethodControlClient implements ControlClient {
     return this.request<MoveSurfaceResponse>(SURFACE_CONTROL_METHODS.move, request);
   }
 
-  // A terminal's close first asks the host whether its helper runs work, which
+  // A terminal's close first asks the host whether its aux terminal runs work, which
   // inspects the process tree: the webview waits that child's bound plus a hop.
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {
     return this.request<KillSurfaceResponse>(

@@ -2,24 +2,30 @@ import { acknowledgeSession, dismissSessionAlert, toggleSessionTodo } from '../.
 import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams } from '../browser-surface';
 import { isWorkspaceSelection } from '../wall-types';
+import type { ContextMode } from '../wall-context';
 import { ARROW_OPPOSITES, commandKey, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
-/** Open the terminal context revealed from the pane header's bottom-left
- *  corner. Browser-surface panes carry no `data-pane-header-for`, so the lookup
- *  misses and the caller's key is a consumed no-op — the spec'd behavior for
- *  surfaces with no header context menu. */
-function openHeaderContext(ctx: WallKeyboardCtx, id: string): void {
+/** Open the terminal context in `mode`, revealed from the pane header's
+ *  bottom-left corner. Browser-surface panes carry no `data-pane-header-for`, so
+ *  the lookup misses and the caller's key is a consumed no-op — the spec'd
+ *  behavior for surfaces with no header context menu. */
+function openHeaderContext(ctx: WallKeyboardCtx, id: string, mode: ContextMode): void {
   const header = document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
   if (!header) return;
   const rect = header.getBoundingClientRect();
-  ctx.openTerminalContext(id, { x: rect.left, y: rect.bottom });
+  ctx.openTerminalContext(id, { origin: { x: rect.left, y: rect.bottom }, mode });
 }
+
+/** The command keys that open the terminal context, each in its mode. */
+const CONTEXT_KEYS: Readonly<Record<string, ContextMode>> = { '?': 'properties', '!': 'aux' };
+/** Bindings Option or AltGr may print on non-US keyboards. */
+const SYMBOL_KEYS = ['|', '%', '"', ...Object.keys(CONTEXT_KEYS)];
 
 /** Keep aligned with the pane handlers below. Workspace selections consume
  *  these keys; an omitted key returns unhandled without dispatching a pane action,
  *  and a printable one raises the stray-key prompt.
  *  Pinned by the independent key list in handle-pane-navigation.test.ts. */
-export const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>']);
+export const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', ...Object.keys(CONTEXT_KEYS)]);
 
 /** Command-mode shortcuts acting on the selected pane or Door. The binding
  *  table is `docs/specs/shortcuts.md`; the behavior is `docs/specs/layout.md`. */
@@ -30,7 +36,7 @@ export function handlePaneShortcuts(
 ): boolean {
   // Option and AltGr can print the symbol bindings on non-US keyboards.
   // Plain host chords still do not become pane actions; Cmd/Ctrl arrows are explicit.
-  const printedSymbol = e.altKey && ['|', '%', '"', '>'].includes(e.key);
+  const printedSymbol = e.altKey && SYMBOL_KEYS.includes(e.key);
   if ((e.altKey && !printedSymbol) || ((e.metaKey || (e.ctrlKey && !printedSymbol)) && !isArrowKey(e.key))) return false;
   const sid = ctx.selectedIdRef.current;
   const key = commandKey(e);
@@ -147,7 +153,7 @@ export function handlePaneShortcuts(
     e.preventDefault();
     e.stopPropagation();
     dismissSessionAlert(sid);
-    openHeaderContext(ctx, sid);
+    openHeaderContext(ctx, sid, 'properties');
     return true;
   }
 
@@ -158,10 +164,11 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  if (key === '>' && sid && ctx.selectedTypeRef.current === 'pane') {
+  const contextMode = CONTEXT_KEYS[key];
+  if (contextMode && sid && ctx.selectedTypeRef.current === 'pane') {
     e.preventDefault();
     e.stopPropagation();
-    openHeaderContext(ctx, sid);
+    openHeaderContext(ctx, sid, contextMode);
     return true;
   }
 

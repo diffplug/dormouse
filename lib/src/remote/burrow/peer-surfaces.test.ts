@@ -136,14 +136,14 @@ describe('surface responder', () => {
     expect(platform.answer('surfaceOp', { surfaceId: 'elsewhere', op: 'attach' })).toEqual([]);
   });
 
-  it('denies helper discovery and direct attachment until promotion', () => {
-    const terminal = registerSurface('helper');
-    registry.get('helper')!.helper = { parentId: 'parent' };
+  it('denies aux terminal discovery and direct attachment until promotion', () => {
+    const terminal = registerSurface('aux');
+    registry.get('aux')!.aux = { parentId: 'parent' };
     expect(platform.answer('directory', {})).toEqual([]);
-    expect(platform.answer('surfaceOp', { surfaceId: 'helper', op: 'attach', cols: 100, rows: 30 })).toEqual([]);
+    expect(platform.answer('surfaceOp', { surfaceId: 'aux', op: 'attach', cols: 100, rows: 30 })).toEqual([]);
     expect(terminal.resize).not.toHaveBeenCalled();
-    registry.get('helper')!.helper = undefined;
-    expect(platform.answer('surfaceOp', { surfaceId: 'helper', op: 'resolve' })).toEqual([{ ptyId: 'helper', cols: 80, rows: 24, modes: FRESH_TERMINAL_MODES }]);
+    registry.get('aux')!.aux = undefined;
+    expect(platform.answer('surfaceOp', { surfaceId: 'aux', op: 'resolve' })).toEqual([{ ptyId: 'aux', cols: 80, rows: 24, modes: FRESH_TERMINAL_MODES }]);
   });
 
   it('resolves ownership without resizing the live xterm', () => {
