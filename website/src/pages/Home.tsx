@@ -20,11 +20,11 @@ import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
 import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
-import phoneMockupUrl from "../assets/phone-mockup.webp";
 import elevenLabsGrantsUrl from "../assets/elevenlabs-grants.png";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
+import { PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
 import { sitePath } from "../lib/site-meta";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
@@ -854,53 +854,39 @@ export default function Home() {
           <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
         </section>
         {/* Section 2: image left, text right */}
-        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <img
-            src={phoneMockupUrl}
-            alt="Dormouse Pocket running on a phone"
-            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
-          />
-          <div className="order-1 md:order-2">
-            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
-              Push notifications you can self-host
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,390px)_1fr] gap-8 md:gap-12 items-start`}>
+          <PocketDemoPhone className="order-2 md:order-1 mx-auto" />
+          {/* One column: the heading, the phone, then the text. */}
+          <div className="contents md:block md:order-2">
+            <h2 className="order-1 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] md:mb-6">
+              Use your laptop from your phone
             </h2>
-            <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Your agent hits a permission prompt four minutes after you leave,
-              then sits there until you get back. Dormouse already knows that
-              pane is asking for a human — so it buzzes your phone. A real push
-              notification, delivered by Apple or Google, to an app that's
-              completely closed.
-            </p>
-            <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Then you answer it. Tap the terminal and a radial menu opens under
-              your thumb: drag down-right for{" "}
-              <code className={SITE_CODE_CLASS}>y</code>,
-              up-right for{" "}
-              <code className={SITE_CODE_CLASS}>n</code>,
-              or out to Esc, Ctrl+C, and a quit menu. One drag and the agent's
-              moving again. No keyboard, no squinting.
-            </p>
-            <p className="mb-4 text-lg leading-relaxed opacity-70">
-              The relay is one Node process. No database — state is JSON on
-              disk, and push keys mint themselves on first boot. Put{" "}
-              <code className={SITE_CODE_CLASS}>tailscale serve</code>{" "}
-              in front of it, build Dormouse from source pointed at it (a
-              stock build reaches only Dormouse Hosted), and you're done: no
-              Dormouse account or Dormouse-operated cloud. The Relay stays on your own
-              machine, inside your tailnet. Your laptop decides which phones get
-              notified — the Relay isn't allowed to choose for it, and the{" "}
-              <a href={sitePath("/security")} className={SITE_LINK_CLASS}>security spec</a>{" "}
-              says exactly what that guarantees. The{" "}
-              <a href={sitePath("/self-host")} className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
-              walks the whole install. If you would rather skip running it,
-              {" "}<a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.home, "remote-control")} className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
-              runs it for you.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Try the{" "}
-              <a href={sitePath("/playground/pocket")} className={SITE_LINK_CLASS}>Dormouse Pocket</a>{" "}
-              phone interface in your browser before you connect your own.
-            </p>
+            <div className="order-3">
+              <p className="mb-4 text-lg leading-relaxed opacity-70">
+                Your agent hits a permission prompt four minutes after you leave,
+                then sits there until you get back. Dormouse sees that the pane is
+                stuck, so it sends a push notification to your phone.
+              </p>
+              <p className="mb-4 text-lg leading-relaxed opacity-70">
+                Tap it and keep going - all the terminals and browsers
+                from your laptop are available on your phone. Scroll and
+                enter common keys while viewing in full screen with Dormouse's
+                gesture-based menu. You can{" "}
+                <a href={sitePath("/playground/pocket")} className={SITE_LINK_CLASS}>try it right now in the mobile playground</a>.
+              </p>
+              <p className="mb-4 text-lg leading-relaxed opacity-70">
+                To make this work, there has to be a coordinating server somewhere. You can{" "}
+                <a href={sitePath("/hosted")} className={SITE_LINK_CLASS}>pay us to use ours</a>{" "}
+                or you can{" "}
+                <a href={sitePath("/self-host")} className={SITE_LINK_CLASS}>self-host your own</a>.
+              </p>
+              <p className="text-lg leading-relaxed opacity-70">
+                The data is end-to-end encrypted between your laptop and your phone, peer-to-peer over WebRTC whenever the network allows it.
+                You're not relying on any cloud services for access control,
+                and the full application gets audited every night with heavier pentest audits every month.
+                More info in our <a href={sitePath("/security")} className={SITE_LINK_CLASS}>security docs</a>.
+              </p>
+            </div>
           </div>
         </section>
 

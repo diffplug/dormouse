@@ -20,15 +20,24 @@ vi.mock("react-router", async (importOriginal) => {
   };
 });
 
-const previewLifecycle = vi.hoisted(() => ({ mounted: [] as boolean[], unmounted: [] as boolean[] }));
+const previewLifecycle = vi.hoisted(() => ({ mounted: [] as string[], unmounted: [] as string[] }));
 vi.mock("../components/SiteHeader", () => ({ default: () => <header />, STATIC_PAGE_HEADER_STYLE: {} }));
 vi.mock("../components/PocketTerminalExperience", () => ({
-  PocketTerminalExperience: ({ interactive }: { interactive: boolean }) => {
+  PocketTerminalExperience: () => {
     useEffect(() => {
-      previewLifecycle.mounted.push(interactive);
-      return () => { previewLifecycle.unmounted.push(interactive); };
-    }, [interactive]);
-    return <section data-interactive={String(interactive)} />;
+      previewLifecycle.mounted.push("terminal");
+      return () => { previewLifecycle.unmounted.push("terminal"); };
+    }, []);
+    return <section data-experience="terminal" />;
+  },
+}));
+vi.mock("../components/pocket-demo/PocketDemoPhone", () => ({
+  PocketDemoPhone: () => {
+    useEffect(() => {
+      previewLifecycle.mounted.push("demo");
+      return () => { previewLifecycle.unmounted.push("demo"); };
+    }, []);
+    return <section data-experience="demo" />;
   },
 }));
 vi.mock("../components/NotifySignupForm", () => ({ NotifySignupForm: () => null }));
@@ -118,10 +127,10 @@ describe("Pocket playground hydration", () => {
       root = hydrateRoot(element, <PocketPlayground />, { onRecoverableError: recoverable });
     });
 
-    expect(element.querySelector(`[data-interactive="${pocket}"]`)).not.toBeNull();
+    expect(element.querySelector(`[data-experience="${pocket ? "terminal" : "demo"}"]`)).not.toBeNull();
     expect(document.body.classList.contains(pocket ? "pocket-terminal-body" : "pocket-marketing-body")).toBe(true);
     expect(recoverable).not.toHaveBeenCalled();
-    if (pocket) expect(previewLifecycle.unmounted).toEqual([false]);
+    if (pocket) expect(previewLifecycle.unmounted).toEqual(["demo"]);
   });
 
   it("updates the page and cleans up the previous experience when media changes", async () => {
@@ -130,14 +139,14 @@ describe("Pocket playground hydration", () => {
     await act(async () => { root = createRoot(element); root.render(<PocketPlayground />); });
 
     act(() => setPocket(true));
-    expect(element.querySelector('[data-interactive="true"]')).not.toBeNull();
+    expect(element.querySelector('[data-experience="terminal"]')).not.toBeNull();
     expect(document.body.classList.contains("pocket-marketing-body")).toBe(false);
-    expect(previewLifecycle.unmounted).toEqual([false]);
+    expect(previewLifecycle.unmounted).toEqual(["demo"]);
 
     act(() => setPocket(false));
-    expect(element.querySelector('[data-interactive="false"]')).not.toBeNull();
+    expect(element.querySelector('[data-experience="demo"]')).not.toBeNull();
     expect(document.body.classList.contains("pocket-terminal-body")).toBe(false);
-    expect(previewLifecycle.unmounted).toEqual([false, true]);
+    expect(previewLifecycle.unmounted).toEqual(["demo", "terminal"]);
   });
 });
 

@@ -21,8 +21,7 @@ export function useRestoredTheme(
   restore: () => void = restoreActiveTheme,
 ): void {
   // Latched before the first restore, and before any child renders: the theme
-  // picker re-resolves through this fallback, and on the desktop Pocket page
-  // it mounts ahead of the component that calls this hook.
+  // picker re-resolves through this fallback.
   setDefaultThemeId(defaultThemeId ?? null);
 
   const restoredRef = useRef(false);

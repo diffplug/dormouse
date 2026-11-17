@@ -38,7 +38,6 @@ function Composition({ touchMode }: { touchMode: MobileTerminalTouchMode }) {
   const sessions = useMobileWallSessionItems(SESSIONS, active);
   return (
     <MobileTerminalUi
-      interactive
       activeTouchMode={touchMode}
       cursorTouchAvailable
       sessions={sessions}
