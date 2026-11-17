@@ -122,6 +122,32 @@ describe('ThemeStoreDialog', () => {
     }
   });
 
+  it('keeps Searching when an earlier search settles before the next debounce fires', async () => {
+    let resolveSearch!: (result: OpenVSXSearchResult) => void;
+    searchThemesMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveSearch = resolve; }),
+    );
+
+    vi.useFakeTimers();
+    try {
+      render();
+      typeQuery('zzz');
+      act(() => { vi.advanceTimersByTime(300); });
+
+      // The next keystroke supersedes the in-flight search, so its empty
+      // answer must neither end Searching nor read as this query's result.
+      typeQuery('zzzq');
+      await act(async () => {
+        resolveSearch(results());
+      });
+
+      expect(container.textContent).toContain('Searching...');
+      expect(container.textContent).not.toContain('No themes found');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('stops searching when the box is emptied while a request is in flight', async () => {
     let resolveSearch!: (result: OpenVSXSearchResult) => void;
     searchThemesMock.mockImplementationOnce(

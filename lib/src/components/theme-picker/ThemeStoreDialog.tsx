@@ -66,7 +66,9 @@ export function ThemeStoreDialog({
   const handleInput = (value: string) => {
     setQuery(value);
     // Searching from the keystroke, not from when the debounce fires: until
-    // then the empty results would otherwise read as "No themes found".
+    // then the empty results would otherwise read as "No themes found". The
+    // new epoch keeps a search still in flight from clearing that early.
+    ++searchEpoch.current;
     setLoading(Boolean(value.trim()));
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSearch(value), 300);
