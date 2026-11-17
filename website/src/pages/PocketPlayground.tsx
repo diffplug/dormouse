@@ -5,7 +5,6 @@ import { PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 import { ShareUrlButton } from "../components/ShareUrlButton";
-import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import { sitePath } from "../lib/site-meta";
@@ -23,16 +22,9 @@ function MobilePocketPlaygroundPage() {
 }
 
 function DesktopPocketPlaygroundPage() {
-  // Declared here rather than left to PocketTerminalExperience below: the
-  // header's picker renders first and re-resolves through this fallback.
-  useRestoredTheme(DOCS_THEME_ID);
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
-      <SiteHeader
-        activePath="/pocket"
-        style={STATIC_PAGE_HEADER_STYLE}
-        controls={<ThemePicker variant="compact" offerStore />}
-      />
+      <SiteHeader activePath="/pocket" style={STATIC_PAGE_HEADER_STYLE} />
       <main className="mx-auto grid min-h-screen max-w-6xl items-center gap-10 px-4 pb-10 pt-24 md:grid-cols-[minmax(320px,390px)_minmax(0,1fr)] md:px-8 md:pt-28">
         <section className="max-w-2xl">
           <h1 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">

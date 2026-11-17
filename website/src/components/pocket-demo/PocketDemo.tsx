@@ -5,8 +5,7 @@ import { initPlatform } from "dormouse-lib/lib/platform";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { disposeAllSessions, initAlertStateReceiver, writeUserInput } from "dormouse-lib/lib/terminal-registry";
 import { setNativeFieldValue } from "dormouse-lib/lib/dom";
-import { useRestoredTheme } from "dormouse-lib/lib/themes";
-import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
+import { applyTheme, getBundledThemes, useRestoredTheme } from "dormouse-lib/lib/themes";
 import { DemoAgent } from "./demo-agent";
 import { DemoReadme } from "./DemoReadme";
 import { DemoStopped, DemoStuck, Finger, FINGER_CLASS } from "./finger";
@@ -25,6 +24,14 @@ const README = "pocket-demo-readme";
 const AGENT_SESSION: MobileWallSession = { id: AGENT, title: "agent" };
 const README_SESSION: MobileWallSession = { id: README, title: "README.md", kind: "tool", browserDisplay: "iframe" };
 const REQUEST = "I want our markdown editor to support links to 3D GLB files";
+
+/** The demo wears one theme whatever the reader picked: it is a picture of
+ *  Pocket. Painted on body, where the terminal reads its colors; it does not
+ *  become the reader's choice. */
+function paintDemoTheme(): void {
+  const theme = getBundledThemes().find(({ id }) => id === "vscode.theme-kimbie-dark.kimbie-dark");
+  if (theme) applyTheme(theme);
+}
 
 /** The app's terminal type scale (`lib/src/theme.css`), scoped to the phone:
  *  that file would retune the whole homepage's type. */
@@ -55,7 +62,7 @@ function waitForPty(adapter: FakePtyAdapter, id: string): Promise<void> {
 }
 
 export default function PocketDemo({ playing, onStuck, still = false }: { playing: boolean; onStuck: () => void; still?: boolean }) {
-  useRestoredTheme(DOCS_THEME_ID);
+  useRestoredTheme(undefined, paintDemoTheme);
   const screenRef = useRef<HTMLDivElement>(null);
   const fingerRef = useRef<HTMLDivElement>(null);
   const [demo, setDemo] = useState<{ agent: DemoAgent; ready: Promise<void> } | null>(null);
