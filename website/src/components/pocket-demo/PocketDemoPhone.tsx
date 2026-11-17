@@ -30,6 +30,7 @@ function turnedSize(width: number, height: number): { width: number; height: num
 export function PocketDemoPhone({ className = "" }: { className?: string }) {
   const slotRef = useRef<HTMLDivElement>(null);
   const phoneRef = useRef<HTMLDivElement>(null);
+  const screenRef = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [run, setRun] = useState(0);
@@ -38,7 +39,8 @@ export function PocketDemoPhone({ className = "" }: { className?: string }) {
   useEffect(() => {
     const slot = slotRef.current;
     const phone = phoneRef.current;
-    if (!slot || !phone) return;
+    const screen = screenRef.current;
+    if (!slot || !phone || !screen) return;
     const nearby = new IntersectionObserver(([entry]) => {
       if (!entry.isIntersecting) return;
       setNear(true);
@@ -60,7 +62,9 @@ export function PocketDemoPhone({ className = "" }: { className?: string }) {
     // The layout box ignores transforms, so its turned size is fixed.
     const turned = turnedSize(PHONE_WIDTH, phone.offsetHeight);
     const refit = () => {
-      const scale = Math.min(1, slot.clientWidth / turned.width, (window.innerHeight - PHONE_VIEWPORT_MARGIN) / turned.height);
+      // The small viewport, not `innerHeight`: a mobile browser's toolbar
+      // showing and hiding as the page scrolls must not resize the phone.
+      const scale = Math.min(1, slot.clientWidth / turned.width, (screen.offsetHeight - PHONE_VIEWPORT_MARGIN) / turned.height);
       // Turned about its center, so centering the layout box centers the projection.
       setFit((prev) => prev?.scale === scale ? prev : { scale, height: turned.height * scale, top: (turned.height * scale - phone.offsetHeight) / 2 });
     };
@@ -81,6 +85,7 @@ export function PocketDemoPhone({ className = "" }: { className?: string }) {
       // Unfitted (prerendered), the slot holds the phone's natural proportions.
       style={{ maxWidth: PHONE_WIDTH, ...(fit ? { height: fit.height } : { aspectRatio: `${PHONE_WIDTH} / 750` }) }}
     >
+      <div ref={screenRef} className="pointer-events-none invisible absolute h-svh w-0" />
       <div
         ref={phoneRef}
         className="absolute left-1/2 rounded-[2rem] border border-white/15 bg-neutral-950 px-3 pb-6 pt-4"
