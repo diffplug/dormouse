@@ -10,6 +10,7 @@ import { respond, type RelayMessage } from "./sw-relay";
 import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
 import { listenerUrlsByPort } from "dormouse-lib/components/wall/port-url";
 import { YOUTUBE_MUSIC_VIDEO, youtubeEmbedUrl } from "../youtube";
+import { startDevServer } from "../dev-server-program";
 import { PlaygroundViewers, type ViewerRequest, type ViewerResponse } from "./viewers";
 import { StockTree, USER_CONFIG, VirtualFs } from "./vfs";
 
@@ -139,6 +140,12 @@ describe("playgroundIframeUrl", () => {
       const video = youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO);
       expect(await playgroundIframeUrl(video)).toEqual({ ok: true, url: video });
       expect(await playgroundIframeUrl("https://www.youtube-nocookie.com/embed/other")).toMatchObject({ ok: false });
+      // A pretend dev server's port serves nothing, so it shows the video, but only while it runs.
+      const server = startDevServer("npm", ["run", "dev"], { setOpenPorts: () => {} }, "t", () => {}, () => {})!;
+      server.start();
+      expect(await playgroundIframeUrl("http://127.0.0.1:5173/")).toEqual({ ok: true, url: video });
+      server.dispose();
+      expect(await playgroundIframeUrl("http://127.0.0.1:5173/")).toMatchObject({ ok: false, reason: "scheme" });
     } finally {
       vi.unstubAllGlobals();
     }

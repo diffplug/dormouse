@@ -8,8 +8,8 @@ import type { InteractiveProgram, SendOutput } from "./tutorial-shell";
  * The pretend dev server the Ports and browsers section has the user run
  * (`npm run dev`). Like Vite, each one takes the first free port from 5173, so
  * two of them listen on different ports, which their panes' properties show.
- * It serves nothing, so a system browser opening one gets the music video
- * instead ({@link devServerPage}).
+ * It serves nothing, so a browser opening one gets the music video instead
+ * ({@link servesDevServer}).
  */
 
 /** The names `startDevServer` runs, for the shell to complete and suggest. */
@@ -69,16 +69,20 @@ class DevServerProgram implements InteractiveProgram {
   }
 }
 
-/** What a system browser shows for `uri`: the music video when it names a
- *  running dev server's port on this machine, else `uri` itself. */
-export function devServerPage(uri: string): string {
+/** Whether `uri` names a running dev server's port on this machine. */
+export function servesDevServer(uri: string): boolean {
   try {
     const url = new URL(uri);
-    if (isLoopbackHostname(url.hostname) && portsInUse.has(Number(url.port))) return YOUTUBE_MUSIC_VIDEO;
+    return isLoopbackHostname(url.hostname) && portsInUse.has(Number(url.port));
   } catch {
-    // Not a URL: nothing to redirect.
+    return false;
   }
-  return uri;
+}
+
+/** What a system browser shows for `uri`: the music video for a running dev
+ *  server, else `uri` itself. */
+export function devServerPage(uri: string): string {
+  return servesDevServer(uri) ? YOUTUBE_MUSIC_VIDEO : uri;
 }
 
 /** `npm run dev` as a dev server; any other `npm` command says what runs here. */
