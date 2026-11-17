@@ -92,7 +92,6 @@ async function createPlatform(): Promise<PlatformAdapter> {
   return new TauriAdapter();
 }
 
-// Await init() first to register event listeners before reconnecting
 async function bootstrap() {
   // First: several modules below key off which window this is, and the Rust
   // commands are all keyed by the invoking window's label. The lib gets the
