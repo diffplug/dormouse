@@ -134,10 +134,10 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
         const press = { x: screen.clientWidth * 0.62, y: screen.clientHeight * 0.66 };
         await finger.moveTo(press, 500);
         await finger.drag(terminal, [{ x: 0, y: 92, ms: 840 }]);
-        await finger.sleep(650);
-        await finger.moveTo(press, 380);
+        await finger.sleep(325);
+        await finger.moveTo(press, 190);
         await finger.drag(terminal, [
-          { x: 62, y: 62, ms: 760, holdMs: 840 },
+          { x: 62, y: 62, ms: 760, holdMs: 420 },
           { x: -4, y: -4, ms: 720 },
         ]);
 
