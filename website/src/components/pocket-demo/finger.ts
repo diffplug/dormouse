@@ -9,6 +9,10 @@ interface Point { x: number; y: number }
 /** The abort reason that unwinds the script wherever it is once the demo stops. */
 export class DemoStopped extends Error {}
 
+/** Thrown when the agent never reaches a phase: a gesture a resize threw off
+ *  answered something else. */
+export class DemoStuck extends Error {}
+
 const POINTER_ID = 7_301;
 
 function easeInOut(t: number): number {
@@ -31,6 +35,20 @@ export class Finger {
 
   async sleep(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
+    this.signal.throwIfAborted();
+  }
+
+  /** Waits for `reached`, throwing `DemoStuck` once `ms` pass without it. */
+  async expect(reached: Promise<void>, ms: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(this.signal.aborted ? this.signal.reason : new DemoStuck()), ms);
+    });
+    try {
+      await Promise.race([reached, deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
     this.signal.throwIfAborted();
   }
 
@@ -74,15 +92,22 @@ export class Finger {
    */
   async drag(target: Element, path: Array<Point & { ms: number; holdMs?: number }>): Promise<void> {
     const origin = this.position;
-    const screen = this.screen.getBoundingClientRect();
+    // Pocket places a press within the pane's drawn box, which the phone's fit
+    // scales, but reads a drag's distance as unscaled pixels: so the press goes
+    // to its spot in the drawn box, and the drag moves at full size.
+    const box = this.screen.getBoundingClientRect();
+    const press = {
+      x: box.left + (origin.x * box.width) / this.screen.offsetWidth,
+      y: box.top + (origin.y * box.height) / this.screen.offsetHeight,
+    };
     const pointer = (type: string) => target.dispatchEvent(new PointerEvent(type, {
       bubbles: true,
       cancelable: true,
       pointerId: POINTER_ID,
       pointerType: "touch",
       isPrimary: true,
-      clientX: screen.left + this.position.x,
-      clientY: screen.top + this.position.y,
+      clientX: press.x + this.position.x - origin.x,
+      clientY: press.y + this.position.y - origin.y,
     }));
     await this.press(true);
     pointer("pointerdown");

@@ -9,14 +9,15 @@ import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 import { DemoAgent } from "./demo-agent";
 import { DemoReadme } from "./DemoReadme";
-import { DemoStopped, Finger, FINGER_CLASS } from "./finger";
+import { DemoStopped, DemoStuck, Finger, FINGER_CLASS } from "./finger";
 
 /**
  * The homepage's Pocket demo: the real mobile composition on a fake PTY,
  * driven by a script. A request typed into Type, an agent's question answered
  * with two gestures, then the README it changed, opened from the Sessions
  * screen, with its new 3D embed turning. Mounted, it shows the agent at its
- * prompt; the script loops while `playing`.
+ * prompt; the script loops while `playing`, and calls `onStuck` if the agent
+ * never answers, for a fresh start.
  */
 
 const AGENT = "pocket-demo-agent";
@@ -53,7 +54,7 @@ function waitForPty(adapter: FakePtyAdapter, id: string): Promise<void> {
   });
 }
 
-export default function PocketDemo({ playing, still = false }: { playing: boolean; still?: boolean }) {
+export default function PocketDemo({ playing, onStuck, still = false }: { playing: boolean; onStuck: () => void; still?: boolean }) {
   useRestoredTheme(DOCS_THEME_ID);
   const screenRef = useRef<HTMLDivElement>(null);
   const fingerRef = useRef<HTMLDivElement>(null);
@@ -106,7 +107,7 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
         await finger.sleep(350);
         await finger.tap(find(screen, "[data-mobile-composer] button", "Send"));
 
-        await agent.waitFor("asking");
+        await finger.expect(agent.waitFor("asking"), 5_000);
         await finger.sleep(700);
         const terminal = find(screen, ".xterm-screen");
         const press = { x: screen.clientWidth * 0.62, y: screen.clientHeight * 0.66 };
@@ -119,9 +120,8 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
           { x: -4, y: -4, ms: 720 },
         ]);
 
-        await agent.waitFor("done");
+        await finger.expect(agent.waitFor("done"), 5_000);
         setSessions([AGENT_SESSION, README_SESSION]);
-        await finger.sleep(1_400);
         await finger.tap(find(screen, 'button[title="Show sessions"]'));
         await finger.sleep(600);
         await finger.tap(find(screen, 'section[aria-label="Sessions"] button', "README.md"));
@@ -137,13 +137,14 @@ export default function PocketDemo({ playing, still = false }: { playing: boolea
     };
 
     play().catch((error: unknown) => {
-      if (!(error instanceof DemoStopped)) console.error(error);
+      if (error instanceof DemoStuck) onStuck();
+      else if (!(error instanceof DemoStopped)) console.error(error);
     });
     return () => {
       controller.abort(new DemoStopped());
       finger.show(false);
     };
-  }, [demo, playing, still]);
+  }, [demo, playing, still, onStuck]);
 
   return (
     <div ref={screenRef} className="relative h-full overflow-hidden" style={APP_TYPE_SCALE}>

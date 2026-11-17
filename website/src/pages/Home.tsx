@@ -12,7 +12,7 @@ import {
   TerminalIcon,
   WindowsLogoIcon,
 } from "@phosphor-icons/react";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
 import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
@@ -235,6 +235,7 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
   const [near, setNear] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [run, setRun] = useState(0);
+  const restart = useCallback(() => setRun((count) => count + 1), []);
   const [fit, setFit] = useState<{ scale: number; height: number; top: number } | null>(null);
   useEffect(() => {
     const slot = slotRef.current;
@@ -254,7 +255,7 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
       } else if (!entry.isIntersecting && played) {
         played = false;
         setPlaying(false);
-        setRun((count) => count + 1);
+        restart();
       }
     }, { threshold: [0, 0.35] });
     observer.observe(slot);
@@ -272,7 +273,7 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
       observer.disconnect();
       window.removeEventListener("resize", refit);
     };
-  }, []);
+  }, [restart]);
   return (
     <div
       ref={slotRef}
@@ -299,7 +300,7 @@ function PocketDemoPhone({ className = "" }: { className?: string }) {
           <div className="h-full" aria-hidden="true" inert>
             {near ? (
               <Suspense fallback={null}>
-                <PocketDemo key={run} playing={playing} still={prefersReducedMotion()} />
+                <PocketDemo key={run} playing={playing} onStuck={restart} still={prefersReducedMotion()} />
               </Suspense>
             ) : null}
           </div>
