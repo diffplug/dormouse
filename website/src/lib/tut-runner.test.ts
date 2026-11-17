@@ -449,7 +449,8 @@ describe("TutRunner snapshots", () => {
 
     expect(lastFrame()).toContain("🐭 FlappyTerm 🐭");
     expect(lastFrame()).not.toContain("???");
-    expect(lastFrame()).toContain("[LOCKED 0/27]");
+    const total = SECTIONS.reduce((sum, section) => sum + section.items.length, 0);
+    expect(lastFrame()).toContain(`[LOCKED 0/${total}]`);
     expect(lastFrame()).toContain("Dormouse Playground Tutorial");
     dispose();
   });

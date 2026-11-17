@@ -2418,6 +2418,7 @@ export function Wall({
       const { mode = 'properties', focusTerminal, ...rest } = options ?? {};
       setTerminalContext({ id, ...rest });
       setContextView({ mode, focusRequest: focusTerminal ? ++focusRequests.current : undefined });
+      fireEvent({ type: 'contextOpen', id, mode });
     },
     close: () => {
       cancelContextPortLaunches();
@@ -2442,7 +2443,7 @@ export function Wall({
       enterPassthrough(aux.id);
     },
     openPort: openContextPort,
-  }), [contextSourceId, terminalContext, contextView, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches]);
+  }), [contextSourceId, terminalContext, contextView, lath, nav, enterPassthrough, openContextPort, cancelContextPortLaunches, fireEvent]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;

@@ -27,6 +27,7 @@ Device routes (`website/src/routes.ts`):
 - **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
 - **Must credit an alert ring only on a transition into `ALERT_RINGING`, by the source its detail names**, so a ring already standing when first seen credits nothing.
 - **Must credit the `dor open` section from the command lines the shells report, and `op-paste` from the playground filesystem's paste report**, never from a hook in the playground `dor` or lib.
+- **Must credit the Ports and browsers section from the command lines the shells report and `contextOpen` events**, the ports items only while `npm run dev` runs in two panes at once.
 
 Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` in `website/src/lib/tut-detector.ts`; `TutorialState` in `website/src/lib/tutorial-state.ts`; profiles in `website/src/lib/tut-items.ts`.
 
@@ -121,7 +122,7 @@ Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.t
 
 Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observability:
 
-- **`WallEvent.kill` / `move` / `paneAdded`** — discriminants on the `WallEvent` union. `kill` fires on every kill path, so each credits `kb-kill`. **`move` must fire on every pane swap, keyboard or drag** (rationale). **`paneAdded` fires once per pane that becomes visible**, seeds included.
+- **`WallEvent.kill` / `move` / `paneAdded` / `contextOpen`** — discriminants on the `WallEvent` union. `kill` fires on every kill path, so each credits `kb-kill`. **`move` must fire on every pane swap, keyboard or drag** (rationale). **`paneAdded` fires once per pane that becomes visible**, seeds included. **`contextOpen` must fire on every terminal context opening, with the mode it opens on.**
 - **`FakePtyAdapter.sendOutput`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.**
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
 - **`resolveAlertDeliveryPolicy`** (`lib/src/lib/alert-delivery-model.ts`) — the active Workspace's speech policy; **must credit `al-speak` only on a turn from off to on**, so a setting saved on an earlier visit grants nothing.

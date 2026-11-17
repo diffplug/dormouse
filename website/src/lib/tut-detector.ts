@@ -1,6 +1,7 @@
 import { DEFAULT_MOUSE_SELECTION_STATE } from "dormouse-lib/lib/mouse-selection";
 import type { TutorialState } from "./tutorial-state";
 import { watchDorOpen, type CommandStoreModule } from "./tut-dor-open-detector";
+import { PortsWatcher } from "./tut-ports-detector";
 
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
 type WallMode = import("dormouse-lib/components/Wall").WallMode;
@@ -72,6 +73,7 @@ export class TutDetector {
   private previousThemeId = '';
   private speechStore: SpeechStoreModule | undefined;
   private disposables: (() => void)[] = [];
+  private ports: PortsWatcher | null = null;
 
   constructor({ state, activityStore, mouseStore, themeStore, commandStore, pasteStore, speechStore }: TutDetectorOptions) {
     this.state = state;
@@ -122,7 +124,11 @@ export class TutDetector {
     this.disposables.push(
       this.themeStore.subscribeToActiveTheme(() => this.processTheme()),
     );
-    if (this.commandStore) this.disposables.push(watchDorOpen(this.state, this.commandStore));
+    if (this.commandStore) {
+      this.disposables.push(watchDorOpen(this.state, this.commandStore));
+      this.ports = new PortsWatcher(this.state, this.commandStore);
+      this.disposables.push(this.ports.start());
+    }
     if (this.pasteStore) this.disposables.push(this.pasteStore.subscribeToPastes(() => this.state.markComplete("op-paste")));
   }
 
@@ -155,6 +161,9 @@ export class TutDetector {
         break;
       case "kill":
         this.state.markComplete("kb-kill");
+        break;
+      case "contextOpen":
+        this.ports?.contextOpened(event.id, event.mode);
         break;
       case "move":
         this.state.markComplete("kb-move");

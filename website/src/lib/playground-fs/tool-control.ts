@@ -60,7 +60,9 @@ export function playgroundToolControl(fs: VirtualFs) {
 export async function playgroundIframeUrl(targetUrl: string): Promise<IframeProxyResult> {
   const url = new URL(targetUrl);
   if (url.href === youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO)) return { ok: true, url: url.href };
-  return isLoopbackHostname(url.hostname) && url.pathname.startsWith(VIEWER_SCOPE)
+  if (!isLoopbackHostname(url.hostname)) return { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers and the music video" };
+  return url.pathname.startsWith(VIEWER_SCOPE)
     ? { ok: true, url: `${location.origin}${url.pathname}${url.search}${url.hash}` }
-    : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers and the music video" };
+    // A port `npm run dev` reports, which serves nothing.
+    : { ok: false, reason: "scheme", detail: "the playground's dev servers are pretend, so there is no page to show" };
 }

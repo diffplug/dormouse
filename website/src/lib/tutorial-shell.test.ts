@@ -242,7 +242,7 @@ describe("TutorialShell tab completion", () => {
   it("completes a command name, and lists every command on an empty line", () => {
     expect(typed("tu\t").echo).toBe("tutorial ");
     expect(typed("c\t\t").echo).toBe("c\r\ncd  changelog\r\n" + promptFor("~/p") + "c");
-    expect(typed("\t\t").echo).toBe("\r\nagent  ascii-splash  build  cd  changelog  dor  ls  pwd  tutorial\r\n" + promptFor("~/p"));
+    expect(typed("\t\t").echo).toBe("\r\nagent  ascii-splash  build  cd  changelog  dor  ls  npm  pwd  tutorial\r\n" + promptFor("~/p"));
     expect(typed("./t\t").echo).toBe("./t");
   });
 

@@ -1016,11 +1016,12 @@ export class TutRunner implements InteractiveProgram {
     if (section.prose && section.prose.length > 0) {
       lines.push("");
       const indent = "  ";
-      for (const p of section.prose) {
+      section.prose.forEach((p, index) => {
+        if (index > 0) lines.push("");
         for (const wrapped of this.wrapText(p, indent.length)) {
           lines.push(`${indent}${DIM}${wrapped}${RESET}`);
         }
-      }
+      });
     }
 
     if (done === total) {

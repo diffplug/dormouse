@@ -12,6 +12,7 @@ import { TutDetector } from "../lib/tut-detector";
 import { trackTutorialCompletion } from "../lib/site-analytics";
 import { TutRunner } from "../lib/tut-runner";
 import { startAlertProgram } from "../lib/alert-programs";
+import { startDevServer } from "../lib/dev-server-program";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import {
@@ -187,8 +188,11 @@ function PlaygroundDesktopExperience() {
           if (name === "changelog") {
             return new ChangelogRunner({ adapter, terminalId, onExit });
           }
-          const alertProgram = startAlertProgram(name, args, (data) => adapter.sendOutput(terminalId, data), onExit);
+          const send = (data: string) => adapter.sendOutput(terminalId, data);
+          const alertProgram = startAlertProgram(name, args, send, onExit);
           if (alertProgram) return alertProgram;
+          const devServer = startDevServer(name, args, adapter, terminalId, send, onExit);
+          if (devServer) return devServer;
           if (name === "dor") {
             return fsHost.startDor(terminalId, args, shellRegistry.cwdOf(terminalId) ?? fsHost.shellFs.cwd, onExit);
           }
