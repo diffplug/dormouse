@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Mechanical checks for the `@xterm/*` pinning invariants in
- * `docs/specs/webgl-text.md` ("Fork pipeline" → Distribution). Runs from the
+ * `docs/specs/layout.md` ("Renderer"). Runs from the
  * repo root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report.
  *
@@ -19,30 +19,12 @@
  *
  * Checks:
  *   1. Provenance: in every workspace, each addon pin's peer range equals
- *      `^<that workspace's @xterm/xterm pin>`. Covers the SDF fork tarball too,
- *      which declares the same peer field as of 0.20.0-sdf301.1 — that is the
- *      only place its base is recorded as a full version.
+ *      `^<that workspace's @xterm/xterm pin>`.
  *   2. Exact pins: every `@xterm/*` specifier is a bare version, no range
  *      operator — these are commit-coupled, a caret would let them drift.
  *   3. standalone ⊆ lib: standalone pins only what its test mocks, and each
  *      pin must equal lib's, so a mock replaces the module lib's code loads.
- *   4. canopy fork lockstep: the `-sdf<NNN>.<M>` in the
- *      `@diffplug/xterm-addon-webgl-sdf` release-tarball URL must match
- *      canopy's `@xterm/xterm` pin `…-beta.<NNN>`, and the release tag and the
- *      .tgz filename in that URL must agree. Renovate cannot see tarball URLs
- *      (canopy/README.md), so nothing else keeps the URL honest. The tag alone
- *      cannot carry provenance — upstream restarts the beta counter on each
- *      release line (5.6.0-beta.1..143, then 6.1.0-beta.1..302), so a `-sdfNNN`
- *      counter does not say which line it came from. Check 1 is what closes
- *      that, via the fork's declared peer range; this check catches the cheaper
- *      mistake of a URL whose tag, filename and counter disagree. The same
- *      check reads the UpstreamVsFork baseline triple, which is hand-copied
- *      into canopy/src/GlTerminal.stories.tsx and canopy/README.md, and holds
- *      its addon and core against canopy's pins and its commit against itself
- *      — the story compares the fork with an upstream addon that must come
- *      from the fork base, and a stale hand-copy makes the harness compare
- *      against something we no longer ship.
- *   5. Format sanity: finding no `@xterm/*` entries at all is a failure, not a
+ *   4. Format sanity: finding no `@xterm/*` entries at all is a failure, not a
  *      pass — it means the lockfile format moved.
  */
 import { readFileSync, existsSync } from 'node:fs';
@@ -50,7 +32,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FORK_ADDON = '@diffplug/xterm-addon-webgl-sdf';
 const problems = [];
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf-8');
@@ -70,7 +51,7 @@ function workspaceDirs() {
   return out;
 }
 
-/** `@xterm/*` + fork-tarball specifiers declared by a workspace. */
+/** `@xterm/*` specifiers declared by a workspace. */
 function xtermPins(dir) {
   const rel = `${dir}/package.json`;
   if (!existsSync(join(ROOT, rel))) return null;
@@ -78,7 +59,7 @@ function xtermPins(dir) {
   const pins = {};
   for (const field of ['dependencies', 'devDependencies']) {
     for (const [name, spec] of Object.entries(pkg[field] ?? {})) {
-      if (name.startsWith('@xterm/') || name === FORK_ADDON) pins[name] = spec;
+      if (name.startsWith('@xterm/')) pins[name] = spec;
     }
   }
   return Object.keys(pins).length > 0 ? { rel, pins } : null;
@@ -86,8 +67,7 @@ function xtermPins(dir) {
 
 /**
  * `'<name>@<version>'` → its declared `@xterm/xterm` peer range, scanned out of
- * the lockfile's top-level `packages:` block, for both `@xterm/*` and the
- * `@diffplug/*` fork tarball (whose "version" is its URL). Entries there carry
+ * the lockfile's top-level `packages:` block. Entries there carry
  * only metadata (resolution/engines/peerDependencies/…); the resolved
  * dependency graph lives in `snapshots:`, which this deliberately skips.
  * pnpm 12 prepends a `---` document pinning pnpm itself, with its own
@@ -102,7 +82,7 @@ function peerRanges() {
     if (/^packages:\s*$/.test(line)) { inPackages = true; continue; }
     if (/^\S/.test(line)) { inPackages = false; key = null; continue; } // any other top-level key ends the block
     if (!inPackages) continue;
-    const entry = /^ {2}'?(@(?:xterm|diffplug)\/[a-z0-9-]+)@(.+?)'?:\s*$/.exec(line);
+    const entry = /^ {2}'?(@xterm\/[a-z0-9-]+)@(.+?)'?:\s*$/.exec(line);
     if (entry) { key = `${entry[1]}@${entry[2]}`; inPeers = false; continue; }
     if (!key) continue;
     if (/^ {4}\S/.test(line)) inPeers = /^ {4}peerDependencies:\s*$/.test(line);
@@ -117,7 +97,7 @@ const workspaces = workspaceDirs()
   .map((dir) => ({ dir, ...(xtermPins(dir) ?? {}) }))
   .filter((w) => w.pins);
 
-// --- Check 5: format sanity (first — everything else rests on it) ------------
+// --- Check 4: format sanity (first — everything else rests on it) ------------
 if (peers.size === 0) {
   problems.push(
     'pnpm-lock.yaml: no @xterm/* entries found under `packages:` — either the ' +
@@ -130,7 +110,6 @@ for (const { dir, rel, pins } of workspaces) {
 
   // --- Check 2: exact pins ---------------------------------------------------
   for (const [name, spec] of Object.entries(pins)) {
-    if (name === FORK_ADDON) continue; // a tarball URL, checked below
     if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(spec)) {
       problems.push(
         `${rel}: ${name} is pinned as "${spec}" — @xterm/* pins must be exact ` +
@@ -140,36 +119,23 @@ for (const { dir, rel, pins } of workspaces) {
   }
 
   // --- Check 1: provenance ---------------------------------------------------
-  const addons = Object.keys(pins).filter(
-    (n) => n.startsWith('@xterm/addon-') || n === FORK_ADDON,
-  );
+  const addons = Object.keys(pins).filter((n) => n.startsWith('@xterm/addon-'));
   if (addons.length > 0 && !core) {
     problems.push(`${rel}: declares ${addons.join(', ')} but no @xterm/xterm pin to check them against`);
   }
   for (const name of addons) {
     if (!core) break;
-    const isFork = name === FORK_ADDON;
-    // The fork's key in the lockfile is its tarball URL, which is also its pin.
-    const shown = isFork ? `${FORK_ADDON} (${/sdf-v([^/]+)\//.exec(pins[name])?.[1] ?? '?'})` : `${name}@${pins[name]}`;
-    const range = peers.get(`${name}@${pins[name]}`);
+    const shown = `${name}@${pins[name]}`;
+    const range = peers.get(shown);
     if (range === undefined) {
-      problems.push(
-        isFork
-          ? `pnpm-lock.yaml: ${shown} declares no @xterm/xterm peer range, so nothing records ` +
-            'which core version it bundles internals from. Fork releases carry that field as of ' +
-            '0.20.0-sdf301.1 (FORK.md § Versioning) — re-cut the release, or run `pnpm install` ' +
-            'if the lockfile is merely stale'
-          : `pnpm-lock.yaml: no entry for ${shown} (pinned by ${rel}) — run \`pnpm install\``,
-      );
+      problems.push(`pnpm-lock.yaml: no entry for ${shown} (pinned by ${rel}) — run \`pnpm install\``);
       continue;
     }
     if (range !== `^${core}`) {
       problems.push(
         `${rel}: ${shown} was built against @xterm/xterm ${range}, ` +
         `but ${dir} pins ${core}. They are from different upstream commits; ` +
-        (isFork
-          ? 'run `node scripts/xterm-bump.mjs --canopy <forkVersion>` after rebasing the fork'
-          : 'run `node scripts/xterm-bump.mjs` for a coherent set'),
+        'run `node scripts/xterm-bump.mjs` for a coherent set',
       );
     }
   }
@@ -190,113 +156,13 @@ if (lib && standalone) {
   }
 }
 
-/**
- * The recorded UpstreamVsFork baseline: `addon <v> == core <v> == commit <sha>`.
- *
- * One spelling in both files so this has one grammar to parse; backticks are
- * optional because the README writes the versions as code spans.
- */
-const TRIPLE = /addon\s+`?([\w.-]+)`?\s*==\s*core\s+`?([\w.-]+)`?\s*==\s*commit\s+`?([0-9a-f]{7,40})`?/;
-const TRIPLE_FILES = ['canopy/src/GlTerminal.stories.tsx', 'canopy/README.md'];
-
-/** @returns {{rel: string, addon: string, core: string, commit: string}[]} */
-function canopyTriples() {
-  const found = [];
-  for (const rel of TRIPLE_FILES) {
-    if (!existsSync(join(ROOT, rel))) {
-      problems.push(
-        `${rel}: missing — it holds a copy of the UpstreamVsFork baseline triple, and without it ` +
-        'nothing checks that copy, or the commit the two copies must agree on, against the pins',
-      );
-      continue;
-    }
-    const m = TRIPLE.exec(read(rel));
-    if (!m) {
-      problems.push(
-        `${rel}: no "addon <version> == core <version> == commit <sha>" line — that triple is ` +
-        'the UpstreamVsFork baseline, and without it nothing checks the hand-copy against the pins',
-      );
-      continue;
-    }
-    found.push({ rel, addon: m[1], core: m[2], commit: m[3] });
-  }
-  return found;
-}
-
-// --- Check 4: canopy fork lockstep -------------------------------------------
-const canopy = workspaces.find((w) => w.dir === 'canopy');
-if (canopy) {
-  const url = canopy.pins[FORK_ADDON];
-  const core = canopy.pins['@xterm/xterm'];
-  const m = url && /\/releases\/download\/sdf-v([^/]+)\/diffplug-xterm-addon-webgl-sdf-(.+)\.tgz$/.exec(url);
-  if (!m) {
-    problems.push(
-      `canopy/package.json: ${FORK_ADDON} must be a diffplug/xterm.js release-asset URL ` +
-      '(.../releases/download/sdf-v<version>/diffplug-xterm-addon-webgl-sdf-<version>.tgz)',
-    );
-  } else {
-    const [, tagVersion, fileVersion] = m;
-    if (tagVersion !== fileVersion) {
-      problems.push(
-        `canopy/package.json: fork tarball URL names tag sdf-v${tagVersion} but asset ${fileVersion}.tgz`,
-      );
-    }
-    const sdf = /-sdf(\d+)\.\d+$/.exec(tagVersion);
-    const beta = core && /-beta\.(\d+)$/.exec(core);
-    if (!sdf) {
-      problems.push(
-        `canopy/package.json: fork version "${tagVersion}" does not encode its upstream base ` +
-        '(expected <addon-version>-sdf<coreBeta>.<iteration>, see FORK.md)',
-      );
-    } else if (!beta) {
-      problems.push(
-        `canopy/package.json: @xterm/xterm is pinned to "${core}", which carries no -beta.N ` +
-        'suffix, so the fork-base lockstep cannot be checked — teach this check the new ' +
-        'version shape (scripts/xterm-lint.mjs, check 4)',
-      );
-    } else if (sdf[1] !== beta[1]) {
-      problems.push(
-        `canopy/package.json: fork release ${tagVersion} encodes @xterm/xterm beta.${sdf[1]}, ` +
-        `but canopy pins ${core}. The addon bundles core internals — ` +
-        'both move together (docs/specs/webgl-text.md → Following upstream)',
-      );
-    }
-  }
-
-  // The recorded triple, against the pins it claims to describe.
-  const upstreamAddon = canopy.pins['@xterm/addon-webgl'];
-  const triples = canopyTriples();
-  for (const { rel, addon, core: recordedCore } of triples) {
-    if (upstreamAddon && addon !== upstreamAddon) {
-      problems.push(
-        `${rel}: records upstream addon ${addon}, but canopy/package.json pins ${upstreamAddon} ` +
-        '(docs/specs/webgl-text.md → Canopy lab)',
-      );
-    }
-    if (core && recordedCore !== core) {
-      problems.push(
-        `${rel}: records core ${recordedCore}, but canopy/package.json pins ${core} ` +
-        '(docs/specs/webgl-text.md → Canopy lab)',
-      );
-    }
-  }
-  // No pin records the commit, so the two copies are each other's only check.
-  if (triples.length === TRIPLE_FILES.length && triples[0].commit !== triples[1].commit) {
-    problems.push(
-      `${triples[0].rel} records fork-base commit ${triples[0].commit} but ${triples[1].rel} ` +
-      `records ${triples[1].commit} — one of them was left behind by a rebase`,
-    );
-  }
-}
-
 // -----------------------------------------------------------------------------
 if (problems.length > 0) {
   console.error(`xterm-lint: ${problems.length} problem(s)\n`);
   for (const p of problems) console.error(`  ${p}`);
   console.error(
-    '\nThe pinning rules are in docs/specs/webgl-text.md ("Fork pipeline", ' +
-    '"Following upstream"). `node scripts/xterm-bump.mjs --dry-run` shows the ' +
-    'newest coherent set.',
+    '\nThe pinning rules are in docs/specs/layout.md ("Renderer"). ' +
+    '`node scripts/xterm-bump.mjs --dry-run` shows the newest coherent set.',
   );
   process.exit(1);
 }

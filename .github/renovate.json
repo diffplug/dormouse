@@ -103,7 +103,7 @@
       "separateMajorMinor": false
     },
     {
-      "description": "xterm core and its first-party addons ship from one repo but carry INDEPENDENT beta counters (an addon is only published when its own content changes), and each addon peers on the exact core version published from the commit it was built from. So the latest of each is routinely a set spanning two commits — today's newest core has no matching addon publish at all — and since ^6.1.0-beta.N admits every later beta, npm and pnpm stay silent about the mismatch while the addons run against core internals they were not compiled for. This group only guarantees core and the addons arrive in one PR and are tested together; scripts/xterm-lint.mjs is what rejects an incoherent set, and `pnpm bump:xterm` writes the newest coherent one. Matched by scope so a newly added addon is grouped automatically; canopy's fork-base pins are excluded below",
+      "description": "xterm core and its first-party addons ship from one repo but carry INDEPENDENT beta counters (an addon is only published when its own content changes), and each addon peers on the exact core version published from the commit it was built from. So the latest of each is routinely a set spanning two commits — today's newest core has no matching addon publish at all — and since ^6.1.0-beta.N admits every later beta, npm and pnpm stay silent about the mismatch while the addons run against core internals they were not compiled for. This group only guarantees core and the addons arrive in one PR and are tested together; scripts/xterm-lint.mjs is what rejects an incoherent set, and `pnpm bump:xterm` writes the newest coherent one. Matched by scope so a newly added addon is grouped automatically",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@xterm/**"],
       "groupName": "xterm",
@@ -202,13 +202,6 @@
       "matchFileNames": ["dor-tools-builtin/package.json"],
       "matchPackageNames": ["monaco-editor"],
       "allowedVersions": "!/-dev-/"
-    },
-    {
-      "description": "canopy pins the pristine @xterm/addon-webgl AND @xterm/xterm to the exact commit the SDF fork's sdf branch is based on (the addon's beta counter is offset from core's; canopy/README.md records the current correspondence). They are the UpstreamVsFork regression baseline and move in lockstep with the hand-cut @diffplug/xterm-addon-webgl-sdf tarball, which Renovate cannot see, so bumping either one is a manual edit made when the fork rebases — never a Renovate bump (see canopy/README.md and docs/specs/webgl-text.md). File-scoped: lib and standalone still track upstream betas via the xterm group above. Must stay last; later rules win",
-      "matchManagers": ["npm"],
-      "matchFileNames": ["canopy/package.json"],
-      "matchPackageNames": ["@xterm/**"],
-      "enabled": false
     },
     {
       "description": "The stripe SDK moves the Stripe API version the billing webhook accepts in minor releases, and production's endpoint renders events at the version it was created with, so every update of either package, patches included, is a deliberate endpoint move: approve it on the dependency dashboard only as part of hosted/README.md, Move the Stripe API version. Last, so no later rule lifts it; it also holds the pgstencil group, which @pgstencil/stripe moves with",

@@ -32,7 +32,6 @@
     "lint:outbound": "node scripts/outbound-lint.mjs && node scripts/outbound-lint-selftest.mjs",
     "lint:xterm": "node scripts/xterm-lint.mjs && node --test scripts/xterm-bump.test.mjs",
     "bump:xterm": "node scripts/xterm-bump.mjs",
-    "dev:canopy": "pnpm --filter canopy storybook",
     "dev:lib": "pnpm --filter dormouse-lib dev",
     "dev:standalone": "pnpm --filter dormouse-standalone tauri dev",
     "innerdogfood": "pnpm --filter dormouse-standalone innerdogfood",
