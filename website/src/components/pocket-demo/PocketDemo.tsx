@@ -86,27 +86,29 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
     const finger = new Finger(screen, dot, controller.signal);
     let agent: DemoAgent | null = null;
 
+    /** A fresh agent at an empty prompt, on a cleared screen. */
+    const freshAgent = (): DemoAgent => {
+      agent?.dispose();
+      adapter.sendOutput(AGENT, "\x1b[2J\x1b[3J\x1b[H");
+      const current = new DemoAgent((data) => adapter.sendOutput(AGENT, data));
+      agent = current;
+      adapter.setInputHandler(AGENT, (data) => current.handleInput(data));
+      current.start();
+      return current;
+    };
+
     const play = async () => {
       await waitForPty(adapter, AGENT);
+      let current = freshAgent();
+      finger.show(true);
+      await finger.sleep(1_200);
       for (;;) {
-        agent?.dispose();
-        adapter.sendOutput(AGENT, "\x1b[2J\x1b[3J\x1b[H");
-        const current = new DemoAgent((data) => adapter.sendOutput(AGENT, data));
-        agent = current;
-        adapter.setInputHandler(AGENT, (data) => current.handleInput(data));
-        setSessions([AGENT_SESSION]);
-        setActiveId(AGENT);
-        setView("terminal");
-        current.start();
-        finger.show(true);
-        await finger.sleep(1_200);
-
         await finger.tap(find(screen, 'button[aria-label="Type"]'));
         const field = find(screen, "[data-mobile-composer] textarea") as HTMLTextAreaElement;
         await finger.moveTo({ x: screen.clientWidth * 0.78, y: screen.clientHeight * 0.55 }, 400);
         for (let i = 1; i <= REQUEST.length; i++) {
           setNativeFieldValue(field, REQUEST.slice(0, i));
-          await finger.sleep(REQUEST[i - 1] === " " ? 70 : 38);
+          await finger.sleep(REQUEST[i - 1] === " " ? 35 : 19);
         }
         await finger.sleep(350);
         await finger.tap(find(screen, "[data-mobile-composer] button", "Send"));
@@ -130,16 +132,15 @@ export default function PocketDemo({ still = false }: { still?: boolean }) {
         await finger.tap(find(screen, 'button[title="Show sessions"]'));
         await finger.sleep(600);
         await finger.tap(find(screen, 'section[aria-label="Sessions"] button', "README.md"));
+        // Behind the README, the agent starts over, so returning finds it empty.
+        current = freshAgent();
         await finger.moveTo({ x: screen.clientWidth * 0.82, y: screen.clientHeight * 0.88 }, 700);
         await finger.sleep(6_000);
 
         await finger.tap(find(screen, 'button[title="Show sessions"]'));
         await finger.sleep(600);
         await finger.tap(find(screen, 'section[aria-label="Sessions"] button', "agent"));
-        await finger.moveTo({ x: screen.clientWidth * 0.7, y: screen.clientHeight * 0.85 }, 700);
-        await finger.sleep(2_500);
-        finger.show(false);
-        await finger.sleep(500);
+        setSessions([AGENT_SESSION]);
       }
     };
 
