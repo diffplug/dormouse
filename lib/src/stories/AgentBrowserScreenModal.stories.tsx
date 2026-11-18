@@ -4,9 +4,9 @@ import { AgentBrowserScreenModal } from '../components/wall/AgentBrowserScreenMo
 import type { ChromeSnapshot, RenderMode, ScreenController, ScreenSnapshot } from '../components/wall/agent-browser-screen';
 
 interface StoryArgs {
-  /** Render backend — `embed` greys out the Screen (viewport) section. */
+  /** Render backend — anything but a screencast greys out the Screen (viewport) section. */
   renderMode: RenderMode;
-  /** Whether the host can pop out (adds `agent-browser-popout` to the offered render modes). */
+  /** Whether the host can pop out (adds `agent-browser-popout` and `playwright-popout` to the offered render modes). */
   canPopOut: boolean;
   /** Browser CSS viewport + inferred DPR. */
   vpW: number;
@@ -73,7 +73,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   title: 'Modals/AgentBrowserScreenModal',
   component: AgentBrowserScreenModalStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['agent-browser-screencast', 'agent-browser-popout', 'iframe'] },
+    renderMode: { control: 'inline-radio', options: ['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe'] },
     canPopOut: { control: 'boolean' },
     vpW: { control: 'number' },
     vpH: { control: 'number' },
@@ -145,8 +145,8 @@ export const EmbedRender: Story = {
   },
 };
 
-// Host can't pop out (e.g. the web host) ⇒ the Render section drops the Pop-out
-// option, leaving Screencast / Embed.
+// Host can't pop out (e.g. the web host) ⇒ the Render section drops both Pop-out
+// options, leaving the two Screencasts and Embed.
 export const NoPopOut: Story = {
   args: {
     canPopOut: false,
