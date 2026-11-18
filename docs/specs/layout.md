@@ -292,7 +292,7 @@ Source of truth: `lib/src/lib/rect-tween.ts`; `lib/src/lib/ring-geometry.ts`.
 
 #### Directional motion smear
 
-**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/aux terminal union, **separate from the crisp, unbroken outline**. **Never use an SVG `feGaussianBlur` here** (rationale).
+**Must smear each travelling edge by its own perpendicular analytic velocity**, with no smear when settled, under reduced motion, or around a source/context panel union, **separate from the crisp, unbroken outline**. **Never use an SVG `feGaussianBlur` here** (rationale).
 
 Source of truth: `writeSmear` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
 
