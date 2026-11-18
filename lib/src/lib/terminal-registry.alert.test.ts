@@ -24,6 +24,7 @@ import {
   countRunningSessions,
   isPaneOscDriven,
   mountElement,
+  mountRenderer,
   refitSession,
   acknowledgeSession,
   clearLocalSurfaceActivity,
@@ -1354,10 +1355,12 @@ describe('registry renderer ownership', () => {
     const mount = vi.spyOn(TerminalWebglRenderer.prototype, 'mount');
     const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
     mountElement('renderer-minimize', container);
+    mountRenderer('renderer-minimize', container);
     expect(mount).toHaveBeenCalledOnce();
     unmountElement('renderer-minimize', container);
     expect(unmount).toHaveBeenCalledOnce();
     mountElement('renderer-minimize', container);
+    mountRenderer('renderer-minimize', container);
     expect(mount).toHaveBeenCalledTimes(2);
     expect(getOrCreateTerminal('renderer-minimize').terminal).toBe(terminal);
   });
@@ -1373,6 +1376,21 @@ describe('registry renderer ownership', () => {
     expect(unmount).not.toHaveBeenCalled();
     disposeSession('renderer-stale');
     expect(unmount).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the GPU renderer to the settled-grid caller, ignoring an older container', () => {
+    createSession('renderer-deferred');
+    const old = createContainer() as unknown as HTMLElement;
+    const current = createContainer() as unknown as HTMLElement;
+    const mount = vi.spyOn(TerminalWebglRenderer.prototype, 'mount');
+    mountElement('renderer-deferred', old);
+    // A canvas created here would be resized by the pane's first fit.
+    expect(mount).not.toHaveBeenCalled();
+    mountElement('renderer-deferred', current);
+    mountRenderer('renderer-deferred', old);
+    expect(mount).not.toHaveBeenCalled();
+    mountRenderer('renderer-deferred', current);
+    expect(mount).toHaveBeenCalledOnce();
   });
 
   it('never fits on mount, leaving settled geometry to the caller', () => {
