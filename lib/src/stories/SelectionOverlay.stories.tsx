@@ -6,6 +6,7 @@ import {
   focusSession,
   getOrCreateTerminal,
   mountElement,
+  mountRenderer,
   refitSession,
   unmountElement,
 } from '../lib/terminal-registry';
@@ -42,7 +43,10 @@ function SelectionOverlayStory({
     getOrCreateTerminal(id);
     mountElement(id, terminalHost);
 
-    const observer = new ResizeObserver(() => refitSession(id));
+    const observer = new ResizeObserver(() => {
+      refitSession(id);
+      mountRenderer(id, terminalHost);
+    });
     observer.observe(terminalHost);
 
     return () => {

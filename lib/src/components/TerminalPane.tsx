@@ -3,6 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import {
   getOrCreateTerminal,
   mountElement,
+  mountRenderer,
   unmountElement,
   refitSession,
   focusSession,
@@ -56,9 +57,15 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       if (!container.isConnected || (resize && !resize.canFit(id))) return;
       // A remote session holds this pane's size: its box is not the authority
       // until the last hold goes (docs/specs/remote-api.md → "Size authority").
-      if (getSizeHolds(id).length > 0) return;
-      const { width, height } = container.getBoundingClientRect();
-      if (width > 0 && height > 0) refitSession(id);
+      if (getSizeHolds(id).length === 0) {
+        const { width, height } = container.getBoundingClientRect();
+        if (width === 0 || height === 0) return;
+        refitSession(id);
+      }
+      // GPU only on the settled grid: in Chromium with TreesInViz, a WebGL canvas
+      // created at the default grid and resized by this first fit leaves every other
+      // terminal canvas blank until an unrelated DOM change.
+      mountRenderer(id, container);
     };
     // Released by its last holder: re-fit to the box through the same guarded path.
     let held = getSizeHolds(id).length > 0;

@@ -102,6 +102,24 @@ describe('handleEditableClipboard', () => {
     await vi.waitFor(() => expect(input.value).toBe('one '));
   });
 
+  it('never copies or cuts a password field, but still pastes into one', async () => {
+    withNativeClipboardRead('pasted');
+    const input = field('secret', [0, 6]);
+    input.type = 'password';
+
+    for (const key of ['c', 'x']) {
+      const e = chord(input, key, 'ctrl');
+      expect(handleEditableClipboard(e)).toBe(true);
+      expect(e.defaultPrevented).toBe(true);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writeText).not.toHaveBeenCalled();
+    expect(input.value).toBe('secret');
+
+    handleEditableClipboard(chord(input, 'v', 'meta'));
+    await vi.waitFor(() => expect(input.value).toBe('pasted'));
+  });
+
   it('drops the edit when the field unmounts during the clipboard read', async () => {
     // Escape, or the blur that commits a rename, can retire the field while the
     // host's clipboard IPC is still in flight. `execCommand` would then edit

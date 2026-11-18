@@ -165,12 +165,29 @@ export interface MobileTerminalUiProps {
    * composer go, and touches and keys are the browser's.
    */
   browserShown?: boolean;
-  interactive?: boolean;
   /** What heads the Sessions screen, above its own bar: the consumer's way out of the wall. */
   sessionsHeader?: ReactNode;
   fillViewport?: boolean;
   className?: string;
   style?: CSSProperties;
+}
+
+/** A synthetic press (the homepage's scripted demo) has no live pointer behind
+ *  it, which the browser refuses to capture; a real one never throws. */
+function capturePointer(element: Element, pointerId: number): void {
+  try {
+    element.setPointerCapture(pointerId);
+  } catch {
+    // No live pointer: nothing to capture.
+  }
+}
+
+function releasePointer(element: Element, pointerId: number): void {
+  try {
+    element.releasePointerCapture(pointerId);
+  } catch {
+    // No live pointer: nothing was captured.
+  }
 }
 
 /** A physical keyboard's named keys; Enter and Tab take their Shift forms. */
@@ -225,9 +242,10 @@ function hardwareKeySequence(event: globalThis.KeyboardEvent, sessionId: string 
 }
 
 /** Where a physical key reaches the terminal: nothing focused, or a non-control
- *  element of this composition. A focused field or control keeps its keys. */
+ *  element of this composition. A focused field or control keeps its keys, and
+ *  an inert composition (a demo on a page someone is reading) takes none. */
 function isHardwareKeyTarget(root: HTMLElement, target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
+  if (!(target instanceof Element) || root.closest('[inert]')) return false;
   if (target === target.ownerDocument.body) return true;
   if (!root.contains(target)) return false;
   return target.closest('button, input, textarea, select, a[href], [contenteditable="true"]') === null;
@@ -249,14 +267,12 @@ function ModeBar({
   mode,
   cursorAvailable,
   composing,
-  disabled,
   onSelect,
   onType,
 }: {
   mode: MobileTerminalTouchMode;
   cursorAvailable: boolean;
   composing: boolean;
-  disabled: boolean;
   onSelect: (mode: MobileTerminalTouchMode) => void;
   onType: () => void;
 }) {
@@ -270,7 +286,7 @@ function ModeBar({
       <div className={clsx('grid min-w-0 flex-1 grid-cols-3 gap-1', MODE_TRAY_CLASS)}>
         {TOUCH_MODES.map((item) => {
           const selected = item.id === mode;
-          const itemDisabled = disabled || (item.id === 'cursor' && !cursorAvailable);
+          const itemDisabled = item.id === 'cursor' && !cursorAvailable;
           const Icon = item.Icon;
           return (
             <button
@@ -295,7 +311,6 @@ function ModeBar({
           title="Type: write a line, then send it"
           aria-label="Type"
           aria-pressed={composing}
-          disabled={disabled}
           onClick={onType}
           className={clsx(MODE_CHIP_CLASS, 'px-2.5', composing ? MODE_CHIP_SELECTED_CLASS : MODE_CHIP_IDLE_CLASS)}
         >
@@ -312,14 +327,12 @@ const SCREEN_BUTTON_CLASS = 'h-full shrink-0 rounded focus-visible:outline focus
 /** The full-screen session list the header's Session title opens, with Settings behind its button. */
 function SessionsScreen({
   sessions,
-  disabled,
   header,
   settings,
   onSelect,
   onClose,
 }: {
   sessions: MobileTerminalSessionItem[];
-  disabled: boolean;
   header?: ReactNode;
   settings?: ReactNode;
   onSelect: (id: string) => void;
@@ -355,7 +368,7 @@ function SessionsScreen({
         ) : null}
       </header>
       <div className="min-h-0 flex-1 overflow-auto">
-        {showSettings ? settings : <SessionsPane sessions={sessions} disabled={disabled} onSelect={onSelect} />}
+        {showSettings ? settings : <SessionsPane sessions={sessions} onSelect={onSelect} />}
       </div>
     </section>
   );
@@ -368,14 +381,12 @@ function Composer({
   fieldRef,
   keptDraft,
   top,
-  disabled,
   onCancel,
   onSend,
 }: {
   fieldRef: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   keptDraft: RefObject<string>;
   top: number;
-  disabled: boolean;
   onCancel: () => void;
   onSend: (text: string, password: boolean) => void;
 }) {
@@ -405,7 +416,6 @@ function Composer({
           type="password"
           aria-label="Password"
           value={draft}
-          disabled={disabled}
           autoComplete="off"
           enterKeyHint="send"
           onChange={(event) => setDraft(event.currentTarget.value)}
@@ -422,7 +432,6 @@ function Composer({
           aria-label="Text to send"
           rows={3}
           value={draft}
-          disabled={disabled}
           autoCapitalize="off"
           onChange={(event) => setDraft(event.currentTarget.value)}
           className={fieldClass}
@@ -433,7 +442,6 @@ function Composer({
           <input
             type="checkbox"
             checked={password}
-            disabled={disabled}
             onChange={(event) => {
               const next = event.currentTarget.checked;
               // The swapped-in field takes focus inside the tap, as Type's does.
@@ -453,7 +461,7 @@ function Composer({
           </button>
           <button
             type="button"
-            disabled={disabled || draft.length === 0}
+            disabled={draft.length === 0}
             onClick={send}
             className={modalActionButton({ tone: 'primary', class: 'px-3' })}
           >
@@ -467,11 +475,9 @@ function Composer({
 
 function SessionsPane({
   sessions,
-  disabled,
   onSelect,
 }: {
   sessions: MobileTerminalSessionItem[];
-  disabled: boolean;
   onSelect?: (id: string) => void;
 }) {
   if (sessions.length === 0) {
@@ -485,7 +491,7 @@ function SessionsPane({
   const rows = (items: MobileTerminalSessionItem[]) => (
     <div className="grid gap-1">
       {items.map((session) => (
-        <SessionRow key={session.id} session={session} disabled={disabled} onSelect={onSelect} />
+        <SessionRow key={session.id} session={session} onSelect={onSelect} />
       ))}
     </div>
   );
@@ -532,9 +538,8 @@ function groupSessions(
 
 /** A row is its own component so it can hold the burst hook; the mobile list has
  *  no speech sink, so the unlabelled row is the only one it ever wears. */
-function SessionRow({ session, disabled, onSelect }: {
+function SessionRow({ session, onSelect }: {
   session: MobileTerminalSessionItem;
-  disabled: boolean;
   onSelect?: (id: string) => void;
 }) {
   const active = session.active === true;
@@ -544,13 +549,11 @@ function SessionRow({ session, disabled, onSelect }: {
   return (
     <button
       type="button"
-      disabled={disabled}
       aria-current={active ? 'page' : undefined}
       onClick={() => onSelect?.(session.id)}
       className={clsx(
         'relative flex min-h-10 min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left font-mono text-xs transition-colors',
         'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-        'disabled:pointer-events-none disabled:opacity-60',
         // Rows sit on the header-inactive Sessions screen, so the inactive row recesses
         // to the app pair — the guaranteed app↔inactive delta (theme.md's
         // three-pair rule); surface-raised is unreliable here.
@@ -710,7 +713,6 @@ export function MobileTerminalUi({
   onSessionSelect,
   settings,
   browserShown = false,
-  interactive = true,
   sessionsHeader,
   fillViewport = false,
   className,
@@ -721,7 +723,7 @@ export function MobileTerminalUi({
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>('gestures');
   const view = activeView ?? internalView;
   const touchMode = activeTouchMode ?? internalTouchMode;
-  const terminalInteractive = interactive && !browserShown;
+  const terminalInteractive = !browserShown;
   const activeSessionId = sessions.find((session) => session.active)?.id;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -761,9 +763,9 @@ export function MobileTerminalUi({
   }, [activeSessionId, onGestureScroll]);
 
   const sendInput = useCallback((data: string) => {
-    if (!interactive || data.length === 0) return;
+    if (data.length === 0) return;
     onSendInput?.(data);
-  }, [interactive, onSendInput]);
+  }, [onSendInput]);
 
   const commitGestureState = useCallback((nextState: MobileGestureTrackingState) => {
     gestureStateRef.current = nextState;
@@ -787,10 +789,9 @@ export function MobileTerminalUi({
   /** Inside the tap's own handler: iOS opens its keyboard only for a focus a
    *  user gesture makes, so the field is committed and focused in one turn. */
   const openComposer = useCallback(() => {
-    if (!interactive) return;
     flushSync(() => setComposing(true));
     composerFieldRef.current?.focus({ preventScroll: true });
-  }, [interactive]);
+  }, []);
 
   const closeComposer = useCallback(() => {
     composerFieldRef.current?.blur();
@@ -838,14 +839,14 @@ export function MobileTerminalUi({
    *  when the app asked, so a TUI never reads the Enter after it as pasted. */
   const sendDraft = useCallback((text: string, password: boolean) => {
     closeComposer();
-    if (!interactive || !text) return;
+    if (!text) return;
     if (password || !onPaste) {
       sendInput(text);
       sendInput(MOBILE_TERMINAL_KEY_SEQUENCES.enter);
       return;
     }
     void Promise.resolve(onPaste(text)).then(() => sendInput(MOBILE_TERMINAL_KEY_SEQUENCES.enter));
-  }, [closeComposer, interactive, onPaste, sendInput]);
+  }, [closeComposer, onPaste, sendInput]);
 
   // A physical keyboard types straight into the terminal while the composer is
   // closed and no gesture confirmation is asking. No soft keyboard reaches
@@ -1034,25 +1035,25 @@ export function MobileTerminalUi({
     // A tap acknowledges the active Session, a drag or swipe never
     // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in
     // capture on the host, before any mode below consumes the press.
-    const sessionId = interactive ? activeSessionId : undefined;
+    const sessionId = activeSessionId;
     pendingTapRef.current = sessionId
       ? { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, sessionId }
       : null;
     blurPaneTextInputs();
-    if (interactive && touchMode === 'cursor' && isTouchLikePrimaryPointer(event)) {
+    if (touchMode === 'cursor' && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
       cursorPointerIdRef.current = event.pointerId;
       cursorPointerTargetRef.current = targetAtPointer(event);
-      event.currentTarget.setPointerCapture(event.pointerId);
+      capturePointer(event.currentTarget, event.pointerId);
       dispatchMouseFromPointer('mousedown', event, cursorPointerTargetRef.current);
       return;
     }
-    if (!interactive || touchMode !== 'gestures') return;
+    if (touchMode !== 'gestures') return;
     if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    capturePointer(event.currentTarget, event.pointerId);
     clearGestureCompletionTimer();
     setPendingGestureConfirmation(null);
     completedGesturePointerIdRef.current = null;
@@ -1075,7 +1076,7 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
-  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, composing, interactive, browserShown, touchMode, stopEdgeScroll]);
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, composing, browserShown, touchMode, stopEdgeScroll]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;
@@ -1122,7 +1123,7 @@ export function MobileTerminalUi({
     event.preventDefault();
     event.stopPropagation();
     edgeScrollRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    releasePointer(event.currentTarget, event.pointerId);
     if (event.type === 'pointerup') {
       scrollEdgeLines(scroll.sessionId, scroll.motion.move(event.clientY, event.timeStamp), event.clientX, event.clientY);
       // Mouse drags still work in desktop previews, but do not fling on release.
@@ -1153,7 +1154,7 @@ export function MobileTerminalUi({
       dispatchMouseFromPointer('mouseup', event, targetAtPointer(event));
       cursorPointerIdRef.current = null;
       cursorPointerTargetRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
 
@@ -1162,20 +1163,20 @@ export function MobileTerminalUi({
       event.preventDefault();
       event.stopPropagation();
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
     if (state.phase === 'idle' && completedGesturePointerIdRef.current === event.pointerId) {
       event.preventDefault();
       event.stopPropagation();
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    releasePointer(event.currentTarget, event.pointerId);
 
     const nextState = updateMobileGesture(state, localPointerPoint(event));
     const result = finishMobileGesture(nextState);
@@ -1200,19 +1201,19 @@ export function MobileTerminalUi({
       dispatchMouseFromPointer('mouseup', event, cursorPointerTargetRef.current ?? targetAtPointer(event));
       cursorPointerIdRef.current = null;
       cursorPointerTargetRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
 
     const state = gestureStateRef.current;
     if (state.phase === 'complete' && state.pointerId === event.pointerId) {
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
       return;
     }
     if (completedGesturePointerIdRef.current === event.pointerId) {
       completedGesturePointerIdRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      releasePointer(event.currentTarget, event.pointerId);
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
@@ -1262,7 +1263,6 @@ export function MobileTerminalUi({
           mode={touchMode}
           cursorAvailable={cursorTouchAvailable}
           composing={composing}
-          disabled={!interactive}
           onSelect={setTouchMode}
           onType={composing ? closeComposer : openComposer}
         />
@@ -1273,7 +1273,6 @@ export function MobileTerminalUi({
           fieldRef={composerFieldRef}
           keptDraft={keptDraftRef}
           top={inset.top}
-          disabled={!interactive}
           onCancel={closeComposer}
           onSend={sendDraft}
         />
@@ -1282,7 +1281,6 @@ export function MobileTerminalUi({
       {view === 'sessions' ? (
         <SessionsScreen
           sessions={sessions}
-          disabled={!interactive}
           header={sessionsHeader}
           settings={settings}
           onSelect={(id) => {

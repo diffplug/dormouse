@@ -19,6 +19,8 @@ const registry = vi.hoisted(() => ({
   entries: new Map<string, { cols: number; rows: number; container?: HTMLElement }>(),
   resizes: [] as Array<{ id: string; cols: number; rows: number }>,
   fits: vi.fn(),
+  /** Renderer acquisitions and grid transitions, in order. */
+  events: [] as string[],
 }));
 vi.mock('../lib/terminal-registry', () => ({
   UNNAMED_PANEL_TITLE: 'Terminal',
@@ -29,6 +31,10 @@ vi.mock('../lib/terminal-registry', () => ({
     registry.entries.get(id)!.container = container;
   },
   unmountElement: (id: string) => { registry.entries.get(id)!.container = undefined; },
+  mountRenderer: (id: string, container: HTMLElement) => {
+    const entry = registry.entries.get(id)!;
+    if (entry.container === container) registry.events.push(`renderer ${id} ${entry.cols}x${entry.rows}`);
+  },
   focusSession: vi.fn(),
   refitSession: (id: string) => {
     registry.fits(id);
@@ -42,6 +48,7 @@ vi.mock('../lib/terminal-registry', () => ({
     entry.cols = cols;
     entry.rows = rows;
     registry.resizes.push({ id, cols, rows });
+    registry.events.push(`resize ${id} ${cols}x${rows}`);
   },
 }));
 vi.mock('./wall/AlertRingIndicator', () => ({ AlertRingIndicator: () => null }));
@@ -63,6 +70,7 @@ beforeEach(() => {
   registry.entries.clear();
   registry.resizes.length = 0;
   registry.fits.mockClear();
+  registry.events.length = 0;
   hostWidth = 800;
   rafs = new Map();
   nextRaf = 0;
@@ -266,6 +274,34 @@ describe('terminal fitting follows settled layout, not animated geometry', () =>
     notifyResize();
     act(() => vi.advanceTimersByTime(150));
     expect(registry.resizes).toEqual([{ id: 'standalone', cols: 100, rows: 30 }]);
+  });
+});
+
+describe('a mounted terminal acquires its GPU renderer on its settled grid', () => {
+  it('keeps an entering pane off the GPU until its first fit, then mounts at the fitted grid', () => {
+    mount();
+    registry.events.length = 0;
+    act(() => { store.addLeaf('c', terminalLeafMeta(), { refId: 'b', edge: 'right' }); });
+    for (let i = 0; i < 20; i++) frame();
+    // Mid-entrance: the pane is still at the default grid, so a canvas created now
+    // would be resized by the settle fit.
+    expect(registry.events.filter(e => e.includes(' c '))).toEqual([]);
+    settle();
+    const ownEvents = registry.events.filter(e => e.includes(' c '));
+    expect(ownEvents[0]).toMatch(/^resize c /);
+    expect(ownEvents[1]).toBe(`renderer c ${ownEvents[0].split(' ')[2]}`);
+  });
+
+  it('mounts a held pane’s renderer without fitting it', () => {
+    mount();
+    holdSize('b', { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1', cols: 51, rows: 14 });
+    render(false);
+    settle();
+    registry.events.length = 0;
+    render(true);
+    settle();
+    expect(registry.fits).not.toHaveBeenCalledWith('b');
+    expect(registry.events).toContain('renderer b 39x28');
   });
 });
 

@@ -293,6 +293,17 @@ describe('MobileTerminalUi physical keyboard', () => {
     expect(onSendInput.mock.calls).toEqual([['a'], ['\r'], ['\x1b[A'], ['\t'], ['😀'], ['\x03']]);
   });
 
+  it('leaves keys and pastes to the page while inert', () => {
+    const onSendInput = vi.fn();
+    const onPaste = vi.fn();
+    const { container } = renderUi({ onSendInput, onPaste });
+    container.setAttribute('inert', '');
+    expect(keydown(document.body, { key: ' ' }).defaultPrevented).toBe(false);
+    expect(nativePaste(document.body, 'page text').defaultPrevented).toBe(false);
+    expect(onSendInput).not.toHaveBeenCalled();
+    expect(onPaste).not.toHaveBeenCalled();
+  });
+
   it('sends the arrows, Home and End in their application form while the program set DECCKM', () => {
     const onSendInput = vi.fn();
     const modes = { applicationCursorKeysMode: true };
@@ -878,7 +889,7 @@ describe('MobileTerminalUi edge scroll', () => {
     expect(scrollLines.mock.calls).toEqual([[2]]);
   });
 
-  it.each(['touch', 'second finger', 'session', 'mode', 'disabled', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
+  it.each(['touch', 'second finger', 'session', 'mode', 'browser', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
     startClock();
     const { pointer, scrollLines, props, renderWith, viewport } = setup();
     flick(pointer);
@@ -888,7 +899,7 @@ describe('MobileTerminalUi edge scroll', () => {
     if (stop === 'second finger') pointer('pointerdown', 100, 200, { pointerId: 8, isPrimary: false });
     if (stop === 'session') renderWith({ ...props, sessions: [{ id: 'other', title: 'other', active: true, episode: null }] });
     if (stop === 'mode') renderWith({ ...props, activeTouchMode: 'selection' });
-    if (stop === 'disabled') renderWith({ ...props, interactive: false });
+    if (stop === 'browser') renderWith({ ...props, browserShown: true });
     if (stop === 'unmount') act(() => roots.pop()!.unmount());
     if (stop === 'hidden') {
       vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
@@ -984,7 +995,7 @@ describe('MobileTerminalUi edge scroll', () => {
   });
 
   it.each<Partial<MobileTerminalUiProps>>([
-    { interactive: false },
+    { browserShown: true },
     { activeTouchMode: 'selection' },
     { sessions: [{ id: 'other', title: 'other', active: true, episode: null }] },
   ])('cancels an edge drag when its context changes: %j', (change) => {
