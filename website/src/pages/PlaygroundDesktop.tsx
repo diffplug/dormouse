@@ -182,6 +182,10 @@ function PlaygroundDesktopExperience() {
               onOpenPocket: handleOpenPocket,
               getTerminalTheme: terminalTheme.getTerminalTheme,
               subscribeToTerminalTheme: terminalTheme.onTerminalThemeChange,
+              // A minimized pane's xterm is detached, and a hidden Workspace's
+              // is not rendered, so either fails checkVisibility.
+              isShown: () => document.visibilityState === "visible"
+                && !!registry.getTerminalInstance(terminalId)?.element?.checkVisibility(),
             });
           }
           if (name === "ascii-splash" || name === "splash") {

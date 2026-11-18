@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import {
   DESKTOP_SECTIONS as SECTIONS,
+  DESKTOP_TUTORIAL_PROFILE,
   POCKET_TUTORIAL_PROFILE,
   type ItemId,
   type TutorialProfile,
@@ -41,6 +42,7 @@ function mountRunner(
     onNotifyPocket?: () => void;
     pocketTouchMode?: "gestures" | "selection" | "cursor";
     profile?: TutorialProfile;
+    isShown?: () => boolean;
   } = {},
 ) {
   const adapter = new FakePtyAdapter();
@@ -77,6 +79,7 @@ function mountRunner(
       };
     },
     getTerminalTheme: () => ({ foreground: "#cccccc", background: "#1e1e1e" }),
+    isShown: options.isShown,
   });
   adapter.setInputHandler(id, (data) => runner.handleInput(data));
   runner.start();
@@ -230,6 +233,38 @@ describe("TutRunner snapshots", () => {
     } finally {
       dispose();
       vi.useRealTimers();
+    }
+  });
+
+  it("holds the desktop starfield still while its terminal is not shown", () => {
+    vi.useFakeTimers();
+    let shown = true;
+    const { lastFrame, dispose } = mountRunner([], { isShown: () => shown });
+    try {
+      shown = false;
+      const original = lastFrame();
+      vi.advanceTimersByTime(10 * STARFIELD_TICK_MS);
+      expect(lastFrame() === original).toBe(true);
+      shown = true;
+      vi.advanceTimersByTime(STARFIELD_TICK_MS);
+      expect(lastFrame() === original).toBe(false);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the last rows of text taller than the pane over the starfield", () => {
+    const { adapter, sendKeys, textFrame, dispose } = mountRunner();
+    try {
+      adapter.resizePty("test-pane", 80, 6);
+      sendKeys(toMenu);
+      const rows = [...textFrame().matchAll(/\x1b\[(\d+);1H/g)].map(([, row]) => Number(row));
+      expect(Math.max(...rows)).toBeLessThanOrEqual(6);
+      expect(textFrame()).toContain("Reset progress");
+      expect(textFrame()).not.toContain(DESKTOP_TUTORIAL_PROFILE.title);
+    } finally {
+      dispose();
     }
   });
 

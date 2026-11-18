@@ -35,8 +35,12 @@ export class PortsWatcher {
     // Only properties list the ports; `!` opens on the aux terminal.
     if (mode !== "properties") return;
     this.state.markComplete("pb-context");
-    if (!runsDevServer(this.store.getTerminalPaneStateSnapshot().get(id))) return;
+    const panes = this.store.getTerminalPaneStateSnapshot();
+    if (!runsDevServer(panes.get(id))) return;
     this.inspected.add(id);
+    // Only servers still running count, so one server stopped and rerun in
+    // another pane is never two.
+    for (const seen of this.inspected) if (!runsDevServer(panes.get(seen))) this.inspected.delete(seen);
     if (this.inspected.size >= SERVERS_NEEDED) this.state.markComplete("pb-ports");
   }
 }

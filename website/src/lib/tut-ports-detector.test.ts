@@ -59,4 +59,14 @@ describe("PortsWatcher", () => {
     watcher.contextOpened("b", "properties");
     expect(done()).toContain("pb-ports");
   });
+
+  it("never counts a dev server that stopped before the second one's properties opened", () => {
+    const { watcher, set, done } = harness();
+    set("a", run("npm run dev"));
+    watcher.contextOpened("a", "properties");
+    set("a", null);
+    set("b", run("npm run dev"));
+    watcher.contextOpened("b", "properties");
+    expect(done()).not.toContain("pb-ports");
+  });
 });

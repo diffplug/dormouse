@@ -209,6 +209,9 @@ interface TutRunnerOptions {
   /** Terminal colors the starfield blends between. */
   getTerminalTheme?: () => Record<string, string>;
   subscribeToTerminalTheme?: (listener: () => void) => () => void;
+  /** Polled each starfield tick on the desktop, which has no {@link TutRunner.setShown}
+   *  caller: whether the terminal is on screen, so a hidden pane stops redrawing. */
+  isShown?: () => boolean;
 }
 
 type Screen = "menu" | "section" | "reset" | "flappy";
@@ -230,6 +233,7 @@ export class TutRunner implements InteractiveProgram {
   private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
   private getTerminalTheme?: () => Record<string, string>;
   private subscribeToTerminalTheme?: (listener: () => void) => () => void;
+  private isShown?: () => boolean;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -269,6 +273,7 @@ export class TutRunner implements InteractiveProgram {
     this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
     this.getTerminalTheme = options.getTerminalTheme;
     this.subscribeToTerminalTheme = options.subscribeToTerminalTheme;
+    this.isShown = options.isShown;
     this.returnToInitialScreen();
   }
 
@@ -302,6 +307,7 @@ export class TutRunner implements InteractiveProgram {
   private startBackgroundTicks(): void {
     if (this.backgroundTimer) return;
     this.backgroundTimer = setInterval(() => {
+      if (this.isShown && !this.isShown()) return;
       this.starfield?.advance();
       this.render();
     }, STARFIELD_TICK_MS);
@@ -740,13 +746,18 @@ export class TutRunner implements InteractiveProgram {
   private renderOverStarfield(lines: string[]): void {
     const { cols, rows } = this.adapter.getPtySize(this.terminalId);
     // Lay the text out as the terminal will, soft wraps included, and keep
-    // stars off each row's text plus the cell after it.
+    // stars off each row's text plus the cell after it. Text taller than the
+    // pane keeps its last rows, as writing it line by line would.
+    const widths = lines.map(visibleWidth);
+    let height = widths.reduce((sum, width) => sum + Math.max(1, Math.ceil(width / cols)), 0);
+    let first = 0;
+    while (height > rows) height -= Math.max(1, Math.ceil(widths[first++] / cols));
     const textEnds = new Array<number>(rows).fill(0);
     const textRows: { row: number; line: string }[] = [];
     let row = 0;
-    for (const line of lines) {
-      if (row >= rows) break;
-      const width = visibleWidth(line);
+    for (const [index, line] of lines.entries()) {
+      if (index < first) continue;
+      const width = widths[index];
       if (width) textRows.push({ row, line });
       const height = Math.max(1, Math.ceil(width / cols));
       for (let i = 0; i < height && row + i < rows; i++) {
