@@ -1,6 +1,16 @@
 {
   "direct": [
     {
+      "name": "block2",
+      "license": "MIT",
+      "author": "Mads Marquart <mads@marquart.dk>",
+      "homepage": "https://github.com/madsmtm/objc2",
+      "declaredName": "block2",
+      "versions": [
+        "0.6.2"
+      ]
+    },
+    {
       "name": "getrandom",
       "license": "MIT OR Apache-2.0",
       "author": "The Rand Project Developers",
@@ -148,6 +158,16 @@
       "declaredName": "windows",
       "versions": [
         "0.62.2"
+      ]
+    },
+    {
+      "name": "wry",
+      "license": "MIT OR Apache-2.0",
+      "author": "Tauri Programme within The Commons Conservancy",
+      "homepage": "https://github.com/tauri-apps/wry",
+      "declaredName": "wry",
+      "versions": [
+        "0.57.0"
       ]
     }
   ],
@@ -378,15 +398,6 @@
       "homepage": "https://github.com/RustCrypto/utils",
       "versions": [
         "0.10.4"
-      ]
-    },
-    {
-      "name": "block2",
-      "license": "MIT",
-      "author": "Mads Marquart <mads@marquart.dk>",
-      "homepage": "https://github.com/madsmtm/objc2",
-      "versions": [
-        "0.6.2"
       ]
     },
     {
@@ -3976,15 +3987,6 @@
       "homepage": "https://github.com/unicode-org/icu4x",
       "versions": [
         "0.6.3"
-      ]
-    },
-    {
-      "name": "wry",
-      "license": "MIT OR Apache-2.0",
-      "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/tauri-apps/wry",
-      "versions": [
-        "0.57.0"
       ]
     },
     {
