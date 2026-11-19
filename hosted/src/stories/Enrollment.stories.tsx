@@ -31,8 +31,9 @@ export const NoPlanCheckoutOpen: Story = {
     // Pressed directly: the button unmounts as it is pressed, which the
     // instrumented focus of a user click cannot follow across the frame.
     canvas.getByRole("button", { name: "Buy Founding" }).click();
-    await expect(await canvas.findByRole("radio", { name: /Founding/ })).toBeChecked();
-    await expect(canvas.getByRole("button", { name: "Continue to payment" })).toBeDisabled();
+    // The card chose, so checkout names Founding alone.
+    await expect(await canvas.findByRole("button", { name: "Continue to payment" })).toBeDisabled();
+    await expect(canvas.queryByRole("radio")).toBeNull();
   },
 };
 export const InvalidLink: Story = { args: { enrolling: { code: null } } };

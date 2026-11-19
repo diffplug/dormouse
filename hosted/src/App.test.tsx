@@ -300,7 +300,9 @@ describe("an account with no plan", () => {
     vi.mocked(api.getBilling).mockResolvedValue(NO_PLAN);
     await mount(ENROLLMENT);
     await act(async () => buyButton("Hosted monthly")!.click());
-    expect(container.querySelector<HTMLInputElement>('input[value="monthly"]')!.checked).toBe(true);
+    // The card chose: checkout names that plan alone, with no others to pick.
+    expect(container.querySelector('input[name="plan"]')).toBeNull();
+    expect(text()).toContain("Hosted monthly$10/month");
     await tick("agree-terms");
     await tick("agree-renewal");
     await click("Continue to payment");
