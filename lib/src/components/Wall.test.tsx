@@ -286,6 +286,25 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('focuses only the pane left in passthrough when two are entered within one frame', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      const press = (id: string) => container.querySelector(`[data-session-id="${id}"]`)!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await act(async () => {
+        press('surface:a');
+        press('surface:b');
+      });
+      await flushFrame();
+      const focused = focus.mock.calls.filter(([, on, target]) => on && target === undefined).map(([id]) => id);
+      expect(focused).toEqual(['surface:b']);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
   it.each(['Enter', 'Escape'])('gives the passthrough terminal the keyboard back after %s closes its rename', async (key) => {
     await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="passthrough" />));
     await flush();

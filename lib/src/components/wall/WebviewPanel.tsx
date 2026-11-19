@@ -15,7 +15,7 @@ import { setPaneWebviewFocus } from '../../lib/window-focus';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceSight } from './use-surface-visibility';
-import { PaneWriteContext, WallActionsContext } from './wall-context';
+import { PaneWriteContext, PassthroughPaneIdContext, WallActionsContext } from './wall-context';
 import {
   openAgentBrowserScreenModal,
   registerAgentBrowserScreen,
@@ -41,6 +41,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
   const paneWrite = useContext(PaneWriteContext);
+  const passthroughPaneId = useContext(PassthroughPaneIdContext);
   const paneWriteRef = useRef(paneWrite);
   paneWriteRef.current = paneWrite;
   const elRef = useRef<HTMLDivElement>(null);
@@ -61,6 +62,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   // Unlike the iframe's, every URL the host reports is persisted: the page
   // cannot forge it.
   const showPage = useCallback((next: PaneWebviewPage) => {
+    if (!next.url) return;
     setPage({ url: next.url, title: next.title || null });
     paneWriteRef.current.setTitle(id, tabDisplayTitle(next));
     const committed = browserSurfaceUrl(next.url);
@@ -90,7 +92,14 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     const unsubscribe = host.onEvent((event) => {
       if (event.id !== id) return;
       switch (event.kind) {
-        case 'page': showPage(event); break;
+        case 'page':
+          // A first load that fails leaves the view with no page at all. It is
+          // closed, so that Reload opens a new one rather than adopting it.
+          if (!event.url && !event.loading && statusRef.current.kind === 'open') {
+            host.close(id);
+            setStatus({ kind: 'error', error: 'it did not load' });
+          } else showPage(event);
+          break;
         case 'pointerdown': actionsRef.current.onClickPanel(id); break;
         case 'leader': actionsRef.current.onFrameLeader(); break;
         case 'focus': setPaneWebviewFocus(id, event.focused); break;
@@ -110,6 +119,24 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const seen = isSeenObserved(useSurfaceSight(parked, id));
   const occluded = usePaneWebviewsOccluded();
   const shown = seen && !occluded && status.kind === 'open' && url !== null;
+  // The view has the keyboard only while it is shown and its pane is the one
+  // in passthrough. Selection can leave without a press in the app webview (a
+  // header chip, `dor`), and nothing else would take the keyboard back.
+  const keyboard = shown && !parked && passthroughPaneId === id;
+  const keyboardRef = useRef(keyboard);
+  keyboardRef.current = keyboard;
+  // The app document's focus parks on the placeholder first, so when the
+  // keyboard comes back to the app webview it lands on this pane.
+  const takeKeyboard = useCallback(() => {
+    elRef.current?.focus({ preventScroll: true });
+    host.focus(id);
+  }, [host, id]);
+  useEffect(() => {
+    if (!keyboard) return;
+    takeKeyboard();
+    return () => host.focus(null);
+  }, [host, keyboard, takeKeyboard]);
+
   useLayoutEffect(() => {
     if (!shown) return;
     let frame = 0;
@@ -132,15 +159,12 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   useEffect(() => {
     if (status.kind !== 'open') return;
     return registerSurfaceFocusHandle(id, {
-      // The app document's focus parks here first, so when the keyboard comes
-      // back to the app webview it lands on this pane, not on what had it before.
-      focus: () => {
-        elRef.current?.focus({ preventScroll: true });
-        host.focus(id);
-      },
+      // The Wall defers its focus calls by a frame, and one for a pane that
+      // has since lost passthrough would take the keyboard from its successor.
+      focus: () => { if (keyboardRef.current) takeKeyboard(); },
       blur: () => host.focus(null),
     });
-  }, [host, id, status.kind]);
+  }, [host, id, status.kind, takeKeyboard]);
 
   const renderModes = useMemo(() => offeredRenderModes(false, null), []);
   const screenActions = useMemo<ScreenActions>(() => ({

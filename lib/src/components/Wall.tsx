@@ -823,8 +823,13 @@ export function Wall({
     selectPane(id);
     modeRef.current = 'passthrough';
     setMode('passthrough');
-    // Defer focus so it happens after the mousedown/click event finishes.
-    if (focus) requestAnimationFrame(() => focusSession(id, true));
+    // Defer focus so it happens after the mousedown/click event finishes. A
+    // pane that lost passthrough in that frame must not take focus back: the
+    // focus it took would be adopted as a selection, and two panes entered in
+    // one frame would trade it forever.
+    if (focus) requestAnimationFrame(() => {
+      if (modeRef.current === 'passthrough' && selectedIdRef.current === id) focusSession(id, true);
+    });
   }, [selectPane]);
 
   /** Put a Door on the Baseboard at `index` (clamped), selecting it in command

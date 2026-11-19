@@ -11,7 +11,7 @@ import { isRealBlur } from '../../lib/window-focus';
 import { BrowserPanel } from './BrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
-import { PaneWriteContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions, type WallActions } from './wall-context';
+import { PaneWriteContext, PassthroughPaneIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions, type WallActions } from './wall-context';
 import { installPaneWebview, stubWallActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -65,21 +65,25 @@ interface Shown {
   params?: Record<string, unknown>;
   parked?: boolean;
   active?: boolean;
+  /** The pane in passthrough, if any. */
+  passthrough?: string | null;
   actions?: WallActions;
   extra?: ReactNode;
 }
 
-async function show({ params = { surfaceType: 'browser', renderMode: 'webview', url: URL }, parked, active = true, actions = stubWallActions(), extra }: Shown = {}): Promise<void> {
+async function show({ params = { surfaceType: 'browser', renderMode: 'webview', url: URL }, parked, active = true, passthrough = null, actions = stubWallActions(), extra }: Shown = {}): Promise<void> {
   await act(async () => {
     root.render(
       <StrictMode>
         <WorkspaceActiveContext.Provider value={active}>
-          <PaneWriteContext.Provider value={paneWrite}>
-            <WallActionsContext.Provider value={actions}>
-              <BrowserPanel id={ID} title="example.com" params={params} parked={parked} />
-              {extra}
-            </WallActionsContext.Provider>
-          </PaneWriteContext.Provider>
+          <PassthroughPaneIdContext.Provider value={passthrough}>
+            <PaneWriteContext.Provider value={paneWrite}>
+              <WallActionsContext.Provider value={actions}>
+                <BrowserPanel id={ID} title="example.com" params={params} parked={parked} />
+                {extra}
+              </WallActionsContext.Provider>
+            </PaneWriteContext.Provider>
+          </PassthroughPaneIdContext.Provider>
         </WorkspaceActiveContext.Provider>
       </StrictMode>,
     );
@@ -185,7 +189,7 @@ describe('WebviewPanel', () => {
     expect(onOpenBrowserPane).toHaveBeenCalledExactlyOnceWith(ID, 'https://example.com/popup');
   });
 
-  it('drives the view from the header and hands it the keyboard', async () => {
+  it('drives the view from the header', async () => {
     const onSwapRenderMode = vi.fn();
     await show({ actions: stubWallActions({ onSwapRenderMode }) });
     const screen = getAgentBrowserScreenController(ID)!;
@@ -193,19 +197,48 @@ describe('WebviewPanel', () => {
     screen.chromeActions.navigate('https://example.com/typed');
     screen.chromeActions.back();
     screen.chromeActions.reload();
-    focusSession(ID, true);
-    focusSession(ID, false);
     expect(pane.calls.filter(([verb]) => verb !== 'open' && verb !== 'place')).toEqual([
       ['navigate', ID, 'https://example.com/typed'],
       ['history', ID, 'back'],
       ['history', ID, 'reload'],
-      ['focus', ID],
-      ['focus', null],
     ]);
 
     screen.actions.setRenderMode?.('webview');
     screen.actions.setRenderMode?.('iframe');
     expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith(ID, 'iframe');
+  });
+
+  it('gives its view the keyboard only while its pane is the one in passthrough', async () => {
+    const lastFocus = () => pane.of('focus').at(-1);
+    await show();
+    expect(pane.of('focus')).toEqual([]);
+    // A focus the Wall deferred from before this pane lost passthrough.
+    focusSession(ID, true);
+    expect(pane.of('focus')).toEqual([]);
+
+    await show({ passthrough: ID });
+    expect(lastFocus()).toEqual(['focus', ID]);
+    const taken = pane.of('focus').length;
+    focusSession(ID, true);
+    expect(pane.of('focus').slice(taken)).toEqual([['focus', ID]]);
+
+    // Passthrough moved to another pane with no press in the app webview.
+    await show({ passthrough: 'surface:other' });
+    expect(lastFocus()).toEqual(['focus', null]);
+    await show({ passthrough: ID, extra: <Occluder /> });
+    expect(lastFocus()).toEqual(['focus', null]);
+    focusSession(ID, false);
+    expect(pane.of('focus').at(-1)).toEqual(['focus', null]);
+  });
+
+  it('closes a view whose first load failed, and says so', async () => {
+    await show();
+    act(() => pane.emit({ id: ID, kind: 'page', url: '', title: '', canGoBack: false, canGoForward: false, loading: true }));
+    expect(pane.of('close')).toEqual([]);
+    act(() => pane.emit({ id: ID, kind: 'page', url: '', title: '', canGoBack: false, canGoForward: false, loading: false }));
+    expect(pane.of('close')).toEqual([['close', ID]]);
+    expect(container.textContent).toContain('Couldn’t open the page — it did not load.');
+    expect(getAgentBrowserScreenController(ID)!.chrome().url).toBe(URL);
   });
 
   it('opens the view where a URL-bar entry names, when it had none', async () => {
