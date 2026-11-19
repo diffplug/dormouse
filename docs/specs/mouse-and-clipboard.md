@@ -307,7 +307,7 @@ Dormouse's own text fields get their clipboard chords from `handleEditableClipbo
 
 - **Paste** reads through `readTextFromClipboard` (the §8.6 tier-2 preference) and replaces the field's selection; **copy** and **cut** write the selected substring, and a cut deletes only after a successful write. **Text only** — the file-reference and image tiers stay terminal-only.
 - Chords are §8.2's: paste takes either modifier on every platform, copy/cut take `⌘` on macOS and `Ctrl` elsewhere.
-- **Scope is narrow.** Excluded: xterm's `.xterm-helper-textarea` (the terminal owns its chords), read-only and disabled fields, and password-field copy/cut. The handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters (rationale). Elsewhere — VS Code, the website, Pocket — it never fires and the webview's own chords are untouched.
+- **Scope is narrow.** Excluded: xterm's `.xterm-helper-textarea` (the terminal owns its chords), read-only and disabled fields, and password-field copy/cut. The handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters (rationale). Elsewhere — VS Code, the website, Pocket — the webview's own chords are untouched.
 - **Must skip an asynchronous edit if the field unmounts, loses focus, becomes read-only/disabled, or changes value or selection.**
 
 Source of truth: `handleEditableClipboard` in `lib/src/components/wall/keyboard/handle-editable-clipboard.ts`, pinned by its test.
