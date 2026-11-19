@@ -564,7 +564,7 @@ jobs:
             cat "$REPORT"
           } > "$BODY"
 
-          # Same truncation as security-audit.yaml; `$REPORT` grows a section per
+          # The clamp helper security-audit.yaml also uses; `$REPORT` grows a section per
           # unexplained commit. `node` is preinstalled and the script has no
           # dependencies, so this job needs no setup-node.
           node scripts/clamp-issue-body.mjs "$BODY" \
