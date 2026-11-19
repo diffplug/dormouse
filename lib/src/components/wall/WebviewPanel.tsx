@@ -17,26 +17,15 @@ import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceSight } from './use-surface-visibility';
 import { PaneWriteContext, PassthroughPaneIdContext, WallActionsContext } from './wall-context';
-import {
-  openAgentBrowserScreenModal,
-  registerAgentBrowserScreen,
-  type ChromeActions,
-  type ChromeSnapshot,
-  type ScreenActions,
-  type ScreenRegistration,
-} from './agent-browser-screen';
+import type { ChromeActions } from './agent-browser-screen';
 import { offeredRenderModes } from './browser-automation';
-import { browserSurfaceUrl, hostPathDisplay, tabDisplayTitle } from './browser-url';
-import { NewTabPrompt } from './IframePanel';
+import { browserSurfaceUrl, tabDisplayTitle } from './browser-url';
+import { NewTabPrompt, useUndrivenScreen } from './IframePanel';
 
 /** How long a pane's rect must hold still before its page is worth a still. */
 const STILL_AFTER_MOVE_MS = 300;
 
 type Status = { kind: 'opening' } | { kind: 'open' } | { kind: 'error'; error: string };
-
-function chromeOf(page: { url: string; title: string | null }): ChromeSnapshot {
-  return { url: page.url, displayUrl: hostPathDisplay(page.url), title: page.title, key: null };
-}
 
 /** The app's CSP admits no `data:` image, so a still is decoded for a canvas. */
 async function decodeStill(url: string | null): Promise<ImageBitmap | null> {
@@ -194,7 +183,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   // The view has the keyboard only while it is shown and its pane is the one
   // in passthrough. Selection can leave without a press in the app webview (a
   // header chip, `dor`), and nothing else would take the keyboard back.
-  const keyboard = shown && !parked && passthroughPaneId === id;
+  const keyboard = shown && passthroughPaneId === id;
   const keyboardRef = useRef(keyboard);
   keyboardRef.current = keyboard;
   // The app document's focus parks on the placeholder first, so when the
@@ -243,16 +232,6 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     });
   }, [host, id, status.kind, takeKeyboard]);
 
-  const renderModes = useMemo(() => offeredRenderModes(false, null), []);
-  const screenActions = useMemo<ScreenActions>(() => ({
-    engageSync() {},
-    openModal() { openAgentBrowserScreenModal(id); },
-    setRenderMode(mode, opts) {
-      if (mode === 'webview' || !renderModes.includes(mode)) return;
-      if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);
-      else actionsRef.current.onSwapRenderMode(id, mode);
-    },
-  }), [id, renderModes]);
   // With no view to navigate, a URL-bar entry is where one opens.
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) {
@@ -270,24 +249,8 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       else setAttempt((n) => n + 1);
     },
   }), [host, id]);
-  const registrationRef = useRef<ScreenRegistration | null>(null);
-  useEffect(() => {
-    const registration = registerAgentBrowserScreen(id, {
-      snapshot: { renderMode: 'webview', viewport: { w: 0, h: 0, dpr: 1 }, syncEngaged: false },
-      actions: screenActions,
-      chrome: chromeOf(page),
-      chromeActions,
-      hostCapable: false,
-      renderModes,
-      // A webview renders at the pane size, so a swap to screencast follows it.
-      viewportSetting: () => ({ mode: 'pane-sync' }),
-    });
-    registrationRef.current = registration;
-    return () => { registration.dispose(); registrationRef.current = null; };
-  }, [id, screenActions, chromeActions, renderModes]);
-  useEffect(() => {
-    registrationRef.current?.updateChrome(chromeOf(page));
-  }, [page]);
+  const renderModes = useMemo(() => offeredRenderModes(false, null), []);
+  useUndrivenScreen(id, 'webview', renderModes, page.url, page.title, chromeActions);
 
   return (
     <div

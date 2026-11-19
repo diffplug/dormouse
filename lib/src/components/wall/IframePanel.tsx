@@ -12,6 +12,8 @@ import {
   openAgentBrowserScreenModal,
   registerAgentBrowserScreen,
   type ChromeActions,
+  type ChromeSnapshot,
+  type RenderMode,
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
@@ -213,8 +215,6 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
   // Bumped by the header's reload button to re-resolve the proxy (a cross-origin
   // frame can't be reloaded via its contentWindow).
   const [reloadNonce, setReloadNonce] = useState(0);
-  const actionsRef = useRef(actions);
-  actionsRef.current = actions;
 
   // Params are still the persisted/source URL for session restore and
   // render-swaps. Keep a small browser-like history on top so iframe chrome
@@ -380,15 +380,9 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
     return () => { cancelled = true; };
   }, [allowedKey, sourceUrl, lease]);
 
-  // Register a screen controller so the embed surface shows the unified
-  // browser chrome (URL + the far-left chip → Display modal) and can swap back
-  // to a live screencast. Gated on the host being able to launch an automated
-  // browser — without one there's no screencast to swap to, so the embed
-  // surface keeps its plain title (e.g. the web host). A tool never pops out
-  // or changes provider (`docs/specs/dor-tool.md` -> Declaring tools); the
-  // other registration site is `agent-browser-surface-controller.ts`.
+  // A tool never pops out or changes provider (`docs/specs/dor-tool.md` ->
+  // Declaring tools).
   const renderModes = useMemo(() => offeredRenderModes(isTool, null), [isTool]);
-  const swapCapable = renderModes.some((mode) => mode !== 'iframe');
   // Where a page the embed cannot show opens instead: a pane webview where
   // this Surface can take one, else the remembered provider's screencast,
   // among those it can take.
@@ -397,25 +391,6 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
   const provider = BROWSER_PROVIDER_GUI[remedyProvider ?? 'agent-browser'];
   const webview = renderModes.includes('webview');
   const remedy = webview ? WEBVIEW_REMEDY : { label: provider.label, open: `${provider.cli} open` };
-  const screenActions = useMemo<ScreenActions>(() => ({
-    engageSync() {},
-    openModal() { openAgentBrowserScreenModal(id); },
-    // iframe is the current backend; every other offered mode swaps to an
-    // automated browser. Wired only when the host can launch one — without it
-    // the header offers no Display modal, but the chrome (URL/nav) still shows.
-    setRenderMode: swapCapable
-      ? (mode, opts) => { if (mode !== 'iframe' && renderModes.includes(mode)) {
-        if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);
-        else actionsRef.current.onSwapRenderMode(id, mode);
-      } }
-      : undefined,
-  }), [id, swapCapable, renderModes]);
-  const setRenderMode = screenActions.setRenderMode;
-  // At the pane's size, as the Display modal preselects for an embed (`viewportSetting`).
-  const openInProvider = setRenderMode && remedyProvider
-    ? () => setRenderMode(renderModeFor(remedyProvider, 'screencast'), { viewport: { mode: 'pane-sync' } }) : undefined;
-  const openInWebview = setRenderMode && webview ? () => setRenderMode('webview') : undefined;
-  const openInRemedy = openInWebview ?? openInProvider;
   // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
   // chrome action that replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
@@ -436,34 +411,13 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
       if (isTool) withToolEditorConsent(id, reload); else reload();
     },
   }), [id, isTool, paneWrite, commitUrl, goToHistoryIndex]);
-  const registrationRef = useRef<ScreenRegistration | null>(null);
-  // Register the screen controller unconditionally so the browser chrome (URL +
-  // far-left chip) shows for every iframe surface, on every host — `dor iframe`
-  // is a full browser-chrome tab, not a lesser one (docs/specs/dor-browser.md).
-  // The render-swap action is gated separately (screenActions.setRenderMode).
-  useEffect(() => {
-    const registration = registerAgentBrowserScreen(id, {
-      snapshot: {
-        renderMode: 'iframe',
-        viewport: { w: 0, h: 0, dpr: 1 },
-        syncEngaged: false,
-      },
-      actions: screenActions,
-      chrome: { url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null },
-      chromeActions,
-      hostCapable: false,
-      renderModes,
-      // An embed renders at the pane size, so a swap to screencast follows it.
-      viewportSetting: () => ({ mode: 'pane-sync' }),
-    });
-    registrationRef.current = registration;
-    return () => { registration.dispose(); registrationRef.current = null; };
-  }, [id, screenActions, chromeActions, renderModes]);
-  // Keep the header's URL current as navigation and in-frame location changes
-  // land. The iframe src is still driven only by sourceUrl.
-  useEffect(() => {
-    registrationRef.current?.updateChrome({ url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null });
-  }, [liveUrl, title]);
+  // The iframe src is driven only by sourceUrl; the chrome follows liveUrl.
+  const setRenderMode = useUndrivenScreen(id, 'iframe', renderModes, liveUrl, title ?? null, chromeActions);
+  // At the pane's size, as the Display modal preselects for an embed (`viewportSetting`).
+  const openInProvider = setRenderMode && remedyProvider
+    ? () => setRenderMode(renderModeFor(remedyProvider, 'screencast'), { viewport: { mode: 'pane-sync' } }) : undefined;
+  const openInWebview = setRenderMode && webview ? () => setRenderMode('webview') : undefined;
+  const openInRemedy = openInWebview ?? openInProvider;
 
   // Trust postMessage from this frame's origin only while the proxied surface is live.
   const proxyOrigin = resolution.kind === 'proxied' ? resolution.origin : null;
@@ -687,6 +641,52 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
       )}
     </div>
   );
+}
+
+/**
+ * Registers the browser chrome of a renderer no agent drives, on every host:
+ * the URL bar and the far-left chip show for each such Surface. It renders at
+ * the pane size, so a swap to a screencast follows the pane. Returns the swap
+ * to another of `renderModes`, absent with none to offer.
+ */
+export function useUndrivenScreen(
+  id: string,
+  renderMode: 'iframe' | 'webview',
+  renderModes: readonly RenderMode[],
+  url: string,
+  title: string | null,
+  chromeActions: ChromeActions,
+): ScreenActions['setRenderMode'] {
+  const actions = useContext(WallActionsContext);
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+  const swapCapable = renderModes.some((mode) => mode !== renderMode);
+  const screenActions = useMemo<ScreenActions>(() => ({
+    engageSync() {},
+    openModal() { openAgentBrowserScreenModal(id); },
+    setRenderMode: swapCapable ? (mode, opts) => {
+      if (mode === renderMode || !renderModes.includes(mode)) return;
+      if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);
+      else actionsRef.current.onSwapRenderMode(id, mode);
+    } : undefined,
+  }), [id, renderMode, swapCapable, renderModes]);
+  const chrome = useMemo<ChromeSnapshot>(() => ({ url, displayUrl: hostPathDisplay(url), title, key: null }), [url, title]);
+  const registrationRef = useRef<ScreenRegistration | null>(null);
+  useEffect(() => {
+    const registration = registerAgentBrowserScreen(id, {
+      snapshot: { renderMode, viewport: { w: 0, h: 0, dpr: 1 }, syncEngaged: false },
+      actions: screenActions,
+      chrome,
+      chromeActions,
+      hostCapable: false,
+      renderModes,
+      viewportSetting: () => ({ mode: 'pane-sync' }),
+    });
+    registrationRef.current = registration;
+    return () => { registration.dispose(); registrationRef.current = null; };
+  }, [id, renderMode, screenActions, chromeActions, renderModes]);
+  useEffect(() => { registrationRef.current?.updateChrome(chrome); }, [chrome]);
+  return screenActions.setRenderMode;
 }
 
 // What it asks is where the page is: a public address never frames, and a

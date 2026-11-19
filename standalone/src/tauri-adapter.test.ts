@@ -465,14 +465,17 @@ describe("TauriAdapter pane webview", () => {
     host.history("s1", "back");
     host.blur("s1");
     host.close("s1");
+    // An open waits its turn too: one that overtook the close would be destroyed by it.
+    const reopened = host.open("s1", "https://example.com/");
     await vi.waitFor(() => expect(invoke.mock.calls.slice(2)).toEqual([
       ["pane_webview_place", { id: "s1", rect: null }],
       ["pane_webview_navigate", { id: "s1", url: "https://example.com/" }],
       ["pane_webview_history", { id: "s1", dir: "back" }],
       ["pane_webview_focus", { id: null, from: "s1" }],
       ["pane_webview_close", { id: "s1" }],
+      ["pane_webview_open", { id: "s1", url: "https://example.com/" }],
     ]));
-    expect(await host.open("s1", "https://example.com/")).toEqual({ ok: false, error: "no window" });
+    expect(await reopened).toEqual({ ok: false, error: "no window" });
     expect(await host.snapshot("s1")).toBeNull();
     expect(invoke).toHaveBeenLastCalledWith("pane_webview_snapshot", { id: "s1" });
 

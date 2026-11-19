@@ -113,7 +113,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   // from its in-memory filesystem (docs/specs/tutorial.md -> Playground filesystem).
   toolControl?: (request: ToolHostRequest) => Promise<ToolControlResult>;
   createIframeProxyUrl?: (targetUrl: string, lease?: string) => Promise<IframeProxyResult>;
-  /** Absent unless a test installs one. */
   paneWebview?: PaneWebviewHost;
 
   /** Where a due push goes. There is no Burrow here, so by default it reaches

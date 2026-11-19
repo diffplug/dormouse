@@ -241,14 +241,6 @@ export interface PaneWebviewPage {
   loading: boolean;
 }
 
-/** Where a pane webview sits: CSS pixels from the window content's top-left. */
-export interface PaneWebviewRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 /** What a host reports about one Surface's pane webview. `leader`,
  *  `pointerdown`, and `focus` come from the host's own observation of native
  *  input, never from the page, which can neither forge nor block them. */
@@ -270,8 +262,9 @@ export interface PaneWebviewHost {
   /** Create `id`'s view hidden at `url`, or adopt the one that exists without
    *  navigating it. */
   open(id: string, url: string): Promise<{ ok: true; page: PaneWebviewPage } | { ok: false; error: string }>;
-  /** Show the view at `rect`, or hide it with `null`. */
-  place(id: string, rect: PaneWebviewRect | null): void;
+  /** Show the view at `rect`, CSS pixels from the window content's top-left,
+   *  or hide it with `null`. */
+  place(id: string, rect: { x: number; y: number; width: number; height: number } | null): void;
   navigate(id: string, url: string): void;
   history(id: string, dir: 'back' | 'forward' | 'reload'): void;
   /** Give the keyboard to `id`'s view. */

@@ -85,7 +85,6 @@ pub use imp::{close_all, forget_window};
 #[cfg(not(windows))]
 const UNSUPPORTED: &str = "pane webviews need macOS 14 or later";
 
-
 #[cfg(any(target_os = "macos", windows))]
 const EVENT: &str = "dormouse://pane-webview";
 

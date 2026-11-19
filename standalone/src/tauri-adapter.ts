@@ -484,21 +484,23 @@ export class TauriAdapter implements PlatformAdapter {
     }
     // One view's commands go out one at a time: WebView2 delivers invokes
     // sent together out of order, and a hide that overtook its show would
-    // leave the view up. A still is no part of that order, so that hiding
-    // never waits on one.
+    // leave the view up, as an open that overtook a close would lose it. A
+    // still is no part of that order, so that hiding never waits on one.
     const last = new Map<string, Promise<void>>();
+    const inOrder = <T>(id: string, cmd: string, args: Record<string, unknown>): Promise<T> => {
+      const answer = (last.get(id) ?? Promise.resolve()).then(() => rawInvoke<T>(cmd, args));
+      const done = answer.then(() => {}, () => {});
+      last.set(id, done);
+      void done.then(() => { if (last.get(id) === done) last.delete(id); });
+      return answer;
+    };
     const send = (id: string, cmd: string, args: Record<string, unknown>): void => {
-      const sent = (last.get(id) ?? Promise.resolve()).then(() => rawInvoke(cmd, args)).then(
-        () => {},
-        (err) => console.error(`[tauri-adapter] ${cmd} failed:`, err),
-      );
-      last.set(id, sent);
-      void sent.then(() => { if (last.get(id) === sent) last.delete(id); });
+      inOrder(id, cmd, args).catch((err) => console.error(`[tauri-adapter] ${cmd} failed:`, err));
     };
     this.paneWebview = {
       open: async (id, url) => {
         try {
-          return { ok: true, page: await rawInvoke<PaneWebviewPage>("pane_webview_open", { id, url }) };
+          return { ok: true, page: await inOrder<PaneWebviewPage>(id, "pane_webview_open", { id, url }) };
         } catch (err) {
           return { ok: false, error: errMessage(err) };
         }
