@@ -145,8 +145,8 @@ export const EmbedRender: Story = {
   },
 };
 
-// Host can't pop out (e.g. the web host) ⇒ the Render section drops both Pop-out
-// options, leaving the two Screencasts and Embed.
+// Host can't pop out (e.g. the web host) ⇒ the Render section drops the Pop-out
+// row for both providers, leaving Screencast (with its provider switch) and Embed.
 export const NoPopOut: Story = {
   args: {
     canPopOut: false,
