@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 mod ids;
 mod log_tail;
+mod pane_webview;
 mod panic_policy;
 mod quit_state;
 mod routing;
@@ -4860,6 +4861,7 @@ pub fn run() {
                 // run off-thread.
                 WindowEvent::Destroyed => {
                     let label = window.label().to_string();
+                    pane_webview::forget_window(app, &label);
                     if let Some(watchdog) = app.try_state::<UiWatchdog>() {
                         guard(&watchdog).forget(&label);
                     }
@@ -5057,6 +5059,14 @@ pub fn run() {
             save_session,
             browser_request,
             ui_watchdog_arm,
+            pane_webview::pane_webview_supported,
+            pane_webview::pane_webview_open,
+            pane_webview::pane_webview_place,
+            pane_webview::pane_webview_navigate,
+            pane_webview::pane_webview_history,
+            pane_webview::pane_webview_focus,
+            pane_webview::pane_webview_close,
+            pane_webview::pane_webview_reset,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
@@ -5067,6 +5077,7 @@ pub fn run() {
                 // The delegate exists by now, which is what this splices onto.
                 macos_terminate::install(app);
                 macos_siri_affordance::install(app);
+                pane_webview::install(app);
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
@@ -5083,6 +5094,7 @@ pub fn run() {
             // Harmless after teardown: the PTY map is already empty, so the
             // sidecar killAll no-ops. Still the backstop for any unclean exit.
             RunEvent::Exit => {
+                pane_webview::close_all(app);
                 if let Some(state) = app.try_state::<SidecarState>() {
                     append_log("[app] exit — shutting down sidecar");
                     shutdown_sidecar_and_wait(&state);
@@ -5890,6 +5902,17 @@ mod tests {
         let relaunch = exit.find("tauri::process::restart(").unwrap();
         assert!(shutdown < relaunch);
         assert!(exit.contains("relaunch_requested(app)"));
+    }
+
+    /// docs/specs/webview-pane.md -> "Lifetime": a window's pane webviews end
+    /// with it, and at exit every one goes before the sidecar.
+    #[test]
+    fn pane_webviews_end_with_their_window_and_the_app() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let destroyed = source.split("WindowEvent::Destroyed => {").nth(1).unwrap().split("_ => {}").next().unwrap();
+        assert!(destroyed.contains("pane_webview::forget_window(app, &label)"));
+        let exit = source.split("RunEvent::Exit => {").nth(1).unwrap().split("_ => {}").next().unwrap();
+        assert!(exit.find("pane_webview::close_all(app)").unwrap() < exit.find("shutdown_sidecar_and_wait(").unwrap());
     }
 
     #[test]

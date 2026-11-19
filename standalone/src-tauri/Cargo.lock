@@ -801,6 +801,7 @@ dependencies = [
 name = "dormouse"
 version = "2.0.0"
 dependencies = [
+ "block2",
  "getrandom 0.4.3",
  "gtk",
  "libc",
@@ -817,6 +818,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-runtime-wry",
  "windows",
+ "wry",
 ]
 
 [[package]]

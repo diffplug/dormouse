@@ -336,6 +336,31 @@ const TAURI = [
     'withGlobalTauri',
     'withGlobalTauri enabled',
   ],
+  [
+    'standalone/src-tauri/src/log_tail.rs',
+    append('\n#[allow(dead_code)]\nfn __selftest() { let _ = wry::WebViewBuilder::new(); }\n'),
+    'builds with wry outside',
+    'a wry webview outside pane_webview.rs',
+  ],
+  ...[
+    '.with_ipc_handler(|_| {})',
+    '.with_initialization_script("x")',
+    '.with_initialization_script_for_main_only("x", true)',
+    '.with_custom_protocol("x".into(), |_, r| r)',
+    '.with_asynchronous_custom_protocol("x".into(), |_, _, _| {})',
+    '.with_devtools(true)',
+  ].map((call) => [
+    'standalone/src-tauri/src/pane_webview.rs',
+    append(`\nfn __selftest(b: wry::WebViewBuilder) -> wry::WebViewBuilder { b${call} }\n`),
+    "hands a pane webview's page a way into Dormouse",
+    `${call} on a pane webview`,
+  ]),
+  [
+    'standalone/src-tauri/Cargo.toml',
+    replace('tauri = { version = "2", features = [] }', 'tauri = { version = "2", features = ["unstable"] }'),
+    'enables an `unstable` feature',
+    "Tauri's unstable multiwebview enabled",
+  ],
 ];
 
 // --- Guards against a vacuous pass ---------------------------------------------
@@ -396,6 +421,12 @@ const GUARDS = [
     replace('"shell:default"', '"shell:default",\n    "http:default"'),
     'grants http:default, a network plugin',
     'a capability granting a network plugin',
+  ],
+  [
+    'standalone/src-tauri/src/pane_webview.rs',
+    (path) => writeFileSync(path, ''),
+    'builds no wry webview',
+    'the pane webview file out of sight',
   ],
 ];
 

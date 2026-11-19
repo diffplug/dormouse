@@ -53,8 +53,12 @@ gtk = "0.18.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSData"] }
+block2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage", "NSEvent", "NSResponder", "NSView", "NSWindow", "block2"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSProcessInfo", "NSString", "NSURL"] }
+# The pane webviews (pane_webview.rs), on the wry tauri-runtime-wry already
+# links: standalone/scripts/tauri-lockstep.test.mjs keeps it one copy.
+wry = { version = "0.57", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Re-exports the tao the app ships, for tests/objc_exception_unwinds.rs.

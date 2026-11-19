@@ -81,6 +81,15 @@ function check(files) {
       failures.push(`Renovate groups ${name} as ${js.groupName} and ${crate} as ${rust.groupName}`);
     }
   }
+  // The pane webviews depend on wry directly and must build on the copy
+  // tauri-runtime-wry links, whose WKWebView subclass the app patches.
+  const wrys = [...files.cargoLock.matchAll(/^\[\[package\]\]\nname = "wry"\n/gm)].length;
+  if (wrys !== 1) failures.push(`Cargo.lock holds ${wrys} copies of wry; the pane webviews must use tauri-runtime-wry's`);
+  const wry = renovateFor(rules, 'cargo', CARGO_TOML, 'wry');
+  const tauri = renovateFor(rules, 'cargo', CARGO_TOML, 'tauri');
+  if (!wry.enabled || wry.groupName !== tauri.groupName) {
+    failures.push(`Renovate groups wry as ${wry.groupName} and tauri as ${tauri.groupName}`);
+  }
   return failures;
 }
 
@@ -94,6 +103,8 @@ const planted = [
   ['a binding a minor ahead of its crate', edit('cargoLock', (t) => t.replace(/(name = "tauri-plugin-shell"\nversion = ")(\d+)\.(\d+)/, (_, p, ma, mi) => `${p}${ma}.${Number(mi) + 1}`)), 'differ in major.minor'],
   ['the tauri group removed', renovate((r) => { r.packageRules = r.packageRules.filter((x) => x.groupName !== 'tauri'); }), 'groups @tauri-apps/api as null and tauri as cargo'],
   ['the tauri group overridden by a later cargo group', renovate((r) => { r.packageRules.push({ matchManagers: ['cargo'], groupName: 'cargo' }); }), 'and tauri as cargo'],
+  ['a second wry', edit('cargoLock', (t) => t.replace(/\[\[package\]\]\nname = "wry"\n/, (m) => `${m}version = "0.58.0"\n\n${m}`)), 'copies of wry'],
+  ['wry bumped apart from tauri', renovate((r) => { r.packageRules.push({ matchManagers: ['cargo'], matchPackageNames: ['wry'], groupName: 'wry' }); }), 'groups wry as wry'],
   ['a plugin crate disabled', renovate((r) => { r.packageRules.push({ matchManagers: ['cargo'], matchPackageNames: ['tauri-plugin-updater'], enabled: false }); }), 'does not update both @tauri-apps/plugin-updater'],
 ];
 for (const [name, plant, expected] of planted) {

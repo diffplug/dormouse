@@ -37,7 +37,10 @@
  *      opener plugin or HTTP client crate in `[dependencies]`; `updater:` permissions only in
  *      `main-only.json`; no capability with a `remote` scope; no
  *      `withGlobalTauri`. The updater's endpoint and key are pinned by
- *      `standalone/scripts/updater-trust-root.test.mjs`.
+ *      `standalone/scripts/updater-trust-root.test.mjs`. A pane webview — the
+ *      user's own browser pane, which the policy does not gate — is wry in
+ *      `PANE_WEBVIEW` alone, handed no IPC, script, scheme, or devtools; and
+ *      no `unstable` feature, Tauri's multiwebview, in `Cargo.toml`.
  *
  * Listeners — the other half of "phones can't reach it" — are
  * `scripts/loopback-lint.mjs`'s: a loopback bind must reference a guard, and a
@@ -350,6 +353,9 @@ const GUARD_BUILDERS = new Set([
 /** The only file that may construct the Burrow's runtimes. */
 const RUNTIME_OWNER = 'lib/src/host/remote/service.ts';
 
+
+/** The one file that builds a pane webview (docs/specs/webview-pane.md). */
+const PANE_WEBVIEW = 'standalone/src-tauri/src/pane_webview.rs';
 
 const CHOKES = new Set(['burrow-service', 'managed-voice', 'updater']);
 const PLAIN_CLASSES = new Set(['loopback', 'local-ipc', 'phone', 'dev-only']);
@@ -710,12 +716,28 @@ if (tauriConf.app?.withGlobalTauri) {
   if (JSON.stringify(plugins) !== JSON.stringify(expected)) {
     problems.push(`${rel}: registers plugins ${JSON.stringify(plugins)}; exactly ${JSON.stringify(expected)} are allowed.`);
   }
+  const WRY = /\bwry\s*::/;
   for (const file of trackedFiles().filter((f) => f.startsWith('standalone/src-tauri/src/') && f.endsWith('.rs'))) {
     const code = stripComments(readRepoFile(file));
     const hit = /\b(?:reqwest|ureq|hyper|TcpStream|TcpListener|UdpSocket|ToSocketAddrs)\b/.exec(code);
     if (hit) problems.push(`${file}:${lineOf(code, hit.index)}: names ${hit[0]}; the Rust host opens no socket of its own.`);
+    const wry = file === PANE_WEBVIEW ? null : WRY.exec(code);
+    if (wry) problems.push(`${file}:${lineOf(code, wry.index)}: builds with wry outside ${PANE_WEBVIEW}, which alone holds a pane webview to its page boundary.`);
+  }
+  const pane = existsSync(join(repoRoot, PANE_WEBVIEW)) ? stripComments(readRepoFile(PANE_WEBVIEW)) : '';
+  if (!WRY.test(pane)) problems.push(`${PANE_WEBVIEW}: builds no wry webview — the pane-webview rules are checking nothing.`);
+  const bridge = /\.with_(?:ipc_handler|initialization_script|custom_protocol|asynchronous_custom_protocol)|\.with_devtools\s*\((?!\s*false\s*\))/.exec(pane);
+  if (bridge) {
+    problems.push(
+      `${PANE_WEBVIEW}:${lineOf(pane, bridge.index)}: ${bridge[0]} hands a pane webview's page a way into Dormouse.\n`
+      + '      A pane webview loads the internet at its real origin; it gets no IPC, script,\n'
+      + '      scheme, or devtools (docs/specs/webview-pane.md -> "Page boundary").',
+    );
   }
   const cargo = readRepoFile('standalone/src-tauri/Cargo.toml');
+  if (/["/]unstable"/.test(cargo.replace(/#.*$/gm, ''))) {
+    problems.push('standalone/src-tauri/Cargo.toml: enables an `unstable` feature; Tauri\'s multiwebview builds the app webview as a child, whose page never sees a menu chord (docs/specs/webview-pane.md -> "Host capability").');
+  }
   // Every crate a non-dev, non-build dependency table pulls in, under each
   // spelling Cargo accepts: a bare or quoted key (dotted keys included), a
   // `[dependencies.<name>]` table, and the real crate behind `package = "…"`.
