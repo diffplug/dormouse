@@ -261,9 +261,11 @@ mod imp {
         let content = window.contentView().ok_or("the window has no content view")?;
         let parent = ContentView(NonNull::from(&*content).cast());
         let (app, id) = (webview.app_handle().clone(), id.to_string());
-        WebViewBuilder::new()
+        let view = WebViewBuilder::new()
             .with_url(url)
             .with_visible(false)
+            // wry turns devtools on in a debug build.
+            .with_devtools(false)
             .with_navigation_handler(|url| may_load(&url))
             .with_new_window_req_handler(move |url, _| {
                 if is_web(&url) {
@@ -281,7 +283,18 @@ mod imp {
             .with_permission_handler(|_| PermissionResponse::Deny)
             .with_data_store_identifier(STORE)
             .build_as_child(&parent)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        // SAFETY: plain setters on the live view's preferences, on the main thread.
+        unsafe {
+            let preferences = view.webview().configuration().preferences();
+            // A page's fullscreen is a window of its own, over every Dormouse
+            // prompt and outside the bounds this file gives the view.
+            preferences.setElementFullscreenEnabled(false);
+            // A new window then takes a press, which a hidden or minimized view
+            // cannot get: wry's handler unwraps the window's screen.
+            preferences.setJavaScriptCanOpenWindowsAutomatically(false);
+        }
+        Ok(view)
     }
 
     pub fn open(webview: Webview, id: String, url: String) -> Result<PageState, String> {
@@ -321,7 +334,7 @@ mod imp {
             }
             None => {
                 // AppKit would leave the window itself holding the keyboard.
-                if holds_focus(&view.webview()) {
+                if is_first_responder(&view.webview()) {
                     focus_app(webview);
                 }
                 view.set_visible(false).map_err(|e| e.to_string())
@@ -432,7 +445,7 @@ mod imp {
             if !doomed(id, pane) {
                 return true;
             }
-            if let Some(webview) = refocus.filter(|_| holds_focus(&pane.view.webview())) {
+            if let Some(webview) = refocus.filter(|_| is_first_responder(&pane.view.webview())) {
                 focus_app(webview);
             }
             false
@@ -448,13 +461,18 @@ mod imp {
         });
     }
 
-    /// A window keeps its first responder while another app has the keyboard.
-    fn holds_focus(view: &WryWebView) -> bool {
+    /// Whether the view is its window's first responder, which a window keeps
+    /// while another app has the keyboard.
+    fn is_first_responder(view: &WryWebView) -> bool {
         view.window()
-            .filter(|window| window.isKeyWindow())
             .and_then(|window| window.firstResponder())
             .and_then(|responder| responder.downcast::<NSView>().ok())
             .is_some_and(|responder| responder.isDescendantOf(view))
+    }
+
+    /// Whether keys reach the view now.
+    fn holds_focus(view: &WryWebView) -> bool {
+        is_first_responder(view) && view.window().is_some_and(|window| window.isKeyWindow())
     }
 
     fn page_state(view: &WryWebView) -> PageState {

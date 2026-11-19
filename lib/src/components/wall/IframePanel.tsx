@@ -25,6 +25,8 @@ import { preferredBrowserProvider } from './BrowserProviderSwitch';
 import { BROWSER_PROVIDER_IDS, renderModeFor } from 'dor-lib-common/browser-providers';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isRealBlur } from '../../lib/window-focus';
+import { isSeenObserved } from '../../lib/surface-sight';
+import { useSurfaceSight } from './use-surface-visibility';
 import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { changeNetworkPolicy, getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../../remote/burrow/network-policy-store';
 import { ALLOWED_NETWORK_REACH, withAllowedNetworks } from '../../remote/network-policy';
@@ -167,7 +169,7 @@ function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, prox
   }
 }
 
-export function IframePanel({ id, title, params, onReady }: PaneProps & {
+export function IframePanel({ id, title, params, parked, onReady }: PaneProps & {
   /** A frame after a document loads. */
   onReady?: () => void;
 }) {
@@ -191,6 +193,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
+  // The prompt hides every pane webview, so a pane out of sight holds it back.
+  const seen = isSeenObserved(useSurfaceSight(parked, id));
   // The proxied frame loaded a document with no shim in it (docs/specs/dor-browser.md
   // → "Iframe Shim").
   const [uninstrumented, setUninstrumented] = useState(false);
@@ -667,7 +671,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
           </button>
         </PopupButtonRow>
       )}
-      {pendingOpenUrl && (
+      {pendingOpenUrl && seen && (
         <NewTabPrompt
           url={pendingOpenUrl}
           // Where the Wall will open it (`onOpenBrowserPane` decides the same

@@ -174,7 +174,8 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           if (!event.focused) takeStill();
           break;
         case 'open-window': {
-          const next = browserSurfaceUrl(event.url);
+          // Its prompt hides every pane webview, so only a page on screen may raise it.
+          const next = shownRef.current ? browserSurfaceUrl(event.url) : null;
           if (next) setPendingOpenUrl(next);
           break;
         }
@@ -308,7 +309,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       ) : still && !shown && status.kind === 'open' ? (
         <Still image={still} />
       ) : null}
-      {pendingOpenUrl && (
+      {pendingOpenUrl && seen && (
         <NewTabPrompt
           url={pendingOpenUrl}
           refusal={null}

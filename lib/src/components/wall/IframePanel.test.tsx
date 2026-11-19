@@ -805,6 +805,18 @@ describe('iframe failures offer a way out', () => {
     expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-https', 'webview');
   });
 
+  it('holds a new-tab prompt back while its pane is out of sight', async () => {
+    proxyPlatform();
+    const props = paneProps('iframe-parked');
+    await renderPanel(stubActions(), { ...props, parked: true });
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'open-window', url: `${PROXY}/docs` } }));
+    });
+    expect(button('Open in new pane')).toBeUndefined();
+    await renderPanel(stubActions(), props);
+    expect(button('Open in new pane')).toBeDefined();
+  });
+
   it('opens a new https:// tab in agent-browser instead of an iframe that would refuse it', async () => {
     const onOpenBrowserPane = vi.fn();
     proxyPlatform();

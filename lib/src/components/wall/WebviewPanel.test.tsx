@@ -9,6 +9,7 @@ import { focusSession } from '../../lib/terminal-registry';
 import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { isRealBlur } from '../../lib/window-focus';
 import { BrowserPanel } from './BrowserPanel';
+import { browserDisplayModeFromParams } from './browser-surface';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
 import { PaneWriteContext, PassthroughPaneIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions, type WallActions } from './wall-context';
@@ -105,6 +106,11 @@ describe('WebviewPanel', () => {
     await show();
     expect(container.querySelector('iframe')?.getAttribute('src')).toBe(URL);
     expect(paneWrite.updateParams.mock.calls.some(([, patch]) => 'renderMode' in patch)).toBe(false);
+    // Its Door says what the pane shows, not what is stored.
+    const stored = { surfaceType: 'browser', renderMode: 'webview', url: URL };
+    expect(browserDisplayModeFromParams(stored)).toBe(browserDisplayModeFromParams({ ...stored, renderMode: 'iframe' }));
+    installPaneWebview(platform);
+    expect(browserDisplayModeFromParams(stored)).not.toBe(browserDisplayModeFromParams({ ...stored, renderMode: 'iframe' }));
   });
 
   it('opens or adopts the view on mount, hides it on unmount, and destroys it only through closeBrowserSurface', async () => {
@@ -187,6 +193,23 @@ describe('WebviewPanel', () => {
     const open = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Open in new pane')!;
     act(() => open.click());
     expect(onOpenBrowserPane).toHaveBeenCalledExactlyOnceWith(ID, 'https://example.com/popup');
+  });
+
+  it('raises a new-window prompt only from a page on screen, and shows it only while its pane is in sight', async () => {
+    // Its prompt hides every pane webview, which a page nobody can see must not do.
+    await show({ parked: true });
+    frame();
+    act(() => pane.emit({ id: ID, kind: 'open-window', url: 'https://example.com/popup' }));
+    await show();
+    expect(container.textContent).not.toContain('wants to open a new tab');
+
+    frame();
+    act(() => pane.emit({ id: ID, kind: 'open-window', url: 'https://example.com/popup' }));
+    expect(container.textContent).toContain('wants to open a new tab');
+    await show({ parked: true });
+    expect(container.textContent).not.toContain('wants to open a new tab');
+    await show();
+    expect(container.textContent).toContain('wants to open a new tab');
   });
 
   it('drives the view from the header', async () => {
