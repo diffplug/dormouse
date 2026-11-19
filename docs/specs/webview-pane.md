@@ -50,7 +50,7 @@ Source of truth: `install` in `standalone/src-tauri/src/pane_webview.rs`; `paneW
 ## Page boundary
 
 - A page may also frame its own `about:`, `blob:`, and `data:` documents (rationale), and its permission requests meet an explicit handler (rationale).
-- A new-window request opens nothing itself: the panel asks, then opens the URL in a new webview pane beside its own.
+- A new-window request takes a press, opens nothing itself, and counts only from a page on screen: the panel asks while its pane is in sight, then opens the URL in a new webview pane beside its own.
 - One persistent profile serves every pane webview.
 - The network policy does not gate a pane webview: it is the user's own connection, as a terminal's is (rationale).
 
