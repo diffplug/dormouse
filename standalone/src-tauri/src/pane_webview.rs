@@ -85,6 +85,110 @@ pub use imp::{close_all, forget_window};
 #[cfg(not(windows))]
 const UNSUPPORTED: &str = "pane webviews need macOS 14 or later";
 
+
+#[cfg(any(target_os = "macos", windows))]
+const EVENT: &str = "dormouse://pane-webview";
+
+#[cfg(any(target_os = "macos", windows))]
+fn scheme(url: &str) -> Option<String> {
+    url.split_once(':').map(|(scheme, _)| scheme.to_ascii_lowercase())
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn is_web(url: &str) -> bool {
+    matches!(scheme(url).as_deref(), Some("http" | "https"))
+}
+
+/// What a page may load, in any frame: pages frame their own `about:`,
+/// `blob:` and `data:` documents. Anything else would leave the engine: a
+/// file, or a scheme another app answers.
+#[cfg(any(target_os = "macos", windows))]
+fn may_load(url: &str) -> bool {
+    matches!(scheme(url).as_deref(), Some("http" | "https" | "about" | "blob" | "data"))
+}
+
+#[cfg(any(target_os = "macos", windows))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Key {
+    LeftMeta,
+    RightMeta,
+    LeftShift,
+    RightShift,
+    Other,
+}
+
+/// `dualTap` in lib/src/lib/dual-tap.ts, which this must match: true when
+/// `key` completes left-then-right Meta, or Shift, under 500 ms apart.
+#[cfg(any(target_os = "macos", windows))]
+fn dual_tap(left: &mut Option<(Key, f64)>, key: Key, now_ms: f64) -> bool {
+    let previous = left.take();
+    let pair = match key {
+        Key::LeftMeta | Key::LeftShift => {
+            *left = Some((key, now_ms));
+            return false;
+        }
+        Key::RightMeta => Key::LeftMeta,
+        Key::RightShift => Key::LeftShift,
+        Key::Other => return false,
+    };
+    previous.is_some_and(|(key, time)| key == pair && now_ms - time < 500.0)
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn emit(app: &AppHandle, owner: &str, id: &str, kind: &str, mut payload: serde_json::Value) {
+    use tauri::Emitter;
+    payload["id"] = id.into();
+    payload["kind"] = kind.into();
+    let _ = app.emit_to(owner, EVENT, payload);
+}
+
+#[cfg(all(test, any(target_os = "macos", windows)))]
+mod tests {
+    use super::*;
+    use Key::*;
+
+    /// The cases of lib/src/lib/dual-tap.test.ts: each press with its ms
+    /// since the previous one.
+    fn leaders(presses: &[(Key, f64)]) -> usize {
+        let (mut left, mut now) = (None, 1000.0);
+        presses
+            .iter()
+            .filter(|(key, ms)| {
+                now += ms;
+                dual_tap(&mut left, *key, now)
+            })
+            .count()
+    }
+
+    #[test]
+    fn dual_tap_matches_the_webview_gesture() {
+        let cases: &[(&str, &[(Key, f64)], usize)] = &[
+            ("left-then-right Meta", &[(LeftMeta, 0.0), (RightMeta, 200.0)], 1),
+            ("left-then-right Shift", &[(LeftShift, 0.0), (RightShift, 100.0)], 1),
+            ("the right press at 500ms (exclusive)", &[(LeftMeta, 0.0), (RightMeta, 500.0)], 0),
+            ("right-then-left", &[(RightMeta, 0.0), (LeftMeta, 100.0)], 0),
+            ("left Meta then right Shift", &[(LeftMeta, 0.0), (RightShift, 100.0)], 0),
+            ("the other modifier between the taps", &[(LeftShift, 0.0), (LeftMeta, 50.0), (RightShift, 50.0)], 0),
+            ("another key between the taps", &[(LeftShift, 0.0), (Other, 50.0), (Other, 50.0), (RightShift, 50.0)], 0),
+            ("a third right press after a completed gesture", &[(LeftMeta, 0.0), (RightMeta, 100.0), (RightMeta, 100.0)], 1),
+        ];
+        for (name, presses, want) in cases {
+            assert_eq!(leaders(presses), *want, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_page_loads_only_what_stays_in_the_engine() {
+        for url in ["https://a.test/", "HTTP://a.test/", "about:srcdoc", "blob:https://a.test/1", "data:text/html,x"] {
+            assert!(may_load(url), "{url}");
+        }
+        for url in ["file:///etc/passwd", "mailto:a@b.test", "zoommtg://x", "javascript:1", "no-scheme"] {
+            assert!(!may_load(url), "{url}");
+        }
+        assert!(!is_web("about:blank") && !is_web("data:text/html,x"));
+    }
+}
+
 #[cfg(not(any(target_os = "macos", windows)))]
 mod imp {
     use super::*;
@@ -135,14 +239,14 @@ mod imp {
         NSDataBase64EncodingOptions, NSDictionary, NSError, NSNumber, NSOperatingSystemVersion, NSProcessInfo,
     };
     use objc2_web_kit::WKSnapshotConfiguration;
-    use serde_json::{json, Value};
+    use serde_json::json;
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
     use std::ffi::c_void;
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     use wry::dpi::{LogicalPosition, LogicalSize};
     use wry::raw_window_handle::{
         AppKitWindowHandle, HandleError, HasWindowHandle, RawWindowHandle, WindowHandle,
@@ -152,30 +256,14 @@ mod imp {
         WebViewExtMacOS, WryWebView,
     };
 
-    const EVENT: &str = "dormouse://pane-webview";
     /// The one profile every pane webview shares; never the app webview's.
     const STORE: [u8; 16] = [
         0x6b, 0x1e, 0x2f, 0x4a, 0x93, 0xd0, 0x4c, 0x51, 0x8e, 0x27, 0x0b, 0xa6, 0x5d, 0x71, 0xc3, 0x9f,
     ];
     const POLL: Duration = Duration::from_millis(250);
 
-    fn scheme(url: &str) -> Option<String> {
-        url.split_once(':').map(|(scheme, _)| scheme.to_ascii_lowercase())
-    }
-
-    fn is_web(url: &str) -> bool {
-        matches!(scheme(url).as_deref(), Some("http" | "https"))
-    }
-
     fn web_only(url: &str) -> Result<(), String> {
         is_web(url).then_some(()).ok_or_else(|| format!("not an http(s) URL: {url}"))
-    }
-
-    /// The handler hears every frame's navigation, and pages frame their own
-    /// `about:`, `blob:` and `data:` documents. Anything else would leave the
-    /// engine: a file, or a scheme another app answers.
-    fn may_load(url: &str) -> bool {
-        matches!(scheme(url).as_deref(), Some("http" | "https" | "about" | "blob" | "data"))
     }
 
     struct Pane {
@@ -498,12 +586,6 @@ mod imp {
         }
     }
 
-    fn emit(app: &AppHandle, owner: &str, id: &str, kind: &str, mut payload: Value) {
-        payload["id"] = id.into();
-        payload["kind"] = kind.into();
-        let _ = app.emit_to(owner, EVENT, payload);
-    }
-
     /// Report every page and focus change since the last call.
     fn sync(app: &AppHandle) {
         let mut events = Vec::new();
@@ -604,15 +686,6 @@ mod imp {
         left.set(state);
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    enum Key {
-        LeftMeta,
-        RightMeta,
-        LeftShift,
-        RightShift,
-        Other,
-    }
-
     /// What a key event presses, or `None` for a modifier's release, which
     /// raises no `keydown`. The masks are IOKit's device-dependent bits, set
     /// while that one key is down, so releasing one Shift with the other held
@@ -635,67 +708,10 @@ mod imp {
         (flags & mask != 0).then_some(key)
     }
 
-    /// `dualTap` in lib/src/lib/dual-tap.ts, which this must match: true when
-    /// `key` completes left-then-right Meta, or Shift, under 500 ms apart.
-    fn dual_tap(left: &mut Option<(Key, f64)>, key: Key, now_ms: f64) -> bool {
-        let previous = left.take();
-        let pair = match key {
-            Key::LeftMeta | Key::LeftShift => {
-                *left = Some((key, now_ms));
-                return false;
-            }
-            Key::RightMeta => Key::LeftMeta,
-            Key::RightShift => Key::LeftShift,
-            Key::Other => return false,
-        };
-        previous.is_some_and(|(key, time)| key == pair && now_ms - time < 500.0)
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
         use Key::*;
-
-        /// The cases of lib/src/lib/dual-tap.test.ts: each press with its ms
-        /// since the previous one.
-        fn leaders(presses: &[(Key, f64)]) -> usize {
-            let (mut left, mut now) = (None, 1000.0);
-            presses
-                .iter()
-                .filter(|(key, ms)| {
-                    now += ms;
-                    dual_tap(&mut left, *key, now)
-                })
-                .count()
-        }
-
-        #[test]
-        fn dual_tap_matches_the_webview_gesture() {
-            let cases: &[(&str, &[(Key, f64)], usize)] = &[
-                ("left-then-right Meta", &[(LeftMeta, 0.0), (RightMeta, 200.0)], 1),
-                ("left-then-right Shift", &[(LeftShift, 0.0), (RightShift, 100.0)], 1),
-                ("the right press at 500ms (exclusive)", &[(LeftMeta, 0.0), (RightMeta, 500.0)], 0),
-                ("right-then-left", &[(RightMeta, 0.0), (LeftMeta, 100.0)], 0),
-                ("left Meta then right Shift", &[(LeftMeta, 0.0), (RightShift, 100.0)], 0),
-                ("the other modifier between the taps", &[(LeftShift, 0.0), (LeftMeta, 50.0), (RightShift, 50.0)], 0),
-                ("another key between the taps", &[(LeftShift, 0.0), (Other, 50.0), (Other, 50.0), (RightShift, 50.0)], 0),
-                ("a third right press after a completed gesture", &[(LeftMeta, 0.0), (RightMeta, 100.0), (RightMeta, 100.0)], 1),
-            ];
-            for (name, presses, want) in cases {
-                assert_eq!(leaders(presses), *want, "{name}");
-            }
-        }
-
-        #[test]
-        fn a_page_loads_only_what_stays_in_the_engine() {
-            for url in ["https://a.test/", "HTTP://a.test/", "about:srcdoc", "blob:https://a.test/1", "data:text/html,x"] {
-                assert!(may_load(url), "{url}");
-            }
-            for url in ["file:///etc/passwd", "mailto:a@b.test", "zoommtg://x", "javascript:1", "no-scheme"] {
-                assert!(!may_load(url), "{url}");
-            }
-            assert!(!is_web("about:blank") && !is_web("data:text/html,x"));
-        }
 
         #[test]
         fn a_snapshot_is_capped_on_its_longest_side() {
@@ -729,37 +745,51 @@ mod imp {
 #[cfg(windows)]
 mod imp {
     use super::*;
-    use serde_json::{json, Value};
+    use serde_json::json;
     use std::cell::{Cell, OnceCell, RefCell};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
     use std::ffi::c_void;
     use std::num::NonZeroIsize;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc::Sender;
     use std::sync::OnceLock;
-    use std::time::Instant;
-    use tauri::{Emitter, Manager};
+    use std::time::{Duration, Instant};
+    use tauri::Manager;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2Settings8, ICoreWebView2_18, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
+        ICoreWebView2Settings8, ICoreWebView2_18, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT,
+        COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
     };
     use webview2_com::{
-        take_pwstr, DocumentTitleChangedEventHandler, FocusChangedEventHandler, HistoryChangedEventHandler,
-        LaunchingExternalUriSchemeEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
-        SourceChangedEventHandler,
+        take_pwstr, CapturePreviewCompletedHandler, DocumentTitleChangedEventHandler, FocusChangedEventHandler,
+        HistoryChangedEventHandler, LaunchingExternalUriSchemeEventHandler, NavigationCompletedEventHandler,
+        NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
     };
-    use windows::core::{Interface, BOOL, PWSTR};
-    use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::core::{w, Interface, BOOL, PWSTR};
+    use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, LRESULT, POINT, RECT, RPC_E_CHANGED_MODE, WPARAM};
+    use windows::Win32::Graphics::Imaging::{
+        CLSID_WICImagingFactory, GUID_ContainerFormatJpeg, GUID_WICPixelFormat24bppBGR, IWICBitmapFrameEncode,
+        IWICBitmapSource, IWICImagingFactory, WICBitmapEncoderNoCache, WICBitmapInterpolationModeFant,
+        WICConvertBitmapSource, WICDecodeMetadataCacheOnDemand,
+    };
+    use windows::Win32::System::Com::StructuredStorage::{IPropertyBag2, PROPBAG2};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, IStream, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+        STREAM_SEEK_END, STREAM_SEEK_SET,
+    };
+    use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_R4};
     use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
     use windows::Win32::UI::Input::{
         GetRawInputData, GetRegisteredRawInputDevices, RegisterRawInputDevices, HRAWINPUT, RAWINPUT,
         RAWINPUTDEVICE, RAWINPUTDEVICE_FLAGS, RAWINPUTHEADER, RID_INPUT, RIM_TYPEKEYBOARD,
     };
-    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SHCreateMemStream, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
-        DestroyWindow, GetAncestor, GetForegroundWindow, IsChild, IsWindow, GA_ROOT, WA_INACTIVE, WM_ACTIVATE,
-        WM_INPUT, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_NCDESTROY, WM_PARENTNOTIFY, WM_POINTERDOWN, WM_RBUTTONDOWN,
-        WM_SETFOCUS, WM_XBUTTONDOWN,
+        DestroyWindow, GetAncestor, GetCursorPos, GetForegroundWindow, GetWindowRect, IsChild, IsWindow, KillTimer,
+        SetTimer, GA_ROOT,
+        WA_INACTIVE, WM_ACTIVATE, WM_INPUT, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_NCDESTROY, WM_PARENTNOTIFY,
+        WM_POINTERDOWN, WM_RBUTTONDOWN, WM_SETFOCUS, WM_XBUTTONDOWN,
     };
     use wry::dpi::{LogicalPosition, LogicalSize};
     use wry::raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle};
@@ -768,33 +798,27 @@ mod imp {
         WebViewExtWindows,
     };
 
-    const EVENT: &str = "dormouse://pane-webview";
     const BUSY: &str = "pane webviews are busy";
     /// The navigation in flight when the build returns, which started before
     /// any handler here could hear it: any completion ends it.
     const FIRST_LOAD: u64 = u64::MAX;
     const PRESS_SUBCLASS: usize = 0x646d_7001;
     const WINDOW_SUBCLASS: usize = 0x646d_7002;
-    const KEYS_SUBCLASS: usize = 0x646d_7003;
+    const INPUT_SUBCLASS: usize = 0x646d_7003;
     /// `RAWKEYBOARD.Flags` bits and the overrun code (winuser.h, ntddkbd.h).
     const RI_KEY_BREAK: u16 = 0x1;
     const RI_KEY_E0: u16 = 0x2;
     const KEYBOARD_OVERRUN_MAKE_CODE: u16 = 0xFF;
-
-    fn scheme(url: &str) -> Option<String> {
-        url.split_once(':').map(|(scheme, _)| scheme.to_ascii_lowercase())
-    }
-
-    fn is_web(url: &str) -> bool {
-        matches!(scheme(url).as_deref(), Some("http" | "https"))
-    }
-
-    /// Pages frame their own `about:`, `blob:` and `data:` documents.
-    /// Anything else would leave the engine: a file, or a scheme another app
-    /// answers.
-    fn may_load(url: &str) -> bool {
-        matches!(scheme(url).as_deref(), Some("http" | "https" | "about" | "blob" | "data"))
-    }
+    /// HID generic-desktop usages (hidusage.h).
+    const POINTER_TICK_MS: u32 = 50;
+    const USAGE_KEYBOARD: u16 = 6;
+    /// A snapshot's longest side in pixels: a full high-DPI pane would be
+    /// megabytes of base64 for a stand-in.
+    const SNAPSHOT_MAX_PX: u32 = 1600;
+    const SNAPSHOT_QUALITY: f32 = 0.7;
+    const SNAPSHOT_WAIT: Duration = Duration::from_secs(2);
+    /// What WebView2 captures into: PNG is lossless into the one JPEG encode.
+    const CAPTURE_FORMAT: COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT = COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
 
     /// The one profile every pane webview shares: beside Dormouse's `state`
     /// and the app webview's `EBWebView` in the local data directory, inside
@@ -828,8 +852,11 @@ mod imp {
     thread_local! {
         static PANES: RefCell<HashMap<String, Pane>> = RefCell::default();
         static APP: OnceCell<AppHandle> = const { OnceCell::new() };
-        static KEYS_HOOKED: Cell<bool> = const { Cell::new(false) };
+        static INPUT_HOOKED: Cell<bool> = const { Cell::new(false) };
         static LEFT: Cell<Option<(Key, f64)>> = const { Cell::new(None) };
+        /// The id and owner of the shown view the pointer was last over.
+        static OVER: Cell<Option<(String, String)>> = const { Cell::new(None) };
+        static POINTER_TIMER: Cell<usize> = const { Cell::new(0) };
     }
     static NEXT_GEN: AtomicU64 = AtomicU64::new(1);
     static EPOCH: OnceLock<Instant> = OnceLock::new();
@@ -890,6 +917,7 @@ mod imp {
                 let was_shown = pane.shown;
                 if from != owner {
                     (pane.rect, pane.shown, pane.want_focus, pane.resume) = (None, false, false, false);
+                    forget_over(&id);
                 }
                 (view, was_shown, pane.loading.clone(), !pane.page.url.is_empty())
             });
@@ -978,7 +1006,7 @@ mod imp {
             }
         }
         hook_window(hwnd);
-        hook_keys(hwnd);
+        hook_input(hwnd);
         if now_url != url {
             let _ = view.load_url(&now_url);
         }
@@ -1013,6 +1041,11 @@ mod imp {
         // Contexts on one directory share one profile and one browser process.
         let mut context = WebContext::new(Some(profile_dir(&local)));
         let (handle, id) = (app.clone(), id.to_string());
+        // Whether each new-window request came from a press, oldest first:
+        // `guard`'s handler pushes one per request, in the same event as
+        // wry's, which runs this builder's callback a turn later.
+        let initiated: Rc<RefCell<VecDeque<bool>>> = Rc::default();
+        let requests = initiated.clone();
         let view = WebViewBuilder::new_with_web_context(&mut context)
             .with_url(url)
             .with_visible(false)
@@ -1022,7 +1055,9 @@ mod imp {
             .with_clipboard(false)
             .with_navigation_handler(|url| may_load(&url))
             .with_new_window_req_handler(move |url, _| {
-                if is_web(&url) {
+                // A page raises the new-pane prompt only from a press.
+                let from_press = requests.borrow_mut().pop_front().unwrap_or(false);
+                if from_press && is_web(&url) {
                     let owner = with_panes(|panes| panes.get(&id).map(|pane| pane.owner.clone())).flatten();
                     if let Some(owner) = owner {
                         emit(&handle, &owner, &id, "open-window", json!({ "url": url }));
@@ -1045,7 +1080,7 @@ mod imp {
         // alive; `dispose` closes one instead.
         std::mem::forget(Rc::clone(&view));
         // SAFETY: a live view, on the main thread.
-        if let Err(error) = unsafe { guard(app, &view, loading) } {
+        if let Err(error) = unsafe { guard(app, &view, loading, initiated) } {
             dispose(app, &view, None);
             return Err(format!("could not secure the page: {error}"));
         }
@@ -1054,10 +1089,27 @@ mod imp {
 
     /// What wry's builder cannot set, and the handlers that report a page's
     /// state; a view any of them fails on never shows.
-    unsafe fn guard(app: &AppHandle, view: &WebView, loading: &Rc<Cell<Option<u64>>>) -> windows::core::Result<()> {
+    unsafe fn guard(
+        app: &AppHandle,
+        view: &WebView,
+        loading: &Rc<Cell<Option<u64>>>,
+        initiated: Rc<RefCell<VecDeque<bool>>>,
+    ) -> windows::core::Result<()> {
         let core = view.webview();
         let controller = view.controller();
         let mut token = Default::default();
+        // wry's builder hides `IsUserInitiated`. Registered after wry's
+        // handler, so it runs in the same event; wry owns the response.
+        core.add_NewWindowRequested(
+            &NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut user = BOOL::default();
+                let from_press = args.IsUserInitiated(&mut user).is_ok() && user.as_bool();
+                initiated.borrow_mut().push_back(from_press);
+                Ok(())
+            })),
+            &mut token,
+        )?;
         // An external scheme, from any frame, would start another app.
         core.cast::<ICoreWebView2_18>()?.add_LaunchingExternalUriScheme(
             &LaunchingExternalUriSchemeEventHandler::create(Box::new(|_, args| {
@@ -1201,6 +1253,7 @@ mod imp {
                 None if pane.shown => {
                     pane.shown = false;
                     pane.resume = false;
+                    forget_over(id);
                     Step::Hide
                 }
                 None => Step::Stay,
@@ -1217,6 +1270,7 @@ mod imp {
                 view.set_bounds(bounds).map_err(|e| e.to_string())?;
                 if first {
                     view.set_visible(true).map_err(|e| e.to_string())?;
+                    watch_pointer();
                 }
                 if focus {
                     move_focus(&view);
@@ -1226,6 +1280,12 @@ mod imp {
             (Step::Hide, _) => hide(app, &view, &owner),
             _ => Ok(()),
         }
+    }
+
+    /// A view hidden or closed under the pointer was never left.
+    fn forget_over(id: &str) {
+        let over = OVER.take();
+        OVER.set(over.filter(|(over, _)| over != id));
     }
 
     /// A hidden view keeps the keyboard it held, and keys typed then are lost.
@@ -1298,7 +1358,7 @@ mod imp {
         result
     }
 
-    pub fn focus(webview: Webview, id: Option<String>, _from: Option<String>) -> Result<(), String> {
+    pub fn focus(webview: Webview, id: Option<String>, from: Option<String>) -> Result<(), String> {
         enum Target {
             Pane(Rc<WebView>),
             App(Vec<Rc<WebView>>),
@@ -1307,6 +1367,12 @@ mod imp {
         let app = webview.app_handle().clone();
         let owner = label(&webview);
         let target = with_panes(|panes| {
+            // Its successor may hold the keyboard already, and must keep it.
+            if let (None, Some(from)) = (&id, &from) {
+                let Some(pane) = panes.get_mut(from).filter(|pane| pane.owner == owner) else { return Target::Nothing };
+                (pane.want_focus, pane.resume) = (false, false);
+                return pane.view.clone().map_or(Target::Nothing, |view| Target::App(vec![view]));
+            }
             for (pane_id, pane) in panes.iter_mut().filter(|(_, pane)| pane.owner == owner) {
                 pane.resume = false;
                 if id.as_deref() != Some(pane_id.as_str()) {
@@ -1321,9 +1387,8 @@ mod imp {
                             Target::Nothing
                         }
                         Some(view) if pane.shown => Target::Pane(view.clone()),
-                        // A hidden view never holds focus, and commands can
-                        // arrive out of the order they were sent in: this
-                        // one waits for the `place` that shows the view.
+                        // A hidden view never holds focus: this waits for
+                        // the `place` that shows it.
                         Some(_) => {
                             pane.want_focus = true;
                             Target::Nothing
@@ -1364,9 +1429,161 @@ mod imp {
         result
     }
 
-    /// Not built on Windows yet: a hidden pane shows its plain placeholder.
-    pub fn snapshot(_: Webview, _: String) -> Result<String, String> {
-        Err("pane webview stills are not built on Windows".into())
+    /// On a pool thread: the main thread only starts the capture and copies
+    /// its bytes out; decoding, scaling, and encoding happen here.
+    pub fn snapshot(webview: Webview, id: String) -> Result<String, String> {
+        let app = webview.app_handle().clone();
+        let owner = label(&webview);
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.run_on_main_thread(move || capture(&id, &owner, tx)).map_err(|e| e.to_string())?;
+        let bytes = rx.recv_timeout(SNAPSHOT_WAIT).map_err(|_| "no snapshot".to_string())??;
+        jpeg_data_url(&bytes).map_err(|_| "no snapshot".to_string())
+    }
+
+    /// On the main thread: start capturing `id`'s view, whose bytes, or the
+    /// error, `tx` hears later.
+    fn capture(id: &str, owner: &str, tx: Sender<Result<Vec<u8>, String>>) {
+        let found = with_panes(|panes| panes.get(id).filter(|pane| pane.owner == owner).map(|pane| (pane.view.clone(), pane.shown)));
+        let view = match found {
+            None => Err(BUSY),
+            Some(None) => Err("no such pane webview"),
+            Some(Some((None, _))) => Err("the pane webview is not built yet"),
+            Some(Some((Some(_), false))) => Err("the pane webview is hidden"),
+            Some(Some((Some(view), true))) => Ok(view),
+        };
+        let view = match view {
+            Ok(view) => view,
+            Err(error) => {
+                let _ = tx.send(Err(error.to_string()));
+                return;
+            }
+        };
+        // SAFETY: an in-memory stream, and a call on a live webview, on the main thread.
+        let started_capture = unsafe {
+            let Some(stream) = SHCreateMemStream(None) else {
+                let _ = tx.send(Err("no stream".to_string()));
+                return;
+            };
+            let (done, out) = (tx.clone(), stream.clone());
+            // Runs later, on the main thread, with no registry borrow.
+            let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+                let bytes = result.and_then(|()| stream_bytes(&out));
+                let _ = done.send(bytes.map_err(|e| e.to_string()));
+                Ok(())
+            }));
+            view.webview().CapturePreview(CAPTURE_FORMAT, &stream, &handler)
+        };
+        if let Err(error) = started_capture {
+            let _ = tx.send(Err(error.to_string()));
+        }
+    }
+
+    /// Every byte of `stream`, from its start.
+    unsafe fn stream_bytes(stream: &IStream) -> windows::core::Result<Vec<u8>> {
+        let mut size = 0u64;
+        stream.Seek(0, STREAM_SEEK_END, Some(&mut size))?;
+        stream.Seek(0, STREAM_SEEK_SET, None)?;
+        let mut bytes = vec![0u8; usize::try_from(size).map_err(|_| windows::core::Error::from(E_FAIL))?];
+        let mut filled = 0;
+        while filled < bytes.len() {
+            let mut read = 0u32;
+            let want = u32::try_from(bytes.len() - filled).unwrap_or(u32::MAX);
+            stream.Read(bytes[filled..].as_mut_ptr().cast(), want, Some(&mut read)).ok()?;
+            if read == 0 {
+                break;
+            }
+            filled += read as usize;
+        }
+        bytes.truncate(filled);
+        Ok(bytes)
+    }
+
+    /// `width` by `height` pixels, capped at `SNAPSHOT_MAX_PX` on the longest
+    /// side with the aspect kept; never 0.
+    fn snapshot_size(width: u32, height: u32) -> (u32, u32) {
+        let longest = width.max(height);
+        if longest <= SNAPSHOT_MAX_PX {
+            return (width.max(1), height.max(1));
+        }
+        let scale = |side: u32| {
+            let scaled = (u64::from(side) * u64::from(SNAPSHOT_MAX_PX) + u64::from(longest) / 2) / u64::from(longest);
+            (scaled as u32).max(1)
+        };
+        (scale(width), scale(height))
+    }
+
+    /// The capture as a JPEG data URL.
+    fn jpeg_data_url(image: &[u8]) -> windows::core::Result<String> {
+        // SAFETY: COM on this pool thread, balanced below when this call initialized it.
+        let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if initialized.is_err() && initialized != RPC_E_CHANGED_MODE {
+            return Err(initialized.into());
+        }
+        // SAFETY: WIC objects created and used on this thread only.
+        let result = unsafe { encode_jpeg(image) };
+        if initialized.is_ok() {
+            // SAFETY: balances the successful `CoInitializeEx` above, S_FALSE included.
+            unsafe { CoUninitialize() };
+        }
+        let url = format!("data:image/jpeg;base64,{}", base64(&result?));
+        Ok(url)
+    }
+
+    unsafe fn encode_jpeg(image: &[u8]) -> windows::core::Result<Vec<u8>> {
+        let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let input = SHCreateMemStream(Some(image)).ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+        let decoder = factory.CreateDecoderFromStream(&input, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?;
+        let frame = decoder.GetFrame(0)?;
+        let (mut width, mut height) = (0, 0);
+        frame.GetSize(&mut width, &mut height)?;
+        let (out_width, out_height) = snapshot_size(width, height);
+        let source: IWICBitmapSource = if (out_width, out_height) == (width, height) {
+            frame.cast()?
+        } else {
+            let scaler = factory.CreateBitmapScaler()?;
+            scaler.Initialize(&frame, out_width, out_height, WICBitmapInterpolationModeFant)?;
+            scaler.cast()?
+        };
+        let source = WICConvertBitmapSource(&GUID_WICPixelFormat24bppBGR, &source)?;
+
+        let output = SHCreateMemStream(None).ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+        let encoder = factory.CreateEncoder(&GUID_ContainerFormatJpeg, std::ptr::null())?;
+        encoder.Initialize(&output, WICBitmapEncoderNoCache)?;
+        let (mut target, mut options): (Option<IWICBitmapFrameEncode>, Option<IPropertyBag2>) = (None, None);
+        encoder.CreateNewFrame(&mut target, &mut options)?;
+        let (target, options) = target.zip(options).ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+        let name = PROPBAG2 { pstrName: PWSTR(w!("ImageQuality").as_ptr().cast_mut()), ..Default::default() };
+        let quality = VARIANT {
+            Anonymous: VARIANT_0 {
+                Anonymous: std::mem::ManuallyDrop::new(VARIANT_0_0 {
+                    vt: VT_R4,
+                    Anonymous: VARIANT_0_0_0 { fltVal: SNAPSHOT_QUALITY },
+                    ..Default::default()
+                }),
+            },
+        };
+        options.Write(1, &name, &quality)?;
+        target.Initialize(&options)?;
+        target.SetSize(out_width, out_height)?;
+        let mut format = GUID_WICPixelFormat24bppBGR;
+        target.SetPixelFormat(&mut format)?;
+        target.WriteSource(&source, std::ptr::null())?;
+        target.Commit()?;
+        encoder.Commit()?;
+        stream_bytes(&output)
+    }
+
+    /// RFC 4648 base64, padded.
+    fn base64(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let group = chunk.iter().enumerate().fold(0u32, |group, (i, byte)| group | u32::from(*byte) << (16 - 8 * i));
+            for i in 0..4 {
+                out.push(if i <= chunk.len() { ALPHABET[(group >> (18 - 6 * i) & 0x3f) as usize] as char } else { '=' });
+            }
+        }
+        out
     }
 
     /// The window is gone, so nothing is left to focus.
@@ -1389,6 +1606,7 @@ mod imp {
         let gone = with_panes(|panes| {
             let ids: Vec<String> =
                 panes.iter().filter(|(id, pane)| doomed(id, pane)).map(|(id, _)| id.clone()).collect();
+            ids.iter().for_each(|id| forget_over(id));
             ids.iter().filter_map(|id| panes.remove(id)).collect::<Vec<_>>()
         })
         .ok_or(BUSY)?;
@@ -1465,12 +1683,6 @@ mod imp {
             can_go_forward: view.can_go_forward().unwrap_or(false),
             loading: loading.get().is_some(),
         }
-    }
-
-    fn emit(app: &AppHandle, owner: &str, id: &str, kind: &str, mut payload: Value) {
-        payload["id"] = id.into();
-        payload["kind"] = kind.into();
-        let _ = app.emit_to(owner, EVENT, payload);
     }
 
     /// Report every page and focus change since the last call.
@@ -1637,18 +1849,19 @@ mod imp {
     /// `RIDEV_INPUTSINK`, which delivers every key while this process is in
     /// front and none otherwise: observe it on tao's target window, and
     /// register the same on `window` only where tao has none.
-    fn hook_keys(window: HWND) {
-        if KEYS_HOOKED.get() {
+    fn hook_input(window: HWND) {
+        if INPUT_HOOKED.get() {
             return;
         }
-        let Some(target) = keyboard_target().or_else(|| register_keyboard(window)) else { return };
+        let Some(target) = raw_target(USAGE_KEYBOARD).or_else(|| register_raw(window, USAGE_KEYBOARD)) else { return };
         // SAFETY: tao's target and the app window are windows of this thread.
-        if unsafe { SetWindowSubclass(target, Some(keys_proc), KEYS_SUBCLASS, 0) }.as_bool() {
-            KEYS_HOOKED.set(true);
+        if unsafe { SetWindowSubclass(target, Some(input_proc), INPUT_SUBCLASS, 0) }.as_bool() {
+            INPUT_HOOKED.set(true);
         }
     }
 
-    fn keyboard_target() -> Option<HWND> {
+    /// The window `usage`'s generic-desktop Raw Input goes to.
+    fn raw_target(usage: u16) -> Option<HWND> {
         let size = std::mem::size_of::<RAWINPUTDEVICE>() as u32;
         let mut count = 0;
         // SAFETY: the first call only counts; the second fills `count` entries.
@@ -1662,7 +1875,7 @@ mod imp {
                 .into_iter()
                 .find(|device| {
                     device.usUsagePage == 1
-                        && device.usUsage == 6
+                        && device.usUsage == usage
                         && !device.hwndTarget.is_invalid()
                         && IsWindow(Some(device.hwndTarget)).as_bool()
                 })
@@ -1670,16 +1883,17 @@ mod imp {
         }
     }
 
-    fn register_keyboard(window: HWND) -> Option<HWND> {
-        // Never `RIDEV_INPUTSINK`, which also delivers keys typed into other apps.
-        let device = RAWINPUTDEVICE { usUsagePage: 1, usUsage: 6, dwFlags: RAWINPUTDEVICE_FLAGS(0), hwndTarget: window };
+    fn register_raw(window: HWND, usage: u16) -> Option<HWND> {
+        // Never `RIDEV_INPUTSINK`, which also delivers other apps' input.
+        let device =
+            RAWINPUTDEVICE { usUsagePage: 1, usUsage: usage, dwFlags: RAWINPUTDEVICE_FLAGS(0), hwndTarget: window };
         // SAFETY: one well-formed registration.
         unsafe { RegisterRawInputDevices(&[device], std::mem::size_of::<RAWINPUTDEVICE>() as u32) }
             .ok()
             .map(|_| window)
     }
 
-    unsafe extern "system" fn keys_proc(
+    unsafe extern "system" fn input_proc(
         window: HWND,
         msg: u32,
         wparam: WPARAM,
@@ -1688,19 +1902,40 @@ mod imp {
         _: usize,
     ) -> LRESULT {
         match msg {
-            // RIM_INPUT: typed while this process is in front. Reading it
-            // leaves it for tao.
+            // RIM_INPUT: while this process is in front. Reading it leaves
+            // it for tao.
             WM_INPUT if wparam.0 & 0xff == 0 => on_raw_input(HRAWINPUT(lparam.0 as *mut c_void)),
             WM_NCDESTROY => {
-                let _ = RemoveWindowSubclass(window, Some(keys_proc), KEYS_SUBCLASS);
-                KEYS_HOOKED.set(false);
+                let _ = RemoveWindowSubclass(window, Some(input_proc), INPUT_SUBCLASS);
+                INPUT_HOOKED.set(false);
             }
             _ => {}
         }
         DefSubclassProc(window, msg, wparam, lparam)
     }
 
+    /// Whether any view is built, and each shown view's id, owner, and
+    /// container, from one short look at the registry; `None` while it is busy.
+    fn shown_views() -> Option<(bool, Vec<(String, String, HWND)>)> {
+        PANES.with(|panes| {
+            let panes = panes.try_borrow().ok()?;
+            let built = panes.values().any(|pane| pane.view.is_some());
+            let shown = panes
+                .iter()
+                .filter(|(_, pane)| pane.shown)
+                .filter_map(|(id, pane)| Some((id.clone(), pane.owner.clone(), pane.view.as_ref()?.hwnd())))
+                .collect();
+            Some((built, shown))
+        })
+    }
+
     fn on_raw_input(input: HRAWINPUT) {
+        // tao's target hears the mouse too, up to 1000 reports a second: with
+        // no view, read nothing.
+        if !shown_views().is_some_and(|(built, _)| built) {
+            LEFT.set(None);
+            return;
+        }
         let mut raw = RAWINPUT::default();
         let mut size = std::mem::size_of::<RAWINPUT>() as u32;
         let header = std::mem::size_of::<RAWINPUTHEADER>() as u32;
@@ -1709,7 +1944,10 @@ mod imp {
         let read = unsafe {
             GetRawInputData(input, RID_INPUT, Some(&mut raw as *mut RAWINPUT as *mut c_void), &mut size, header)
         };
-        if read == u32::MAX || raw.header.dwType != RIM_TYPEKEYBOARD.0 {
+        if read == u32::MAX {
+            return;
+        }
+        if raw.header.dwType != RIM_TYPEKEYBOARD.0 {
             return;
         }
         // SAFETY: the header says keyboard.
@@ -1735,13 +1973,57 @@ mod imp {
         }
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    enum Key {
-        LeftMeta,
-        RightMeta,
-        LeftShift,
-        RightShift,
-        Other,
+    /// No mouse message reaches this process from over a view, and no mouse
+    /// Raw Input arrived for injected moves over Remote Desktop, so while any
+    /// view is shown a timer looks at where the pointer is.
+    fn watch_pointer() {
+        if POINTER_TIMER.get() == 0 {
+            // SAFETY: a thread timer, ticking on this thread's message loop.
+            POINTER_TIMER.set(unsafe { SetTimer(None, 0, POINTER_TICK_MS, Some(pointer_tick)) });
+        }
+    }
+
+    unsafe extern "system" fn pointer_tick(_: HWND, _: u32, timer: usize, _: u32) {
+        match shown_views() {
+            Some((_, shown)) if shown.is_empty() => {
+                let _ = KillTimer(None, timer);
+                POINTER_TIMER.set(0);
+                OVER.set(None);
+            }
+            Some((_, shown)) => on_pointer(shown),
+            None => {}
+        }
+    }
+
+    /// `pointerleave` once the pointer is off the shown view it was over. A
+    /// view hidden or closed meanwhile was never left.
+    fn on_pointer(shown: Vec<(String, String, HWND)>) {
+        let was = OVER.take();
+        if shown.is_empty() {
+            return;
+        }
+        let mut point = POINT::default();
+        // SAFETY: plain queries; screen pixels both, in this per-monitor-aware process.
+        let hit = unsafe {
+            if GetCursorPos(&mut point).is_err() {
+                OVER.set(was);
+                return;
+            }
+            shown.iter().find(|(.., container)| {
+                let mut rect = RECT::default();
+                GetWindowRect(*container, &mut rect).is_ok()
+                    && (rect.left..rect.right).contains(&point.x)
+                    && (rect.top..rect.bottom).contains(&point.y)
+            })
+        }
+        .map(|(id, owner, _)| (id.clone(), owner.clone()));
+        let left = was.filter(|was| {
+            Some(was) != hit.as_ref() && shown.iter().any(|(id, owner, _)| (id, owner) == (&was.0, &was.1))
+        });
+        OVER.set(hit);
+        if let (Some((id, owner)), Some(app)) = (left, app()) {
+            emit(&app, &owner, &id, "pointerleave", json!({}));
+        }
     }
 
     /// What a Raw Input keyboard report presses, or `None` for a release,
@@ -1763,67 +2045,10 @@ mod imp {
         }
     }
 
-    /// `dualTap` in lib/src/lib/dual-tap.ts, which this must match: true when
-    /// `key` completes left-then-right Meta, or Shift, under 500 ms apart.
-    fn dual_tap(left: &mut Option<(Key, f64)>, key: Key, now_ms: f64) -> bool {
-        let previous = left.take();
-        let pair = match key {
-            Key::LeftMeta | Key::LeftShift => {
-                *left = Some((key, now_ms));
-                return false;
-            }
-            Key::RightMeta => Key::LeftMeta,
-            Key::RightShift => Key::LeftShift,
-            Key::Other => return false,
-        };
-        previous.is_some_and(|(key, time)| key == pair && now_ms - time < 500.0)
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
         use Key::*;
-
-        /// The cases of lib/src/lib/dual-tap.test.ts: each press with its ms
-        /// since the previous one.
-        fn leaders(presses: &[(Key, f64)]) -> usize {
-            let (mut left, mut now) = (None, 1000.0);
-            presses
-                .iter()
-                .filter(|(key, ms)| {
-                    now += ms;
-                    dual_tap(&mut left, *key, now)
-                })
-                .count()
-        }
-
-        #[test]
-        fn dual_tap_matches_the_webview_gesture() {
-            let cases: &[(&str, &[(Key, f64)], usize)] = &[
-                ("left-then-right Meta", &[(LeftMeta, 0.0), (RightMeta, 200.0)], 1),
-                ("left-then-right Shift", &[(LeftShift, 0.0), (RightShift, 100.0)], 1),
-                ("the right press at 500ms (exclusive)", &[(LeftMeta, 0.0), (RightMeta, 500.0)], 0),
-                ("right-then-left", &[(RightMeta, 0.0), (LeftMeta, 100.0)], 0),
-                ("left Meta then right Shift", &[(LeftMeta, 0.0), (RightShift, 100.0)], 0),
-                ("the other modifier between the taps", &[(LeftShift, 0.0), (LeftMeta, 50.0), (RightShift, 50.0)], 0),
-                ("another key between the taps", &[(LeftShift, 0.0), (Other, 50.0), (Other, 50.0), (RightShift, 50.0)], 0),
-                ("a third right press after a completed gesture", &[(LeftMeta, 0.0), (RightMeta, 100.0), (RightMeta, 100.0)], 1),
-            ];
-            for (name, presses, want) in cases {
-                assert_eq!(leaders(presses), *want, "{name}");
-            }
-        }
-
-        #[test]
-        fn a_page_loads_only_what_stays_in_the_engine() {
-            for url in ["https://a.test/", "HTTP://a.test/", "about:srcdoc", "blob:https://a.test/1", "data:text/html,x"] {
-                assert!(may_load(url), "{url}");
-            }
-            for url in ["file:///etc/passwd", "mailto:a@b.test", "zoommtg://x", "javascript:1", "no-scheme"] {
-                assert!(!may_load(url), "{url}");
-            }
-            assert!(!is_web("about:blank") && !is_web("data:text/html,x"));
-        }
 
         #[test]
         fn only_presses_count() {
@@ -1850,6 +2075,29 @@ mod imp {
             assert_ne!(profile, local);
             assert!(!profile.starts_with(local.join("state")));
             assert!(!profile.components().any(|part| part.as_os_str() == "EBWebView"));
+        }
+
+        #[test]
+        fn a_snapshot_is_capped_on_its_longest_side() {
+            assert_eq!(snapshot_size(800, 600), (800, 600));
+            assert_eq!(snapshot_size(1600, 900), (1600, 900));
+            assert_eq!(snapshot_size(3200, 1800), (1600, 900));
+            // A tall view is capped by its height.
+            assert_eq!(snapshot_size(1000, 3200), (500, 1600));
+            // Rounded, never 0.
+            assert_eq!(snapshot_size(3000, 1001), (1600, 534));
+            assert_eq!(snapshot_size(100_000, 1), (1600, 1));
+            assert_eq!(snapshot_size(0, 0), (1, 1));
+        }
+
+        #[test]
+        fn base64_matches_rfc_4648() {
+            let vectors =
+                [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")];
+            for (input, want) in vectors {
+                assert_eq!(base64(input.as_bytes()), want, "{input:?}");
+            }
+            assert_eq!(base64(&[0xfb, 0xff, 0xbf]), "+/+/");
         }
     }
 }
