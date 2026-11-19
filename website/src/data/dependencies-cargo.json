@@ -151,6 +151,16 @@
       ]
     },
     {
+      "name": "webview2-com",
+      "license": "MIT",
+      "author": "Bill Avery",
+      "homepage": "https://github.com/wravery/webview2-rs",
+      "declaredName": "webview2-com",
+      "versions": [
+        "0.39.1"
+      ]
+    },
+    {
       "name": "windows",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
@@ -3659,15 +3669,6 @@
       "homepage": "https://github.com/rustls/webpki-roots",
       "versions": [
         "1.0.7"
-      ]
-    },
-    {
-      "name": "webview2-com",
-      "license": "MIT",
-      "author": "Bill Avery",
-      "homepage": "https://github.com/wravery/webview2-rs",
-      "versions": [
-        "0.39.1"
       ]
     },
     {
