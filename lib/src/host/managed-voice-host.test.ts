@@ -515,7 +515,7 @@ describe('the build it runs in', () => {
 });
 
 describe('the network policy', () => {
-  it('sends nothing under Nothing, asking again at every speak', async () => {
+  it('sends nothing under Nowhere, asking again at every speak', async () => {
     // docs/specs/remote-network.md → "Policy": managed voice is a choke point
     // of its own. Saving a token is local, so it still works.
     let allowed = true;
