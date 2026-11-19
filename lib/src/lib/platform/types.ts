@@ -274,8 +274,10 @@ export interface PaneWebviewHost {
   place(id: string, rect: PaneWebviewRect | null): void;
   navigate(id: string, url: string): void;
   history(id: string, dir: 'back' | 'forward' | 'reload'): void;
-  /** Give the keyboard to `id`'s view, or with `null` back to the app webview. */
-  focus(id: string | null): void;
+  /** Give the keyboard to `id`'s view. */
+  focus(id: string): void;
+  /** Return the keyboard to the app webview, if `id`'s view holds it. */
+  blur(id: string): void;
   close(id: string): void;
   /** A still of the view's current rendering as an image URL, or null on any failure. */
   snapshot(id: string): Promise<string | null>;

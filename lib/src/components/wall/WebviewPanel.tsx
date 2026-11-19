@@ -206,7 +206,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   useEffect(() => {
     if (!keyboard) return;
     takeKeyboard();
-    return () => host.focus(null);
+    return () => host.blur(id);
   }, [host, keyboard, takeKeyboard]);
 
   useLayoutEffect(() => {
@@ -239,7 +239,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       // The Wall defers its focus calls by a frame, and one for a pane that
       // has since lost passthrough would take the keyboard from its successor.
       focus: () => { if (keyboardRef.current) takeKeyboard(); },
-      blur: () => host.focus(null),
+      blur: () => host.blur(id),
     });
   }, [host, id, status.kind, takeKeyboard]);
 

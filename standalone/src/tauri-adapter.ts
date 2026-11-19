@@ -482,6 +482,19 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] pane webviews unavailable:", err);
       return;
     }
+    // One view's commands go out one at a time: WebView2 delivers invokes
+    // sent together out of order, and a hide that overtook its show would
+    // leave the view up. A still is no part of that order, so that hiding
+    // never waits on one.
+    const last = new Map<string, Promise<void>>();
+    const send = (id: string, cmd: string, args: Record<string, unknown>): void => {
+      const sent = (last.get(id) ?? Promise.resolve()).then(() => rawInvoke(cmd, args)).then(
+        () => {},
+        (err) => console.error(`[tauri-adapter] ${cmd} failed:`, err),
+      );
+      last.set(id, sent);
+      void sent.then(() => { if (last.get(id) === sent) last.delete(id); });
+    };
     this.paneWebview = {
       open: async (id, url) => {
         try {
@@ -490,11 +503,12 @@ export class TauriAdapter implements PlatformAdapter {
           return { ok: false, error: errMessage(err) };
         }
       },
-      place: (id, rect) => invoke("pane_webview_place", { id, rect }),
-      navigate: (id, url) => invoke("pane_webview_navigate", { id, url }),
-      history: (id, dir) => invoke("pane_webview_history", { id, dir }),
-      focus: (id) => invoke("pane_webview_focus", { id }),
-      close: (id) => invoke("pane_webview_close", { id }),
+      place: (id, rect) => send(id, "pane_webview_place", { id, rect }),
+      navigate: (id, url) => send(id, "pane_webview_navigate", { id, url }),
+      history: (id, dir) => send(id, "pane_webview_history", { id, dir }),
+      focus: (id) => send(id, "pane_webview_focus", { id }),
+      blur: (id) => send(id, "pane_webview_focus", { id: null, from: id }),
+      close: (id) => send(id, "pane_webview_close", { id }),
       snapshot: (id) => rawInvoke<string>("pane_webview_snapshot", { id }).catch(() => null),
       onEvent: (listener) => {
         this.paneWebviewListeners.add(listener);

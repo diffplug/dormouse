@@ -232,26 +232,28 @@ describe('WebviewPanel', () => {
   });
 
   it('gives its view the keyboard only while its pane is the one in passthrough', async () => {
-    const lastFocus = () => pane.of('focus').at(-1);
+    // The keyboard calls in order, each naming this pane.
+    const keyboard = () => pane.calls.filter(([verb]) => verb === 'focus' || verb === 'blur');
     await show();
-    expect(pane.of('focus')).toEqual([]);
+    expect(keyboard()).toEqual([]);
     // A focus the Wall deferred from before this pane lost passthrough.
     focusSession(ID, true);
-    expect(pane.of('focus')).toEqual([]);
+    expect(keyboard()).toEqual([]);
 
     await show({ passthrough: ID });
-    expect(lastFocus()).toEqual(['focus', ID]);
-    const taken = pane.of('focus').length;
+    expect(keyboard().at(-1)).toEqual(['focus', ID]);
+    const taken = keyboard().length;
     focusSession(ID, true);
-    expect(pane.of('focus').slice(taken)).toEqual([['focus', ID]]);
+    expect(keyboard().slice(taken)).toEqual([['focus', ID]]);
 
     // Passthrough moved to another pane with no press in the app webview.
     await show({ passthrough: 'surface:other' });
-    expect(lastFocus()).toEqual(['focus', null]);
+    expect(keyboard().at(-1)).toEqual(['blur', ID]);
     await show({ passthrough: ID, extra: <Occluder /> });
-    expect(lastFocus()).toEqual(['focus', null]);
+    expect(keyboard().at(-1)).toEqual(['blur', ID]);
+    const released = keyboard().length;
     focusSession(ID, false);
-    expect(pane.of('focus').at(-1)).toEqual(['focus', null]);
+    expect(keyboard().slice(released)).toEqual([['blur', ID]]);
   });
 
   it('closes a view whose first load failed, and says so', async () => {

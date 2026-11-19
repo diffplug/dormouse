@@ -54,9 +54,11 @@ pub fn pane_webview_history(webview: Webview, id: String, dir: String) -> Result
     imp::history(webview, id, dir)
 }
 
+/// With no `id`, the app webview takes the keyboard back; `from` names the
+/// pane giving it up, which must still hold it for anything to move.
 #[tauri::command]
-pub fn pane_webview_focus(webview: Webview, id: Option<String>) -> Result<(), String> {
-    imp::focus(webview, id)
+pub fn pane_webview_focus(webview: Webview, id: Option<String>, from: Option<String>) -> Result<(), String> {
+    imp::focus(webview, id, from)
 }
 
 #[tauri::command]
@@ -102,7 +104,7 @@ mod imp {
     pub fn history(_: Webview, _: String, _: String) -> Result<(), String> {
         Err(UNSUPPORTED.into())
     }
-    pub fn focus(_: Webview, _: Option<String>) -> Result<(), String> {
+    pub fn focus(_: Webview, _: Option<String>, _: Option<String>) -> Result<(), String> {
         Err(UNSUPPORTED.into())
     }
     pub fn close(_: Webview, _: String) -> Result<(), String> {
@@ -360,13 +362,20 @@ mod imp {
         })
     }
 
-    pub fn focus(webview: Webview, id: Option<String>) -> Result<(), String> {
-        match id {
+    pub fn focus(webview: Webview, id: Option<String>, from: Option<String>) -> Result<(), String> {
+        match (id, from) {
             // A hidden view never holds focus.
-            Some(id) => on_view(webview, id, true, |view, _| {
+            (Some(id), _) => on_view(webview, id, true, |view, _| {
                 if view.webview().isHidden() { Ok(()) } else { view.focus().map_err(|e| e.to_string()) }
             }),
-            None => command(webview, true, |_, webview, _| Ok(focus_app(webview))),
+            // Its successor may hold the keyboard already, and must keep it.
+            (None, Some(from)) => on_view(webview, from, true, |view, webview| {
+                if is_first_responder(&view.webview()) {
+                    focus_app(webview);
+                }
+                Ok(())
+            }),
+            (None, None) => command(webview, true, |_, webview, _| Ok(focus_app(webview))),
         }
     }
 
@@ -1289,7 +1298,7 @@ mod imp {
         result
     }
 
-    pub fn focus(webview: Webview, id: Option<String>) -> Result<(), String> {
+    pub fn focus(webview: Webview, id: Option<String>, _from: Option<String>) -> Result<(), String> {
         enum Target {
             Pane(Rc<WebView>),
             App(Vec<Rc<WebView>>),

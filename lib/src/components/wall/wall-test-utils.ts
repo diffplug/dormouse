@@ -297,6 +297,7 @@ export function installPaneWebview(platform: PlatformAdapter) {
     navigate: (id, url) => { calls.push(['navigate', id, url]); },
     history: (id, dir) => { calls.push(['history', id, dir]); },
     focus: (id) => { calls.push(['focus', id]); },
+    blur: (id) => { calls.push(['blur', id]); },
     close: (id) => { calls.push(['close', id]); },
     snapshot: vi.fn(async (id: string) => {
       calls.push(['snapshot', id]);

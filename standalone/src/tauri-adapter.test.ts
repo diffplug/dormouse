@@ -448,20 +448,30 @@ describe("TauriAdapter pane webview", () => {
     const { adapter, invoke, deliver } = await booted(true);
     const host = adapter.paneWebview!;
     invoke.mockClear();
+    // One view's commands are sent one at a time, in the order they were made,
+    // and another view's do not wait on them.
+    let release!: () => void;
+    invoke.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
     host.place("s1", { x: 1, y: 2, width: 3, height: 4 });
     host.place("s1", null);
-    host.navigate("s1", "https://example.com/");
-    host.history("s1", "back");
-    host.focus(null);
-    host.close("s1");
+    host.focus("s2");
+    await Promise.resolve();
     expect(invoke.mock.calls).toEqual([
       ["pane_webview_place", { id: "s1", rect: { x: 1, y: 2, width: 3, height: 4 } }],
+      ["pane_webview_focus", { id: "s2" }],
+    ]);
+    release();
+    host.navigate("s1", "https://example.com/");
+    host.history("s1", "back");
+    host.blur("s1");
+    host.close("s1");
+    await vi.waitFor(() => expect(invoke.mock.calls.slice(2)).toEqual([
       ["pane_webview_place", { id: "s1", rect: null }],
       ["pane_webview_navigate", { id: "s1", url: "https://example.com/" }],
       ["pane_webview_history", { id: "s1", dir: "back" }],
-      ["pane_webview_focus", { id: null }],
+      ["pane_webview_focus", { id: null, from: "s1" }],
       ["pane_webview_close", { id: "s1" }],
-    ]);
+    ]));
     expect(await host.open("s1", "https://example.com/")).toEqual({ ok: false, error: "no window" });
     expect(await host.snapshot("s1")).toBeNull();
     expect(invoke).toHaveBeenLastCalledWith("pane_webview_snapshot", { id: "s1" });
