@@ -260,6 +260,7 @@ const CSP = [
 ];
 
 // --- Tauri -----------------------------------------------------------------------
+const PANE = 'standalone/src-tauri/src/pane_webview.rs';
 const TAURI = [
   [
     'standalone/src-tauri/src/lib.rs',
@@ -355,6 +356,76 @@ const TAURI = [
     "hands a pane webview's page a way into Dormouse",
     `${call} on a pane webview`,
   ]),
+  [
+    PANE,
+    replace('.with_devtools(false)', ''),
+    'a builder chain without .with_devtools(false)',
+    'the macOS pane builder leaving devtools at wry\'s default',
+  ],
+  [
+    PANE,
+    (path) => {
+      const text = readFileSync(path, 'utf8');
+      const at = text.lastIndexOf('.with_devtools(false)');
+      if (at <= text.indexOf('.with_devtools(false)')) throw new Error(`self-test fixture: ${path} has no second .with_devtools(false)`);
+      writeFileSync(path, text.slice(0, at) + text.slice(at + '.with_devtools(false)'.length));
+    },
+    'a builder chain without .with_devtools(false)',
+    'the Windows pane builder leaving devtools at wry\'s default',
+  ],
+  [
+    PANE,
+    append('\nfn __selftest(w: &W) { let _ = wry::WebViewBuilder::new().with_url("x").build(w); }\n'),
+    'a builder chain without .with_devtools(false)',
+    'a new pane builder that never mentions devtools',
+  ],
+  [
+    PANE,
+    replace('add_LaunchingExternalUriScheme', 'add_SelftestRemoved'),
+    'no LaunchingExternalUriScheme handler that calls SetCancel(true)',
+    'the external-scheme handler unregistered',
+  ],
+  [
+    PANE,
+    (path) => {
+      const text = readFileSync(path, 'utf8');
+      const at = text.indexOf('SetCancel(true)', text.indexOf('add_LaunchingExternalUriScheme'));
+      if (at < 0 || !text.includes('add_LaunchingExternalUriScheme')) throw new Error(`self-test fixture: ${path} cancels no external scheme`);
+      writeFileSync(path, `${text.slice(0, at)}SetCancel(false)${text.slice(at + 'SetCancel(true)'.length)}`);
+    },
+    'no LaunchingExternalUriScheme handler that calls SetCancel(true)',
+    'an external scheme let through to another app',
+  ],
+  [
+    PANE,
+    replace(',msSmartScreenProtection', ''),
+    'do not disable msSmartScreenProtection',
+    'SmartScreen left in the browser args',
+  ],
+  [
+    PANE,
+    replace('SetIsReputationCheckingRequired(false)', 'SetIsReputationCheckingRequired(true)'),
+    'no SetIsReputationCheckingRequired(false)',
+    'reputation checking turned on',
+  ],
+  [
+    PANE,
+    replace('std::mem::forget(Rc::clone(&view));', ''),
+    'leaks 0 with std::mem::forget',
+    'a Windows pane view no longer leaked',
+  ],
+  [
+    PANE,
+    append('\nfn __selftest(view: Rc<WebView>) { let _ = Rc::try_unwrap(view); }\n'),
+    'Rc::try_unwrap drops a Windows pane view',
+    'a Windows pane view unwrapped to drop',
+  ],
+  [
+    PANE,
+    append('\nfn __selftest(view: Rc<WebView>) { drop(view); }\n'),
+    'drops a Windows pane view',
+    'a Windows pane view dropped',
+  ],
   [
     'standalone/src-tauri/Cargo.toml',
     replace('tauri = { version = "2", features = [] }', 'tauri = { version = "2", features = ["unstable"] }'),
