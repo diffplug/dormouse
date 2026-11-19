@@ -818,6 +818,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-runtime-wry",
+ "webview2-com",
  "windows",
  "wry",
 ]
