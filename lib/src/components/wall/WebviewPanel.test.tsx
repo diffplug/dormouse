@@ -241,6 +241,48 @@ describe('WebviewPanel', () => {
     expect(getAgentBrowserScreenController(ID)!.chrome().url).toBe(URL);
   });
 
+  it('closes a view whose load failed before its open was answered', async () => {
+    let answer!: (result: Awaited<ReturnType<typeof pane.host.open>>) => void;
+    vi.mocked(pane.host.open).mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    await show();
+    act(() => pane.emit({ id: ID, kind: 'page', url: '', title: '', canGoBack: false, canGoForward: false, loading: false }));
+    expect(pane.of('close')).toEqual([]);
+    await act(async () => answer({ ok: true, page: { url: URL, title: '', canGoBack: false, canGoForward: false, loading: true } }));
+    expect(pane.of('close')).toEqual([['close', ID]]);
+    expect(container.textContent).toContain('it did not load');
+  });
+
+  it('retakes the still once its pane has stopped moving, since the page lays out for its size', async () => {
+    vi.useFakeTimers();
+    try {
+      await show();
+      frame();
+      await act(async () => { vi.advanceTimersByTime(1000); });
+      const before = pane.of('snapshot').length;
+      rect = { ...RECT, width: 500 };
+      frame();
+      await act(async () => { vi.advanceTimersByTime(100); });
+      rect = { ...RECT, width: 520 };
+      frame();
+      await act(async () => { vi.advanceTimersByTime(250); });
+      expect(pane.of('snapshot').length).toBe(before);
+      await act(async () => { vi.advanceTimersByTime(100); });
+      expect(pane.of('snapshot').length).toBe(before + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes a still when a page finishes loading, so a pane nobody touched has one to hide behind', async () => {
+    await show();
+    frame();
+    const before = pane.of('snapshot').length;
+    act(() => pane.emit({ id: ID, kind: 'page', url: URL, title: 'Loading', canGoBack: false, canGoForward: false, loading: true }));
+    expect(pane.of('snapshot').length).toBe(before);
+    act(() => pane.emit({ id: ID, kind: 'page', url: URL, title: 'Loaded', canGoBack: false, canGoForward: false, loading: false }));
+    expect(pane.of('snapshot').length).toBe(before + 1);
+  });
+
   it('opens the view where a URL-bar entry names, when it had none', async () => {
     await show({ params: { surfaceType: 'browser', renderMode: 'webview' } });
     expect(container.textContent).toContain('No URL was provided.');
@@ -269,6 +311,102 @@ describe('WebviewPanel', () => {
     expect(container.textContent).toContain('Couldn’t open the page — no window.');
     frame();
     expect(pane.of('place')).toEqual([]);
+  });
+
+  describe('the still that stands in for a hidden view', () => {
+    const still = () => container.querySelector('canvas');
+    // A decoded still is as wide as its JPEG's bytes, so its canvas names it.
+    beforeEach(() => {
+      vi.stubGlobal('createImageBitmap', vi.fn(async (blob: Blob) => ({ width: blob.size, height: 1, close: vi.fn() })));
+      return () => vi.unstubAllGlobals();
+    });
+    const page = (url: string) => ({ id: ID, kind: 'page' as const, url, title: '', canGoBack: false, canGoForward: false, loading: false });
+    /** A snapshot answer the test releases. */
+    function deferSnapshot(): (image: string | null) => Promise<void> {
+      let answer = (_: string | null) => {};
+      vi.mocked(pane.host.snapshot).mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+      return async (image) => { await act(async () => answer(image)); };
+    }
+
+    it('shows the latest snapshot while the view is hidden, never while it is shown', async () => {
+      await show();
+      frame();
+      await act(async () => pane.emit({ id: ID, kind: 'pointerleave' }));
+      expect(pane.of('snapshot')).toEqual([['snapshot', ID]]);
+      expect(still()).toBeNull();
+
+      await show({ extra: <Occluder /> });
+      expect(createImageBitmap).toHaveBeenCalledOnce();
+      expect(still()?.getAttribute('aria-hidden')).toBe('true');
+      expect(still()?.className).toContain('pointer-events-none');
+
+      await show();
+      expect(lastPlace()).toEqual(['place', ID, RECT]);
+      expect(still()).toBeNull();
+    });
+
+    it('hides the view at once, without waiting for a snapshot', async () => {
+      const answer = deferSnapshot();
+      await show();
+      frame();
+      act(() => pane.emit({ id: ID, kind: 'focus', focused: false }));
+      expect(pane.host.snapshot).toHaveBeenCalledExactlyOnceWith(ID);
+
+      await show({ extra: <Occluder /> });
+      expect(lastPlace()).toEqual(['place', ID, null]);
+      expect(still()).toBeNull();
+      await answer(`data:image/jpeg;base64,${btoa('late')}`);
+      expect(still()?.width).toBe('late'.length);
+    });
+
+    it('snapshots as the pointer leaves the view or the view loses the keyboard, only while it is shown', async () => {
+      await show({ extra: <Occluder /> });
+      act(() => pane.emit({ id: ID, kind: 'pointerleave' }));
+      act(() => pane.emit({ id: ID, kind: 'focus', focused: false }));
+      expect(pane.of('snapshot')).toEqual([]);
+
+      await show();
+      frame();
+      act(() => pane.emit({ id: 'surface:other', kind: 'pointerleave' }));
+      act(() => pane.emit({ id: ID, kind: 'focus', focused: true }));
+      expect(pane.of('snapshot')).toEqual([]);
+      await act(async () => pane.emit({ id: ID, kind: 'pointerleave' }));
+      expect(pane.of('snapshot')).toHaveLength(1);
+      await act(async () => pane.emit({ id: ID, kind: 'focus', focused: false }));
+      expect(pane.of('snapshot')).toHaveLength(2);
+    });
+
+    it('drops the still when the page moves to another URL, even one snapshotted before it moved', async () => {
+      await show();
+      frame();
+      await act(async () => pane.emit({ id: ID, kind: 'pointerleave' }));
+      await show({ extra: <Occluder /> });
+      act(() => pane.emit({ ...page(URL), title: 'Retitled' }));
+      expect(still()).not.toBeNull();
+      act(() => pane.emit(page('https://example.com/next')));
+      expect(still()).toBeNull();
+
+      const answer = deferSnapshot();
+      await show();
+      act(() => pane.emit({ id: ID, kind: 'pointerleave' }));
+      // Still loading, so the new page asks for no still of its own yet.
+      act(() => pane.emit({ ...page('https://example.com/later'), loading: true }));
+      await answer(`data:image/jpeg;base64,${btoa('next')}`);
+      await show({ extra: <Occluder /> });
+      expect(still()).toBeNull();
+    });
+
+    it('drops the still when the view closes', async () => {
+      await show();
+      frame();
+      await act(async () => pane.emit({ id: ID, kind: 'pointerleave' }));
+      act(() => pane.emit({ ...page(''), loading: false }));
+      expect(pane.of('close')).toEqual([['close', ID]]);
+      await act(async () => getAgentBrowserScreenController(ID)!.chromeActions.reload());
+      await show({ extra: <Occluder /> });
+      expect(container.textContent).not.toContain('Couldn’t open');
+      expect(still()).toBeNull();
+    });
   });
 
   it('is no real blur while its view holds the keyboard, until that ends or the panel goes', async () => {

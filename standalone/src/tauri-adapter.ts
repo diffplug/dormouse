@@ -495,6 +495,7 @@ export class TauriAdapter implements PlatformAdapter {
       history: (id, dir) => invoke("pane_webview_history", { id, dir }),
       focus: (id) => invoke("pane_webview_focus", { id }),
       close: (id) => invoke("pane_webview_close", { id }),
+      snapshot: (id) => rawInvoke<string>("pane_webview_snapshot", { id }).catch(() => null),
       onEvent: (listener) => {
         this.paneWebviewListeners.add(listener);
         return () => { this.paneWebviewListeners.delete(listener); };

@@ -69,6 +69,13 @@ pub fn pane_webview_reset(webview: Webview) -> Result<(), String> {
     imp::reset(webview)
 }
 
+/// A `data:image/jpeg;base64,` URL of the view's current rendering. Async:
+/// the main thread answers it, so waiting there would never end.
+#[tauri::command(async)]
+pub fn pane_webview_snapshot(webview: Webview, id: String) -> Result<String, String> {
+    imp::snapshot(webview, id)
+}
+
 #[cfg(target_os = "macos")]
 pub use imp::install;
 pub use imp::{close_all, forget_window};
@@ -103,6 +110,9 @@ mod imp {
     pub fn reset(_: Webview) -> Result<(), String> {
         Err(UNSUPPORTED.into())
     }
+    pub fn snapshot(_: Webview, _: String) -> Result<String, String> {
+        Err(UNSUPPORTED.into())
+    }
     pub fn forget_window(_: &AppHandle, _: &str) {}
     pub fn close_all(_: &AppHandle) {}
 }
@@ -113,8 +123,15 @@ mod imp {
     use block2::RcBlock;
     use objc2::rc::Retained;
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSEvent, NSEventMask, NSEventType, NSResponder, NSView, NSWindow};
-    use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{
+        NSBitmapImageFileType, NSBitmapImageRep, NSEvent, NSEventMask, NSEventType, NSImage, NSImageCompressionFactor,
+        NSResponder, NSView, NSWindow,
+    };
+    use objc2_foundation::{
+        NSDataBase64EncodingOptions, NSDictionary, NSError, NSNumber, NSOperatingSystemVersion, NSProcessInfo,
+    };
+    use objc2_web_kit::WKSnapshotConfiguration;
     use serde_json::{json, Value};
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
@@ -349,6 +366,57 @@ mod imp {
         command(webview, true, |panes, webview, owner| Ok(remove(panes, |_, pane| pane.owner == owner, Some(webview))))
     }
 
+    /// A snapshot's longest side in pixels: a Retina pane's full size would be
+    /// megabytes of base64 for a stand-in.
+    const SNAPSHOT_MAX_PX: f64 = 1600.0;
+    const SNAPSHOT_QUALITY: f64 = 0.7;
+    const SNAPSHOT_WAIT: Duration = Duration::from_secs(2);
+
+    /// The snapshot width in points that keeps a `width` by `height` point view,
+    /// at `scale` pixels per point, within `SNAPSHOT_MAX_PX`.
+    fn snapshot_width(width: f64, height: f64, scale: f64) -> f64 {
+        let longest = width.max(height) * scale;
+        if longest <= SNAPSHOT_MAX_PX { width } else { width * SNAPSHOT_MAX_PX / longest }
+    }
+
+    pub fn snapshot(webview: Webview, id: String) -> Result<String, String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        command(webview, false, move |panes, _, owner| {
+            let pane = panes.get(&id).filter(|pane| pane.owner == owner).ok_or("no such pane webview")?;
+            let view = pane.view.webview();
+            let size = view.bounds().size;
+            let scale = view.window().map_or(1.0, |window| window.backingScaleFactor());
+            // SAFETY: this runs on the main thread.
+            let config = unsafe { WKSnapshotConfiguration::new(MainThreadMarker::new_unchecked()) };
+            let width = NSNumber::new_f64(snapshot_width(size.width, size.height, scale));
+            // The handler runs later, on the main thread, so encoding never
+            // holds the registry.
+            let handler = RcBlock::new(move |image: *mut NSImage, _: *mut NSError| {
+                // SAFETY: WebKit passes a live image or null.
+                let _ = tx.send(unsafe { image.as_ref() }.and_then(jpeg_data_url));
+            });
+            // SAFETY: a property write and a call on a live WKWebView, on the main thread.
+            unsafe {
+                config.setSnapshotWidth(Some(&width));
+                view.takeSnapshotWithConfiguration_completionHandler(Some(&config), &handler);
+            }
+            Ok(())
+        })?;
+        rx.recv_timeout(SNAPSHOT_WAIT).ok().flatten().ok_or_else(|| "no snapshot".to_string())
+    }
+
+    fn jpeg_data_url(image: &NSImage) -> Option<String> {
+        let bitmap = NSBitmapImageRep::imageRepWithData(&*image.TIFFRepresentation()?)?;
+        let quality = NSNumber::new_f64(SNAPSHOT_QUALITY);
+        // SAFETY: a framework constant, and the compression factor it keys is a number.
+        let jpeg = unsafe {
+            let properties = NSDictionary::from_slices(&[NSImageCompressionFactor], &[quality.as_ref() as &AnyObject]);
+            bitmap.representationUsingType_properties(NSBitmapImageFileType::JPEG, &properties)?
+        };
+        let base64 = jpeg.base64EncodedStringWithOptions(NSDataBase64EncodingOptions::empty());
+        Some(format!("data:image/jpeg;base64,{base64}"))
+    }
+
     /// The window is gone, so nothing is left to focus.
     pub fn forget_window(app: &AppHandle, label: &str) {
         let label = label.to_string();
@@ -449,21 +517,26 @@ mod imp {
         });
 
         let app = app.clone();
-        let left = Cell::new(None);
+        let (left, over) = (Cell::new(None), Cell::new(None));
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit hands the monitor a live event, on the main thread.
             let (ev, mtm) = unsafe { (event.as_ref(), MainThreadMarker::new_unchecked()) };
-            on_event(&app, ev, mtm, &left);
+            on_event(&app, ev, mtm, &left, &over);
             event.as_ptr()
         });
-        let mask = NSEventMask::KeyDown | NSEventMask::FlagsChanged | NSEventMask::LeftMouseDown;
+        // tao's windows accept mouse-moved events, so the monitor sees every move.
+        let mask = NSEventMask::KeyDown | NSEventMask::FlagsChanged | NSEventMask::LeftMouseDown | NSEventMask::MouseMoved;
         // SAFETY: the block returns the event it was given.
         let monitor = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
         // Never removed: it lives as long as the app.
         std::mem::forget(monitor);
     }
 
-    fn on_event(app: &AppHandle, event: &NSEvent, mtm: MainThreadMarker, left: &Cell<Option<(Key, f64)>>) {
+    /// `over` is the id and owner of the shown view the pointer was last over.
+    fn on_event(
+        app: &AppHandle, event: &NSEvent, mtm: MainThreadMarker, left: &Cell<Option<(Key, f64)>>,
+        over: &Cell<Option<(String, String)>>,
+    ) {
         let Some(window) = event.window(mtm) else { return };
         // The id and owner of this window's view that `test` picks.
         let find = |test: &dyn Fn(&WryWebView) -> bool| {
@@ -476,10 +549,15 @@ mod imp {
             })
         };
         let kind = event.r#type();
-        if kind == NSEventType::LeftMouseDown {
+        if kind == NSEventType::LeftMouseDown || kind == NSEventType::MouseMoved {
             let point = event.locationInWindow();
             let hit = find(&|view| !view.isHidden() && view.mouse_inRect(view.convertPoint_fromView(point, None), view.bounds()));
-            if let Some((id, owner)) = hit {
+            if kind == NSEventType::MouseMoved {
+                // The app webview hears no move while a pane webview is under the pointer.
+                if let Some((id, owner)) = over.replace(hit.clone()).filter(|was| Some(was) != hit.as_ref()) {
+                    emit(app, &owner, &id, "pointerleave", json!({}));
+                }
+            } else if let Some((id, owner)) = hit {
                 emit(app, &owner, &id, "pointerdown", json!({}));
             }
             return;
@@ -589,6 +667,16 @@ mod imp {
                 assert!(!may_load(url), "{url}");
             }
             assert!(!is_web("about:blank") && !is_web("data:text/html,x"));
+        }
+
+        #[test]
+        fn a_snapshot_is_capped_on_its_longest_side() {
+            assert_eq!(snapshot_width(400.0, 300.0, 2.0), 400.0);
+            assert_eq!(snapshot_width(800.0, 600.0, 2.0), 800.0);
+            assert_eq!(snapshot_width(1600.0, 900.0, 2.0), 800.0);
+            // A tall view is capped by its height.
+            assert_eq!(snapshot_width(500.0, 1600.0, 1.0), 500.0);
+            assert_eq!(snapshot_width(500.0, 3200.0, 1.0), 250.0);
         }
 
         #[test]

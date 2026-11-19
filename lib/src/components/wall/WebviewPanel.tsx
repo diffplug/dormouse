@@ -29,10 +29,38 @@ import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, tabDisplayTitle } from './browser-url';
 import { NewTabPrompt } from './IframePanel';
 
+/** How long a pane's rect must hold still before its page is worth a still. */
+const STILL_AFTER_MOVE_MS = 300;
+
 type Status = { kind: 'opening' } | { kind: 'open' } | { kind: 'error'; error: string };
 
 function chromeOf(page: { url: string; title: string | null }): ChromeSnapshot {
   return { url: page.url, displayUrl: hostPathDisplay(page.url), title: page.title, key: null };
+}
+
+/** The app's CSP admits no `data:` image, so a still is decoded for a canvas. */
+async function decodeStill(url: string | null): Promise<ImageBitmap | null> {
+  if (!url) return null;
+  try {
+    const bytes = Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), (c) => c.charCodeAt(0));
+    return await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+  } catch {
+    return null;
+  }
+}
+
+function Still({ image }: { image: ImageBitmap }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => { ref.current!.getContext('2d')?.drawImage(image, 0, 0); }, [image]);
+  return (
+    <canvas
+      ref={ref}
+      width={image.width}
+      height={image.height}
+      aria-hidden
+      className="pointer-events-none absolute inset-0 h-full w-full object-cover object-left-top"
+    />
+  );
 }
 
 export function WebviewPanel({ id, params, parked }: PaneProps) {
@@ -61,16 +89,46 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
   // A URL-bar entry made while the view is opening, which the host would drop.
   const pendingNavRef = useRef<string | null>(null);
+  // A still of the page the placeholder shows while the view is hidden. Hiding
+  // never waits for one, so it is taken while the view is shown, as the user
+  // leaves the page: before any overlay can open. It never outlives its page.
+  const [still, setStill] = useState<ImageBitmap | null>(null);
+  const pageUrlRef = useRef(page.url);
+  const shownRef = useRef(false);
+  const takeStill = useCallback(() => {
+    if (!shownRef.current) return;
+    const at = pageUrlRef.current;
+    void host.snapshot(id).then(decodeStill).then((image) => { if (image && pageUrlRef.current === at) setStill(image); });
+  }, [host, id]);
 
   // Unlike the iframe's, every URL the host reports is persisted: the page
   // cannot forge it.
   const showPage = useCallback((next: PaneWebviewPage) => {
     if (!next.url) return;
+    if (next.url !== pageUrlRef.current) setStill(null);
+    pageUrlRef.current = next.url;
     setPage({ url: next.url, title: next.title || null });
     paneWriteRef.current.setTitle(id, tabDisplayTitle(next));
     const committed = browserSurfaceUrl(next.url);
     if (committed && committed !== urlRef.current) paneWriteRef.current.updateParams(id, { url: committed });
   }, [id]);
+
+  // A first load that fails leaves the view with no page at all. It is closed,
+  // so that Reload opens a new one rather than adopting it.
+  const settle = useCallback((next: PaneWebviewPage) => {
+    if (next.url || next.loading) {
+      showPage(next);
+      // A page nobody points at or types in still needs a still to hide behind.
+      if (!next.loading) takeStill();
+      return;
+    }
+    host.close(id);
+    setStill(null);
+    setStatus({ kind: 'error', error: 'it did not load' });
+  }, [host, id, showPage, takeStill]);
+  // What the host last reported while the view was opening: it can be newer
+  // than the page `open` answers with, and is not reported again.
+  const reportedRef = useRef<PaneWebviewPage | null>(null);
 
   // Opens the view, or adopts the one this Surface already has: it outlives
   // the panel, and only `closeBrowserSurface` destroys it.
@@ -78,6 +136,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   useEffect(() => {
     if (!hasUrl) return;
     let live = true;
+    reportedRef.current = null;
     setStatus({ kind: 'opening' });
     void host.open(id, urlRef.current!).then((result) => {
       if (!live) return;
@@ -88,28 +147,32 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
         setStatus({ kind: 'error', error: result.error });
         return;
       }
-      setStatus({ kind: 'open' });
-      showPage(result.page);
-      if (entry) host.navigate(id, entry);
+      // Read by the event listener before the next render.
+      statusRef.current = { kind: 'open' };
+      setStatus(statusRef.current);
+      if (entry) {
+        showPage(result.page);
+        host.navigate(id, entry);
+      } else settle(reportedRef.current ?? result.page);
     });
     return () => { live = false; };
-  }, [host, id, hasUrl, attempt, showPage]);
+  }, [host, id, hasUrl, attempt, showPage, settle]);
 
   useEffect(() => {
     const unsubscribe = host.onEvent((event) => {
       if (event.id !== id) return;
       switch (event.kind) {
         case 'page':
-          // A first load that fails leaves the view with no page at all. It is
-          // closed, so that Reload opens a new one rather than adopting it.
-          if (!event.url && !event.loading && statusRef.current.kind === 'open') {
-            host.close(id);
-            setStatus({ kind: 'error', error: 'it did not load' });
-          } else showPage(event);
+          if (statusRef.current.kind === 'open') settle(event);
+          else reportedRef.current = event;
           break;
         case 'pointerdown': actionsRef.current.onClickPanel(id); break;
+        case 'pointerleave': takeStill(); break;
         case 'leader': actionsRef.current.onFrameLeader(); break;
-        case 'focus': setPaneWebviewFocus(id, event.focused); break;
+        case 'focus':
+          setPaneWebviewFocus(id, event.focused);
+          if (!event.focused) takeStill();
+          break;
         case 'open-window': {
           const next = browserSurfaceUrl(event.url);
           if (next) setPendingOpenUrl(next);
@@ -119,13 +182,14 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     });
     // An unmounted panel's view is hidden, and a hidden view never holds focus.
     return () => { unsubscribe(); setPaneWebviewFocus(id, false); };
-  }, [host, id, showPage]);
+  }, [host, id, settle, takeStill]);
 
   // Shown only while its pane is in sight and no overlay is open, following
   // the placeholder's laid-out rect every frame.
   const seen = isSeenObserved(useSurfaceSight(parked, id));
   const occluded = usePaneWebviewsOccluded();
   const shown = seen && !occluded && status.kind === 'open' && url !== null;
+  shownRef.current = shown;
   // The view has the keyboard only while it is shown and its pane is the one
   // in passthrough. Selection can leave without a press in the app webview (a
   // header chip, `dor`), and nothing else would take the keyboard back.
@@ -148,20 +212,25 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     if (!shown) return;
     let frame = 0;
     let placed: DOMRect | null = null;
+    // A still taken at another size shows the page laid out for that size.
+    let resettled: ReturnType<typeof setTimeout> | undefined;
     const follow = () => {
       const box = elRef.current!.getBoundingClientRect();
       if (!placed || !rectsEqual(placed, box)) {
         placed = box;
         host.place(id, { x: box.x, y: box.y, width: box.width, height: box.height });
+        clearTimeout(resettled);
+        resettled = setTimeout(takeStill, STILL_AFTER_MOVE_MS);
       }
       frame = requestAnimationFrame(follow);
     };
     follow();
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(resettled);
       host.place(id, null);
     };
-  }, [host, id, shown]);
+  }, [host, id, shown, takeStill]);
 
   useEffect(() => {
     if (status.kind !== 'open') return;
@@ -236,6 +305,8 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
         </PaneMessage>
       ) : status.kind === 'error' ? (
         <PaneMessage className="text-muted">Couldn’t open the page — {status.error}.</PaneMessage>
+      ) : still && !shown && status.kind === 'open' ? (
+        <Still image={still} />
       ) : null}
       {pendingOpenUrl && (
         <NewTabPrompt

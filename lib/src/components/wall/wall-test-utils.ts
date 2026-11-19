@@ -298,6 +298,10 @@ export function installPaneWebview(platform: PlatformAdapter) {
     history: (id, dir) => { calls.push(['history', id, dir]); },
     focus: (id) => { calls.push(['focus', id]); },
     close: (id) => { calls.push(['close', id]); },
+    snapshot: vi.fn(async (id: string) => {
+      calls.push(['snapshot', id]);
+      return `data:image/jpeg;base64,${btoa(`still ${calls.length}`)}`;
+    }),
     onEvent(listener) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };

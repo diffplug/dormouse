@@ -426,6 +426,7 @@ describe("TauriAdapter pane webview", () => {
     invoke.mockImplementation((async (cmd: string) => {
       if (cmd === "pane_webview_supported") return supported;
       if (cmd === "pane_webview_open") throw "no window";
+      if (cmd === "pane_webview_snapshot") throw "no snapshot";
       return undefined;
     }) as unknown as typeof rawInvoke);
     const adapter = new TauriAdapter();
@@ -462,6 +463,8 @@ describe("TauriAdapter pane webview", () => {
       ["pane_webview_close", { id: "s1" }],
     ]);
     expect(await host.open("s1", "https://example.com/")).toEqual({ ok: false, error: "no window" });
+    expect(await host.snapshot("s1")).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith("pane_webview_snapshot", { id: "s1" });
 
     const events: unknown[] = [];
     const unsubscribe = host.onEvent((event) => events.push(event));
