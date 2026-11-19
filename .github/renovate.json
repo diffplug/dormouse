@@ -145,9 +145,9 @@
       "allowedVersions": "<0.19"
     },
     {
-      "description": "Tauri's CLI fails `tauri build` and `tauri dev` unless each JS binding (@tauri-apps/api, @tauri-apps/plugin-*) shares a major.minor with its crate (tauri, tauri-plugin-*), and CI runs neither, so a split bump merges green and breaks the next release. Group the npm and cargo halves of the Tauri family into one PR; standalone/scripts/tauri-lockstep.test.mjs pins this grouping and the installed pairs. Must stay after the cargo group, which it overrides for the Tauri crates. wry rides along: the pane webviews build on the copy tauri-runtime-wry links, so a solo wry bump would add a second one",
+      "description": "Tauri's CLI fails `tauri build` and `tauri dev` unless each JS binding (@tauri-apps/api, @tauri-apps/plugin-*) shares a major.minor with its crate (tauri, tauri-plugin-*), and CI runs neither, so a split bump merges green and breaks the next release. Group the npm and cargo halves of the Tauri family into one PR; standalone/scripts/tauri-lockstep.test.mjs pins this grouping and the installed pairs. Must stay after the cargo group, which it overrides for the Tauri crates. wry and webview2-com ride along: the pane webviews build on the copies tauri-runtime-wry links, so a solo bump of either would add a second one",
       "matchManagers": ["npm", "cargo"],
-      "matchPackageNames": ["@tauri-apps/**", "tauri", "tauri-*", "wry"],
+      "matchPackageNames": ["@tauri-apps/**", "tauri", "tauri-*", "wry", "webview2-com"],
       "groupName": "tauri",
       "groupSlug": "tauri",
       "separateMajorMinor": false

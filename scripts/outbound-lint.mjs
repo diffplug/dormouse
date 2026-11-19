@@ -39,8 +39,11 @@
  *      `withGlobalTauri`. The updater's endpoint and key are pinned by
  *      `standalone/scripts/updater-trust-root.test.mjs`. A pane webview — the
  *      user's own browser pane, which the policy does not gate — is wry in
- *      `PANE_WEBVIEW` alone, handed no IPC, script, scheme, or devtools; and
- *      no `unstable` feature, Tauri's multiwebview, in `Cargo.toml`.
+ *      `PANE_WEBVIEW` alone, handed no IPC, script, scheme, or devtools, every
+ *      builder chain saying `with_devtools(false)`; its WebView2 half cancels
+ *      every external scheme, turns SmartScreen off in its browser args and
+ *      settings, and leaks every view it builds rather than ever dropping one;
+ *      and no `unstable` feature, Tauri's multiwebview, in `Cargo.toml`.
  *
  * Listeners — the other half of "phones can't reach it" — are
  * `scripts/loopback-lint.mjs`'s: a loopback bind must reference a guard, and a
@@ -733,6 +736,53 @@ if (tauriConf.app?.withGlobalTauri) {
       + '      A pane webview loads the internet at its real origin; it gets no IPC, script,\n'
       + '      scheme, or devtools (docs/specs/webview-pane.md -> "Page boundary").',
     );
+  }
+  // Absent is not off: wry turns devtools on in a debug build, so every builder
+  // chain must say `with_devtools(false)` before it builds.
+  const SPEC = 'docs/specs/security-local.md -> "Webview panes"';
+  const builders = [...pane.matchAll(/\bWebViewBuilder\s*::\s*new(?:_with_web_context)?\s*\(/g)];
+  if (pane && builders.length === 0) problems.push(`${PANE_WEBVIEW}: found no \`WebViewBuilder::new\` — the devtools rule is checking nothing.`);
+  for (const builder of builders) {
+    const end = /\.build(?:_as_child)?\s*\(/g;
+    end.lastIndex = builder.index;
+    const stop = end.exec(pane);
+    if (!stop || !/\.with_devtools\s*\(\s*false\s*\)/.test(pane.slice(builder.index, stop.index))) {
+      problems.push(`${PANE_WEBVIEW}:${lineOf(pane, builder.index)}: a builder chain without .with_devtools(false) gets devtools in a debug build (${SPEC}).`);
+    }
+  }
+  // The Windows module, to the end of the file: WebView2's own controls.
+  const windows = /#\[cfg\(windows\)\]\s*mod\s+imp\b/.exec(pane);
+  if (pane && !windows) problems.push(`${PANE_WEBVIEW}: found no \`#[cfg(windows)] mod imp\` — the WebView2 rules are checking nothing.`);
+  const win = windows ? pane.slice(windows.index) : '';
+  const at = (index) => `${PANE_WEBVIEW}:${lineOf(pane, windows.index + index)}`;
+  if (windows) {
+    // The argument list of `add_LaunchingExternalUriScheme(`, parentheses balanced.
+    const launch = /\badd_LaunchingExternalUriScheme\s*\(/.exec(win);
+    let handler = '';
+    if (launch) {
+      let depth = 1;
+      let i = launch.index + launch[0].length;
+      for (; i < win.length && depth > 0; i += 1) depth += win[i] === '(' ? 1 : win[i] === ')' ? -1 : 0;
+      handler = win.slice(launch.index, i);
+    }
+    if (!/\bSetCancel\s*\(\s*true\s*\)/.test(handler)) {
+      problems.push(`${launch ? at(launch.index) : PANE_WEBVIEW}: no LaunchingExternalUriScheme handler that calls SetCancel(true); WebView2 would hand mailto: and the like to another app (${SPEC}).`);
+    }
+    if (!/\.with_additional_browser_args\s*\(\s*"[^"]*--disable-features=[\w,]*\bmsSmartScreenProtection\b/.test(win)) {
+      problems.push(`${PANE_WEBVIEW}: the Windows builder's browser args do not disable msSmartScreenProtection; SmartScreen sends every visited URL to Microsoft (${SPEC}).`);
+    }
+    if (!/\bSetIsReputationCheckingRequired\s*\(\s*false\s*\)/.test(win)) {
+      problems.push(`${PANE_WEBVIEW}: no SetIsReputationCheckingRequired(false); SmartScreen sends every visited URL to Microsoft (${SPEC}).`);
+    }
+    // wry's `Drop` for a child WebView2 removes the app webview's own subclass,
+    // so each Windows pane view leaks one reference and is closed by hand.
+    const builds = [...win.matchAll(/\bWebViewBuilder\s*::\s*new(?:_with_web_context)?\s*\(/g)].length;
+    const leaks = [...win.matchAll(/\bmem\s*::\s*forget\s*\(\s*Rc\s*::\s*clone\s*\(\s*&\s*\w+\s*\)\s*\)/g)].length;
+    if (leaks < builds) {
+      problems.push(`${PANE_WEBVIEW}: the Windows module builds ${builds} view(s) but leaks ${leaks} with std::mem::forget(Rc::clone(&view)); a dropped pane view unhooks the app webview (${SPEC}).`);
+    }
+    const unleak = /\bRc\s*::\s*(?:try_unwrap|into_inner)\b|\bdrop\s*\(\s*[\w.&*\s]*view/i.exec(win);
+    if (unleak) problems.push(`${at(unleak.index)}: ${unleak[0]} drops a Windows pane view, which unhooks the app webview (${SPEC}).`);
   }
   const cargo = readRepoFile('standalone/src-tauri/Cargo.toml');
   if (/["/]unstable"/.test(cargo.replace(/#.*$/gm, ''))) {
