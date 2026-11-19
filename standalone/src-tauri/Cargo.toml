@@ -40,7 +40,14 @@ windows = { version = "0.62", features = [
     # console_parent: owner chains, and re-enabling a window a dead dialog disabled.
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
+    # pane_webview.rs: window handles, and the keyboard Raw Input the leader reads.
+    "Win32_Foundation",
+    "Win32_UI_Input",
 ] }
+# The pane webviews (pane_webview.rs), on the wry and webview2-com
+# tauri-runtime-wry already links: one copy of each.
+wry = { version = "0.57", default-features = false }
+webview2-com = "0.39"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # One instance per user (run in lib.rs); macOS relies on LaunchServices.
