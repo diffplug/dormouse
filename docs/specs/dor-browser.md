@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary, and `docs/specs/dor-cli.md` for the shared `dor` CLI, surface handle model, and host control plumbing this surface builds on.
 > - Owns the browser Surface end to end — params, chrome, the renderers, the iframe proxy boundary. Its security boundaries are audited in `docs/specs/security-local.md`, whose `FAIL IF` lines own the properties this spec's mechanisms serve. Evidence behind the rules: [dor-browser.rationale.md](dor-browser.rationale.md).
 
-One body component renders all web content: `BrowserPanel`, persisted as `surfaceType: 'browser'` with a swappable `renderMode`. A browser pane has a target (today always a bare URL; process-backed targets belong to the **dor-tools** scope, `docs/specs/dor-tool.md`) and a render mode (`agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout`, `iframe`). **Never make render a separate surface kind**: it is a pane parameter, and `docs/specs/glossary.md` owns the `kind` / `render_mode` mapping.
+One body component renders all web content: `BrowserPanel`, persisted as `surfaceType: 'browser'` with a swappable `renderMode`. A browser pane has a target (today always a bare URL; process-backed targets belong to the **dor-tools** scope, `docs/specs/dor-tool.md`) and a render mode (`agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout`, `iframe`, `webview` (`docs/specs/webview-pane.md`)). **Never make render a separate surface kind**: it is a pane parameter, and `docs/specs/glossary.md` owns the `kind` / `render_mode` mapping.
 
 Browser entry points take a URL, a schemeless `host:port`, or a terminal Surface handle (`docs/specs/dor-cli.md` → Browser Open Target Resolution): `dor agent-browser ...` and `dor playwright ...` bind the user's own installed CLI to a browser pane; `dor iframe <url>` uses the [Iframe Renderer](#iframe-renderer).
 
@@ -11,7 +11,7 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`, `lib/src/components
 
 ## Providers
 
-An automated renderer belongs to one provider, the CLI that drives its browser. **Must read every per-provider fact from the one registry** — render modes, CLI, binary for `dor`, the hosts and the webview; label and viewport hint for the GUI — never a ternary on the provider or a mode prefix. **Must spell provider names in full and lowercase in commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` reads anything but a provider's mode as `iframe`.
+An automated renderer belongs to one provider, the CLI that drives its browser. **Must read every per-provider fact from the one registry** — render modes, CLI, binary for `dor`, the hosts and the webview; label and viewport hint for the GUI — never a ternary on the provider or a mode prefix. **Must spell provider names in full and lowercase in commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` reads anything but a provider's mode or `webview` as `iframe`.
 
 The remembered provider preference defaults to agent-browser, else an available provider.
 
@@ -20,7 +20,7 @@ Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in `dor-lib-common/sr
 ## Canonical Params
 
 - **Must treat `renderMode` as canonical, resolving an absent one to `iframe`, never to a live agent-browser.** Only params may omit it; a live `ScreenSnapshot` always carries one.
-- `url` is the canonical target across render swaps and relaunches. Agent-browser mirrors the newest http(s) active tab URL into it, and the host relaunches at nothing else; iframe persists only navigations Dormouse chrome initiated.
+- `url` is the canonical target across render swaps and relaunches. Agent-browser mirrors the newest http(s) active tab URL into it, and the host relaunches at nothing else; iframe persists only navigations Dormouse chrome initiated; webview: `docs/specs/webview-pane.md` -> "Lifetime".
 - **Must keep persisted browser params flat** — `browserViewport` stores resolved sizing, `launchFallback` may carry restore params — and derive popped-out presentation from `renderMode`, never a separate flag.
 - **Never carry a stream in params**: the stream a launch, `attach`, or `dor` hands over goes straight to the Surface's controller (rationale).
 - `contextPortKey` is persisted, carried only by a Surface the pane context menu opened for a port. **Must keep agent-browser's provider suffix `agent`**, the value persisted before Playwright existed, so a restored pane still matches.
@@ -35,7 +35,7 @@ Source of truth: `resolveRenderMode` and `launchFallbackFromParams` in `lib/src/
 CLI focus follows `docs/specs/dor-cli.md` → "Focus intent"; Pane Context Menu placement and `docs/specs/layout.md` corner case #6 retain their GUI focus behavior.
 
 - **Must unpark a doored pane before killing it**, so its DOM dies with the Surface.
-- **Must kill an automated pane, or swap away from its renderer, through `closeBrowserSurface`**: it closes the session and releases every client resource; the Surface's work in flight never outlives the close ([Browser Host](#browser-host)).
+- **Must kill an automated or webview pane, or swap away from its renderer, through `closeBrowserSurface`**: it closes the session or view and releases every client resource; the Surface's work in flight never outlives the close ([Browser Host](#browser-host)).
 - **Must release a Workspace transfer's browser controllers without closing their sessions**; the destination attaches to them, or opens the same named session a launch was opening. An abandoned launch closes only a session the host minted.
 - An iframe view's proxy grant ends with its lease ([Iframe Proxy Leases](#iframe-proxy-leases)).
 
@@ -53,7 +53,7 @@ Source of truth: `lib/src/lib/surface-sight.ts`, `useSurfaceVisibility` in `lib/
 
 ## Browser Chrome
 
-**Must register a screen controller from both renderers, unconditionally**: chrome is keyed by it, and render swaps are separately host-gated.
+**Must register a screen controller from every renderer, unconditionally**: chrome is keyed by it, and render swaps are separately host-gated.
 
 **Must follow CLI scheme selection in the URL editor**, plus bare loopback → `http://` and bare remote → `https://` (`normalizeNavUrl`), and refuse any other scheme, since no renderer opens one.
 
@@ -82,7 +82,7 @@ Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareFor
 
 ## Display Modal And Render Swaps
 
-The Display modal is the GUI for render mode and screencast resolution, Resize with pane or Fixed size. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
+The Display modal is the GUI for render mode and screencast resolution, Resize with pane or Fixed size. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; `webview` where the host has pane webviews; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
 
 The host owns Resize with pane (rationale), answering each engagement — a choice of Resize with pane, named in every size sent — with its state: applying, synced, or off.
 
@@ -97,9 +97,10 @@ Surface identity across swaps: `docs/specs/glossary.md` → "Invariants" I10.
 
 | From -> To | Behavior |
 | --- | --- |
-| `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | Swaps at once to a session-less renderer whose controller launches at the current URL, headed for a popout (rationale). A failed launch restores the previous renderer in place (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability; a non-http(s) `url` refuses the swap (`browserSurfaceUrl`). |
+| any other renderer -> `agent-browser-*` / `playwright-*` | Swaps at once to a session-less renderer whose controller launches at the current URL, headed for a popout (rationale). A failed launch restores the previous renderer in place (`launchFallback: { restore }`), even minimized: the embed or webview, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability; a non-http(s) `url` refuses the swap (`browserSurfaceUrl`). |
 | `agent-browser-screencast` ↔ `agent-browser-popout` | Same session, headed/headless relaunch; preserves only the active URL. |
-| `agent-browser-*` -> `iframe` | Frames the page on screen (chrome URL, then `params.url`); with multiple tabs, requires confirmation, since only the active tab survives. |
+| any other renderer -> `iframe` | Frames the page on screen (chrome URL, then `params.url`); with multiple tabs, requires confirmation, since only the active tab survives. |
+| any other renderer -> `webview` | Opens the page on screen, if http(s). Inert without the capability. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`, `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`, `onSwapRenderMode` in `lib/src/components/Wall.tsx`, `createViewportSync` in `lib/src/host/browser-sync.ts`.
 
@@ -199,7 +200,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 
 ### Browser Host
 
-**Must carry every browser operation on one `PlatformAdapter.browser(request)`**, a provider-tagged `BrowserRequest` answered by a `BrowserResult`. A host lists the providers it drives in `browserProviders`; one without them (the web demo) offers no automated renderer. VS Code runs the shared host in the extension host, standalone the bundled copy in the sidecar. **Never put a frame on a request's transport** (rationale).
+**Must carry every automated browser operation on one `PlatformAdapter.browser(request)`**, a provider-tagged `BrowserRequest` answered by a `BrowserResult`. A host lists the providers it drives in `browserProviders`; one without them (the web demo) offers no automated renderer. VS Code runs the shared host in the extension host, standalone the bundled copy in the sidecar. **Never put a frame on a request's transport** (rationale).
 
 - `launch` opens an http(s) `url` in a new GUI session, or for a named session navigates its browser when up in the mode asked for, else relaunches it headed or headless; it resolves when the browser is up, not the page. **Never stop a browser a named launch finds up in its mode**: a Tool re-announced (rationale).
 - **Never start a browser from `attach` or `measure`**, except that `attach` relaunches a gone one at the page its caller names, answering `relaunched`.
@@ -324,7 +325,7 @@ Source of truth: `createIframeProxyUrl` and `releaseIframeProxyLease` in `lib/sr
 
 The proxy's redirect page also posts `navigate` ([Iframe External Origins](#iframe-external-origins)), which any proxied document can forge.
 
-**Must let only `http:` and `https:` reach a browser Surface, re-checked at the sink**: `open-window`, `navigate`, and the control socket's `surface.iframe` go through `browserSurfaceUrl`, and `IframePanel` checks `params.url` again before framing it, since the header's URL editor writes there too (rationale).
+**Must let only `http:` and `https:` reach a browser Surface, re-checked at the sink**: `open-window`, `navigate`, and the control socket's `surface.iframe` go through `browserSurfaceUrl`, and `IframePanel` and `WebviewPanel` check `params.url` again before loading it, since the header's URL editor writes there too (rationale).
 
 The panel's listener checks the message origin against its own proxy origin (`docs/specs/security-local.md` -> "Browser panes", which also bounds `leader` and `pointerdown`). A `pointerdown` enters its pane like a click; the shim focuses its own frame before posting one, since a browser gives a page that cancels a press no focus (rationale). A leader message exits passthrough like an in-document dual-tap; a `location` maps back to its upstream URL for chrome and history without reloading the frame; a new-tab request asks before opening an adjacent browser pane.
 

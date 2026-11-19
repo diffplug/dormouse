@@ -12,6 +12,8 @@ Evidence behind [webview-pane.md](webview-pane.md), keyed by its headings. Measu
 
 Removing the view from its window and adding it back kept the page: no reload, form state intact.
 
+A first load that fails leaves the view with no page at all, and `open` adopts an existing view without navigating it, so Reload would adopt an empty view.
+
 ## Visibility
 
 Hiding the view kept its page, raised `visibilitychange`, stopped `requestAnimationFrame`, and slowed a 100 ms timer to about one tick a second.
@@ -24,7 +26,7 @@ Hiding a view that held first responder left the window itself holding it, not t
 
 ## Page boundary
 
-**Why a page keeps `about:`, `blob:`, and `data:`.** wry's navigation handler hears every frame and cannot tell the top one, and pages frame those documents routinely; none reaches outside the engine, where `file:` reads the disk and any other scheme starts another app.
+**Why a page may frame `about:`, `blob:`, and `data:`.** wry's navigation handler hears every frame and cannot tell the top one, and pages frame those documents routinely; none reaches outside the engine, where `file:` reads the disk and any other scheme starts another app.
 
 **Why the permission handler is explicit.** wry grants a media-capture request outright when no handler is set.
 

@@ -199,7 +199,7 @@ Wall starts in `command` mode. Embedders may pass `initialMode="passthrough"` wh
 
 Enter passthrough mode: clicking any pane body or header; `Enter` or `z` on a selected pane; creating a terminal through a manual split (`|` / `%` / `-` / `"`, a header split button) or a host New Terminal action; clicking or pressing `Enter` on a door (restoring the session first); clicking a Workspace tab's TODO pill ([Workspace tabs](#workspace-tabs)); a context terminal taking focus, by any route, leaving the source unfocused.
 
-Enter command mode: Left Cmd, then Right Cmd in quick succession — or the same left-then-right gesture with Shift — detected even while xterm holds DOM focus. From a context terminal it moves focus to the context's controls.
+Enter command mode: Left Cmd, then Right Cmd in quick succession — or the same left-then-right gesture with Shift — detected even while xterm or a pane webview holds focus. From a context terminal it moves focus to the context's controls.
 
 - Left Cmd then Right Shift does not trigger, and **both modifiers must stay live on every platform** (rationale).
 - **Must consume every bare Meta/Shift press outside the terminal context in this detector**, so no later handler mistakes it for a command key.
@@ -230,7 +230,7 @@ flowchart TD
   R -- no --> KC["kill confirmation → stray-key prompt"]
   KC --> DL{"dialog lease held?"}
   DL -- no --> W["Workspace shortcuts → pane shortcuts → pane navigation → stray key"]
-  M["iframe shim leader message, accepted by IframePanel"] --> MA{"passthrough?"}
+  M["iframe shim or pane webview leader, accepted by its panel"] --> MA{"passthrough?"}
   MA -- yes --> CM["command mode"]
 ```
 
@@ -463,7 +463,7 @@ A store commit that empties the tree (last pane killed or minimized) spawns one 
 
 > Numbers are cited from other specs and code: never renumber; leave a retired one retired.
 
-- #2 — A focused iframe surface is not a window blur: it blurs the window while `document.hasFocus()` stays true, so presence ends (`docs/specs/alert.md` → Engagement), and a pane or sash drag cancels, only on a real blur. Source of truth: `isRealBlur` in `lib/src/lib/window-focus.ts`.
+- #2 — A focused iframe surface, which blurs the window while `document.hasFocus()` stays true, or a focused pane webview is no window blur, so presence ends (`docs/specs/alert.md` → Engagement), and a pane or sash drag cancels, only on a real blur. Source of truth: `isRealBlur` in `lib/src/lib/window-focus.ts`.
 - #6 — Focus-neutral surface creation (a CLI creation `docs/specs/dor-cli.md` → "Focus intent" leaves unfocused): the create never re-parents the caller's subtree, steals activation, or selects. The one exception: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Any completed teardown preserves the caller's live selection.
 
 ## Future
