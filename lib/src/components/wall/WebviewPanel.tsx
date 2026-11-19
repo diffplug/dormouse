@@ -7,7 +7,8 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
-import type { PaneWebviewPage, PaneWebviewRect } from '../../lib/platform/types';
+import type { PaneWebviewPage } from '../../lib/platform/types';
+import { rectsEqual } from '../../lib/rect-tween';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import { isSeenObserved } from '../../lib/surface-sight';
 import { usePaneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
@@ -40,8 +41,8 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const actions = useContext(WallActionsContext);
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
-  const paneWrite = useContext(PaneWriteContext);
   const passthroughPaneId = useContext(PassthroughPaneIdContext);
+  const paneWrite = useContext(PaneWriteContext);
   const paneWriteRef = useRef(paneWrite);
   paneWriteRef.current = paneWrite;
   const elRef = useRef<HTMLDivElement>(null);
@@ -140,12 +141,12 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   useLayoutEffect(() => {
     if (!shown) return;
     let frame = 0;
-    let placed: PaneWebviewRect | null = null;
+    let placed: DOMRect | null = null;
     const follow = () => {
       const box = elRef.current!.getBoundingClientRect();
-      if (!placed || placed.x !== box.x || placed.y !== box.y || placed.width !== box.width || placed.height !== box.height) {
-        placed = { x: box.x, y: box.y, width: box.width, height: box.height };
-        host.place(id, placed);
+      if (!placed || !rectsEqual(placed, box)) {
+        placed = box;
+        host.place(id, { x: box.x, y: box.y, width: box.width, height: box.height });
       }
       frame = requestAnimationFrame(follow);
     };
@@ -192,14 +193,12 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       else setAttempt((n) => n + 1);
     },
   }), [host, id]);
-  const pageRef = useRef(page);
-  pageRef.current = page;
   const registrationRef = useRef<ScreenRegistration | null>(null);
   useEffect(() => {
     const registration = registerAgentBrowserScreen(id, {
       snapshot: { renderMode: 'webview', viewport: { w: 0, h: 0, dpr: 1 }, syncEngaged: false },
       actions: screenActions,
-      chrome: chromeOf(pageRef.current),
+      chrome: chromeOf(page),
       chromeActions,
       hostCapable: false,
       renderModes,

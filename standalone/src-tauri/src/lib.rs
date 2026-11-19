@@ -5904,8 +5904,8 @@ mod tests {
         assert!(exit.contains("relaunch_requested(app)"));
     }
 
-    /// docs/specs/webview-pane.md -> "Lifetime": a window's pane webviews end
-    /// with it, and at exit every one goes before the sidecar.
+    /// A window's pane webviews end with it, and at exit every one goes
+    /// before the sidecar.
     #[test]
     fn pane_webviews_end_with_their_window_and_the_app() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();

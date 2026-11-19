@@ -73,11 +73,11 @@ pub fn pane_webview_reset(webview: Webview) -> Result<(), String> {
 pub use imp::install;
 pub use imp::{close_all, forget_window};
 
+const UNSUPPORTED: &str = "pane webviews need macOS 14 or later";
+
 #[cfg(not(target_os = "macos"))]
 mod imp {
     use super::*;
-
-    const UNSUPPORTED: &str = "pane webviews need macOS 14 or later";
 
     pub fn supported() -> bool {
         false
@@ -147,6 +147,10 @@ mod imp {
         matches!(scheme(url).as_deref(), Some("http" | "https"))
     }
 
+    fn web_only(url: &str) -> Result<(), String> {
+        is_web(url).then_some(()).ok_or_else(|| format!("not an http(s) URL: {url}"))
+    }
+
     /// The handler hears every frame's navigation, and pages frame their own
     /// `about:`, `blob:` and `data:` documents. Anything else would leave the
     /// engine: a file, or a scheme another app answers.
@@ -161,8 +165,9 @@ mod imp {
         focused: bool,
     }
 
+    type Panes = HashMap<String, Pane>;
     thread_local! {
-        static PANES: RefCell<HashMap<String, Pane>> = RefCell::default();
+        static PANES: RefCell<Panes> = RefCell::default();
     }
     /// Whether any pane exists, so the poll leaves the main thread alone otherwise.
     static ANY: AtomicBool = AtomicBool::new(false);
@@ -172,10 +177,10 @@ mod imp {
         NSProcessInfo::processInfo().isOperatingSystemAtLeastVersion(floor)
     }
 
-    /// Run `f` on the main thread with the registry, then report what changed.
+    /// Run `f` on the main thread with the registry; with `report`, then
+    /// report what changed rather than waiting for the poll.
     fn on_main<T: Send + 'static>(
-        app: &AppHandle,
-        f: impl FnOnce(&mut HashMap<String, Pane>) -> Result<T, String> + Send + 'static,
+        app: &AppHandle, report: bool, f: impl FnOnce(&mut Panes) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let handle = app.clone();
@@ -186,19 +191,34 @@ mod imp {
                 ANY.store(!panes.is_empty(), Ordering::Relaxed);
                 result
             });
-            sync(&handle);
+            if report {
+                sync(&handle);
+            }
             let _ = tx.send(result);
         })
         .map_err(|e| e.to_string())?;
         rx.recv().map_err(|_| "the main thread dropped the call".to_string())?
     }
 
-    fn label(webview: &Webview) -> String {
-        webview.window().label().to_string()
+    /// A command from `webview`, with the label of the window it came from.
+    fn command<T: Send + 'static>(
+        webview: Webview, report: bool, f: impl FnOnce(&mut Panes, &Webview, &str) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let app = webview.app_handle().clone();
+        on_main(&app, report, move |panes| {
+            let owner = webview.window().label().to_string();
+            f(panes, &webview, &owner)
+        })
     }
 
-    fn owned<'a>(panes: &'a HashMap<String, Pane>, id: &str, owner: &str) -> Option<&'a WebView> {
-        panes.get(id).filter(|pane| pane.owner == owner).map(|pane| &pane.view)
+    /// A command on `id`'s view, which does nothing unless `webview`'s window owns it.
+    fn on_view(
+        webview: Webview, id: String, report: bool, f: impl FnOnce(&WebView, &Webview) -> Result<(), String> + Send + 'static,
+    ) -> Result<(), String> {
+        command(webview, report, move |panes, webview, owner| match panes.get(&id).filter(|pane| pane.owner == owner) {
+            Some(pane) => f(&pane.view, webview),
+            None => Ok(()),
+        })
     }
 
     /// The window handle tao gives Tauri names its own view, which the app
@@ -219,11 +239,11 @@ mod imp {
         unsafe { Retained::retain(ptr.cast::<NSWindow>()) }.ok_or_else(|| "no window".to_string())
     }
 
-    fn build(app: &AppHandle, webview: &Webview, id: &str, url: &str) -> Result<WebView, String> {
+    fn build(webview: &Webview, id: &str, url: &str) -> Result<WebView, String> {
         let window = ns_window(webview)?;
         let content = window.contentView().ok_or("the window has no content view")?;
         let parent = ContentView(NonNull::from(&*content).cast());
-        let (app, id) = (app.clone(), id.to_string());
+        let (app, id) = (webview.app_handle().clone(), id.to_string());
         WebViewBuilder::new()
             .with_url(url)
             .with_visible(false)
@@ -249,67 +269,56 @@ mod imp {
 
     pub fn open(webview: Webview, id: String, url: String) -> Result<PageState, String> {
         if !supported() {
-            return Err("pane webviews need macOS 14 or later".into());
+            return Err(UNSUPPORTED.into());
         }
-        let app = webview.app_handle().clone();
-        on_main(&app.clone(), move |panes| {
-            let owner = label(&webview);
+        command(webview, true, move |panes, webview, owner| {
             if let Some(pane) = panes.get_mut(&id) {
                 if pane.owner != owner {
-                    let window = ns_window(&webview)?;
+                    let window = ns_window(webview)?;
                     pane.view.set_visible(false).map_err(|e| e.to_string())?;
                     pane.view.reparent(Retained::as_ptr(&window).cast_mut()).map_err(|e| e.to_string())?;
-                    pane.owner = owner;
+                    pane.owner = owner.to_string();
                 }
                 pane.page = page_state(&pane.view.webview());
                 return Ok(pane.page.clone());
             }
-            if !is_web(&url) {
-                return Err(format!("not an http(s) URL: {url}"));
-            }
-            let view = build(&app, &webview, &id, &url)?;
+            web_only(&url)?;
+            let view = build(webview, &id, &url)?;
             let page = page_state(&view.webview());
-            panes.insert(id, Pane { view, owner, page: page.clone(), focused: false });
+            panes.insert(id, Pane { view, owner: owner.to_string(), page: page.clone(), focused: false });
             Ok(page)
         })
     }
 
+    /// Showing a view moves neither page nor focus, so only a hide reports at
+    /// once; the panel places a moving view every frame.
     pub fn place(webview: Webview, id: String, rect: Option<Rect>) -> Result<(), String> {
-        on_main(&webview.app_handle().clone(), move |panes| {
-            let Some(view) = owned(panes, &id, &label(&webview)) else { return Ok(()) };
-            match rect {
-                Some(rect) => {
-                    let bounds = wry::Rect {
-                        position: LogicalPosition::new(rect.x, rect.y).into(),
-                        size: LogicalSize::new(rect.width, rect.height).into(),
-                    };
-                    view.set_bounds(bounds).map_err(|e| e.to_string())?;
-                    view.set_visible(true).map_err(|e| e.to_string())
+        on_view(webview, id, rect.is_none(), move |view, webview| match rect {
+            Some(rect) => {
+                let bounds = wry::Rect {
+                    position: LogicalPosition::new(rect.x, rect.y).into(),
+                    size: LogicalSize::new(rect.width, rect.height).into(),
+                };
+                view.set_bounds(bounds).map_err(|e| e.to_string())?;
+                view.set_visible(true).map_err(|e| e.to_string())
+            }
+            None => {
+                // AppKit would leave the window itself holding the keyboard.
+                if holds_focus(&view.webview()) {
+                    focus_app(webview);
                 }
-                None => {
-                    // AppKit would leave the window itself holding the keyboard.
-                    if holds_focus(&view.webview()) {
-                        focus_app(&webview);
-                    }
-                    view.set_visible(false).map_err(|e| e.to_string())
-                }
+                view.set_visible(false).map_err(|e| e.to_string())
             }
         })
     }
 
     pub fn navigate(webview: Webview, id: String, url: String) -> Result<(), String> {
-        if !is_web(&url) {
-            return Err(format!("not an http(s) URL: {url}"));
-        }
-        on_main(&webview.app_handle().clone(), move |panes| match owned(panes, &id, &label(&webview)) {
-            Some(view) => view.load_url(&url).map_err(|e| e.to_string()),
-            None => Ok(()),
-        })
+        web_only(&url)?;
+        on_view(webview, id, true, move |view, _| view.load_url(&url).map_err(|e| e.to_string()))
     }
 
     pub fn history(webview: Webview, id: String, dir: String) -> Result<(), String> {
-        on_main(&webview.app_handle().clone(), move |panes| {
-            let Some(view) = owned(panes, &id, &label(&webview)) else { return Ok(()) };
+        on_view(webview, id, true, move |view, _| {
             match dir.as_str() {
                 "back" => view.go_back(),
                 "forward" => view.go_forward(),
@@ -321,63 +330,45 @@ mod imp {
     }
 
     pub fn focus(webview: Webview, id: Option<String>) -> Result<(), String> {
-        on_main(&webview.app_handle().clone(), move |panes| {
-            match id {
-                // A hidden view never holds focus.
-                Some(id) => match owned(panes, &id, &label(&webview)) {
-                    Some(view) if !view.webview().isHidden() => view.focus().map_err(|e| e.to_string())?,
-                    _ => {}
-                },
-                None => focus_app(&webview),
-            }
-            Ok(())
-        })
+        match id {
+            // A hidden view never holds focus.
+            Some(id) => on_view(webview, id, true, |view, _| {
+                if view.webview().isHidden() { Ok(()) } else { view.focus().map_err(|e| e.to_string()) }
+            }),
+            None => command(webview, true, |_, webview, _| Ok(focus_app(webview))),
+        }
     }
 
     pub fn close(webview: Webview, id: String) -> Result<(), String> {
-        on_main(&webview.app_handle().clone(), move |panes| {
-            let owner = label(&webview);
-            remove(panes, |pane_id, pane| pane_id == id && pane.owner == owner, Some(&webview));
-            Ok(())
+        command(webview, true, move |panes, webview, owner| {
+            Ok(remove(panes, |pane_id, pane| pane_id == id && pane.owner == owner, Some(webview)))
         })
     }
 
     pub fn reset(webview: Webview) -> Result<(), String> {
-        on_main(&webview.app_handle().clone(), move |panes| {
-            let owner = label(&webview);
-            remove(panes, |_, pane| pane.owner == owner, Some(&webview));
-            Ok(())
-        })
+        command(webview, true, |panes, webview, owner| Ok(remove(panes, |_, pane| pane.owner == owner, Some(webview))))
     }
 
     /// The window is gone, so nothing is left to focus.
     pub fn forget_window(app: &AppHandle, label: &str) {
         let label = label.to_string();
-        let _ = on_main(app, move |panes| {
-            remove(panes, |_, pane| pane.owner == label, None);
-            Ok(())
-        });
+        let _ = on_main(app, true, move |panes| Ok(remove(panes, |_, pane| pane.owner == label, None)));
     }
 
     pub fn close_all(app: &AppHandle) {
-        let _ = on_main(app, |panes| {
-            panes.clear();
-            Ok(())
-        });
+        let _ = on_main(app, false, |panes| Ok(panes.clear()));
     }
 
-    fn remove(
-        panes: &mut HashMap<String, Pane>,
-        doomed: impl Fn(&str, &Pane) -> bool,
-        refocus: Option<&Webview>,
-    ) {
-        let ids: Vec<String> = panes.iter().filter(|(id, pane)| doomed(id, pane)).map(|(id, _)| id.clone()).collect();
-        for id in ids {
-            let Some(pane) = panes.remove(&id) else { continue };
+    fn remove(panes: &mut Panes, doomed: impl Fn(&str, &Pane) -> bool, refocus: Option<&Webview>) {
+        panes.retain(|id, pane| {
+            if !doomed(id, pane) {
+                return true;
+            }
             if let Some(webview) = refocus.filter(|_| holds_focus(&pane.view.webview())) {
                 focus_app(webview);
             }
-        }
+            false
+        });
     }
 
     fn focus_app(webview: &Webview) {
@@ -474,33 +465,27 @@ mod imp {
 
     fn on_event(app: &AppHandle, event: &NSEvent, mtm: MainThreadMarker, left: &Cell<Option<(Key, f64)>>) {
         let Some(window) = event.window(mtm) else { return };
-        let kind = event.r#type();
-        let hit = PANES.with(|panes| {
-            let panes = panes.try_borrow().ok()?;
-            let in_window = |view: &WryWebView| view.window().is_some_and(|w| std::ptr::eq(&*w, &*window));
-            if kind == NSEventType::LeftMouseDown {
-                let point = event.locationInWindow();
-                panes.iter().find_map(|(id, pane)| {
+        // The id and owner of this window's view that `test` picks.
+        let find = |test: &dyn Fn(&WryWebView) -> bool| {
+            PANES.with(|panes| {
+                panes.try_borrow().ok()?.iter().find_map(|(id, pane)| {
                     let view = pane.view.webview();
-                    let local = view.convertPoint_fromView(point, None);
-                    (in_window(&view) && !view.isHidden() && view.mouse_inRect(local, view.bounds()))
+                    (view.window().is_some_and(|w| std::ptr::eq(&*w, &*window)) && test(&view))
                         .then(|| (id.clone(), pane.owner.clone()))
                 })
-            } else {
-                let responder = window.firstResponder()?.downcast::<NSView>().ok()?;
-                panes.iter().find_map(|(id, pane)| {
-                    let view = pane.view.webview();
-                    (in_window(&view) && responder.isDescendantOf(&view)).then(|| (id.clone(), pane.owner.clone()))
-                })
-            }
-        });
+            })
+        };
+        let kind = event.r#type();
         if kind == NSEventType::LeftMouseDown {
+            let point = event.locationInWindow();
+            let hit = find(&|view| !view.isHidden() && view.mouse_inRect(view.convertPoint_fromView(point, None), view.bounds()));
             if let Some((id, owner)) = hit {
                 emit(app, &owner, &id, "pointerdown", json!({}));
             }
             return;
         }
-        let Some((id, owner)) = hit else {
+        let responder = window.firstResponder().and_then(|responder| responder.downcast::<NSView>().ok());
+        let Some((id, owner)) = responder.and_then(|responder| find(&|view| responder.isDescendantOf(view))) else {
             left.set(None);
             return;
         };

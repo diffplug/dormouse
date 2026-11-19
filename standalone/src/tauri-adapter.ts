@@ -475,18 +475,15 @@ export class TauriAdapter implements PlatformAdapter {
   /** Offer pane webviews where the host builds them, once a page this one
    *  replaced (a reload) has had every view it left destroyed. */
   private async initPaneWebview(): Promise<void> {
-    let supported = false;
     try {
-      supported = await rawInvoke<boolean>("pane_webview_supported");
-      if (supported) await rawInvoke("pane_webview_reset");
+      if (!await rawInvoke<boolean>("pane_webview_supported")) return;
+      await rawInvoke("pane_webview_reset");
     } catch (err) {
       console.error("[tauri-adapter] pane webviews unavailable:", err);
       return;
     }
-    if (!supported) return;
-    const listeners = this.paneWebviewListeners;
     this.paneWebview = {
-      async open(id, url) {
+      open: async (id, url) => {
         try {
           return { ok: true, page: await rawInvoke<PaneWebviewPage>("pane_webview_open", { id, url }) };
         } catch (err) {
@@ -498,9 +495,9 @@ export class TauriAdapter implements PlatformAdapter {
       history: (id, dir) => invoke("pane_webview_history", { id, dir }),
       focus: (id) => invoke("pane_webview_focus", { id }),
       close: (id) => invoke("pane_webview_close", { id }),
-      onEvent(listener) {
-        listeners.add(listener);
-        return () => { listeners.delete(listener); };
+      onEvent: (listener) => {
+        this.paneWebviewListeners.add(listener);
+        return () => { this.paneWebviewListeners.delete(listener); };
       },
     };
   }

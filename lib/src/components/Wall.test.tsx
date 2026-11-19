@@ -22,7 +22,7 @@ import * as browserSurface from './wall/browser-surface';
 import * as lathWallEngine from './wall/lath-wall-engine';
 import { TERMINAL_CLOSE_REFUSAL } from './wall/close-for-client';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
-import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
+import { getAgentBrowserScreenController, type RenderMode } from './wall/agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
@@ -1738,7 +1738,7 @@ describe('Wall on the Lath engine', () => {
       'surface:web': { component: 'browser', tabComponent: 'surface', title: 'example.com', params: { surfaceType: 'browser', renderMode, url } },
     },
   });
-  const swapWeb = async (mode: Parameters<NonNullable<ReturnType<typeof getAgentBrowserScreenController>>['actions']['setRenderMode'] & {}>[0]) => {
+  const swapWeb = async (mode: RenderMode) => {
     await act(async () => { getAgentBrowserScreenController('surface:web')?.actions.setRenderMode?.(mode); });
     await flush();
   };
