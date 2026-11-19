@@ -256,6 +256,8 @@ export type PaneWebviewEvent =
   | ({ id: string; kind: 'page' } & PaneWebviewPage)
   | { id: string; kind: 'leader' }
   | { id: string; kind: 'pointerdown' }
+  /** The pointer left the shown view: the app webview hears no move over it. */
+  | { id: string; kind: 'pointerleave' }
   | { id: string; kind: 'focus'; focused: boolean }
   | { id: string; kind: 'open-window'; url: string };
 
@@ -272,9 +274,13 @@ export interface PaneWebviewHost {
   place(id: string, rect: PaneWebviewRect | null): void;
   navigate(id: string, url: string): void;
   history(id: string, dir: 'back' | 'forward' | 'reload'): void;
-  /** Give the keyboard to `id`'s view, or with `null` back to the app webview. */
-  focus(id: string | null): void;
+  /** Give the keyboard to `id`'s view. */
+  focus(id: string): void;
+  /** Return the keyboard to the app webview, if `id`'s view holds it. */
+  blur(id: string): void;
   close(id: string): void;
+  /** A still of the view's current rendering as an image URL, or null on any failure. */
+  snapshot(id: string): Promise<string | null>;
   /** Hear every view's events; returns the unsubscribe. */
   onEvent(listener: (event: PaneWebviewEvent) => void): () => void;
 }

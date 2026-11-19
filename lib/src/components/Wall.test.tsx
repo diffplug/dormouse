@@ -22,7 +22,7 @@ import * as browserSurface from './wall/browser-surface';
 import * as lathWallEngine from './wall/lath-wall-engine';
 import { TERMINAL_CLOSE_REFUSAL } from './wall/close-for-client';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
-import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
+import { getAgentBrowserScreenController, type RenderMode } from './wall/agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
@@ -1738,7 +1738,7 @@ describe('Wall on the Lath engine', () => {
       'surface:web': { component: 'browser', tabComponent: 'surface', title: 'example.com', params: { surfaceType: 'browser', renderMode, url } },
     },
   });
-  const swapWeb = async (mode: Parameters<NonNullable<ReturnType<typeof getAgentBrowserScreenController>>['actions']['setRenderMode'] & {}>[0]) => {
+  const swapWeb = async (mode: RenderMode) => {
     await act(async () => { getAgentBrowserScreenController('surface:web')?.actions.setRenderMode?.(mode); });
     await flush();
   };
@@ -1790,6 +1790,77 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(leafIds()).toHaveLength(2);
     expect(pane.of('open').at(-1)).toEqual(['open', expect.not.stringMatching(/^surface:web$/), 'https://example.com/popup']);
+  });
+
+  /** One control request, its response. */
+  const controlRequest = async (method: string, params: Record<string, unknown>) => {
+    let response: { ok: boolean; error?: string; result?: Record<string, unknown> } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: { method, params, respond: (r: typeof response) => { response = r; } },
+      }));
+    });
+    await flush();
+    return response;
+  };
+
+  it('opens dor webview as a webview Surface, which dor lists as webview and neither drives nor sizes', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+
+    const opened = await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'https://example.com/login', focus: false });
+    expect(opened).toMatchObject({ ok: true, result: { status: 'created', url: 'https://example.com/login', minimized: false } });
+    const id = opened!.result!.surfaceId as string;
+    expect(pane.of('open').at(-1)).toEqual(['open', id, 'https://example.com/login']);
+
+    const listed = await controlRequest(SURFACE_CONTROL_METHODS.list, {});
+    expect((listed!.result!.surfaces as Array<{ id: string }>).find((surface) => surface.id === id))
+      .toMatchObject({ kind: 'browser', renderMode: 'webview' });
+
+    const refusal = (provider: string) => `surface '${id}' is not ${provider} rendered (render_mode: webview) — a webview cannot be driven; open its page with dor agent-browser open https://example.com/login`;
+    expect(await dispatchResolveBrowser(id)).toEqual({ ok: false, error: refusal('agent-browser') });
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.browserViewport, { provider: 'playwright', surface: id }))
+      .toEqual({ ok: false, error: refusal('playwright') });
+  });
+
+  it('refuses dor webview before any pane opens where the host has no pane webviews, naming what shows the page', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'http://localhost:5173/' }))
+      .toEqual({ ok: false, error: 'this host has no webview panes — open it with dor iframe http://localhost:5173/' });
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'https://example.com/' }))
+      .toEqual({ ok: false, error: 'this host has no webview panes — open it with dor agent-browser open https://example.com/' });
+    installPaneWebview(fake);
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'javascript:alert(1)' }))
+      .toEqual({ ok: false, error: 'url must be an http:// or https:// URL' });
+    expect(leafIds()).toEqual(['surface:a']);
+  });
+
+  it('opens a new https:// tab from an iframe as a pane webview where the host has them', async () => {
+    const { requests } = hostBrowsers();
+    const pane = installPaneWebview(fake);
+    (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+      await flush();
+      await dispatchIframe('http://localhost:5173/');
+      const before = leafIds();
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: 'http://127.0.0.1:61234', data: { __dormouse: 'open-window', url: 'https://accounts.example/login' } }));
+      });
+      const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent === 'Open in webview')!;
+      await act(async () => { button.click(); });
+      await flush();
+
+      const [tab] = leafIds().filter((id) => !before.includes(id));
+      expect(pane.of('open').at(-1)).toEqual(['open', tab, 'https://accounts.example/login']);
+      expect(requests('launch')).toEqual([]);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
   });
 
   it('answers dor with the same id after an iframe → agent-browser swap', async () => {
@@ -5105,7 +5176,7 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('refuses an https:// surface.iframe on a host that proxies, naming dor agent-browser open', async () => {
+  it('refuses an https:// surface.iframe on a host that proxies, naming dor webview where the host has it, else dor agent-browser open', async () => {
     const respond = async (url: string) => {
       let response: { ok: boolean; error?: string } | undefined;
       await act(async () => {
@@ -5127,6 +5198,12 @@ describe('Wall on the Lath engine', () => {
       error: 'the embedded view frames http:// pages only — open it with dor agent-browser open https://example.com/',
     });
     expect((await respond('http://localhost:5173/'))?.ok).toBe(true);
+    // A host with pane webviews names the command that shows it to a human.
+    installPaneWebview(fake);
+    expect(await respond('https://example.com/')).toEqual({
+      ok: false,
+      error: 'the embedded view frames http:// pages only — open it with dor webview https://example.com/',
+    });
   });
 
   it('opens a new https:// tab from an iframe as an agent-browser pane bound to its launch', async () => {

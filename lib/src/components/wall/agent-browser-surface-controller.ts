@@ -1927,7 +1927,7 @@ function closeBrowserSessionFromParams(params: unknown): Promise<void> {
  * close. No-op for other surface types.
  */
 export function closeBrowserSurface(id: string, params: unknown): Promise<void> {
-  // The one place a pane webview is destroyed: its panel only hides it.
+  // Its panel only hides a pane webview.
   if (resolveRenderMode(params) === 'webview') getPlatform().paneWebview?.close(id);
   const controller = registry.get(id);
   registry.delete(id);

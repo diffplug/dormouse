@@ -28,6 +28,7 @@ Then pick the command for the job:
 | Drive a browser in a project that uses Playwright | `dor playwright open <url>` |
 | Show the user a local file (HTML, image, text, media) or folder | `dor open <path>` |
 | Show the user an `http://` page you will not drive | `dor iframe <url>` |
+| Show the user a page you will not drive in a real browser pane, `https://` and logins included (the macOS and Windows app only) | `dor webview <url>` |
 
 Run `dor <command> --help` for every flag and output format.
 
@@ -128,19 +129,19 @@ dor kill surface:3 --confirm-dangerously          # only when already validated
 
 ## Browsers
 
-Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything but the Dormouse flags, which may come anywhere, is that CLI's own command set; a bare `--` and everything after it are forwarded unchanged, so to pass a value spelled like a Dormouse flag, put `--` after the command: `dor agent-browser fill @e1 -- --focus`. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`.
+Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything but the Dormouse flags, which may come anywhere, is that CLI's own command set; a bare `--` and everything after it are forwarded unchanged, so to pass a value spelled like a Dormouse flag, put `--` after the command: `dor agent-browser fill @e1 -- --focus`. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`. **`dor webview`** shows the human any `http://` or `https://` page in a real browser pane where logins work, in the macOS and Windows app only; you cannot read or drive it either.
 
-`dor list` shows each browser's `render_mode`, which says what drives it: `agent-browser-*` takes `dor agent-browser --surface <id>`, `playwright-*` takes `dor playwright --surface <id>`, and `iframe` takes neither — open its URL with `dor agent-browser open <url>` instead. `screencast` renders in the pane; `popout` is a separate window the pane stands in for.
+`dor list` shows each browser's `render_mode`, which says what drives it: `agent-browser-*` takes `dor agent-browser --surface <id>`, `playwright-*` takes `dor playwright --surface <id>`, and `iframe` and `webview` take neither — open its URL with `dor agent-browser open <url>` instead. `screencast` renders in the pane; `popout` is a separate window the pane stands in for.
 
 ### Browser identity
 
 Each command names its browser one way; the flags are mutually exclusive:
 
 - `--key <name>` (default `default`) — a browser this Workspace knows by name. One key is one browser, reused across commands; use distinct keys for independent browsers at once. agent-browser and Playwright keys are separate.
-- `--surface <handle>` — the browser a handle names; prefer it whenever you hold an id. It is the only way to reach a browser the user opened from the GUI or a Tool's browser, and it fails on a terminal or an `iframe` surface.
+- `--surface <handle>` — the browser a handle names; prefer it whenever you hold an id. It is the only way to reach a browser the user opened from the GUI or a Tool's browser, and it fails on a terminal, an `iframe`, or a `webview` surface.
 - `--session <name>` (Playwright also takes `-s`) — a raw native session by its literal name.
 
-`--from <handle>` is not an identity: as on `split`, `ensure`, `tool`, `open`, and `iframe`, it says where a new pane goes. It places only a pane the command creates; a browser that already has one stays where it is. A `--key` belongs to the `--from` Surface's Workspace, so a later command for a key you placed in another Workspace needs the same `--from` or `--workspace`. It cannot be combined with `--surface`.
+`--from <handle>` is not an identity: as on `split`, `ensure`, `tool`, `open`, `iframe`, and `webview`, it says where a new pane goes. It places only a pane the command creates; a browser that already has one stays where it is. A `--key` belongs to the `--from` Surface's Workspace, so a later command for a key you placed in another Workspace needs the same `--from` or `--workspace`. It cannot be combined with `--surface`.
 
 Navigation verbs (`open`, `goto`, agent-browser's `navigate`) also accept Dormouse targets: `host:port` and `:port` default to `http://`, and a terminal handle (`surface:3`) opens the dev-server port that terminal owns.
 

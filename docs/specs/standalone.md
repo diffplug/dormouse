@@ -18,7 +18,7 @@ flowchart LR
   P -- /ws/burrow --> X[(Relay)]
 ```
 
-**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, dock icon, logging), the session file store, multi-window state (§Windows), and the quit flow.
+**Shared host logic runs in the sidecar**, on the same `lib/src/host/` modules the VS Code host runs, so the two hosts cannot drift. Rust keeps the bridge, OS-integration edges (window events, menu, dock icon, logging), the session file store, multi-window state (§Windows), pane webviews, and the quit flow.
 
 ## Boot sequence
 
@@ -110,8 +110,8 @@ Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
 The app replaces Tauri's default menu; its Reopen Closed item is `docs/specs/reopen.md` → "Reopen verb". **Must keep the macOS fullscreen item**: it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal the traffic lights.
 
-- **Must keep the Edit submenu on macOS**, Tool iframes' only clipboard path (rationale).
-- **Must cancel the keydown of any chord the page handles**, so the menu item skips it (rationale): `docs/specs/mouse-and-clipboard.md` §3.9, §8.2, §8.9.
+- **Must keep the Edit submenu on macOS**, Tool iframes' and pane webviews' only clipboard path (rationale).
+- **Must cancel the keydown of any chord the app webview handles**, so the menu item skips it (rationale): `docs/specs/mouse-and-clipboard.md` §3.9, §8.2, §8.9.
 - **Never add an Edit submenu on Windows or Linux** (rationale).
 
 ## Siri affordance
@@ -128,7 +128,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **Every new window is cloned from `app.windows[0]`**, window settings and CSP included. **Never let Tauri add a nonce to the CSP's `style-src`** (`dangerousDisableAssetCspModification`; rationale).
 
-**Never let a window's webview throttle or suspend in the background**: `app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op on Windows and Linux; rationale).
+**Never let a window's app webview throttle or suspend in the background**: `app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op on Windows and Linux; rationale).
 
 **Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default`, `core:app:allow-version`, and `core:resources:allow-close` (an update handle's release) to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins these.
 
@@ -333,7 +333,7 @@ Source of truth: `standalone/src-tauri/src/console_parent.rs`; `pty_spawn` / `se
 - **Window identity is implicit**: each command keys by the invoking window's label, so the frontend stays window-agnostic.
 - Only §Per-window close, the boot merge (§Arrival queue), the discard above, and a failed Reopen delete a snapshot.
 
-**Must keep all state in `dormouse_data_dir`**: `app_local_data_dir`, on Windows its `state` folder, never Roaming nor around WebView2's `EBWebView` (rationale). **Must root debug state at `<data dir>/dev`, release state at the data directory** (rationale), Burrow state directly under it. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, the data directory) and `DORMOUSE_RECOVERY_DIR` (the state root; rationale). The browser-dev harness sets both to its per-run temp directory.
+**Must keep all state in `dormouse_data_dir`**: `app_local_data_dir`, on Windows its `state` folder, never Roaming nor around WebView2's `EBWebView` (rationale). Windows pane webviews keep their profile in `pane-webview` beside both, outside `state`'s owner-only restriction. **Must root debug state at `<data dir>/dev`, release state at the data directory** (rationale), Burrow state directly under it. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, the data directory) and `DORMOUSE_RECOVERY_DIR` (the state root; rationale). The browser-dev harness sets both to its per-run temp directory.
 
 **The session store is owner-only before any bytes are written** (`docs/specs/security-local.md` -> "Persisted state"; rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory.
 
@@ -477,7 +477,7 @@ Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.jso
 - **Must prepend the wrapper's Node directory to PATH without setting binary overrides.** Runtime requirements: `docs/specs/security-supply-chain.md` → "Bundled runtime".
 - **The sidecar bundle and the webview bake `DORMOUSE_RELAY_ORIGIN`** (`docs/specs/relay.md` → "Relay origin"); the webview CSP has no relay sources (`standalone/scripts/tauri-conf.test.mjs`).
 - **A self-host `tauri build` overlays no updater endpoint and no updater artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
-- **Must keep each Tauri JS binding (`@tauri-apps/api`, `@tauri-apps/plugin-*`) on its crate's major.minor**: `tauri build` and `tauri dev` reject a mismatch and CI runs neither, so Renovate's `tauri` group moves the npm and cargo halves in one PR. Pinned by `standalone/scripts/tauri-lockstep.test.mjs`.
+- **Must keep each Tauri JS binding (`@tauri-apps/api`, `@tauri-apps/plugin-*`) on its crate's major.minor**: `tauri build` and `tauri dev` reject a mismatch and CI runs neither, so Renovate's `tauri` group moves the npm and cargo halves in one PR, with `wry`, the one copy `tauri-runtime-wry` links. Pinned by `standalone/scripts/tauri-lockstep.test.mjs`.
 - The bundle ships the whole sidecar via the `../sidecar/**/*` resources glob, including node-pty's prebuilds + bundled ConPTY and the shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY", `docs/specs/terminal-state.md` -> "Shell-integration injection").
 - **Must start native dev with Vite on an OS-assigned loopback port** (`DORMOUSE_BROWSER_DEV_VITE_PORT` may pin it) **and key the Tauri identifier to the canonical worktree path**, so parallel worktrees and the installed app never share a port or app data.
 - **Never stop another process to free a port**: an occupied pinned port fails, and Windows pre-dev cleanup touches only sidecars executing from this worktree's default debug directory, never a listener by port.
@@ -495,7 +495,7 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 
 **The bridge is authenticated**: its gates are `docs/specs/security-local.md` -> "Loopback Listeners". The token is per-run, attached by `BrowserSidecarHost.url()` alone, and **never the `dor` control-API `controlToken`** (rationale); **the CORS origin is never `*`** (rationale). **A CORS preflight is the one carve-out**: `OPTIONS` answers `204` with the CORS headers before the token check.
 
-The harness **may omit** native-only desktop chrome but **must preserve** every `PlatformAdapter` contract the app uses, the sidecar's alerts included (stamped with the one label it simulates, `main`), so a rule that holds only across the host boundary is exercised. It **must mirror** standalone's Session-persistence answer — one `PersistedWindow` per window in `localStorage`, its id counters persisted per worktree (`docs/specs/transport.md` → "Surface ids"), and the same agent-recovery claim against a per-run temp state directory — and never captures (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set.
+The harness **may omit** native-only desktop chrome and pane webviews but **must preserve** every `PlatformAdapter` contract the app uses, the sidecar's alerts included (stamped with the one label it simulates, `main`), so a rule that holds only across the host boundary is exercised. It **must mirror** standalone's Session-persistence answer — one `PersistedWindow` per window in `localStorage`, its id counters persisted per worktree (`docs/specs/transport.md` → "Surface ids"), and the same agent-recovery claim against a per-run temp state directory — and never captures (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set.
 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`; `standalone/src/browser-sidecar-adapter.ts`.
 

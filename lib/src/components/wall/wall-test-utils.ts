@@ -7,7 +7,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { applyTerminalSemanticEvents } from '../../lib/terminal-registry';
 import { setPortalAnchor } from '../../lib/dom';
 import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
-import type { PaneWebviewEvent, PaneWebviewHost } from '../../lib/platform/types';
+import type { PaneWebviewEvent, PaneWebviewHost, PlatformAdapter } from '../../lib/platform/types';
 import type { WallActions } from './wall-context';
 import {
   registerAgentBrowserScreen,
@@ -285,7 +285,7 @@ export function installBrowserHost(
  * Give `platform` pane webviews whose host records every call in order, opens
  * each view at the URL it was asked for, and plays its events through `emit`.
  */
-export function installPaneWebview(platform: FakePtyAdapter) {
+export function installPaneWebview(platform: PlatformAdapter) {
   const calls: unknown[][] = [];
   const listeners = new Set<(event: PaneWebviewEvent) => void>();
   const host: PaneWebviewHost = {
@@ -297,7 +297,12 @@ export function installPaneWebview(platform: FakePtyAdapter) {
     navigate: (id, url) => { calls.push(['navigate', id, url]); },
     history: (id, dir) => { calls.push(['history', id, dir]); },
     focus: (id) => { calls.push(['focus', id]); },
+    blur: (id) => { calls.push(['blur', id]); },
     close: (id) => { calls.push(['close', id]); },
+    snapshot: vi.fn(async (id: string) => {
+      calls.push(['snapshot', id]);
+      return `data:image/jpeg;base64,${btoa(`still ${calls.length}`)}`;
+    }),
     onEvent(listener) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };

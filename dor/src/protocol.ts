@@ -24,6 +24,7 @@ export const SURFACE_CONTROL_METHODS = {
   kill: 'surface.kill',
   move: 'surface.move',
   iframe: 'surface.iframe',
+  webview: 'surface.webview',
   browser: 'surface.browser',
   browserViewport: 'surface.browserViewport',
   browserDiagnostics: 'surface.browserDiagnostics',

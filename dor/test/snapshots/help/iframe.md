@@ -9,7 +9,7 @@ USAGE
 
 Opens an http:// page in a high-fidelity iframe surface for a human to look at.
 
-Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use `dor agent-browser open <url>`.
+Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use `dor agent-browser open <url>`; to only show a human such a page, `dor webview <url>` where Dormouse has webview surfaces.
 
 A page from another machine opens only from a private network you allow, from its warning or Settings → Network; a page on the internet never does.
 

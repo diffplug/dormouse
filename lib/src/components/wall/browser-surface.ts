@@ -261,7 +261,7 @@ export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMod
   if (!isBrowserParams(params)) return undefined;
   const p = asParams(params);
   return browserDisplayMode({
-    renderMode: resolveRenderMode(p),
+    renderMode: rendersInIframe(p) ? 'iframe' : resolveRenderMode(p),
     syncEngaged: isBrowserViewportSetting(p.browserViewport) && p.browserViewport.mode === 'pane-sync',
   });
 }
