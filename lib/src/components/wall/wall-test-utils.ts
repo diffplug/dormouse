@@ -7,6 +7,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { applyTerminalSemanticEvents } from '../../lib/terminal-registry';
 import { setPortalAnchor } from '../../lib/dom';
 import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
+import type { PaneWebviewEvent, PaneWebviewHost } from '../../lib/platform/types';
 import type { WallActions } from './wall-context';
 import {
   registerAgentBrowserScreen,
@@ -278,4 +279,31 @@ export function installBrowserHost(
   const requests = <K extends BrowserOp['op']>(op: K): Extract<BrowserRequest, { op: K }>[] =>
     browser.mock.calls.map(([request]) => withoutIds(request)).filter((request): request is Extract<BrowserRequest, { op: K }> => request.op === op);
   return { platform, browser, answers, requests };
+}
+
+/**
+ * Give `platform` pane webviews whose host records every call in order, opens
+ * each view at the URL it was asked for, and plays its events through `emit`.
+ */
+export function installPaneWebview(platform: FakePtyAdapter) {
+  const calls: unknown[][] = [];
+  const listeners = new Set<(event: PaneWebviewEvent) => void>();
+  const host: PaneWebviewHost = {
+    open: vi.fn(async (id: string, url: string) => {
+      calls.push(['open', id, url]);
+      return { ok: true as const, page: { url, title: '', canGoBack: false, canGoForward: false, loading: false } };
+    }),
+    place: (id, rect) => { calls.push(['place', id, rect]); },
+    navigate: (id, url) => { calls.push(['navigate', id, url]); },
+    history: (id, dir) => { calls.push(['history', id, dir]); },
+    focus: (id) => { calls.push(['focus', id]); },
+    close: (id) => { calls.push(['close', id]); },
+    onEvent(listener) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+  platform.paneWebview = host;
+  const emit = (event: PaneWebviewEvent) => { for (const listener of [...listeners]) listener(event); };
+  return { host, calls, emit, of: (verb: string) => calls.filter(([called]) => called === verb) };
 }

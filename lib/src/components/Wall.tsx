@@ -92,6 +92,7 @@ import {
   toolBrowserLaunchParams,
   type LaunchFallback,
   browserDisplayModeFromParams,
+  rendersInIframe,
   retainsLivePage,
   browserUrlFromParams,
   surfaceKindFromParams,
@@ -2187,6 +2188,15 @@ export function Wall({
         return;
       }
 
+      // Any other renderer → the native webview, at the page on screen.
+      if (mode === 'webview') {
+        const url = browserSurfaceUrl(shownUrl ?? '');
+        if (currentRenderMode === 'webview' || !url || !getPlatform().paneWebview) return;
+        swapBrowserRenderer(id, params, { surfaceType: 'browser', renderMode: 'webview', url });
+        selectPane(id);
+        return;
+      }
+
       // agent-browser → iframe: frame the active tab's URL; the swap closes
       // the now-unneeded headless browser. Webview-only.
       if (currentRenderMode !== 'iframe' && mode === 'iframe') {
@@ -2240,18 +2250,22 @@ export function Wall({
       }
     },
     onOpenBrowserPane: (id, url) => {
-      // A new-tab request from the iframe shim → a new browser pane split next
-      // to the source (docs/specs/dor-browser.md → "Iframe Shim"): an iframe,
-      // or the remembered provider's screencast for a page the iframe would refuse.
+      // A new-tab request from the iframe shim or a pane webview → a new
+      // browser pane split next to the source (docs/specs/dor-browser.md →
+      // "Iframe Shim"): a pane webview's opens as one; an iframe's as an
+      // iframe, or the remembered provider's screencast for a page the iframe
+      // would refuse.
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
-      const providers = iframeRefusal(url) ? hostBrowserProviders() : [];
+      const source = nav.paneParams(id);
+      const webview = resolveRenderMode(source) === 'webview' && !rendersInIframe(source);
+      const providers = !webview && iframeRefusal(url) ? hostBrowserProviders() : [];
       createContentSurface({
         minimized: false,
         // A launch that fails takes its pane with it.
         params: providers.length
           ? { surfaceType: 'browser', renderMode: renderModeFor(preferredBrowserProvider(providers), 'screencast'), url, launchFallback: 'close' satisfies LaunchFallback }
-          : { surfaceType: 'browser', renderMode: 'iframe', url },
+          : { surfaceType: 'browser', renderMode: webview ? 'webview' : 'iframe', url },
         reference,
         title: hostPathDisplay(url, true),
       });

@@ -30,7 +30,7 @@ export function hostPathDisplay(rawUrl: string, includeSearch = false): string {
 
 /** A tab's display label for the browser tab strip and surface title: its
  *  trimmed page title, falling back to the URL's host+path, then 'untitled'. */
-export function tabDisplayTitle(tab: AgentBrowserTab): string {
+export function tabDisplayTitle(tab: Pick<AgentBrowserTab, 'title' | 'url'>): string {
   const title = tab.title?.trim();
   if (title) return title;
   return hostPathDisplay(tab.url) || 'untitled';

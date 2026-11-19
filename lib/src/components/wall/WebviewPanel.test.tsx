@@ -1,0 +1,244 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { act, StrictMode, type ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { focusSession } from '../../lib/terminal-registry';
+import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
+import { isRealBlur } from '../../lib/window-focus';
+import { BrowserPanel } from './BrowserPanel';
+import { getAgentBrowserScreenController } from './agent-browser-screen';
+import { closeBrowserSurface } from './agent-browser-surface-controller';
+import { PaneWriteContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions, type WallActions } from './wall-context';
+import { installPaneWebview, stubWallActions } from './wall-test-utils';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+const ID = 'surface:web';
+const URL = 'https://example.com/';
+const RECT = { x: 10, y: 40, width: 300, height: 200 };
+
+let container: HTMLDivElement;
+let root: Root;
+let platform: FakePtyAdapter;
+let pane: ReturnType<typeof installPaneWebview>;
+let frames: FrameRequestCallback[];
+let rect: typeof RECT;
+let paneWrite: { updateParams: Mock<PaneWriteActions['updateParams']>; setTitle: Mock<PaneWriteActions['setTitle']> };
+
+beforeEach(() => {
+  platform = new FakePtyAdapter();
+  setPlatform(platform);
+  pane = installPaneWebview(platform);
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  frames = [];
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback));
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+  rect = RECT;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ ...rect, top: rect.y, left: rect.x, right: rect.x + rect.width, bottom: rect.y + rect.height, toJSON: () => ({}) }));
+  paneWrite = { updateParams: vi.fn<PaneWriteActions['updateParams']>(), setTitle: vi.fn<PaneWriteActions['setTitle']>() };
+});
+
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+  vi.restoreAllMocks();
+});
+
+/** Run the frames requested so far. */
+function frame(): void {
+  const due = frames;
+  frames = [];
+  for (const callback of due) callback(performance.now());
+}
+
+function Occluder() {
+  useOccludePaneWebviews(true);
+  return null;
+}
+
+interface Shown {
+  params?: Record<string, unknown>;
+  parked?: boolean;
+  active?: boolean;
+  actions?: WallActions;
+  extra?: ReactNode;
+}
+
+async function show({ params = { surfaceType: 'browser', renderMode: 'webview', url: URL }, parked, active = true, actions = stubWallActions(), extra }: Shown = {}): Promise<void> {
+  await act(async () => {
+    root.render(
+      <StrictMode>
+        <WorkspaceActiveContext.Provider value={active}>
+          <PaneWriteContext.Provider value={paneWrite}>
+            <WallActionsContext.Provider value={actions}>
+              <BrowserPanel id={ID} title="example.com" params={params} parked={parked} />
+              {extra}
+            </WallActionsContext.Provider>
+          </PaneWriteContext.Provider>
+        </WorkspaceActiveContext.Provider>
+      </StrictMode>,
+    );
+  });
+}
+
+const lastPlace = () => pane.of('place').at(-1);
+
+describe('WebviewPanel', () => {
+  it('renders a webview Surface with the iframe renderer on a host without pane webviews, keeping its mode', async () => {
+    await show();
+    expect(container.querySelector('iframe')).toBeNull();
+    // StrictMode mounts twice: the second open adopts the first's view.
+    expect(new Set(pane.of('open').map((call) => call.join()))).toEqual(new Set([['open', ID, URL].join()]));
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    delete platform.paneWebview;
+    await show();
+    expect(container.querySelector('iframe')?.getAttribute('src')).toBe(URL);
+    expect(paneWrite.updateParams.mock.calls.some(([, patch]) => 'renderMode' in patch)).toBe(false);
+  });
+
+  it('opens or adopts the view on mount, hides it on unmount, and destroys it only through closeBrowserSurface', async () => {
+    await show();
+    frame();
+    expect(lastPlace()).toEqual(['place', ID, RECT]);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    expect(lastPlace()).toEqual(['place', ID, null]);
+    expect(pane.of('close')).toEqual([]);
+
+    await closeBrowserSurface(ID, { surfaceType: 'browser', renderMode: 'iframe', url: URL });
+    expect(pane.of('close')).toEqual([]);
+    await closeBrowserSurface(ID, { surfaceType: 'browser', renderMode: 'webview', url: URL });
+    expect(pane.of('close')).toEqual([['close', ID]]);
+  });
+
+  it('places the view on its pane\'s rect as it moves, only while in sight and no overlay is open', async () => {
+    await show();
+    frame();
+    expect(lastPlace()).toEqual(['place', ID, RECT]);
+    const placed = pane.of('place').length;
+    frame();
+    expect(pane.of('place')).toHaveLength(placed);
+    rect = { ...RECT, x: 50 };
+    frame();
+    expect(lastPlace()).toEqual(['place', ID, { ...RECT, x: 50 }]);
+
+    await show({ extra: <Occluder /> });
+    expect(lastPlace()).toEqual(['place', ID, null]);
+    await show();
+    expect(lastPlace()).toEqual(['place', ID, { ...RECT, x: 50 }]);
+
+    await show({ parked: true });
+    expect(lastPlace()).toEqual(['place', ID, null]);
+    await show();
+    await show({ active: false });
+    expect(lastPlace()).toEqual(['place', ID, null]);
+  });
+
+  it('shows the page the host reports in the chrome and title, and persists every http(s) URL it commits', async () => {
+    await show();
+    act(() => pane.emit({ id: ID, kind: 'page', url: 'https://example.com/next', title: 'Next', canGoBack: true, canGoForward: false, loading: false }));
+    expect(getAgentBrowserScreenController(ID)?.chrome()).toMatchObject({ url: 'https://example.com/next', title: 'Next' });
+    expect(paneWrite.setTitle).toHaveBeenLastCalledWith(ID, 'Next');
+    expect(paneWrite.updateParams).toHaveBeenLastCalledWith(ID, { url: 'https://example.com/next' });
+
+    paneWrite.updateParams.mockClear();
+    act(() => pane.emit({ id: ID, kind: 'page', url: 'about:blank', title: '', canGoBack: true, canGoForward: false, loading: false }));
+    act(() => pane.emit({ id: 'surface:other', kind: 'page', url: 'https://other.test/', title: 'Other', canGoBack: false, canGoForward: false, loading: false }));
+    expect(paneWrite.updateParams).not.toHaveBeenCalled();
+    expect(getAgentBrowserScreenController(ID)?.chrome().url).toBe('about:blank');
+  });
+
+  it('enters its pane on a press and leaves passthrough on the leader, for its own view only', async () => {
+    const actions = stubWallActions();
+    await show({ actions });
+    act(() => pane.emit({ id: 'surface:other', kind: 'pointerdown' }));
+    act(() => pane.emit({ id: 'surface:other', kind: 'leader' }));
+    expect(actions.onClickPanel).not.toHaveBeenCalled();
+    expect(actions.onFrameLeader).not.toHaveBeenCalled();
+
+    act(() => pane.emit({ id: ID, kind: 'pointerdown' }));
+    expect(actions.onClickPanel).toHaveBeenCalledExactlyOnceWith(ID);
+    act(() => pane.emit({ id: ID, kind: 'leader' }));
+    expect(actions.onFrameLeader).toHaveBeenCalledOnce();
+  });
+
+  it('asks before opening a new-window target as a new pane, hiding the view while it asks', async () => {
+    const onOpenBrowserPane = vi.fn();
+    await show({ actions: stubWallActions({ onOpenBrowserPane }) });
+    frame();
+    act(() => pane.emit({ id: ID, kind: 'open-window', url: 'javascript:alert(1)' }));
+    expect(container.textContent).not.toContain('wants to open a new tab');
+
+    act(() => pane.emit({ id: ID, kind: 'open-window', url: 'https://example.com/popup' }));
+    expect(container.textContent).toContain('wants to open a new tab');
+    expect(lastPlace()).toEqual(['place', ID, null]);
+    const open = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Open in new pane')!;
+    act(() => open.click());
+    expect(onOpenBrowserPane).toHaveBeenCalledExactlyOnceWith(ID, 'https://example.com/popup');
+  });
+
+  it('drives the view from the header and hands it the keyboard', async () => {
+    const onSwapRenderMode = vi.fn();
+    await show({ actions: stubWallActions({ onSwapRenderMode }) });
+    const screen = getAgentBrowserScreenController(ID)!;
+    expect(screen.snapshot().renderMode).toBe('webview');
+    screen.chromeActions.navigate('https://example.com/typed');
+    screen.chromeActions.back();
+    screen.chromeActions.reload();
+    focusSession(ID, true);
+    focusSession(ID, false);
+    expect(pane.calls.filter(([verb]) => verb !== 'open' && verb !== 'place')).toEqual([
+      ['navigate', ID, 'https://example.com/typed'],
+      ['history', ID, 'back'],
+      ['history', ID, 'reload'],
+      ['focus', ID],
+      ['focus', null],
+    ]);
+
+    screen.actions.setRenderMode?.('webview');
+    screen.actions.setRenderMode?.('iframe');
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith(ID, 'iframe');
+  });
+
+  it('opens the view where a URL-bar entry names, when it had none', async () => {
+    await show({ params: { surfaceType: 'browser', renderMode: 'webview' } });
+    expect(container.textContent).toContain('No URL was provided.');
+    getAgentBrowserScreenController(ID)!.chromeActions.navigate(URL);
+    expect(paneWrite.updateParams).toHaveBeenCalledWith(ID, { url: URL });
+    expect(pane.of('navigate')).toEqual([]);
+  });
+
+  it('opens no view for a URL that is not http(s), and says why an open failed', async () => {
+    await show({ params: { surfaceType: 'browser', renderMode: 'webview', url: 'javascript:alert(1)' } });
+    expect(container.textContent).toContain('http:// and https:// pages only');
+    expect(pane.of('open')).toEqual([]);
+
+    vi.mocked(pane.host.open).mockResolvedValue({ ok: false, error: 'no window' });
+    await show();
+    expect(container.textContent).toContain('Couldn’t open the page — no window.');
+    frame();
+    expect(pane.of('place')).toEqual([]);
+  });
+
+  it('is no real blur while its view holds the keyboard, until that ends or the panel goes', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    await show();
+    act(() => pane.emit({ id: ID, kind: 'focus', focused: true }));
+    expect(isRealBlur()).toBe(false);
+    act(() => pane.emit({ id: ID, kind: 'focus', focused: false }));
+    expect(isRealBlur()).toBe(true);
+
+    act(() => pane.emit({ id: ID, kind: 'focus', focused: true }));
+    act(() => root.unmount());
+    root = createRoot(container);
+    expect(isRealBlur()).toBe(true);
+  });
+});

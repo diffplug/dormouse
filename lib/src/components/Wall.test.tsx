@@ -36,7 +36,7 @@ import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { markSessionTouched, pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
-import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
+import { installBrowserHost, installPaneWebview, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
@@ -1710,6 +1710,67 @@ describe('Wall on the Lath engine', () => {
     expect(requests('close')).toContainEqual(expect.objectContaining({ provider: 'agent-browser', binding: { session: 'ab-live' } }));
     // `dor` addresses the swapped Surface by the ref it always had.
     expect(await dispatchResolveBrowser('surface:ab-pane', 'playwright')).toMatchObject({ ok: true, result: { binding: { session: 'pw-1' } } });
+  });
+
+  const webviewLayout = (renderMode: string, url = 'https://example.com/') => ({
+    version: 1 as const,
+    tree: { root: { kind: 'leaf' as const, id: 'surface:web' } },
+    leafMeta: {
+      'surface:web': { component: 'browser', tabComponent: 'surface', title: 'example.com', params: { surfaceType: 'browser', renderMode, url } },
+    },
+  });
+  const swapWeb = async (mode: Parameters<NonNullable<ReturnType<typeof getAgentBrowserScreenController>>['actions']['setRenderMode'] & {}>[0]) => {
+    await act(async () => { getAgentBrowserScreenController('surface:web')?.actions.setRenderMode?.(mode); });
+    await flush();
+  };
+
+  it('swaps an iframe to the webview at its page and back, destroying the view only on the way out', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('iframe', 'http://localhost:5173/')} initialMode="command" />));
+    await flush();
+
+    await swapWeb('webview');
+    expect(leafIds()).toEqual(['surface:web']);
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(pane.of('open').at(-1)).toEqual(['open', 'surface:web', 'http://localhost:5173/']);
+    expect(pane.of('close')).toEqual([]);
+
+    await swapWeb('iframe');
+    expect(container.querySelector('iframe')).not.toBeNull();
+    expect(pane.of('close')).toEqual([['close', 'surface:web']]);
+  });
+
+  it('destroys a pane webview on a swap to an automated browser', async () => {
+    const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'ab-1', stream: 4321 }) });
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('webview')} initialMode="command" />));
+    await flush();
+
+    await swapWeb('agent-browser-screencast');
+    expect(pane.of('close')).toEqual([['close', 'surface:web']]);
+    expect(requests('launch')).toEqual([expect.objectContaining({ url: 'https://example.com/' })]);
+  });
+
+  it('destroys a pane webview with its Surface on a kill', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('webview')} initialMode="command" />));
+    await flush();
+
+    expect((await dispatchKill('surface:web'))?.ok).toBe(true);
+    expect(pane.of('close')).toEqual([['close', 'surface:web']]);
+  });
+
+  it('opens a pane webview\'s new-window target as a pane webview', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('webview')} initialMode="command" />));
+    await flush();
+
+    act(() => pane.emit({ id: 'surface:web', kind: 'open-window', url: 'https://example.com/popup' }));
+    const open = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Open in new pane')!;
+    await act(async () => { open.click(); });
+    await flush();
+    expect(leafIds()).toHaveLength(2);
+    expect(pane.of('open').at(-1)).toEqual(['open', expect.not.stringMatching(/^surface:web$/), 'https://example.com/popup']);
   });
 
   it('answers dor with the same id after an iframe → agent-browser swap', async () => {

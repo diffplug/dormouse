@@ -25,6 +25,7 @@ import { preferredBrowserProvider } from './BrowserProviderSwitch';
 import { BROWSER_PROVIDER_IDS, renderModeFor } from 'dor-lib-common/browser-providers';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isRealBlur } from '../../lib/window-focus';
+import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { changeNetworkPolicy, getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../../remote/burrow/network-policy-store';
 import { ALLOWED_NETWORK_REACH, withAllowedNetworks } from '../../remote/network-policy';
 import { useBusyAction } from '../remote-control-shared';
@@ -737,14 +738,16 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
   );
 }
 
-function NewTabPrompt({ url, refusal, remedyLabel, onOpen, onCancel }: {
+export function NewTabPrompt({ url, refusal, remedyLabel, onOpen, onCancel }: {
   url: string;
   /** Why an iframe cannot show it, so it opens in `remedyLabel` instead. */
   refusal: string | null;
-  remedyLabel: string;
+  /** Absent: no other renderer to recommend. */
+  remedyLabel?: string;
   onOpen: () => void;
   onCancel: () => void;
 }) {
+  useOccludePaneWebviews(true);
   return (
     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 text-center">
       <div className="max-w-sm text-sm text-foreground">
@@ -769,11 +772,13 @@ function NewTabPrompt({ url, refusal, remedyLabel, onOpen, onCancel }: {
           Cancel
         </button>
       </div>
-      <div className="text-xs text-muted/80">
-        {refusal
-          ? `It is an https:// page, and ${refusal}.`
-          : `Pages that open many tabs work better in ${remedyLabel} — open the chip → Display.`}
-      </div>
+      {remedyLabel && (
+        <div className="text-xs text-muted/80">
+          {refusal
+            ? `It is an https:// page, and ${refusal}.`
+            : `Pages that open many tabs work better in ${remedyLabel} — open the chip → Display.`}
+        </div>
+      )}
     </div>
   );
 }

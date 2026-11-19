@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react';
+import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 
 /**
  * The pane-header popovers' shared dismissal:
@@ -13,6 +14,7 @@ export function useDismissOverlay(
   onClose: () => void,
   overlayRef: RefObject<HTMLElement | null>,
 ): void {
+  useOccludePaneWebviews(true);
   useEffect(() => {
     const close = () => onClose();
     const closeOnKey = (event: KeyboardEvent) => {

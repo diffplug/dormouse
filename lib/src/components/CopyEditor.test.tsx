@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { act, StrictMode, type ReactElement } from 'react';
+import { paneWebviewsOccluded } from '../lib/pane-webview-occlusion';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -646,6 +647,15 @@ describe('CopyEditor: touch slop', () => {
     expect(getMouseSelectionState('term-1')).toMatchObject({ selection: { endRow: 5 }, copyEditor: { format: 'auto' } });
     render();
     expect(editor()!.style.padding).toBe('0px');
+  });
+});
+
+describe('CopyEditor: pane webviews', () => {
+  it('hides every pane webview while open', () => {
+    drag(0, 0, 1, 10);
+    render();
+    expect(editor()).not.toBeNull();
+    expect(paneWebviewsOccluded()).toBe(true);
   });
 });
 

@@ -15,6 +15,7 @@ import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/br
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
+import { getPlatformOrNull } from '../../lib/platform';
 
 /** A measured Playwright ratio belongs to its native context; only a ratio
  * explicitly requested for this Surface may be replayed on its next open. */
@@ -239,12 +240,20 @@ export function isBrowserParams(params: unknown): boolean {
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
 }
 
+/** Whether these params render with `IframePanel`: `iframe`, or `webview` on a
+ *  host without pane webviews, which keeps the mode stored for one that has
+ *  them. */
+export function rendersInIframe(params: unknown): boolean {
+  const mode = resolveRenderMode(params);
+  return mode === 'iframe' || (mode === 'webview' && !getPlatformOrNull()?.paneWebview);
+}
+
 /** Whether a Surface with these params keeps a live page in an iframe — a
  *  browser, or a Tool serving one, in the iframe renderer — which minimizing
  *  never stops and a move between Windows cannot carry. */
 export function retainsLivePage(params: unknown): boolean {
   return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
-    && resolveRenderMode(params) === 'iframe';
+    && rendersInIframe(params);
 }
 
 /** Browser display identity projected from canonical persisted params. */

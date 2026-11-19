@@ -413,3 +413,61 @@ describe("TauriAdapter terminal stream", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 });
+
+describe("TauriAdapter pane webview", () => {
+  async function booted(supported: boolean) {
+    const handlers = new Map<string, (event: { payload: unknown }) => void>();
+    vi.mocked(listen).mockImplementation((async (event: string, handler: (e: { payload: unknown }) => void) => {
+      handlers.set(event, handler);
+      return () => {};
+    }) as unknown as typeof listen);
+    const invoke = vi.mocked(rawInvoke);
+    invoke.mockClear();
+    invoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "pane_webview_supported") return supported;
+      if (cmd === "pane_webview_open") throw "no window";
+      return undefined;
+    }) as unknown as typeof rawInvoke);
+    const adapter = new TauriAdapter();
+    await adapter.init();
+    return { adapter, invoke, deliver: (payload: unknown) => handlers.get("dormouse://pane-webview")?.({ payload }) };
+  }
+
+  it("offers pane webviews only where the host builds them, resetting this window's views before any opens", async () => {
+    const without = await booted(false);
+    expect(without.adapter.paneWebview).toBeUndefined();
+    expect(without.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("pane_webview_reset");
+
+    const { adapter, invoke } = await booted(true);
+    expect(adapter.paneWebview).toBeDefined();
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).toContain("pane_webview_reset");
+  });
+
+  it("carries each operation as its command, answers a failed open as a result, and delivers the window's events", async () => {
+    const { adapter, invoke, deliver } = await booted(true);
+    const host = adapter.paneWebview!;
+    invoke.mockClear();
+    host.place("s1", { x: 1, y: 2, width: 3, height: 4 });
+    host.place("s1", null);
+    host.navigate("s1", "https://example.com/");
+    host.history("s1", "back");
+    host.focus(null);
+    host.close("s1");
+    expect(invoke.mock.calls).toEqual([
+      ["pane_webview_place", { id: "s1", rect: { x: 1, y: 2, width: 3, height: 4 } }],
+      ["pane_webview_place", { id: "s1", rect: null }],
+      ["pane_webview_navigate", { id: "s1", url: "https://example.com/" }],
+      ["pane_webview_history", { id: "s1", dir: "back" }],
+      ["pane_webview_focus", { id: null }],
+      ["pane_webview_close", { id: "s1" }],
+    ]);
+    expect(await host.open("s1", "https://example.com/")).toEqual({ ok: false, error: "no window" });
+
+    const events: unknown[] = [];
+    const unsubscribe = host.onEvent((event) => events.push(event));
+    deliver({ id: "s1", kind: "leader" });
+    unsubscribe();
+    deliver({ id: "s1", kind: "pointerdown" });
+    expect(events).toEqual([{ id: "s1", kind: "leader" }]);
+  });
+});
