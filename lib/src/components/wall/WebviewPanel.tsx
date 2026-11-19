@@ -59,6 +59,8 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState<{ url: string; title: string | null }>(() => ({ url: url ?? rawUrl, title: null }));
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
+  // A URL-bar entry made while the view is opening, which the host would drop.
+  const pendingNavRef = useRef<string | null>(null);
 
   // Unlike the iframe's, every URL the host reports is persisted: the page
   // cannot forge it.
@@ -79,12 +81,16 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     setStatus({ kind: 'opening' });
     void host.open(id, urlRef.current!).then((result) => {
       if (!live) return;
+      // A failed open drops the entry, which no later open should take.
+      const entry = pendingNavRef.current;
+      pendingNavRef.current = null;
       if (!result.ok) {
         setStatus({ kind: 'error', error: result.error });
         return;
       }
       setStatus({ kind: 'open' });
       showPage(result.page);
+      if (entry) host.navigate(id, entry);
     });
     return () => { live = false; };
   }, [host, id, hasUrl, attempt, showPage]);
@@ -180,7 +186,8 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   // With no view to navigate, a URL-bar entry is where one opens.
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) {
-      if (statusRef.current.kind !== 'error' && urlRef.current !== null) host.navigate(id, next);
+      if (statusRef.current.kind === 'open') host.navigate(id, next);
+      else if (statusRef.current.kind === 'opening' && urlRef.current !== null) pendingNavRef.current = next;
       else {
         paneWriteRef.current.updateParams(id, { url: next });
         setAttempt((n) => n + 1);

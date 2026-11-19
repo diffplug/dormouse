@@ -92,7 +92,6 @@ import {
   toolBrowserLaunchParams,
   type LaunchFallback,
   browserDisplayModeFromParams,
-  rendersInIframe,
   retainsLivePage,
   browserUrlFromParams,
   surfaceKindFromParams,
@@ -2258,13 +2257,13 @@ export function Wall({
       // A new-tab request from the iframe shim or a pane webview → a new
       // browser pane split next to the source (docs/specs/dor-browser.md →
       // "Iframe Shim"): a pane webview's opens as one; an iframe's as an
-      // iframe, or the remembered provider's screencast for a page the iframe
-      // would refuse.
+      // iframe, or, for a page the iframe would refuse, a pane webview where
+      // the host has them, else the remembered provider's screencast.
       const reference = buildDorSurfaces().find((s) => s.id === id);
       if (!reference) return;
-      const source = nav.paneParams(id);
-      const webview = resolveRenderMode(source) === 'webview' && !rendersInIframe(source);
-      const providers = !webview && iframeRefusal(url) ? hostBrowserProviders() : [];
+      const refused = iframeRefusal(url) !== null;
+      const webview = !!getPlatform().paneWebview && (refused || resolveRenderMode(nav.paneParams(id)) === 'webview');
+      const providers = !webview && refused ? hostBrowserProviders() : [];
       createContentSurface({
         minimized: false,
         // A launch that fails takes its pane with it.

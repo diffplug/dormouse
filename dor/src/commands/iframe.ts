@@ -1,10 +1,13 @@
-/** Private `surface.iframe` command wiring and open-target resolution. */
+/** `dor iframe` and `dor webview`: one URL in a new browser pane, over
+ *  `surface.iframe` / `surface.webview`, with open-target resolution. */
 
 import { buildCommand } from '@stricli/core';
 import { commandError } from './errors.js';
 import type {
   Command,
+  ControlClient,
   DorCommandContext,
+  IframeSurfaceRequest,
   IframeSurfaceResponse,
   WorkspaceScopedFlags,
 } from './types.js';
@@ -25,30 +28,61 @@ import {
   resolveSurfaceOpenTarget,
 } from './open-target.js';
 
-interface IframeFlags extends WorkspaceScopedFlags {
+interface UrlPaneFlags extends WorkspaceScopedFlags {
   readonly focus?: boolean;
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly from?: string;
 }
 
-export const iframeCommand: Command = {
+interface UrlPane {
+  name: string;
+  brief: string;
+  /** The help's opening paragraphs. */
+  purpose: string;
+  /** The schemes its `<url>` form takes, in help. */
+  schemes: string;
+  open(client: ControlClient, request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
+}
+
+export const iframeCommand = urlPaneCommand({
   name: 'iframe',
-  command: buildCommand<IframeFlags, [string], DorCommandContext>({
-    docs: {
-      brief: 'Open a target in an iframe surface.',
-      fullDescription: `Opens an http:// page in a high-fidelity iframe surface for a human to look at.
+  brief: 'Open a target in an iframe surface.',
+  purpose: `Opens an http:// page in a high-fidelity iframe surface for a human to look at.
 
-Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use \`dor agent-browser open <url>\`.
+Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use \`dor agent-browser open <url>\`; to only show a human such a page, \`dor webview <url>\` where Dormouse has webview surfaces.
 
-A page from another machine opens only from a private network you allow, from its warning or Settings → Network; a page on the internet never does.
+A page from another machine opens only from a private network you allow, from its warning or Settings → Network; a page on the internet never does.`,
+  schemes: 'http://',
+  open: (client, request) => client.iframeSurface(request),
+});
 
-If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
+export const webviewCommand = urlPaneCommand({
+  name: 'webview',
+  brief: 'Open a target in a native webview surface.',
+  purpose: `Opens a page in a native webview surface: a real browser pane for a human to look at and use. The page loads at its own origin, so https:// pages and logins work in it.
+
+Agents cannot read or drive a webview surface. To read or drive a page, use \`dor agent-browser open <url>\`.
+
+Only the Dormouse app on macOS 14 or later has webview surfaces. Elsewhere the command fails before any pane opens, naming \`dor iframe <url>\` for an http:// page and \`dor agent-browser open <url>\` otherwise.`,
+  schemes: 'http:// or https://',
+  open: (client, request) => client.webviewSurface(request),
+});
+
+function urlPaneCommand(pane: UrlPane): Command {
+  return {
+    name: pane.name,
+    command: buildCommand<UrlPaneFlags, [string], DorCommandContext>({
+      docs: {
+        brief: pane.brief,
+        fullDescription: `${pane.purpose}
+
+If the caller surface is an untouched terminal, Dormouse replaces that terminal with the ${pane.name}. Otherwise Dormouse creates a split next to the caller/focused surface.
 
 ${focusHelp({ minimize: true })}
 
 The target is one of:
-  <url>          An absolute http:// URL.
+  <url>          An absolute ${pane.schemes} URL.
   host:port      A schemeless host:port, defaulted to http:// (e.g.
                  localhost:5173, box.ts.net:3000). The explicit port marks a
                  dev/infra server, which is http far more often than not.
@@ -69,65 +103,64 @@ JSON output:
     "url": "http://localhost:5173/",
     "minimized": false
   }`,
-    },
-    parameters: {
-      flags: {
-        focus: focusFlag,
-        json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
-        minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
-        from: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
-        workspace: workspaceFlag,
       },
-      positional: {
-        kind: 'tuple',
-        parameters: [
-          { parse: parseIframeTarget, brief: 'URL, host:port, :port, or surface handle to open.', placeholder: 'target' },
-        ],
+      parameters: {
+        flags: {
+          focus: focusFlag,
+          json: { kind: 'boolean', brief: 'Print a JSON result or error object.', optional: true, withNegated: false },
+          minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
+          from: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
+          workspace: workspaceFlag,
+        },
+        positional: {
+          kind: 'tuple',
+          parameters: [
+            { parse: parseOpenTarget, brief: 'URL, host:port, :port, or surface handle to open.', placeholder: 'target' },
+          ],
+        },
       },
-    },
-    func: runIframeCommand,
-  }),
-};
+      async func(this: DorCommandContext, flags: UrlPaneFlags, target: string): Promise<void | Error> {
+        const conflict = focusMinimizeConflict(flags);
+        if (conflict) return conflict;
+        const client = requireControlClient(this.options);
+        if (client instanceof Error) return client;
 
-async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, target: string): Promise<void | Error> {
-  const conflict = focusMinimizeConflict(flags);
-  if (conflict) return conflict;
-  const client = requireControlClient(this.options);
-  if (client instanceof Error) return client;
+        // A `surface:` handle is resolved to its dev-server URL by the host port scan;
+        // concrete targets (URL / bare :port) were already normalized at parse time.
+        let url = target;
+        if (isSurfaceOpenTarget(target)) {
+          const resolved = await resolveSurfaceOpenTarget(target, client, flags.workspace);
+          if (resolved instanceof Error) return resolved;
+          url = resolved;
+        }
 
-  // A `surface:` handle is resolved to its dev-server URL by the host port scan;
-  // concrete targets (URL / bare :port) were already normalized at parse time.
-  let url = target;
-  if (isSurfaceOpenTarget(target)) {
-    const resolved = await resolveSurfaceOpenTarget(target, client, flags.workspace);
-    if (resolved instanceof Error) return resolved;
-    url = resolved;
-  }
-
-  try {
-    const response = await client.iframeSurface({
-      minimized: flags.minimize === true,
-      focus: flags.focus === true,
-      surface: flags.from,
-      url,
-      ...workspaceParam(flags.workspace),
-    });
-    writeStdout(this, renderIframeResponse(response, flags.json === true));
-    return undefined;
-  } catch (error) {
-    return commandError(error);
-  }
+        try {
+          const response = await pane.open(client, {
+            minimized: flags.minimize === true,
+            focus: flags.focus === true,
+            surface: flags.from,
+            url,
+            ...workspaceParam(flags.workspace),
+          });
+          writeStdout(this, renderResponse(response, flags.json === true));
+          return undefined;
+        } catch (error) {
+          return commandError(error);
+        }
+      },
+    }),
+  };
 }
 
 // A `surface:` handle passes through verbatim for async resolution in the func;
 // every other form is normalized to a URL here so a bad target fails at parse
 // time. A schemeless `:port` / `host:port` is inferred to `http://`; only a
 // non-http(s) scheme or otherwise unparseable input is rejected.
-function parseIframeTarget(input: string): string {
+function parseOpenTarget(input: string): string {
   return isSurfaceOpenTarget(input) ? input : normalizeConcreteOpenUrl(input);
 }
 
-function renderIframeResponse(response: IframeSurfaceResponse, json: boolean): string {
+function renderResponse(response: IframeSurfaceResponse, json: boolean): string {
   if (json) {
     return renderJson({
       status: response.status,

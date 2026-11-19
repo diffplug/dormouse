@@ -249,6 +249,16 @@ describe('WebviewPanel', () => {
     expect(pane.of('navigate')).toEqual([]);
   });
 
+  it('takes a URL-bar entry made while the view is still opening once it has opened', async () => {
+    let opened = (_: { ok: true; page: { url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean } }) => {};
+    vi.mocked(pane.host.open).mockImplementation(() => new Promise((resolve) => { opened = resolve; }));
+    await show();
+    getAgentBrowserScreenController(ID)!.chromeActions.navigate('https://example.com/typed');
+    expect(pane.of('navigate')).toEqual([]);
+    await act(async () => { opened({ ok: true, page: { url: URL, title: '', canGoBack: false, canGoForward: false, loading: false } }); });
+    expect(pane.of('navigate')).toEqual([['navigate', ID, 'https://example.com/typed']]);
+  });
+
   it('opens no view for a URL that is not http(s), and says why an open failed', async () => {
     await show({ params: { surfaceType: 'browser', renderMode: 'webview', url: 'javascript:alert(1)' } });
     expect(container.textContent).toContain('http:// and https:// pages only');
