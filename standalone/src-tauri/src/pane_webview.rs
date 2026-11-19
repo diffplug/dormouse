@@ -790,7 +790,7 @@ mod imp {
                 if from != owner {
                     (pane.rect, pane.shown, pane.want_focus, pane.resume) = (None, false, false, false);
                 }
-                (view, was_shown, pane.loading.clone())
+                (view, was_shown, pane.loading.clone(), !pane.page.url.is_empty())
             });
             Some((held, from, pane.page.clone()))
         })
@@ -798,7 +798,7 @@ mod imp {
         match existing {
             // Its build reads the owner it now has.
             Some((None, _, page)) => Ok(page),
-            Some((Some((view, was_shown, loading)), from, _)) => {
+            Some((Some((view, was_shown, loading, had_page)), from, _)) => {
                 if from != owner {
                     let hwnd = window_hwnd(app, &owner)?;
                     if was_shown {
@@ -807,7 +807,7 @@ mod imp {
                     view.reparent(hwnd.0 as isize).map_err(|e| e.to_string())?;
                     hook_window(hwnd);
                 }
-                let page = page_of(&view, &loading);
+                let page = page_of(&view, &loading, had_page);
                 with_panes(|panes| {
                     if let Some(pane) = panes.get_mut(&id) {
                         pane.page = page.clone();
@@ -1219,9 +1219,14 @@ mod imp {
                             pane.want_focus = true;
                             Target::Nothing
                         }
-                        // A hidden view never holds focus.
                         Some(view) if pane.shown => Target::Pane(view.clone()),
-                        Some(_) => Target::Nothing,
+                        // A hidden view never holds focus, and commands can
+                        // arrive out of the order they were sent in: this
+                        // one waits for the `place` that shows the view.
+                        Some(_) => {
+                            pane.want_focus = true;
+                            Target::Nothing
+                        }
                     },
                     None => Target::Nothing,
                 },
@@ -1333,7 +1338,8 @@ mod imp {
         }
     }
 
-    fn page_of(view: &WebView, loading: &Cell<Option<u64>>) -> PageState {
+    /// `had_page`: whether this view has reported a URL before.
+    fn page_of(view: &WebView, loading: &Cell<Option<u64>>, had_page: bool) -> PageState {
         let core = view.webview();
         // SAFETY: plain property reads on a live webview, on the main thread.
         let (source, title) = unsafe {
@@ -1344,8 +1350,10 @@ mod imp {
             (source, title)
         };
         PageState {
-            // `about:blank` until the first commit, where macOS has no URL.
-            url: if is_web(&source) { source } else { String::new() },
+            // `about:blank` until the first commit, where macOS has no URL,
+            // and no URL with no load in flight tells the panel the page
+            // failed. A page that later moves itself to `about:blank` has not.
+            url: if is_web(&source) || had_page { source } else { String::new() },
             title,
             can_go_back: view.can_go_back().unwrap_or(false),
             can_go_forward: view.can_go_forward().unwrap_or(false),
@@ -1364,15 +1372,18 @@ mod imp {
         let views = with_panes(|panes| {
             panes
                 .iter()
-                .filter_map(|(id, pane)| pane.view.clone().map(|view| (id.clone(), pane.gen, view, pane.loading.clone())))
+                .filter_map(|(id, pane)| {
+                    let had_page = !pane.page.url.is_empty();
+                    pane.view.clone().map(|view| (id.clone(), pane.gen, view, pane.loading.clone(), had_page))
+                })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
         let seen: Vec<_> = views
             .into_iter()
-            .map(|(id, gen, view, loading)| {
+            .map(|(id, gen, view, loading, had_page)| {
                 let container = view.hwnd();
-                (id, gen, page_of(&view, &loading), has_keyboard(container), in_front(container))
+                (id, gen, page_of(&view, &loading, had_page), has_keyboard(container), in_front(container))
             })
             .collect();
         let events = with_panes(|panes| {
@@ -1441,11 +1452,22 @@ mod imp {
         _: usize,
     ) -> LRESULT {
         match msg {
-            WM_ACTIVATE if (wparam.0 & 0xffff) as u32 == WA_INACTIVE => {
-                for (id, view, focused, ..) in panes_in(window) {
-                    if focused || thread_focus_in(view.hwnd()) {
-                        set_resume(&id, true);
+            WM_ACTIVATE => {
+                if (wparam.0 & 0xffff) as u32 == WA_INACTIVE {
+                    for (id, view, focused, ..) in panes_in(window) {
+                        if focused || thread_focus_in(view.hwnd()) {
+                            set_resume(&id, true);
+                        }
                     }
+                }
+                // Another app can come to the front with no focus event from
+                // the view, and the foreground window only changes after this
+                // message: look again a turn later.
+                if let Some(app) = app() {
+                    std::thread::spawn(move || {
+                        let handle = app.clone();
+                        let _ = app.run_on_main_thread(move || sync(&handle));
+                    });
                 }
             }
             WM_SETFOCUS => {
