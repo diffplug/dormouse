@@ -1,7 +1,7 @@
 # Pane Webview
 
 > - See `docs/specs/glossary.md` for canonical Surface / Session / Pane / Door vocabulary.
-> - Owns the `webview` render mode of the browser Surface, a native view that loads the page at its real origin: its host boundary, lifetime, visibility, and keyboard. `docs/specs/dor-browser.md` owns the browser Surface, its other renderers, and render swaps; `docs/specs/standalone.md` the host it runs in; `docs/specs/security-local.md` -> "Webview panes" what a page may reach.
+> - Owns the `webview` render mode of the browser Surface, a native view that loads the page at its real origin. `docs/specs/dor-browser.md` owns the browser Surface, its other renderers, and render swaps; `docs/specs/standalone.md` the host it runs in; `docs/specs/security-local.md` -> "Webview panes" what a page may reach.
 > - A *pane webview* is the native view this spec describes; the *app webview* is the one that runs Dormouse.
 
 ## Host capability
@@ -11,6 +11,12 @@ A host offers the mode by setting `PlatformAdapter.paneWebview` before the first
 Every pane webview is built with wry directly on the app window, in one Rust file, never through Tauri's `unstable` multiwebview (`docs/specs/security-local.md` -> "Webview panes"; rationale).
 
 Source of truth: `PaneWebviewHost` in `lib/src/lib/platform/types.ts`; `initPaneWebview` in `standalone/src/tauri-adapter.ts`; `rendersInIframe` in `lib/src/components/wall/browser-surface.ts`; `standalone/src-tauri/src/pane_webview.rs`.
+
+## Entry points
+
+A webview pane opens from `dor webview` (`docs/specs/dor-cli.md` -> "Browser Open Target Resolution"), a render swap, a page's new-window request, and the iframe renderer's refusals (`docs/specs/dor-browser.md` -> "Iframe Renderer"). A Client frames its local `http:` page as an iframe pane's (`docs/specs/remote-api.md` -> "Frames").
+
+Source of truth: `webviewCommand` in `dor/src/commands/iframe.ts`; `pageOf` in `lib/src/remote/burrow/embedded-pages.ts`.
 
 ## Lifetime
 
@@ -42,8 +48,6 @@ Source of truth: `install` in `standalone/src-tauri/src/pane_webview.rs`; `paneW
 
 ## Page boundary
 
-What a page may reach is `docs/specs/security-local.md` -> "Webview panes".
-
 - A page may also frame its own `about:`, `blob:`, and `data:` documents (rationale), and its permission requests meet an explicit handler (rationale).
 - A new-window request opens nothing itself: the panel asks, then opens the URL in a new webview pane beside its own.
 - One persistent profile serves every pane webview.
@@ -55,10 +59,9 @@ Source of truth: `may_load` in `standalone/src-tauri/src/pane_webview.rs`; `onOp
 
 **Scope: webview-panes** — what remains, in staged order:
 
-1. Snapshot stand-ins under motion and overlays.
-2. `dor webview <url>`, and the entry points that default to it.
-3. A Client's frame of a local `http:` page whatever the laptop renders with (`docs/specs/remote-api.md` -> "Frames").
-4. Windows.
-5. Surviving an app-webview reload, by adoption.
+1. The pane context menu and a Tool's Break opening a webview pane.
+2. Snapshot stand-ins under motion and overlays.
+3. Windows.
+4. Surviving an app-webview reload, by adoption.
 
 Not planned: Linux, VS Code, a Client rendering one, an agent driving one.
