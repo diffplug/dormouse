@@ -71,6 +71,16 @@
       ]
     },
     {
+      "name": "objc2-web-kit",
+      "license": "MIT OR Zlib OR Apache-2.0",
+      "author": "Mads Marquart",
+      "homepage": "https://github.com/madsmtm/objc2",
+      "declaredName": "objc2-web-kit",
+      "versions": [
+        "0.3.2"
+      ]
+    },
+    {
       "name": "process-wrap",
       "license": "MIT OR Apache-2.0",
       "author": "Félix Saparelli <felix@passcod.name>",
@@ -2083,15 +2093,6 @@
     },
     {
       "name": "objc2-user-notifications",
-      "license": "MIT OR Zlib OR Apache-2.0",
-      "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2",
-      "versions": [
-        "0.3.2"
-      ]
-    },
-    {
-      "name": "objc2-web-kit",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2",

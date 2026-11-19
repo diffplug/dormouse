@@ -32,6 +32,7 @@ A pane webview paints above everything the app webview draws, and takes neither 
 
 - **Must show a pane webview only while its pane is in sight** (`docs/specs/dor-browser.md` -> "Resource Policy"); a hidden one keeps its page, which the engine throttles (rationale).
 - Every modal, menu, and prompt hides them all first (`docs/specs/security-local.md` -> "Webview panes").
+- A hidden view's placeholder shows a still of its open page, taken only while the view is shown. **Never wait for a still to hide a view.** A new URL or a closed view drops it.
 
 Source of truth: `useOccludePaneWebviews` in `lib/src/lib/pane-webview-occlusion.ts`.
 
@@ -40,7 +41,7 @@ Source of truth: `useOccludePaneWebviews` in `lib/src/lib/pane-webview-occlusion
 The app webview receives no key or pointer event while a pane webview holds focus.
 
 - **Must give a pane webview the keyboard only while it is shown and its pane is the passthrough pane**; hiding one that holds it returns focus to the app webview (rationale).
-- The host sees each key and press before either webview and reports the leader and presses as events (`docs/specs/security-local.md` -> "Webview panes"; rationale). **Must detect the leader exactly as `dualTap` does** (`docs/specs/layout.md` -> "Mode switching"); a press enters its pane like a click.
+- The host sees each key and press before either webview and reports the leader, presses, and the pointer leaving as events (`docs/specs/security-local.md` -> "Webview panes"; rationale). **Must detect the leader exactly as `dualTap` does** (`docs/specs/layout.md` -> "Mode switching"); a press enters its pane like a click.
 - **Must report which pane webview holds focus**: that is no real blur (`docs/specs/layout.md` -> "Corner cases" #2), and keeps presence (`docs/specs/alert.md` -> "Engagement").
 - On macOS a chord bound to a menu item reaches the menu, never the page (rationale); the Edit submenu is the page's clipboard path (`docs/specs/standalone.md` -> "Application menu").
 
@@ -60,8 +61,7 @@ Source of truth: `may_load` in `standalone/src-tauri/src/pane_webview.rs`; `onOp
 **Scope: webview-panes** — what remains, in staged order:
 
 1. The pane context menu and a Tool's Break opening a webview pane.
-2. Snapshot stand-ins under motion and overlays.
-3. Windows.
-4. Surviving an app-webview reload, by adoption.
+2. Windows.
+3. Surviving an app-webview reload, by adoption.
 
 Not planned: Linux, VS Code, a Client rendering one, an agent driving one.
