@@ -64,7 +64,7 @@ export const webviewCommand = urlPaneCommand({
 
 Agents cannot read or drive a webview surface. To read or drive a page, use \`dor agent-browser open <url>\`.
 
-Only the Dormouse app on macOS 14 or later has webview surfaces. Elsewhere the command fails before any pane opens, naming \`dor iframe <url>\` for an http:// page and \`dor agent-browser open <url>\` otherwise.`,
+Only the Dormouse app has webview surfaces, on macOS 14 or later and on Windows. Elsewhere the command fails before any pane opens, naming \`dor iframe <url>\` for an http:// page and \`dor agent-browser open <url>\` otherwise.`,
   schemes: 'http:// or https://',
   open: (client, request) => client.webviewSurface(request),
 });

@@ -1,6 +1,6 @@
 # Pane Webview — Rationale
 
-Evidence behind [webview-pane.md](webview-pane.md), keyed by its headings. Measured 2026-11-19 on macOS 27 with tao 0.37.2 and wry 0.57.0, in a scratch app posting synthesized `NSEvent`s to its own queue.
+Evidence behind [webview-pane.md](webview-pane.md), keyed by its headings. Measured 2026-11-19 with tao 0.37.2 and wry 0.57.0: on macOS 27 in a scratch app posting synthesized `NSEvent`s to its own queue; on Windows 11 26300 with WebView2 157 over RDP, input by `SendInput`.
 
 ## Host capability
 
@@ -8,15 +8,23 @@ Evidence behind [webview-pane.md](webview-pane.md), keyed by its headings. Measu
 
 **Why macOS 14.** A data store apart from the app's own is `WKWebsiteDataStore(forIdentifier:)`, which that release added.
 
+**Why one command at a time.** WebView2 delivered unawaited invokes out of order: a burst of 20 `place` calls was reordered in 14 of 15 runs; calls 16 ms apart kept their order.
+
+**Why Windows answers `open` first.** A sync command runs on the main thread inside the app webview's IPC callback, and building a view there deadlocked every time: `CreateCoreWebView2Controller` never completed (20 s watchdog), and `run_on_main_thread` from the main thread runs inline. A build posted from a spawned thread took 157–250 ms the first time, about 30 ms after.
+
 ## Lifetime
 
 Removing the view from its window and adding it back kept the page: no reload, form state intact.
 
 A first load that fails leaves the view with no page at all, and `open` adopts an existing view without navigating it, so Reload would adopt an empty view.
 
+**Why a Windows view is never dropped.** wry's `Drop` for a child view sends its parent the message that removes the app webview's own subclass; after one drop the app webview no longer followed window resizes or took the keyboard on activation. Closing the controller and destroying its container still ended the profile's browser processes.
+
 ## Visibility
 
 Hiding the view kept its page, raised `visibilitychange`, stopped `requestAnimationFrame`, and slowed a 100 ms timer to about one tick a second.
+
+On Windows `SetIsVisible(false)` throttles (no `requestAnimationFrame`, a 100 ms timer at 1 Hz); hiding the container alone throttles nothing.
 
 ## Keyboard and pointer
 
@@ -24,9 +32,11 @@ An app-level `NSEvent` local monitor saw every `keyDown` and `flagsChanged` befo
 
 Hiding a view that held first responder left the window itself holding it, not the app webview.
 
+On Windows `AcceleratorKeyPressed` never fired for Shift alone, and no `WM_KEYDOWN` reached the process while a webview held focus. Raw Input under tao's existing registration, flags 0, saw all 70 test keys while either webview held focus and none while another app was foreground; left and right Shift differ by make code. `WM_PARENTNOTIFY` on a view's container fired once per press, any button, focused or not. WebView2's focus events are not one per transition, while `GetFocus` with `IsChild` matched where keys went every time. Hiding a focused view stranded the keyboard in it, and a press from one pane into another let the first pane's release blur the second for 6 ms.
+
 ## Page boundary
 
-**Why a page may frame `about:`, `blob:`, and `data:`.** wry's navigation handler hears every frame and cannot tell the top one, and pages frame those documents routinely; none reaches outside the engine, where `file:` reads the disk and any other scheme starts another app.
+**Why a page may frame `about:`, `blob:`, and `data:`.** wry's navigation handler hears every frame and cannot tell the top one, and pages frame those documents routinely; none reaches outside the engine, where `file:` reads the disk and any other scheme starts another app. On Windows wry's handler hears only the top frame, so the frames have a handler of their own; the external-scheme cancel caught `mailto:` and `ms-settings:` from the top frame, a link, and an iframe.
 
 **Why the permission handler is explicit.** wry grants a media-capture request outright when no handler is set.
 

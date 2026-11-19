@@ -11,7 +11,7 @@ Opens a page in a native webview surface: a real browser pane for a human to loo
 
 Agents cannot read or drive a webview surface. To read or drive a page, use `dor agent-browser open <url>`.
 
-Only the Dormouse app on macOS 14 or later has webview surfaces. Elsewhere the command fails before any pane opens, naming `dor iframe <url>` for an http:// page and `dor agent-browser open <url>` otherwise.
+Only the Dormouse app has webview surfaces, on macOS 14 or later and on Windows. Elsewhere the command fails before any pane opens, naming `dor iframe <url>` for an http:// page and `dor agent-browser open <url>` otherwise.
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the webview. Otherwise Dormouse creates a split next to the caller/focused surface.
 

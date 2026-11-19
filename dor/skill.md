@@ -28,7 +28,7 @@ Then pick the command for the job:
 | Drive a browser in a project that uses Playwright | `dor playwright open <url>` |
 | Show the user a local file (HTML, image, text, media) or folder | `dor open <path>` |
 | Show the user an `http://` page you will not drive | `dor iframe <url>` |
-| Show the user a page you will not drive in a real browser pane, `https://` and logins included (macOS app only) | `dor webview <url>` |
+| Show the user a page you will not drive in a real browser pane, `https://` and logins included (the macOS and Windows app only) | `dor webview <url>` |
 
 Run `dor <command> --help` for every flag and output format.
 
@@ -129,7 +129,7 @@ dor kill surface:3 --confirm-dangerously          # only when already validated
 
 ## Browsers
 
-Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything but the Dormouse flags, which may come anywhere, is that CLI's own command set; a bare `--` and everything after it are forwarded unchanged, so to pass a value spelled like a Dormouse flag, put `--` after the command: `dor agent-browser fill @e1 -- --focus`. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`. **`dor webview`** shows the human any `http://` or `https://` page in a real browser pane where logins work, on the macOS app only; you cannot read or drive it either.
+Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything but the Dormouse flags, which may come anywhere, is that CLI's own command set; a bare `--` and everything after it are forwarded unchanged, so to pass a value spelled like a Dormouse flag, put `--` after the command: `dor agent-browser fill @e1 -- --focus`. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`. **`dor webview`** shows the human any `http://` or `https://` page in a real browser pane where logins work, in the macOS and Windows app only; you cannot read or drive it either.
 
 `dor list` shows each browser's `render_mode`, which says what drives it: `agent-browser-*` takes `dor agent-browser --surface <id>`, `playwright-*` takes `dor playwright --surface <id>`, and `iframe` and `webview` take neither — open its URL with `dor agent-browser open <url>` instead. `screencast` renders in the pane; `popout` is a separate window the pane stands in for.
 
