@@ -40,10 +40,10 @@ it('leaves collapsed and unrelated selections alone', () => {
   select(0, 0);
   expect(copy().handled).toBe(false);
   select();
-  const aux = document.createElement('textarea');
-  document.body.append(aux);
-  aux.focus();
-  expect(copy(aux).handled).toBe(false);
+  const field = document.createElement('textarea');
+  document.body.append(field);
+  field.focus();
+  expect(copy(field).handled).toBe(false);
   expect(write).not.toHaveBeenCalled();
 });
 it('retains selection after clipboard rejection for another attempt', async () => {
