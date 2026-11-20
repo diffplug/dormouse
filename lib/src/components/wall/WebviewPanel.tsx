@@ -11,7 +11,7 @@ import type { PaneWebviewEvent, PaneWebviewPage } from '../../lib/platform/types
 import { rectsEqual } from '../../lib/rect-tween';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import { isSeenObserved } from '../../lib/surface-sight';
-import { useOccludePaneWebviews, usePaneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
+import { usePaneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
 import { setPaneWebviewFocus } from '../../lib/window-focus';
 import { isComposingKey } from '../../lib/dom';
 import type { PaneProps } from './pane-props';
@@ -198,7 +198,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           break;
         }
         case 'dialog':
-          // So does this one's; a page off screen is answered no.
+          // This one's hides its own view; a page off screen is answered no.
           if (shownRef.current) {
             dialogRef.current = event;
             setDialog(event);
@@ -215,10 +215,11 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   }, [host, id, settle, takeStill, fail]);
 
   // Shown only while its pane is in sight and no overlay is open, following
-  // the placeholder's laid-out rect.
+  // the placeholder's laid-out rect. Its page's own prompt draws inside this
+  // pane alone, so it hides this view and no other pane's.
   const seen = isSeenObserved(useSurfaceSight(parked, id));
   const occluded = usePaneWebviewsOccluded();
-  const shown = seen && !occluded && status.kind === 'open' && url !== null;
+  const shown = seen && !occluded && !dialog && !downloadRefused && status.kind === 'open' && url !== null;
   shownRef.current = shown;
   // The view has the keyboard only while it is shown and its pane is the one
   // in passthrough. Selection can leave without a press in the app webview (a
@@ -359,7 +360,6 @@ export function PageDialogPrompt({ asker, dialog, focusTarget, onAnswer }: {
   focusTarget?: (element: HTMLElement | null) => void;
   onAnswer: (accept: boolean, text?: string) => void;
 }) {
-  useOccludePaneWebviews(true);
   const [text, setText] = useState(dialog.text ?? '');
   const accept = () => onAnswer(true, dialog.dialog === 'prompt' ? text : undefined);
   return (

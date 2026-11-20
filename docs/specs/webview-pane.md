@@ -31,7 +31,7 @@ Source of truth: `WebviewPanel` in `lib/src/components/wall/WebviewPanel.tsx`; `
 A pane webview paints above everything the app webview draws, and takes neither transform nor clip.
 
 - **Must show a pane webview only while its pane is in sight** (`docs/specs/dor-browser.md` -> "Resource Policy"); a hidden one keeps its page, which the engine throttles (rationale).
-- Every modal, menu, and prompt hides them all first (`docs/specs/security-local.md` -> "Webview panes").
+- Every modal, menu, and prompt hides them all first, except a page's own dialog and the refused-download notice, which hide their pane's view alone (`docs/specs/security-local.md` -> "Webview panes").
 - A hidden view's placeholder shows a still of its open page, taken only while the view is shown. **Never wait for a still to hide a view.** A new URL or a closed view drops it.
 
 Source of truth: `useOccludePaneWebviews` in `lib/src/lib/pane-webview-occlusion.ts`.
