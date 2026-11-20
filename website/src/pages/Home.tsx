@@ -21,8 +21,8 @@ import elevenLabsGrantsUrl from "../assets/elevenlabs-grants.png";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
-import { PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
-import { VsCodeDemoWindow } from "../components/vscode-demo/VsCodeDemoWindow";
+import { loadPocketDemo, PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
+import { loadVsCodeDemoWall, VsCodeDemoWindow } from "../components/vscode-demo/VsCodeDemoWindow";
 import { sitePath } from "../lib/site-meta";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
@@ -61,6 +61,31 @@ const HERO_SCROLL_SETTLE_PX = 0.5;
 
 /** Vertical padding applied to all content sections after the hero. */
 const SECTION_PY = "py-8";
+
+/** Runs each loader once the page has loaded and the browser is idle, unless
+ *  the reader asked to save data or is on a 2G connection. Returns a cancel. */
+function preloadWhenIdle(loaders: readonly (() => Promise<unknown>)[]): () => void {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (connection?.saveData || connection?.effectiveType?.includes("2g")) return () => {};
+  const preload = () => loaders.forEach((load) => void load().catch(() => {}));
+  let cancelIdle = () => {};
+  const run = () => {
+    // Safari has no requestIdleCallback.
+    if ("requestIdleCallback" in window) {
+      const handle = requestIdleCallback(preload, { timeout: 3000 });
+      cancelIdle = () => cancelIdleCallback(handle);
+    } else {
+      const handle = setTimeout(preload, 500);
+      cancelIdle = () => clearTimeout(handle);
+    }
+  };
+  if (document.readyState === "complete") run();
+  else addEventListener("load", run, { once: true });
+  return () => {
+    removeEventListener("load", run);
+    cancelIdle();
+  };
+}
 
 /** Clamp a value to 0–1. */
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -327,6 +352,11 @@ export default function Home() {
     else if (!root.hasAttribute(HERO_GATE_ATTR)) root.setAttribute(HERO_GATE_ATTR, "pending");
   }, [heroCanPaint]);
   useEffect(() => () => document.documentElement.removeAttribute(HERO_GATE_ATTR), []);
+
+  // The demos' modules are most of the page's weight. Fetch them once the page
+  // has loaded and the browser is idle, rather than when a demo nears the
+  // viewport, so a reader who scrolls finds them ready.
+  useEffect(() => preloadWhenIdle([loadVsCodeDemoWall, loadPocketDemo]), []);
 
   useEffect(() => {
     let cancelled = false;

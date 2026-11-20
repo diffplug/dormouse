@@ -23,9 +23,20 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import tinyIconUrl from "../../assets/icon-tiny-dark.png";
+import agentStill from "../../assets/demo-stills/agent.webp";
+import portsStill from "../../assets/demo-stills/ports.webp";
+import videoStill from "../../assets/demo-stills/video.webp";
 import type { SceneName } from "./scenes";
 
-const VsCodeDemoWall = lazy(() => import("./VsCodeDemoWall"));
+/** The Walls' module, which the homepage also fetches ahead, once it has loaded. */
+export const loadVsCodeDemoWall = () => import("./VsCodeDemoWall");
+const VsCodeDemoWall = lazy(loadVsCodeDemoWall);
+
+/** Each scene's first frame, shown until its Wall paints over it, so a slow
+ *  load looks like the app rather than an empty window. Screenshots of the
+ *  real scenes, at the window's layout size: retake them when a scene or the
+ *  Wall's look changes. */
+const STILLS: Record<SceneName, string> = { video: videoStill, agent: agentStill, ports: portsStill };
 
 /** VS Code's workbench in Kimbie Dark, the theme the Walls inside wear
  *  (`../homepage-demos.ts`): the theme file's own colors, and VS Code's dark
@@ -198,7 +209,8 @@ function TabStrip({ children, actions }: { children: ReactNode; actions: ReactNo
  *  window's refits would otherwise re-render the whole Wall. */
 const DemoWall = memo(function DemoWall({ scene, near }: { scene: SceneName; near: boolean }) {
   return (
-    <div className="relative min-h-0 flex-1" style={{ background: KIMBIE.editor }}>
+    <div data-demo-scene={scene} className="relative min-h-0 flex-1" style={{ background: KIMBIE.editor }}>
+      <img src={STILLS[scene]} alt="" decoding="async" className="absolute inset-0 size-full" />
       {near ? (
         <Suspense fallback={null}>
           <VsCodeDemoWall scene={scene} />
