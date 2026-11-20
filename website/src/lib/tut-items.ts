@@ -278,7 +278,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       },
     ],
     prose: [
-      'Dormouse has three kinds of browser pane. The playground\'s servers are pretend and it has no browser to drive, so the music video pane is the one to try here.',
+      'Dormouse has three kinds of browser pane. The playground\'s servers are pretend and it has no browser to drive, so opening one of their ports shows the music video instead.',
       '`iframe` is built in. It shows the page itself, with no lag, through a proxy on your machine. It shows `http://` pages only, an agent can neither read nor drive it, and a page\'s service worker does not run.',
       '`agent-browser` and `playwright` drive a Chromium you install yourself, through the `agent-browser` or `@playwright/cli` command. The pane shows its screencast, a step behind the page. Your agents read and drive the same browser, and it opens any page, `https://` included. Pop it out into its own window to use it directly: popping out or back in carries over only the URL, not logins, cookies, or other tabs.',
     ],
