@@ -20,7 +20,7 @@ A first load that fails leaves the view with no page at all, and `open` adopts a
 
 **Why a Windows view is never dropped.** wry's `Drop` for a child view sends its parent the message that removes the app webview's own subclass; after one drop the app webview no longer followed window resizes or took the keyboard on activation. Closing the controller and destroying its container still ended the profile's browser processes.
 
-On Windows a page's renderer ended from outside raised `ProcessFailed` for a shown view and for a hidden one, whose pane said so when its Workspace came back; Reload then built a new view (2026-11-19).
+On Windows a page's renderer ended from outside raised `ProcessFailed` for a shown view and for a hidden one, whose pane said so when its Workspace came back; Reload then built a new view (2026-11-19). wry 0.57 destroys the view's container on `window.close()` (measured WebView2 157, 2026-11).
 
 ## Visibility
 

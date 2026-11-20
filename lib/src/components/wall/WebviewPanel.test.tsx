@@ -271,11 +271,14 @@ describe('WebviewPanel', () => {
     expect(prompt()).toBeNull();
   });
 
-  it('closes a view whose page crashed, says so, and opens a new one on Reload', async () => {
+  it.each([
+    ['crashed', 'The page crashed.'],
+    ['closed', 'The page closed itself.'],
+  ] as const)('closes a view whose page %s, says so, and opens a new one on Reload', async (kind, copy) => {
     await show();
-    act(() => pane.emit({ id: ID, kind: 'crashed' }));
+    act(() => pane.emit({ id: ID, kind }));
     expect(pane.of('close')).toEqual([['close', ID]]);
-    expect(container.textContent).toContain('The page crashed.');
+    expect(container.textContent).toContain(copy);
     const opens = pane.of('open').length;
     await act(async () => getAgentBrowserScreenController(ID)!.chromeActions.reload());
     expect(pane.of('open')).toHaveLength(opens + 1);

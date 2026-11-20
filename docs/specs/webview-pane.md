@@ -8,7 +8,7 @@
 
 A host offers the mode by setting `PlatformAdapter.paneWebview` before the first render; standalone sets it on macOS 14 and later and on Windows (rationale). **Must send one view's commands to the host one at a time, in order**, a still request aside (rationale). On Windows `open` answers before the view exists, and its page follows as events (rationale). **Must render a `webview` Surface with the iframe renderer on a host without it, keeping `renderMode` stored**, so the Surface returns to its mode on a host that has it.
 
-Every pane webview is built with wry directly on the app window, in one Rust file, never through Tauri's `unstable` multiwebview (`docs/specs/security-local.md` -> "Webview panes"; rationale).
+Every pane webview is built with wry on the app window, in one Rust file, never through Tauri's `unstable` multiwebview (`docs/specs/security-local.md` -> "Webview panes"; rationale).
 
 Source of truth: `PaneWebviewHost` in `lib/src/lib/platform/types.ts`; `initPaneWebview` in `standalone/src/tauri-adapter.ts`; `rendersInIframe` in `lib/src/components/wall/browser-surface.ts`; `standalone/src-tauri/src/pane_webview.rs`.
 
@@ -20,7 +20,7 @@ Source of truth: `webviewCommand` in `dor/src/commands/iframe.ts`; `pageOf` in `
 
 ## Lifetime
 
-**The host keys a pane webview by Surface id; a panel that mounts opens or adopts its Surface's view, and one that unmounts only hides it.** A move between Workspaces reloads nothing, and a move to another window reparents the view (rationale). **Only `closeBrowserSurface`, the end of its window, a reload of that window's app webview, a first load that fails, or its page's process ending destroys one** (rationale); on Windows a failed load shows the engine's error page, and only a view that cannot be built is destroyed.
+**The host keys a pane webview by Surface id; a panel that mounts opens or adopts its Surface's view, and one that unmounts only hides it.** A move between Workspaces reloads nothing, and one to another window reparents the view (rationale). **Only `closeBrowserSurface`, the end of its window, a reload of that window's app webview, a first load that fails, its page's process ending, or, on Windows, its page closing itself destroys one** (rationale); on Windows a failed load shows the engine's error page, and only a view that cannot be built is destroyed.
 
 `url` in params is every top-level `http(s)` URL the host reports. A restart is a cold load there; the profile's cookies and storage survive it.
 
@@ -43,17 +43,17 @@ The app webview receives no key or pointer event while a pane webview holds focu
 - **Must give a pane webview the keyboard only while it is shown and its pane is the passthrough pane**; hiding or closing one that holds it returns focus to the app webview (rationale), and a pane's release moves nothing unless its own view holds the keyboard.
 - The host observes keys and presses natively, never through the page, and reports the leader, presses, and the pointer leaving as events (`docs/specs/security-local.md` -> "Webview panes"; rationale). **Must detect the leader exactly as `dualTap` does** (`docs/specs/layout.md` -> "Mode switching"); a press enters its pane like a click.
 - **Must report which pane webview holds focus**: that is no real blur (`docs/specs/layout.md` -> "Corner cases" #2), and keeps presence (`docs/specs/alert.md` -> "Engagement").
-- `⌘=`, `⌘-`, and `⌘0` on macOS, matched by the character typed, and on Windows `Ctrl` with those keys or the wheel, zoom the page that holds the keyboard, unless the page handled the chord itself (rationale).
+- `⌘=`, `⌘-`, and `⌘0` on macOS, matched by the character typed, and on Windows `Ctrl` with those keys or the wheel, zoom the page that holds the keyboard, unless the page handled the chord (rationale).
 - On macOS a chord bound to a menu item reaches the menu, never the page (rationale); the Edit submenu is the page's clipboard path (`docs/specs/standalone.md` -> "Application menu").
 
 Source of truth: `install` and `on_raw_input` in `standalone/src-tauri/src/pane_webview.rs`; `paneWebviewHoldsFocus` in `lib/src/lib/window-focus.ts`.
 
 ## Page boundary
 
-- A page may also frame its own `about:`, `blob:`, and `data:` documents (rationale), and its permission requests meet an explicit handler, and its fullscreen never leaves its pane (rationale).
+- A page may also frame its own `about:`, `blob:`, and `data:` documents (rationale); its permission requests meet an explicit handler, and its fullscreen never leaves its pane (rationale).
 - The panel says so when the host refuses a page's download, for a page on screen. On Windows the page menu has no "Save as" (`docs/specs/security-local.md` -> "Webview panes").
-- A new-window request takes a press (rationale), opens nothing itself, and counts only from a page on screen: the panel asks while its pane is in sight, then opens the URL in a new webview pane beside its own.
-- **Must answer each of a page's alerts, confirms, and prompts exactly once** (rationale). The panel asks one at a time in its pane, from a page on screen only; any other, and one pending when its panel unmounts, its header navigates, or its view closes, is answered no, a prompt null. A page's `beforeunload` asks nothing: the page leaves.
+- A new-window request takes a press (rationale), opens nothing itself, and counts only from a page on screen: the panel asks while its pane is in sight, then opens the URL in a webview pane beside its own.
+- **Must answer each of a page's alerts, confirms, and prompts exactly once** (rationale). The panel asks one at a time in its pane, from a page on screen; any other, and one pending when its panel unmounts, its header navigates, or its view closes, is answered no, a prompt null. A page's `beforeunload` asks nothing: the page leaves.
 - A page reaches a local file only as one the user picks in the system's file picker or drops on it.
 - One persistent profile serves every pane webview.
 - The network policy does not gate a pane webview: it is the user's own connection, as a terminal's is (rationale).
