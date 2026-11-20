@@ -339,7 +339,9 @@ export function VsCodeDemoWindow({
   };
 
   return (
-    <div ref={slotRef} className={className} style={{ height: height * scale }}>
+    // `min-w-0`: the window's layout width is not the slot's. As a grid or flex
+    // item the slot would otherwise grow to it, and widen the page on a phone.
+    <div ref={slotRef} className={`min-w-0 ${className}`} style={{ height: height * scale }}>
       <div
         aria-hidden="true"
         inert

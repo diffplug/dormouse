@@ -845,7 +845,7 @@ export default function Home() {
           <PocketDemoPhone className="order-2 md:order-1 mx-auto" />
           {/* One column: the heading, the phone, then the text. */}
           <div className="contents md:block md:order-2">
-            <h2 className="order-1 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] md:mb-6">
+            <h2 className="order-1 font-display text-xl text-[var(--color-text)] md:mb-6">
               Your laptop on your phone
             </h2>
             <div className="order-3">
@@ -878,7 +878,7 @@ export default function Home() {
         </section>
 
         {/* 3. Port awareness — text left, the real terminal context right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-8 md:gap-12 items-center`}>
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid grid-cols-[minmax(0,1fr)] md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-8 md:gap-12 items-center`}>
           <div>
             <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
@@ -902,11 +902,12 @@ export default function Home() {
           <VsCodeDemoWindow tab="ports" otherTab="Login.tsx" aspect={0.8} minWidth={740} />
         </section>
 
-        {/* 4. Selection and copy/paste — text left, video right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <div>
+        {/* 4. Selection and copy/paste — video left, text right (text first on a phone) */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
+          <FeatureVideo src={copyPasteVideoUrl} className="order-2 md:order-1" />
+          <div className="order-1 md:order-2">
             <h2 className="font-display text-xl mb-6">Select and copy-paste like you meant</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
+            <p className="text-lg leading-relaxed opacity-70">
               Click and drag in a "mouse conformant" terminal doesn't select
               text; it fires escape code{" "}
               <code className={SITE_CODE_CLASS}>{"\\e[<0;x;yM"}</code>{" "}
@@ -914,17 +915,7 @@ export default function Home() {
               mouse and hands you a one-click override, so you can just — select
               the thing.
             </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Then copy it the way you meant it, seeing exactly what lands on
-              the clipboard with every line break marked.{" "}
-              <strong className="font-semibold opacity-100">Auto</strong> joins the hard wraps back into
-              the line the program actually printed; <strong className="font-semibold opacity-100">Exact</strong>{" "}
-              keeps them. Press{" "}
-              <code className={SITE_CODE_CLASS}>e</code>{" "}
-              to expand a clipped selection out to the whole URL, path, or paragraph.
-            </p>
           </div>
-          <FeatureVideo src={copyPasteVideoUrl} />
         </section>
 
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
