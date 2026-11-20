@@ -34,18 +34,20 @@ flowchart TD
   T{session token?}
   T -- no --> U{prior passkey use?}
   U -- no --> G["setup({ setupToken }), which signs in"]
-  U -- yes --> I[signin]
+  U -- yes --> B[POST /api/setup/begin]
+  B -- "code's account holds none of this browser's passkeys" --> G
+  B -- holds one --> I[signin]
   I -- 404 --> G
   I -- ok --> R[POST /api/setup/retire]
   T -- yes --> R
   R -- session expired --> U
-  R & I & G -- fails --> X[abort]
+  R & B & I & G -- fails --> X[abort]
   R --> P[pair]
   G --> P
   P -- approved --> C[connect]
 ```
 
-**A phone registering nothing spends its code at `POST /api/setup/retire`**, preventing later registration with a photographed QR. **An expired Relay session returns to sign-in with its code**, unspent by the session gate. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing follows [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits appear before the outcome and remain until it arrives**. **Must close the relay socket on cancellation and suppress ceremony failures, including rejections**, except expired sessions and unavailable passkeys still return to sign-in. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
+**A phone registering nothing spends its code at `POST /api/setup/retire`**, preventing later registration with a photographed QR. **An expired Relay session returns to sign-in with its code**, unspent by the session gate. **A returning browser registers when `setupBegin`'s `existingCredentialIds` hold none of its passkeys** (a second Hosted account's code). **Otherwise only a sign-in refused 404 falls back to registering** (rationale). **A retire refused for a code `setupBegin` accepts under another account is `SetupCodeOtherAccountError`**: sign out, not a new code. Pairing follows [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits appear before the outcome and remain until it arrives**. **Must close the relay socket on cancellation and suppress ceremony failures, including rejections**, except expired sessions and unavailable passkeys still return to sign-in. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
 
 **Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in, setup, pairing, or connection; `false` renders a fixed upgrade requirement instead.
 
