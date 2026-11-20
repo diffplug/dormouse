@@ -1,6 +1,7 @@
 import type { LathPersistedLayout, LeafMeta } from "dormouse-lib/lib/lath/persistence";
 import type { OpenPort } from "dormouse-lib/lib/platform/types";
 import type { PersistedDoor } from "dormouse-lib/lib/session-types";
+import { YOUTUBE_MUSIC_VIDEO, youtubeEmbedUrl } from "../../lib/youtube";
 
 /**
  * What each homepage VS Code demo shows: its Sessions, how the Wall lays them
@@ -90,13 +91,8 @@ const metaFor = (sessions: Record<string, DemoSession>, ...ids: string[]) =>
 const doorsFor = (sessions: Record<string, DemoSession>, ...ids: string[]): PersistedDoor[] =>
   ids.map((id) => ({ id, ...terminal(sessions[id].command) }));
 
-// --- "Tmux with browsers": two Workspaces in one VS Code window, the video
-// in an editor tab and an agent in the bottom panel, its dev server a Door. ---
-
-/** The homepage video, as YouTube's privacy-enhanced embed serves it: muted
- *  and looping, since the window around it takes no clicks. */
-export const VIDEO_ID = "REPLACE_WITH_VIDEO_ID";
-const VIDEO_URL = `https://www.youtube-nocookie.com/embed/${VIDEO_ID}?autoplay=1&mute=1&loop=1&playlist=${VIDEO_ID}&controls=0&rel=0`;
+// --- "Tmux with browsers": two Workspaces in one VS Code window, the music
+// video in an editor tab and an agent in the bottom panel, its dev server a Door. ---
 
 // Surface ids as the app mints them, distinct across the demos since they
 // share the registry.
@@ -115,7 +111,7 @@ const VIDEO: DemoScene = {
   layout: () => ({
     version: 1,
     tree: { root: { kind: "leaf", id: W.video } },
-    leafMeta: { [W.video]: { component: "browser", tabComponent: "surface", title: "Dormouse", params: { url: VIDEO_URL } } },
+    leafMeta: { [W.video]: { component: "browser", tabComponent: "surface", title: "Dormouse music video", params: { url: youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO) } } },
   }),
 };
 

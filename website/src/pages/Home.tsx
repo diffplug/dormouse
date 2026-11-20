@@ -1,13 +1,11 @@
 import {
   AppleLogoIcon,
   CheckCircleIcon,
-  CloudArrowUpIcon,
   CubeIcon,
   DesktopIcon,
   DotsThreeOutlineIcon,
   LinuxLogoIcon,
   ScalesIcon,
-  SpeakerHighIcon,
   StorefrontIcon,
   TerminalIcon,
   WindowsLogoIcon,
@@ -848,7 +846,7 @@ export default function Home() {
           {/* One column: the heading, the phone, then the text. */}
           <div className="contents md:block md:order-2">
             <h2 className="order-1 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] md:mb-6">
-              Use your laptop from your phone
+              Your laptop on your phone
             </h2>
             <div className="order-3">
               <p className="mb-4 text-lg leading-relaxed opacity-70">
@@ -884,17 +882,20 @@ export default function Home() {
           <div>
             <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Six panes running and something's serving{" "}
-              <code className={SITE_CODE_CLASS}>:3000</code>.
-              Which one?
+              Six dev servers running on different worktrees. Are you sure
+              your browser is looking at the right port?
             </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Right-click a pane and Dormouse lists the ports that pane's
-              process tree is actually listening on — hit a number to open one.
-              No{" "}
-              <code className={SITE_CODE_CLASS}>lsof</code>,
-              no scrolling back to find where Vite printed the URL.
+            <p className="text-lg leading-relaxed opacity-70 mb-3">
+              Right-click a terminal pane and Dormouse will look at that
+              pane's process tree to see which ports it opened. One click and
+              you can send it to:
             </p>
+            <ul className="list-disc space-y-1 pl-6 text-lg leading-relaxed opacity-70">
+              <li>your system browser</li>
+              <li>a browser inside of Dormouse</li>
+              <li>a Playwright or agent-browser instance</li>
+              <li>your phone as a push notification</li>
+            </ul>
           </div>
           {/* Drawn wider than the column, so each pane's context lists its ports
               rather than folding them into a count. */}
@@ -924,39 +925,6 @@ export default function Home() {
             </p>
           </div>
           <FeatureVideo src={copyPasteVideoUrl} />
-        </section>
-
-        <section id="hosted" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
-          <div className="border-y border-[var(--color-text)]/20 py-8">
-            <h2 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)]">
-              Dormouse, with less to run yourself
-            </h2>
-            <p className="mb-7 max-w-3xl text-lg leading-relaxed opacity-70">
-              Keep Dormouse free and local, then pay only if you want the
-              Relay operated for you or a more natural voice for spoken alerts.
-            </p>
-            <div className="grid gap-7 md:grid-cols-2">
-              <div>
-                <CloudArrowUpIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
-                <h3 className="mb-2 font-display text-xl">Managed remote control</h3>
-                <p className="leading-relaxed opacity-70">
-                  Use Pocket without deploying and maintaining a Relay.
-                  Your terminals still run on your computer.
-                </p>
-              </div>
-              <div>
-                <SpeakerHighIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
-                <h3 className="mb-2 font-display text-xl">Natural Voice</h3>
-                <p className="leading-relaxed opacity-70">
-                  Choose a managed natural voice for spoken alerts, while browser and
-                  system speech stay available.
-                </p>
-              </div>
-            </div>
-            <p className="mt-7 text-lg">
-              <a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.home)} className={SITE_LINK_CLASS}>See what Dormouse Hosted costs</a>
-            </p>
-          </div>
         </section>
 
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
