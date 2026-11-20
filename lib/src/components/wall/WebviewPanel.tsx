@@ -91,6 +91,10 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     host.answer(id, accept, text);
   }, [host, id]);
   useEffect(() => () => answer(false), [answer]);
+  // The app document's focus parks on the placeholder, and a press on the
+  // prompt's backdrop lands there too; either way it belongs in the prompt.
+  const dialogFocusRef = useRef<HTMLElement | null>(null);
+  const setDialogFocus = useCallback((element: HTMLElement | null) => { dialogFocusRef.current = element; }, []);
   // A URL-bar entry made while the view is opening, which the host would drop.
   const pendingNavRef = useRef<string | null>(null);
   // A still of the page the placeholder shows while the view is hidden. Hiding
@@ -288,6 +292,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       tabIndex={-1}
       className={`relative h-full w-full overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       onMouseDown={() => actions.onClickPanel(id)}
+      onFocus={(e) => { if (e.target === e.currentTarget) dialogFocusRef.current?.focus(); }}
     >
       {!rawUrl ? (
         <PaneMessage className="text-muted">No URL was provided.</PaneMessage>
@@ -312,17 +317,18 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           onCancel={() => setPendingOpenUrl(null)}
         />
       )}
-      {dialog && seen && <PageDialogPrompt dialog={dialog} takesFocus={passthroughPaneId === id} onAnswer={answer} />}
+      {dialog && seen && <PageDialogPrompt dialog={dialog} focusTarget={passthroughPaneId === id ? setDialogFocus : undefined} onAnswer={answer} />}
     </div>
   );
 }
 
 /** A page's alert, confirm, or prompt, asked in its pane. Its text is the
  *  page's: plain, attributed, and scrolling within the prompt. */
-function PageDialogPrompt({ dialog, takesFocus, onAnswer }: {
+function PageDialogPrompt({ dialog, focusTarget, onAnswer }: {
   dialog: PageDialog;
-  /** Its pane is the one in passthrough, so the keyboard was the page's already. */
-  takesFocus: boolean;
+  /** Takes the element the keyboard belongs on; given only while its pane is
+   *  the one in passthrough, where the keyboard was the page's already. */
+  focusTarget?: (element: HTMLElement | null) => void;
   onAnswer: (accept: boolean, text?: string) => void;
 }) {
   useOccludePaneWebviews(true);
@@ -347,10 +353,10 @@ function PageDialogPrompt({ dialog, takesFocus, onAnswer }: {
         <div className="min-h-0 overflow-auto whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{dialog.message}</div>
       </div>
       {dialog.dialog === 'prompt' && (
-        <TextInput value={text} onChange={setText} autoFocus={takesFocus} aria-label={asker} className="max-w-sm" />
+        <TextInput ref={focusTarget} value={text} onChange={setText} autoFocus={!!focusTarget} aria-label={asker} className="max-w-sm" />
       )}
       <div className="flex gap-2">
-        <button type="button" autoFocus={takesFocus && dialog.dialog !== 'prompt'} onClick={accept} className={modalActionButton({ tone: 'primary' })}>
+        <button type="button" ref={dialog.dialog === 'prompt' ? undefined : focusTarget} autoFocus={!!focusTarget && dialog.dialog !== 'prompt'} onClick={accept} className={modalActionButton({ tone: 'primary' })}>
           OK
         </button>
         {dialog.dialog !== 'alert' && (

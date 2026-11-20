@@ -242,6 +242,10 @@ describe('WebviewPanel', () => {
     expect(prompt()!.textContent).toContain('example.com says:<b>Sure?</b>');
     expect(prompt()!.querySelector('b')).toBeNull();
     expect(lastPlace()).toEqual(['place', ID, null]);
+    // Focus parked on the placeholder, by the keyboard's return or a press on
+    // the backdrop, belongs in the prompt.
+    act(() => prompt()!.parentElement!.focus());
+    expect(document.activeElement).toBe(button('OK'));
     act(() => button('Cancel')!.click());
     expect(pane.of('answer')).toEqual([['answer', ID, false, undefined]]);
     expect(prompt()).toBeNull();
