@@ -960,7 +960,10 @@ describe('MobileTerminalUi edge scroll', () => {
     terminal.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 10 }));
     expect(wheels).toHaveLength(0);
     pointer('pointerdown', edgeX, 100);
+    // One report per three lines of travel, the lines a TUI scrolls per report.
     pointer('pointermove', edgeX, 64);
+    expect(wheels).toHaveLength(0);
+    pointer('pointermove', edgeX, -8);
     pointer('pointermove', edgeX, 100);
     expect(wheels.map((event) => [event.deltaY, event.deltaMode, event.clientX])).toEqual([
       [1, 1, cellX], [1, 1, cellX], [-1, 1, cellX], [-1, 1, cellX],

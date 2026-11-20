@@ -53,7 +53,7 @@ Source of truth: `TOUCH_MODES`, `paneMouseOverride`, `isPortaledTarget`, and `is
 
 **Must coast after a touch or pen flick**, retaining fractional-line travel; a held or stationary press, mouse drag, or pointer cancellation launches no momentum (rationale).
 
-**Must send wheel events through xterm when the Session captures the mouse**, clamping the reported coordinates inside its terminal screen. **Must otherwise scroll the terminal buffer directly**, never synthesize alternate-screen arrow keys. **Must stop momentum at a buffer boundary, on a new pane press, or when the document becomes hidden.** **Must stop scrolling when interaction is disabled, the touch mode changes, or the active Session changes.**
+**Must send wheel events through xterm when the Session captures the mouse**, one per `WHEEL_REPORT_LINES` lines of travel (rationale), clamping the reported coordinates inside its terminal screen. **Must otherwise scroll the terminal buffer directly**, never synthesize alternate-screen arrow keys. **Must stop momentum at a buffer boundary, on a new pane press, or when the document becomes hidden.** **Must stop scrolling when interaction is disabled, the touch mode changes, or the active Session changes.**
 
 Source of truth: `EdgeScrollMotion` / `scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`.
 

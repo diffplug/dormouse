@@ -16,6 +16,8 @@
 
 The edge gesture routes to either terminal history or a mouse-reporting TUI, neither of which is a browser scroll container. Its coast therefore approximates native scrolling rather than delegating to an overflow element. The exponential decay uses iOS's normal 0.998 rate, documented by [React Native](https://reactnative.dev/docs/scrollview#decelerationrate) (consulted 2026-09). Elapsed-time integration avoids refresh-rate-dependent travel. Recent directional samples avoid stale speed after reversals; release time includes a brief pause, while a longer hold suppresses the coast. Whole terminal lines preclude native subpixel motion and rubber-band bounce; the launch cap bounds wheel reports to a remote TUI.
 
+A mouse-reporting TUI decides how far one wheel report scrolls, and most choose three lines (Claude Code, vim's default `mousescroll`), so a report per line of travel moved such content three lines per 18 px and felt jumpy beside Codex, which scrolls the buffer directly ([#1853](https://github.com/diffplug/dormouse/issues/1853), reported 2026-11). One report per three lines matches that convention; a TUI scrolling one line per report now moves a third as far as the finger.
+
 ## Type
 
 **Why no live keystrokes.** A soft keyboard's autocorrect and word prediction act on the text of the field it types into. Sent key by key into an empty hidden field, as the earlier Type mode did, those keystrokes arrived without that help and with corrections replayed as deletions and retypes, which made them unreliable in practice (2026-10). A composed field keeps the keyboard's accuracy.
