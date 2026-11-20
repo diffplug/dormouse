@@ -71,6 +71,13 @@ pub fn pane_webview_reset(webview: Webview) -> Result<(), String> {
     imp::reset(webview)
 }
 
+/// Answer the page's pending alert, confirm, or prompt: `accept` is OK, and
+/// `text` what a prompt returns. On Windows the engine shows its own.
+#[tauri::command]
+pub fn pane_webview_answer(webview: Webview, id: String, accept: bool, text: Option<String>) -> Result<(), String> {
+    imp::answer(webview, id, accept, text)
+}
+
 /// A `data:image/jpeg;base64,` URL of the view's current rendering. Async:
 /// the main thread answers it, so waiting there would never end.
 #[tauri::command(async)]
@@ -216,6 +223,9 @@ mod imp {
     pub fn reset(_: Webview) -> Result<(), String> {
         Err(UNSUPPORTED.into())
     }
+    pub fn answer(_: Webview, _: String, _: bool, _: Option<String>) -> Result<(), String> {
+        Err(UNSUPPORTED.into())
+    }
     pub fn snapshot(_: Webview, _: String) -> Result<String, String> {
         Err(UNSUPPORTED.into())
     }
@@ -226,18 +236,19 @@ mod imp {
 #[cfg(target_os = "macos")]
 mod imp {
     use super::*;
-    use block2::RcBlock;
+    use block2::{Block, RcBlock};
     use objc2::rc::{autoreleasepool, Retained};
-    use objc2::MainThreadMarker;
-    use objc2::runtime::AnyObject;
+    use objc2::runtime::{AnyObject, Bool, NSObject, ProtocolObject, Sel};
+    use objc2::{define_class, msg_send, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
         NSBitmapImageFileType, NSBitmapImageRep, NSEvent, NSEventMask, NSEventType, NSImage, NSImageCompressionFactor,
         NSResponder, NSView, NSWindow,
     };
     use objc2_foundation::{
-        NSDataBase64EncodingOptions, NSDictionary, NSError, NSNumber, NSOperatingSystemVersion, NSProcessInfo,
+        NSDataBase64EncodingOptions, NSDictionary, NSError, NSNumber, NSObjectProtocol, NSOperatingSystemVersion,
+        NSProcessInfo, NSString,
     };
-    use objc2_web_kit::WKSnapshotConfiguration;
+    use objc2_web_kit::{WKFrameInfo, WKSnapshotConfiguration, WKUIDelegate, WKWebView};
     use serde_json::json;
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
@@ -266,7 +277,11 @@ mod imp {
     }
 
     struct Pane {
+        /// Before `view`, so a pending one is answered while its view lives.
+        dialog: Option<Dialog>,
         view: WebView,
+        /// The view's UI delegate, which the view holds only weakly.
+        _dialogs: Retained<Dialogs>,
         owner: String,
         page: PageState,
         focused: bool,
@@ -346,11 +361,137 @@ mod imp {
         unsafe { Retained::retain(ptr.cast::<NSWindow>()) }.ok_or_else(|| "no window".to_string())
     }
 
-    fn build(webview: &Webview, id: &str, url: &str) -> Result<WebView, String> {
+    /// The longest message or default text a page's dialog reports, in characters.
+    const DIALOG_TEXT_MAX: usize = 4000;
+
+    fn capped(text: &NSString) -> String {
+        text.to_string().chars().take(DIALOG_TEXT_MAX).collect()
+    }
+
+    /// The completion handler of a page's alert, confirm, or prompt.
+    enum Handler {
+        Alert(RcBlock<dyn Fn()>),
+        Confirm(RcBlock<dyn Fn(Bool)>),
+        Prompt(RcBlock<dyn Fn(*mut NSString)>),
+    }
+
+    /// A page's dialog waiting on the user. WebKit raises if its handler is
+    /// released uncalled, so one dropped unanswered answers no: an alert is
+    /// done, a confirm false, a prompt null.
+    struct Dialog(Option<Handler>);
+
+    impl Dialog {
+        fn answer(mut self, accept: bool, text: Option<String>) {
+            self.reply(accept, text);
+        }
+
+        fn reply(&mut self, accept: bool, text: Option<String>) {
+            match self.0.take() {
+                Some(Handler::Alert(handler)) => handler.call(()),
+                Some(Handler::Confirm(handler)) => handler.call((Bool::new(accept),)),
+                Some(Handler::Prompt(handler)) => {
+                    let text = accept.then(|| NSString::from_str(&text.unwrap_or_default()));
+                    handler.call((text.as_ref().map_or(std::ptr::null_mut(), |text| Retained::as_ptr(text).cast_mut()),));
+                }
+                None => {}
+            }
+        }
+    }
+
+    impl Drop for Dialog {
+        fn drop(&mut self) {
+            self.reply(false, None);
+        }
+    }
+
+    struct DialogsIvars {
+        /// wry's own UI delegate, which answers everything else.
+        wry: Retained<ProtocolObject<dyn WKUIDelegate>>,
+        app: AppHandle,
+        id: String,
+    }
+
+    define_class!(
+        /// A view's UI delegate: asks a page's alert, confirm, and prompt in
+        /// its pane, and hands every other call to wry's delegate.
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[ivars = DialogsIvars]
+        struct Dialogs;
+
+        unsafe impl NSObjectProtocol for Dialogs {
+            #[unsafe(method(respondsToSelector:))]
+            fn responds_to(&self, sel: Sel) -> bool {
+                Self::class().responds_to(sel) || self.ivars().wry.respondsToSelector(sel)
+            }
+        }
+
+        impl Dialogs {
+            #[unsafe(method(forwardingTargetForSelector:))]
+            fn forwarding_target(&self, _: Sel) -> *mut AnyObject {
+                Retained::as_ptr(&self.ivars().wry).cast::<AnyObject>().cast_mut()
+            }
+        }
+
+        unsafe impl WKUIDelegate for Dialogs {
+            #[unsafe(method(webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:))]
+            fn alert(&self, _: &WKWebView, message: &NSString, frame: &WKFrameInfo, handler: &Block<dyn Fn()>) {
+                let payload = json!({ "dialog": "alert", "message": capped(message) });
+                self.ask(Dialog(Some(Handler::Alert(handler.copy()))), payload, frame);
+            }
+
+            #[unsafe(method(webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:))]
+            fn confirm(&self, _: &WKWebView, message: &NSString, frame: &WKFrameInfo, handler: &Block<dyn Fn(Bool)>) {
+                let payload = json!({ "dialog": "confirm", "message": capped(message) });
+                self.ask(Dialog(Some(Handler::Confirm(handler.copy()))), payload, frame);
+            }
+
+            #[unsafe(method(webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:))]
+            fn prompt(
+                &self, _: &WKWebView, message: &NSString, text: Option<&NSString>, frame: &WKFrameInfo,
+                handler: &Block<dyn Fn(*mut NSString)>,
+            ) {
+                let payload = json!({ "dialog": "prompt", "message": capped(message), "text": text.map(capped).unwrap_or_default() });
+                self.ask(Dialog(Some(Handler::Prompt(handler.copy()))), payload, frame);
+            }
+        }
+    );
+
+    impl Dialogs {
+        fn new(wry: Retained<ProtocolObject<dyn WKUIDelegate>>, app: AppHandle, id: String, mtm: MainThreadMarker) -> Retained<Self> {
+            let this = mtm.alloc::<Self>().set_ivars(DialogsIvars { wry, app, id });
+            // SAFETY: NSObject's designated initializer.
+            unsafe { msg_send![super(this), init] }
+        }
+
+        /// Hold `dialog` on its pane and report it; one at a time per pane, so
+        /// another, or one with no pane, gets the default at once.
+        fn ask(&self, dialog: Dialog, mut payload: serde_json::Value, frame: &WKFrameInfo) {
+            let DialogsIvars { app, id, .. } = self.ivars();
+            let held = PANES.with(move |panes| {
+                let Ok(mut panes) = panes.try_borrow_mut() else { return Err(dialog) };
+                match panes.get_mut(id) {
+                    Some(pane) if pane.dialog.is_none() => {
+                        pane.dialog = Some(dialog);
+                        Ok(pane.owner.clone())
+                    }
+                    _ => Err(dialog),
+                }
+            });
+            if let Ok(owner) = held {
+                // SAFETY: plain property reads on a live frame, on the main thread.
+                payload["origin"] = unsafe { frame.securityOrigin().host() }.to_string().into();
+                emit(app, &owner, id, "dialog", payload);
+            }
+        }
+    }
+
+    fn build(webview: &Webview, id: &str, url: &str) -> Result<(WebView, Retained<Dialogs>), String> {
         let window = ns_window(webview)?;
         let content = window.contentView().ok_or("the window has no content view")?;
         let parent = ContentView(NonNull::from(&*content).cast());
         let (app, id) = (webview.app_handle().clone(), id.to_string());
+        let asker = (app.clone(), id.clone());
         let view = WebViewBuilder::new()
             .with_url(url)
             .with_visible(false)
@@ -384,7 +525,16 @@ mod imp {
             // cannot get: wry's handler unwraps the window's screen.
             preferences.setJavaScriptCanOpenWindowsAutomatically(false);
         }
-        Ok(view)
+        // WebKit reads which methods a UI delegate has as it is set, so this
+        // one is whole before it replaces wry's.
+        // SAFETY: the live view's UI delegate, read and set on the main thread.
+        let dialogs = unsafe {
+            let wry = view.webview().UIDelegate().ok_or("the view has no UI delegate")?;
+            let dialogs = Dialogs::new(wry, asker.0, asker.1, MainThreadMarker::from(&*window));
+            view.webview().setUIDelegate(Some(ProtocolObject::from_ref(&*dialogs)));
+            dialogs
+        };
+        Ok((view, dialogs))
     }
 
     pub fn open(webview: Webview, id: String, url: String) -> Result<PageState, String> {
@@ -398,14 +548,16 @@ mod imp {
                     pane.view.set_visible(false).map_err(|e| e.to_string())?;
                     pane.view.reparent(Retained::as_ptr(&window).cast_mut()).map_err(|e| e.to_string())?;
                     pane.owner = owner.to_string();
+                    // Its old window asked, and can no longer answer.
+                    pane.dialog = None;
                 }
                 pane.page = page_state(&pane.view.webview());
                 return Ok(pane.page.clone());
             }
             web_only(&url)?;
-            let view = build(webview, &id, &url)?;
+            let (view, dialogs) = build(webview, &id, &url)?;
             let page = page_state(&view.webview());
-            panes.insert(id, Pane { view, owner: owner.to_string(), page: page.clone(), focused: false });
+            panes.insert(id, Pane { dialog: None, view, _dialogs: dialogs, owner: owner.to_string(), page: page.clone(), focused: false });
             Ok(page)
         })
     }
@@ -474,6 +626,16 @@ mod imp {
 
     pub fn reset(webview: Webview) -> Result<(), String> {
         command(webview, true, |panes, webview, owner| Ok(remove(panes, |_, pane| pane.owner == owner, Some(webview))))
+    }
+
+    pub fn answer(webview: Webview, id: String, accept: bool, text: Option<String>) -> Result<(), String> {
+        command(webview, false, move |panes, _, owner| {
+            let pane = panes.get_mut(&id).filter(|pane| pane.owner == owner);
+            if let Some(dialog) = pane.and_then(|pane| pane.dialog.take()) {
+                dialog.answer(accept, text);
+            }
+            Ok(())
+        })
     }
 
     /// A snapshot's longest side in pixels: a Retina pane's full size would be
@@ -715,6 +877,7 @@ mod imp {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use std::rc::Rc;
         use Key::*;
 
         #[test]
@@ -725,6 +888,58 @@ mod imp {
             // A tall view is capped by its height.
             assert_eq!(snapshot_width(500.0, 1600.0, 1.0), 500.0);
             assert_eq!(snapshot_width(500.0, 3200.0, 1.0), 250.0);
+        }
+
+        /// A confirm and a prompt whose handlers log what they are called with.
+        fn logged() -> (Rc<RefCell<Vec<String>>>, Dialog, Dialog) {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let (confirm, prompt) = (log.clone(), log.clone());
+            let confirm = RcBlock::new(move |ok: Bool| confirm.borrow_mut().push(format!("confirm {}", ok.as_bool())));
+            let prompt = RcBlock::new(move |text: *mut NSString| {
+                // SAFETY: the handler is called with a live string or null.
+                let text = unsafe { text.as_ref() }.map_or("prompt null".into(), |text| format!("prompt {:?}", text.to_string()));
+                prompt.borrow_mut().push(text);
+            });
+            (log, Dialog(Some(Handler::Confirm(confirm))), Dialog(Some(Handler::Prompt(prompt))))
+        }
+
+        #[test]
+        fn a_dialog_is_answered_once_and_no_when_dropped() {
+            let (log, confirm, prompt) = logged();
+            drop((confirm, prompt));
+            assert_eq!(*log.borrow(), ["confirm false", "prompt null"]);
+
+            let (log, confirm, prompt) = logged();
+            confirm.answer(true, None);
+            prompt.answer(true, Some("typed".into()));
+            assert_eq!(*log.borrow(), ["confirm true", "prompt \"typed\""]);
+
+            // Cancelled, a prompt returns null whatever was typed; accepted empty, "".
+            let (log, confirm, prompt) = logged();
+            prompt.answer(false, Some("typed".into()));
+            confirm.answer(false, None);
+            assert_eq!(*log.borrow(), ["prompt null", "confirm false"]);
+            let (log, _confirm, prompt) = logged();
+            prompt.answer(true, None);
+            assert_eq!(*log.borrow(), ["prompt \"\""]);
+        }
+
+        #[test]
+        fn the_ui_delegate_answers_every_page_dialog() {
+            // Registering the class checks each method takes its selector's arguments.
+            let class = Dialogs::class();
+            assert!(class.responds_to(objc2::sel!(webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:)));
+            assert!(class.responds_to(objc2::sel!(webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:)));
+            assert!(class.responds_to(objc2::sel!(
+                webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:
+            )));
+        }
+
+        #[test]
+        fn a_dialog_reports_bounded_text() {
+            let long = NSString::from_str(&"é".repeat(DIALOG_TEXT_MAX + 1));
+            assert_eq!(capped(&long), "é".repeat(DIALOG_TEXT_MAX));
+            assert_eq!(capped(&NSString::from_str("short")), "short");
         }
 
         #[test]
@@ -1235,6 +1450,11 @@ mod imp {
     pub fn reset(webview: Webview) -> Result<(), String> {
         let owner = label(&webview);
         remove(|_, pane| pane.owner == owner, true);
+        Ok(())
+    }
+
+    /// WebView2 shows a page's dialogs itself.
+    pub fn answer(_: Webview, _: String, _: bool, _: Option<String>) -> Result<(), String> {
         Ok(())
     }
 

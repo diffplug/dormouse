@@ -8,6 +8,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { focusSession } from '../../lib/terminal-registry';
 import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { isRealBlur } from '../../lib/window-focus';
+import { setNativeFieldValue } from '../../lib/dom';
 import { BrowserPanel } from './BrowserPanel';
 import { browserDisplayModeFromParams } from './browser-surface';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
@@ -102,6 +103,10 @@ async function show({ params = { surfaceType: 'browser', renderMode: 'webview', 
 }
 
 const lastPlace = () => pane.of('place').at(-1);
+const dialogEvent = (dialog: 'alert' | 'confirm' | 'prompt', text?: string) =>
+  ({ id: ID, kind: 'dialog' as const, dialog, message: '<b>Sure?</b>', origin: 'example.com', text });
+const prompt = () => container.querySelector('[role="alertdialog"]');
+const key = (target: Element, key: string) => act(() => { target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
 
 describe('WebviewPanel', () => {
   it('renders a webview Surface with the iframe renderer on a host without pane webviews, keeping its mode', async () => {
@@ -227,6 +232,80 @@ describe('WebviewPanel', () => {
     expect(container.textContent).not.toContain('wants to open a new tab');
     await show();
     expect(container.textContent).toContain('wants to open a new tab');
+  });
+
+  it('asks a page\'s dialog in its pane as the page\'s plain text, hiding the view, and answers what the user chose', async () => {
+    await show({ passthrough: ID });
+    moved();
+    const button = (label: string) => [...prompt()!.querySelectorAll('button')].find((b) => b.textContent === label);
+    act(() => pane.emit(dialogEvent('confirm')));
+    expect(prompt()!.textContent).toContain('example.com says:<b>Sure?</b>');
+    expect(prompt()!.querySelector('b')).toBeNull();
+    expect(lastPlace()).toEqual(['place', ID, null]);
+    act(() => button('Cancel')!.click());
+    expect(pane.of('answer')).toEqual([['answer', ID, false, undefined]]);
+    expect(prompt()).toBeNull();
+    expect(lastPlace()).toEqual(['place', ID, RECT]);
+
+    act(() => pane.emit(dialogEvent('prompt', 'default')));
+    const input = prompt()!.querySelector('input')!;
+    expect(input.value).toBe('default');
+    expect(document.activeElement).toBe(input);
+    act(() => setNativeFieldValue(input, 'typed'));
+    key(input, 'Enter');
+    expect(pane.of('answer').at(-1)).toEqual(['answer', ID, true, 'typed']);
+
+    act(() => pane.emit(dialogEvent('alert')));
+    expect(button('Cancel')).toBeUndefined();
+    key(document.activeElement!, 'Escape');
+    expect(pane.of('answer').at(-1)).toEqual(['answer', ID, false, undefined]);
+    expect(prompt()).toBeNull();
+  });
+
+  it('answers no at once to a dialog from a page off screen, and takes no keyboard from another pane', async () => {
+    await show({ parked: true });
+    act(() => pane.emit(dialogEvent('confirm')));
+    expect(pane.of('answer')).toEqual([['answer', ID, false, undefined]]);
+    await show();
+    expect(prompt()).toBeNull();
+
+    act(() => pane.emit(dialogEvent('prompt')));
+    expect(prompt()).not.toBeNull();
+    expect(document.activeElement).not.toBe(prompt()!.querySelector('input'));
+    // Still asked, but shown only while its pane is in sight.
+    await show({ parked: true });
+    expect(prompt()).toBeNull();
+    await show();
+    expect(prompt()).not.toBeNull();
+    expect(pane.of('answer')).toHaveLength(1);
+  });
+
+  it('answers a pending dialog no before the header navigates, and when the panel unmounts or its view closes', async () => {
+    await show();
+    const ask = () => act(() => pane.emit(dialogEvent('confirm')));
+    const chrome = () => getAgentBrowserScreenController(ID)!.chromeActions;
+    const answered = () => pane.calls.filter(([verb]) => verb === 'answer' || verb === 'navigate' || verb === 'history' || verb === 'close');
+    for (const leave of [() => chrome().navigate('https://example.com/typed'), () => chrome().back(), () => chrome().forward(), () => chrome().reload()]) {
+      ask();
+      act(leave);
+    }
+    expect(answered()).toEqual([
+      ['answer', ID, false, undefined], ['navigate', ID, 'https://example.com/typed'],
+      ['answer', ID, false, undefined], ['history', ID, 'back'],
+      ['answer', ID, false, undefined], ['history', ID, 'forward'],
+      ['answer', ID, false, undefined], ['history', ID, 'reload'],
+    ]);
+
+    ask();
+    act(() => root.unmount());
+    root = createRoot(container);
+    expect(answered().at(-1)).toEqual(['answer', ID, false, undefined]);
+
+    await show();
+    ask();
+    act(() => pane.emit({ id: ID, kind: 'page', url: '', title: '', canGoBack: false, canGoForward: false, loading: false }));
+    expect(answered().slice(-2)).toEqual([['answer', ID, false, undefined], ['close', ID]]);
+    expect(prompt()).toBeNull();
   });
 
   it('drives the view from the header', async () => {

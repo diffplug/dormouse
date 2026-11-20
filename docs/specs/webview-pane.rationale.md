@@ -48,4 +48,6 @@ No mouse report reached tao's mouse Raw Input registration on Windows for inject
 
 **Why no fullscreen leaves a pane.** WebKit's element fullscreen is a window of its own, over every Dormouse prompt, so macOS turns it off. WebView2 granted `requestFullscreen` in a child view but kept it there: the page reported its pane's size, the container did not change, and Esc ended it.
 
+**Why the panel asks a page's dialogs.** wry 0.57's UI delegate implements none of WebKit's three JavaScript panel methods, and without them WebKit dismisses an `alert` and answers a `confirm` false and a `prompt` null, unseen. WebKit raises an Objective-C exception for a panel's completion handler released uncalled. Read from wry's source and Apple's documentation, not measured.
+
 **Why a new window takes a press.** On Windows `window.open` from a timer raised `NewWindowRequested` with `IsUserInitiated` false, and from a press true; on macOS `javaScriptCanOpenWindowsAutomatically` off leaves a scripted one unraised.

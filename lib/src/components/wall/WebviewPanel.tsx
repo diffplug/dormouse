@@ -5,14 +5,15 @@
  * goes and shows why it is absent.
  */
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { modalActionButton, PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS, TextInput } from '../design';
 import { getPlatform } from '../../lib/platform';
-import type { PaneWebviewPage } from '../../lib/platform/types';
+import type { PaneWebviewEvent, PaneWebviewPage } from '../../lib/platform/types';
 import { rectsEqual } from '../../lib/rect-tween';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import { isSeenObserved } from '../../lib/surface-sight';
-import { usePaneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
+import { useOccludePaneWebviews, usePaneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
 import { setPaneWebviewFocus } from '../../lib/window-focus';
+import { isComposingKey } from '../../lib/dom';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceSight } from './use-surface-visibility';
@@ -27,6 +28,7 @@ import { NewTabPrompt, useUndrivenScreen } from './IframePanel';
 const STILL_AFTER_MOVE_MS = 300;
 
 type Status = { kind: 'opening' } | { kind: 'open' } | { kind: 'error'; error: string };
+type PageDialog = Extract<PaneWebviewEvent, { kind: 'dialog' }>;
 
 /** The app's CSP admits no `data:` image, so a still is decoded for a canvas. */
 async function decodeStill(url: string | null): Promise<ImageBitmap | null> {
@@ -78,6 +80,17 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState<{ url: string; title: string | null }>(() => ({ url: url ?? rawUrl, title: null }));
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
+  // The page waits on its alert, confirm, or prompt until it is answered, so
+  // every way out of this panel answers it: no, by default.
+  const [dialog, setDialog] = useState<PageDialog | null>(null);
+  const dialogRef = useRef<PageDialog | null>(null);
+  const answer = useCallback((accept: boolean, text?: string) => {
+    if (!dialogRef.current) return;
+    dialogRef.current = null;
+    setDialog(null);
+    host.answer(id, accept, text);
+  }, [host, id]);
+  useEffect(() => () => answer(false), [answer]);
   // A URL-bar entry made while the view is opening, which the host would drop.
   const pendingNavRef = useRef<string | null>(null);
   // A still of the page the placeholder shows while the view is hidden. Hiding
@@ -113,10 +126,11 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       if (!next.loading) takeStill();
       return;
     }
+    answer(false);
     host.close(id);
     setStill(null);
     setStatus({ kind: 'error', error: 'it did not load' });
-  }, [host, id, showPage, takeStill]);
+  }, [host, id, showPage, takeStill, answer]);
   // What the host last reported while the view was opening: it can be newer
   // than the page `open` answers with, and is not reported again.
   const reportedRef = useRef<PaneWebviewPage | null>(null);
@@ -170,6 +184,13 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           if (next) setPendingOpenUrl(next);
           break;
         }
+        case 'dialog':
+          // So does this one's; a page off screen is answered no.
+          if (shownRef.current) {
+            dialogRef.current = event;
+            setDialog(event);
+          } else host.answer(id, false);
+          break;
       }
     });
     // An unmounted panel's view is hidden, and a hidden view never holds focus.
@@ -235,6 +256,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   // With no view to navigate, a URL-bar entry is where one opens.
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) {
+      answer(false);
       if (statusRef.current.kind === 'open') host.navigate(id, next);
       else if (statusRef.current.kind === 'opening' && urlRef.current !== null) pendingNavRef.current = next;
       else {
@@ -242,13 +264,20 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
         setAttempt((n) => n + 1);
       }
     },
-    back() { if (statusRef.current.kind === 'open') host.history(id, 'back'); },
-    forward() { if (statusRef.current.kind === 'open') host.history(id, 'forward'); },
+    back() {
+      answer(false);
+      if (statusRef.current.kind === 'open') host.history(id, 'back');
+    },
+    forward() {
+      answer(false);
+      if (statusRef.current.kind === 'open') host.history(id, 'forward');
+    },
     reload() {
+      answer(false);
       if (statusRef.current.kind === 'open') host.history(id, 'reload');
       else setAttempt((n) => n + 1);
     },
-  }), [host, id]);
+  }), [host, id, answer]);
   const renderModes = useMemo(() => offeredRenderModes(false, null), []);
   useUndrivenScreen(id, 'webview', renderModes, page.url, page.title, chromeActions);
 
@@ -283,6 +312,53 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           onCancel={() => setPendingOpenUrl(null)}
         />
       )}
+      {dialog && seen && <PageDialogPrompt dialog={dialog} takesFocus={passthroughPaneId === id} onAnswer={answer} />}
+    </div>
+  );
+}
+
+/** A page's alert, confirm, or prompt, asked in its pane. Its text is the
+ *  page's: plain, attributed, and scrolling within the prompt. */
+function PageDialogPrompt({ dialog, takesFocus, onAnswer }: {
+  dialog: PageDialog;
+  /** Its pane is the one in passthrough, so the keyboard was the page's already. */
+  takesFocus: boolean;
+  onAnswer: (accept: boolean, text?: string) => void;
+}) {
+  useOccludePaneWebviews(true);
+  const [text, setText] = useState(dialog.text ?? '');
+  const accept = () => onAnswer(true, dialog.dialog === 'prompt' ? text : undefined);
+  const asker = `${dialog.origin || 'This page'} says:`;
+  return (
+    <div
+      role="alertdialog"
+      aria-label={asker}
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 py-4"
+      onKeyDown={(e) => {
+        if (isComposingKey(e.nativeEvent)) return;
+        if (e.key === 'Enter') accept();
+        else if (e.key === 'Escape') onAnswer(false);
+        else return;
+        e.preventDefault();
+      }}
+    >
+      <div className="flex min-h-0 w-full max-w-sm flex-col gap-1 text-sm">
+        <div className="break-all text-muted">{asker}</div>
+        <div className="min-h-0 overflow-auto whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{dialog.message}</div>
+      </div>
+      {dialog.dialog === 'prompt' && (
+        <TextInput value={text} onChange={setText} autoFocus={takesFocus} aria-label={asker} className="max-w-sm" />
+      )}
+      <div className="flex gap-2">
+        <button type="button" autoFocus={takesFocus && dialog.dialog !== 'prompt'} onClick={accept} className={modalActionButton({ tone: 'primary' })}>
+          OK
+        </button>
+        {dialog.dialog !== 'alert' && (
+          <button type="button" onClick={() => onAnswer(false)} className={modalActionButton({ tone: 'secondary' })}>
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
   );
 }

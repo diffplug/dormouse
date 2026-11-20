@@ -27,7 +27,7 @@
   "docs/specs/security-audit.md": 5450,
   "docs/specs/security-ci.md": 3400,
   "docs/specs/security-hosted.md": 4850,
-  "docs/specs/security-local.md": 7950,
+  "docs/specs/security-local.md": 8000,
   "docs/specs/security-remote.md": 8050,
   "docs/specs/security-supply-chain.md": 1650,
   "docs/specs/security.md": 3950,
@@ -42,5 +42,5 @@
   "docs/specs/tutorial.md": 1750,
   "docs/specs/vscode.md": 4550,
   "docs/specs/website-docs.md": 3400,
-  "docs/specs/webview-pane.md": 900
+  "docs/specs/webview-pane.md": 950
 }
