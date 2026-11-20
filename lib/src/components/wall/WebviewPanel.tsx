@@ -130,10 +130,12 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   }, [id]);
 
   // A view left with no page at all is closed, so that Reload opens a new one
-  // rather than adopting it.
+  // rather than adopting it. The host reports no focus change for a view it
+  // removes, so a view that held the keyboard gives it up here.
   const fail = useCallback((error: string) => {
     answer(false);
     host.close(id);
+    setPaneWebviewFocus(id, false);
     setStill(null);
     setStatus({ kind: 'error', error });
   }, [host, id, answer]);
