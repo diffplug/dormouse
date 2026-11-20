@@ -51,7 +51,7 @@ Source of truth: `install` and `on_raw_input` in `standalone/src-tauri/src/pane_
 
 - A page may also frame its own `about:`, `blob:`, and `data:` documents (rationale), and its permission requests meet an explicit handler, and its fullscreen never leaves its pane (rationale).
 - A new-window request takes a press (rationale), opens nothing itself, and counts only from a page on screen: the panel asks while its pane is in sight, then opens the URL in a new webview pane beside its own.
-- A page reaches a local file only as one the user picks in the system's file picker.
+- A page reaches a local file only as one the user picks in the system's file picker or drops on it.
 - One persistent profile serves every pane webview.
 - The network policy does not gate a pane webview: it is the user's own connection, as a terminal's is (rationale).
 
