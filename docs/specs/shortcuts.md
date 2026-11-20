@@ -76,6 +76,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 |-----|--------|-------------|
 | `⌘V` (macOS) / `Ctrl+V` (others) | Paste into page | Inserts the *local* clipboard as text through the host. On macOS, `Ctrl+V` goes to the page. |
 | `⌘` (macOS) / `Ctrl` (others) + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. On macOS, `Ctrl` + these keys goes to the page. |
+| `⌘=` / `⌘-` / `⌘0` (macOS, `webview` surface) | Zoom in / out / actual size | Zooms the page in the pane webview that holds the keyboard (`docs/specs/webview-pane.md` -> "Keyboard and pointer"). |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
 ## Terminal context properties

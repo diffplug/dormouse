@@ -464,6 +464,7 @@ describe("TauriAdapter pane webview", () => {
     host.navigate("s1", "https://example.com/");
     host.history("s1", "back");
     host.blur("s1");
+    host.answer("s1", true, "typed");
     host.close("s1");
     // An open waits its turn too: one that overtook the close would be destroyed by it.
     const reopened = host.open("s1", "https://example.com/");
@@ -472,6 +473,7 @@ describe("TauriAdapter pane webview", () => {
       ["pane_webview_navigate", { id: "s1", url: "https://example.com/" }],
       ["pane_webview_history", { id: "s1", dir: "back" }],
       ["pane_webview_focus", { id: null, from: "s1" }],
+      ["pane_webview_answer", { id: "s1", accept: true, text: "typed" }],
       ["pane_webview_close", { id: "s1" }],
       ["pane_webview_open", { id: "s1", url: "https://example.com/" }],
     ]));

@@ -5067,6 +5067,7 @@ pub fn run() {
             pane_webview::pane_webview_focus,
             pane_webview::pane_webview_close,
             pane_webview::pane_webview_reset,
+            pane_webview::pane_webview_answer,
             pane_webview::pane_webview_snapshot,
         ])
         .build(tauri::generate_context!())

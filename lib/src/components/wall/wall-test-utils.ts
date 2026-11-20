@@ -299,6 +299,7 @@ export function installPaneWebview(platform: PlatformAdapter) {
     focus: (id) => { calls.push(['focus', id]); },
     blur: (id) => { calls.push(['blur', id]); },
     close: (id) => { calls.push(['close', id]); },
+    answer: (id, accept, text) => { calls.push(['answer', id, accept, text]); },
     snapshot: vi.fn(async (id: string) => {
       calls.push(['snapshot', id]);
       return `data:image/jpeg;base64,${btoa(`still ${calls.length}`)}`;

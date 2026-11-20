@@ -5,14 +5,15 @@
  * goes and shows why it is absent.
  */
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { modalActionButton, PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS, TextInput } from '../design';
 import { getPlatform } from '../../lib/platform';
-import type { PaneWebviewPage } from '../../lib/platform/types';
+import type { PaneWebviewEvent, PaneWebviewPage } from '../../lib/platform/types';
 import { rectsEqual } from '../../lib/rect-tween';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
 import { isSeenObserved } from '../../lib/surface-sight';
-import { usePaneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
+import { useOccludePaneWebviews, usePaneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
 import { setPaneWebviewFocus } from '../../lib/window-focus';
+import { isComposingKey } from '../../lib/dom';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceSight } from './use-surface-visibility';
@@ -27,6 +28,13 @@ import { NewTabPrompt, useUndrivenScreen } from './IframePanel';
 const STILL_AFTER_MOVE_MS = 300;
 
 type Status = { kind: 'opening' } | { kind: 'open' } | { kind: 'error'; error: string };
+type PageDialog = Extract<PaneWebviewEvent, { kind: 'dialog' }>;
+
+/** What a pane says of a download its host refused. */
+export const DOWNLOAD_REFUSED = {
+  asker: 'This page tried to download a file.',
+  dialog: { dialog: 'alert', message: 'A webview pane downloads nothing.' },
+} as const;
 
 /** The app's CSP admits no `data:` image, so a still is decoded for a canvas. */
 async function decodeStill(url: string | null): Promise<ImageBitmap | null> {
@@ -78,6 +86,23 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState<{ url: string; title: string | null }>(() => ({ url: url ?? rawUrl, title: null }));
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
+  // The page waits on its alert, confirm, or prompt until it is answered, so
+  // every way out of this panel answers it: no, by default.
+  const [dialog, setDialog] = useState<PageDialog | null>(null);
+  const dialogRef = useRef<PageDialog | null>(null);
+  // The host refuses every download, which the page shows no sign of.
+  const [downloadRefused, setDownloadRefused] = useState(false);
+  const answer = useCallback((accept: boolean, text?: string) => {
+    if (!dialogRef.current) return;
+    dialogRef.current = null;
+    setDialog(null);
+    host.answer(id, accept, text);
+  }, [host, id]);
+  useEffect(() => () => answer(false), [answer]);
+  // The app document's focus parks on the placeholder, and a press on the
+  // prompt's backdrop lands there too; either way it belongs in the prompt.
+  const dialogFocusRef = useRef<HTMLElement | null>(null);
+  const setDialogFocus = useCallback((element: HTMLElement | null) => { dialogFocusRef.current = element; }, []);
   // A URL-bar entry made while the view is opening, which the host would drop.
   const pendingNavRef = useRef<string | null>(null);
   // A still of the page the placeholder shows while the view is hidden. Hiding
@@ -104,19 +129,21 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     if (committed && committed !== urlRef.current) paneWriteRef.current.updateParams(id, { url: committed });
   }, [id]);
 
-  // A first load that fails leaves the view with no page at all. It is closed,
-  // so that Reload opens a new one rather than adopting it.
+  // A view left with no page at all is closed, so that Reload opens a new one
+  // rather than adopting it.
+  const fail = useCallback((error: string) => {
+    answer(false);
+    host.close(id);
+    setStill(null);
+    setStatus({ kind: 'error', error });
+  }, [host, id, answer]);
   const settle = useCallback((next: PaneWebviewPage) => {
     if (next.url || next.loading) {
       showPage(next);
       // A page nobody points at or types in still needs a still to hide behind.
       if (!next.loading) takeStill();
-      return;
-    }
-    host.close(id);
-    setStill(null);
-    setStatus({ kind: 'error', error: 'it did not load' });
-  }, [host, id, showPage, takeStill]);
+    } else fail('Couldn’t open the page — it did not load.');
+  }, [showPage, takeStill, fail]);
   // What the host last reported while the view was opening: it can be newer
   // than the page `open` answers with, and is not reported again.
   const reportedRef = useRef<PaneWebviewPage | null>(null);
@@ -135,7 +162,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       const entry = pendingNavRef.current;
       pendingNavRef.current = null;
       if (!result.ok) {
-        setStatus({ kind: 'error', error: result.error });
+        setStatus({ kind: 'error', error: `Couldn’t open the page — ${result.error}.` });
         return;
       }
       // Read by the event listener before the next render.
@@ -170,11 +197,22 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           if (next) setPendingOpenUrl(next);
           break;
         }
+        case 'dialog':
+          // So does this one's; a page off screen is answered no.
+          if (shownRef.current) {
+            dialogRef.current = event;
+            setDialog(event);
+          } else host.answer(id, false);
+          break;
+        case 'download-refused':
+          if (shownRef.current) setDownloadRefused(true);
+          break;
+        case 'crashed': fail('The page crashed.'); break;
       }
     });
     // An unmounted panel's view is hidden, and a hidden view never holds focus.
     return () => { unsubscribe(); setPaneWebviewFocus(id, false); };
-  }, [host, id, settle, takeStill]);
+  }, [host, id, settle, takeStill, fail]);
 
   // Shown only while its pane is in sight and no overlay is open, following
   // the placeholder's laid-out rect.
@@ -235,6 +273,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   // With no view to navigate, a URL-bar entry is where one opens.
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) {
+      answer(false);
       if (statusRef.current.kind === 'open') host.navigate(id, next);
       else if (statusRef.current.kind === 'opening' && urlRef.current !== null) pendingNavRef.current = next;
       else {
@@ -242,13 +281,20 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
         setAttempt((n) => n + 1);
       }
     },
-    back() { if (statusRef.current.kind === 'open') host.history(id, 'back'); },
-    forward() { if (statusRef.current.kind === 'open') host.history(id, 'forward'); },
+    back() {
+      answer(false);
+      if (statusRef.current.kind === 'open') host.history(id, 'back');
+    },
+    forward() {
+      answer(false);
+      if (statusRef.current.kind === 'open') host.history(id, 'forward');
+    },
     reload() {
+      answer(false);
       if (statusRef.current.kind === 'open') host.history(id, 'reload');
       else setAttempt((n) => n + 1);
     },
-  }), [host, id]);
+  }), [host, id, answer]);
   const renderModes = useMemo(() => offeredRenderModes(false, null), []);
   useUndrivenScreen(id, 'webview', renderModes, page.url, page.title, chromeActions);
 
@@ -259,6 +305,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       tabIndex={-1}
       className={`relative h-full w-full overflow-hidden bg-terminal-bg outline-none ${TERMINAL_BOTTOM_RADIUS_CLASS}`}
       onMouseDown={() => actions.onClickPanel(id)}
+      onFocus={(e) => { if (e.target === e.currentTarget) dialogFocusRef.current?.focus(); }}
     >
       {!rawUrl ? (
         <PaneMessage className="text-muted">No URL was provided.</PaneMessage>
@@ -268,7 +315,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           <div className="text-xs text-muted/80">Enter an http:// or https:// address in the URL bar above.</div>
         </PaneMessage>
       ) : status.kind === 'error' ? (
-        <PaneMessage className="text-muted">Couldn’t open the page — {status.error}.</PaneMessage>
+        <PaneMessage className="text-muted">{status.error}</PaneMessage>
       ) : still && !shown && status.kind === 'open' ? (
         <Still image={still} />
       ) : null}
@@ -283,6 +330,69 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           onCancel={() => setPendingOpenUrl(null)}
         />
       )}
+      {dialog && seen ? (
+        <PageDialogPrompt
+          asker={`${dialog.origin || 'This page'} says:`}
+          dialog={dialog}
+          focusTarget={passthroughPaneId === id ? setDialogFocus : undefined}
+          onAnswer={answer}
+        />
+      ) : downloadRefused && seen && (
+        <PageDialogPrompt
+          {...DOWNLOAD_REFUSED}
+          focusTarget={passthroughPaneId === id ? setDialogFocus : undefined}
+          onAnswer={() => setDownloadRefused(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A page's alert, confirm, or prompt, asked in its pane. Its text is the
+ *  page's: plain, attributed, and scrolling within the prompt. */
+export function PageDialogPrompt({ asker, dialog, focusTarget, onAnswer }: {
+  /** Who is speaking: the page's origin, or Dormouse about the page. */
+  asker: string;
+  dialog: Pick<PageDialog, 'dialog' | 'message' | 'text'>;
+  /** Takes the element the keyboard belongs on; given only while its pane is
+   *  the one in passthrough, where the keyboard was the page's already. */
+  focusTarget?: (element: HTMLElement | null) => void;
+  onAnswer: (accept: boolean, text?: string) => void;
+}) {
+  useOccludePaneWebviews(true);
+  const [text, setText] = useState(dialog.text ?? '');
+  const accept = () => onAnswer(true, dialog.dialog === 'prompt' ? text : undefined);
+  return (
+    <div
+      role="alertdialog"
+      aria-label={asker}
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 py-4"
+      onKeyDown={(e) => {
+        if (isComposingKey(e.nativeEvent)) return;
+        // A focused button answers Enter itself: on Cancel it must not accept.
+        if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) accept();
+        else if (e.key === 'Escape') onAnswer(false);
+        else return;
+        e.preventDefault();
+      }}
+    >
+      <div className="flex min-h-0 w-full max-w-sm flex-col gap-1 text-sm">
+        <div className="break-all text-muted">{asker}</div>
+        <div className="min-h-0 overflow-auto whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{dialog.message}</div>
+      </div>
+      {dialog.dialog === 'prompt' && (
+        <TextInput ref={focusTarget} value={text} onChange={setText} autoFocus={!!focusTarget} aria-label={asker} className="max-w-sm" />
+      )}
+      <div className="flex gap-2">
+        <button type="button" ref={dialog.dialog === 'prompt' ? undefined : focusTarget} autoFocus={!!focusTarget && dialog.dialog !== 'prompt'} onClick={accept} className={modalActionButton({ tone: 'primary' })}>
+          OK
+        </button>
+        {dialog.dialog !== 'alert' && (
+          <button type="button" onClick={() => onAnswer(false)} className={modalActionButton({ tone: 'secondary' })}>
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
   );
 }

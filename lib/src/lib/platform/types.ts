@@ -251,7 +251,14 @@ export type PaneWebviewEvent =
   /** The pointer left the shown view: the app webview hears no move over it. */
   | { id: string; kind: 'pointerleave' }
   | { id: string; kind: 'focus'; focused: boolean }
-  | { id: string; kind: 'open-window'; url: string };
+  | { id: string; kind: 'open-window'; url: string }
+  /** The page started a download, which the host refused. */
+  | { id: string; kind: 'download-refused' }
+  /** The page's process ended, leaving the view blank. */
+  | { id: string; kind: 'crashed' }
+  /** The page's alert, confirm, or prompt, waiting on `answer`: `origin` is
+   *  the asking frame's host, and `text` a prompt's default. */
+  | { id: string; kind: 'dialog'; dialog: 'alert' | 'confirm' | 'prompt'; message: string; origin: string; text?: string };
 
 /**
  * The native views a host renders `webview` Surfaces with
@@ -272,6 +279,8 @@ export interface PaneWebviewHost {
   /** Return the keyboard to the app webview, if `id`'s view holds it. */
   blur(id: string): void;
   close(id: string): void;
+  /** Answer the view's pending dialog: `accept` is OK, and `text` what a prompt returns. */
+  answer(id: string, accept: boolean, text?: string): void;
   /** A still of the view's current rendering as an image URL, or null on any failure. */
   snapshot(id: string): Promise<string | null>;
   /** Hear every view's events; returns the unsubscribe. */

@@ -20,7 +20,7 @@ Source of truth: `webviewCommand` in `dor/src/commands/iframe.ts`; `pageOf` in `
 
 ## Lifetime
 
-**The host keys a pane webview by Surface id; a panel that mounts opens or adopts its Surface's view, and one that unmounts only hides it.** A move between Workspaces therefore reloads nothing, and a move to another window reparents the view (rationale). **Only `closeBrowserSurface`, the end of its window, a reload of that window's app webview, or a first load that fails destroys one** (rationale); on Windows a failed load shows the engine's error page, and only a view that cannot be built is destroyed.
+**The host keys a pane webview by Surface id; a panel that mounts opens or adopts its Surface's view, and one that unmounts only hides it.** A move between Workspaces therefore reloads nothing, and a move to another window reparents the view (rationale). **Only `closeBrowserSurface`, the end of its window, a reload of that window's app webview, a first load that fails, or on macOS its page's process ending destroys one** (rationale); on Windows a failed load shows the engine's error page, and only a view that cannot be built is destroyed.
 
 `url` in params is every top-level `http(s)` URL the host reports. A restart is a cold load there; the profile's cookies and storage survive it.
 
@@ -43,6 +43,7 @@ The app webview receives no key or pointer event while a pane webview holds focu
 - **Must give a pane webview the keyboard only while it is shown and its pane is the passthrough pane**; hiding or closing one that holds it returns focus to the app webview (rationale), and a pane's release moves nothing unless its own view holds the keyboard.
 - The host observes keys and presses natively, never through the page, and reports the leader, presses, and the pointer leaving as events (`docs/specs/security-local.md` -> "Webview panes"; rationale). **Must detect the leader exactly as `dualTap` does** (`docs/specs/layout.md` -> "Mode switching"); a press enters its pane like a click.
 - **Must report which pane webview holds focus**: that is no real blur (`docs/specs/layout.md` -> "Corner cases" #2), and keeps presence (`docs/specs/alert.md` -> "Engagement").
+- On macOS `⌘=`, `⌘-`, and `⌘0` zoom the page that holds the keyboard, matched by the character typed, unless the page handled the chord itself (rationale).
 - On macOS a chord bound to a menu item reaches the menu, never the page (rationale); the Edit submenu is the page's clipboard path (`docs/specs/standalone.md` -> "Application menu").
 
 Source of truth: `install` and `on_raw_input` in `standalone/src-tauri/src/pane_webview.rs`; `paneWebviewHoldsFocus` in `lib/src/lib/window-focus.ts`.
@@ -50,12 +51,14 @@ Source of truth: `install` and `on_raw_input` in `standalone/src-tauri/src/pane_
 ## Page boundary
 
 - A page may also frame its own `about:`, `blob:`, and `data:` documents (rationale), and its permission requests meet an explicit handler, and its fullscreen never leaves its pane (rationale).
+- On macOS the panel says so when the host refuses a page's download, for a page on screen.
 - A new-window request takes a press (rationale), opens nothing itself, and counts only from a page on screen: the panel asks while its pane is in sight, then opens the URL in a new webview pane beside its own.
+- **Must answer each of a page's alerts, confirms, and prompts exactly once** (rationale). On macOS the panel asks one at a time in its pane, from a page on screen only; any other, and one pending when its panel unmounts, its header navigates, or its view closes, is answered no, a prompt null. On Windows the engine shows its own.
 - A page reaches a local file only as one the user picks in the system's file picker or drops on it.
 - One persistent profile serves every pane webview.
 - The network policy does not gate a pane webview: it is the user's own connection, as a terminal's is (rationale).
 
-Source of truth: `may_load` in `standalone/src-tauri/src/pane_webview.rs`; `onOpenBrowserPane` in `lib/src/components/Wall.tsx`.
+Source of truth: `may_load` and `Dialog` in `standalone/src-tauri/src/pane_webview.rs`; `onOpenBrowserPane` in `lib/src/components/Wall.tsx`.
 
 ## Future
 
