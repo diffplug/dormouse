@@ -12,7 +12,7 @@ import { BrowserPanel } from './BrowserPanel';
 import { browserDisplayModeFromParams } from './browser-surface';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
-import { PaneWriteContext, PassthroughPaneIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions, type WallActions } from './wall-context';
+import { LayoutFramesContext, PaneWriteContext, PassthroughPaneIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions, type WallActions } from './wall-context';
 import { installPaneWebview, stubWallActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,7 +25,12 @@ let container: HTMLDivElement;
 let root: Root;
 let platform: FakePtyAdapter;
 let pane: ReturnType<typeof installPaneWebview>;
-let frames: FrameRequestCallback[];
+let observers: Set<() => void>;
+let layoutFrames: Set<(settled: boolean) => void>;
+const subscribeLayoutFrames = (listener: (settled: boolean) => void) => {
+  layoutFrames.add(listener);
+  return () => layoutFrames.delete(listener);
+};
 let rect: typeof RECT;
 let paneWrite: { updateParams: Mock<PaneWriteActions['updateParams']>; setTitle: Mock<PaneWriteActions['setTitle']> };
 
@@ -36,9 +41,13 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  frames = [];
-  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback));
-  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+  observers = new Set();
+  layoutFrames = new Set();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: () => void) {}
+    observe() { observers.add(this.callback); }
+    disconnect() { observers.delete(this.callback); }
+  });
   rect = RECT;
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ ...rect, top: rect.y, left: rect.x, right: rect.x + rect.width, bottom: rect.y + rect.height, toJSON: () => ({}) }));
   paneWrite = { updateParams: vi.fn<PaneWriteActions['updateParams']>(), setTitle: vi.fn<PaneWriteActions['setTitle']>() };
@@ -48,13 +57,12 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-/** Run the frames requested so far. */
-function frame(): void {
-  const due = frames;
-  frames = [];
-  for (const callback of due) callback(performance.now());
+/** The pane may have moved: what a resize of it reports. */
+function moved(): void {
+  for (const callback of [...observers]) callback();
 }
 
 function Occluder() {
@@ -80,7 +88,9 @@ async function show({ params = { surfaceType: 'browser', renderMode: 'webview', 
           <PassthroughPaneIdContext.Provider value={passthrough}>
             <PaneWriteContext.Provider value={paneWrite}>
               <WallActionsContext.Provider value={actions}>
-                <BrowserPanel id={ID} title="example.com" params={params} parked={parked} />
+                <LayoutFramesContext.Provider value={subscribeLayoutFrames}>
+                  <BrowserPanel id={ID} title="example.com" params={params} parked={parked} />
+                </LayoutFramesContext.Provider>
                 {extra}
               </WallActionsContext.Provider>
             </PaneWriteContext.Provider>
@@ -115,7 +125,7 @@ describe('WebviewPanel', () => {
 
   it('opens or adopts the view on mount, hides it on unmount, and destroys it only through closeBrowserSurface', async () => {
     await show();
-    frame();
+    moved();
     expect(lastPlace()).toEqual(['place', ID, RECT]);
 
     act(() => root.unmount());
@@ -131,14 +141,21 @@ describe('WebviewPanel', () => {
 
   it('places the view on its pane\'s rect as it moves, only while in sight and no overlay is open', async () => {
     await show();
-    frame();
+    moved();
     expect(lastPlace()).toEqual(['place', ID, RECT]);
     const placed = pane.of('place').length;
-    frame();
+    moved();
     expect(pane.of('place')).toHaveLength(placed);
     rect = { ...RECT, x: 50 };
-    frame();
+    moved();
     expect(lastPlace()).toEqual(['place', ID, { ...RECT, x: 50 }]);
+
+    // A layout animation moves a pane without resizing it.
+    rect = { ...RECT, x: 60 };
+    for (const listener of [...layoutFrames]) listener(false);
+    expect(lastPlace()).toEqual(['place', ID, { ...RECT, x: 60 }]);
+    rect = { ...RECT, x: 50 };
+    moved();
 
     await show({ extra: <Occluder /> });
     expect(lastPlace()).toEqual(['place', ID, null]);
@@ -183,7 +200,7 @@ describe('WebviewPanel', () => {
   it('asks before opening a new-window target as a new pane, hiding the view while it asks', async () => {
     const onOpenBrowserPane = vi.fn();
     await show({ actions: stubWallActions({ onOpenBrowserPane }) });
-    frame();
+    moved();
     act(() => pane.emit({ id: ID, kind: 'open-window', url: 'javascript:alert(1)' }));
     expect(container.textContent).not.toContain('wants to open a new tab');
 
@@ -198,12 +215,12 @@ describe('WebviewPanel', () => {
   it('raises a new-window prompt only from a page on screen, and shows it only while its pane is in sight', async () => {
     // Its prompt hides every pane webview, which a page nobody can see must not do.
     await show({ parked: true });
-    frame();
+    moved();
     act(() => pane.emit({ id: ID, kind: 'open-window', url: 'https://example.com/popup' }));
     await show();
     expect(container.textContent).not.toContain('wants to open a new tab');
 
-    frame();
+    moved();
     act(() => pane.emit({ id: ID, kind: 'open-window', url: 'https://example.com/popup' }));
     expect(container.textContent).toContain('wants to open a new tab');
     await show({ parked: true });
@@ -281,14 +298,14 @@ describe('WebviewPanel', () => {
     vi.useFakeTimers();
     try {
       await show();
-      frame();
+      moved();
       await act(async () => { vi.advanceTimersByTime(1000); });
       const before = pane.of('snapshot').length;
       rect = { ...RECT, width: 500 };
-      frame();
+      moved();
       await act(async () => { vi.advanceTimersByTime(100); });
       rect = { ...RECT, width: 520 };
-      frame();
+      moved();
       await act(async () => { vi.advanceTimersByTime(250); });
       expect(pane.of('snapshot').length).toBe(before);
       await act(async () => { vi.advanceTimersByTime(100); });
@@ -300,7 +317,7 @@ describe('WebviewPanel', () => {
 
   it('takes a still when a page finishes loading, so a pane nobody touched has one to hide behind', async () => {
     await show();
-    frame();
+    moved();
     const before = pane.of('snapshot').length;
     act(() => pane.emit({ id: ID, kind: 'page', url: URL, title: 'Loading', canGoBack: false, canGoForward: false, loading: true }));
     expect(pane.of('snapshot').length).toBe(before);
@@ -334,7 +351,7 @@ describe('WebviewPanel', () => {
     vi.mocked(pane.host.open).mockResolvedValue({ ok: false, error: 'no window' });
     await show();
     expect(container.textContent).toContain('Couldn’t open the page — no window.');
-    frame();
+    moved();
     expect(pane.of('place')).toEqual([]);
   });
 
@@ -355,7 +372,7 @@ describe('WebviewPanel', () => {
 
     it('shows the latest snapshot while the view is hidden, never while it is shown', async () => {
       await show();
-      frame();
+      moved();
       await act(async () => pane.emit({ id: ID, kind: 'pointerleave' }));
       expect(pane.of('snapshot')).toEqual([['snapshot', ID]]);
       expect(still()).toBeNull();
@@ -373,7 +390,7 @@ describe('WebviewPanel', () => {
     it('hides the view at once, without waiting for a snapshot', async () => {
       const answer = deferSnapshot();
       await show();
-      frame();
+      moved();
       act(() => pane.emit({ id: ID, kind: 'focus', focused: false }));
       expect(pane.host.snapshot).toHaveBeenCalledExactlyOnceWith(ID);
 
@@ -391,7 +408,7 @@ describe('WebviewPanel', () => {
       expect(pane.of('snapshot')).toEqual([]);
 
       await show();
-      frame();
+      moved();
       act(() => pane.emit({ id: 'surface:other', kind: 'pointerleave' }));
       act(() => pane.emit({ id: ID, kind: 'focus', focused: true }));
       expect(pane.of('snapshot')).toEqual([]);
@@ -403,7 +420,7 @@ describe('WebviewPanel', () => {
 
     it('drops the still when the page moves to another URL, even one snapshotted before it moved', async () => {
       await show();
-      frame();
+      moved();
       await act(async () => pane.emit({ id: ID, kind: 'pointerleave' }));
       await show({ extra: <Occluder /> });
       act(() => pane.emit({ ...page(URL), title: 'Retitled' }));
@@ -423,7 +440,7 @@ describe('WebviewPanel', () => {
 
     it('drops the still when the view closes', async () => {
       await show();
-      frame();
+      moved();
       await act(async () => pane.emit({ id: ID, kind: 'pointerleave' }));
       act(() => pane.emit({ ...page(''), loading: false }));
       expect(pane.of('close')).toEqual([['close', ID]]);

@@ -16,7 +16,8 @@ import { setPaneWebviewFocus } from '../../lib/window-focus';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceSight } from './use-surface-visibility';
-import { PaneWriteContext, PassthroughPaneIdContext, WallActionsContext } from './wall-context';
+import { LayoutFramesContext, PaneWriteContext, PassthroughPaneIdContext, WallActionsContext } from './wall-context';
+import { subscribePaneMotion } from './pane-motion';
 import type { ChromeActions } from './agent-browser-screen';
 import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, tabDisplayTitle } from './browser-url';
@@ -62,6 +63,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   const paneWrite = useContext(PaneWriteContext);
   const paneWriteRef = useRef(paneWrite);
   paneWriteRef.current = paneWrite;
+  const subscribeLayoutFrames = useContext(LayoutFramesContext);
   const elRef = useRef<HTMLDivElement>(null);
   usePaneChrome(id, elRef);
 
@@ -175,7 +177,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   }, [host, id, settle, takeStill]);
 
   // Shown only while its pane is in sight and no overlay is open, following
-  // the placeholder's laid-out rect every frame.
+  // the placeholder's laid-out rect.
   const seen = isSeenObserved(useSurfaceSight(parked, id));
   const occluded = usePaneWebviewsOccluded();
   const shown = seen && !occluded && status.kind === 'open' && url !== null;
@@ -200,27 +202,25 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
 
   useLayoutEffect(() => {
     if (!shown) return;
-    let frame = 0;
     let placed: DOMRect | null = null;
     // A still taken at another size shows the page laid out for that size.
     let resettled: ReturnType<typeof setTimeout> | undefined;
     const follow = () => {
       const box = elRef.current!.getBoundingClientRect();
-      if (!placed || !rectsEqual(placed, box)) {
-        placed = box;
-        host.place(id, { x: box.x, y: box.y, width: box.width, height: box.height });
-        clearTimeout(resettled);
-        resettled = setTimeout(takeStill, STILL_AFTER_MOVE_MS);
-      }
-      frame = requestAnimationFrame(follow);
+      if (placed && rectsEqual(placed, box)) return;
+      placed = box;
+      host.place(id, { x: box.x, y: box.y, width: box.width, height: box.height });
+      clearTimeout(resettled);
+      resettled = setTimeout(takeStill, STILL_AFTER_MOVE_MS);
     };
     follow();
+    const unsubscribe = subscribePaneMotion(elRef.current, follow, subscribeLayoutFrames);
     return () => {
-      cancelAnimationFrame(frame);
+      unsubscribe();
       clearTimeout(resettled);
       host.place(id, null);
     };
-  }, [host, id, shown, takeStill]);
+  }, [host, id, shown, takeStill, subscribeLayoutFrames]);
 
   useEffect(() => {
     if (status.kind !== 'open') return;

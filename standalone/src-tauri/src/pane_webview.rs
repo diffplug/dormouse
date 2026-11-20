@@ -227,7 +227,7 @@ mod imp {
 mod imp {
     use super::*;
     use block2::RcBlock;
-    use objc2::rc::Retained;
+    use objc2::rc::{autoreleasepool, Retained};
     use objc2::MainThreadMarker;
     use objc2::runtime::AnyObject;
     use objc2_app_kit::{
@@ -499,11 +499,9 @@ mod imp {
             // SAFETY: this runs on the main thread.
             let config = unsafe { WKSnapshotConfiguration::new(MainThreadMarker::new_unchecked()) };
             let width = NSNumber::new_f64(snapshot_width(size.width, size.height, scale));
-            // The handler runs later, on the main thread, so encoding never
-            // holds the registry.
             let handler = RcBlock::new(move |image: *mut NSImage, _: *mut NSError| {
                 // SAFETY: WebKit passes a live image or null.
-                let _ = tx.send(unsafe { image.as_ref() }.and_then(jpeg_data_url));
+                let _ = tx.send(unsafe { Retained::retain(image) }.map(Handed));
             });
             // SAFETY: a property write and a call on a live WKWebView, on the main thread.
             unsafe {
@@ -512,8 +510,15 @@ mod imp {
             }
             Ok(())
         })?;
-        rx.recv_timeout(SNAPSHOT_WAIT).ok().flatten().ok_or_else(|| "no snapshot".to_string())
+        // Encoded on this thread: on the main one it would stall both webviews.
+        let image = rx.recv_timeout(SNAPSHOT_WAIT).ok().flatten();
+        image.and_then(|Handed(image)| autoreleasepool(|_| jpeg_data_url(&image))).ok_or_else(|| "no snapshot".to_string())
     }
+
+    /// A snapshot WebKit has handed over and no longer touches.
+    struct Handed(Retained<NSImage>);
+    // SAFETY: it has one owner, and AppKit lets any thread read an image no other thread uses.
+    unsafe impl Send for Handed {}
 
     fn jpeg_data_url(image: &NSImage) -> Option<String> {
         let bitmap = NSBitmapImageRep::imageRepWithData(&*image.TIFFRepresentation()?)?;
