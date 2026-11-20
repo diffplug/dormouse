@@ -18,6 +18,7 @@ The guide addresses a VS Code user; the standalone app gets one section pointing
 ## Push notifications you can self-host
 ## Terminals that know their ports
 ## Browsers for you (and your agents)
+## Read the plan, see the running app
 ## Select and copy-paste like you meant
 ## Getting started
 ## Keyboard shortcuts

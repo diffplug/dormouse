@@ -32,7 +32,10 @@
     "persistent",
     "split",
     "panes",
-    "completion"
+    "completion",
+    "markdown preview",
+    "dev server",
+    "preview"
   ],
   "activationEvents": [
     "onView:dormouse.view",

@@ -1,11 +1,15 @@
 import {
   AppleLogoIcon,
+  ArrowUpRightIcon,
   CheckCircleIcon,
   CloudArrowUpIcon,
+  CropIcon,
   CubeIcon,
   DesktopIcon,
   DotsThreeOutlineIcon,
+  HighlighterIcon,
   LinuxLogoIcon,
+  RectangleIcon,
   ScalesIcon,
   SpeakerHighIcon,
   StorefrontIcon,
@@ -932,24 +936,28 @@ export default function Home() {
         </section>
 
         {/* 4. Browser surfaces — transcript + preview left, text right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-8 md:gap-12 items-center`}>
           <div className="order-2 md:order-1 space-y-4">
-          {/* Authored transcript. Command syntax tracks dor/test/snapshots/help/;
-              the output lines are illustrative and not generated from a test. */}
-          <div className="overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm leading-relaxed">
-            <div><span className="opacity-40">$ </span>dor ensure -- pnpm dev</div>
-            <div className="opacity-60">created surface:3&nbsp;&nbsp;&quot;pnpm dev&quot;</div>
-            <div className="mt-3"><span className="opacity-40">$ </span>dor agent-browser open surface:3</div>
-            <div className="opacity-60">&#8594; <span className="text-[var(--color-caramel)]">http://localhost:5173/</span></div>
+          {/* Authored transcript. Command syntax and the dormouse.yml fields
+              track dor/test/snapshots/help/ and `ToolEntry`; the output line
+              is illustrative and not generated from a test. */}
+          <div className="overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-xs leading-relaxed">
+            <div className="opacity-40"># dormouse.yml</div>
+            <div className="whitespace-pre">{"tools:\n  web:\n    run: pnpm dev\n    render: agent-browser-screencast\n    port: auto\n    prespawn_dedupe: [web, $HERE]"}</div>
+            <div className="mt-3"><span className="opacity-40">$ </span>dor tool web</div>
+            <div className="whitespace-pre opacity-60">{'takeover surface:1  [queued]  "pnpm dev"'}</div>
           </div>
           <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
             <div className="flex items-center gap-2 border-b border-[var(--color-text)]/10 px-3 py-2">
-              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
-              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
-              <div className="ml-1 flex-1 truncate rounded bg-[var(--color-text)]/10 px-2 py-1 font-mono text-xs opacity-70">
+              {/* A Tool's terminal waits behind the header's far-left chip. */}
+              <span className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-text)]/20 px-1.5 py-0.5 font-mono text-[0.65rem] opacity-70">
+                <TerminalIcon size={11} weight="bold" aria-hidden="true" />
+                pnpm dev
+              </span>
+              <div className="min-w-0 flex-1 truncate rounded bg-[var(--color-text)]/10 px-2 py-1 font-mono text-xs opacity-70">
                 localhost:5173
               </div>
-              <span className="rounded border border-[var(--color-caramel)]/40 px-1.5 py-0.5 font-mono text-[0.65rem] text-[var(--color-caramel)]">
+              <span className="shrink-0 rounded border border-[var(--color-caramel)]/40 px-1.5 py-0.5 font-mono text-[0.65rem] text-[var(--color-caramel)]">
                 screencast
               </span>
             </div>
@@ -974,11 +982,23 @@ export default function Home() {
               alt-tab and no second monitor.
             </p>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              <code className={SITE_CODE_CLASS}>dor agent-browser open surface:3</code>{" "}
-              aims a browser at the port that terminal is serving. Your agents
-              run the same command, so when an agent wants to see what it just built, it opens a pane you're
-              already watching. Pop it out to a real OS window when you need the
-              real thing.
+              Better yet, declare it once in the{" "}
+              <code className={SITE_CODE_CLASS}>dormouse.yml</code> you commit:{" "}
+              <code className={SITE_CODE_CLASS}>dor tool web</code> runs it in
+              one pane, its terminal until it serves a port, then that page.
+              Ask again and you get the running server, not a second one; each
+              checkout gets its own. A project's file runs nothing until you
+              approve it once.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Run{" "}
+              <code className={SITE_CODE_CLASS}>dor skill --install</code>{" "}
+              once in the project and the agent skill Dormouse bundles tells
+              your agents to start a declared server the same way, and{" "}
+              <code className={SITE_CODE_CLASS}>dor agent-browser</code> drives
+              its page, so when an agent wants to see what it just built, it
+              opens a pane you're already watching. Pop it out to a real OS
+              window when you need the real thing.
             </p>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
               Dormouse drives the{" "}
@@ -986,6 +1006,8 @@ export default function Home() {
               you already have installed — it doesn't ship a browser of its own.
             </p>
             <p className="text-base leading-relaxed opacity-60">
+              <a href={`${sitePath("/dor")}#tool`} className={SITE_LINK_CLASS}>dor tool</a>
+              {" · "}
               <a href={`${sitePath("/dor")}#agent-browser`} className={SITE_LINK_CLASS}>CLI reference</a>
               {" · "}
               <a href={sitePath("/agent-skill")} className={SITE_LINK_CLASS}>Agent skill</a>
@@ -993,7 +1015,71 @@ export default function Home() {
           </div>
         </section>
 
-        {/* 5. Selection and copy/paste — text left, video right */}
+        {/* 5. Local files — text left, two tiled file panes right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
+          <div>
+            <h2 className="font-display text-xl mb-6">Read the plan, not the raw Markdown</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Your agent left a 300-line plan in PLAN.md.{" "}
+              <code className={SITE_CODE_CLASS}>dor open PLAN.md</code> shows it
+              in a pane as a document, not a wall of text: tables as tables,
+              Mermaid diagrams drawn, and you can edit it right there.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              A PNG or JPEG opens in an image editor, to mark it up, redact a
+              secret, or crop. Source opens in a code editor, HTML and media in
+              viewers, a folder as a list you can click through.{" "}
+              <code className={SITE_CODE_CLASS}>--preview</code> reuses one
+              pane without taking your focus, and your agents can run{" "}
+              <code className={SITE_CODE_CLASS}>dor open</code> too.
+            </p>
+            <p className="text-base leading-relaxed opacity-60">
+              <a href={`${sitePath("/dor")}#open`} className={SITE_LINK_CLASS}>dor open</a>
+            </p>
+          </div>
+          <div aria-hidden="true" className="grid grid-cols-2 gap-3">
+            <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
+              <div className="border-b border-[var(--color-text)]/10 px-3 py-2 font-mono text-xs opacity-70">PLAN.md</div>
+              <div className="space-y-2.5 p-4">
+                <div className="h-2.5 w-1/2 rounded bg-[var(--color-text)]/20" />
+                <div className="h-2 w-full rounded bg-[var(--color-text)]/10" />
+                <div className="h-2 w-5/6 rounded bg-[var(--color-text)]/10" />
+                <div className="grid grid-cols-3 overflow-hidden rounded border border-[var(--color-text)]/15">
+                  {Array.from({ length: 9 }, (_, i) => (
+                    <div key={i} className={`h-5 border-[var(--color-text)]/10 ${i % 3 ? "border-l" : ""} ${i >= 3 ? "border-t" : "bg-[var(--color-text)]/10"}`} />
+                  ))}
+                </div>
+                <div className="flex items-center justify-center gap-1 pt-1">
+                  <div className="h-6 min-w-0 max-w-12 flex-1 rounded border border-[var(--color-caramel)]/60" />
+                  <div className="h-px w-3 shrink-0 bg-[var(--color-caramel)]/60" />
+                  <div className="h-6 min-w-0 max-w-12 flex-1 rounded border border-[var(--color-caramel)]/60" />
+                  <div className="h-px w-3 shrink-0 bg-[var(--color-caramel)]/60" />
+                  <div className="h-6 min-w-0 max-w-12 flex-1 rounded border border-[var(--color-caramel)]/60" />
+                </div>
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
+              <div className="border-b border-[var(--color-text)]/10 px-3 py-2 font-mono text-xs opacity-70">login.png</div>
+              <div className="flex gap-1.5 border-b border-[var(--color-text)]/10 px-3 py-1.5 opacity-60">
+                <ArrowUpRightIcon size={14} weight="bold" />
+                <HighlighterIcon size={14} weight="bold" />
+                <RectangleIcon size={14} weight="fill" />
+                <CropIcon size={14} weight="bold" />
+              </div>
+              <div className="relative space-y-2.5 p-4">
+                <div className="h-2.5 w-1/3 rounded bg-[var(--color-text)]/20" />
+                <div className="h-6 w-full rounded border border-[var(--color-text)]/15" />
+                <div className="flex h-6 w-full items-center rounded border border-[var(--color-text)]/15 px-2">
+                  <div className="h-3 w-2/3 bg-[var(--color-text)]" />
+                </div>
+                <div className="h-6 w-1/3 rounded bg-[var(--color-text)]/20" />
+                <div className="absolute bottom-3 right-4 h-10 w-1/3 rounded-sm border-2 border-[var(--color-caramel)]" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 6. Selection and copy/paste — text left, video right */}
         <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
           <div>
             <h2 className="font-display text-xl mb-6">Select and copy-paste like you meant</h2>

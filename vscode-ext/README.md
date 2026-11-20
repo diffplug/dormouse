@@ -49,6 +49,12 @@ dor agent-browser open surface:3    # open the port surface:3 is serving
 
 Dormouse drives the agent-browser or Playwright CLI you already have rather than shipping a browser. See the [`dor agent-browser` reference](https://dormouse.sh/dor#agent-browser).
 
+## Read the plan, see the running app
+
+`dor open` shows a local file or folder in a pane: Markdown in an editor that draws its tables and Mermaid diagrams, PNG and JPEG in an image editor to mark up, redact, or crop, and source in a code editor. HTML and media open in viewers, and a folder as a list you can click through. `--preview` reuses one preview pane without taking focus, and your agents can run `dor open` too.
+
+`dor tool <name>` runs a dev server declared in your project's `dormouse.yml` in one pane: its terminal until it serves a port, then that page, and the terminal again when it exits. Run `dor skill --install` once in the project and the [agent skill](https://dormouse.sh/agent-skill) tells your agents to start a declared dev server through `dor tool`, and a project's `dormouse.yml` runs nothing until you approve it once. See the [`dor open`](https://dormouse.sh/dor#open) and [`dor tool`](https://dormouse.sh/dor#tool) references.
+
 ## Select and copy-paste like you meant
 
 <!-- TODO: GIF of overriding a TUI's mouse capture and copying in Auto from the copy editor -->
