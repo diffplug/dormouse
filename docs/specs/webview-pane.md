@@ -20,7 +20,7 @@ Source of truth: `webviewCommand` in `dor/src/commands/iframe.ts`; `pageOf` in `
 
 ## Lifetime
 
-**The host keys a pane webview by Surface id; a panel that mounts opens or adopts its Surface's view, and one that unmounts only hides it.** A move between Workspaces therefore reloads nothing, and a move to another window reparents the view (rationale). **Only `closeBrowserSurface`, the end of its window, a reload of that window's app webview, a first load that fails, or its page's process ending destroys one** (rationale); on Windows a failed load shows the engine's error page, and only a view that cannot be built is destroyed.
+**The host keys a pane webview by Surface id; a panel that mounts opens or adopts its Surface's view, and one that unmounts only hides it.** A move between Workspaces reloads nothing, and a move to another window reparents the view (rationale). **Only `closeBrowserSurface`, the end of its window, a reload of that window's app webview, a first load that fails, or its page's process ending destroys one** (rationale); on Windows a failed load shows the engine's error page, and only a view that cannot be built is destroyed.
 
 `url` in params is every top-level `http(s)` URL the host reports. A restart is a cold load there; the profile's cookies and storage survive it.
 
