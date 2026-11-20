@@ -242,15 +242,6 @@ export function iframeShim(embedderOrigin: string): string {
 })();`;
 }
 
-// Drop in-document CSP unless the upstream opted into preservation, then
-// inject the shim before </head>. Applies to framed http upstreams, loopback or
-// remote — the trade is stated in docs/specs/dor-browser.md → "Iframe Host
-// Capability And CSP". The response-header CSP is replaced separately via
-// FRAMING_RESPONSE_HEADERS.
-//
-// `embedderOrigin` is the document that frames us, and it is required: without
-// one there is nobody to address the shim's messages to, so the caller must not
-// instrument at all rather than fall back to `'*'`.
 // Every WHATWG label for UTF-16 (LE and BE): a body in either is no place to
 // splice ASCII bytes.
 const UTF16_LABELS = new Set(['utf-16', 'utf-16le', 'utf-16be', 'unicode', 'unicodefeff', 'unicodefffe', 'ucs-2', 'iso-10646-ucs-2', 'csunicode']);
@@ -338,6 +329,16 @@ export function tunnelSocketShim(): string {
 })();`;
 }
 
+// Drop in-document CSP unless the upstream opted into preservation, then
+// inject the shim before </head>, else just after <body>, else at the end of the
+// prologue; a tunneled page also gets the socket shim at the prologue end.
+// Applies to framed http upstreams, loopback or remote — the trade is stated in
+// docs/specs/dor-browser.md → "Iframe Host Capability And CSP". The
+// response-header CSP is replaced separately via FRAMING_RESPONSE_HEADERS.
+//
+// `embedderOrigin` is the document that frames us, and it is required: without
+// one there is nobody to address the shim's messages to, so the caller must not
+// instrument at all rather than fall back to `'*'`.
 export function instrumentHtml(body: string, embedderOrigin: string, preserveCsp = false, tunneled = false): string {
   const html = preserveCsp ? body : body.replace(
     /<meta[^>]+http-equiv=["']?content-security-policy["']?[^>]*>/gi,
@@ -468,7 +469,7 @@ export function offOriginRedirectPage(target: URL): ErrorPage {
   };
 }
 
-export function escapeHtml(value: string): string {
+function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
