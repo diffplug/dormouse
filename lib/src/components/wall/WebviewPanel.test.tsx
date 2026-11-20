@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { focusSession } from '../../lib/terminal-registry';
-import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
+import { paneWebviewsOccluded, useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { isRealBlur } from '../../lib/window-focus';
 import { setNativeFieldValue } from '../../lib/dom';
 import { BrowserPanel } from './BrowserPanel';
@@ -241,7 +241,9 @@ describe('WebviewPanel', () => {
     act(() => pane.emit(dialogEvent('confirm')));
     expect(prompt()!.textContent).toContain('example.com says:<b>Sure?</b>');
     expect(prompt()!.querySelector('b')).toBeNull();
+    // Its own view hides; another pane's is left showing.
     expect(lastPlace()).toEqual(['place', ID, null]);
+    expect(paneWebviewsOccluded()).toBe(false);
     // Focus parked on the placeholder, by the keyboard's return or a press on
     // the backdrop, belongs in the prompt.
     act(() => prompt()!.parentElement!.focus());
@@ -280,6 +282,16 @@ describe('WebviewPanel', () => {
     const opens = pane.of('open').length;
     await act(async () => getAgentBrowserScreenController(ID)!.chromeActions.reload());
     expect(pane.of('open')).toHaveLength(opens + 1);
+  });
+
+  it('gives up the keyboard when a view that held it crashes, though the panel stays', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    await show();
+    act(() => pane.emit({ id: ID, kind: 'focus', focused: true }));
+    expect(isRealBlur()).toBe(false);
+    act(() => pane.emit({ id: ID, kind: 'crashed' }));
+    expect(container.textContent).toContain('The page crashed.');
+    expect(isRealBlur()).toBe(true);
   });
 
   it('says so when the host refuses a page\'s download, only for a page on screen', async () => {

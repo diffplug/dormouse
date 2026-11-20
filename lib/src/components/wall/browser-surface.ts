@@ -142,8 +142,8 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
  * boolean because the header and the body must agree: a port conflict occupies
  * the browser's place (there is nothing to frame, so the pane shows *why*
  * where the browser would have been) but has no URL to edit, so it must not
- * get browser chrome. Which halves are *mounted* never changes; see
- * `ToolPanel.tsx`.
+ * get browser chrome. Every face but `pending-approval` mounts both halves;
+ * `pending-approval` mounts neither until the user approves (`ToolPanel.tsx`).
  *
  * `browser` and `port-conflict` are mutually exclusive by construction —
  * autobind writes a conflict only when it declined to write a URL.

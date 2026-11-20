@@ -71,7 +71,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/theme.md`** — The two-layer CSS variable strategy, consumed-token resolver, terminal color contract, theme debugger.
 - **`docs/specs/dor-cli.md`** — The `dor` CLI on every Dormouse terminal's `PATH`: bundling and env contract, `spawnAndCapture` rules, control-socket plumbing, the Surface handle model, the command set.
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.
-- **`docs/specs/webview-pane.md`** — The `webview` render mode, a native child webview showing a page at its real origin in standalone macOS: host boundary, lifetime, visibility, keyboard.
+- **`docs/specs/webview-pane.md`** — The `webview` render mode, a native child webview showing a page at its real origin in standalone on macOS 14+ and Windows: host boundary, lifetime, visibility, keyboard.
 - **`docs/specs/dor-tool.md`** — Dor Tools: the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs, OSC 367 contract, designation, trust, serving, and persistence.
 - **`docs/specs/dor-tools-builtin.md`** — The built-in Tools `builtin:file` (local-file viewer with text, Markdown, and image editors), `builtin:code`, and `builtin:folder`: formats, grants, disk saves, listings, and their runtime packaging.
 - **`docs/specs/dor-tools-lib.md`** — `dor-tools-lib`, the MIT Tool-protocol package: its license and dependency boundary, entry points, consumers, and the road to publishing 1.0.

@@ -19,6 +19,8 @@ import { ChangelogRunner } from "../lib/changelog-runner";
 import { startAlertProgram } from "../lib/alert-programs";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
+import { hideYoutubeCaptions } from "../lib/youtube";
+import { MusicVideoFrame } from "./MusicVideoFrame";
 
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 
@@ -27,10 +29,13 @@ type MobileGestureInputId = import("dormouse-lib/lib/mobile-gesture-menu").Mobil
 
 const POCKET_TUTORIAL_PANE = "pocket-tut";
 const POCKET_CHANGELOG_PANE = "pocket-changelog";
+const POCKET_VIDEO_PANE = "pocket-video";
 const POCKET_SESSIONS: MobileWallSession[] = [
   { id: POCKET_TUTORIAL_PANE, title: "tutorial" },
+  { id: POCKET_VIDEO_PANE, title: "music video", kind: "browser", browserDisplay: "iframe" },
   { id: POCKET_CHANGELOG_PANE, title: "changelog" },
 ];
+const POCKET_TERMINAL_SESSIONS = POCKET_SESSIONS.filter((session) => session.kind !== "browser");
 const POCKET_AUTOSTART_COMMANDS = new Map<string, string>([
   [POCKET_TUTORIAL_PANE, "tutorial"],
   [POCKET_CHANGELOG_PANE, "changelog"],
@@ -56,6 +61,7 @@ export function PocketTerminalExperience() {
   const [view, setView] = useState<MobileTerminalView>("terminal");
   const tutorialShown = activePaneId === POCKET_TUTORIAL_PANE && view === "terminal";
   const tutorialShownRef = useRef(tutorialShown);
+  const videoShown = activePaneId === POCKET_VIDEO_PANE;
   const sessionItems = useMobileWallSessionItems(POCKET_SESSIONS, activePaneId);
   const mouseStates = useSyncExternalStore(
     subscribeToMouseSelection,
@@ -132,7 +138,7 @@ export function PocketTerminalExperience() {
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
       adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      for (const session of POCKET_SESSIONS) {
+      for (const session of POCKET_TERMINAL_SESSIONS) {
         adapter.setScenario(session.id, { name: "none", chunks: [] });
       }
 
@@ -184,13 +190,13 @@ export function PocketTerminalExperience() {
         },
       );
       shellRegistryRef.current = shellRegistry;
-      for (const session of POCKET_SESSIONS) shellRegistry.ensureShell(session.id);
+      for (const session of POCKET_TERMINAL_SESSIONS) shellRegistry.ensureShell(session.id);
 
       spawnUnsubRef.current = adapter.onPtySpawn(({ id }) => {
         shellRegistry.ensureShell(id);
         tryAutoStart(id);
       });
-      for (const session of POCKET_SESSIONS) {
+      for (const session of POCKET_TERMINAL_SESSIONS) {
         if (adapter.hasPty(session.id)) tryAutoStart(session.id);
       }
 
@@ -215,6 +221,9 @@ export function PocketTerminalExperience() {
     };
   }, [getPocketTouchMode, handleNotifyPocket, handleOpenGithub, subscribeToPocketTouchMode, tryAutoStart]);
 
+  // The music video burns in its own captions.
+  useEffect(() => hideYoutubeCaptions(), []);
+
   useEffect(() => {
     tutorialShownRef.current = tutorialShown;
     tutorialRunnerRef.current?.setShown(tutorialShown);
@@ -224,7 +233,7 @@ export function PocketTerminalExperience() {
   // touch mode and that pane's own reporting, so a pane the user switched away
   // from would otherwise be left stuck in a stale override.
   useEffect(() => {
-    for (const session of POCKET_SESSIONS) {
+    for (const session of POCKET_TERMINAL_SESSIONS) {
       const reporting = mouseStates.get(session.id)?.mouseReporting ?? "none";
       setMouseOverride(session.id, paneMouseOverride(touchMode, reporting));
     }
@@ -244,9 +253,12 @@ export function PocketTerminalExperience() {
             activeSessionId={activePaneId}
             onActiveSessionChange={setActivePaneId}
             onShowSessions={() => setView("sessions")}
+            browser={<MusicVideoFrame visible={videoShown && view === "terminal"} />}
+            browserShown={videoShown}
           />
         ) : null
       }
+      browserShown={videoShown}
       fillViewport
       activeTouchMode={touchMode}
       onTouchModeChange={handleTouchModeChange}

@@ -288,7 +288,8 @@ test('readClipboardText on windows strips Get-Clipboard trailing newline', async
     env: WINDOWS_ENV,
     exec: async (cmd, args) => {
       assert.equal(cmd, POWERSHELL);
-      assert.ok(args.includes('Get-Clipboard -Raw'));
+      assert.ok(args.at(-1).endsWith('Get-Clipboard -Raw'));
+      assert.ok(args.at(-1).startsWith('[Console]::OutputEncoding = [Text.Encoding]::UTF8;'));
       return { stdout: 'line1\r\nline2\r\n' };
     },
   });
@@ -363,18 +364,38 @@ test('writeClipboardText on mac shells out to pbcopy via stdin', async () => {
   assert.equal(f.calls[0][2].env.LC_CTYPE, 'UTF-8');
 });
 
-test('writeClipboardText on windows shells out to clip', async () => {
+test('writeClipboardText on windows sets the clipboard through PowerShell, not clip.exe', async () => {
   const f = fakeSpawn();
   await writeClipboardText('x', { platform: 'win32', env: WINDOWS_ENV, spawn: f.spawn });
-  assert.deepEqual(f.calls.map((c) => [c[0], c[1]]), [['D:\\Win\\System32\\clip.exe', []]]);
+  assert.equal(f.calls.length, 1);
+  assert.match(f.calls[0][0], /powershell\.exe$/i);
+  assert.match(f.calls[0][1].at(-1), /Set-Clipboard/);
 });
 
-test('writeClipboardText on windows sends clip UTF-16LE behind a byte-order mark', async () => {
+test('writeClipboardText on windows sends UTF-8 with no byte-order mark', async () => {
   const f = fakeSpawn();
   await writeClipboardText('café ✓', { platform: 'win32', env: WINDOWS_ENV, spawn: f.spawn });
   const sent = f.writes[0][1];
-  assert.deepEqual([...sent.subarray(0, 2)], [0xff, 0xfe]);
-  assert.equal(sent.subarray(2).toString('utf16le'), 'café ✓');
+  assert.notDeepEqual([...sent.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+  assert.equal(sent.toString('utf8'), 'café ✓');
+});
+
+// Windows 10.0.26300's clip.exe kept a UTF-16 byte-order mark as U+FEFF, and
+// without one guessed a lone 'é' wrong; Get-Clipboard's stdout came back in the
+// OEM code page ('h�llo ??'): only the real clipboard shows these.
+test('clipboard text on windows round-trips through the real clipboard', { skip: process.platform !== 'win32' }, async () => {
+  const { execFileSync } = require('node:child_process');
+  const codes = () => execFileSync('powershell', ['-NoProfile', '-Command', '[int[]][char[]](Get-Clipboard -Raw) -join ","'], { encoding: 'utf8' }).trim();
+  const saved = await readClipboardText();
+  try {
+    for (const text of ['é', '世', 'héllo 世界', 'café ✓\r\nline 2', 'plain']) {
+      await writeClipboardText(text);
+      assert.equal(codes(), text.split('').map((c) => c.charCodeAt(0)).join(','));
+      assert.equal(await readClipboardText(), text);
+    }
+  } finally {
+    await writeClipboardText(saved);
+  }
 });
 
 test('writeClipboardText spawns with windowsHide so no console window flickers', async () => {

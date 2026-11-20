@@ -6,7 +6,7 @@
 
 **Why the page restores its own theme.** Theme selection moved out of `SiteHeader` into the Wall's Settings dialog, so nothing on the page guarantees a picker ever mounts. `useRestoredTheme(DOCS_THEME_ID)` makes the restore unconditional, and declares the host fallback the Settings picker later re-resolves through.
 
-**Why the desktop layout is an explicit Lath seed.** The synchronous `initialPaneIds` path creates its leaves before the later ones have measured geometry, so it cannot reliably choose alternating split axes — the L-shape comes out however the measurements land. A valid Lath snapshot fixes the shape, and with it the one vertical and one horizontal divider.
+**Why the desktop layout is an explicit Lath seed.** The synchronous `initialPaneIds` path creates its leaves before the later ones have measured geometry, so it cannot reliably choose alternating split axes — the shape comes out however the measurements land. A valid Lath snapshot fixes the shape and every divider's axis.
 
 **Why `tut-boxed` is the copy target.** Its wrapped detail lines exercise the copy editor's Auto format, and its TUI captures the mouse, the state `cp-override` exists to demonstrate. Pocket's `pocket-changelog` session is there for the same two reasons.
 

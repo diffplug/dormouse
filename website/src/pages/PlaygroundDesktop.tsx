@@ -12,6 +12,7 @@ import { TutDetector } from "../lib/tut-detector";
 import { trackTutorialCompletion } from "../lib/site-analytics";
 import { TutRunner } from "../lib/tut-runner";
 import { startAlertProgram } from "../lib/alert-programs";
+import { devServerPage, startDevServer } from "../lib/dev-server-program";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import {
@@ -20,6 +21,7 @@ import {
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
+import { hideYoutubeCaptions } from "../lib/youtube";
 import { DOCS_THEME_ID } from "dormouse-lib/site/docs-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
@@ -100,11 +102,12 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs, clipboardFailure] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, terminalTheme, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs, clipboardFailure] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
         import("dormouse-lib/lib/themes"),
+        import("dormouse-lib/lib/terminal-theme"),
         import("dormouse-lib/lib/alert-settings"),
         import("dormouse-lib/lib/alert-delivery-model"),
         import("dormouse-lib/components/WorkspaceWindow"),
@@ -130,7 +133,14 @@ function PlaygroundDesktopExperience() {
       adapter.clearDefaultScenario();
       shellDefaults.setDefaultShellOpts({ shell: "/bin/fake" });
       const fsHost = playgroundFs.installPlaygroundFs(adapter);
-      disposeFsRef.current = fsHost.dispose;
+      // A pretend dev server's port opens the music video in a system browser.
+      const openExternal = adapter.openExternal.bind(adapter);
+      adapter.openExternal = (uri: string) => openExternal(devServerPage(uri));
+      disposeFsRef.current = () => {
+        fsHost.dispose();
+        // Back to the prototype's, for the Pocket page sharing this adapter.
+        delete (adapter as { openExternal?: unknown }).openExternal;
+      };
 
       const tutorialState = new TutorialState(DESKTOP_TUTORIAL_PROFILE.sections);
       stopCompletionTracking = trackTutorialCompletion(tutorialState, "desktop");
@@ -170,6 +180,12 @@ function PlaygroundDesktopExperience() {
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
               onOpenGithub: handleOpenGithub,
               onOpenPocket: handleOpenPocket,
+              getTerminalTheme: terminalTheme.getTerminalTheme,
+              subscribeToTerminalTheme: terminalTheme.onTerminalThemeChange,
+              // A minimized pane's xterm is detached, and a hidden Workspace's
+              // is not rendered, so either fails checkVisibility.
+              isShown: () => document.visibilityState === "visible"
+                && !!registry.getTerminalInstance(terminalId)?.element?.checkVisibility(),
             });
           }
           if (name === "ascii-splash" || name === "splash") {
@@ -183,8 +199,11 @@ function PlaygroundDesktopExperience() {
           if (name === "changelog") {
             return new ChangelogRunner({ adapter, terminalId, onExit });
           }
-          const alertProgram = startAlertProgram(name, args, (data) => adapter.sendOutput(terminalId, data), onExit);
+          const send = (data: string) => adapter.sendOutput(terminalId, data);
+          const alertProgram = startAlertProgram(name, args, send, onExit);
           if (alertProgram) return alertProgram;
+          const devServer = startDevServer(name, args, adapter, terminalId, send, onExit);
+          if (devServer) return devServer;
           if (name === "dor") {
             return fsHost.startDor(terminalId, args, shellRegistry.cwdOf(terminalId) ?? fsHost.shellFs.cwd, onExit);
           }
@@ -212,7 +231,7 @@ function PlaygroundDesktopExperience() {
         if (adapter.hasPty(pane.id)) tryAutoStart(pane);
       }
 
-      // A revisit starts from one Workspace and re-seeds the L-shape rather
+      // A revisit starts from one Workspace and re-seeds the layout rather
       // than finding the last visit's Workspaces.
       workspaceWindow.resetWorkspaceWindow();
       // A user's name, so auto-naming never retitles it from its panes' cwd.
@@ -238,8 +257,11 @@ function PlaygroundDesktopExperience() {
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
 
+  // The music video burns in its own captions.
+  useEffect(() => hideYoutubeCaptions(), []);
+
   const handleWallEvent = useCallback((event: WallEvent) => {
-    // Every visible pane (the three seed panes + any the user splits off) gets a
+    // Every visible pane (the seed panes + any the user splits off) gets a
     // fake shell. `paneAdded` fires once per pane that becomes visible, before the
     // pane's terminal spawns.
     if (event.type === "paneAdded") {
