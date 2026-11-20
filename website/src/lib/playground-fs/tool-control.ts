@@ -8,8 +8,11 @@ import { defaultBrowserViewportConfig } from "dor-lib-common/browser-viewports";
 import type { IframeProxyResult } from "dormouse-lib/lib/platform/iframe-proxy-types";
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
 import { builtinOpenResult, noUserToolMessage, offerBuiltins } from "dormouse-lib/lib/tool-open-builtin";
+import { isLoopbackHostname } from "dormouse-lib/lib/ip-literal";
 import { USER_CONFIG, type VirtualFs } from "./vfs";
 import { VIEWER_SCOPE } from "./viewers";
+import { YOUTUBE_MUSIC_VIDEO, youtubeEmbedUrl } from "../youtube";
+import { servesDevServer } from "../dev-server-program";
 
 export function playgroundToolControl(fs: VirtualFs) {
   /** `input` as an existing snapshot path and its built-in candidates, or the host's error. */
@@ -50,13 +53,17 @@ export function playgroundToolControl(fs: VirtualFs) {
   };
 }
 
-/** Fronts only the playground's own viewers: `useToolServing` frames an
- * announced port at `localhost`, and the page that answers is this origin's
- * `/playground-fs/` service worker. Every other page is refused, since
- * nothing here can proxy it. */
+/** Fronts the playground's own viewers and frames the music video embed
+ * unproxied, for its own pane and for a pretend dev server's port, which
+ * serves nothing: `useToolServing` frames an announced port at its listener's
+ * loopback address, and the page that answers is this origin's
+ * `/playground-fs/` service worker. Every other page is refused, since nothing
+ * here can proxy it. */
 export async function playgroundIframeUrl(targetUrl: string): Promise<IframeProxyResult> {
   const url = new URL(targetUrl);
-  return url.hostname === "localhost" && url.pathname.startsWith(VIEWER_SCOPE)
+  const video = youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO);
+  if (url.href === video || servesDevServer(url.href)) return { ok: true, url: video };
+  return isLoopbackHostname(url.hostname) && url.pathname.startsWith(VIEWER_SCOPE)
     ? { ok: true, url: `${location.origin}${url.pathname}${url.search}${url.hash}` }
-    : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers" };
+    : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers and the music video" };
 }

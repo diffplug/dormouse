@@ -27,17 +27,18 @@ Device routes (`website/src/routes.ts`):
 - **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
 - **Must credit an alert ring only on a transition into `ALERT_RINGING`, by the source its detail names**, so a ring already standing when first seen credits nothing.
 - **Must credit the `dor open` section from the command lines the shells report, and `op-paste` from the playground filesystem's paste report**, never from a hook in the playground `dor` or lib.
+- **Must credit the Ports and browsers section from the command lines the shells report and `contextOpen` events**, the ports items only while `npm run dev` runs in two panes at once.
 
 Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` in `website/src/lib/tut-detector.ts`; `TutorialState` in `website/src/lib/tutorial-state.ts`; profiles in `website/src/lib/tut-items.ts`.
 
 ## Layout
 
 - **The desktop page must restore its own theme** with `useRestoredTheme(DOCS_THEME_ID)` (rationale).
-- `/playground/desktop` runs `WorkspaceWindow` (`FakePtyAdapter`, `initialMode="passthrough"`) from one fresh Workspace. **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale).
+- `/playground/desktop` runs `WorkspaceWindow` (`FakePtyAdapter`, `initialMode="passthrough"`) from one fresh Workspace. **Must seed its four-pane layout as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each terminal seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale).
 
 Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`.
 
-`/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**.
+`/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`), **`pocket-video`** (a `browser` Session on the music video), and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**.
 
 Source of truth: `PlaygroundDesktop` in `website/src/pages/PlaygroundDesktop.tsx`; `PocketPlayground` in `website/src/pages/PocketPlayground.tsx`.
 
@@ -47,7 +48,7 @@ Source of truth: `PlaygroundDesktop` in `website/src/pages/PlaygroundDesktop.tsx
 
 **Must capture the mouse only on this screen**, and **must stop animation and release capture on leaving or disposal.** Reduced motion disables idle animation, retaining scroll movement.
 
-Source of truth: `TutRunner` and `GestureStarfield` in `website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
+Source of truth: `TutRunner` and `Starfield` in `website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
 
 ## Menu and navigation behavior
 
@@ -85,7 +86,7 @@ The desktop shells share one filesystem, a snapshot of the tracked files of `dor
 - **Must abandon a playground `dor` run on interruption or disposal**, including a pending CLI load, picker, and control requests; never send later requests or output.
 - **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
 - **Must serve the real viewer pages, CSPs, and contracts on the Node viewers' routes** (`docs/specs/dor-tools-builtin.md`); a PNG or JPEG the image editor can edit opens in it, and view-only images and other non-text formats are refused.
-- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to this origin, preserving path, query, and fragment**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
+- **`createIframeProxyUrl` must map only a loopback URL under `/playground-fs/` to this origin, preserving path, query, and fragment, and frame only the music video's embed otherwise, for its URL or a running `npm run dev` port**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
 - **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below, bodies as Blobs (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
 
 ```mermaid
@@ -121,7 +122,7 @@ Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.t
 
 Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observability:
 
-- **`WallEvent.kill` / `move` / `paneAdded`** — discriminants on the `WallEvent` union. `kill` fires on every kill path, so each credits `kb-kill`. **`move` must fire on every pane swap, keyboard or drag** (rationale). **`paneAdded` fires once per pane that becomes visible**, seeds included.
+- **`WallEvent.kill` / `move` / `paneAdded` / `contextOpen`** — discriminants on the `WallEvent` union. `kill` fires on every kill path, so each credits `kb-kill`. **`move` must fire on every pane swap, keyboard or drag** (rationale). **`paneAdded` fires once per pane that becomes visible**, seeds included. **`contextOpen` must fire on every terminal context opening, with the mode it opens on.**
 - **`FakePtyAdapter.sendOutput`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.**
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
 - **`resolveAlertDeliveryPolicy`** (`lib/src/lib/alert-delivery-model.ts`) — the active Workspace's speech policy; **must credit `al-speak` only on a turn from off to on**, so a setting saved on an earlier visit grants nothing.

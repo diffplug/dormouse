@@ -4,34 +4,29 @@ Expect: standalone/sidecar/clipboard-ops.js
 Source: reverses #1040 (clipboard reads ran `powershell` by bare name)
 
 diff --git a/standalone/sidecar/clipboard-ops.js b/standalone/sidecar/clipboard-ops.js
-index e44a93b3c..c9d476cb7 100644
+index 2c768cc12..a8c3f0e02 100644
 --- a/standalone/sidecar/clipboard-ops.js
 +++ b/standalone/sidecar/clipboard-ops.js
-@@ -4,7 +4,7 @@ const path = require('node:path');
- const crypto = require('node:crypto');
- const { execFile, spawn } = require('node:child_process');
- const { promisify } = require('node:util');
--const { windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
-+const { windowsSystemPath } = require('./windows-system');
- 
- const rawExecFileP = promisify(execFile);
- 
-@@ -20,11 +20,11 @@ function execFileP(cmd, args, options) {
- 
+@@ -22,14 +22,13 @@ function execFileP(cmd, args, options) {
  const MAX_BUFFER = 16 * 1024 * 1024;
  
--/** Run `script` in Windows PowerShell, by its absolute path (`windowsPowerShellPath`). */
-+/** Run `script` in Windows PowerShell. */
+ /**
+- * Run `script` in Windows PowerShell, by its absolute path (`windowsPowerShellPath`). Its stdout
+- * is switched to UTF-8: in the console's OEM code page `é` arrives as a byte that is not UTF-8 and
+- * CJK as `?`.
++ * Run `script` in Windows PowerShell. Its stdout is switched to UTF-8: in the console's OEM code
++ * page `é` arrives as a byte that is not UTF-8 and CJK as `?`.
+  */
  function runPowerShell(script, runtime) {
    const exec = runtime.exec || execFileP;
    return exec(
 -    windowsPowerShellPath(runtime.env || process.env),
 +    'powershell',
-     ['-NoProfile', '-NonInteractive', '-Command', script],
+     ['-NoProfile', '-NonInteractive', '-Command', `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${script}`],
      { maxBuffer: MAX_BUFFER },
    );
 diff --git a/standalone/sidecar/clipboard-ops.test.js b/standalone/sidecar/clipboard-ops.test.js
-index 3d25750ed..8583096d1 100644
+index 33393f341..e17d591cb 100644
 --- a/standalone/sidecar/clipboard-ops.test.js
 +++ b/standalone/sidecar/clipboard-ops.test.js
 @@ -11,10 +11,8 @@ const {
