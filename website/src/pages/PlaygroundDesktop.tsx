@@ -12,6 +12,7 @@ import { TutDetector } from "../lib/tut-detector";
 import { trackTutorialCompletion } from "../lib/site-analytics";
 import { TutRunner } from "../lib/tut-runner";
 import { startAlertProgram } from "../lib/alert-programs";
+import { lazyProgram } from "../lib/lazy-program";
 import { devServerPage, startDevServer } from "../lib/dev-server-program";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
@@ -102,7 +103,7 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, terminalTheme, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs, clipboardFailure] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, terminalTheme, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, playgroundFs, clipboardFailure] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
@@ -114,7 +115,6 @@ function PlaygroundDesktopExperience() {
         import("../components/PlaygroundTabs"),
         import("dormouse-lib/lib/workspace-store"),
         import("dormouse-lib/lib/shell-defaults"),
-        import("../lib/ascii-splash-runner"),
         import("../lib/playground-fs"),
         import("dormouse-lib/components/ClipboardFailureDialog"),
         import("dormouse-lib/index.css"),
@@ -189,12 +189,13 @@ function PlaygroundDesktopExperience() {
             });
           }
           if (name === "ascii-splash" || name === "splash") {
-            return new asciiSplash.AsciiSplashRunner({
+            // Its patterns are a large module, so it loads when first run.
+            return lazyProgram(() => import("../lib/ascii-splash-runner").then(({ AsciiSplashRunner }) => new AsciiSplashRunner({
               adapter,
               terminalId,
               args,
               onExit,
-            });
+            })), onExit);
           }
           if (name === "changelog") {
             return new ChangelogRunner({ adapter, terminalId, onExit });

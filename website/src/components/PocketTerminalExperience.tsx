@@ -17,6 +17,7 @@ import { TutRunner } from "../lib/tut-runner";
 import { POCKET_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { startAlertProgram } from "../lib/alert-programs";
+import { lazyProgram } from "../lib/lazy-program";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 import { hideYoutubeCaptions } from "../lib/youtube";
@@ -122,14 +123,16 @@ export function PocketTerminalExperience() {
     let stopCompletionTracking: (() => void) | null = null;
 
     async function loadWall() {
-      const platform = await import("dormouse-lib/lib/platform");
-      const registry = await import("dormouse-lib/lib/terminal-registry");
-      const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
-      const themes = await import("dormouse-lib/lib/themes");
-      const terminalTheme = await import("dormouse-lib/lib/terminal-theme");
-      const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
-      const asciiSplash = await import("../lib/ascii-splash-runner");
-      await import("dormouse-lib/index.css");
+      // In parallel: one at a time, each waited out a round trip.
+      const [platform, registry, mouseSelection, themes, terminalTheme, scenarios] = await Promise.all([
+        import("dormouse-lib/lib/platform"),
+        import("dormouse-lib/lib/terminal-registry"),
+        import("dormouse-lib/lib/mouse-selection"),
+        import("dormouse-lib/lib/themes"),
+        import("dormouse-lib/lib/terminal-theme"),
+        import("dormouse-lib/lib/platform/fake-scenarios"),
+        import("dormouse-lib/index.css"),
+      ]);
       if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
@@ -176,12 +179,13 @@ export function PocketTerminalExperience() {
             return runner;
           }
           if (name === "ascii-splash" || name === "splash") {
-            return new asciiSplash.AsciiSplashRunner({
+            // Its patterns are a large module, so it loads when first run.
+            return lazyProgram(() => import("../lib/ascii-splash-runner").then(({ AsciiSplashRunner }) => new AsciiSplashRunner({
               adapter,
               terminalId,
               args,
               onExit,
-            });
+            })), onExit);
           }
           if (name === "changelog") {
             return new ChangelogRunner({ adapter, terminalId, onExit });
