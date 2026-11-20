@@ -1,3 +1,5 @@
+import { currentWindowLabel } from "./window-label";
+
 export type BrowserSidecarEvent = { event: string; data: unknown };
 
 export class BrowserSidecarHost {
@@ -10,7 +12,9 @@ export class BrowserSidecarHost {
   private readonly reconnectHandlers = new Set<() => void>();
   private nextId = 1;
 
-  constructor(private readonly baseUrl: string) {}
+  /** `windowLabel` names this page to the harness, which routes it as Rust
+   *  routes that window (`?window=` in `window-label.ts`). */
+  constructor(private readonly baseUrl: string, private readonly windowLabel: string = currentWindowLabel()) {}
 
   /**
    * The one place that knows the bridge is authenticated. Every caller — the
@@ -26,6 +30,7 @@ export class BrowserSidecarHost {
   url(path: string): URL {
     const url = new URL(this.baseUrl);
     url.pathname = path;
+    url.searchParams.set("window", this.windowLabel);
     return url;
   }
 

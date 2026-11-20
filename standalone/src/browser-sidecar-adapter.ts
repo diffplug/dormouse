@@ -57,6 +57,7 @@ import {
   dispatchDorControlRequest,
 } from "dormouse-lib/lib/platform/dor-control-dispatch";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
+import { currentWindowLabel, MAIN_WINDOW_LABEL } from "./window-label";
 import { IframeLeaseOrder } from '../../lib/src/lib/platform/iframe-lease-order';
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
@@ -73,7 +74,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
-  private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
+  /** One `PersistedWindow` per label; `main` keeps the bare key, so a
+   *  single-page run restores what it always did. */
+  private static stateKey(label: string): string {
+    return label === MAIN_WINDOW_LABEL ? BrowserSidecarAdapter.STATE_KEY : `${BrowserSidecarAdapter.STATE_KEY}.${label}`;
+  }
+  private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.stateKey(currentWindowLabel()), 'browser-sidecar');
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
   // forwards the same `burrow:*` messages over its own transport.
   private readonly burrowClient = createBurrowLinkClient({
@@ -85,7 +91,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   readonly burrow: BurrowLink = this.burrowClient.link;
 
   // The sidecar's alerts, through the same client TauriAdapter uses; the dev
-  // host stamps this page's one fixed window label on each command.
+  // host stamps this page's `?window=` label on each command.
   private readonly alerts = createAlertClient((payload: AlertCommand) => {
     this.host.send("alert_command", { payload });
   });
@@ -125,6 +131,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alerts.hello();
     this.managedVoice?.refresh();
     this.installConsoleForwarder();
+    // The harness's focus order, which a `dor` request naming nothing goes
+    // to, as Rust's focus events feed its own.
+    const focused = () => { if (document.visibilityState === "visible") this.host.send("window_focused"); };
+    window.addEventListener("focus", focused);
+    document.addEventListener("visibilitychange", focused);
+    if (document.hasFocus()) focused();
     await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
     }, this.windowSlot.read());

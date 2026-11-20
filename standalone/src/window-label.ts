@@ -4,8 +4,9 @@
  * The Tauri label is a Window's persistence identity (`docs/specs/glossary.md`)
  * and the only window that checks for updates is `main`
  * (`docs/specs/auto-update.md`), so several modules need the answer
- * synchronously after boot. The browser-dev harness has no windows at all and
- * answers `main`.
+ * synchronously after boot. The browser-dev harness has no native windows: a
+ * page names itself with `?window=` (`main`, the default, or `ws-<n>`), and the
+ * harness routes it as Rust routes that window.
  */
 
 import { listen, type Event, type UnlistenFn } from '@tauri-apps/api/event';
@@ -16,7 +17,10 @@ let label = MAIN_WINDOW_LABEL;
 
 /** Read the host's answer. Idempotent; called once from `bootstrap()`. */
 export async function resolveWindowLabel(): Promise<string> {
-  if (import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST) return label;
+  if (import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST) {
+    label = browserDevLabel(location.search);
+    return label;
+  }
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     label = getCurrentWindow().label;
@@ -24,6 +28,12 @@ export async function resolveWindowLabel(): Promise<string> {
     console.error('[dormouse] could not resolve the window label; assuming main', err);
   }
   return label;
+}
+
+/** A browser-dev page's `?window=`: `main` or `ws-<n>`, anything else `main`. */
+export function browserDevLabel(search: string): string {
+  const asked = new URLSearchParams(search).get('window');
+  return asked && /^(main|ws-[1-9][0-9]{0,5})$/.test(asked) ? asked : MAIN_WINDOW_LABEL;
 }
 
 export function currentWindowLabel(): string {
