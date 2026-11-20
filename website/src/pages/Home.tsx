@@ -21,7 +21,6 @@ import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
 import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
-import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import elevenLabsGrantsUrl from "../assets/elevenlabs-grants.png";
@@ -29,6 +28,7 @@ import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
 import { PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
+import { VsCodeDemoWindow } from "../components/vscode-demo/VsCodeDemoWindow";
 import { sitePath } from "../lib/site-meta";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
@@ -200,22 +200,15 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
   },
 };
 
-const FEATURE_VIDEO_BASE =
-  "-mx-4 md:mx-0 block w-[calc(100%+2rem)] max-w-none md:w-full md:max-w-full";
-
-const FEATURE_VIDEO_VARIANTS = {
-  cover: "aspect-video object-cover",
-  intrinsic: "h-auto",
-} as const;
+const FEATURE_VIDEO_CLASS =
+  "-mx-4 md:mx-0 block w-[calc(100%+2rem)] max-w-none md:w-full md:max-w-full aspect-video object-cover";
 
 function FeatureVideo({
   src,
   className = "",
-  variant = "cover",
 }: {
   src: string;
   className?: string;
-  variant?: keyof typeof FEATURE_VIDEO_VARIANTS;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   // Plays only within a screen of the viewport: `autoPlay` would fetch every
@@ -238,11 +231,7 @@ function FeatureVideo({
       loop
       muted
       playsInline
-      className={[
-        FEATURE_VIDEO_BASE,
-        FEATURE_VIDEO_VARIANTS[variant],
-        className,
-      ].filter(Boolean).join(" ")}
+      className={[FEATURE_VIDEO_CLASS, className].filter(Boolean).join(" ")}
     />
   );
 }
@@ -855,7 +844,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
+          <VsCodeDemoWindow className="mt-8" />
         </section>
         {/* Section 2: image left, text right */}
         <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,390px)_1fr] gap-8 md:gap-12 items-start`}>

@@ -1,0 +1,175 @@
+/* The Wall's structural rules: the Lath host, its leaves and sashes, and the
+ * animations its chrome names. Split from index.css so a host that renders a
+ * Wall inside its own design (the homepage's VS Code demo) can take them
+ * without the app shell's body and type-scale rules. */
+
+/* --- Lath host (the tiling engine binding) ---
+ *
+ * The HTML adapter for Lath (docs/specs/tiling-engine.md → "The HTML adapter
+ * (LathHost)"), mounted by the Wall. app-bg gutters and a terminal-bg body.
+ * LathHost applies the shared PANE_HEADER_HEIGHT_PX to the header slot inline;
+ * the header and body React components carry their own palette (bg-header-…,
+ * bg-terminal-bg) and rounded corners, so this is structural layout +
+ * backgrounds only. */
+
+.lath-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background-color: var(--color-app-bg);
+}
+
+/* One stable, absolutely-positioned div per leaf — moved and resized via inline
+ * styles, never re-parented (the no-reparent guarantee that keeps iframes from
+ * reloading and xterms from blurring). */
+.lath-host .lath-leaf {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* While a terminal context is open every other pane recedes under a scrim of the
+ * Wall's own ground (DESIGN.md → "Terminal Context Teeth"). A scrim rather
+ * than the leaf's opacity, which the animator writes; it takes no input, so a press
+ * still reaches the pane and dismisses the context. */
+.lath-host .lath-leaf::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background-color: var(--color-app-bg);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.lath-host .lath-leaf[data-receded]::after {
+  /* The strong modal backdrop's strength (`modalOverlay` in design.tsx). */
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lath-host .lath-leaf::after { transition: none; }
+}
+
+.lath-host .lath-leaf-header {
+  position: relative;
+  overflow: visible;
+  z-index: 20;
+}
+
+.lath-host .lath-leaf-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-terminal-bg);
+}
+
+/* Sashes render from the core `sashes()` geometry as sibling divs over the gap
+ * band; the adapter widens the hit area and sets the cursor inline. */
+.lath-host .lath-sash {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+}
+
+/* Drag drop-preview boxes: the destination, its scope, and a swap's other slot during a
+ * pane/Door drag. Fill, border, and border-radius are all set inline (the resolved
+ * selection color + TERMINAL_SELECTION_BORDER_RADIUS); only positioning lives here.
+ * Inert to the pointer so it never intercepts the drag. */
+.lath-host .lath-drop-preview {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Held by `shieldFrames` while a drag reads window pointer events. */
+[data-frame-shield] iframe {
+  pointer-events: none;
+}
+
+/* --- Command mode marching-ants animation --- */
+
+@keyframes marching-ants {
+  to { stroke-dashoffset: var(--march-offset); }
+}
+
+/* A still dashed ring. `!important` because SelectionRing writes `animation` inline. */
+@media (prefers-reduced-motion: reduce) {
+  [data-ring='outline'] { animation: none !important; }
+}
+
+/* --- Kill-dialog confirm animation --- */
+
+@keyframes kill-overlay-confirm {
+  0%   { opacity: 1; transform: scale(1); }
+  30%  { opacity: 1; transform: scale(1.02); }
+  100% { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes kill-letter-flash {
+  0%   { transform: scale(1);    filter: brightness(1); }
+  40%  { transform: scale(1.25); filter: brightness(1.6); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+
+.kill-overlay-confirm { animation: kill-overlay-confirm 220ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.kill-letter-flash    { animation: kill-letter-flash    220ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+                        display: inline-block; transform-origin: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kill-overlay-confirm,
+  .kill-letter-flash { animation-duration: 1ms; }
+}
+
+/* --- Confirmation flash for a popup button (the mouse override banner's) --- */
+
+@keyframes copy-flash {
+  0%   { transform: scale(1);    }
+  45%  { transform: scale(1.08); }
+  100% { transform: scale(1);    }
+}
+.animate-copy-flash {
+  animation: copy-flash 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-copy-flash { animation: none; }
+}
+
+/* --- A copied selection's fill: in, a dip, and held until it clears --- */
+
+@keyframes copy-flash-fill {
+  0%   { opacity: 0;    }
+  30%  { opacity: 1;    }
+  60%  { opacity: 0.55; }
+  100% { opacity: 1;    }
+}
+/* Gated in JS by `motionIsInstant()`, which also covers `cfg.layout.animate`. */
+.animate-copy-flash-fill {
+  animation: copy-flash-fill 500ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* --- Shell selection feedback --- */
+
+@keyframes shell-spawn-notice {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  15%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-3px); }
+}
+
+.shell-spawn-notice {
+  animation: shell-spawn-notice 1500ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-spawn-notice { animation: none; }
+}
+
+/* The Workspace tab or + a pane drag would move its Surface to on release. */
+[data-surface-drop] {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}

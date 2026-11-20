@@ -10,7 +10,7 @@ import { FOCUS_MOTION_MS, SELECTION_RING_Z_INDEX } from '../design';
 //
 //  - `variant='ants'`: 2px dashed stroke, marching for as long as command mode
 //    lasts (the dash geometry and `--march-offset` are written imperatively).
-//    Command-mode ring. Reduced motion holds it still (`index.css`).
+//    Command-mode ring. Reduced motion holds it still (`wall.css`).
 //  - `variant='solid'`: 1px stroke, no dash/animation. Passthrough ring, replacing
 //    the retired 1px CSS border (pixel-identical stroke placement).
 //
