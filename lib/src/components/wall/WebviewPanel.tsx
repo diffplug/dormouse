@@ -125,20 +125,21 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
     if (committed && committed !== urlRef.current) paneWriteRef.current.updateParams(id, { url: committed });
   }, [id]);
 
-  // A first load that fails leaves the view with no page at all. It is closed,
-  // so that Reload opens a new one rather than adopting it.
+  // A view left with no page at all is closed, so that Reload opens a new one
+  // rather than adopting it.
+  const fail = useCallback((error: string) => {
+    answer(false);
+    host.close(id);
+    setStill(null);
+    setStatus({ kind: 'error', error });
+  }, [host, id, answer]);
   const settle = useCallback((next: PaneWebviewPage) => {
     if (next.url || next.loading) {
       showPage(next);
       // A page nobody points at or types in still needs a still to hide behind.
       if (!next.loading) takeStill();
-      return;
-    }
-    answer(false);
-    host.close(id);
-    setStill(null);
-    setStatus({ kind: 'error', error: 'it did not load' });
-  }, [host, id, showPage, takeStill, answer]);
+    } else fail('Couldn’t open the page — it did not load.');
+  }, [showPage, takeStill, fail]);
   // What the host last reported while the view was opening: it can be newer
   // than the page `open` answers with, and is not reported again.
   const reportedRef = useRef<PaneWebviewPage | null>(null);
@@ -157,7 +158,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
       const entry = pendingNavRef.current;
       pendingNavRef.current = null;
       if (!result.ok) {
-        setStatus({ kind: 'error', error: result.error });
+        setStatus({ kind: 'error', error: `Couldn’t open the page — ${result.error}.` });
         return;
       }
       // Read by the event listener before the next render.
@@ -202,11 +203,12 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
         case 'download-refused':
           if (shownRef.current) setDownloadRefused(true);
           break;
+        case 'crashed': fail('The page crashed.'); break;
       }
     });
     // An unmounted panel's view is hidden, and a hidden view never holds focus.
     return () => { unsubscribe(); setPaneWebviewFocus(id, false); };
-  }, [host, id, settle, takeStill]);
+  }, [host, id, settle, takeStill, fail]);
 
   // Shown only while its pane is in sight and no overlay is open, following
   // the placeholder's laid-out rect.
@@ -309,7 +311,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           <div className="text-xs text-muted/80">Enter an http:// or https:// address in the URL bar above.</div>
         </PaneMessage>
       ) : status.kind === 'error' ? (
-        <PaneMessage className="text-muted">Couldn’t open the page — {status.error}.</PaneMessage>
+        <PaneMessage className="text-muted">{status.error}</PaneMessage>
       ) : still && !shown && status.kind === 'open' ? (
         <Still image={still} />
       ) : null}

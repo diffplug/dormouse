@@ -501,7 +501,7 @@ mod imp {
         let content = window.contentView().ok_or("the window has no content view")?;
         let parent = ContentView(NonNull::from(&*content).cast());
         let (app, id) = (webview.app_handle().clone(), id.to_string());
-        let (asker, downloader) = ((app.clone(), id.clone()), (app.clone(), id.clone()));
+        let (asker, downloader, crashed) = ((app.clone(), id.clone()), (app.clone(), id.clone()), (app.clone(), id.clone()));
         let view = WebViewBuilder::new()
             .with_url(url)
             .with_visible(false)
@@ -520,6 +520,7 @@ mod imp {
             })
             // wry grants media capture when no handler is set.
             .with_permission_handler(|_| PermissionResponse::Deny)
+            .with_on_web_content_process_terminate_handler(move || report(&crashed.0, &crashed.1, "crashed", json!({})))
             .with_data_store_identifier(STORE)
             .build_as_child(&parent)
             .map_err(|e| e.to_string())?;

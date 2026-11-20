@@ -266,6 +266,16 @@ describe('WebviewPanel', () => {
     expect(prompt()).toBeNull();
   });
 
+  it('closes a view whose page crashed, says so, and opens a new one on Reload', async () => {
+    await show();
+    act(() => pane.emit({ id: ID, kind: 'crashed' }));
+    expect(pane.of('close')).toEqual([['close', ID]]);
+    expect(container.textContent).toContain('The page crashed.');
+    const opens = pane.of('open').length;
+    await act(async () => getAgentBrowserScreenController(ID)!.chromeActions.reload());
+    expect(pane.of('open')).toHaveLength(opens + 1);
+  });
+
   it('says so when the host refuses a page\'s download, only for a page on screen', async () => {
     await show({ parked: true });
     act(() => pane.emit({ id: ID, kind: 'download-refused' }));
