@@ -3,13 +3,12 @@ import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { Wall } from "dormouse-lib/components/Wall";
 import { WorkspaceVisibleContext } from "dormouse-lib/components/wall/wall-context";
 import { initPlatform } from "dormouse-lib/lib/platform";
-import { disposeSession, initAlertStateReceiver, toggleSessionTodo } from "dormouse-lib/lib/terminal-registry";
+import { initAlertStateReceiver, toggleSessionTodo } from "dormouse-lib/lib/terminal-registry";
 import { seedLaunchedCommand } from "dormouse-lib/lib/terminal-state-store";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
-import type { LathPersistedLayout } from "dormouse-lib/lib/lath/persistence";
 import "dormouse-lib/wall.css";
-import { APP_TYPE_SCALE, paintDemoTheme } from "../demo-theme";
-import { DemoStopped, Finger } from "../pocket-demo/finger";
+import { APP_TYPE_SCALE, disposeDemoSessions, paintDemoTheme } from "../homepage-demos";
+import { DemoStopped, Finger, offsetWithin } from "../pocket-demo/finger";
 import { CWD, ran, SCENES, type SceneName } from "./scenes";
 
 /**
@@ -22,18 +21,12 @@ export default function VsCodeDemoWall({ scene: name }: { scene: SceneName }) {
   const scene = SCENES[name];
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
-  const [layout, setLayout] = useState<LathPersistedLayout | null>(null);
+  // Set up before the Wall mounts, so its terminals spawn onto their scenarios.
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const fake = initPlatform("fake");
-    const ids = Object.keys(scene.sessions);
-    // Only its own Sessions: the other demos share the adapter and the registry.
-    const disposeOwn = () => {
-      for (const id of ids) {
-        disposeSession(id);
-        fake.clearScenario(id);
-      }
-    };
+    const disposeOwn = () => disposeDemoSessions(fake, Object.keys(scene.sessions));
     disposeOwn();
     initAlertStateReceiver();
     for (const [id, { command, data, ports, title }] of Object.entries(scene.sessions)) {
@@ -46,7 +39,7 @@ export default function VsCodeDemoWall({ scene: name }: { scene: SceneName }) {
     const stopTodos = fake.onPtySpawn(({ id }) => {
       if (scene.sessions[id]?.todo) toggleSessionTodo(id);
     });
-    setLayout(scene.layout(window.location.origin));
+    setReady(true);
     return () => {
       stopTodos();
       disposeOwn();
@@ -60,7 +53,7 @@ export default function VsCodeDemoWall({ scene: name }: { scene: SceneName }) {
     const root = rootRef.current;
     const cursor = cursorRef.current;
     const tour = scene.contextTour;
-    if (!layout || !root || !cursor || !tour?.length) return;
+    if (!ready || !root || !cursor || !tour?.length) return;
     let controller: AbortController | null = null;
     const stop = () => {
       controller?.abort(new DemoStopped());
@@ -83,9 +76,9 @@ export default function VsCodeDemoWall({ scene: name }: { scene: SceneName }) {
       observer.disconnect();
       stop();
     };
-  }, [layout, scene]);
+  }, [ready, scene]);
 
-  if (!layout) return null;
+  if (!ready) return null;
   return (
     <div ref={rootRef} className="relative flex h-full min-h-0 w-full" style={APP_TYPE_SCALE}>
       {/* Shown but inactive, as an outgoing Workspace is while it fades: its
@@ -93,7 +86,7 @@ export default function VsCodeDemoWall({ scene: name }: { scene: SceneName }) {
       <WorkspaceVisibleContext.Provider value={true}>
         <Wall
           workspaceId={scene.workspaceId}
-          restoredLathLayout={layout}
+          restoredLathLayout={scene.layout}
           initialDoors={scene.doors}
           initialMode="passthrough"
           active={false}
@@ -105,14 +98,10 @@ export default function VsCodeDemoWall({ scene: name }: { scene: SceneName }) {
 }
 
 /** Where in `root` the cursor's tip goes to right-click `header`: a little way
- *  in from its left end. Layout offsets, since the window is scaled. */
+ *  in from its left end. */
 function headerPoint(root: HTMLElement, header: HTMLElement): { x: number; y: number } {
-  const point = { x: Math.min(90, header.offsetWidth / 3), y: header.offsetHeight / 2 };
-  for (let node: HTMLElement | null = header; node && node !== root; node = node.offsetParent as HTMLElement | null) {
-    point.x += node.offsetLeft;
-    point.y += node.offsetTop;
-  }
-  return point;
+  const at = offsetWithin(header, root);
+  return { x: at.x + Math.min(90, header.offsetWidth / 3), y: at.y + header.offsetHeight / 2 };
 }
 
 /** A right-click where the cursor's tip is, as the reader's own would arrive. */

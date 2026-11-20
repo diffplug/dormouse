@@ -31,3 +31,14 @@ export const MOUSE_DISABLE = `${ESC}?1003l${ESC}?1002l${ESC}?1000l${ESC}?1006l`;
 // by canned scenarios so they look the same.
 export const promptFor = (dir: string): string => `${fg(32)}user${RESET}@${fg(36)}dormouse${RESET}:${BOLD}${fg(34)}${dir}${RESET}$ `;
 export const PROMPT = promptFor('~');
+
+// VS Code shell integration (OSC 633), which Dormouse parses for a Session's
+// prompt and command boundaries, command line, and cwd.
+export const OSC_PROMPT_START = '\x1b]633;A\x07';
+export const OSC_PROMPT_END = '\x1b]633;B\x07';
+export const OSC_COMMAND_START = '\x1b]633;C\x07';
+/** A 633 property value: the parser splits on `;` and unescapes `\\` and `\x3b`. */
+const osc633Value = (value: string) => value.replace(/\\/g, '\\\\').replace(/;/g, '\\x3b');
+export const oscCommandLine = (commandLine: string) => `\x1b]633;E;${osc633Value(commandLine)}\x07`;
+export const oscCommandFinish = (exitCode: number) => `\x1b]633;D;${exitCode}\x07`;
+export const oscCwd = (cwd: string) => `\x1b]633;P;Cwd=${osc633Value(cwd)}\x07`;

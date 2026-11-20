@@ -1,6 +1,9 @@
-import type { LathPersistedLayout, LeafMeta } from "dormouse-lib/lib/lath/persistence";
+import { browserLeafMeta, terminalLeafMeta } from "dormouse-lib/components/wall/lath-wall-engine";
+import { BOLD, DIM, OSC_COMMAND_START, OSC_PROMPT_END, OSC_PROMPT_START, RESET, fg, oscCommandLine, oscCwd } from "dormouse-lib/lib/ansi";
+import type { LathPersistedLayout } from "dormouse-lib/lib/lath/persistence";
 import type { OpenPort } from "dormouse-lib/lib/platform/types";
 import type { PersistedDoor } from "dormouse-lib/lib/session-types";
+import { wrap } from "../../lib/wrap";
 import { YOUTUBE_MUSIC_VIDEO, youtubeEmbedUrl } from "../../lib/youtube";
 
 /**
@@ -27,8 +30,7 @@ export interface DemoScene {
   /** Its own, so the demos' Walls never answer for each other. */
   workspaceId: string;
   sessions: Record<string, DemoSession>;
-  /** Built on the client, which knows the origin the browser pane loads from. */
-  layout(origin: string): LathPersistedLayout;
+  layout: LathPersistedLayout;
   doors?: PersistedDoor[];
   /** Panes whose headers a cursor right-clicks in turn, on a loop while the
    *  window is on screen, each opening its terminal context. */
@@ -37,38 +39,19 @@ export interface DemoScene {
 
 export const CWD = "/Users/you/acorn";
 
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const YELLOW = "\x1b[33m";
-const CYAN = "\x1b[36m";
+const GREEN = fg(32);
+const RED = fg(31);
+const YELLOW = fg(33);
+const CYAN = fg(36);
 const PROMPT = `${DIM}~/acorn${RESET} ${YELLOW}❯${RESET} `;
 
 const lines = (...rows: string[]) => rows.join("\r\n");
 
-/** A shell prompt that ran `command`, marked with the VS Code shell-integration
+/** A shell prompt that ran `command`, marked with the shell-integration
  *  sequences Dormouse's own integration emits, so each header derives its
  *  command and cwd as it would from a real shell. */
 export const ran = (command: string) =>
-  `\x1b]7;file://${CWD}\x07\x1b]633;A\x07${PROMPT}\x1b]633;B\x07${command}\r\n\x1b]633;E;${command}\x07\x1b]633;C\x07`;
-
-/** Word-wrap `text` to `columns` as an agent CLI does, which xterm.js would
- *  break mid-word. The windows never lay out narrower than their minimum, and
- *  scale instead, so each pane's width in columns holds near enough. */
-function wrap(text: string, columns: number, indent = ""): string[] {
-  const rows: string[] = [];
-  let row = "";
-  for (const word of text.split(" ")) {
-    if (row && row.length + 1 + word.length > columns - indent.length) {
-      rows.push(row);
-      row = word;
-    } else row = row ? `${row} ${word}` : word;
-  }
-  rows.push(row);
-  return rows.map((r, i) => (i === 0 ? r : indent + r));
-}
+  `${oscCwd(CWD)}${OSC_PROMPT_START}${PROMPT}${OSC_PROMPT_END}${command}\r\n${oscCommandLine(command)}${OSC_COMMAND_START}`;
 
 const listening = (port: number, pid: number): OpenPort => ({ protocol: "tcp", family: "IPv4", address: "127.0.0.1", port, pid, processName: "node" });
 
@@ -83,13 +66,11 @@ const vite = (port: number, ...after: string[]) => lines(
 
 const hmr = (time: string, file: string) => `${DIM}${time}${RESET} ${CYAN}${BOLD}[vite]${RESET} ${GREEN}hmr update${RESET} ${DIM}${file}${RESET}`;
 
-const terminal = (title: string): LeafMeta => ({ component: "terminal", tabComponent: "terminal", title });
-
 const metaFor = (sessions: Record<string, DemoSession>, ...ids: string[]) =>
-  Object.fromEntries(ids.map((id) => [id, terminal(sessions[id].command)]));
+  Object.fromEntries(ids.map((id) => [id, terminalLeafMeta(sessions[id].command)]));
 
 const doorsFor = (sessions: Record<string, DemoSession>, ...ids: string[]): PersistedDoor[] =>
-  ids.map((id) => ({ id, ...terminal(sessions[id].command) }));
+  ids.map((id) => ({ id, ...terminalLeafMeta(sessions[id].command) }));
 
 // --- "Tmux with browsers": two Workspaces in one VS Code window, the music
 // video in an editor tab and an agent in the bottom panel, its dev server a Door. ---
@@ -108,11 +89,11 @@ const PANEL_COLUMNS = 80;
 const VIDEO: DemoScene = {
   workspaceId: "vscode-demo-editor",
   sessions: {},
-  layout: () => ({
+  layout: {
     version: 1,
     tree: { root: { kind: "leaf", id: W.video } },
-    leafMeta: { [W.video]: { component: "browser", tabComponent: "surface", title: "Dormouse music video", params: { url: youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO) } } },
-  }),
+    leafMeta: { [W.video]: browserLeafMeta("Dormouse music video", { url: youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO) }) },
+  },
 };
 
 const AGENT_SESSIONS: Record<string, DemoSession> = {
@@ -141,11 +122,11 @@ const AGENT_SESSIONS: Record<string, DemoSession> = {
 const AGENT: DemoScene = {
   workspaceId: "vscode-demo-panel",
   sessions: AGENT_SESSIONS,
-  layout: () => ({
+  layout: {
     version: 1,
     tree: { root: { kind: "leaf", id: W.agent } },
     leafMeta: metaFor(AGENT_SESSIONS, W.agent),
-  }),
+  },
   doors: doorsFor(AGENT_SESSIONS, W.dev),
 };
 
@@ -182,7 +163,7 @@ const PORTS_SESSIONS: Record<string, DemoSession> = {
 const PORTS: DemoScene = {
   workspaceId: "vscode-demo-ports",
   sessions: PORTS_SESSIONS,
-  layout: () => ({
+  layout: {
     version: 1,
     tree: {
       root: {
@@ -195,7 +176,7 @@ const PORTS: DemoScene = {
       },
     },
     leafMeta: metaFor(PORTS_SESSIONS, P.web, P.api),
-  }),
+  },
   contextTour: [P.web, P.api],
 };
 

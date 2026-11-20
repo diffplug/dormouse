@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, memo, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -28,7 +28,7 @@ import type { SceneName } from "./scenes";
 const VsCodeDemoWall = lazy(() => import("./VsCodeDemoWall"));
 
 /** VS Code's workbench in Kimbie Dark, the theme the Walls inside wear
- *  (`../demo-theme.ts`): the theme file's own colors, and VS Code's dark
+ *  (`../homepage-demos.ts`): the theme file's own colors, and VS Code's dark
  *  defaults for the keys it leaves unset. The workbench is VS Code's, not
  *  Dormouse's, so these are a picture of it rather than theme tokens. */
 const KIMBIE = {
@@ -114,6 +114,8 @@ const README: readonly (readonly Run[])[] = [
   [{ text: "The app serves on " }, { text: "`localhost:5173`", color: KIMBIE.code }, { text: ", and the API runs with " }, { text: "`wrangler dev`", color: KIMBIE.code }, { text: "." }],
 ];
 
+const lineLength = (runs: readonly Run[]) => runs.reduce((sum, run) => sum + run.text.length, 0);
+
 function Explorer() {
   return (
     <div className="flex w-[220px] shrink-0 flex-col text-[13px]" style={{ background: KIMBIE.sideBar, color: KIMBIE.foreground }}>
@@ -156,7 +158,7 @@ function Explorer() {
       <div className="flex h-[35px] shrink-0 items-center gap-3.5 px-3" style={{ color: KIMBIE.activityFg, borderTop: `1px solid ${KIMBIE.sectionBorder}` }}>
         <span className="flex h-full items-center" style={{ boxShadow: `inset 0 -1px 0 ${KIMBIE.activityFg}` }}><CopyIcon size={18} /></span>
         {[MagnifyingGlassIcon, GitBranchIcon, PlayIcon].map((Icon, i) => <Icon key={i} size={18} className="opacity-50" />)}
-        <span className="relative flex opacity-100">
+        <span className="relative flex">
           <SquaresFourIcon size={18} className="opacity-50" />
           <span className="absolute -right-1.5 -bottom-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 text-[9px] font-semibold text-white" style={{ background: KIMBIE.badge }}>1</span>
         </span>
@@ -192,8 +194,9 @@ function TabStrip({ children, actions }: { children: ReactNode; actions: ReactNo
   );
 }
 
-/** A Wall, mounted once the window is near the viewport. */
-function DemoWall({ scene, near }: { scene: SceneName; near: boolean }) {
+/** A Wall, mounted once the window is near the viewport. Memoized: the
+ *  window's refits would otherwise re-render the whole Wall. */
+const DemoWall = memo(function DemoWall({ scene, near }: { scene: SceneName; near: boolean }) {
   return (
     <div className="relative min-h-0 flex-1" style={{ background: KIMBIE.editor }}>
       {near ? (
@@ -203,7 +206,7 @@ function DemoWall({ scene, near }: { scene: SceneName; near: boolean }) {
       ) : null}
     </div>
   );
-}
+});
 
 /** README.md in a text editor group: breadcrumbs, line numbers, word wrap, minimap. */
 function ReadmeGroup() {
@@ -231,10 +234,9 @@ function ReadmeGroup() {
         </div>
         {/* The minimap: each line a faint bar of its length. */}
         <div className="w-12 shrink-0 space-y-[2px] pt-0.5 pr-2 opacity-40">
-          {README.map((runs, i) => {
-            const length = runs.reduce((sum, run) => sum + run.text.length, 0);
-            return <div key={i} className="h-[2px] rounded-full" style={{ width: `${Math.min(100, length * 1.6)}%`, background: runs[0]?.color ?? KIMBIE.editorFg }} />;
-          })}
+          {README.map((runs, i) => (
+            <div key={i} className="h-[2px] rounded-full" style={{ width: `${Math.min(100, lineLength(runs) * 1.6)}%`, background: runs[0]?.color ?? KIMBIE.editorFg }} />
+          ))}
         </div>
       </div>
     </div>
@@ -245,7 +247,6 @@ function ReadmeGroup() {
 function Panel({ scene, near }: { scene: SceneName; near: boolean }) {
   const tab = (label: string, badge?: string, active = false) => (
     <div
-      key={label}
       className="flex h-full items-center gap-1.5 text-[11px]"
       style={{ color: active ? "#e7e7e7" : "#e7e7e799", boxShadow: active ? "inset 0 -1px 0 #e7e7e7" : undefined }}
     >
@@ -286,7 +287,7 @@ export function VsCodeDemoWindow({
   panel,
   readme = false,
   otherTab,
-  aspect = 0.64,
+  aspect,
   minWidth = MIN_LAYOUT_WIDTH,
   className = "",
 }: {
@@ -295,14 +296,14 @@ export function VsCodeDemoWindow({
   readme?: boolean;
   otherTab?: string;
   /** Height over width. */
-  aspect?: number;
+  aspect: number;
   /** Narrowest layout width, wider than the column to draw it smaller. */
   minWidth?: number;
   className?: string;
 }) {
   const slotRef = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
-  const [fit, setFit] = useState<{ width: number; scale: number } | null>(null);
+  const [available, setAvailable] = useState<number | null>(null);
 
   useEffect(() => {
     const slot = slotRef.current;
@@ -313,11 +314,7 @@ export function VsCodeDemoWindow({
       nearby.disconnect();
     }, { rootMargin: "100% 0px" });
     nearby.observe(slot);
-    const refit = () => {
-      const available = slot.clientWidth;
-      const width = Math.max(available, minWidth);
-      setFit((prev) => prev?.width === width && prev.scale === available / width ? prev : { width, scale: available / width });
-    };
+    const refit = () => setAvailable(slot.clientWidth);
     refit();
     const resize = new ResizeObserver(refit);
     resize.observe(slot);
@@ -325,11 +322,11 @@ export function VsCodeDemoWindow({
       nearby.disconnect();
       resize.disconnect();
     };
-  }, [minWidth]);
+  }, []);
 
-  const width = fit?.width ?? minWidth;
+  const width = Math.max(available ?? minWidth, minWidth);
   const height = Math.round(width * aspect);
-  const scale = fit?.scale ?? 1;
+  const scale = (available ?? width) / width;
   const windowStyle: CSSProperties = {
     width,
     height,

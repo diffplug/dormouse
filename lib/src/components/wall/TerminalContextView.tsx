@@ -362,7 +362,7 @@ function PlacementIcon({ side }: { side: ContextSide }) {
   </svg>;
 }
 
-/** The custom properties `.terminal-context-enter` / `-exit` read (`lib/src/theme.css`)
+/** The custom properties `.terminal-context-enter` / `-exit` read (`lib/src/wall.css`)
  *  that JS owns: the exit length the removal timer must match, and the corner radius. */
 const SURFACE_STYLE = { '--context-exit-duration': `${TERMINAL_CONTEXT_EXIT_MS}ms`, '--context-radius': TERMINAL_SELECTION_BORDER_RADIUS } as CSSProperties;
 

@@ -1,8 +1,7 @@
 /* The Wall's structural rules and its chrome's animations: the Lath host, its
  * leaves and sashes, the terminal context, the preview slot, and TODO pills.
- * Split from index.css and theme.css so a host that renders a
- * Wall inside its own design (the homepage's VS Code demo) can take them
- * without the app shell's body and type-scale rules. */
+ * Free of the app shell's body and type-scale rules, so a host that renders a
+ * Wall inside its own design (the homepage's VS Code demo) can import it. */
 
 /* --- Lath host (the tiling engine binding) ---
  *

@@ -3,10 +3,10 @@ import { MobileTerminalUi, type MobileTerminalView } from "dormouse-lib/componen
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
 import { initPlatform } from "dormouse-lib/lib/platform";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
-import { disposeSession, initAlertStateReceiver, writeUserInput } from "dormouse-lib/lib/terminal-registry";
+import { initAlertStateReceiver, writeUserInput } from "dormouse-lib/lib/terminal-registry";
 import { setNativeFieldValue } from "dormouse-lib/lib/dom";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
-import { APP_TYPE_SCALE, paintDemoTheme } from "../demo-theme";
+import { APP_TYPE_SCALE, disposeDemoSessions, paintDemoTheme } from "../homepage-demos";
 import { DemoAgent } from "./demo-agent";
 import { DemoReadme } from "./DemoReadme";
 import { DemoStopped, DemoStuck, Finger, FINGER_CLASS } from "./finger";
@@ -56,14 +56,7 @@ export default function PocketDemo({ playing, onStuck, still = false }: { playin
 
   useEffect(() => {
     const fake = initPlatform("fake");
-    // Only its own Sessions: the VS Code demo shares the adapter and the registry.
-    const disposeOwn = () => {
-      for (const id of [AGENT, README]) {
-        disposeSession(id);
-        fake.clearScenario(id);
-        fake.clearInputHandler(id);
-      }
-    };
+    const disposeOwn = () => disposeDemoSessions(fake, [AGENT, README]);
     disposeOwn();
     initAlertStateReceiver();
     for (const id of [AGENT, README]) fake.setScenario(id, { name: "none", chunks: [] });

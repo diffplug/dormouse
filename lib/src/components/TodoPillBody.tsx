@@ -63,7 +63,7 @@ export function useTodoPillContent(todo: boolean): {
  * signal so a repeat replays it. The pulse runs on the signal's clock, so a pill
  * that mounts long after lands past its end instead of replaying it; `className`
  * carries the pill's own extent and corners. The CSS (`.todo-spotlight` in
- * `theme.css`) animates it and drops it under reduced motion.
+ * `wall.css`) animates it and drops it under reduced motion.
  */
 export function TodoSpotlight({ surfaceId, className }: { surfaceId: string; className?: string }) {
   const spotlight = useSyncExternalStore(subscribeToTodoSpotlight, getTodoSpotlight);

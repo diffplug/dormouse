@@ -47,7 +47,7 @@ export interface WallKeyboardCtx {
   enterCommandMode: () => void;
   minimizePane: (id: string) => void;
   /** Open the terminal context for a pane from a command key, in `mode`, revealed from
-   *  `origin` (`.terminal-context-enter` in `lib/src/theme.css`); the terminal mode takes
+   *  `origin` (`.terminal-context-enter` in `lib/src/wall.css`); the terminal mode takes
    *  the keyboard into it in passthrough. */
   openTerminalContext: (id: string, options: { origin: { x: number; y: number }; mode: ContextMode }) => void;
   /** The kill gesture: `requestKill` in `lib/src/components/Wall.tsx` decides

@@ -14,6 +14,7 @@ import {
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
 import changelogData from "../data/changelog.json";
+import { wrap } from "./wrap";
 
 const LIST_WIDTH = 12;
 const SEPARATOR = "│";
@@ -45,24 +46,6 @@ const RELEASES = (changelogData as { releases: Release[] }).releases;
 
 function stripLinks(text: string): string {
   return text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-}
-
-function wrap(text: string, width: number): string[] {
-  if (width <= 1) return [text];
-  const out: string[] = [];
-  let line = "";
-  for (const word of text.split(/\s+/).filter(Boolean)) {
-    if (!line) {
-      line = word;
-    } else if (line.length + 1 + word.length <= width) {
-      line += " " + word;
-    } else {
-      out.push(line);
-      line = word;
-    }
-  }
-  if (line) out.push(line);
-  return out.length > 0 ? out : [""];
 }
 
 interface ChangelogRunnerOptions {

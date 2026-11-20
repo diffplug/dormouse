@@ -194,16 +194,7 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
   },
 };
 
-const FEATURE_VIDEO_CLASS =
-  "-mx-4 md:mx-0 block w-[calc(100%+2rem)] max-w-none md:w-full md:max-w-full aspect-video object-cover";
-
-function FeatureVideo({
-  src,
-  className = "",
-}: {
-  src: string;
-  className?: string;
-}) {
+function FeatureVideo({ src, className }: { src: string; className: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   // Plays only within a screen of the viewport: `autoPlay` would fetch every
   // feature video on arrival, before the reader has scrolled past the hero.
@@ -225,7 +216,7 @@ function FeatureVideo({
       loop
       muted
       playsInline
-      className={[FEATURE_VIDEO_CLASS, className].filter(Boolean).join(" ")}
+      className={`-mx-4 md:mx-0 block w-[calc(100%+2rem)] max-w-none md:w-full md:max-w-full aspect-video object-cover ${className}`}
     />
   );
 }
@@ -878,7 +869,7 @@ export default function Home() {
         </section>
 
         {/* 3. Port awareness — text left, the real terminal context right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid grid-cols-[minmax(0,1fr)] md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-8 md:gap-12 items-center`}>
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-8 md:gap-12 items-center`}>
           <div>
             <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
