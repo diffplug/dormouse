@@ -34,7 +34,7 @@ An app-level `NSEvent` local monitor saw every `keyDown` and `flagsChanged` befo
 
 Hiding a view that held first responder left the window itself holding it, not the app webview.
 
-The monitor saw each `⌘=` `keyDown` twice with one timestamp: WebKit sends a key its page left unhandled through the app again. A synthesized `⌘=` arrived with the keypad's key code, so the zoom chords match the character (measured on macOS 27, 2026-11).
+The monitor saw each `⌘=` `keyDown` twice with one timestamp: WebKit sends a key its page left unhandled through the app again, and a page that called `preventDefault` on it got no second delivery, so the zoom acts on the second. A synthesized `⌘=` arrived with the keypad's key code, so the zoom chords match the character (measured on macOS 27, 2026-11).
 
 On Windows `AcceleratorKeyPressed` never fired for Shift alone, and no `WM_KEYDOWN` reached the process while a webview held focus. Raw Input under tao's existing registration, flags 0, saw all 70 test keys while either webview held focus and none while another app was foreground; left and right Shift differ by make code. `WM_PARENTNOTIFY` on a view's container fired once per press, any button, focused or not. WebView2's focus events are not one per transition and arrive before `GetFocus` moves, while `GetFocus` with `IsChild`, read after a focus command, matched where keys went every time. Hiding a focused view stranded the keyboard in it, and a press from one pane into another let the first pane's release blur the second for 6 ms.
 

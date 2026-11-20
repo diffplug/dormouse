@@ -366,7 +366,8 @@ function PageDialogPrompt({ asker, dialog, focusTarget, onAnswer }: {
       className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 py-4"
       onKeyDown={(e) => {
         if (isComposingKey(e.nativeEvent)) return;
-        if (e.key === 'Enter') accept();
+        // A focused button answers Enter itself: on Cancel it must not accept.
+        if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) accept();
         else if (e.key === 'Escape') onAnswer(false);
         else return;
         e.preventDefault();

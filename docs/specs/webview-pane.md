@@ -43,7 +43,7 @@ The app webview receives no key or pointer event while a pane webview holds focu
 - **Must give a pane webview the keyboard only while it is shown and its pane is the passthrough pane**; hiding or closing one that holds it returns focus to the app webview (rationale), and a pane's release moves nothing unless its own view holds the keyboard.
 - The host observes keys and presses natively, never through the page, and reports the leader, presses, and the pointer leaving as events (`docs/specs/security-local.md` -> "Webview panes"; rationale). **Must detect the leader exactly as `dualTap` does** (`docs/specs/layout.md` -> "Mode switching"); a press enters its pane like a click.
 - **Must report which pane webview holds focus**: that is no real blur (`docs/specs/layout.md` -> "Corner cases" #2), and keeps presence (`docs/specs/alert.md` -> "Engagement").
-- On macOS `⌘=`, `⌘-`, and `⌘0` zoom the page that holds the keyboard, matched by the character typed, once per press (rationale); the page hears the chord too.
+- On macOS `⌘=`, `⌘-`, and `⌘0` zoom the page that holds the keyboard, matched by the character typed, unless the page handled the chord itself (rationale).
 - On macOS a chord bound to a menu item reaches the menu, never the page (rationale); the Edit submenu is the page's clipboard path (`docs/specs/standalone.md` -> "Application menu").
 
 Source of truth: `install` and `on_raw_input` in `standalone/src-tauri/src/pane_webview.rs`; `paneWebviewHoldsFocus` in `lib/src/lib/window-focus.ts`.

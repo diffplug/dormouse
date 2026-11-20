@@ -286,6 +286,8 @@ mod imp {
         owner: String,
         page: PageState,
         focused: bool,
+        /// Its page's process ended, so the next `open` builds a new view.
+        crashed: bool,
     }
 
     type Panes = HashMap<String, Pane>;
@@ -472,7 +474,8 @@ mod imp {
             let held = PANES.with(move |panes| {
                 let Ok(mut panes) = panes.try_borrow_mut() else { return Err(dialog) };
                 match panes.get_mut(id) {
-                    Some(pane) if pane.dialog.is_none() => {
+                    // A hidden view's panel may not be there to ask or to answer.
+                    Some(pane) if pane.dialog.is_none() && !pane.view.webview().isHidden() => {
                         pane.dialog = Some(dialog);
                         Ok(pane.owner.clone())
                     }
@@ -523,7 +526,15 @@ mod imp {
             })
             // wry grants media capture when no handler is set.
             .with_permission_handler(|_| PermissionResponse::Deny)
-            .with_on_web_content_process_terminate_handler(move || report(&crashed.0, &crashed.1, "crashed", json!({})))
+            .with_on_web_content_process_terminate_handler(move || {
+                // Kept for a panel that is not mounted to hear the report.
+                PANES.with(|panes| {
+                    if let Some(pane) = panes.try_borrow_mut().ok().as_mut().and_then(|panes| panes.get_mut(&crashed.1)) {
+                        pane.crashed = true;
+                    }
+                });
+                report(&crashed.0, &crashed.1, "crashed", json!({}));
+            })
             .with_data_store_identifier(STORE)
             .build_as_child(&parent)
             .map_err(|e| e.to_string())?;
@@ -562,6 +573,7 @@ mod imp {
             return Err(UNSUPPORTED.into());
         }
         command(webview, true, move |panes, webview, owner| {
+            panes.retain(|pane_id, pane| *pane_id != id || !pane.crashed);
             if let Some(pane) = panes.get_mut(&id) {
                 if pane.owner != owner {
                     let window = ns_window(webview)?;
@@ -577,7 +589,7 @@ mod imp {
             web_only(&url)?;
             let (view, dialogs) = build(webview, &id, &url)?;
             let page = page_state(&view.webview());
-            panes.insert(id, Pane { dialog: None, view, _dialogs: dialogs, owner: owner.to_string(), page: page.clone(), focused: false });
+            panes.insert(id, Pane { dialog: None, view, _dialogs: dialogs, owner: owner.to_string(), page: page.clone(), focused: false, crashed: false });
             Ok(page)
         })
     }
@@ -863,9 +875,10 @@ mod imp {
             left.set(None);
             return;
         };
-        // WebKit sends a key the page left unhandled through the app again.
-        let again = kind == NSEventType::KeyDown && zoom_at.replace(event.timestamp()) == event.timestamp();
-        if kind == NSEventType::KeyDown && !again && event.modifierFlags().contains(NSEventModifierFlags::Command) {
+        // WebKit sends a key through the app again only when its page left it
+        // unhandled, so a page that takes a zoom chord itself keeps it.
+        let unhandled = kind == NSEventType::KeyDown && zoom_at.replace(event.timestamp()) == event.timestamp();
+        if unhandled && event.modifierFlags().contains(NSEventModifierFlags::Command) {
             let view = PANES.with(|panes| Some(panes.try_borrow().ok()?.get(&id)?.view.webview()));
             let typed = event.charactersIgnoringModifiers().map(|typed| typed.to_string());
             if let Some((view, typed)) = view.zip(typed) {

@@ -246,6 +246,9 @@ describe('WebviewPanel', () => {
     // the backdrop, belongs in the prompt.
     act(() => prompt()!.parentElement!.focus());
     expect(document.activeElement).toBe(button('OK'));
+    // Enter on a focused Cancel is that button's, never an OK.
+    key(button('Cancel')!, 'Enter');
+    expect(pane.of('answer')).toEqual([]);
     act(() => button('Cancel')!.click());
     expect(pane.of('answer')).toEqual([['answer', ID, false, undefined]]);
     expect(prompt()).toBeNull();
