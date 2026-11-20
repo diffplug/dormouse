@@ -208,6 +208,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           if (shownRef.current) setDownloadRefused(true);
           break;
         case 'crashed': fail('The page crashed.'); break;
+        case 'closed': fail('The page closed itself.'); break;
       }
     });
     // An unmounted panel's view is hidden, and a hidden view never holds focus.

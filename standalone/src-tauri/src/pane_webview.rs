@@ -1054,7 +1054,7 @@ mod imp {
         take_pwstr, CapturePreviewCompletedHandler, ContextMenuRequestedEventHandler, DocumentTitleChangedEventHandler, FocusChangedEventHandler,
         HistoryChangedEventHandler, LaunchingExternalUriSchemeEventHandler, NavigationCompletedEventHandler,
         NavigationStartingEventHandler, NewWindowRequestedEventHandler, ProcessFailedEventHandler,
-        ScriptDialogOpeningEventHandler, SourceChangedEventHandler,
+        ScriptDialogOpeningEventHandler, SourceChangedEventHandler, WindowCloseRequestedEventHandler,
     };
     use windows::core::{w, Error, Interface, BOOL, HSTRING, PSTR, PWSTR};
     use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, LRESULT, POINT, RECT, RPC_E_CHANGED_MODE, WPARAM};
@@ -1115,8 +1115,9 @@ mod imp {
         want_focus: bool,
         loading: Rc<Cell<Option<u64>>>,
         dialog: Option<Dialog>,
-        /// Its page's process ended, so the next `open` builds a new view.
-        crashed: bool,
+        /// Its page's process ended or the page closed itself, so the next
+        /// `open` disposes this view and builds another.
+        dead: bool,
     }
 
     /// A page's dialog waiting on the user, answered once: one dropped
@@ -1206,7 +1207,7 @@ mod imp {
     pub fn open(webview: Webview, id: String, url: String) -> Result<PageState, String> {
         let _ = APP.with(|cell| cell.set(webview.app_handle().clone()));
         let owner = label(&webview);
-        remove(|pane_id, pane| pane_id == id && pane.crashed, true);
+        remove(|pane_id, pane| pane_id == id && pane.dead, true);
         let existing = with_panes(|panes| {
             let pane = panes.get_mut(&id)?;
             let (from, was_shown) = (std::mem::replace(&mut pane.owner, owner.clone()), pane.shown);
@@ -1225,7 +1226,7 @@ mod imp {
             let (page, loading) = (no_page(true), Rc::new(Cell::new(Some(FIRST_LOAD))));
             let pane = Pane {
                 view: None, owner, url, page, focused: false, rect: None, shown: false, want_focus: false, loading,
-                dialog: None, crashed: false,
+                dialog: None, dead: false,
             };
             with_panes(|panes| panes.insert(id.clone(), pane));
             // Building inside this command's callback would deadlock.
@@ -1369,9 +1370,19 @@ mod imp {
                     || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED
                 {
                     // Kept for a panel that is not mounted to hear the report.
-                    with_panes(|panes| panes.get_mut(&crashed.1).map(|pane| pane.crashed = true));
+                    with_panes(|panes| panes.get_mut(&crashed.1).map(|pane| pane.dead = true));
                     report(&crashed.0, &crashed.1, "crashed", json!({}));
                 }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        // wry's own handler destroys the view's container on `window.close()`.
+        let closed = (app.clone(), id.to_string());
+        core.add_WindowCloseRequested(
+            &WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+                with_panes(|panes| panes.get_mut(&closed.1).map(|pane| pane.dead = true));
+                report(&closed.0, &closed.1, "closed", json!({}));
                 Ok(())
             })),
             &mut token,

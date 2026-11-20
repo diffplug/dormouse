@@ -256,6 +256,8 @@ export type PaneWebviewEvent =
   | { id: string; kind: 'download-refused' }
   /** The page's process ended, leaving the view blank. */
   | { id: string; kind: 'crashed' }
+  /** The page called `window.close()`, which leaves the view blank on Windows. */
+  | { id: string; kind: 'closed' }
   /** The page's alert, confirm, or prompt, waiting on `answer`: `origin` is
    *  the asking frame's host, and `text` a prompt's default. */
   | { id: string; kind: 'dialog'; dialog: 'alert' | 'confirm' | 'prompt'; message: string; origin: string; text?: string };
