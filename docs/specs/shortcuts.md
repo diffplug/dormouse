@@ -80,7 +80,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 
 ## Terminal context properties
 
-Live and labeled only when a command key opened the context, while in command mode; a focused list or field keeps its keys.
+Live and labeled only when a command key opened the context, while in command mode; a focused list or field keeps its keys. Option/AltGr permits the symbol keys.
 
 | Key | Action |
 |-----|--------|

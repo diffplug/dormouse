@@ -8,6 +8,15 @@ export const CONTEXT_KEYS = {
   watch: 'a', todo: 't', aux: '!', keepOpen: 'k', back: '[', forward: ']', close: 'Escape',
   left: 'ArrowLeft', right: 'ArrowRight', top: 'ArrowUp', bottom: 'ArrowDown',
 } as const;
+/** Symbol keys a layout may print only under Option or AltGr: `[` is Option+5 on a German Mac and AltGr+8 on Windows,
+ *  which reports Ctrl+Alt. The Wall's command keys allow the same (`SYMBOL_KEYS` in `keyboard/handle-pane-shortcuts.ts`). */
+const PRINTED_SYMBOL_KEYS: ReadonlySet<string> = new Set(Object.values(CONTEXT_KEYS).filter(k => k.length === 1 && !/[a-z0-9]/i.test(k)));
+
+/** Whether `event`'s modifiers leave it a context key: none, or Option/AltGr printing one of the symbol keys. */
+export function contextKeyModifiersOk(event: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean }): boolean {
+  if (event.metaKey) return false;
+  return event.altKey ? PRINTED_SYMBOL_KEYS.has(event.key) : !event.ctrlKey;
+}
 /** The port row's launch actions, in row order; overflowed ones answer once `more` shows them. */
 export const PORT_ACTION_KEYS = ['1', '2', '3', '4', '5'] as const;
 

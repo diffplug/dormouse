@@ -608,6 +608,23 @@ it('labels and answers the properties\' keys only when asked, in the label where
   expect(container.textContent).not.toContain('[');
 });
 
+it('answers a symbol key printed under Option or AltGr, and no other modified key', () => {
+  const press = (key: string, mods: Partial<Pick<KeyboardEventInit, 'altKey' | 'ctrlKey' | 'metaKey'>>) => act(() => container.querySelector('[data-terminal-context]')!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...mods })));
+  props.shortcuts = true;
+  render();
+  press('t', { altKey: true });
+  press('t', { ctrlKey: true, altKey: true });
+  press('!', { ctrlKey: true });
+  press('!', { metaKey: true, altKey: true });
+  expect(props.onTodo).not.toHaveBeenCalled();
+  expect(props.onModeChange).not.toHaveBeenCalled();
+  // AltGr reports Ctrl+Alt on Windows; Option alone on a Mac.
+  press('!', { ctrlKey: true, altKey: true });
+  expect(props.onModeChange).toHaveBeenCalledTimes(1);
+  press('!', { altKey: true });
+  expect(props.onModeChange).toHaveBeenCalledTimes(2);
+});
+
 it('shows the overflowed port actions in the row on `+`, and only then answers their keys', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   // Room for one action beside the trigger.
