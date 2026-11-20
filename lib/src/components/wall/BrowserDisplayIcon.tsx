@@ -1,8 +1,8 @@
 import { clsx } from 'clsx';
 import {
-  AppWindowIcon,
   ArrowSquareOutIcon,
   FrameCornersIcon,
+  GlobeIcon,
   type Icon,
   PictureInPictureIcon,
 } from '@phosphor-icons/react';
@@ -18,7 +18,7 @@ const VIEW_ICON: Record<BrowserView | 'iframe' | 'webview', Icon> = {
   fixed: PictureInPictureIcon,
   popout: ArrowSquareOutIcon,
   iframe: FrameCornersIcon,
-  webview: AppWindowIcon,
+  webview: GlobeIcon,
 };
 
 /** Every display mode's label: `<provider> <view>`, the embed, and the webview. */
