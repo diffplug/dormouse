@@ -487,6 +487,9 @@ mod imp {
         }
     }
 
+    /// `CACornerMask` for the two corners at the bottom of a flipped view.
+    const BOTTOM_CORNERS: usize = 4 | 8;
+
     /// Report `kind` to the window that owns `id`'s view, from one of that
     /// view's own handlers.
     fn report(app: &AppHandle, id: &str, kind: &str, payload: serde_json::Value) {
@@ -533,6 +536,14 @@ mod imp {
             // A new window then takes a press, which a hidden or minimized view
             // cannot get: wry's handler unwraps the window's screen.
             preferences.setJavaScriptCanOpenWindowsAutomatically(false);
+            // The pane rounds its bottom corners, which a native view squares
+            // off: `TERMINAL_BORDER_RADIUS_PX` in `lib/src/components/design.tsx`.
+            let layer: Option<Retained<AnyObject>> = msg_send![&*view.webview(), layer];
+            if let Some(layer) = layer {
+                let _: () = msg_send![&*layer, setCornerRadius: 8.0f64];
+                let _: () = msg_send![&*layer, setMaskedCorners: BOTTOM_CORNERS];
+                let _: () = msg_send![&*layer, setMasksToBounds: true];
+            }
         }
         // WebKit reads which methods a UI delegate has as it is set, so this
         // one is whole before it replaces wry's.
