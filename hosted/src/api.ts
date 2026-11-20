@@ -34,6 +34,8 @@ async function request(
   if (response.status >= 500) throw new Error(unavailable);
   return response;
 }
+/** A 429: trying again before its window passes is refused again. */
+export class RateLimitedError extends Error {}
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await request(
     path,
@@ -42,7 +44,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   );
   if (!response.ok) {
     if (response.status === 429)
-      throw new Error("Too many attempts. Wait a minute before trying again.");
+      throw new RateLimitedError("Too many attempts. Wait a minute before trying again.");
     throw new Error(
       "That did not work. Check your details and try again. If connecting a provider, sign in again first.",
     );
