@@ -72,7 +72,7 @@ pub fn pane_webview_reset(webview: Webview) -> Result<(), String> {
 }
 
 /// Answer the page's pending alert, confirm, or prompt: `accept` is OK, and
-/// `text` what a prompt returns. On Windows the engine shows its own.
+/// `text` what a prompt returns.
 #[tauri::command]
 pub fn pane_webview_answer(webview: Webview, id: String, accept: bool, text: Option<String>) -> Result<(), String> {
     imp::answer(webview, id, accept, text)
@@ -147,6 +147,19 @@ fn emit(app: &AppHandle, owner: &str, id: &str, kind: &str, mut payload: serde_j
     payload["kind"] = kind.into();
     let _ = app.emit_to(owner, EVENT, payload);
 }
+
+/// Report `kind` to the window that owns `id`'s view, from one of that
+/// view's own handlers.
+#[cfg(any(target_os = "macos", windows))]
+fn report(app: &AppHandle, id: &str, kind: &str, payload: serde_json::Value) {
+    if let Some(owner) = imp::owner_of(id) {
+        emit(app, &owner, id, kind, payload);
+    }
+}
+
+/// The longest message or default text a page's dialog reports, in characters.
+#[cfg(any(target_os = "macos", windows))]
+const DIALOG_TEXT_MAX: usize = 4000;
 
 #[cfg(all(test, any(target_os = "macos", windows)))]
 mod tests {
@@ -364,9 +377,6 @@ mod imp {
         unsafe { Retained::retain(ptr.cast::<NSWindow>()) }.ok_or_else(|| "no window".to_string())
     }
 
-    /// The longest message or default text a page's dialog reports, in characters.
-    const DIALOG_TEXT_MAX: usize = 4000;
-
     fn capped(text: &NSString) -> String {
         text.to_string().chars().take(DIALOG_TEXT_MAX).collect()
     }
@@ -493,13 +503,8 @@ mod imp {
     /// `CACornerMask` for the two corners at the bottom of a flipped view.
     const BOTTOM_CORNERS: usize = 4 | 8;
 
-    /// Report `kind` to the window that owns `id`'s view, from one of that
-    /// view's own handlers.
-    fn report(app: &AppHandle, id: &str, kind: &str, payload: serde_json::Value) {
-        let owner = PANES.with(|panes| panes.try_borrow().ok()?.get(id).map(|pane| pane.owner.clone()));
-        if let Some(owner) = owner {
-            emit(app, &owner, id, kind, payload);
-        }
+    pub fn owner_of(id: &str) -> Option<String> {
+        PANES.with(|panes| panes.try_borrow().ok()?.get(id).map(|pane| pane.owner.clone()))
     }
 
     fn build(webview: &Webview, id: &str, url: &str) -> Result<(WebView, Retained<Dialogs>), String> {
@@ -1039,15 +1044,19 @@ mod imp {
     use std::{path::{Path, PathBuf}, time::{Duration, Instant}};
     use tauri::{Manager, WebviewWindow};
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2Settings8, ICoreWebView2_18, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
-        COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
+        ICoreWebView2Settings8, ICoreWebView2_11, ICoreWebView2_18, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+        COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, COREWEBVIEW2_PROCESS_FAILED_KIND,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED, COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED,
+        COREWEBVIEW2_SCRIPT_DIALOG_KIND, COREWEBVIEW2_SCRIPT_DIALOG_KIND_ALERT, COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD,
+        COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM, COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT,
     };
     use webview2_com::{
-        take_pwstr, CapturePreviewCompletedHandler, DocumentTitleChangedEventHandler, FocusChangedEventHandler,
+        take_pwstr, CapturePreviewCompletedHandler, ContextMenuRequestedEventHandler, DocumentTitleChangedEventHandler, FocusChangedEventHandler,
         HistoryChangedEventHandler, LaunchingExternalUriSchemeEventHandler, NavigationCompletedEventHandler,
-        NavigationStartingEventHandler, NewWindowRequestedEventHandler, SourceChangedEventHandler,
+        NavigationStartingEventHandler, NewWindowRequestedEventHandler, ProcessFailedEventHandler,
+        ScriptDialogOpeningEventHandler, SourceChangedEventHandler,
     };
-    use windows::core::{w, Error, Interface, BOOL, PSTR, PWSTR};
+    use windows::core::{w, Error, Interface, BOOL, HSTRING, PSTR, PWSTR};
     use windows::Win32::Foundation::{E_FAIL, HWND, LPARAM, LRESULT, POINT, RECT, RPC_E_CHANGED_MODE, WPARAM};
     use windows::Win32::Graphics::Imaging::{
         CLSID_WICImagingFactory, GUID_ContainerFormatJpeg, IWICBitmapFrameEncode, IWICBitmapSource,
@@ -1105,6 +1114,31 @@ mod imp {
         /// Take the keyboard once shown.
         want_focus: bool,
         loading: Rc<Cell<Option<u64>>>,
+        dialog: Option<Dialog>,
+        /// Its page's process ended, so the next `open` builds a new view.
+        crashed: bool,
+    }
+
+    /// A page's dialog waiting on the user, answered once: one dropped
+    /// unanswered answers no, so an alert is done, a confirm false, a prompt null.
+    struct Dialog(Option<Box<dyn FnOnce(bool, Option<String>)>>);
+
+    impl Dialog {
+        fn answer(mut self, accept: bool, text: Option<String>) {
+            self.reply(accept, text);
+        }
+
+        fn reply(&mut self, accept: bool, text: Option<String>) {
+            if let Some(reply) = self.0.take() {
+                reply(accept, text);
+            }
+        }
+    }
+
+    impl Drop for Dialog {
+        fn drop(&mut self) {
+            self.reply(false, None);
+        }
     }
 
     thread_local! {
@@ -1133,6 +1167,10 @@ mod imp {
 
     fn app() -> Option<AppHandle> {
         APP.with(|app| app.get().cloned())
+    }
+
+    pub fn owner_of(id: &str) -> Option<String> {
+        with_panes(|panes| panes.get(id).map(|pane| pane.owner.clone())).flatten()
     }
 
     fn tell(owner: &str, id: &str, kind: &str, payload: Value) {
@@ -1168,21 +1206,27 @@ mod imp {
     pub fn open(webview: Webview, id: String, url: String) -> Result<PageState, String> {
         let _ = APP.with(|cell| cell.set(webview.app_handle().clone()));
         let owner = label(&webview);
+        remove(|pane_id, pane| pane_id == id && pane.crashed, true);
         let existing = with_panes(|panes| {
             let pane = panes.get_mut(&id)?;
             let (from, was_shown) = (std::mem::replace(&mut pane.owner, owner.clone()), pane.shown);
+            let mut dialog = None;
             if from != owner && pane.view.is_some() {
-                (pane.rect, pane.shown, pane.want_focus) = (None, false, false);
+                // Its old window asked, and can no longer answer.
+                (pane.rect, pane.shown, pane.want_focus, dialog) = (None, false, false, pane.dialog.take());
             }
-            Some((pane.view.clone(), from, was_shown, pane.loading.clone(), pane.page.clone()))
+            Some((pane.view.clone(), from, was_shown, pane.loading.clone(), pane.page.clone(), dialog))
         })
         .flatten();
-        let Some((view, from, was_shown, loading, page)) = existing else {
+        let Some((view, from, was_shown, loading, page, _dialog)) = existing else {
             if !is_web(&url) {
                 return Err(format!("not an http(s) URL: {url}"));
             }
             let (page, loading) = (no_page(true), Rc::new(Cell::new(Some(FIRST_LOAD))));
-            let pane = Pane { view: None, owner, url, page, focused: false, rect: None, shown: false, want_focus: false, loading };
+            let pane = Pane {
+                view: None, owner, url, page, focused: false, rect: None, shown: false, want_focus: false, loading,
+                dialog: None, crashed: false,
+            };
             with_panes(|panes| panes.insert(id.clone(), pane));
             // Building inside this command's callback would deadlock.
             later(move || build(&id));
@@ -1254,6 +1298,8 @@ mod imp {
         let local = window.path().app_local_data_dir().map_err(|e| e.to_string())?;
         // Contexts on one directory share one profile and one browser process.
         let mut context = WebContext::new(Some(profile_dir(&local)));
+        let app = window.app_handle().clone();
+        let downloader = (app.clone(), id.to_string());
         let view = WebViewBuilder::new_with_web_context(&mut context)
             .with_url(url)
             .with_visible(false)
@@ -1262,9 +1308,13 @@ mod imp {
             // wry turns devtools on in a debug build.
             .with_devtools(false)
             .with_clipboard(false)
+            .with_hotkeys_zoom(true)
             .with_navigation_handler(|url| may_load(&url))
             // wry allows a download when no handler says otherwise.
-            .with_download_started_handler(|_, _| false)
+            .with_download_started_handler(move |_, _| {
+                report(&downloader.0, &downloader.1, "download-refused", json!({}));
+                false
+            })
             .with_permission_handler(|_| PermissionResponse::Deny)
             // SmartScreen sends every visited URL to Microsoft.
             .with_additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
@@ -1277,7 +1327,7 @@ mod imp {
         // keyboard on activation. `dispose` closes one instead.
         std::mem::forget(Rc::clone(&view));
         // SAFETY: a live view, on the main thread.
-        if let Err(error) = unsafe { guard(id, &view, loading) } {
+        if let Err(error) = unsafe { guard(&app, id, &view, loading) } {
             dispose(&view, None);
             return Err(format!("could not secure the page: {error}"));
         }
@@ -1286,13 +1336,13 @@ mod imp {
 
     /// What wry's builder cannot set, and the handlers that report a page's
     /// state; a view any of them fails on never shows.
-    unsafe fn guard(id: &str, view: &WebView, loading: &Rc<Cell<Option<u64>>>) -> windows::core::Result<()> {
+    unsafe fn guard(app: &AppHandle, id: &str, view: &WebView, loading: &Rc<Cell<Option<u64>>>) -> windows::core::Result<()> {
         let core = view.webview();
         let controller = view.controller();
         let mut token = Default::default();
         // With no handler of its own wry refuses every new window; its builder
         // hides `IsUserInitiated`. A page raises the new-pane prompt only from a press.
-        let id = id.to_string();
+        let opener = (app.clone(), id.to_string());
         core.add_NewWindowRequested(
             &NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
                 let Some(args) = args else { return Ok(()) };
@@ -1302,10 +1352,25 @@ mod imp {
                 let url = take_pwstr(uri);
                 args.IsUserInitiated(&mut user)?;
                 if user.as_bool() && is_web(&url) {
-                    let owner = with_panes(|panes| panes.get(&id).map(|pane| pane.owner.clone())).flatten();
-                    if let Some(owner) = owner {
-                        tell(&owner, &id, "open-window", json!({ "url": url }));
-                    }
+                    report(&opener.0, &opener.1, "open-window", json!({ "url": url }));
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        // Other kinds, a frame's or a helper process's, WebView2 recovers from.
+        let crashed = (app.clone(), id.to_string());
+        core.add_ProcessFailed(
+            &ProcessFailedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
+                args.ProcessFailedKind(&mut kind)?;
+                if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+                    || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED
+                {
+                    // Kept for a panel that is not mounted to hear the report.
+                    with_panes(|panes| panes.get_mut(&crashed.1).map(|pane| pane.crashed = true));
+                    report(&crashed.0, &crashed.1, "crashed", json!({}));
                 }
                 Ok(())
             })),
@@ -1316,6 +1381,24 @@ mod imp {
             &LaunchingExternalUriSchemeEventHandler::create(Box::new(|_, args| {
                 if let Some(args) = args {
                     args.SetCancel(true)?;
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        // The engine's "Save as" writes the page to disk past the download handler.
+        core.cast::<ICoreWebView2_11>()?.add_ContextMenuRequested(
+            &ContextMenuRequestedEventHandler::create(Box::new(|_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let items = args.MenuItems()?;
+                let mut count = 0;
+                items.Count(&mut count)?;
+                for index in (0..count).rev() {
+                    let mut name = PWSTR::null();
+                    items.GetValueAtIndex(index)?.Name(&mut name)?;
+                    if take_pwstr(name) == "saveAs" {
+                        items.RemoveValueAtIndex(index)?;
+                    }
                 }
                 Ok(())
             })),
@@ -1339,6 +1422,63 @@ mod imp {
         settings.cast::<ICoreWebView2Settings8>()?.SetIsReputationCheckingRequired(false)?;
         settings.SetIsWebMessageEnabled(false)?;
         settings.SetAreHostObjectsAllowed(false)?;
+        // WebView2's own dialogs spill over neighbouring panes, and its "Leave
+        // site?" names no origin.
+        settings.SetAreDefaultScriptDialogsEnabled(false)?;
+        let asker = (app.clone(), id.to_string());
+        core.add_ScriptDialogOpening(
+            &ScriptDialogOpeningEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut kind = COREWEBVIEW2_SCRIPT_DIALOG_KIND::default();
+                args.Kind(&mut kind)?;
+                let dialog = match kind {
+                    // The page leaves unasked, as on macOS.
+                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD => return args.Accept(),
+                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_ALERT => "alert",
+                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM => "confirm",
+                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT => "prompt",
+                    _ => return Ok(()),
+                };
+                let capped = |text: PWSTR| take_pwstr(text).chars().take(DIALOG_TEXT_MAX).collect::<String>();
+                let mut out = PWSTR::null();
+                let message = args.Message(&mut out).map(|()| capped(out))?;
+                let text = args.DefaultText(&mut out).map(|()| capped(out))?;
+                let uri = args.Uri(&mut out).map(|()| take_pwstr(out))?;
+                let origin = tauri::Url::parse(&uri).ok().and_then(|uri| uri.host_str().map(str::to_string));
+                let mut payload = json!({ "dialog": dialog, "message": message, "origin": origin.unwrap_or_default() });
+                let prompt = kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT;
+                if prompt {
+                    payload["text"] = text.into();
+                }
+                let deferral = args.GetDeferral()?;
+                let dialog = Dialog(Some(Box::new(move |accept, text: Option<String>| {
+                    // SAFETY: the live event args and deferral, on the main thread.
+                    unsafe {
+                        if accept {
+                            if prompt {
+                                let _ = args.SetResultText(&HSTRING::from(text.unwrap_or_default()));
+                            }
+                            let _ = args.Accept();
+                        }
+                        let _ = deferral.Complete();
+                    }
+                })));
+                // One at a time per pane: another, or one the busy registry cannot hold, is answered no at once.
+                let held = with_panes(|panes| match panes.get_mut(&asker.1) {
+                    // A hidden view's panel may not be there to ask or to answer.
+                    Some(pane) if pane.shown && pane.dialog.is_none() => {
+                        pane.dialog = Some(dialog);
+                        Ok(pane.owner.clone())
+                    }
+                    _ => Err(dialog),
+                });
+                if let Some(Ok(owner)) = held {
+                    emit(&asker.0, &owner, &asker.1, "dialog", payload);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
 
         let cell = loading.clone();
         core.add_NavigationStarting(
@@ -1522,8 +1662,10 @@ mod imp {
         Ok(())
     }
 
-    /// WebView2 shows a page's dialogs itself.
-    pub fn answer(_: Webview, _: String, _: bool, _: Option<String>) -> Result<(), String> {
+    pub fn answer(webview: Webview, id: String, accept: bool, text: Option<String>) -> Result<(), String> {
+        if let Some(Some(dialog)) = owned(&webview, &id, |pane| pane.dialog.take()) {
+            dialog.answer(accept, text);
+        }
         Ok(())
     }
 
@@ -1929,6 +2071,19 @@ mod imp {
             // `A`, and the Shift-like codes without their E0.
             assert_eq!(pressed(0x1E, 0), Some(Other));
             assert_eq!(pressed(0x5B, 0), Some(Other));
+        }
+
+        #[test]
+        fn a_dialog_is_answered_once_and_no_when_dropped() {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let dialog = || {
+                let log = log.clone();
+                Dialog(Some(Box::new(move |accept, text| log.borrow_mut().push((accept, text)))))
+            };
+            drop(dialog());
+            assert_eq!(*log.borrow(), [(false, None)]);
+            dialog().answer(true, Some("typed".into()));
+            assert_eq!(*log.borrow(), [(false, None), (true, Some("typed".into()))]);
         }
 
         #[test]
