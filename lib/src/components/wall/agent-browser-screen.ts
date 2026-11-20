@@ -17,26 +17,27 @@ export type BrowserView = 'resize' | 'fixed' | 'popout';
 export const BROWSER_VIEWS: readonly BrowserView[] = ['resize', 'fixed', 'popout'];
 
 /** Capability-first browser display identity shared by pane chrome, the Display
- *  modal, and minimized Doors: a provider's view, or the embed. The automated
- *  modes always carry the robot; the second glyph describes the view. */
-export type BrowserDisplayMode = 'iframe' | `${ProviderAlias}-${BrowserView}`;
+ *  modal, and minimized Doors: a provider's view, the embed, or the native
+ *  webview. The automated modes always carry the robot; the second glyph
+ *  describes the view. */
+export type BrowserDisplayMode = 'iframe' | 'webview' | `${ProviderAlias}-${BrowserView}`;
 
 /** `provider`'s display mode for `view`. */
 export function displayModeFor(provider: BrowserAutomationProvider, view: BrowserView): BrowserDisplayMode {
   return `${provider}-${view}`;
 }
 
-/** The view a display mode presents, or the embed. */
-export function displayView(mode: BrowserDisplayMode): BrowserView | 'iframe' {
-  return mode === 'iframe' ? 'iframe' : mode.slice(mode.lastIndexOf('-') + 1) as BrowserView;
+/** The view a display mode presents, or an undriven renderer. */
+export function displayView(mode: BrowserDisplayMode): BrowserView | 'iframe' | 'webview' {
+  return mode === 'iframe' || mode === 'webview' ? mode : mode.slice(mode.lastIndexOf('-') + 1) as BrowserView;
 }
 
 export function browserDisplayMode(
   snapshot: Pick<ScreenSnapshot, 'renderMode' | 'syncEngaged'>,
 ): BrowserDisplayMode {
-  const { provider, presentation } = parseRenderMode(snapshot.renderMode);
-  if (provider === null) return 'iframe';
-  return displayModeFor(provider, presentation === 'popout' ? 'popout' : snapshot.syncEngaged ? 'resize' : 'fixed');
+  const parsed = parseRenderMode(snapshot.renderMode);
+  if (parsed.provider === null) return parsed.presentation;
+  return displayModeFor(parsed.provider, parsed.presentation === 'popout' ? 'popout' : snapshot.syncEngaged ? 'resize' : 'fixed');
 }
 
 export interface ScreenSnapshot {

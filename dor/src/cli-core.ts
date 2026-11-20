@@ -18,7 +18,7 @@ import { agentBrowserCommand } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
 import { ensureCommand } from './commands/ensure.js';
-import { iframeCommand } from './commands/iframe.js';
+import { iframeCommand, webviewCommand } from './commands/iframe.js';
 import { moveCommand } from './commands/move.js';
 import { killCommand } from './commands/kill.js';
 import { listCommand } from './commands/list.js';
@@ -57,6 +57,7 @@ const COMMANDS = [
   reopenCommand,
   moveCommand,
   iframeCommand,
+  webviewCommand,
   agentBrowserCommand,
   playwrightCommand,
   listCommand,

@@ -61,7 +61,8 @@ const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`)
 const agentBrowserDir = mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'dab-'));
 
 const pending = new Map();
-const sseClients = new Set();
+/** Window label → its pages' event streams (several while a reload overlaps). */
+const sseClients = new Map();
 let sidecar;
 let vite;
 let hostServer;
@@ -81,22 +82,135 @@ function sendSse(res, event, data) {
 }
 
 function broadcast(event, data) {
-  for (const client of sseClients) sendSse(client, event, data);
+  for (const clients of sseClients.values()) for (const client of clients) sendSse(client, event, data);
 }
 
-// PTYs the page killed. Rust's `pty_kill` forgets the id's owner, so every
-// later line it routes by that id goes to no window, the exit pty-core reports
-// for a killed PTY included, until a spawn mints the id again (`route` in
-// standalone/src-tauri/src/routing.rs).
-const killedPtys = new Set();
-const OWNER_ROUTED = new Set([
-  'pty:data', 'terminal:semanticEvents', 'terminal:toolEvents', 'terminal:clipboardOffer',
-  'pty:marked', 'pty:replay', 'pty:exit', 'terminal:clientInput',
-]);
+function sendTo(label, event, data) {
+  for (const client of sseClients.get(label) ?? []) sendSse(client, event, data);
+}
 
-function routesToNoWindow(event, data) {
-  if (typeof data?.id !== 'string' || !killedPtys.has(data.id) || typeof data.forWindow === 'string') return false;
-  return OWNER_ROUTED.has(event) || event.startsWith('alert:');
+// ── Windows ─────────────────────────────────────────────────────────────────
+// Each page names itself with `?window=` (`main` when absent) and is routed as
+// Rust routes that window (`route` in standalone/src-tauri/src/routing.rs),
+// minus Workspace transfers, which the harness has no way to start. A page's
+// PTYs outlive its event stream: a reload resumes them.
+const WINDOW_LABEL = /^(main|ws-[1-9][0-9]{0,5})$/;
+function windowOf(url) {
+  const asked = url.searchParams.get('window');
+  return asked && WINDOW_LABEL.test(asked) ? asked : 'main';
+}
+/** PTY id → the window that spawned it; forgotten at kill (`pty_kill` in lib.rs). */
+const owners = new Map();
+/** Window label → its reported Workspaces (`workspaces::Registry`). */
+const registry = new Map();
+/** Most recently focused first; a window seen but never focused is appended. */
+const focusOrder = [];
+/** Which window took each outstanding `dor` request, for its cancel. */
+const dorTargets = new Map();
+/** Every window a page has opened as, for the Burrow's ask collector. Never
+ *  shrinks: a reload is the same window coming back. */
+const knownWindows = new Set();
+
+function noteWindow(label) {
+  if (!focusOrder.includes(label)) focusOrder.push(label);
+  if (knownWindows.has(label)) return;
+  knownWindows.add(label);
+  writeSidecar('burrow:windows', { labels: [...knownWindows] });
+}
+function touchFocus(label) {
+  const at = focusOrder.indexOf(label);
+  if (at >= 0) focusOrder.splice(at, 1);
+  focusOrder.unshift(label);
+}
+const ownedBy = (label) => [...owners].filter(([, owner]) => owner === label).map(([id]) => id);
+
+/** `workspaces::window_of`: an exact id first, then a name held by exactly one window. */
+function windowOfWorkspace(target) {
+  let id = '';
+  let name = null;
+  if (target.startsWith('workspace-name:')) name = target.slice('workspace-name:'.length) || null;
+  else if (/^workspace:[^\s\ufeff]+$/.test(target)) id = target;
+  if (id) for (const [label, entries] of registry) if (entries.some((entry) => entry.id === id)) return label;
+  if (!name) return null;
+  const holders = [...registry].filter(([, entries]) => entries.some((entry) => entry.name === name));
+  return holders.length === 1 ? holders[0][0] : null;
+}
+
+const BROADCAST = { kind: 'broadcast' };
+const DROP = { kind: 'drop' };
+const to = (label) => ({ kind: 'to', label });
+const ownerOf = (id) => (owners.has(id) ? to(owners.get(id)) : DROP);
+const str = (value) => (typeof value === 'string' ? value : undefined);
+
+/** A JS port of Rust's `route`, without the mid-transfer states. An id no
+ *  window owns is dropped, never broadcast. */
+function route(event, data) {
+  const id = str(data?.id);
+  switch (event) {
+    case 'pty:data': case 'terminal:semanticEvents': case 'terminal:toolEvents': case 'terminal:clipboardOffer':
+    case 'pty:marked': case 'pty:exit':
+      return id ? ownerOf(id) : BROADCAST;
+    case 'terminal:clientInput':
+      return id ? ownerOf(id) : DROP;
+    case 'pty:replay':
+      if (str(data?.forWindow)) return to(data.forWindow);
+      return id ? ownerOf(id) : BROADCAST;
+    case 'pty:list':
+      return str(data?.forWindow) ? to(data.forWindow) : BROADCAST;
+    case 'dor:controlRequest': {
+      const workspace = str(data?.params?.workspace);
+      const holder = workspace && windowOfWorkspace(workspace);
+      if (holder) return to(holder);
+      const named = str(data?.params?.window)?.match(/^window:(.+)$/)?.[1];
+      if (named && registry.has(named)) return to(named);
+      const surfaceId = str(data?.surfaceId);
+      if (!surfaceId) return focusOrder.length ? to(focusOrder[0]) : BROADCAST;
+      if (owners.has(surfaceId)) return to(owners.get(surfaceId));
+      return { kind: 'unowned', requestId: str(data?.requestId) ?? '', surfaceId };
+    }
+    case 'dor:controlCancel': {
+      const requestId = str(data?.requestId);
+      return requestId && dorTargets.has(requestId) ? to(dorTargets.get(requestId)) : BROADCAST;
+    }
+    case 'burrow:ask': {
+      const surfaceId = str(data?.params?.surfaceId);
+      return surfaceId && owners.has(surfaceId) ? to(owners.get(surfaceId)) : BROADCAST;
+    }
+    case 'voice:result':
+      return DROP;
+    default:
+      if (event.startsWith('alert:')) {
+        if (str(data?.forWindow)) return to(data.forWindow);
+        return id ? ownerOf(id) : BROADCAST;
+      }
+      return BROADCAST;
+  }
+}
+
+/** Deliver one sidecar line where `route` sends it, then the bookkeeping Rust
+ *  does after its emit. */
+function deliver(event, data) {
+  const where = route(event, data);
+  if (where.kind === 'broadcast') {
+    broadcast('sidecar', { event, data });
+  } else if (where.kind === 'to') {
+    sendTo(where.label, 'sidecar', { event, data });
+  } else if (where.kind === 'unowned') {
+    // Never a sibling window: acting on the wrong terminal is worse than failing.
+    writeSidecar('dor:controlResponse', {
+      requestId: where.requestId, ok: false, error: `No Dormouse window owns surface '${where.surfaceId}'`,
+    });
+  } else if (event === 'pty:data' && typeof data?.id === 'string' && typeof data.data === 'string' && data.data.length > 0) {
+    // Output no window will parse is acknowledged on its behalf (`dropped_output_ack`).
+    writeSidecar('pty:ack', { id: data.id, chars: data.data.length });
+  }
+  const delivered = where.kind === 'to' ? where.label : null;
+  const requestId = str(data?.requestId);
+  if (event === 'dor:controlRequest' && delivered && requestId) dorTargets.set(requestId, delivered);
+  if (event === 'dor:controlCancel' && requestId) dorTargets.delete(requestId);
+  if (event === 'burrow:ask' && delivered && str(data?.burrowRequestId)) {
+    writeSidecar('burrow:askDelivered', { burrowRequestId: data.burrowRequestId, windows: [delivered] });
+  }
 }
 
 function writeSidecar(event, data = {}) {
@@ -125,12 +239,11 @@ function requestSidecar(event, data, responseEvent, pick, timeoutMs = 10000) {
   });
 }
 
-/** The one window this harness simulates: its alert viewer id and registry label. */
-const HARNESS_WINDOW = 'main';
-
+// Every command takes `(args, window)`: the invoking page's label, which Rust
+// reads off the invoking `tauri::Window`.
 const fireAndForget = {
-  pty_spawn: ({ id, options }) => {
-    killedPtys.delete(id);
+  pty_spawn: ({ id, options }, window) => {
+    owners.set(id, window);
     writeSidecar('pty:spawn', { id, options });
   },
   // `userInput` and `launch` ride the write, as `pty_write` in src-tauri/src/lib.rs carries them.
@@ -141,22 +254,30 @@ const fireAndForget = {
   pty_ack: ({ id, chars }) => writeSidecar('pty:ack', { id, chars }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => {
-    killedPtys.add(id);
+    owners.delete(id);
     writeSidecar('pty:kill', { id });
   },
-  pty_request_init: ({ requestId } = {}) => writeSidecar('pty:requestInit', { requestId }),
-  dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
-  // The Burrow's whole bridge rides one passthrough, exactly as it does
-  // through Rust (`burrow_command` in src-tauri/src/lib.rs).
-  burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
+  // Lists and replays only what this window owns, named so the answer routes
+  // back to it alone (`pty_request_init` in src-tauri/src/lib.rs).
+  pty_request_init: ({ requestId } = {}, window) =>
+    writeSidecar('pty:requestInit', { forWindow: window, ids: ownedBy(window), requestId }),
+  dor_control_response: ({ response }) => {
+    if (typeof response?.requestId === 'string') dorTargets.delete(response.requestId);
+    writeSidecar('dor:controlResponse', response);
+  },
+  // What Rust learns from the window's own focus events.
+  window_focused: (_args, window) => touchFocus(window),
+  // The Burrow's whole bridge rides one passthrough, stamped with the invoking
+  // window as Rust stamps it (`burrow_command` in src-tauri/src/lib.rs): an ask
+  // settles on having heard from each window.
+  burrow_command: ({ payload }, window) => writeSidecar('burrow:command', { ...payload, window }),
   // The app's one AlertManager lives in the sidecar; its answers come back over
-  // the event stream like every other sidecar line. Stamped with the one window
-  // label this harness simulates, as Rust stamps the invoking window's
+  // the event stream like every other sidecar line. Stamped with the invoking
+  // page's label, as Rust stamps the invoking window's
   // (`alert_command` in src-tauri/src/lib.rs).
-  alert_command: ({ payload }) => writeSidecar('alert:command', { ...payload, window: HARNESS_WINDOW }),
-  // Owned by the one window, as Rust stamps the invoking window's
-  // (`iframe_release_proxy` in src-tauri/src/lib.rs).
-  iframe_release_proxy: ({ lease }) => writeSidecar('iframe:releaseProxy', { owner: HARNESS_WINDOW, id: lease ?? null }),
+  alert_command: ({ payload }, window) => writeSidecar('alert:command', { ...payload, window }),
+  // Owned by the invoking window (`iframe_release_proxy` in src-tauri/src/lib.rs).
+  iframe_release_proxy: ({ lease }, window) => writeSidecar('iframe:releaseProxy', { owner: window, id: lease ?? null }),
   kill_sidecar_now: () => shutdown(),
   // The page posts it through `send`, as Tauri's `pty_cancel_input` returns nothing.
   pty_cancel_input: ({ id, inputId }) => writeSidecar('pty:cancelInput', { id, inputId }),
@@ -175,10 +296,10 @@ const invokeMap = {
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
   write_clipboard_text: ({ text }) => requestSidecar('clipboard:writeText', { text }, 'clipboard:written', () => null),
   // Invoked at boot, so the release lands before this page's first lease.
-  iframe_release_proxy: async ({ lease }) => { writeSidecar('iframe:releaseProxy', { owner: HARNESS_WINDOW, id: lease ?? null }); return null; },
-  iframe_create_proxy_url: ({ target, embedderOrigins, lease }) => requestSidecar('iframe:createProxyUrl', {
+  iframe_release_proxy: async ({ lease }, window) => { writeSidecar('iframe:releaseProxy', { owner: window, id: lease ?? null }); return null; },
+  iframe_create_proxy_url: ({ target, embedderOrigins, lease }, window) => requestSidecar('iframe:createProxyUrl', {
     target, embedderOrigins,
-    ...(typeof lease === 'string' ? { lease: { owner: HARNESS_WINDOW, id: lease } } : {}),
+    ...(typeof lease === 'string' ? { lease: { owner: window, id: lease } } : {}),
   }, 'iframe:proxyUrl', (data) => data.result),
   // Managed voice, the passthrough `managed_voice` in src-tauri/src/lib.rs;
   // 20_000 mirrors its MANAGED_VOICE_TIMEOUT.
@@ -195,15 +316,16 @@ const invokeMap = {
   take_recovery_commands: ({ paneIds }) =>
     requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data.commands ?? {}),
   // The Workspace registry (docs/specs/standalone.md -> "Workspace registry"):
-  // one id counter per kind and one window, since the harness simulates no
-  // second one.
+  // one id counter per kind, shared by every window.
   workspace_reserve_ids: ({ count }) => reserve('workspace', count),
   // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
   // the floor the page restored, which outlives this process in localStorage.
   surface_reserve_ids: ({ count, floor }) => reserve('surface', count, floor),
   boot_reserve_ids: async ({ workspaces, surfaces, floor }) =>
     ({ workspaces: await reserve('workspace', workspaces), surfaces: await reserve('surface', surfaces, floor) }),
-  workspace_report: async ({ entries }) => {
+  workspace_report: async ({ entries }, window) => {
+    registry.set(window, (Array.isArray(entries) ? entries : [])
+      .map((entry) => ({ id: String(entry?.id ?? ''), name: String(entry?.name ?? '') })));
     // Restored browser state survives this process; mirror Rust's report seed.
     const seeded = ids.workspace;
     for (const entry of entries ?? []) {
@@ -271,6 +393,15 @@ function cors(req, res) {
   }
 }
 
+// `DORMOUSE_BROWSER_DEV_TRACE=1`: log each page's commands under its window
+// label, minus the per-keystroke and per-chunk ones.
+const TRACE = process.env.DORMOUSE_BROWSER_DEV_TRACE === '1';
+const UNTRACED = new Set(['pty_write', 'pty_ack', 'pty_resize', 'pty_theme_colors', 'pty_get_cwds', 'git_info']);
+function trace(window, cmd, args) {
+  if (!TRACE || UNTRACED.has(cmd)) return;
+  log(`[${window}] ${cmd} ${JSON.stringify(args ?? {}).slice(0, 160)}`);
+}
+
 function startHostServer() {
   const server = http.createServer(async (req, res) => {
     if (!viteOrigin) {
@@ -291,6 +422,7 @@ function startHostServer() {
     }
     try {
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
+      const window = windowOf(url);
       if (req.method === 'GET' && url.pathname === '/__dormouse_dev_host/events') {
         res.writeHead(200, {
           'content-type': 'text/event-stream',
@@ -299,16 +431,20 @@ function startHostServer() {
           // No access-control-allow-origin here: cors(req, res) already set it, and
           // writeHead merges what setHeader recorded.
         });
-        sseClients.add(res);
-        sendSse(res, 'sidecar', { event: 'dev:connected', data: { pid: process.pid } });
-        req.on('close', () => sseClients.delete(res));
+        if (!sseClients.has(window)) sseClients.set(window, new Set());
+        sseClients.get(window).add(res);
+        noteWindow(window);
+        log(`page connected as window ${window}`);
+        sendSse(res, 'sidecar', { event: 'dev:connected', data: { pid: process.pid, window } });
+        req.on('close', () => sseClients.get(window)?.delete(res));
         return;
       }
       if (req.method === 'POST' && url.pathname === '/__dormouse_dev_host/send') {
         const { cmd, args } = await readJson(req);
         const fn = fireAndForget[cmd];
         if (!fn) throw new Error(`unknown send command ${cmd}`);
-        fn(args || {});
+        trace(window, cmd, args);
+        fn(args || {}, window);
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true }));
         return;
       }
@@ -316,7 +452,8 @@ function startHostServer() {
         const { cmd, args } = await readJson(req);
         const fn = invokeMap[cmd];
         if (!fn) throw new Error(`unknown invoke command ${cmd}`);
-        const result = await fn(args || {});
+        trace(window, cmd, args);
+        const result = await fn(args || {}, window);
         res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, result }));
         return;
       }
@@ -386,8 +523,7 @@ function startSidecar() {
         return;
       }
     }
-    if (routesToNoWindow(event, data)) return;
-    broadcast('sidecar', { event, data });
+    deliver(event, data);
   });
   createInterface({ input: sidecar.stderr }).on('line', (line) => console.error(`[sidecar] ${line}`));
   sidecar.on('error', (err) => {
@@ -470,7 +606,7 @@ function removeRunDirs() {
 async function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const client of sseClients) client.end();
+  for (const clients of sseClients.values()) for (const client of clients) client.end();
   sseClients.clear();
   hostServer?.close();
   hostServer?.closeAllConnections();

@@ -293,4 +293,4 @@ for (const report of reports) {
   if (!all && hits.length > visible.length) console.log(`  … ${hits.length - visible.length} more; rerun with --all or --json`);
   if (report.unresolved.length > 0) console.log(`  REVIEW    unresolved file-like refs: ${report.unresolved.join(', ')}`);
 }
-console.log('\nDisposition each hit as KEEP, CUT, POINTER, RATIONALE, MATRIX, or CANONICAL; see docs/prose-audit.md.');
+console.log('\nDisposition each hit as KEEP, CUT, POINTER, RATIONALE, MATRIX, CANONICAL, COMMENT, or ORPHAN; see docs/prose-audit.md.');

@@ -1,6 +1,16 @@
 {
   "direct": [
     {
+      "name": "block2",
+      "license": "MIT",
+      "author": "Mads Marquart <mads@marquart.dk>",
+      "homepage": "https://github.com/madsmtm/objc2",
+      "declaredName": "block2",
+      "versions": [
+        "0.6.2"
+      ]
+    },
+    {
       "name": "getrandom",
       "license": "MIT OR Apache-2.0",
       "author": "The Rand Project Developers",
@@ -56,6 +66,16 @@
       "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2",
       "declaredName": "objc2-foundation",
+      "versions": [
+        "0.3.2"
+      ]
+    },
+    {
+      "name": "objc2-web-kit",
+      "license": "MIT OR Zlib OR Apache-2.0",
+      "author": "Mads Marquart",
+      "homepage": "https://github.com/madsmtm/objc2",
+      "declaredName": "objc2-web-kit",
       "versions": [
         "0.3.2"
       ]
@@ -141,6 +161,16 @@
       ]
     },
     {
+      "name": "webview2-com",
+      "license": "MIT",
+      "author": "Bill Avery",
+      "homepage": "https://github.com/wravery/webview2-rs",
+      "declaredName": "webview2-com",
+      "versions": [
+        "0.39.1"
+      ]
+    },
+    {
       "name": "windows",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
@@ -148,6 +178,16 @@
       "declaredName": "windows",
       "versions": [
         "0.62.2"
+      ]
+    },
+    {
+      "name": "wry",
+      "license": "MIT OR Apache-2.0",
+      "author": "Tauri Programme within The Commons Conservancy",
+      "homepage": "https://github.com/tauri-apps/wry",
+      "declaredName": "wry",
+      "versions": [
+        "0.57.0"
       ]
     }
   ],
@@ -378,15 +418,6 @@
       "homepage": "https://github.com/RustCrypto/utils",
       "versions": [
         "0.10.4"
-      ]
-    },
-    {
-      "name": "block2",
-      "license": "MIT",
-      "author": "Mads Marquart <mads@marquart.dk>",
-      "homepage": "https://github.com/madsmtm/objc2",
-      "versions": [
-        "0.6.2"
       ]
     },
     {
@@ -2080,15 +2111,6 @@
       ]
     },
     {
-      "name": "objc2-web-kit",
-      "license": "MIT OR Zlib OR Apache-2.0",
-      "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2",
-      "versions": [
-        "0.3.2"
-      ]
-    },
-    {
       "name": "once_cell",
       "license": "MIT OR Apache-2.0",
       "author": "Aleksey Kladov <aleksey.kladov@gmail.com>",
@@ -3651,15 +3673,6 @@
       ]
     },
     {
-      "name": "webview2-com",
-      "license": "MIT",
-      "author": "Bill Avery",
-      "homepage": "https://github.com/wravery/webview2-rs",
-      "versions": [
-        "0.39.1"
-      ]
-    },
-    {
       "name": "webview2-com-macros",
       "license": "MIT",
       "author": "Bill Avery",
@@ -3976,15 +3989,6 @@
       "homepage": "https://github.com/unicode-org/icu4x",
       "versions": [
         "0.6.3"
-      ]
-    },
-    {
-      "name": "wry",
-      "license": "MIT OR Apache-2.0",
-      "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/tauri-apps/wry",
-      "versions": [
-        "0.57.0"
       ]
     },
     {

@@ -2,7 +2,7 @@ import { getAux } from '../../lib/aux-terminal';
 import { getTerminalPaneState, isUntouched } from '../../lib/terminal-registry';
 import { auxMayBeBusy, registry } from '../../lib/terminal-store';
 import { getToolDirty } from '../../lib/tool-dirty-store';
-import { isToolParams, resolveRenderMode, surfaceKindFromParams, toolScopeFromParams } from './browser-surface';
+import { isAgentBrowserParams, isToolParams, surfaceKindFromParams, toolScopeFromParams } from './browser-surface';
 
 /**
  * What a user close of one Surface does, decided at the close from state
@@ -46,7 +46,7 @@ export function closeKind(id: string, params: unknown): CloseKind {
   switch (surfaceKindFromParams(params)) {
     case 'terminal': return isTrivialShell(id) ? 'trivial' : 'confirm';
     // A closed tab reopens at its URL, reloaded.
-    case 'browser': return resolveRenderMode(params) === 'iframe' ? 'reopenable' : 'confirm';
+    case 'browser': return isAgentBrowserParams(params) ? 'confirm' : 'reopenable';
     case 'tool': return isReopenableBuiltin(id, params) ? 'reopenable' : 'confirm';
   }
 }

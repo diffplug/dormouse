@@ -177,9 +177,9 @@ export function shouldParkOnMinimize(meta: LeafMeta): boolean {
   return meta.component === 'browser' || meta.component === 'tool';
 }
 
-/** The open terminal context's aux terminal host, outlined by the selection ring with its source. */
+/** The open terminal context's panel, outlined by the selection ring with its source. */
 export type ContextPanel = { sourceId: string; element: HTMLElement; side: Edge };
-/** Places the open context's aux terminal from one painted frame; null hides it from the ring. */
+/** Places the open context's panel from one painted frame; null hides it from the ring. */
 export type ContextPlacer = (paint: ReadonlyMap<string, Frame>) => ContextPanel | null;
 
 export type LathWallEngine = {
@@ -208,12 +208,12 @@ export type LathWallEngine = {
    *  without a store commit (`markDying`, `setContextPlacer`). Returns an unsubscribe. */
   subscribeWake(cb: () => void): () => void;
   /** Register the open context's placer (null on unmount) and wake the tick loop, so
-   *  the aux terminal is repainted and chrome re-measures it. */
+   *  the panel is repainted and chrome re-measures it. */
   setContextPlacer(placer: ContextPlacer | null): void;
   /** LathHost's paint calls this with the frames it just wrote, before `notifyFrames`,
-   *  so chrome measures the aux terminal where it is painted. */
+   *  so chrome measures the panel where it is painted. */
   placeContext(paint: ReadonlyMap<string, Frame>): void;
-  /** The aux terminal the last paint placed, or null. */
+  /** The context panel the last paint placed, or null. */
   contextPanel(): ContextPanel | null;
 
   // --- reads / projections over the store ---

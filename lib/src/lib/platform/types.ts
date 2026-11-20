@@ -232,6 +232,61 @@ export interface WritePtyOptions {
   launch?: true;
 }
 
+/** A pane webview's page as its host reports it. */
+export interface PaneWebviewPage {
+  url: string;
+  title: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  loading: boolean;
+}
+
+/** What a host reports about one Surface's pane webview. `leader`,
+ *  `pointerdown`, and `focus` come from the host's own observation of native
+ *  input, never from the page, which can neither forge nor block them. */
+export type PaneWebviewEvent =
+  | ({ id: string; kind: 'page' } & PaneWebviewPage)
+  | { id: string; kind: 'leader' }
+  | { id: string; kind: 'pointerdown' }
+  /** The pointer left the shown view: the app webview hears no move over it. */
+  | { id: string; kind: 'pointerleave' }
+  | { id: string; kind: 'focus'; focused: boolean }
+  | { id: string; kind: 'open-window'; url: string }
+  /** The page started a download, which the host refused. */
+  | { id: string; kind: 'download-refused' }
+  /** The page's process ended, leaving the view blank. */
+  | { id: string; kind: 'crashed' }
+  /** The page's alert, confirm, or prompt, waiting on `answer`: `origin` is
+   *  the asking frame's host, and `text` a prompt's default. */
+  | { id: string; kind: 'dialog'; dialog: 'alert' | 'confirm' | 'prompt'; message: string; origin: string; text?: string };
+
+/**
+ * The native views a host renders `webview` Surfaces with
+ * (`docs/specs/webview-pane.md`), keyed by Surface id. Only `close` and the
+ * end of the window destroy one.
+ */
+export interface PaneWebviewHost {
+  /** Create `id`'s view hidden at `url`, or adopt the one that exists without
+   *  navigating it. */
+  open(id: string, url: string): Promise<{ ok: true; page: PaneWebviewPage } | { ok: false; error: string }>;
+  /** Show the view at `rect`, CSS pixels from the window content's top-left,
+   *  or hide it with `null`. */
+  place(id: string, rect: { x: number; y: number; width: number; height: number } | null): void;
+  navigate(id: string, url: string): void;
+  history(id: string, dir: 'back' | 'forward' | 'reload'): void;
+  /** Give the keyboard to `id`'s view. */
+  focus(id: string): void;
+  /** Return the keyboard to the app webview, if `id`'s view holds it. */
+  blur(id: string): void;
+  close(id: string): void;
+  /** Answer the view's pending dialog: `accept` is OK, and `text` what a prompt returns. */
+  answer(id: string, accept: boolean, text?: string): void;
+  /** A still of the view's current rendering as an image URL, or null on any failure. */
+  snapshot(id: string): Promise<string | null>;
+  /** Hear every view's events; returns the unsubscribe. */
+  onEvent(listener: (event: PaneWebviewEvent) => void): () => void;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -402,6 +457,10 @@ export interface PlatformAdapter {
   // (docs/specs/dor-browser.md → "Iframe External Origins").
   createIframeProxyUrl?(targetUrl: string, lease?: string): Promise<IframeProxyResult>;
   releaseIframeProxy?(lease: string): void;
+
+  // The `webview` render mode's native views. Absent where the host cannot
+  // build one, where a `webview` Surface renders with the iframe renderer.
+  paneWebview?: PaneWebviewHost;
 
   // Dor Tools (see docs/specs/dor-tool.md). Two operations behind one method:
   // resolve a tool name against the nearest dormouse.yml, and record a trust

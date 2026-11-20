@@ -455,6 +455,7 @@ const CREATING_CONTROL_METHODS = new Set<string>([
   SURFACE_CONTROL_METHODS.split,
   SURFACE_CONTROL_METHODS.ensure,
   SURFACE_CONTROL_METHODS.iframe,
+  SURFACE_CONTROL_METHODS.webview,
   SURFACE_CONTROL_METHODS.browser,
 ]);
 
@@ -802,8 +803,8 @@ export function useDorControl({
     return target;
   }, [requireListedSurface]);
 
-  // Past the browser gate, web verbs stay renderMode-gated: an `iframe`
-  // renderer is a browser with nothing to drive (docs/specs/glossary.md →
+  // Past the browser gate, web verbs stay renderMode-gated: an `iframe` or
+  // `webview` renderer is a browser with nothing to drive (docs/specs/glossary.md →
   // Panes and Surfaces). Whether `provider` renders `target`, else false once
   // the caller is answered.
   const requireProvider = useCallback((
@@ -816,7 +817,7 @@ export function useDorControl({
     // Name the command that does work on it, so the caller's next try lands.
     const remedy = rendering
       ? `drive it with ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${target.id}`
-      : `an iframe cannot be driven; open its page with dor agent-browser open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
+      : `${target.renderMode === 'webview' ? 'a webview' : 'an iframe'} cannot be driven; open its page with dor agent-browser open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
     detail.respond({
       ok: false,
       error: `surface '${target.id}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
@@ -2220,7 +2221,10 @@ export function useDorControl({
       return;
     }
 
-    if (detail.method === SURFACE_CONTROL_METHODS.iframe) {
+    // `dor iframe` and `dor webview`: one URL in a new browser pane, each
+    // refused before any pane opens where its renderer cannot show the page.
+    if (detail.method === SURFACE_CONTROL_METHODS.iframe || detail.method === SURFACE_CONTROL_METHODS.webview) {
+      const renderMode = detail.method === SURFACE_CONTROL_METHODS.iframe ? 'iframe' : 'webview';
       const raw = stringParam(params.url);
       if (!raw) {
         detail.respond({ ok: false, error: 'url is required' });
@@ -2234,10 +2238,15 @@ export function useDorControl({
         detail.respond({ ok: false, error: 'url must be an http:// or https:// URL' });
         return;
       }
-      // Refused here, where the caller can act on it, not in the pane.
-      const refusal = iframeRefusal(url);
+      // Refused here, where the caller can act on it, not in the pane, naming
+      // the command that shows it here.
+      const webviews = !!getPlatform().paneWebview;
+      const refusal = renderMode === 'iframe' ? iframeRefusal(url) : webviews ? null : 'this host has no webview panes';
       if (refusal) {
-        detail.respond({ ok: false, error: `${refusal} — open it with dor agent-browser open ${url}` });
+        const remedy = renderMode === 'iframe'
+          ? (webviews ? 'dor webview' : 'dor agent-browser open')
+          : (new URL(url).protocol === 'http:' ? 'dor iframe' : 'dor agent-browser open');
+        detail.respond({ ok: false, error: `${refusal} — open it with ${remedy} ${url}` });
         return;
       }
       const target = resolvePlacement(resolveVisibleSurface);
@@ -2247,7 +2256,7 @@ export function useDorControl({
       }
       const result = createContentSurface({
         minimized: booleanParam(params.minimized),
-        params: { surfaceType: 'browser', renderMode: 'iframe', url },
+        params: { surfaceType: 'browser', renderMode, url },
         reference: target.value,
         preserveSource: !!detail.auxParentId,
         title: hostPathDisplay(url, true),

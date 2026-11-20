@@ -5,7 +5,8 @@
  *
  *   - Render — swap the backend in place, preserving the target: each
  *     provider's screencast and popout (relaunch headed as a native OS
- *     window), or `iframe embed`. Each lists its agent/URL/feel trade-offs.
+ *     window), `iframe embed`, or `native webview`. Each lists its
+ *     agent/URL/feel trade-offs.
  *     Offered only when the controller wires `setRenderMode`, listing only
  *     the modes the controller declares in `renderModes`.
  *   - Resolution — the screencast viewport: *Resize with pane* (linked to the
@@ -149,7 +150,7 @@ export function AgentBrowserScreenModal({
   // Only Apply remembers the provider; Cancel leaves the preference alone.
   const chooseProvider = (value: typeof provider) => {
     setChosenProvider(value);
-    if (selected.presentation !== 'iframe') {
+    if (selected.provider !== null) {
       const next = renderModeFor(value, selected.presentation);
       setRenderMode(offered(next) ? next : renderModeFor(value, 'screencast'));
     }
@@ -306,6 +307,15 @@ export function AgentBrowserScreenModal({
             label={BROWSER_DISPLAY_LABEL.iframe}
             features={[[false, 'agents cannot read/write'], [false, 'http only'], [false, 'no logins/cookies'], [true, 'native human experience']]}
             disabledReason={embedRefusal ?? undefined}
+          />
+        )}
+        {offered('webview') && (
+          <RenderOption
+            checked={renderMode === 'webview'}
+            onSelect={() => setRenderMode('webview')}
+            icon={<BrowserDisplayIcon mode="webview" size={14} className="text-muted" />}
+            label={BROWSER_DISPLAY_LABEL.webview}
+            features={[[false, 'agents cannot read/write'], [true, 'http and https'], [true, 'logins/cookies'], [true, 'native human experience']]}
           />
         )}
       </div>

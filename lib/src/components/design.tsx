@@ -9,6 +9,7 @@ import { isComposingKey } from '../lib/dom';
 import type { CopyOutcome } from '../lib/mouse-selection';
 import { rectsEqual } from '../lib/rect-tween';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
+import { useOccludePaneWebviews } from '../lib/pane-webview-occlusion';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -647,6 +648,7 @@ export function ModalOverlay({
   layer?: ModalLayer;
 }) {
   const rect = useMeasuredElementRect(targetElement ?? null);
+  useOccludePaneWebviews(true);
   const resolvedZIndex = MODAL_LAYERS[layer];
   const overlayStyle: CSSProperties = rect
     ? {
@@ -776,6 +778,7 @@ export function NativeModalDialog({
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  useOccludePaneWebviews(true);
   useEffect(() => {
     const dialog = dialogRef.current;
     // StrictMode runs this twice on one element, and a second showModal throws.

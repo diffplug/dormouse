@@ -8,9 +8,9 @@
 //! stole focus per paste, freezing the GUI (diffplug/dormouse Windows paste bug).
 //!
 //! These functions talk to the Win32 clipboard directly, so a paste is a few
-//! in-process API calls with no subprocess at all. macOS/Linux keep the sidecar
-//! path (`pbpaste`/`xclip` never pop a console window), so this module is
-//! Windows-only.
+//! in-process API calls with no subprocess at all. macOS keeps the sidecar path
+//! (`pbpaste` never pops a console window), and Linux reads through GTK
+//! (`clipboard_linux.rs`), so this module is Windows-only.
 
 use std::io::Write;
 use std::time::Duration;

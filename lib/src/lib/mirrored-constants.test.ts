@@ -22,8 +22,7 @@ import { TOOL_PAYLOAD_LIMIT } from 'dor-tools-lib/osc';
 // the installers are sh and PowerShell) and only a "keep in sync" comment tied
 // the copies together. Each test
 // fs-reads the sibling definition and compares values, so drifting one copy
-// fails loudly. Pattern per AGENTS.md — a "must stay in sync" claim names the
-// test that pins it.
+// fails loudly.
 const here = dirname(fileURLToPath(import.meta.url));
 const readRepoFile = (rel: string) => readFileSync(resolve(here, '../../..', rel), 'utf8');
 

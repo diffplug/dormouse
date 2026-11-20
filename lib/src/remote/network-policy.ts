@@ -61,7 +61,7 @@ export interface NetworkPolicyResult {
 }
 
 /**
- * What allowing a network means for browser panes, said wherever one is
+ * What allowing a network means for iframe panes, said wherever one is
  * allowed: a page on it is framed on this computer's loopback, beside its own
  * services (`docs/specs/dor-browser.md` -> "Iframe External Origins").
  */

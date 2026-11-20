@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPresenceTracker, type PresenceTracker } from './presence';
 import type { EngagementLapse } from './alert-manager';
+import { setPaneWebviewFocus } from './window-focus';
 
 const TIMEOUT = 15_000;
 
@@ -114,6 +115,23 @@ describe('presence', () => {
     focused = false;
     vi.advanceTimersByTime(TIMEOUT);
     expect(transitions).toEqual([[true, undefined], [false, 'leave']]);
+  });
+
+  it('stays present while a pane webview holds the keyboard, its blur reported before or after its focus', () => {
+    input('keydown');
+    // The native view took the keyboard: the app document blurred for real.
+    focused = false;
+    setPaneWebviewFocus('surface:web', true);
+    input('blur');
+    vi.advanceTimersByTime(TIMEOUT * 2);
+    expect(transitions).toEqual([[true, undefined]]);
+
+    // Its report trails the blur: back at once.
+    setPaneWebviewFocus('surface:web', false);
+    expect(transitions.at(-1)).toEqual([false, 'leave']);
+    setPaneWebviewFocus('surface:web', true);
+    expect(transitions.at(-1)).toEqual([true, undefined]);
+    setPaneWebviewFocus('surface:web', false);
   });
 
   it('leaves when hidden and comes back when shown', () => {

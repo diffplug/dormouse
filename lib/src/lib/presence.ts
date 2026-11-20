@@ -1,5 +1,5 @@
 import type { EngagementLapse } from './alert-manager';
-import { subscribeWindowFocus } from './window-focus';
+import { isRealBlur, paneWebviewHoldsFocus, subscribeWindowFocus } from './window-focus';
 
 /** What counts as a human at this window (`docs/specs/alert.md` -> Engagement). */
 const INPUT_EVENTS = ['keydown', 'pointerdown', 'pointermove', 'wheel', 'compositionupdate'] as const;
@@ -33,11 +33,11 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
   let present = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const windowActive = (): boolean => document.hasFocus() && document.visibilityState === 'visible';
-  // A focused iframe Surface keeps the input typed into it from these
-  // listeners, so its focus stands in for input (`docs/specs/alert.md` ->
-  // Engagement).
-  const iframeHoldsFocus = (): boolean => document.activeElement?.tagName === 'IFRAME';
+  const windowActive = (): boolean => !isRealBlur() && document.visibilityState === 'visible';
+  // A focused iframe Surface or pane webview keeps the input typed into it
+  // from these listeners, so its focus stands in for input
+  // (`docs/specs/alert.md` -> Engagement).
+  const embeddedHoldsFocus = (): boolean => document.activeElement?.tagName === 'IFRAME' || paneWebviewHoldsFocus();
 
   const set = (next: boolean, lapse?: EngagementLapse): void => {
     if (next === present) return;
@@ -66,7 +66,7 @@ export function createPresenceTracker({ timeoutMs, onChange }: PresenceTrackerOp
       set(false, 'leave');
       return;
     }
-    if (iframeHoldsFocus()) lastInputAt = Date.now();
+    if (embeddedHoldsFocus()) lastInputAt = Date.now();
     if (Date.now() - lastInputAt >= timeoutMs()) set(false, 'idle');
     else arm();
   }

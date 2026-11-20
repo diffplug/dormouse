@@ -266,6 +266,10 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         minimized: request.minimized,
       };
     },
+    async webviewSurface(request) {
+      this.requests.push({ method: 'webviewSurface', request });
+      return { status: 'created', surfaceId: 'surface:3', url: request.url, minimized: request.minimized };
+    },
     async browserSurface(request) {
       this.requests.push({ method: 'browserSurface', request });
       return {
@@ -500,7 +504,7 @@ test('split sends command argv to the host', async () => {
 });
 
 test('Surface-producing commands always send focus, true only with --focus', async () => {
-  for (const args of [['split'], ['split', '--'], ['split', '--', 'echo', 'hi'], ['ensure', '--', 'echo', 'hi'], ['iframe', ':5173'], ['tool', '--', 'echo'], ['open', 'a.md']]) {
+  for (const args of [['split'], ['split', '--'], ['split', '--', 'echo', 'hi'], ['ensure', '--', 'echo', 'hi'], ['iframe', ':5173'], ['webview', ':5173'], ['tool', '--', 'echo'], ['open', 'a.md']]) {
     // Absent, it is sent false: only the webview's own requests omit it.
     const unstated = fixtureClient();
     const result = await runCli(args, { client: unstated });
@@ -1184,6 +1188,35 @@ test('iframe honors an explicit https scheme (no downgrade to http)', async () =
   const client = fixtureClient();
   await runCli(['iframe', 'https://example.com:8080'], { client });
   assert.equal(client.requests[0].request.url, 'https://example.com:8080/');
+});
+
+test('webview sends the request to the host as surface.webview, https included, and prints as iframe does', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['webview', '--minimize', '--from', 'surface:1', 'https://example.com/login?next=1'], { client });
+  assert.equal(result.exitCode, 0, result.stderr);
+  assert.equal(result.stdout, 'created surface:3  [minimized]  "https://example.com/login?next=1"\n');
+  assert.deepEqual(client.requests, [{
+    method: 'webviewSurface',
+    request: { minimized: true, focus: false, surface: 'surface:1', url: 'https://example.com/login?next=1' },
+  }]);
+  const json = await runCli(['webview', '--json', 'localhost:5173'], { client: fixtureClient() });
+  assert.deepEqual(JSON.parse(json.stdout), { status: 'created', surface_id: 'surface:3', url: 'http://localhost:5173/', minimized: false });
+});
+
+test('webview takes iframe\'s targets: a schemeless host:port is http, a surface handle its port, anything else refused', async () => {
+  const client = fixtureClient();
+  await runCli(['webview', 'box.tailnet.ts.net:3000'], { client });
+  await runCli(['webview', 'surface:1'], { client });
+  assert.deepEqual(client.requests, [
+    { method: 'webviewSurface', request: { focus: false, minimized: false, surface: undefined, url: 'http://box.tailnet.ts.net:3000/' } },
+    { method: 'resolveOpenTarget', request: { surface: 'surface:1' } },
+    { method: 'webviewSurface', request: { focus: false, minimized: false, surface: undefined, url: 'http://localhost:5173/' } },
+  ]);
+  const refused = fixtureClient();
+  const result = await runCli(['webview', 'ftp://localhost:5173'], { client: refused });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /http:\/\/ or https:\/\//);
+  assert.deepEqual(refused.requests, []);
 });
 
 test('iframe surfaces a zero-port resolution error to stderr with exit 1', async () => {
@@ -1960,6 +1993,7 @@ test('every action command forwards --workspace to the host', async () => {
     [['read', 'surface:1', '--workspace', 'workspace-name:build'], 'readSurface'],
     [['kill', 'surface:1', '--confirm-dangerously', '--workspace', 'workspace-name:build'], 'killSurface'],
     [['iframe', 'http://localhost:5173', '--workspace', 'workspace-name:build'], 'iframeSurface'],
+    [['webview', 'https://example.com/', '--workspace', 'workspace-name:build'], 'webviewSurface'],
   ];
   for (const [argv, method] of calls) {
     const client = fixtureClient();
@@ -2666,7 +2700,7 @@ test('agent-browser exits 4 when its successful command cannot bind a pane', asy
 });
 
 test('creation uses --from and rejects the old --surface spelling before host calls', async () => {
-  for (const args of [['split'], ['ensure', '--', 'echo'], ['tool', '--', 'echo'], ['open', 'a.md'], ['iframe', ':5173']]) {
+  for (const args of [['split'], ['ensure', '--', 'echo'], ['tool', '--', 'echo'], ['open', 'a.md'], ['iframe', ':5173'], ['webview', ':5173']]) {
     const client = fixtureClient();
     const result = await runCli([args[0], '--from', 'surface:8', ...args.slice(1)], { client });
     assert.equal(result.exitCode, 0, result.stderr);

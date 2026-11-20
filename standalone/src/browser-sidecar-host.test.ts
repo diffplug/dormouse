@@ -127,3 +127,40 @@ describe("BrowserSidecarHost.init", () => {
     expect(reconnects).toHaveBeenCalledTimes(1);
   });
 });
+
+// One POST per keystroke (`pty_write`): two in flight at once can land at the
+// bridge in either order.
+describe("BrowserSidecarHost.send", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("starts each send only after the one before it settles, in call order", async () => {
+    const started: string[] = [];
+    const settle: Array<() => void> = [];
+    vi.stubGlobal("fetch", vi.fn((_url: URL, init: RequestInit) => {
+      started.push(JSON.parse(String(init.body)).args.data);
+      return new Promise<void>((resolve) => settle.push(resolve));
+    }));
+    const host = new BrowserSidecarHost("http://127.0.0.1:1422/?t=deadbeef");
+    for (const data of ["a", "b", "c"]) host.send("pty_write", { id: "p", data });
+    await vi.waitFor(() => expect(started).toEqual(["a"]));
+    settle[0]();
+    await vi.waitFor(() => expect(started).toEqual(["a", "b"]));
+    settle[1]();
+    await vi.waitFor(() => expect(started).toEqual(["a", "b", "c"]));
+  });
+
+  it("keeps sending after one send fails", async () => {
+    const started: string[] = [];
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn((_url: URL, init: RequestInit) => {
+      const { cmd } = JSON.parse(String(init.body));
+      started.push(cmd);
+      return cmd === "first" ? Promise.reject(new Error("down")) : Promise.resolve();
+    }));
+    const host = new BrowserSidecarHost("http://127.0.0.1:1422");
+    host.send("first");
+    host.send("second");
+    await vi.waitFor(() => expect(started).toEqual(["first", "second"]));
+    vi.restoreAllMocks();
+  });
+});

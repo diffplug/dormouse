@@ -28,7 +28,7 @@ async function fixture(t) {
     const { createInterface } = require('node:readline');
     createInterface({ input: process.stdin }).on('line', line => {
       const { event, data } = JSON.parse(line);
-      if (event === 'alert:command' || event === 'pty:input' || event === 'pty:cancelInput') console.error('SIDECAR_LINE ' + line);
+      if (event === 'alert:command' || event === 'pty:input' || event === 'pty:requestInit' || event === 'pty:cancelInput') console.error('SIDECAR_LINE ' + line);
       // pty-core reports an exit for a PTY it killed; a resize stands in for
       // one ending on its own.
       if (event === 'pty:kill' || event === 'pty:resize') console.log(JSON.stringify({ event: 'pty:exit', data: { id: data.id, exitCode: 0 } }));
@@ -107,8 +107,8 @@ async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_c
   });
 }
 
-async function send(run, cmd, args) {
-  return fetch(`${run.bridge}/__dormouse_dev_host/send?t=${run.token}`, {
+async function send(run, cmd, args, window = 'main') {
+  return fetch(`${run.bridge}/__dormouse_dev_host/send?t=${run.token}&window=${window}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin: run.app },
     body: JSON.stringify({ cmd, args }),
     signal: AbortSignal.timeout(5000),
@@ -116,10 +116,10 @@ async function send(run, cmd, args) {
 }
 
 /** The page's event stream: everything read so far, and a wait for a pattern in it. */
-async function events(t, run) {
+async function events(t, run, window = 'main') {
   const controller = new AbortController();
   t.after(() => controller.abort());
-  const response = await fetch(`${run.bridge}/__dormouse_dev_host/events?t=${run.token}`, {
+  const response = await fetch(`${run.bridge}/__dormouse_dev_host/events?t=${run.token}&window=${window}`, {
     headers: { origin: run.app }, signal: controller.signal,
   });
   assert.equal(response.status, 200);
@@ -256,6 +256,7 @@ test('a PTY the page killed delivers no exit, until a spawn reuses its id', { ti
   const run = await (await fixture(t)).start().ready();
   const stream = await events(t, run);
   await stream.wait(/dev:connected/);
+  assert.equal((await send(run, 'pty_spawn', { id: 'live' })).status, 200);
   assert.equal((await send(run, 'pty_kill', { id: 'killed' })).status, 200);
   assert.equal((await send(run, 'pty_resize', { id: 'live', cols: 80, rows: 24 })).status, 200);
   await stream.wait(/"event":"pty:exit","data":\{"id":"live"/);
@@ -263,6 +264,28 @@ test('a PTY the page killed delivers no exit, until a spawn reuses its id', { ti
   assert.equal((await send(run, 'pty_spawn', { id: 'killed' })).status, 200);
   assert.equal((await send(run, 'pty_resize', { id: 'killed', cols: 80, rows: 24 })).status, 200);
   await stream.wait(/"event":"pty:exit","data":\{"id":"killed"/);
+});
+
+// Each `?window=` page is one window, as Rust routes them: a PTY's traffic
+// reaches only the window that spawned it, and a boot list names only its own.
+test('routes each PTY to the window that spawned it, and scopes the boot list', { timeout: 60000 }, async t => {
+  const run = await (await fixture(t)).start().ready();
+  const main = await events(t, run, 'main');
+  const ws1 = await events(t, run, 'ws-1');
+  await main.wait(/dev:connected/);
+  await ws1.wait(/dev:connected/);
+  assert.equal((await send(run, 'pty_spawn', { id: 'in-main' }, 'main')).status, 200);
+  assert.equal((await send(run, 'pty_spawn', { id: 'in-ws1' }, 'ws-1')).status, 200);
+  assert.equal((await send(run, 'pty_resize', { id: 'in-ws1', cols: 80, rows: 24 })).status, 200);
+  assert.equal((await send(run, 'pty_resize', { id: 'in-main', cols: 80, rows: 24 })).status, 200);
+  await main.wait(/"event":"pty:exit","data":{"id":"in-main"/);
+  await ws1.wait(/"event":"pty:exit","data":{"id":"in-ws1"/);
+  assert.doesNotMatch(main.text, /in-ws1/);
+  assert.doesNotMatch(ws1.text, /in-main/);
+  assert.equal((await send(run, 'pty_request_init', { requestId: 'r1' }, 'ws-1')).status, 200);
+  assert.deepEqual(JSON.parse((await run.wait(/SIDECAR_LINE ({"event":"pty:requestInit".*})/))[1]), {
+    event: 'pty:requestInit', data: { forWindow: 'ws-1', ids: ['in-ws1'], requestId: 'r1' },
+  });
 });
 
 test('explicit ports and raw browser sessions are honored; occupied ports fail without adopting a peer', { timeout: 60000 }, async t => {

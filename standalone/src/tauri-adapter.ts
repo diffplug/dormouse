@@ -13,6 +13,9 @@ import { nativeClipboardWriter } from "./native-clipboard";
 import type {
   IframeProxyResult,
   OpenPort,
+  PaneWebviewEvent,
+  PaneWebviewHost,
+  PaneWebviewPage,
   PlatformAdapter,
   PtyDataDetail,
   PtyDataHandler,
@@ -151,6 +154,8 @@ export class TauriAdapter implements PlatformAdapter {
     // leases it never released; this page holds none yet. Every lease this
     // page takes waits on it, so the release reaches the sidecar first.
     this.leaseOrder.reset = rawInvoke("iframe_release_proxy", { lease: null }).catch(() => {});
+    // Before the first render, which picks a `webview` Surface's renderer by it.
+    const paneWebviewReady = this.initPaneWebview();
     // Registered together rather than one await after another: every `listen`
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.
@@ -251,6 +256,12 @@ export class TauriAdapter implements PlatformAdapter {
         listenToWindow<unknown>(name, (event) => void this.alerts.onEvent(name, event.payload))),
 
       listenToWindow<unknown>("voice:status", (event) => this.managedVoice?.receiveStatus(event.payload)),
+
+      listenToWindow<PaneWebviewEvent>("dormouse://pane-webview", (event) => {
+        for (const listener of this.paneWebviewListeners) listener(event.payload);
+      }),
+
+      paneWebviewReady,
     ]);
     this.managedVoice?.refresh();
     // This realm is new, whether the window just opened or reloaded: the
@@ -454,6 +465,59 @@ export class TauriAdapter implements PlatformAdapter {
 
   releaseIframeProxy(lease: string): void {
     this.leaseOrder.release(lease, () => void rawInvoke("iframe_release_proxy", { lease }).catch(() => {}));
+  }
+
+  // --- pane webviews (docs/specs/webview-pane.md) ---
+
+  paneWebview?: PaneWebviewHost;
+  private readonly paneWebviewListeners = new Set<(event: PaneWebviewEvent) => void>();
+
+  /** Offer pane webviews where the host builds them, once a page this one
+   *  replaced (a reload) has had every view it left destroyed. */
+  private async initPaneWebview(): Promise<void> {
+    try {
+      if (!await rawInvoke<boolean>("pane_webview_supported")) return;
+      await rawInvoke("pane_webview_reset");
+    } catch (err) {
+      console.error("[tauri-adapter] pane webviews unavailable:", err);
+      return;
+    }
+    // One view's commands go out one at a time: WebView2 delivers invokes
+    // sent together out of order, and a hide that overtook its show would
+    // leave the view up, as an open that overtook a close would lose it. A
+    // still is no part of that order, so that hiding never waits on one.
+    const last = new Map<string, Promise<void>>();
+    const inOrder = <T>(id: string, cmd: string, args: Record<string, unknown>): Promise<T> => {
+      const answer = (last.get(id) ?? Promise.resolve()).then(() => rawInvoke<T>(cmd, args));
+      const done = answer.then(() => {}, () => {});
+      last.set(id, done);
+      void done.then(() => { if (last.get(id) === done) last.delete(id); });
+      return answer;
+    };
+    const send = (id: string, cmd: string, args: Record<string, unknown>): void => {
+      inOrder(id, cmd, args).catch((err) => console.error(`[tauri-adapter] ${cmd} failed:`, err));
+    };
+    this.paneWebview = {
+      open: async (id, url) => {
+        try {
+          return { ok: true, page: await inOrder<PaneWebviewPage>(id, "pane_webview_open", { id, url }) };
+        } catch (err) {
+          return { ok: false, error: errMessage(err) };
+        }
+      },
+      place: (id, rect) => send(id, "pane_webview_place", { id, rect }),
+      navigate: (id, url) => send(id, "pane_webview_navigate", { id, url }),
+      history: (id, dir) => send(id, "pane_webview_history", { id, dir }),
+      focus: (id) => send(id, "pane_webview_focus", { id }),
+      blur: (id) => send(id, "pane_webview_focus", { id: null, from: id }),
+      close: (id) => send(id, "pane_webview_close", { id }),
+      answer: (id, accept, text) => send(id, "pane_webview_answer", { id, accept, text }),
+      snapshot: (id) => rawInvoke<string>("pane_webview_snapshot", { id }).catch(() => null),
+      onEvent: (listener) => {
+        this.paneWebviewListeners.add(listener);
+        return () => { this.paneWebviewListeners.delete(listener); };
+      },
+    };
   }
 
   // --- browser automation (docs/specs/dor-browser.md → "Browser Host").
