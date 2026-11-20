@@ -15,6 +15,7 @@ import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, format
 import { placeCopyEditor, selectionBand, type CopyEditorSide } from '../lib/copy-editor-placement';
 import { copySelection } from '../lib/copy-selection';
 import { setPortalAnchor } from '../lib/dom';
+import { useOccludePaneWebviews } from '../lib/pane-webview-occlusion';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
 import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
@@ -143,6 +144,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
   copyState: CopyState;
   programCopy: string | null;
 }) {
+  useOccludePaneWebviews(true);
   const touchUi = useContext(TouchUiContext);
   const zoomedId = useContext(ZoomedIdContext);
   const workspaceId = useContext(WorkspaceIdContext);

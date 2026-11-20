@@ -4,7 +4,7 @@
 import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { FakePtyAdapter, getPlatform, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
 import type { PaneProps } from './pane-props';
 import { runInNewContext } from 'node:vm';
@@ -12,7 +12,7 @@ import { iframeShim } from '../../host/iframe-proxy-rewrite';
 import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
-import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
+import { installBrowserHost, installPaneWebview, stubWallActions as stubActions } from './wall-test-utils';
 import { rememberBrowserProvider } from './BrowserProviderSwitch';
 import { confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 import { resetToolDirty } from '../../lib/tool-dirty-store';
@@ -787,6 +787,36 @@ describe('iframe failures offer a way out', () => {
     expect(container.textContent).toContain('dor agent-browser open https://example.com/');
   });
 
+  it('offers the webview, and names dor webview, on an unproxyable url where the host has pane webviews', async () => {
+    const onSwapRenderMode = vi.fn();
+    installPaneWebview(proxyPlatform({ ok: false, reason: 'scheme', detail: 'the embedded view frames http:// pages only' }));
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+          <WallActionsContext.Provider value={stubActions({ onSwapRenderMode })}>
+            <IframePanel id="iframe-https" title="t" params={{ url: 'https://example.com/' }} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    expect(container.textContent).toContain('or run dor webview https://example.com/');
+    expect(button('Open in agent-browser')).toBeUndefined();
+    await act(async () => { button('Open in webview')!.click(); });
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-https', 'webview');
+  });
+
+  it('holds a new-tab prompt back while its pane is out of sight', async () => {
+    proxyPlatform();
+    const props = paneProps('iframe-parked');
+    await renderPanel(stubActions(), { ...props, parked: true });
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin: PROXY, data: { __dormouse: 'open-window', url: `${PROXY}/docs` } }));
+    });
+    expect(button('Open in new pane')).toBeUndefined();
+    await renderPanel(stubActions(), props);
+    expect(button('Open in new pane')).toBeDefined();
+  });
+
   it('opens a new https:// tab in agent-browser instead of an iframe that would refuse it', async () => {
     const onOpenBrowserPane = vi.fn();
     proxyPlatform();
@@ -805,6 +835,14 @@ describe('iframe failures offer a way out', () => {
     await openWindow(`${PROXY}/docs`);
     await act(async () => { button('Open in new pane')!.click(); });
     expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'http://example.test/docs');
+
+    // Where the host has pane webviews, the Wall opens it in one.
+    installPaneWebview(getPlatform());
+    await openWindow('https://accounts.example/login');
+    expect(button('Open in agent-browser')).toBeUndefined();
+    expect(container.textContent).toContain('It is an https:// page, and the embedded view frames http:// pages only.');
+    await act(async () => { button('Open in webview')!.click(); });
+    expect(onOpenBrowserPane).toHaveBeenLastCalledWith('iframe-newtab', 'https://accounts.example/login');
   });
 });
 
@@ -899,8 +937,9 @@ describe('external origins', () => {
   }
 
   /** A pane under {@link policyHost}, whose param writes land back in its props. */
-  async function renderGated(url: string, actions: WallActions = stubActions(), policy: NetworkPolicy = { level: 'nothing', allowed: ['10.8.0.0/24'], autoUpdate: false }) {
+  async function renderGated(url: string, actions: WallActions = stubActions(), policy: NetworkPolicy = { level: 'nothing', allowed: ['10.8.0.0/24'], autoUpdate: false }, webviews = false) {
     const platform = installBrowserHost().platform;
+    if (webviews) installPaneWebview(platform);
     const host = policyHost(platform, policy);
     const openExternal = vi.fn();
     platform.openExternal = openExternal;
@@ -992,6 +1031,15 @@ describe('external origins', () => {
     expect(container.textContent).toContain('Website on the internet');
     expect(Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim()))
       .toEqual(['Open in agent-browser', 'Open in browser', 'Cancel']);
+  });
+
+  it('offers the webview first where the host has pane webviews', async () => {
+    const onSwapRenderMode = vi.fn();
+    await renderGated(`${EXTERNAL}/guide`, stubActions({ onSwapRenderMode }), undefined, true);
+    expect(Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim()))
+      .toEqual(['Open in webview', 'Open in agent-browser', 'Open in browser', 'Cancel']);
+    await act(async () => { button('Open in webview')!.click(); });
+    expect(onSwapRenderMode).toHaveBeenCalledExactlyOnceWith('iframe-external', 'webview');
   });
 
   it('offers no Allow for a private network this computer is not on, naming Settings instead', async () => {

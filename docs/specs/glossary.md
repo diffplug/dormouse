@@ -24,7 +24,7 @@ A Pane holds one primary Surface today; aux terminals share its Pane ([Container
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — a **Session** |
 | `tool` | — | a PTY and an optional browser on the same Session |
-| `browser` | `iframe`, `agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout` | an iframe proxy grant, or an automation-provider session (`docs/specs/dor-browser.md`) |
+| `browser` | `iframe`, `webview`, `agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout` | an iframe proxy grant, a pane webview (`docs/specs/webview-pane.md`), or an automation-provider session (`docs/specs/dor-browser.md`) |
 
 **For a browser Surface `renderMode` is canonical**; the CLI `render_mode` is derived from it and never stored.
 
@@ -45,7 +45,7 @@ A Session runs all six axes ([Layers](#layers)); a browser Surface participates 
 | **View** | full — all four states apply |
 | **Activity** | **TODO only** — user-flagged; never reaches `ALERT_RINGING` (no BEL/OSC source) |
 | **Snapshot** | `surfaceType` + render params, plus the alert blob's `todo` |
-| **Process** | none — lifetime is the agent-browser session or proxy grant, keyed outside the Pane id |
+| **Process** | none — lifetime is the agent-browser session or proxy grant, keyed outside the Pane id, or the pane webview |
 | **Registry** | none — DOM is LathHost's leaf div (never re-parented); focus via a lightweight handle |
 | **Link** | none — rebuilt from persisted params, not replayed |
 
@@ -59,7 +59,7 @@ Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 
 ## Containers
 
-**Must keep an aux terminal as a Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, targetable id, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown aux terminal is `Paned` within the source body; a closed context leaves it `Hidden` and DOM-parked (`Mounted`).
+**Must keep an aux terminal as a Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, targetable id, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown aux terminal is `Paned` within the source body; a closed context, or one showing properties, leaves it `Hidden` and DOM-parked (`Mounted`).
 
 Workspace and Window are containers, not Session layers — they group Surfaces rather than describing one Surface's state (containment is I7).
 

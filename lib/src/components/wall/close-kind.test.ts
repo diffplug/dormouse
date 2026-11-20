@@ -75,6 +75,7 @@ describe('closeKind reopenable kinds', () => {
 
   it.each([
     ['an iframe browser', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' }, 'reopenable'],
+    ['a webview browser', { surfaceType: 'browser', renderMode: 'webview', url: 'https://example.com/' }, 'reopenable'],
     ['an agent-browser', { surfaceType: 'browser', renderMode: 'agent-browser-screencast', url: 'http://localhost:5173/' }, 'confirm'],
     ['a playwright browser', { surfaceType: 'browser', renderMode: 'playwright-screencast', url: 'http://localhost:5173/' }, 'confirm'],
   ] as const)('classifies %s', (_label, params, kind) => {

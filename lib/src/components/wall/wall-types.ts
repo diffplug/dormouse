@@ -1,5 +1,6 @@
 import type { SurfaceKind } from 'dor/commands/types';
 import type { BrowserDisplayMode } from './agent-browser-screen';
+import type { ContextMode } from './wall-context';
 import type { ReconnectResult } from '../../lib/reconnect';
 import type { PersistedDoor, WorkspaceId } from '../../lib/session-types';
 
@@ -97,4 +98,6 @@ export type WallEvent =
   // the tiling engine.
   | { type: 'paneAdded'; id: string }
   | { type: 'kill'; id: string }
+  // A terminal context opening on `id`, in the mode it opens on.
+  | { type: 'contextOpen'; id: string; mode: ContextMode }
   | { type: 'move'; fromId: string; toId: string };

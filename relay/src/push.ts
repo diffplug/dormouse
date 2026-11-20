@@ -138,12 +138,7 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
   return decoded;
 }
 
-/**
- * Real delivery: `web-push` builds the encrypted body and VAPID headers, and
- * `postToPushService` sends them, at the shared `PUSH_TTL_SECONDS`. The
- * request timeout is a separate bound on socket inactivity while talking to
- * the push service.
- */
+/** Bound on socket inactivity while talking to the push service. */
 export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 
 // The third bound of the trio, `PUSH_SEND_DEADLINE_MS`, lives in
@@ -263,6 +258,11 @@ function postToPushService(
   });
 }
 
+/**
+ * Real delivery: `web-push` builds the encrypted body and VAPID headers, and
+ * `postToPushService` sends them, at the shared `PUSH_TTL_SECONDS`, under
+ * `PUSH_REQUEST_TIMEOUT_MS`.
+ */
 export function createWebPushSender(
   keys: VapidKeys,
   subject: string,

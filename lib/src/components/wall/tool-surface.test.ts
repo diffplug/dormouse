@@ -14,6 +14,8 @@ import {
   toolPendingFromParams,
 } from './browser-surface';
 import { persistableLeafMeta, shouldParkOnMinimize, toolLeafMeta } from './lath-wall-engine';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { installPaneWebview } from './wall-test-utils';
 
 const booting = { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo' };
 const serving = { ...booting, url: 'http://localhost:6006/', renderMode: 'iframe' };
@@ -234,5 +236,14 @@ describe('retainsLivePage', () => {
     expect(retainsLivePage({ surfaceType: 'tool', renderMode: 'iframe' })).toBe(false);
     expect(retainsLivePage({ surfaceType: 'browser', renderMode: 'agent-browser-screencast' })).toBe(false);
     expect(retainsLivePage({ surfaceType: 'terminal' })).toBe(false);
+  });
+
+  it('is a webview only where the iframe renderer stands in for it', () => {
+    const webview = { surfaceType: 'browser', renderMode: 'webview', url: 'https://example.com/' };
+    const platform = new FakePtyAdapter();
+    setPlatform(platform);
+    expect(retainsLivePage(webview)).toBe(true);
+    installPaneWebview(platform);
+    expect(retainsLivePage(webview)).toBe(false);
   });
 });

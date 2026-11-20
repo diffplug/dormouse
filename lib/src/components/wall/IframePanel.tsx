@@ -12,6 +12,8 @@ import {
   openAgentBrowserScreenModal,
   registerAgentBrowserScreen,
   type ChromeActions,
+  type ChromeSnapshot,
+  type RenderMode,
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
@@ -25,6 +27,9 @@ import { preferredBrowserProvider } from './BrowserProviderSwitch';
 import { BROWSER_PROVIDER_IDS, renderModeFor } from 'dor-lib-common/browser-providers';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 import { isRealBlur } from '../../lib/window-focus';
+import { isSeenObserved } from '../../lib/surface-sight';
+import { useSurfaceSight } from './use-surface-visibility';
+import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { changeNetworkPolicy, getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../../remote/burrow/network-policy-store';
 import { ALLOWED_NETWORK_REACH, withAllowedNetworks } from '../../remote/network-policy';
 import { useBusyAction } from '../remote-control-shared';
@@ -41,6 +46,10 @@ const SHIM_REPORT_LEAD_MS = 250;
 // hidden, so it still lays out and loads. One whose load never fires shows
 // after this.
 const FIRST_PAINT_FALLBACK_MS = 1000;
+
+/** What shows a page the embed cannot, by name and the command that opens it. */
+interface Remedy { label: string; open: string }
+const WEBVIEW_REMEDY: Remedy = { label: 'webview', open: 'dor webview' };
 
 type Resolution =
   | { kind: 'empty' }
@@ -162,7 +171,7 @@ function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, prox
   }
 }
 
-export function IframePanel({ id, title, params, onReady }: PaneProps & {
+export function IframePanel({ id, title, params, parked, onReady }: PaneProps & {
   /** A frame after a document loads. */
   onReady?: () => void;
 }) {
@@ -186,6 +195,8 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
   const [pendingOpenUrl, setPendingOpenUrl] = useState<string | null>(null);
+  // The prompt hides every pane webview, so a pane out of sight holds it back.
+  const seen = isSeenObserved(useSurfaceSight(parked, id));
   // The proxied frame loaded a document with no shim in it (docs/specs/dor-browser.md
   // → "Iframe Shim").
   const [uninstrumented, setUninstrumented] = useState(false);
@@ -204,8 +215,6 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // Bumped by the header's reload button to re-resolve the proxy (a cross-origin
   // frame can't be reloaded via its contentWindow).
   const [reloadNonce, setReloadNonce] = useState(0);
-  const actionsRef = useRef(actions);
-  actionsRef.current = actions;
 
   // Params are still the persisted/source URL for session restore and
   // render-swaps. Keep a small browser-like history on top so iframe chrome
@@ -371,37 +380,17 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     return () => { cancelled = true; };
   }, [allowedKey, sourceUrl, lease]);
 
-  // Register a screen controller so the embed surface shows the unified
-  // browser chrome (URL + the far-left chip → Display modal) and can swap back
-  // to a live screencast. Gated on the host being able to launch an automated
-  // browser — without one there's no screencast to swap to, so the embed
-  // surface keeps its plain title (e.g. the web host). A tool never pops out
-  // or changes provider (`docs/specs/dor-tool.md` -> Declaring tools); the
-  // other registration site is `agent-browser-surface-controller.ts`.
+  // A tool never pops out or changes provider (`docs/specs/dor-tool.md` ->
+  // Declaring tools).
   const renderModes = useMemo(() => offeredRenderModes(isTool, null), [isTool]);
-  const swapCapable = renderModes.some((mode) => mode !== 'iframe');
-  // Where a page the embed cannot show opens instead: the remembered
-  // provider's screencast, among those this Surface can take.
+  // Where a page the embed cannot show opens instead: a pane webview where
+  // this Surface can take one, else the remembered provider's screencast,
+  // among those it can take.
   const remedyProviders = BROWSER_PROVIDER_IDS.filter((provider) => renderModes.includes(renderModeFor(provider, 'screencast')));
   const remedyProvider = remedyProviders.length ? preferredBrowserProvider(remedyProviders) : null;
-  const remedy = BROWSER_PROVIDER_GUI[remedyProvider ?? 'agent-browser'];
-  const screenActions = useMemo<ScreenActions>(() => ({
-    engageSync() {},
-    openModal() { openAgentBrowserScreenModal(id); },
-    // iframe is the current backend; every other offered mode swaps to an
-    // automated browser. Wired only when the host can launch one — without it
-    // the header offers no Display modal, but the chrome (URL/nav) still shows.
-    setRenderMode: swapCapable
-      ? (mode, opts) => { if (mode !== 'iframe' && renderModes.includes(mode)) {
-        if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);
-        else actionsRef.current.onSwapRenderMode(id, mode);
-      } }
-      : undefined,
-  }), [id, swapCapable, renderModes]);
-  const setRenderMode = screenActions.setRenderMode;
-  // At the pane's size, as the Display modal preselects for an embed (`viewportSetting`).
-  const openInAgentBrowser = setRenderMode && remedyProvider
-    ? () => setRenderMode(renderModeFor(remedyProvider, 'screencast'), { viewport: { mode: 'pane-sync' } }) : undefined;
+  const provider = BROWSER_PROVIDER_GUI[remedyProvider ?? 'agent-browser'];
+  const webview = renderModes.includes('webview');
+  const remedy = webview ? WEBVIEW_REMEDY : { label: provider.label, open: `${provider.cli} open` };
   // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
   // chrome action that replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
@@ -422,34 +411,13 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       if (isTool) withToolEditorConsent(id, reload); else reload();
     },
   }), [id, isTool, paneWrite, commitUrl, goToHistoryIndex]);
-  const registrationRef = useRef<ScreenRegistration | null>(null);
-  // Register the screen controller unconditionally so the browser chrome (URL +
-  // far-left chip) shows for every iframe surface, on every host — `dor iframe`
-  // is a full browser-chrome tab, not a lesser one (docs/specs/dor-browser.md).
-  // The render-swap action is gated separately (screenActions.setRenderMode).
-  useEffect(() => {
-    const registration = registerAgentBrowserScreen(id, {
-      snapshot: {
-        renderMode: 'iframe',
-        viewport: { w: 0, h: 0, dpr: 1 },
-        syncEngaged: false,
-      },
-      actions: screenActions,
-      chrome: { url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null },
-      chromeActions,
-      hostCapable: false,
-      renderModes,
-      // An embed renders at the pane size, so a swap to screencast follows it.
-      viewportSetting: () => ({ mode: 'pane-sync' }),
-    });
-    registrationRef.current = registration;
-    return () => { registration.dispose(); registrationRef.current = null; };
-  }, [id, screenActions, chromeActions, renderModes]);
-  // Keep the header's URL current as navigation and in-frame location changes
-  // land. The iframe src is still driven only by sourceUrl.
-  useEffect(() => {
-    registrationRef.current?.updateChrome({ url: liveUrl, displayUrl: hostPathDisplay(liveUrl), title: title ?? null, key: null });
-  }, [liveUrl, title]);
+  // The iframe src is driven only by sourceUrl; the chrome follows liveUrl.
+  const setRenderMode = useUndrivenScreen(id, 'iframe', renderModes, liveUrl, title ?? null, chromeActions);
+  // At the pane's size, as the Display modal preselects for an embed (`viewportSetting`).
+  const openInProvider = setRenderMode && remedyProvider
+    ? () => setRenderMode(renderModeFor(remedyProvider, 'screencast'), { viewport: { mode: 'pane-sync' } }) : undefined;
+  const openInWebview = setRenderMode && webview ? () => setRenderMode('webview') : undefined;
+  const openInRemedy = openInWebview ?? openInProvider;
 
   // Trust postMessage from this frame's origin only while the proxied surface is live.
   const proxyOrigin = resolution.kind === 'proxied' ? resolution.origin : null;
@@ -627,8 +595,9 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
             // The policy's event re-asks; an offer already allowed meanwhile does not move it.
             if (!await allowNetworks(resolution.offer!.prefixes)) setReloadNonce((n) => n + 1);
           } : undefined}
-          onOpenInAgentBrowser={openInAgentBrowser}
-          remedyLabel={remedy.label}
+          onOpenInWebview={openInWebview}
+          onOpenInAgentBrowser={openInProvider}
+          remedyLabel={provider.label}
           onOpenInBrowser={getPlatform().openExternal ? () => {
             getPlatform().openExternal?.(sourceUrl);
             cancelExternal();
@@ -636,7 +605,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
           onCancel={cancelExternal}
         />
       ) : (
-        <PanelMessage resolution={resolution} url={sourceUrl} remedy={remedy} onOpenInAgentBrowser={openInAgentBrowser} />
+        <PanelMessage resolution={resolution} url={sourceUrl} remedy={remedy} onOpenRemedy={openInRemedy} />
       )}
       {uninstrumented && (
         <PopupButtonRow
@@ -648,20 +617,21 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
             Dormouse can’t follow this page — it isn’t an HTML page on the proxy, so the URL bar and leader chord stop at it.
           </span>
           <button type="button" className={popupButton()} onClick={() => chromeActions.reload()}>Reload</button>
-          {openInAgentBrowser && (
-            <button type="button" className={popupButton()} onClick={openInAgentBrowser}>Open in {remedy.label}</button>
+          {openInRemedy && (
+            <button type="button" className={popupButton()} onClick={openInRemedy}>Open in {remedy.label}</button>
           )}
           <button type="button" className={popupButton()} aria-label="Dismiss" onClick={() => setUninstrumented(false)}>
             <XIcon size={12} weight="bold" />
           </button>
         </PopupButtonRow>
       )}
-      {pendingOpenUrl && (
+      {pendingOpenUrl && seen && (
         <NewTabPrompt
           url={pendingOpenUrl}
-          // Where the Wall will open it (`onOpenBrowserPane` decides the same way).
-          refusal={remedyProvider ? iframeRefusal(pendingOpenUrl) : null}
-          remedyLabel={remedy.label}
+          // Where the Wall will open it (`onOpenBrowserPane` decides the same
+          // way): a new pane is no Tool, so it takes a webview where the host has them.
+          refusal={getPlatform().paneWebview || remedyProvider ? iframeRefusal(pendingOpenUrl) : null}
+          remedyLabel={getPlatform().paneWebview && iframeRefusal(pendingOpenUrl) ? WEBVIEW_REMEDY.label : provider.label}
           onOpen={() => {
             setPendingOpenUrl(null);
             actions.onOpenBrowserPane?.(id, pendingOpenUrl);
@@ -673,16 +643,64 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   );
 }
 
+/**
+ * Registers the browser chrome of a renderer no agent drives, on every host:
+ * the URL bar and the far-left chip show for each such Surface. It renders at
+ * the pane size, so a swap to a screencast follows the pane. Returns the swap
+ * to another of `renderModes`, absent with none to offer.
+ */
+export function useUndrivenScreen(
+  id: string,
+  renderMode: 'iframe' | 'webview',
+  renderModes: readonly RenderMode[],
+  url: string,
+  title: string | null,
+  chromeActions: ChromeActions,
+): ScreenActions['setRenderMode'] {
+  const actions = useContext(WallActionsContext);
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+  const swapCapable = renderModes.some((mode) => mode !== renderMode);
+  const screenActions = useMemo<ScreenActions>(() => ({
+    engageSync() {},
+    openModal() { openAgentBrowserScreenModal(id); },
+    setRenderMode: swapCapable ? (mode, opts) => {
+      if (mode === renderMode || !renderModes.includes(mode)) return;
+      if (opts?.viewport) actionsRef.current.onSwapRenderMode(id, mode, opts.viewport);
+      else actionsRef.current.onSwapRenderMode(id, mode);
+    } : undefined,
+  }), [id, renderMode, swapCapable, renderModes]);
+  const chrome = useMemo<ChromeSnapshot>(() => ({ url, displayUrl: hostPathDisplay(url), title, key: null }), [url, title]);
+  const registrationRef = useRef<ScreenRegistration | null>(null);
+  useEffect(() => {
+    const registration = registerAgentBrowserScreen(id, {
+      snapshot: { renderMode, viewport: { w: 0, h: 0, dpr: 1 }, syncEngaged: false },
+      actions: screenActions,
+      chrome,
+      chromeActions,
+      hostCapable: false,
+      renderModes,
+      viewportSetting: () => ({ mode: 'pane-sync' }),
+    });
+    registrationRef.current = registration;
+    return () => { registration.dispose(); registrationRef.current = null; };
+  }, [id, renderMode, screenActions, chromeActions, renderModes]);
+  useEffect(() => { registrationRef.current?.updateChrome(chrome); }, [chrome]);
+  return screenActions.setRenderMode;
+}
+
 // What it asks is where the page is: a public address never frames, and a
 // private one frames once its network is allowed, which also lets it reach
 // this computer's own services — so the consent names the network, and says so.
-export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, onOpenInAgentBrowser, remedyLabel = 'agent-browser', onOpenInBrowser, onCancel }: {
+export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, onOpenInWebview, onOpenInAgentBrowser, remedyLabel = 'agent-browser', onOpenInBrowser, onCancel }: {
   origin: string;
   /** Some address it is on is public, so no network can be allowed for it. */
   publicAddress: boolean;
   /** This machine's networks holding it, which `onAllow` allows. */
   offer?: IframeNetworkOffer;
   onAllow?: () => Promise<void>;
+  /** Shows the page at its own origin, which no network policy gates. */
+  onOpenInWebview?: () => void;
   onOpenInAgentBrowser?: () => void;
   /** The provider `onOpenInAgentBrowser` opens. */
   remedyLabel?: string;
@@ -714,8 +732,13 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
             Allow {offer.label} ({offer.prefixes.join(', ')})
           </button>
         )}
+        {onOpenInWebview && (
+          <button type="button" {...press(onOpenInWebview)} className={modalActionButton({ tone: 'primary' })}>
+            Open in {WEBVIEW_REMEDY.label}
+          </button>
+        )}
         {onOpenInAgentBrowser && (
-          <button type="button" {...press(onOpenInAgentBrowser)} className={modalActionButton({ tone: 'primary' })}>
+          <button type="button" {...press(onOpenInAgentBrowser)} className={modalActionButton({ tone: onOpenInWebview ? 'secondary' : 'primary' })}>
             Open in {remedyLabel}
           </button>
         )}
@@ -723,7 +746,7 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
           <button
             type="button"
             {...press(onOpenInBrowser)}
-            className={modalActionButton({ tone: onOpenInAgentBrowser ? 'secondary' : 'primary' })}
+            className={modalActionButton({ tone: onOpenInWebview || onOpenInAgentBrowser ? 'secondary' : 'primary' })}
           >
             Open in browser
           </button>
@@ -737,14 +760,16 @@ export function ExternalPreviewPrompt({ origin, publicAddress, offer, onAllow, o
   );
 }
 
-function NewTabPrompt({ url, refusal, remedyLabel, onOpen, onCancel }: {
+export function NewTabPrompt({ url, refusal, remedyLabel, onOpen, onCancel }: {
   url: string;
   /** Why an iframe cannot show it, so it opens in `remedyLabel` instead. */
   refusal: string | null;
-  remedyLabel: string;
+  /** Absent: no other renderer to recommend. */
+  remedyLabel?: string;
   onOpen: () => void;
   onCancel: () => void;
 }) {
+  useOccludePaneWebviews(true);
   return (
     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-terminal-bg/95 px-6 text-center">
       <div className="max-w-sm text-sm text-foreground">
@@ -769,21 +794,23 @@ function NewTabPrompt({ url, refusal, remedyLabel, onOpen, onCancel }: {
           Cancel
         </button>
       </div>
-      <div className="text-xs text-muted/80">
-        {refusal
-          ? `It is an https:// page, and ${refusal}.`
-          : `Pages that open many tabs work better in ${remedyLabel} — open the chip → Display.`}
-      </div>
+      {remedyLabel && (
+        <div className="text-xs text-muted/80">
+          {refusal
+            ? `It is an https:// page, and ${refusal}.`
+            : `Pages that open many tabs work better in ${remedyLabel} — open the chip → Display.`}
+        </div>
+      )}
     </div>
   );
 }
 
-function PanelMessage({ resolution, url, remedy, onOpenInAgentBrowser }: {
+function PanelMessage({ resolution, url, remedy, onOpenRemedy }: {
   resolution: Resolution;
   url: string;
-  /** The provider `onOpenInAgentBrowser` opens. */
-  remedy: { label: string; cli: string };
-  onOpenInAgentBrowser?: () => void;
+  /** What `onOpenRemedy` opens, and the command that opens it. */
+  remedy: Remedy;
+  onOpenRemedy?: () => void;
 }) {
   if (resolution.kind === 'resolving') {
     return <PaneMessage className="text-muted">Connecting to <span className="ml-1 font-semibold">{url}</span>…</PaneMessage>;
@@ -796,22 +823,22 @@ function PanelMessage({ resolution, url, remedy, onOpenInAgentBrowser }: {
   // 'error' — the proxy turned a dead end into something actionable. (Unreachable
   // cases are served as a page inside the frame; this covers the synchronous
   // ones, chiefly an unproxyable scheme such as https://.)
-  // agent-browser is the remedy only where the URL itself is fine and the proxy
+  // The remedy is offered only where the URL itself is fine and the proxy
   // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
   // so pointing a refused scheme at it would be a dead end.
-  const command = <code className="rounded bg-app-bg px-1 py-0.5">{remedy.cli} open {url}</code>;
+  const command = <code className="rounded bg-app-bg px-1 py-0.5">{remedy.open} {url}</code>;
   return (
     <PaneMessage className="text-muted" contentClassName="flex flex-col gap-2">
       <div>{messageFor(resolution)}</div>
       {resolution.reason === 'non-http' ? (
         <div className="text-xs text-muted/80">Enter an http:// address in the URL bar above.</div>
-      ) : onOpenInAgentBrowser ? (
+      ) : onOpenRemedy ? (
         <div className="flex flex-col items-start gap-1.5 text-xs text-muted/80">
           <button
             type="button"
             className={modalActionButton({ tone: 'primary' })}
             onMouseDown={(e) => e.stopPropagation()}
-            onClick={onOpenInAgentBrowser}
+            onClick={onOpenRemedy}
           >
             Open in {remedy.label}
           </button>

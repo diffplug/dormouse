@@ -515,6 +515,7 @@ export interface MoveSurfaceResponse {
   workspaceId: string;
 }
 
+/** `surface.iframe`'s, and `surface.webview`'s. */
 export interface IframeSurfaceRequest extends WorkspaceScopedRequest, FocusIntentRequest {
   minimized: boolean;
   surface?: string;
@@ -655,6 +656,7 @@ export interface ControlClient {
   moveSurface(request: MoveSurfaceRequest): Promise<MoveSurfaceResponse>;
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
+  webviewSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse>;
   listWorkspaces(request: ListWorkspacesRequest): Promise<ListWorkspacesResponse>;
   newWorkspace(request: NewWorkspaceRequest): Promise<WorkspaceMutationResponse>;

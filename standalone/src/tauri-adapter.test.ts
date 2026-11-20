@@ -413,3 +413,79 @@ describe("TauriAdapter terminal stream", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 });
+
+describe("TauriAdapter pane webview", () => {
+  async function booted(supported: boolean) {
+    const handlers = new Map<string, (event: { payload: unknown }) => void>();
+    vi.mocked(listen).mockImplementation((async (event: string, handler: (e: { payload: unknown }) => void) => {
+      handlers.set(event, handler);
+      return () => {};
+    }) as unknown as typeof listen);
+    const invoke = vi.mocked(rawInvoke);
+    invoke.mockClear();
+    invoke.mockImplementation((async (cmd: string) => {
+      if (cmd === "pane_webview_supported") return supported;
+      if (cmd === "pane_webview_open") throw "no window";
+      if (cmd === "pane_webview_snapshot") throw "no snapshot";
+      return undefined;
+    }) as unknown as typeof rawInvoke);
+    const adapter = new TauriAdapter();
+    await adapter.init();
+    return { adapter, invoke, deliver: (payload: unknown) => handlers.get("dormouse://pane-webview")?.({ payload }) };
+  }
+
+  it("offers pane webviews only where the host builds them, resetting this window's views before any opens", async () => {
+    const without = await booted(false);
+    expect(without.adapter.paneWebview).toBeUndefined();
+    expect(without.invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("pane_webview_reset");
+
+    const { adapter, invoke } = await booted(true);
+    expect(adapter.paneWebview).toBeDefined();
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).toContain("pane_webview_reset");
+  });
+
+  it("carries each operation as its command, answers a failed open as a result, and delivers the window's events", async () => {
+    const { adapter, invoke, deliver } = await booted(true);
+    const host = adapter.paneWebview!;
+    invoke.mockClear();
+    // One view's commands are sent one at a time, in the order they were made,
+    // and another view's do not wait on them.
+    let release!: () => void;
+    invoke.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    host.place("s1", { x: 1, y: 2, width: 3, height: 4 });
+    host.place("s1", null);
+    host.focus("s2");
+    await Promise.resolve();
+    expect(invoke.mock.calls).toEqual([
+      ["pane_webview_place", { id: "s1", rect: { x: 1, y: 2, width: 3, height: 4 } }],
+      ["pane_webview_focus", { id: "s2" }],
+    ]);
+    release();
+    host.navigate("s1", "https://example.com/");
+    host.history("s1", "back");
+    host.blur("s1");
+    host.answer("s1", true, "typed");
+    host.close("s1");
+    // An open waits its turn too: one that overtook the close would be destroyed by it.
+    const reopened = host.open("s1", "https://example.com/");
+    await vi.waitFor(() => expect(invoke.mock.calls.slice(2)).toEqual([
+      ["pane_webview_place", { id: "s1", rect: null }],
+      ["pane_webview_navigate", { id: "s1", url: "https://example.com/" }],
+      ["pane_webview_history", { id: "s1", dir: "back" }],
+      ["pane_webview_focus", { id: null, from: "s1" }],
+      ["pane_webview_answer", { id: "s1", accept: true, text: "typed" }],
+      ["pane_webview_close", { id: "s1" }],
+      ["pane_webview_open", { id: "s1", url: "https://example.com/" }],
+    ]));
+    expect(await reopened).toEqual({ ok: false, error: "no window" });
+    expect(await host.snapshot("s1")).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith("pane_webview_snapshot", { id: "s1" });
+
+    const events: unknown[] = [];
+    const unsubscribe = host.onEvent((event) => events.push(event));
+    deliver({ id: "s1", kind: "leader" });
+    unsubscribe();
+    deliver({ id: "s1", kind: "pointerdown" });
+    expect(events).toEqual([{ id: "s1", kind: "leader" }]);
+  });
+});

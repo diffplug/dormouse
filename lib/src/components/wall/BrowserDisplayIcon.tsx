@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import {
   ArrowSquareOutIcon,
   FrameCornersIcon,
+  GlobeIcon,
   type Icon,
   PictureInPictureIcon,
 } from '@phosphor-icons/react';
@@ -12,18 +13,20 @@ import { BROWSER_VIEWS, displayModeFor, displayView, type BrowserDisplayMode, ty
 const VIEW_LABEL: Record<BrowserView, string> = { resize: 'resizes with pane', fixed: 'fixed size', popout: 'popout' };
 /** How the human view is presented: one glyph per view, the embed framed like
  *  a pane-sized screencast. */
-const VIEW_ICON: Record<BrowserView | 'iframe', Icon> = {
+const VIEW_ICON: Record<BrowserView | 'iframe' | 'webview', Icon> = {
   resize: FrameCornersIcon,
   fixed: PictureInPictureIcon,
   popout: ArrowSquareOutIcon,
   iframe: FrameCornersIcon,
+  webview: GlobeIcon,
 };
 
-/** Every display mode's label: `<provider> <view>`, and the embed. */
+/** Every display mode's label: `<provider> <view>`, the embed, and the webview. */
 export const BROWSER_DISPLAY_LABEL = Object.fromEntries([
   ...BROWSER_PROVIDER_IDS.flatMap((provider) => BROWSER_VIEWS.map((view) =>
     [displayModeFor(provider, view), `${BROWSER_PROVIDERS[provider].label} ${VIEW_LABEL[view]}`])),
   ['iframe', 'iframe embed'],
+  ['webview', 'native webview'],
 ]) as Record<BrowserDisplayMode, string>;
 
 /** Compact custom robot whose wide silhouette survives the 12–14px chrome. */
@@ -71,7 +74,7 @@ export function BrowserPresentationIcon({
 
 /** One visual grammar for browser presentation everywhere it appears. The
  *  robot means an agent can see/control the page; the companion glyph describes
- *  the human view. iframe intentionally omits the agent glyph. */
+ *  the human view. iframe and webview intentionally omit the agent glyph. */
 export function BrowserDisplayIcon({
   mode,
   size,
@@ -87,7 +90,7 @@ export function BrowserDisplayIcon({
       data-browser-display-mode={mode}
       className={clsx('inline-flex shrink-0 items-center gap-0.5', className)}
     >
-      {mode !== 'iframe' && <AgentRobotIcon size={size} />}
+      {mode !== 'iframe' && mode !== 'webview' && <AgentRobotIcon size={size} />}
       <BrowserPresentationIcon mode={mode} size={size} />
     </span>
   );

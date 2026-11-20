@@ -108,7 +108,7 @@ function framesEqual(a: RingFrame, b: RingFrame): boolean {
 
 /** The frame the ring currently shows: geometry plus the per-edge motion-smear
  *  `speeds`, populated only while a tween runs; a settled ring carries null speeds,
- *  so its render is clean. `union` holds the source and aux terminal rects while a terminal
+ *  so its render is clean. `union` holds the source and context panel rects while a terminal
  *  context is open; `rect` is then their bounds, and both rectangles tween together.
  *  Held in a ref and written to the DOM imperatively. */
 interface DisplayedRing extends RingFrame {
@@ -203,7 +203,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   selectedType: WallSelectionKind;
   mode: WallMode;
   active?: boolean;
-  /** The open context's aux terminal as last painted; LathHost notifies frames after placing it. */
+  /** The open context's panel as last painted; LathHost notifies frames after placing it. */
   contextPanel?: () => ContextPanel | null;
 }) {
   const { elements: paneElements, version: paneVersion } = useContext(PaneElementsContext);
@@ -401,7 +401,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
       const next = measureFrame(targetEl, selectedType);
       if (!next) return;
-      // An open aux terminal's side joins the identity, so opening, closing and switching
+      // An open context panel's side joins the identity, so opening, closing and switching
       // sides tween the union while same-side motion tracks like any other re-measure.
       const aux = selectedType === 'pane' ? contextPanel?.() : null;
       const auxFrame = aux?.sourceId === selectedId ? measureFrame(aux.element, 'pane') : null;

@@ -22,7 +22,7 @@ import * as browserSurface from './wall/browser-surface';
 import * as lathWallEngine from './wall/lath-wall-engine';
 import { TERMINAL_CLOSE_REFUSAL } from './wall/close-for-client';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
-import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
+import { getAgentBrowserScreenController, type RenderMode } from './wall/agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import * as browserAutomation from './wall/browser-automation';
 import { setDevServerResolution } from './wall/agent-browser-ports';
@@ -36,7 +36,7 @@ import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { markSessionTouched, pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
-import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
+import { installBrowserHost, installPaneWebview, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
@@ -281,6 +281,25 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); });
       expect(menu.hasAttribute('inert') || !menu.isConnected).toBe(true);
       expect(focus).not.toHaveBeenCalledWith('surface:a', true);
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
+  it('focuses only the pane left in passthrough when two are entered within one frame', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a', 'surface:b']} initialMode="command" />));
+    await flush();
+    const focus = vi.spyOn(terminalRegistry, 'focusSession');
+    try {
+      const press = (id: string) => container.querySelector(`[data-session-id="${id}"]`)!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await act(async () => {
+        press('surface:a');
+        press('surface:b');
+      });
+      await flushFrame();
+      const focused = focus.mock.calls.filter(([, on, target]) => on && target === undefined).map(([id]) => id);
+      expect(focused).toEqual(['surface:b']);
     } finally {
       focus.mockRestore();
     }
@@ -1710,6 +1729,138 @@ describe('Wall on the Lath engine', () => {
     expect(requests('close')).toContainEqual(expect.objectContaining({ provider: 'agent-browser', binding: { session: 'ab-live' } }));
     // `dor` addresses the swapped Surface by the ref it always had.
     expect(await dispatchResolveBrowser('surface:ab-pane', 'playwright')).toMatchObject({ ok: true, result: { binding: { session: 'pw-1' } } });
+  });
+
+  const webviewLayout = (renderMode: string, url = 'https://example.com/') => ({
+    version: 1 as const,
+    tree: { root: { kind: 'leaf' as const, id: 'surface:web' } },
+    leafMeta: {
+      'surface:web': { component: 'browser', tabComponent: 'surface', title: 'example.com', params: { surfaceType: 'browser', renderMode, url } },
+    },
+  });
+  const swapWeb = async (mode: RenderMode) => {
+    await act(async () => { getAgentBrowserScreenController('surface:web')?.actions.setRenderMode?.(mode); });
+    await flush();
+  };
+
+  it('swaps an iframe to the webview at its page and back, destroying the view only on the way out', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('iframe', 'http://localhost:5173/')} initialMode="command" />));
+    await flush();
+
+    await swapWeb('webview');
+    expect(leafIds()).toEqual(['surface:web']);
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(pane.of('open').at(-1)).toEqual(['open', 'surface:web', 'http://localhost:5173/']);
+    expect(pane.of('close')).toEqual([]);
+
+    await swapWeb('iframe');
+    expect(container.querySelector('iframe')).not.toBeNull();
+    expect(pane.of('close')).toEqual([['close', 'surface:web']]);
+  });
+
+  it('destroys a pane webview on a swap to an automated browser', async () => {
+    const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'ab-1', stream: 4321 }) });
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('webview')} initialMode="command" />));
+    await flush();
+
+    await swapWeb('agent-browser-screencast');
+    expect(pane.of('close')).toEqual([['close', 'surface:web']]);
+    expect(requests('launch')).toEqual([expect.objectContaining({ url: 'https://example.com/' })]);
+  });
+
+  it('destroys a pane webview with its Surface on a kill', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('webview')} initialMode="command" />));
+    await flush();
+
+    expect((await dispatchKill('surface:web'))?.ok).toBe(true);
+    expect(pane.of('close')).toEqual([['close', 'surface:web']]);
+  });
+
+  it('opens a pane webview\'s new-window target as a pane webview', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall restoredLathLayout={webviewLayout('webview')} initialMode="command" />));
+    await flush();
+
+    act(() => pane.emit({ id: 'surface:web', kind: 'open-window', url: 'https://example.com/popup' }));
+    const open = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Open in new pane')!;
+    await act(async () => { open.click(); });
+    await flush();
+    expect(leafIds()).toHaveLength(2);
+    expect(pane.of('open').at(-1)).toEqual(['open', expect.not.stringMatching(/^surface:web$/), 'https://example.com/popup']);
+  });
+
+  /** One control request, its response. */
+  const controlRequest = async (method: string, params: Record<string, unknown>) => {
+    let response: { ok: boolean; error?: string; result?: Record<string, unknown> } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: { method, params, respond: (r: typeof response) => { response = r; } },
+      }));
+    });
+    await flush();
+    return response;
+  };
+
+  it('opens dor webview as a webview Surface, which dor lists as webview and neither drives nor sizes', async () => {
+    const pane = installPaneWebview(fake);
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+
+    const opened = await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'https://example.com/login', focus: false });
+    expect(opened).toMatchObject({ ok: true, result: { status: 'created', url: 'https://example.com/login', minimized: false } });
+    const id = opened!.result!.surfaceId as string;
+    expect(pane.of('open').at(-1)).toEqual(['open', id, 'https://example.com/login']);
+
+    const listed = await controlRequest(SURFACE_CONTROL_METHODS.list, {});
+    expect((listed!.result!.surfaces as Array<{ id: string }>).find((surface) => surface.id === id))
+      .toMatchObject({ kind: 'browser', renderMode: 'webview' });
+
+    const refusal = (provider: string) => `surface '${id}' is not ${provider} rendered (render_mode: webview) — a webview cannot be driven; open its page with dor agent-browser open https://example.com/login`;
+    expect(await dispatchResolveBrowser(id)).toEqual({ ok: false, error: refusal('agent-browser') });
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.browserViewport, { provider: 'playwright', surface: id }))
+      .toEqual({ ok: false, error: refusal('playwright') });
+  });
+
+  it('refuses dor webview before any pane opens where the host has no pane webviews, naming what shows the page', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+    await flush();
+
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'http://localhost:5173/' }))
+      .toEqual({ ok: false, error: 'this host has no webview panes — open it with dor iframe http://localhost:5173/' });
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'https://example.com/' }))
+      .toEqual({ ok: false, error: 'this host has no webview panes — open it with dor agent-browser open https://example.com/' });
+    installPaneWebview(fake);
+    expect(await controlRequest(SURFACE_CONTROL_METHODS.webview, { url: 'javascript:alert(1)' }))
+      .toEqual({ ok: false, error: 'url must be an http:// or https:// URL' });
+    expect(leafIds()).toEqual(['surface:a']);
+  });
+
+  it('opens a new https:// tab from an iframe as a pane webview where the host has them', async () => {
+    const { requests } = hostBrowsers();
+    const pane = installPaneWebview(fake);
+    (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />));
+      await flush();
+      await dispatchIframe('http://localhost:5173/');
+      const before = leafIds();
+      await act(async () => {
+        window.dispatchEvent(new MessageEvent('message', { origin: 'http://127.0.0.1:61234', data: { __dormouse: 'open-window', url: 'https://accounts.example/login' } }));
+      });
+      const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent === 'Open in webview')!;
+      await act(async () => { button.click(); });
+      await flush();
+
+      const [tab] = leafIds().filter((id) => !before.includes(id));
+      expect(pane.of('open').at(-1)).toEqual(['open', tab, 'https://accounts.example/login']);
+      expect(requests('launch')).toEqual([]);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
   });
 
   it('answers dor with the same id after an iframe → agent-browser swap', async () => {
@@ -5025,7 +5176,7 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('refuses an https:// surface.iframe on a host that proxies, naming dor agent-browser open', async () => {
+  it('refuses an https:// surface.iframe on a host that proxies, naming dor webview where the host has it, else dor agent-browser open', async () => {
     const respond = async (url: string) => {
       let response: { ok: boolean; error?: string } | undefined;
       await act(async () => {
@@ -5047,6 +5198,12 @@ describe('Wall on the Lath engine', () => {
       error: 'the embedded view frames http:// pages only — open it with dor agent-browser open https://example.com/',
     });
     expect((await respond('http://localhost:5173/'))?.ok).toBe(true);
+    // A host with pane webviews names the command that shows it to a human.
+    installPaneWebview(fake);
+    expect(await respond('https://example.com/')).toEqual({
+      ok: false,
+      error: 'the embedded view frames http:// pages only — open it with dor webview https://example.com/',
+    });
   });
 
   it('opens a new https:// tab from an iframe as an agent-browser pane bound to its launch', async () => {
@@ -5607,6 +5764,7 @@ it('labels the properties\' keys for `?` only, and takes `!` into the aux termin
     await flushFrame();
   };
   const modes = () => onEvent.mock.calls.filter(([event]) => event.type === 'modeChange').map(([event]) => event.mode);
+  const opens = () => onEvent.mock.calls.filter(([event]) => event.type === 'contextOpen').map(([event]) => event);
 
   await key({ key: '?' });
   await flush();
@@ -5625,6 +5783,12 @@ it('labels the properties\' keys for `?` only, and takes `!` into the aux termin
   await flush();
   await flushFrame();
   expect(context()!.dataset.contextMode).toBe('aux');
+  // Each opening tells the embedder, in the mode it opened on.
+  expect(opens()).toEqual([
+    { type: 'contextOpen', id: 'surface:keys', mode: 'properties' },
+    { type: 'contextOpen', id: 'surface:keys', mode: 'properties' },
+    { type: 'contextOpen', id: 'surface:keys', mode: 'aux' },
+  ]);
   // The aux terminal takes the keyboard, which is passthrough; the source takes none.
   expect(focus).toHaveBeenCalledWith('surface:keys-aux', true);
   const terminal = context()!.querySelector('[data-aux-terminal]')!;

@@ -45,7 +45,7 @@ import {
   surfaceProvider,
   type BrowserHandle,
 } from './browser-automation';
-import { agentBrowserSessionFromParams, isToolParams, viewportFromMeasurement } from './browser-surface';
+import { agentBrowserSessionFromParams, isToolParams, resolveRenderMode, viewportFromMeasurement } from './browser-surface';
 import {
   EDIT_OPS,
   SPECIAL_KEYS,
@@ -1918,14 +1918,17 @@ function closeBrowserSessionFromParams(params: unknown): Promise<void> {
 }
 
 /**
- * A kill or a swap away from an automated renderer: surface lifetime and browser
- * lifetime are bound (docs/specs/dor-browser.md → "Placement And Lifetime"), so
- * close its session and release its controller. The controller closes what it
- * holds or its launch names, after any of that session's work still in flight;
- * `params` covers a session no controller holds. Resolves once the host
- * answered every close. No-op for other surface types.
+ * A kill or a swap away from an automated renderer or a pane webview: surface
+ * lifetime and browser lifetime are bound (docs/specs/dor-browser.md →
+ * "Placement And Lifetime"), so close its session and release its controller,
+ * or destroy its native view. The controller closes what it holds or its
+ * launch names, after any of that session's work still in flight; `params`
+ * covers a session no controller holds. Resolves once the host answered every
+ * close. No-op for other surface types.
  */
 export function closeBrowserSurface(id: string, params: unknown): Promise<void> {
+  // Its panel only hides a pane webview.
+  if (resolveRenderMode(params) === 'webview') getPlatform().paneWebview?.close(id);
   const controller = registry.get(id);
   registry.delete(id);
   const closed = controller?.close();

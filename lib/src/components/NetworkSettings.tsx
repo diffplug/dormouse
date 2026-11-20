@@ -424,7 +424,7 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
       <div id="network-allowed-label" className={LABEL}>Allowed networks</div>
       <div className={HINT}>
         {phones
-          ? 'A phone connects only when both ends of its connection are on one of these, and browser panes preview pages on them.'
+          ? 'A phone connects only when both ends of its connection are on one of these, and iframe panes preview pages on them.'
           : 'Browser panes preview pages on these networks. Under Local networks only, phones connect over them too.'}{' '}
         {ALLOWED_NETWORK_REACH}
       </div>

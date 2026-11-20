@@ -12,7 +12,7 @@
 | Left ⇧ → Right ⇧ (less than 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
 | `Enter` (command) | Enter passthrough or activate | Focus the selected pane or reattach a door; Workspace targets follow the table below. |
 
-A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
+An iframe's proxy shim (`docs/specs/dor-browser.md`) and a pane webview's host (`docs/specs/webview-pane.md`) detect the gesture where the Wall cannot.
 
 ## Pane actions (command mode)
 
@@ -76,11 +76,12 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 |-----|--------|-------------|
 | `⌘V` (macOS) / `Ctrl+V` (others) | Paste into page | Inserts the *local* clipboard as text through the host. On macOS, `Ctrl+V` goes to the page. |
 | `⌘` (macOS) / `Ctrl` (others) + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. On macOS, `Ctrl` + these keys goes to the page. |
+| `⌘=` / `⌘-` / `⌘0` (macOS) / `Ctrl` + those keys or the wheel (Windows), `webview` surface | Zoom in / out / actual size | Zooms the page in the pane webview that holds the keyboard (`docs/specs/webview-pane.md` -> "Keyboard and pointer"). |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
 ## Terminal context properties
 
-Live and labeled only when a command key opened the context, while in command mode; a focused list or field keeps its keys.
+Live and labeled only when a command key opened the context, while in command mode; a focused list or field keeps its keys. Option/AltGr permits the symbol keys.
 
 | Key | Action |
 |-----|--------|
