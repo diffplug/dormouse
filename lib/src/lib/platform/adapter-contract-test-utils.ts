@@ -122,6 +122,8 @@ const MEMBERS = {
   browser: ['-VTH-', FAIL('browser')],
   createIframeProxyUrl: ['-VTH-', FAIL('createIframeProxyUrl')],
   releaseIframeProxy: ['-VTH-', 'iframe-lease-order.test.ts'],
+  // Standalone once `pane_webview_supported` says so; the fake when a test installs one.
+  paneWebview: ['f-t--', 'tauri-adapter.test.ts "pane webview"; WebviewPanel.test.tsx'],
   toolControl: ['-VTH-', FAIL('toolControl')],
   reapsTools: ['-VTH-', 'unpinned'],
   gitInfo: ['--TH-', FAIL('gitInfo')],

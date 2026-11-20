@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
 import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT_CSS, useMeasuredElementRect } from './design';
+import { useOccludePaneWebviews } from '../lib/pane-webview-occlusion';
 import {
   clampOverlayPosition,
   insetOverlayBounds,
@@ -177,6 +178,7 @@ export function useCloseOnOutsideAndEscape(
     captureKeys?: boolean;
   } = {},
 ) {
+  useOccludePaneWebviews(open);
   useEffect(() => {
     if (!open) return;
 

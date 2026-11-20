@@ -59,8 +59,8 @@ Three separate signals, never one lease (rationale):
 A Session is engaged while some present viewer focuses it.
 
 - **Must compute presence in the renderer and report transitions only**: an input event only stamps a time, and the host keeps no presence timer.
-- **Must treat a blur as a leave only when `document.hasFocus()` is false** (`docs/specs/layout.md` → Corner cases #2).
-- **An iframe Surface holding focus must keep presence from lapsing `idle`**, its input never reaching the window; a blur behind it is a `leave` at the next deadline (rationale).
+- **Must treat a blur as a leave only when it is real** (`docs/specs/layout.md` → Corner cases #2).
+- **An iframe Surface or pane webview holding focus must keep presence from lapsing `idle`**, its input never reaching the window; a blur behind it is a `leave` at the next deadline (rationale).
 - **Must keep engagement per viewer**, deduped at the renderer, so one viewer's leave never disengages a Session another viewer engages. An absent viewer reports no focus change.
 
 | Gesture | Acknowledges |
@@ -157,8 +157,8 @@ stateDiagram-v2
     [*] --> Absent
     Absent --> Present: activity, or focus or visibility returns, in an active window
     Present --> Present: activity, or its focus moves
-    Present --> Absent: idle — no activity for the inactivity timeout, no iframe holding focus
-    Present --> Absent: leave — blur without document focus, hide, or the realm ends
+    Present --> Absent: idle — no activity for the inactivity timeout, no iframe or pane webview holding focus
+    Present --> Absent: leave — a real blur, hide, or the realm ends
   }
 ```
 

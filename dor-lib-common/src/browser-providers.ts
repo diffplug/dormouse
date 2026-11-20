@@ -202,23 +202,30 @@ export const BROWSER_PROVIDER_IDS = Object.keys(BROWSER_PROVIDERS) as BrowserAut
 /** An automated render mode: a provider's screencast or popout. */
 export type AutomatedRenderMode = (typeof BROWSER_PROVIDERS)[BrowserAutomationProvider]['modes'][BrowserPresentation];
 
-/** Every render mode a browser Surface can take; `iframe` is the embed. */
-export type SurfaceRenderMode = 'iframe' | AutomatedRenderMode;
+/** Every render mode a browser Surface can take: `iframe` is the embed,
+ *  `webview` a native view the host places over the pane, neither driven by a
+ *  provider. */
+export type SurfaceRenderMode = 'iframe' | 'webview' | AutomatedRenderMode;
 
-/** A render mode decoded: its provider and presentation, or the embed. */
+/** A render mode decoded: its provider and presentation, or one of the two
+ *  undriven renderers. */
 export type ParsedRenderMode =
   | { provider: BrowserAutomationProvider; presentation: BrowserPresentation; mode: AutomatedRenderMode }
-  | { provider: null; presentation: 'iframe'; mode: 'iframe' };
+  | { provider: null; presentation: 'iframe'; mode: 'iframe' }
+  | { provider: null; presentation: 'webview'; mode: 'webview' };
 
-const PARSED_MODES = new Map<string, ParsedRenderMode>(BROWSER_PROVIDER_IDS.flatMap((provider) =>
-  (Object.keys(BROWSER_PROVIDERS[provider].modes) as BrowserPresentation[]).map((presentation) => {
-    const mode = BROWSER_PROVIDERS[provider].modes[presentation];
-    return [mode, { provider, presentation, mode }] as const;
-  })));
+const PARSED_MODES = new Map<string, ParsedRenderMode>([
+  ...BROWSER_PROVIDER_IDS.flatMap((provider) =>
+    (Object.keys(BROWSER_PROVIDERS[provider].modes) as BrowserPresentation[]).map((presentation) => {
+      const mode = BROWSER_PROVIDERS[provider].modes[presentation];
+      return [mode, { provider, presentation, mode }] as const;
+    })),
+  ['webview', { provider: null, presentation: 'webview', mode: 'webview' }],
+]);
 const EMBED: ParsedRenderMode = { provider: null, presentation: 'iframe', mode: 'iframe' };
 
-/** Decode a render mode. Anything but an automated mode — `iframe`, an absent
- *  one, or an unknown persisted string — is the embed. */
+/** Decode a render mode. Anything but an automated mode or `webview` —
+ *  `iframe`, an absent one, or an unknown persisted string — is the embed. */
 export function parseRenderMode(mode: unknown): ParsedRenderMode {
   return (typeof mode === 'string' && PARSED_MODES.get(mode)) || EMBED;
 }

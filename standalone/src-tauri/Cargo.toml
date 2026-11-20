@@ -40,7 +40,20 @@ windows = { version = "0.62", features = [
     # console_parent: owner chains, and re-enabling a window a dead dialog disabled.
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
+    # pane_webview.rs: window handles, and the keyboard Raw Input the leader reads.
+    "Win32_Foundation",
+    "Win32_UI_Input",
+    # pane_webview.rs: a still's capture stream, and its WIC scale and JPEG encode.
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_Security_Cryptography",
 ] }
+# The pane webviews (pane_webview.rs), on the wry and webview2-com
+# tauri-runtime-wry already links: one copy of each.
+wry = { version = "0.57", default-features = false }
+webview2-com = "0.39"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # One instance per user (run in lib.rs); macOS relies on LaunchServices.
@@ -53,8 +66,14 @@ gtk = "0.18.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSImage"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSData"] }
+block2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSEvent", "NSResponder", "NSView", "NSWindow", "block2"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError", "NSProcessInfo", "NSString", "NSURL", "NSValue"] }
+# The pane webviews (pane_webview.rs), on the wry tauri-runtime-wry already
+# links: standalone/scripts/tauri-lockstep.test.mjs keeps it one copy.
+wry = { version = "0.57", default-features = false }
+# Pane webview snapshots, on the copy wry links.
+objc2-web-kit = { version = "0.3", default-features = false, features = ["WKPreferences", "WKSnapshotConfiguration", "WKWebView", "WKWebViewConfiguration", "block2", "objc2-app-kit"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Re-exports the tao the app ships, for tests/objc_exception_unwinds.rs.

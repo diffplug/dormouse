@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from 'react';
+import { paneWebviewsOccluded } from '../../lib/pane-webview-occlusion';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { contextTeeth, teethSlots, TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
@@ -702,6 +703,20 @@ it('pauses its aux terminal while its Workspace is out of view, and resumes when
   }
 });
 
+
+it('hides every pane webview while it shows, but not from a Workspace out of view', async () => {
+  const open = vi.spyOn(auxTerminals, 'openAux').mockResolvedValue({ id: 'aux', parentId: 'hidden-source' });
+  const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" mode="aux" /></WorkspaceActiveContext.Provider>));
+  try {
+    await show(true);
+    expect(paneWebviewsOccluded()).toBe(true);
+    await show(false);
+    expect(paneWebviewsOccluded()).toBe(false);
+  } finally {
+    await act(async () => root.render(<></>));
+    open.mockRestore();
+  }
+});
 
 it('offers a Windows file manager a POSIX directory only where it names a drive', () => {
   const at = (path: string, pathKind: 'posix' | 'windows' = 'posix') => ({ path, pathKind, isRemote: false, source: 'osc7' as const, updatedAt: 0 });

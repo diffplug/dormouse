@@ -6,7 +6,7 @@ import { offeredRenderModes } from './browser-automation';
 import { browserDisplayMode } from './agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL } from './BrowserDisplayIcon';
 import { resolveRenderMode } from './browser-surface';
-import { installBrowserHost } from './wall-test-utils';
+import { installBrowserHost, installPaneWebview } from './wall-test-utils';
 
 describe('automation render modes', () => {
   it('resolves every provider presentation, and anything else as the embed', () => {
@@ -16,7 +16,8 @@ describe('automation render modes', () => {
         expect(resolveRenderMode({ renderMode: mode })).toBe(mode);
       }
     }
-    for (const mode of ['iframe', undefined, 'constructor', 'toString']) {
+    expect(resolveRenderMode({ renderMode: 'webview' })).toBe('webview');
+    for (const mode of ['iframe', undefined, 'constructor', 'toString', 'Webview']) {
       expect(resolveRenderMode({ renderMode: mode })).toBe('iframe');
     }
   });
@@ -27,6 +28,7 @@ describe('automation render modes', () => {
     expect(display('agent-browser-screencast', false)).toBe('agent-browser-fixed');
     expect(display('playwright-popout', true)).toBe('playwright-popout');
     expect(display('iframe', true)).toBe('iframe');
+    expect(display('webview', true)).toBe('webview');
     expect(BROWSER_DISPLAY_LABEL['playwright-resize']).toBe('playwright resizes with pane');
     expect(BROWSER_DISPLAY_LABEL['agent-browser-popout']).toBe('agent-browser popout');
     expect(BROWSER_DISPLAY_LABEL.iframe).toBe('iframe embed');
@@ -56,5 +58,13 @@ describe('offeredRenderModes', () => {
     installBrowserHost();
     expect(offeredRenderModes(true, null)).toEqual(['agent-browser-screencast', 'playwright-screencast', 'iframe']);
     expect(offeredRenderModes(true, 'agent-browser')).toEqual(['agent-browser-screencast', 'playwright-screencast', 'iframe']);
+  });
+
+  it('offers the webview where the host has pane webviews, never to a Tool', () => {
+    const { platform } = installBrowserHost({}, []);
+    expect(offeredRenderModes(false, null)).toEqual(['iframe']);
+    installPaneWebview(platform);
+    expect(offeredRenderModes(false, null)).toEqual(['iframe', 'webview']);
+    expect(offeredRenderModes(true, null)).toEqual(['iframe']);
   });
 });

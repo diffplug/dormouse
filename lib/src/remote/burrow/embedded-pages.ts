@@ -1,8 +1,9 @@
 /**
  * The pages this webview's Surfaces embed, as the frame tunnel reaches them
  * (`docs/specs/remote-api.md` → "Frames"): a browser Surface's, or a serving
- * Tool's, while the iframe renderer shows it. Read off the browser chrome both
- * renderers register, so a page is listed exactly while its chrome shows one.
+ * Tool's, while the iframe renderer or a pane webview shows it. Read off the
+ * browser chrome every renderer registers, so a page is listed exactly while
+ * its chrome shows one. A Client frames it whatever the laptop renders it with.
  */
 
 import type { DirectoryBrowser } from 'remote-lib-common';
@@ -16,7 +17,8 @@ import { isAuxSession } from '../../lib/terminal-store';
 
 function pageOf(controller: ScreenController): DirectoryBrowser | null {
   if (isAuxSession(controller.id) || isPendingKillSession(controller.id)) return null;
-  if (controller.snapshot().renderMode !== 'iframe') return null;
+  const { renderMode } = controller.snapshot();
+  if (renderMode !== 'iframe' && renderMode !== 'webview') return null;
   const { url, title } = controller.chrome();
   // Only what the iframe proxy fronts (`docs/specs/dor-browser.md` → "Iframe Renderer").
   let protocol: string;

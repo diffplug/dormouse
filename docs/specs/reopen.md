@@ -21,7 +21,7 @@ Source of truth: `closeKind` in `lib/src/components/wall/close-kind.ts`; `reques
 | Trivial close ([The rule](#the-rule)) | Nothing: no record | Nothing | No |
 | `builtin:file` (viewer or editor) running and reporting clean | Same path, same position | Cursor and scroll position | No |
 | `builtin:folder` running | Same path | Expanded subfolders | No |
-| `iframe` browser | Same URL, reloaded | Live page state | No |
+| `iframe` or `webview` browser | Same URL, reloaded | Live page state | No |
 | Touched or running shell, any other Tool (`builtin:code` included), agent-browser / playwright, a dirty or unreported Tool | — | — | Yes |
 
 A read-only `builtin:file` view reports clean as it starts (`docs/specs/dor-tools-builtin.md`). Repo Tools join the table only through `docs/specs/dor-tool.md` → "Reaping", which supplies the safe-to-stop contract args alone do not.

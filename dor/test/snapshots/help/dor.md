@@ -21,6 +21,7 @@ USAGE
   dor reopen [--json]
   dor move <surface> <workspace>|--new-workspace [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]
   dor iframe [--focus] [--json] [--minimize] [--from handle] [--workspace ref] <target>
+  dor webview [--focus] [--json] [--minimize] [--from handle] [--workspace ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]
   dor playwright [--key name|--session name|--surface handle] [--from handle] [--workspace ref] [--focus] [args...]
   dor list [--workspace ref|--all] [--window ref] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]
@@ -51,6 +52,7 @@ COMMANDS
   reopen         Reopen the most recently closed surface, workspace, or window.
   move           Move a surface to another workspace.
   iframe         Open a target in an iframe surface.
+  webview        Open a target in a native webview surface.
   agent-browser  Drive a browser surface via your agent-browser install.
   playwright     Drive a browser surface via your playwright CLI install.
   list           List Dormouse Surfaces.

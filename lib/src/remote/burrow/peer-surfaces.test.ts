@@ -367,7 +367,7 @@ describe('embedded pages', () => {
     for (const registration of registrations.splice(0)) registration.dispose();
   });
 
-  function registerPage(id: string, url: string, renderMode: 'iframe' | 'agent-browser-screencast' = 'iframe') {
+  function registerPage(id: string, url: string, renderMode: 'iframe' | 'webview' | 'agent-browser-screencast' = 'iframe') {
     const registration = registerAgentBrowserScreen(id, {
       snapshot: {
         renderMode, viewport: { w: 0, h: 0, dpr: 1 }, syncEngaged: false,
@@ -390,6 +390,14 @@ describe('embedded pages', () => {
     expect(platform.answer('browserOp', { surfaceId: 'surface:3' })).toEqual([]);
     expect(platform.answer('browserOp', { surfaceId: 'surface:4' })).toEqual([]);
     expect(platform.answer('browserOp', { surfaceId: 'surface:9' })).toEqual([]);
+  });
+
+  it('answers the http: page a pane webview shows, as one a Client frames', () => {
+    registerPage('surface:5', 'http://localhost:5175/app', 'webview');
+    registerPage('surface:6', 'https://example.com/', 'webview');
+    expect(platform.answer('browserOp', { surfaceId: 'surface:5' }))
+      .toEqual([{ render: 'iframe', url: 'http://localhost:5175/app', title: 'Page' }]);
+    expect(platform.answer('browserOp', { surfaceId: 'surface:6' })).toEqual([]);
   });
 
   it('lists a browser Surface as its own entry and a serving Tool\'s page on its terminal', () => {

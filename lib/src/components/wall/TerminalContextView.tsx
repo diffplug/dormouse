@@ -4,13 +4,14 @@ import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_C
 import { stepFocus } from '../focus-step';
 import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, contextKeyModifiersOk, KeyHint, Mnemonic, openPicker, PORT_ACTION_KEYS } from './context-keys';
 import { isEditableTarget } from '../../lib/dom';
+import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon, BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
 import { browserProviderSwitch, rememberBrowserProvider, useBrowserProvider } from './BrowserProviderSwitch';
 import type { PortUrlEntry } from './port-url';
 import { displayModeFor, type RenderMode } from './agent-browser-screen';
-import { WindowFocusedContext, type ContextMode } from './wall-context';
+import { WindowFocusedContext, WorkspaceActiveContext, type ContextMode } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import { oppositeEdge } from '../../lib/lath/model';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
@@ -444,6 +445,8 @@ function snapshotExit(surface: HTMLElement, content: HTMLElement | null) {
 }
 
 export function TerminalContextView(p: TerminalContextViewProps) {
+  // A hidden Workspace keeps its context open, drawing nothing.
+  useOccludePaneWebviews(useContext(WorkspaceActiveContext));
   const motionClass = motionIsInstant() ? '' : p.closing ? 'terminal-context-exit' : 'terminal-context-enter';
   const surface = useRef<HTMLElement>(null);
   const panel = useRef<HTMLDivElement>(null);

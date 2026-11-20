@@ -801,12 +801,14 @@ dependencies = [
 name = "dormouse"
 version = "2.0.0"
 dependencies = [
+ "block2",
  "getrandom 0.4.3",
  "gtk",
  "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "objc2-web-kit",
  "process-wrap",
  "serde",
  "serde_json",
@@ -816,7 +818,9 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-runtime-wry",
+ "webview2-com",
  "windows",
+ "wry",
 ]
 
 [[package]]

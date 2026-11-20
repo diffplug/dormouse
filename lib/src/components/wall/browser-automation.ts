@@ -79,9 +79,9 @@ export function hostBrowserProviders(): BrowserAutomationProvider[] {
  * The render modes a browser Surface can take on this host — what its Display
  * modal offers (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
  * A provider needs a host that can drive it, unless it is the one `current`
- * already runs, which keeps its screencast. `iframe` is always available. A
- * Tool takes only its declarable renders (docs/specs/dor-tool.md → Declaring
- * tools).
+ * already runs, which keeps its screencast. `iframe` is always available,
+ * `webview` where the host has pane webviews. A Tool takes only its declarable
+ * renders (docs/specs/dor-tool.md → Declaring tools).
  */
 export function offeredRenderModes(isTool: boolean, current: BrowserAutomationProvider | null): RenderMode[] {
   const modes: RenderMode[] = [];
@@ -92,6 +92,7 @@ export function offeredRenderModes(isTool: boolean, current: BrowserAutomationPr
     if (hosted) modes.push(renderModeFor(provider, 'popout'));
   }
   modes.push('iframe');
+  if (getPlatform().paneWebview) modes.push('webview');
   return isTool ? modes.filter(isToolRender) : modes;
 }
 

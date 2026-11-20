@@ -536,8 +536,8 @@ export const BINDINGS: Readonly<Record<string, MachineBinding<Step>>> = {
       'Viewer: [*] --> Absent': always,
       'Viewer: Absent --> Present: activity, or focus or visibility returns, in an active window': (s) => s.ev.k === 'present' && s.ev.viewer === s.viewer,
       'Viewer: Present --> Present: activity, or its focus moves': (s) => s.ev.k === 'present' && s.ev.viewer === s.viewer,
-      'Viewer: Present --> Absent: idle — no activity for the inactivity timeout, no iframe holding focus': (s) => s.ev.k === 'idle' && s.ev.viewer === s.viewer,
-      'Viewer: Present --> Absent: leave — blur without document focus, hide, or the realm ends': (s) => is(s, 'leave', 'realmEnd') && viewerOfEvent(s) === s.viewer,
+      'Viewer: Present --> Absent: idle — no activity for the inactivity timeout, no iframe or pane webview holding focus': (s) => s.ev.k === 'idle' && s.ev.viewer === s.viewer,
+      'Viewer: Present --> Absent: leave — a real blur, hide, or the realm ends': (s) => is(s, 'leave', 'realmEnd') && viewerOfEvent(s) === s.viewer,
     },
   },
   Engagement: {

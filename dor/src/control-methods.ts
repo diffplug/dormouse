@@ -138,6 +138,10 @@ export abstract class MethodControlClient implements ControlClient {
     return this.request<IframeSurfaceResponse>(SURFACE_CONTROL_METHODS.iframe, request);
   }
 
+  webviewSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse> {
+    return this.request<IframeSurfaceResponse>(SURFACE_CONTROL_METHODS.webview, request);
+  }
+
   // The host asks the browser where it streams (`attach`) before answering,
   // which can wait behind a launch or close of that browser for as long as
   // the host's own request timeout; the socket deadline sits above it, so a

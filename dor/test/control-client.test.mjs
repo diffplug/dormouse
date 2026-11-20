@@ -197,7 +197,7 @@ test('a failure before the request frame is CONTROL_UNAVAILABLE; one after it is
 
 test('--json reports an unreachable host as CONTROL_UNAVAILABLE and a host refusal as COMMAND_FAILED', skipOnWindows, async () => {
   await withTempSocket(async (socketPath) => {
-    const commands = [['read', 'surface:1'], ['tool', 'example'], ['tool', '--list'], ['kill', 'surface:1', '--confirm-dangerously'], ['iframe', 'surface:2']];
+    const commands = [['read', 'surface:1'], ['tool', 'example'], ['tool', '--list'], ['kill', 'surface:1', '--confirm-dangerously'], ['iframe', 'surface:2'], ['webview', 'https://example.com/']];
     const codes = async (token) => {
       const env = { DORMOUSE_CONTROL_SOCKET: socketPath, DORMOUSE_CONTROL_TOKEN: token, PWD: tmpdir() };
       const seen = [];
