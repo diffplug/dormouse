@@ -3,6 +3,7 @@ import { shortPath } from 'dor/commands/picker-core';
 import { POSIX_ESCAPABLE } from 'dormouse-lib/lib/posix-escape';
 import { HOME, type DirEntry, type VirtualFs } from './playground-fs/vfs';
 import { ALERT_PROGRAMS } from './alert-programs';
+import { DEV_SERVER_PROGRAMS } from './dev-server-program';
 
 export type SendOutput = (data: string) => void;
 
@@ -63,9 +64,10 @@ export function shellWords(line: string): string[] {
 const ESCAPABLE = new RegExp(POSIX_ESCAPABLE.source, 'g');
 
 /** The pages' programs (`splash` is `ascii-splash`'s alias), and with a
- * filesystem the builtins and `dor` too, sorted as a listing shows them. */
+ * filesystem the builtins, `dor`, and the desktop's `npm` too, sorted as a
+ * listing shows them. */
 const PROGRAMS = ['ascii-splash', 'changelog', 'tutorial', ...ALERT_PROGRAMS].sort();
-const FS_COMMANDS = [...PROGRAMS, 'cd', 'dor', 'ls', 'pwd'].sort();
+const FS_COMMANDS = [...PROGRAMS, ...DEV_SERVER_PROGRAMS, 'cd', 'dor', 'ls', 'pwd'].sort();
 
 /** The longest prefix every one of `names` shares. */
 function commonPrefix(names: string[]): string {

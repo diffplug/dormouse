@@ -5764,6 +5764,7 @@ it('labels the properties\' keys for `?` only, and takes `!` into the aux termin
     await flushFrame();
   };
   const modes = () => onEvent.mock.calls.filter(([event]) => event.type === 'modeChange').map(([event]) => event.mode);
+  const opens = () => onEvent.mock.calls.filter(([event]) => event.type === 'contextOpen').map(([event]) => event);
 
   await key({ key: '?' });
   await flush();
@@ -5782,6 +5783,12 @@ it('labels the properties\' keys for `?` only, and takes `!` into the aux termin
   await flush();
   await flushFrame();
   expect(context()!.dataset.contextMode).toBe('aux');
+  // Each opening tells the embedder, in the mode it opened on.
+  expect(opens()).toEqual([
+    { type: 'contextOpen', id: 'surface:keys', mode: 'properties' },
+    { type: 'contextOpen', id: 'surface:keys', mode: 'properties' },
+    { type: 'contextOpen', id: 'surface:keys', mode: 'aux' },
+  ]);
   // The aux terminal takes the keyboard, which is passthrough; the source takes none.
   expect(focus).toHaveBeenCalledWith('surface:keys-aux', true);
   const terminal = context()!.querySelector('[data-aux-terminal]')!;
