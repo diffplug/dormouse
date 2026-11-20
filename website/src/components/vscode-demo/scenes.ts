@@ -35,6 +35,9 @@ export interface DemoScene {
   /** Panes whose headers a cursor right-clicks in turn, on a loop while the
    *  window is on screen, each opening its terminal context. */
   contextTour?: string[];
+  /** Its browser panes' pages take the pointer (to play, to go fullscreen);
+   *  the rest of the window stays inert. */
+  playable?: boolean;
 }
 
 export const CWD = "/Users/you/acorn";
@@ -94,6 +97,7 @@ const VIDEO: DemoScene = {
     tree: { root: { kind: "leaf", id: W.video } },
     leafMeta: { [W.video]: browserLeafMeta("Dormouse music video", { url: youtubeEmbedUrl(YOUTUBE_MUSIC_VIDEO) }) },
   },
+  playable: true,
 };
 
 const AGENT_SESSIONS: Record<string, DemoSession> = {

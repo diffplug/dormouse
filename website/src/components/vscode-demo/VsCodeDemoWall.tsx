@@ -78,9 +78,42 @@ export default function VsCodeDemoWall({ scene: name }: { scene: SceneName }) {
     };
   }, [ready, scene]);
 
+  // A playable scene's window is not inert, so its pages take clicks. Everything
+  // off the path from the window to each frame is made inert instead, again as
+  // the Wall renders, and only the frames take the pointer.
+  useEffect(() => {
+    const root = rootRef.current;
+    const win = root?.closest<HTMLElement>("[data-demo-window]");
+    if (!ready || !root || !win || !scene.playable) return;
+    const inerted = new WeakSet<Element>();
+    const isolate = () => {
+      const path = new Set<Element>([root]);
+      for (let node: Element | null = root; node && node !== win; node = node.parentElement) path.add(node);
+      for (const frame of root.querySelectorAll("iframe")) {
+        for (let node: Element | null = frame; node && node !== root; node = node.parentElement) path.add(node);
+      }
+      for (const node of path) {
+        if (inerted.has(node)) node.removeAttribute("inert");
+        for (const sibling of node === root ? root.children : node.parentElement?.children ?? []) {
+          if (path.has(sibling) || sibling.hasAttribute("inert")) continue;
+          sibling.setAttribute("inert", "");
+          inerted.add(sibling);
+        }
+      }
+    };
+    isolate();
+    const observer = new MutationObserver(isolate);
+    observer.observe(win, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [ready, scene]);
+
   if (!ready) return null;
   return (
-    <div ref={rootRef} className="relative flex h-full min-h-0 w-full" style={APP_TYPE_SCALE}>
+    <div
+      ref={rootRef}
+      className={`relative flex h-full min-h-0 w-full ${scene.playable ? "pointer-events-none [&_iframe]:pointer-events-auto" : ""}`}
+      style={APP_TYPE_SCALE}
+    >
       {/* Shown but inactive, as an outgoing Workspace is while it fades: its
           terminals stay attached, and it takes no window input. */}
       <WorkspaceVisibleContext.Provider value={true}>
