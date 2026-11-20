@@ -21,6 +21,10 @@ const registry = vi.hoisted(() => ({
   fits: vi.fn(),
   /** Renderer acquisitions and grid transitions, in order. */
   events: [] as string[],
+  /** True while the test's animation-frame callbacks run. */
+  inFrame: false,
+  /** Fits and renderer acquisitions made inside an animation-frame callback. */
+  framed: [] as string[],
 }));
 vi.mock('../lib/terminal-registry', () => ({
   UNNAMED_PANEL_TITLE: 'Terminal',
@@ -33,11 +37,13 @@ vi.mock('../lib/terminal-registry', () => ({
   unmountElement: (id: string) => { registry.entries.get(id)!.container = undefined; },
   mountRenderer: (id: string, container: HTMLElement) => {
     const entry = registry.entries.get(id)!;
+    if (registry.inFrame) registry.framed.push(`renderer ${id}`);
     if (entry.container === container) registry.events.push(`renderer ${id} ${entry.cols}x${entry.rows}`);
   },
   focusSession: vi.fn(),
   refitSession: (id: string) => {
     registry.fits(id);
+    if (registry.inFrame) registry.framed.push(`fit ${id}`);
     const entry = registry.entries.get(id)!;
     const rect = entry.container!.getBoundingClientRect();
     const cols = Math.max(2, Math.floor(rect.width / 10));
@@ -71,6 +77,7 @@ beforeEach(() => {
   registry.resizes.length = 0;
   registry.fits.mockClear();
   registry.events.length = 0;
+  registry.framed.length = 0;
   hostWidth = 800;
   rafs = new Map();
   nextRaf = 0;
@@ -129,7 +136,12 @@ function frame(ms = 16) {
     vi.advanceTimersByTime(ms);
     const callbacks = [...rafs.values()];
     rafs.clear();
-    for (const cb of callbacks) cb(performance.now());
+    registry.inFrame = true;
+    try {
+      for (const cb of callbacks) cb(performance.now());
+    } finally {
+      registry.inFrame = false;
+    }
   });
   notifyResize();
 }
@@ -290,6 +302,15 @@ describe('a mounted terminal acquires its GPU renderer on its settled grid', () 
     const ownEvents = registry.events.filter(e => e.includes(' c '));
     expect(ownEvents[0]).toMatch(/^resize c /);
     expect(ownEvents[1]).toBe(`renderer c ${ownEvents[0].split(' ')[2]}`);
+  });
+
+  it('fits an entering pane and acquires its renderer outside any animation-frame callback', () => {
+    mount();
+    registry.events.length = 0;
+    act(() => { store.addLeaf('c', terminalLeafMeta(), { refId: 'b', edge: 'right' }); });
+    settle();
+    expect(registry.framed).toEqual([]);
+    expect(registry.events.some(e => e.startsWith('renderer c '))).toBe(true);
   });
 
   it('mounts a held pane’s renderer without fitting it', () => {

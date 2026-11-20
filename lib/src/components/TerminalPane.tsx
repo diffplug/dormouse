@@ -52,8 +52,10 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
     // committed geometry, a debounced container resize otherwise. Both drop a pending
     // fit, so a settled layout never also fits on the timer behind it.
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let wake: ReturnType<typeof setTimeout> | undefined;
     const fit = () => {
       clearTimeout(timer);
+      clearTimeout(wake);
       if (!container.isConnected || (resize && !resize.canFit(id))) return;
       // A remote session holds this pane's size: its box is not the authority
       // until the last hold goes (docs/specs/remote-api.md → "Size authority").
@@ -67,6 +69,13 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       // terminal canvas blank until an unrelated DOM change.
       mountRenderer(id, container);
     };
+    // The coordinator may wake fitting inside an animation-frame callback: fit from a
+    // task of its own instead. In Chromium with TreesInViz, an entering pane's first
+    // resize inside that callback blanks every other WebGL terminal canvas for 0.1-2s.
+    const wakeFit = () => {
+      clearTimeout(wake);
+      wake = setTimeout(fit, 0);
+    };
     // Released by its last holder: re-fit to the box through the same guarded path.
     let held = getSizeHolds(id).length > 0;
     const unsubscribeHold = subscribeToSizeHolds(() => {
@@ -79,14 +88,14 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       timer = setTimeout(fit, REFIT_DEBOUNCE_MS);
     });
     observer.observe(container);
-    const unsubscribe = resize?.subscribe(fit);
-    const frame = requestAnimationFrame(fit);
+    const unsubscribe = resize?.subscribe(wakeFit);
+    wakeFit();
 
     return () => {
       observer.disconnect();
       unsubscribe?.();
       unsubscribeHold();
-      cancelAnimationFrame(frame);
+      clearTimeout(wake);
       clearTimeout(timer);
       unmountElement(id, container);
     };
