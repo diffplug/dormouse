@@ -1,13 +1,11 @@
 import {
   AppleLogoIcon,
   CheckCircleIcon,
-  CloudArrowUpIcon,
   CubeIcon,
   DesktopIcon,
   DotsThreeOutlineIcon,
   LinuxLogoIcon,
   ScalesIcon,
-  SpeakerHighIcon,
   StorefrontIcon,
   TerminalIcon,
   WindowsLogoIcon,
@@ -17,14 +15,14 @@ import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
 import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
-import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
 import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import elevenLabsGrantsUrl from "../assets/elevenlabs-grants.png";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
-import { PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
+import { loadPocketDemo, PocketDemoPhone } from "../components/pocket-demo/PocketDemoPhone";
+import { loadVsCodeDemoWall, VsCodeDemoWindow } from "../components/vscode-demo/VsCodeDemoWindow";
 import { sitePath } from "../lib/site-meta";
 import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
@@ -63,6 +61,31 @@ const HERO_SCROLL_SETTLE_PX = 0.5;
 
 /** Vertical padding applied to all content sections after the hero. */
 const SECTION_PY = "py-8";
+
+/** Runs each loader once the page has loaded and the browser is idle, unless
+ *  the reader asked to save data or is on a 2G connection. Returns a cancel. */
+function preloadWhenIdle(loaders: readonly (() => Promise<unknown>)[]): () => void {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (connection?.saveData || connection?.effectiveType?.includes("2g")) return () => {};
+  const preload = () => loaders.forEach((load) => void load().catch(() => {}));
+  let cancelIdle = () => {};
+  const run = () => {
+    // Safari has no requestIdleCallback.
+    if ("requestIdleCallback" in window) {
+      const handle = requestIdleCallback(preload, { timeout: 3000 });
+      cancelIdle = () => cancelIdleCallback(handle);
+    } else {
+      const handle = setTimeout(preload, 500);
+      cancelIdle = () => clearTimeout(handle);
+    }
+  };
+  if (document.readyState === "complete") run();
+  else addEventListener("load", run, { once: true });
+  return () => {
+    removeEventListener("load", run);
+    cancelIdle();
+  };
+}
 
 /** Clamp a value to 0–1. */
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
@@ -196,23 +219,7 @@ const INSTALL_STEPS: Record<string, { pill: string; title: string; steps: string
   },
 };
 
-const FEATURE_VIDEO_BASE =
-  "-mx-4 md:mx-0 block w-[calc(100%+2rem)] max-w-none md:w-full md:max-w-full";
-
-const FEATURE_VIDEO_VARIANTS = {
-  cover: "aspect-video object-cover",
-  intrinsic: "h-auto",
-} as const;
-
-function FeatureVideo({
-  src,
-  className = "",
-  variant = "cover",
-}: {
-  src: string;
-  className?: string;
-  variant?: keyof typeof FEATURE_VIDEO_VARIANTS;
-}) {
+function FeatureVideo({ src, className }: { src: string; className: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   // Plays only within a screen of the viewport: `autoPlay` would fetch every
   // feature video on arrival, before the reader has scrolled past the hero.
@@ -234,11 +241,7 @@ function FeatureVideo({
       loop
       muted
       playsInline
-      className={[
-        FEATURE_VIDEO_BASE,
-        FEATURE_VIDEO_VARIANTS[variant],
-        className,
-      ].filter(Boolean).join(" ")}
+      className={`-mx-4 md:mx-0 block w-[calc(100%+2rem)] max-w-none md:w-full md:max-w-full aspect-video object-cover ${className}`}
     />
   );
 }
@@ -349,6 +352,11 @@ export default function Home() {
     else if (!root.hasAttribute(HERO_GATE_ATTR)) root.setAttribute(HERO_GATE_ATTR, "pending");
   }, [heroCanPaint]);
   useEffect(() => () => document.documentElement.removeAttribute(HERO_GATE_ATTR), []);
+
+  // The demos' modules are most of the page's weight. Fetch them once the page
+  // has loaded and the browser is idle, rather than when a demo nears the
+  // viewport, so a reader who scrolls finds them ready.
+  useEffect(() => preloadWhenIdle([loadVsCodeDemoWall, loadPocketDemo]), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -851,15 +859,15 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
+          <VsCodeDemoWindow tab="video" panel="agent" readme aspect={0.66} className="mt-8" />
         </section>
         {/* Section 2: image left, text right */}
         <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,390px)_1fr] gap-8 md:gap-12 items-start`}>
           <PocketDemoPhone className="order-2 md:order-1 mx-auto" />
           {/* One column: the heading, the phone, then the text. */}
           <div className="contents md:block md:order-2">
-            <h2 className="order-1 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] md:mb-6">
-              Use your laptop from your phone
+            <h2 className="order-1 font-display text-xl text-[var(--color-text)] md:mb-6">
+              Your laptop on your phone
             </h2>
             <div className="order-3">
               <p className="mb-4 text-lg leading-relaxed opacity-70">
@@ -890,163 +898,43 @@ export default function Home() {
           </div>
         </section>
 
-        {/* 3. Port awareness — text left, context-menu mock right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
+        {/* 3. Port awareness — text left, the real terminal context right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-8 md:gap-12 items-center`}>
           <div>
             <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Six panes running and something's serving{" "}
-              <code className={SITE_CODE_CLASS}>:3000</code>.
-              Which one?
+              Six dev servers running on different worktrees. Are you sure
+              your browser is looking at the right port?
             </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Right-click a pane and Dormouse lists the ports that pane's
-              process tree is actually listening on — hit a number to open one.
-              No{" "}
-              <code className={SITE_CODE_CLASS}>lsof</code>,
-              no scrolling back to find where Vite printed the URL.
+            <p className="text-lg leading-relaxed opacity-70 mb-3">
+              Right-click a terminal pane and Dormouse will look at that
+              pane's process tree to see which ports it opened. One click and
+              you can send it to:
             </p>
+            <ul className="list-disc space-y-1 pl-6 text-lg leading-relaxed opacity-70">
+              <li>your system browser</li>
+              <li>a browser inside of Dormouse</li>
+              <li>a Playwright or agent-browser instance</li>
+              <li>your phone as a push notification</li>
+            </ul>
           </div>
-          <div className="rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm opacity-60">
-              <TerminalIcon size={15} weight="bold" />
-              <span className="font-mono">web — pnpm dev</span>
-            </div>
-            <div className="space-y-1 font-mono text-sm">
-              {[
-                { key: "1", port: "3000", label: "vite" },
-                { key: "2", port: "24678", label: "vite hmr" },
-                { key: "3", port: "5432", label: "postgres" },
-              ].map(({ key, port, label }) => (
-                <div
-                  key={port}
-                  className="flex items-center gap-3 rounded px-2 py-1.5 hover:bg-[var(--color-text)]/10"
-                >
-                  <span className="w-4 text-center opacity-40">{key}</span>
-                  <span className="text-[var(--color-caramel)]">localhost:{port}</span>
-                  <span className="ml-auto opacity-50">{label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* Drawn wider than the column, so each pane's context lists its ports
+              rather than folding them into a count. */}
+          <VsCodeDemoWindow tab="ports" otherTab="Login.tsx" aspect={0.8} minWidth={740} />
         </section>
 
-        {/* 4. Browser surfaces — transcript + preview left, text right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
-          <div className="order-2 md:order-1 space-y-4">
-          {/* Authored transcript. Command syntax tracks dor/test/snapshots/help/;
-              the output lines are illustrative and not generated from a test. */}
-          <div className="overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm leading-relaxed">
-            <div><span className="opacity-40">$ </span>dor ensure -- pnpm dev</div>
-            <div className="opacity-60">created surface:3&nbsp;&nbsp;&quot;pnpm dev&quot;</div>
-            <div className="mt-3"><span className="opacity-40">$ </span>dor agent-browser open surface:3</div>
-            <div className="opacity-60">&#8594; <span className="text-[var(--color-caramel)]">http://localhost:5173/</span></div>
-          </div>
-          <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
-            <div className="flex items-center gap-2 border-b border-[var(--color-text)]/10 px-3 py-2">
-              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
-              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
-              <div className="ml-1 flex-1 truncate rounded bg-[var(--color-text)]/10 px-2 py-1 font-mono text-xs opacity-70">
-                localhost:5173
-              </div>
-              <span className="rounded border border-[var(--color-caramel)]/40 px-1.5 py-0.5 font-mono text-[0.65rem] text-[var(--color-caramel)]">
-                screencast
-              </span>
-            </div>
-            <div className="space-y-2.5 p-4">
-              <div className="h-2.5 w-1/3 rounded bg-[var(--color-text)]/20" />
-              <div className="h-2 w-full rounded bg-[var(--color-text)]/10" />
-              <div className="h-2 w-11/12 rounded bg-[var(--color-text)]/10" />
-              <div className="h-2 w-4/5 rounded bg-[var(--color-text)]/10" />
-              <div className="mt-4 grid grid-cols-3 gap-2.5">
-                <div className="h-12 rounded bg-[var(--color-text)]/10" />
-                <div className="h-12 rounded bg-[var(--color-text)]/10" />
-                <div className="h-12 rounded bg-[var(--color-text)]/10" />
-              </div>
-            </div>
-          </div>
-          </div>
+        {/* 4. Selection and copy/paste — video left, text right (text first on a phone) */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
+          <FeatureVideo src={copyPasteVideoUrl} className="order-2 md:order-1" />
           <div className="order-1 md:order-2">
-            <h2 className="font-display text-xl mb-6">Browsers for you (and your agents)</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              A browser is just another pane. Park your dev server next to the
-              terminal that's running it — same tiling layout, same keybinds, no
-              alt-tab and no second monitor.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              <code className={SITE_CODE_CLASS}>dor agent-browser open surface:3</code>{" "}
-              aims a browser at the port that terminal is serving. Your agents
-              run the same command, so when an agent wants to see what it just built, it opens a pane you're
-              already watching. Pop it out to a real OS window when you need the
-              real thing.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Dormouse drives the{" "}
-              <code className={SITE_CODE_CLASS}>agent-browser</code>{" "}
-              you already have installed — it doesn't ship a browser of its own.
-            </p>
-            <p className="text-base leading-relaxed opacity-60">
-              <a href={`${sitePath("/dor")}#agent-browser`} className={SITE_LINK_CLASS}>CLI reference</a>
-              {" · "}
-              <a href={sitePath("/agent-skill")} className={SITE_LINK_CLASS}>Agent skill</a>
-            </p>
-          </div>
-        </section>
-
-        {/* 5. Selection and copy/paste — text left, video right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <div>
             <h2 className="font-display text-xl mb-6">Select and copy-paste like you meant</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
+            <p className="text-lg leading-relaxed opacity-70">
               Click and drag in a "mouse conformant" terminal doesn't select
               text; it fires escape code{" "}
               <code className={SITE_CODE_CLASS}>{"\\e[<0;x;yM"}</code>{" "}
               at whatever's running. Dormouse notices when a TUI has grabbed the
               mouse and hands you a one-click override, so you can just — select
               the thing.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Then copy it the way you meant it, seeing exactly what lands on
-              the clipboard with every line break marked.{" "}
-              <strong className="font-semibold opacity-100">Auto</strong> joins the hard wraps back into
-              the line the program actually printed; <strong className="font-semibold opacity-100">Exact</strong>{" "}
-              keeps them. Press{" "}
-              <code className={SITE_CODE_CLASS}>e</code>{" "}
-              to expand a clipped selection out to the whole URL, path, or paragraph.
-            </p>
-          </div>
-          <FeatureVideo src={copyPasteVideoUrl} />
-        </section>
-
-        <section id="hosted" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
-          <div className="border-y border-[var(--color-text)]/20 py-8">
-            <h2 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)]">
-              Dormouse, with less to run yourself
-            </h2>
-            <p className="mb-7 max-w-3xl text-lg leading-relaxed opacity-70">
-              Keep Dormouse free and local, then pay only if you want the
-              Relay operated for you or a more natural voice for spoken alerts.
-            </p>
-            <div className="grid gap-7 md:grid-cols-2">
-              <div>
-                <CloudArrowUpIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
-                <h3 className="mb-2 font-display text-xl">Managed remote control</h3>
-                <p className="leading-relaxed opacity-70">
-                  Use Pocket without deploying and maintaining a Relay.
-                  Your terminals still run on your computer.
-                </p>
-              </div>
-              <div>
-                <SpeakerHighIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
-                <h3 className="mb-2 font-display text-xl">Natural Voice</h3>
-                <p className="leading-relaxed opacity-70">
-                  Choose a managed natural voice for spoken alerts, while browser and
-                  system speech stay available.
-                </p>
-              </div>
-            </div>
-            <p className="mt-7 text-lg">
-              <a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.home)} className={SITE_LINK_CLASS}>See what Dormouse Hosted costs</a>
             </p>
           </div>
         </section>

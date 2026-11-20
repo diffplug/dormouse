@@ -27,6 +27,7 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 - **Copy-paste that works.** Click and drag selects text the way you'd expect, even in mouse-aware TUIs that normally swallow it as escape codes.
 - **Minimize to doors.** Minimize a terminal to a compact status indicator. It keeps running and keeps reporting whether its task needs attention.
 - **Browser panes.** Put a browser in the tiling layout next to the terminal serving it, drivable by you or your agents.
+- **Read the plan, see the running app.** `dor open` shows a local file or folder in a pane: Markdown in an editor that draws its tables and Mermaid diagrams, PNG and JPEG in an image editor to mark up, redact, or crop, and source in a code editor. `dor tool <name>` runs a dev server declared in your project's `dormouse.yml` in one pane: its terminal until it serves a port, then that page.
 - **Dual distribution.** Standalone desktop app (Mac/Windows/Linux) or VS Code extension.
 
 ## Development

@@ -1,4 +1,17 @@
-import { BOLD, CLEAR_LINE, PROMPT, RESET, fg, promptFor } from 'dormouse-lib/lib/ansi';
+import {
+  BOLD,
+  CLEAR_LINE,
+  OSC_COMMAND_START,
+  OSC_PROMPT_END,
+  OSC_PROMPT_START,
+  PROMPT,
+  RESET,
+  fg,
+  oscCommandFinish,
+  oscCommandLine,
+  oscCwd,
+  promptFor,
+} from 'dormouse-lib/lib/ansi';
 import { shortPath } from 'dor/commands/picker-core';
 import { POSIX_ESCAPABLE } from 'dormouse-lib/lib/posix-escape';
 import { HOME, type DirEntry, type VirtualFs } from './playground-fs/vfs';
@@ -22,17 +35,6 @@ export type StartProgram = (
   args: string[],
   onExit: (exitCode?: number) => void,
 ) => InteractiveProgram | null;
-
-// Report real command boundaries: WATCHING is keyed on the running command.
-// See docs/specs/tutorial.md → "Fake shell behavior".
-const OSC_PROMPT_START = '\x1b]633;A\x07';
-const OSC_PROMPT_END = '\x1b]633;B\x07';
-const OSC_COMMAND_START = '\x1b]633;C\x07';
-/** A 633 property value: the parser splits on `;` and unescapes `\\` and `\x3b`. */
-const osc633Value = (value: string) => value.replace(/\\/g, '\\\\').replace(/;/g, '\\x3b');
-const oscCommandLine = (commandLine: string) => `\x1b]633;E;${osc633Value(commandLine)}\x07`;
-const oscCommandFinish = (exitCode: number) => `\x1b]633;D;${exitCode}\x07`;
-const oscCwd = (cwd: string) => `\x1b]633;P;Cwd=${osc633Value(cwd)}\x07`;
 
 /** `line` split into words as a POSIX shell would, honoring quotes and
  * backslashes; the playground has no expansions. */
@@ -343,6 +345,8 @@ export class TutorialShell {
   }
 
   private showPrompt(): void {
+    // Real command boundaries: WATCHING is keyed on the running command
+    // (docs/specs/tutorial.md → "Fake shell behavior").
     this.sendOutput(OSC_PROMPT_START + (this.place ? oscCwd(this.place.cwd) : '') + this.prompt() + OSC_PROMPT_END);
     this.promptShown = true;
   }

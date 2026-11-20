@@ -81,7 +81,7 @@ describe('TodoSpotlight', () => {
 
   // jsdom applies no stylesheet, so the pulse and its gate are pinned where they live.
   it('rests invisible and drops the pulse under reduced motion', () => {
-    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../theme.css'), 'utf8');
+    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../wall.css'), 'utf8');
     expect(css).toMatch(/\.todo-spotlight \{\s*opacity: 0;\s*animation: todo-spotlight \d+ms/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.todo-spotlight \{ animation: none; \}/);
   });

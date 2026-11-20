@@ -1,7 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
+import phoneStill from "../../assets/demo-stills/phone.webp";
 
-const PocketDemo = lazy(() => import("./PocketDemo"));
+/** The demo's module, which the homepage also fetches ahead, once it has loaded. */
+export const loadPocketDemo = () => import("./PocketDemo");
+const PocketDemo = lazy(loadPocketDemo);
 
 /** The phone's layout width: a real phone's, so Pocket's bars fit their labels. */
 const PHONE_WIDTH = 390;
@@ -100,7 +103,10 @@ export function PocketDemoPhone({ className = "" }: { className?: string }) {
       >
         <div className="mx-auto mb-3 h-1.5 w-24 rounded-full bg-white/20" />
         <div className="aspect-[390/760] overflow-hidden rounded-[1.25rem] border border-white/10 bg-black">
-          <div className="h-full" aria-hidden="true" inert>
+          <div className="relative h-full" aria-hidden="true" inert>
+            {/* The demo's first frame, until it paints over it: a screenshot,
+                to retake when Pocket's look changes. */}
+            <img src={phoneStill} alt="" decoding="async" className="absolute inset-0 size-full" />
             {near ? (
               <Suspense fallback={null}>
                 <PocketDemo key={run} playing={playing} onStuck={restart} still={prefersReducedMotion()} />

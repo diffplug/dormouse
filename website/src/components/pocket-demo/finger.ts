@@ -19,6 +19,17 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 }
 
+/** `element`'s top-left within `root`, from layout offsets rather than client
+ *  boxes, which a transform on the demo (a turn, a scale) skews. */
+export function offsetWithin(element: HTMLElement, root: HTMLElement): Point {
+  const at = { x: 0, y: 0 };
+  for (let node: HTMLElement | null = element; node && node !== root; node = node.offsetParent as HTMLElement | null) {
+    at.x += node.offsetLeft;
+    at.y += node.offsetTop;
+  }
+  return at;
+}
+
 export class Finger {
   private position: Point;
 
@@ -71,15 +82,10 @@ export class Finger {
     }
   }
 
-  /** Moves onto `element`'s center and taps it. The center comes from layout
-   *  offsets, not client boxes, which the phone's 3D turn skews. */
+  /** Moves onto `element`'s center and taps it. */
   async tap(element: HTMLElement): Promise<void> {
-    const center = { x: element.offsetWidth / 2, y: element.offsetHeight / 2 };
-    for (let node: HTMLElement | null = element; node && node !== this.screen; node = node.offsetParent as HTMLElement | null) {
-      center.x += node.offsetLeft;
-      center.y += node.offsetTop;
-    }
-    await this.moveTo(center, 520);
+    const at = offsetWithin(element, this.screen);
+    await this.moveTo({ x: at.x + element.offsetWidth / 2, y: at.y + element.offsetHeight / 2 }, 520);
     await this.press(true);
     element.click();
     await this.sleep(110);

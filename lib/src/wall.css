@@ -1,0 +1,357 @@
+/* The Wall's structural rules and its chrome's animations: the Lath host, its
+ * leaves and sashes, the terminal context, the preview slot, and TODO pills.
+ * Free of the app shell's body and type-scale rules, so a host that renders a
+ * Wall inside its own design (the homepage's VS Code demo) can import it. */
+
+/* --- Lath host (the tiling engine binding) ---
+ *
+ * The HTML adapter for Lath (docs/specs/tiling-engine.md → "The HTML adapter
+ * (LathHost)"), mounted by the Wall. app-bg gutters and a terminal-bg body.
+ * LathHost applies the shared PANE_HEADER_HEIGHT_PX to the header slot inline;
+ * the header and body React components carry their own palette (bg-header-…,
+ * bg-terminal-bg) and rounded corners, so this is structural layout +
+ * backgrounds only. */
+
+.lath-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background-color: var(--color-app-bg);
+}
+
+/* One stable, absolutely-positioned div per leaf — moved and resized via inline
+ * styles, never re-parented (the no-reparent guarantee that keeps iframes from
+ * reloading and xterms from blurring). */
+.lath-host .lath-leaf {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* While a terminal context is open every other pane recedes under a scrim of the
+ * Wall's own ground (DESIGN.md → "Terminal Context Teeth"). A scrim rather
+ * than the leaf's opacity, which the animator writes; it takes no input, so a press
+ * still reaches the pane and dismisses the context. */
+.lath-host .lath-leaf::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background-color: var(--color-app-bg);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.lath-host .lath-leaf[data-receded]::after {
+  /* The strong modal backdrop's strength (`modalOverlay` in design.tsx). */
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lath-host .lath-leaf::after { transition: none; }
+}
+
+.lath-host .lath-leaf-header {
+  position: relative;
+  overflow: visible;
+  z-index: 20;
+}
+
+.lath-host .lath-leaf-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-terminal-bg);
+}
+
+/* Sashes render from the core `sashes()` geometry as sibling divs over the gap
+ * band; the adapter widens the hit area and sets the cursor inline. */
+.lath-host .lath-sash {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+}
+
+/* Drag drop-preview boxes: the destination, its scope, and a swap's other slot during a
+ * pane/Door drag. Fill, border, and border-radius are all set inline (the resolved
+ * selection color + TERMINAL_SELECTION_BORDER_RADIUS); only positioning lives here.
+ * Inert to the pointer so it never intercepts the drag. */
+.lath-host .lath-drop-preview {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Held by `shieldFrames` while a drag reads window pointer events. */
+[data-frame-shield] iframe {
+  pointer-events: none;
+}
+
+/* --- Command mode marching-ants animation --- */
+
+@keyframes marching-ants {
+  to { stroke-dashoffset: var(--march-offset); }
+}
+
+/* A still dashed ring. `!important` because SelectionRing writes `animation` inline. */
+@media (prefers-reduced-motion: reduce) {
+  [data-ring='outline'] { animation: none !important; }
+}
+
+/* --- Kill-dialog confirm animation --- */
+
+@keyframes kill-overlay-confirm {
+  0%   { opacity: 1; transform: scale(1); }
+  30%  { opacity: 1; transform: scale(1.02); }
+  100% { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes kill-letter-flash {
+  0%   { transform: scale(1);    filter: brightness(1); }
+  40%  { transform: scale(1.25); filter: brightness(1.6); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+
+.kill-overlay-confirm { animation: kill-overlay-confirm 220ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.kill-letter-flash    { animation: kill-letter-flash    220ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+                        display: inline-block; transform-origin: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kill-overlay-confirm,
+  .kill-letter-flash { animation-duration: 1ms; }
+}
+
+/* --- Confirmation flash for a popup button (the mouse override banner's) --- */
+
+@keyframes copy-flash {
+  0%   { transform: scale(1);    }
+  45%  { transform: scale(1.08); }
+  100% { transform: scale(1);    }
+}
+.animate-copy-flash {
+  animation: copy-flash 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-copy-flash { animation: none; }
+}
+
+/* --- A copied selection's fill: in, a dip, and held until it clears --- */
+
+@keyframes copy-flash-fill {
+  0%   { opacity: 0;    }
+  30%  { opacity: 1;    }
+  60%  { opacity: 0.55; }
+  100% { opacity: 1;    }
+}
+/* Gated in JS by `motionIsInstant()`, which also covers `cfg.layout.animate`. */
+.animate-copy-flash-fill {
+  animation: copy-flash-fill 500ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* --- Shell selection feedback --- */
+
+@keyframes shell-spawn-notice {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  15%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-3px); }
+}
+
+.shell-spawn-notice {
+  animation: shell-spawn-notice 1500ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-spawn-notice { animation: none; }
+}
+
+/* The Workspace tab or + a pane drag would move its Surface to on release. */
+[data-surface-drop] {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+/* Pane spawn / kill motion is owned by the Lath animator (docs/specs/tiling-engine.md
+ * → "Animation"): LathHost applies interpolated frames imperatively to the leaf divs,
+ * so there are no CSS entrance/exit classes. */
+
+/* Terminal context reveal and dismissal (docs/specs/layout.md → "Header context menu").
+ * Reveal at the final layout size so the aux terminal's xterm fits once, immediately; the shell
+ * establishes depth before initialization becomes visible. TerminalContextView sets
+ * the inline custom properties: `--context-origin-x/y` (the opening pointer's offsets
+ * inside the surface, clamped here so an outside origin sits on the edge),
+ * `--context-radius`, `--context-exit-duration`, and the `--context-exit-*` snapshot
+ * of an interrupted reveal. */
+.terminal-context-enter,
+.terminal-context-exit {
+  --context-origin-cx: clamp(0px, var(--context-origin-x, 0px), 100%);
+  --context-origin-cy: clamp(0px, var(--context-origin-y, 0px), 100%);
+  --context-pinhole-clip: inset(var(--context-origin-cy) calc(100% - var(--context-origin-cx)) calc(100% - var(--context-origin-cy)) var(--context-origin-cx) round var(--context-radius));
+  --context-full-clip: inset(-40px round var(--context-radius));
+}
+
+.terminal-context-enter {
+  animation: terminal-context-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.terminal-context-enter .terminal-context-content {
+  animation: terminal-context-content 140ms ease-out 160ms backwards;
+}
+
+@keyframes terminal-context-enter {
+  from { clip-path: var(--context-pinhole-clip); opacity: 0.4; }
+  to { clip-path: var(--context-full-clip); opacity: 1; }
+}
+
+@keyframes terminal-context-content {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.terminal-context-exit {
+  animation: terminal-context-exit var(--context-exit-duration) cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.terminal-context-exit .terminal-context-content {
+  animation: terminal-context-content-exit 100ms ease-out forwards;
+}
+
+@keyframes terminal-context-exit {
+  from { clip-path: var(--context-exit-clip, var(--context-full-clip)); opacity: var(--context-exit-opacity, 1); }
+  to { clip-path: var(--context-pinhole-clip); opacity: 0; }
+}
+
+@keyframes terminal-context-content-exit {
+  from { opacity: var(--context-exit-content-opacity, 1); }
+  to { opacity: 0; }
+}
+
+/* Also honor preference changes during a mounted entrance. `motionIsInstant`
+ * skips these classes altogether when reduced motion or static layout is known. */
+@media (prefers-reduced-motion: reduce) {
+  .terminal-context-enter,
+  .terminal-context-enter .terminal-context-content { animation: none; }
+}
+
+/* Preview slot switch (docs/specs/dor-tool.md → "Switching the slot"). The ghost of the
+ * slot's last view blurs at once and eases deeper, never dimming; the new view
+ * fades in over it. `motionIsInstant` adds `preview-ghost-static`, a static blur,
+ * and skips the fade. The blur is a backdrop overlay rather than the ghost's own
+ * `filter`: a filter samples transparent pixels past the pane edge and rims a
+ * light page dark, where the backdrop's edges clamp. Isolated, so the overlay
+ * stays above anything the ghost positions inside it. */
+.preview-ghost {
+  isolation: isolate;
+}
+
+.preview-ghost::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  animation: preview-ghost-blur 600ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.preview-ghost-static::after {
+  animation: none;
+}
+
+.preview-reveal {
+  animation: preview-reveal 120ms ease-out both;
+}
+
+@keyframes preview-ghost-blur {
+  from { -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  to { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+}
+
+@keyframes preview-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* TODO dismiss flourish. Sequence across 500ms:
+ *   0–30%  letters fade out while the check springs in (with a small overshoot)
+ *  30–55%  check settles, pill is visually still
+ *  55–100% whole pill shell (border, bg, check) dissolves together
+ *
+ * The pill body is a grid-stacked <letters, check> so width is stable
+ * throughout — no reflow when the animation starts. */
+.todo-pill-stack {
+  display: inline-grid;
+}
+.todo-pill-stack > * {
+  grid-column: 1;
+  grid-row: 1;
+}
+.todo-pill-stack__letters {
+  opacity: 1;
+}
+.todo-pill-stack__check {
+  justify-self: center;
+  align-self: center;
+  color: var(--color-success);
+  opacity: 0;
+}
+
+.todo-pill-shell[data-flourishing='true'] {
+  animation: todo-pill-dissolve 500ms ease-out forwards;
+  pointer-events: none;
+}
+.todo-pill-shell[data-flourishing='true'] .todo-pill-stack__letters {
+  animation: todo-flourish-letters 500ms ease-out forwards;
+}
+.todo-pill-shell[data-flourishing='true'] .todo-pill-stack__check {
+  animation: todo-flourish-check 500ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes todo-flourish-letters {
+  0%   { opacity: 1; }
+  30%  { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes todo-flourish-check {
+  0%   { opacity: 0; transform: scale(0.5); }
+  35%  { opacity: 1; transform: scale(1.15); }
+  55%  { transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes todo-pill-dissolve {
+  0%, 55%  { opacity: 1; transform: scale(1); }
+  100%     { opacity: 0; transform: scale(0.92); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-pill-shell[data-flourishing='true'],
+  .todo-pill-shell[data-flourishing='true'] .todo-pill-stack__letters,
+  .todo-pill-shell[data-flourishing='true'] .todo-pill-stack__check {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* TODO landing spotlight (`TodoSpotlight` in lib/src/components/TodoPillBody.tsx): a Workspace tab's
+ * pill entered this Surface, so its header pill takes one wash of its own colour —
+ * rising, held while the focus ring lands, then fading. Not the flourish (no
+ * check, no dissolve) and not the alarm (no edge, no alarm colour, no repeat).
+ * Resting opacity is 0, so a finished pulse, or one reduced motion drops,
+ * leaves nothing on screen. TodoSpotlight remounts the overlay per signal. */
+.todo-spotlight {
+  opacity: 0;
+  animation: todo-spotlight 480ms ease-out;
+}
+@keyframes todo-spotlight {
+  0%       { opacity: 0; }
+  30%, 45% { opacity: 1; }
+  100%     { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-spotlight { animation: none; }
+}

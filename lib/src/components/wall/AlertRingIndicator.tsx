@@ -18,7 +18,7 @@ import {
 /**
  * Very loud, pointer-transparent alarm state over one terminal Pane.
  *
- * Two layers straddling `.lath-leaf-header` (`z-index: 20` in `index.css`): the
+ * Two layers straddling `.lath-leaf-header` (`z-index: 20` in `wall.css`): the
  * wash and label below it at `z-[19]`, the perimeter ring above at `z-[25]`.
  * Keeping the wash under the header is what stops it tinting the header band,
  * where `--color-alarm-vs-terminal` — picked against the terminal body — carries

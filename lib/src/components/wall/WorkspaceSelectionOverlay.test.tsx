@@ -339,7 +339,7 @@ describe('SelectionRing settled render', () => {
   // jsdom applies no stylesheet, so the gate is pinned where it lives. It must
   // outrank the inline `animation` and leave the dash in place.
   it('holds the ants still under reduced motion', async () => {
-    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../index.css'), 'utf8');
+    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../wall.css'), 'utf8');
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\[data-ring='outline'\] \{ animation: none !important; \}/);
 
     const store = makeStore();

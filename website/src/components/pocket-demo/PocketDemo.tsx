@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MobileTerminalUi, type MobileTerminalView } from "dormouse-lib/components/MobileTerminalUi";
 import { MobileWall, useMobileWallSessionItems, type MobileWallSession } from "dormouse-lib/components/MobileWall";
 import { initPlatform } from "dormouse-lib/lib/platform";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
-import { disposeAllSessions, initAlertStateReceiver, writeUserInput } from "dormouse-lib/lib/terminal-registry";
+import { initAlertStateReceiver, writeUserInput } from "dormouse-lib/lib/terminal-registry";
 import { setNativeFieldValue } from "dormouse-lib/lib/dom";
-import { applyTheme, getBundledThemes, useRestoredTheme } from "dormouse-lib/lib/themes";
+import { useRestoredTheme } from "dormouse-lib/lib/themes";
+import { APP_TYPE_SCALE, disposeDemoSessions, paintDemoTheme } from "../homepage-demos";
 import { DemoAgent } from "./demo-agent";
 import { DemoReadme } from "./DemoReadme";
 import { DemoStopped, DemoStuck, Finger, FINGER_CLASS } from "./finger";
@@ -24,25 +25,6 @@ const README = "pocket-demo-readme";
 const AGENT_SESSION: MobileWallSession = { id: AGENT, title: "agent" };
 const README_SESSION: MobileWallSession = { id: README, title: "README.md", kind: "tool", browserDisplay: "iframe" };
 const REQUEST = "I want our markdown editor to support links to 3D GLB files";
-
-/** The demo wears one theme whatever the reader picked: it is a picture of
- *  Pocket. Painted on body, where the terminal reads its colors; it does not
- *  become the reader's choice. */
-function paintDemoTheme(): void {
-  const theme = getBundledThemes().find(({ id }) => id === "vscode.theme-kimbie-dark.kimbie-dark");
-  if (theme) applyTheme(theme);
-}
-
-/** The app's terminal type scale (`lib/src/theme.css`), scoped to the phone:
- *  that file would retune the whole homepage's type. */
-const APP_TYPE_SCALE = {
-  "--text-xs": "0.625rem",
-  "--text-xs--line-height": "1rem",
-  "--text-sm": "0.75rem",
-  "--text-sm--line-height": "1rem",
-  "--font-mono": "var(--vscode-editor-font-family)",
-  "--font-sans": "var(--vscode-editor-font-family)",
-} as CSSProperties;
 
 function find(root: ParentNode, selector: string, text?: string): HTMLElement {
   const match = [...root.querySelectorAll<HTMLElement>(selector)].find((element) => text === undefined || element.textContent?.includes(text));
@@ -74,8 +56,8 @@ export default function PocketDemo({ playing, onStuck, still = false }: { playin
 
   useEffect(() => {
     const fake = initPlatform("fake");
-    disposeAllSessions();
-    fake.reset();
+    const disposeOwn = () => disposeDemoSessions(fake, [AGENT, README]);
+    disposeOwn();
     initAlertStateReceiver();
     for (const id of [AGENT, README]) fake.setScenario(id, { name: "none", chunks: [] });
     const agent = new DemoAgent((data) => fake.sendOutput(AGENT, data));
@@ -85,8 +67,7 @@ export default function PocketDemo({ playing, onStuck, still = false }: { playin
     setDemo({ agent, ready });
     return () => {
       agent.dispose();
-      disposeAllSessions();
-      fake.reset();
+      disposeOwn();
     };
   }, []);
 

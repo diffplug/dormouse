@@ -37,7 +37,7 @@ export const COMPARISON_SOURCE_PATH = "website/src/lib/comparison.tsx";
 export const TOOLS: readonly Tool[] = [
   { id: "dormouse", name: "Dormouse", blurb: "Terminal for VS Code and desktop" },
   { id: "cmux", name: "cmux", href: "https://github.com/manaflow-ai/cmux", blurb: "Native macOS terminal" },
-  { id: "herdr", name: "herdr", href: "https://herdr.dev", blurb: "Multiplexer inside your terminal" },
+  { id: "herdr", name: "herdr", href: "https://herdr.dev", blurb: "Agent multiplexer, as a TUI or its own app" },
   {
     id: "claude-desktop",
     name: "Claude Desktop",
@@ -65,14 +65,20 @@ export const COMPARISON: readonly ComparisonGroup[] = [
         cells: {
           dormouse: "yes",
           cmux: "no",
-          herdr: { support: "partial", note: "Preview" },
+          herdr: "yes",
           "claude-desktop": "yes",
           "codex-app": "yes",
         },
       },
       {
         label: "Linux",
-        cells: { dormouse: "yes", cmux: "no", herdr: "yes", "claude-desktop": "no", "codex-app": "no" },
+        cells: {
+          dormouse: "yes",
+          cmux: "no",
+          herdr: "yes",
+          "claude-desktop": { support: "partial", note: "Beta" },
+          "codex-app": "no",
+        },
       },
       {
         label: "Inside VS Code",
@@ -88,8 +94,8 @@ export const COMPARISON: readonly ComparisonGroup[] = [
         label: "Source available",
         cells: {
           dormouse: { support: "yes", note: "FSL, MIT after two years" },
-          cmux: { support: "yes", note: "GPL-3.0" },
-          herdr: { support: "yes", note: "AGPL-3.0" },
+          cmux: { support: "yes", note: "GPL-3.0; its server is BSL 1.1" },
+          herdr: { support: "yes", note: "Apache-2.0" },
           "claude-desktop": "no",
           "codex-app": "no",
         },
@@ -172,9 +178,9 @@ export const COMPARISON: readonly ComparisonGroup[] = [
         label: "Push notifications",
         cells: {
           dormouse: { support: "yes", note: "To your phone, through Pocket" },
-          cmux: { support: "partial", note: "Desktop only" },
-          herdr: "unknown",
-          "claude-desktop": "unknown",
+          cmux: { support: "partial", note: "iOS beta, with cmux Pro" },
+          herdr: { support: "partial", note: "A banner while its phone app is open" },
+          "claude-desktop": { support: "yes", note: "To the Claude app, with Remote Control on" },
           "codex-app": "unknown",
         },
       },
@@ -198,8 +204,8 @@ export const COMPARISON: readonly ComparisonGroup[] = [
         cells: {
           dormouse: "yes",
           cmux: "yes",
-          herdr: "no",
-          "claude-desktop": { support: "no", note: "Uses your Chrome" },
+          herdr: { support: "partial", note: "Third-party plugin" },
+          "claude-desktop": { support: "yes", note: "Browser pane, local sessions" },
           "codex-app": { support: "partial", note: "In-app browser" },
         },
       },
@@ -208,8 +214,8 @@ export const COMPARISON: readonly ComparisonGroup[] = [
         cells: {
           dormouse: "yes",
           cmux: "yes",
-          herdr: "no",
-          "claude-desktop": { support: "partial", note: "Through Chrome" },
+          herdr: { support: "partial", note: "Third-party plugin" },
+          "claude-desktop": { support: "yes", note: "In its Browser pane" },
           "codex-app": "yes",
         },
       },
@@ -219,7 +225,7 @@ export const COMPARISON: readonly ComparisonGroup[] = [
           dormouse: { support: "yes", note: "Playwright, agent-browser" },
           cmux: { support: "no", note: "Private Chromium fork" },
           herdr: "no",
-          "claude-desktop": { support: "partial", note: "Chrome extension" },
+          "claude-desktop": { support: "unknown", note: "Its own browser tools" },
           "codex-app": "unknown",
         },
       },
@@ -229,8 +235,43 @@ export const COMPARISON: readonly ComparisonGroup[] = [
           dormouse: { support: "partial", note: "Slight lag; the system browser has none" },
           cmux: "yes",
           herdr: "no",
-          "claude-desktop": { support: "yes", note: "Your own Chrome" },
+          "claude-desktop": "unknown",
           "codex-app": "unknown",
+        },
+      },
+    ],
+  },
+  {
+    title: "Files and dev servers",
+    rows: [
+      {
+        label: "Opens Markdown, images, and source in a pane",
+        cells: {
+          dormouse: { support: "yes", note: "Editors; no PDF or diff view" },
+          cmux: { support: "partial", note: "Markdown viewer (cmux open)" },
+          herdr: { support: "partial", note: "Third-party plugins only" },
+          "claude-desktop": { support: "yes", note: "File, diff, and plan panes" },
+          "codex-app": { support: "yes", note: "Artifacts viewer, diff pane" },
+        },
+      },
+      {
+        label: "Dev servers declared in a file you commit",
+        cells: {
+          dormouse: { support: "yes", note: "dormouse.yml; detects the port, doesn't assign one" },
+          cmux: { support: "yes", note: ".cmux/cmux.json" },
+          herdr: "no",
+          "claude-desktop": { support: "yes", note: ".claude/launch.json; can pick a free port" },
+          "codex-app": { support: "yes", note: "Actions in .codex; no port handling found" },
+        },
+      },
+      {
+        label: "Add your own panes",
+        cells: {
+          dormouse: { support: "yes", note: "Any command that serves a page; no gallery" },
+          cmux: { support: "partial", note: "Terminal and browser layouts, fixed URLs" },
+          herdr: { support: "yes", note: "Plugins and mods, with a marketplace" },
+          "claude-desktop": { support: "no", note: "MCP Apps render in chat, not as panes" },
+          "codex-app": { support: "unknown", note: "Plugins add panels to ChatGPT; unclear for Codex" },
         },
       },
     ],
@@ -242,10 +283,10 @@ export const COMPARISON: readonly ComparisonGroup[] = [
         label: "Drive it from your phone",
         cells: {
           dormouse: { support: "yes", note: "Pocket" },
-          cmux: "unknown",
-          herdr: { support: "partial", note: "Over SSH" },
-          "claude-desktop": "partial",
-          "codex-app": { support: "partial", note: "Cloud tasks" },
+          cmux: { support: "partial", note: "iOS beta, with cmux Pro" },
+          herdr: { support: "yes", note: "iPhone, iPad, and Android, over SSH" },
+          "claude-desktop": { support: "yes", note: "Remote Control, in the Claude app" },
+          "codex-app": { support: "yes", note: "ChatGPT app: cloud, or a connected Mac or PC" },
         },
       },
       {
@@ -261,7 +302,7 @@ export const COMPARISON: readonly ComparisonGroup[] = [
         label: "Free to use",
         cells: {
           dormouse: { support: "yes", note: "Hosted is paid" },
-          cmux: "yes",
+          cmux: { support: "yes", note: "Its phone app needs cmux Pro" },
           herdr: "yes",
           "claude-desktop": { support: "partial", note: "Needs a Claude plan" },
           "codex-app": { support: "partial", note: "Needs a ChatGPT plan" },
@@ -364,8 +405,8 @@ export const VERSUS: readonly Versus[] = [
         points: [
           "Claude Code, Codex, and any other CLI agent run side by side in one layout.",
           "One alert model across all of them, which knows what you have already seen.",
-          "Browser panes your agents drive, next to the terminals they run in.",
-          "It runs inside VS Code, and on Linux.",
+          "A browser pane any CLI agent can drive, not only the vendor's own.",
+          "It runs inside VS Code.",
         ],
       },
     ],
@@ -381,9 +422,9 @@ export const VERSUS: readonly Versus[] = [
       {
         lead: "Some reasons you might prefer herdr:",
         points: [
-          "It runs inside the terminal you already use — Ghostty, kitty, WezTerm, even tmux — and over SSH.",
+          "Its TUI runs inside the terminal you already use — Ghostty, kitty, WezTerm, even tmux — and over SSH.",
           "Its background server keeps agents running when your client disconnects.",
-          "It is keyboard-first, for people who never want to reach for the mouse.",
+          "Its phone apps for iPhone, iPad, and Android come from the app stores and connect over SSH or Tailscale, with no account and no relay to set up.",
         ],
       },
       {
@@ -391,7 +432,8 @@ export const VERSUS: readonly Versus[] = [
         points: [
           "Mouse-friendly: split, drag, select, and copy as you would in any app.",
           "Browser panes next to your terminals, which your agents can drive.",
-          "It runs inside VS Code, and on your phone.",
+          "It runs inside VS Code.",
+          "Alerts reach your phone as push notifications, even with Pocket closed. herdr's phone app shows a banner while it is open.",
         ],
       },
     ],

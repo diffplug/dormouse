@@ -29,7 +29,7 @@ Source of truth: `computeDynamicPalette()` in `lib/src/lib/themes/dynamic-palett
 
 Two layers: `--vscode-*` holds imported or host-provided VSCode color data; `--color-*` in `lib/src/theme-colors.css` provides the semantic Tailwind tokens (`bg-app-bg`, `text-app-fg`, `bg-header-active-bg`).
 
-**The colour tokens are a file a host can import without the app.** `theme-colors.css` carries `--color-*` alone; `theme.css` layers the type scale, fonts, animations, and component classes over it. A host rendering library components inside its own design takes the first and never the second (rationale).
+**The colour tokens are a file a host can import without the app.** `theme-colors.css` carries `--color-*` alone; `theme.css` layers the type scale, fonts, animations, and component classes over it. A host rendering library components inside its own design takes the first, plus `wall.css` for a Wall, never the second (rationale).
 
 `applyTheme()` writes the theme's `--vscode-*` to `document.body`, fills missing consumed variables through the resolver, adds `vscode-light` / `vscode-dark` for consumers that need the theme type, and **sets `body`'s `color-scheme` to that polarity** so native controls follow the theme, not the OS. In real VSCode webviews `installVscodeThemeVarResolver()` runs before React renders, materializing **only the missing** consumed variables on `body.style` and removing stale materialized ones once the host provides a real value.
 
