@@ -281,6 +281,16 @@ describe('WebviewPanel', () => {
     expect(pane.of('open')).toHaveLength(opens + 1);
   });
 
+  it('gives up the keyboard when a view that held it crashes, though the panel stays', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    await show();
+    act(() => pane.emit({ id: ID, kind: 'focus', focused: true }));
+    expect(isRealBlur()).toBe(false);
+    act(() => pane.emit({ id: ID, kind: 'crashed' }));
+    expect(container.textContent).toContain('The page crashed.');
+    expect(isRealBlur()).toBe(true);
+  });
+
   it('says so when the host refuses a page\'s download, only for a page on screen', async () => {
     await show({ parked: true });
     act(() => pane.emit({ id: ID, kind: 'download-refused' }));
