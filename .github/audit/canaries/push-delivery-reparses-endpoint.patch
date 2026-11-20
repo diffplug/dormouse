@@ -4,7 +4,7 @@ Expect: relay/src/push.ts relay/src/push-endpoint.ts
 Source: reverses #1226 (registration admits any host WHATWG parses, and delivery hands web-push the endpoint string), with the ambiguous-endpoint tests removed so the seeded tree stays green
 
 diff --git a/relay/src/push-endpoint.ts b/relay/src/push-endpoint.ts
-index 5472615a8..3a1afeec8 100644
+index 60f202a7d..6cdb13eb2 100644
 --- a/relay/src/push-endpoint.ts
 +++ b/relay/src/push-endpoint.ts
 @@ -90,14 +90,6 @@ export function isPublicNetworkAddress(address: string): boolean {
@@ -37,7 +37,7 @@ index 5472615a8..3a1afeec8 100644
    }
    return parsed;
 diff --git a/relay/src/push.ts b/relay/src/push.ts
-index 574db60ac..a93599f37 100644
+index 980e11e01..aa014ad30 100644
 --- a/relay/src/push.ts
 +++ b/relay/src/push.ts
 @@ -19,7 +19,7 @@
@@ -57,7 +57,7 @@ index 574db60ac..a93599f37 100644
  } from './push-endpoint.js';
  
  /** What a push service needs to reach one browser. */
-@@ -213,56 +212,6 @@ function pushErrorDetail(body: string): string {
+@@ -208,60 +207,9 @@ function pushErrorDetail(body: string): string {
      : collapsed;
  }
  
@@ -111,10 +111,16 @@ index 574db60ac..a93599f37 100644
 -  });
 -}
 -
+ /**
+- * Real delivery: `web-push` builds the encrypted body and VAPID headers, and
+- * `postToPushService` sends them, at the shared `PUSH_TTL_SECONDS`, under
+- * `PUSH_REQUEST_TIMEOUT_MS`.
++ * Real delivery: `web-push` builds the encrypted body and VAPID headers and
++ * sends them, at the shared `PUSH_TTL_SECONDS`, under `PUSH_REQUEST_TIMEOUT_MS`.
+  */
  export function createWebPushSender(
    keys: VapidKeys,
-   subject: string,
-@@ -274,20 +223,21 @@ export function createWebPushSender(
+@@ -274,20 +222,21 @@ export function createWebPushSender(
          // The registration route applies the same parse, but enforce it again
          // for manually edited state. Node connects to an IP literal
          // without invoking the Agent's DNS lookup.
