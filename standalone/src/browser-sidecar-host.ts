@@ -99,12 +99,21 @@ export class BrowserSidecarHost {
     return () => this.reconnectHandlers.delete(handler);
   }
 
+  /**
+   * Sends go out one at a time, in call order: concurrent POSTs can reach the bridge out of order,
+   * which reorders keystrokes (`pty_write` per key) in a fast-typed command.
+   */
+  private sendChain: Promise<unknown> = Promise.resolve();
+
   send(cmd: string, args?: Record<string, unknown>): void {
-    fetch(this.url('/__dormouse_dev_host/send'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ cmd, args: args ?? {} }),
-    }).catch((err) => console.error(`[browser-sidecar] ${cmd} failed:`, err));
+    const body = JSON.stringify({ cmd, args: args ?? {} });
+    this.sendChain = this.sendChain.then(() =>
+      fetch(this.url('/__dormouse_dev_host/send'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }).catch((err) => console.error(`[browser-sidecar] ${cmd} failed:`, err)),
+    );
   }
 
   async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
