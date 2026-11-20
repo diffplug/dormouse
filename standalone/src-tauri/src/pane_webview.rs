@@ -487,12 +487,21 @@ mod imp {
         }
     }
 
+    /// Report `kind` to the window that owns `id`'s view, from one of that
+    /// view's own handlers.
+    fn report(app: &AppHandle, id: &str, kind: &str, payload: serde_json::Value) {
+        let owner = PANES.with(|panes| panes.try_borrow().ok()?.get(id).map(|pane| pane.owner.clone()));
+        if let Some(owner) = owner {
+            emit(app, &owner, id, kind, payload);
+        }
+    }
+
     fn build(webview: &Webview, id: &str, url: &str) -> Result<(WebView, Retained<Dialogs>), String> {
         let window = ns_window(webview)?;
         let content = window.contentView().ok_or("the window has no content view")?;
         let parent = ContentView(NonNull::from(&*content).cast());
         let (app, id) = (webview.app_handle().clone(), id.to_string());
-        let asker = (app.clone(), id.clone());
+        let (asker, downloader) = ((app.clone(), id.clone()), (app.clone(), id.clone()));
         let view = WebViewBuilder::new()
             .with_url(url)
             .with_visible(false)
@@ -501,16 +510,14 @@ mod imp {
             .with_navigation_handler(|url| may_load(&url))
             .with_new_window_req_handler(move |url, _| {
                 if is_web(&url) {
-                    let owner = PANES.with(|panes| {
-                        panes.try_borrow().ok()?.get(&id).map(|pane| pane.owner.clone())
-                    });
-                    if let Some(owner) = owner {
-                        emit(&app, &owner, &id, "open-window", json!({ "url": url }));
-                    }
+                    report(&app, &id, "open-window", json!({ "url": url }));
                 }
                 NewWindowResponse::Deny
             })
-            .with_download_started_handler(|_, _| false)
+            .with_download_started_handler(move |_, _| {
+                report(&downloader.0, &downloader.1, "download-refused", json!({}));
+                false
+            })
             // wry grants media capture when no handler is set.
             .with_permission_handler(|_| PermissionResponse::Deny)
             .with_data_store_identifier(STORE)

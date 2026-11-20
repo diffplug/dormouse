@@ -51,6 +51,7 @@ Source of truth: `install` and `on_raw_input` in `standalone/src-tauri/src/pane_
 ## Page boundary
 
 - A page may also frame its own `about:`, `blob:`, and `data:` documents (rationale), and its permission requests meet an explicit handler, and its fullscreen never leaves its pane (rationale).
+- On macOS the panel says so when the host refuses a page's download, for a page on screen.
 - A new-window request takes a press (rationale), opens nothing itself, and counts only from a page on screen: the panel asks while its pane is in sight, then opens the URL in a new webview pane beside its own.
 - **Must answer each of a page's alerts, confirms, and prompts exactly once** (rationale). On macOS the panel asks one at a time in its pane, from a page on screen only; any other, and one pending when its panel unmounts, its header navigates, or its view closes, is answered no, a prompt null. On Windows the engine shows its own.
 - A page reaches a local file only as one the user picks in the system's file picker or drops on it.

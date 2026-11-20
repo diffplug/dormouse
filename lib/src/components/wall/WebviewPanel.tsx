@@ -30,6 +30,8 @@ const STILL_AFTER_MOVE_MS = 300;
 type Status = { kind: 'opening' } | { kind: 'open' } | { kind: 'error'; error: string };
 type PageDialog = Extract<PaneWebviewEvent, { kind: 'dialog' }>;
 
+const DOWNLOAD_REFUSED = { dialog: 'alert', message: 'A webview pane downloads nothing.' } as const;
+
 /** The app's CSP admits no `data:` image, so a still is decoded for a canvas. */
 async function decodeStill(url: string | null): Promise<ImageBitmap | null> {
   if (!url) return null;
@@ -84,6 +86,8 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
   // every way out of this panel answers it: no, by default.
   const [dialog, setDialog] = useState<PageDialog | null>(null);
   const dialogRef = useRef<PageDialog | null>(null);
+  // The host refuses every download, which the page shows no sign of.
+  const [downloadRefused, setDownloadRefused] = useState(false);
   const answer = useCallback((accept: boolean, text?: string) => {
     if (!dialogRef.current) return;
     dialogRef.current = null;
@@ -194,6 +198,9 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
             dialogRef.current = event;
             setDialog(event);
           } else host.answer(id, false);
+          break;
+        case 'download-refused':
+          if (shownRef.current) setDownloadRefused(true);
           break;
       }
     });
@@ -317,15 +324,31 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
           onCancel={() => setPendingOpenUrl(null)}
         />
       )}
-      {dialog && seen && <PageDialogPrompt dialog={dialog} focusTarget={passthroughPaneId === id ? setDialogFocus : undefined} onAnswer={answer} />}
+      {dialog && seen ? (
+        <PageDialogPrompt
+          asker={`${dialog.origin || 'This page'} says:`}
+          dialog={dialog}
+          focusTarget={passthroughPaneId === id ? setDialogFocus : undefined}
+          onAnswer={answer}
+        />
+      ) : downloadRefused && seen && (
+        <PageDialogPrompt
+          asker="This page tried to download a file."
+          dialog={DOWNLOAD_REFUSED}
+          focusTarget={passthroughPaneId === id ? setDialogFocus : undefined}
+          onAnswer={() => setDownloadRefused(false)}
+        />
+      )}
     </div>
   );
 }
 
 /** A page's alert, confirm, or prompt, asked in its pane. Its text is the
  *  page's: plain, attributed, and scrolling within the prompt. */
-function PageDialogPrompt({ dialog, focusTarget, onAnswer }: {
-  dialog: PageDialog;
+function PageDialogPrompt({ asker, dialog, focusTarget, onAnswer }: {
+  /** Who is speaking: the page's origin, or Dormouse about the page. */
+  asker: string;
+  dialog: Pick<PageDialog, 'dialog' | 'message' | 'text'>;
   /** Takes the element the keyboard belongs on; given only while its pane is
    *  the one in passthrough, where the keyboard was the page's already. */
   focusTarget?: (element: HTMLElement | null) => void;
@@ -334,7 +357,6 @@ function PageDialogPrompt({ dialog, focusTarget, onAnswer }: {
   useOccludePaneWebviews(true);
   const [text, setText] = useState(dialog.text ?? '');
   const accept = () => onAnswer(true, dialog.dialog === 'prompt' ? text : undefined);
-  const asker = `${dialog.origin || 'This page'} says:`;
   return (
     <div
       role="alertdialog"

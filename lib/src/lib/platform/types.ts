@@ -252,6 +252,8 @@ export type PaneWebviewEvent =
   | { id: string; kind: 'pointerleave' }
   | { id: string; kind: 'focus'; focused: boolean }
   | { id: string; kind: 'open-window'; url: string }
+  /** The page started a download, which the host refused. */
+  | { id: string; kind: 'download-refused' }
   /** The page's alert, confirm, or prompt, waiting on `answer`: `origin` is
    *  the asking frame's host, and `text` a prompt's default. */
   | { id: string; kind: 'dialog'; dialog: 'alert' | 'confirm' | 'prompt'; message: string; origin: string; text?: string };

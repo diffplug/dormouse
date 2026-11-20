@@ -266,6 +266,21 @@ describe('WebviewPanel', () => {
     expect(prompt()).toBeNull();
   });
 
+  it('says so when the host refuses a page\'s download, only for a page on screen', async () => {
+    await show({ parked: true });
+    act(() => pane.emit({ id: ID, kind: 'download-refused' }));
+    await show();
+    expect(prompt()).toBeNull();
+
+    moved();
+    act(() => pane.emit({ id: ID, kind: 'download-refused' }));
+    expect(prompt()!.textContent).toContain('tried to download a file');
+    expect(lastPlace()).toEqual(['place', ID, null]);
+    act(() => prompt()!.querySelector('button')!.click());
+    expect(prompt()).toBeNull();
+    expect(pane.of('answer')).toEqual([]);
+  });
+
   it('answers no at once to a dialog from a page off screen, and takes no keyboard from another pane', async () => {
     await show({ parked: true });
     act(() => pane.emit(dialogEvent('confirm')));
