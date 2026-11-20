@@ -20,6 +20,8 @@ A first load that fails leaves the view with no page at all, and `open` adopts a
 
 **Why a Windows view is never dropped.** wry's `Drop` for a child view sends its parent the message that removes the app webview's own subclass; after one drop the app webview no longer followed window resizes or took the keyboard on activation. Closing the controller and destroying its container still ended the profile's browser processes.
 
+On Windows a page's renderer ended from outside raised `ProcessFailed` for a shown view and for a hidden one, whose pane said so when its Workspace came back; Reload then built a new view (2026-11-19).
+
 ## Visibility
 
 Hiding the view kept its page, raised `visibilitychange`, stopped `requestAnimationFrame`, and slowed a 100 ms timer to about one tick a second.
@@ -36,6 +38,8 @@ Hiding a view that held first responder left the window itself holding it, not t
 
 The monitor saw each `⌘=` `keyDown` twice with one timestamp: WebKit sends a key its page left unhandled through the app again, and a page that called `preventDefault` on it got no second delivery, so the zoom acts on the second. A synthesized `⌘=` arrived with the keypad's key code, so the zoom chords match the character (measured on macOS 27, 2026-11).
 
+wry turns WebView2's own zoom off by default; with it on, `Ctrl+=` took a page from a device pixel ratio of 2 to 2.2 and 2.5, `Ctrl+0` back to 2, and the wheel the same, while a page that called `preventDefault` on the chord or the wheel stayed at 2 (2026-11-19).
+
 On Windows `AcceleratorKeyPressed` never fired for Shift alone, and no `WM_KEYDOWN` reached the process while a webview held focus. Raw Input under tao's existing registration, flags 0, saw all 70 test keys while either webview held focus and none while another app was foreground; left and right Shift differ by make code. `WM_PARENTNOTIFY` on a view's container fired once per press, any button, focused or not. WebView2's focus events are not one per transition and arrive before `GetFocus` moves, while `GetFocus` with `IsChild`, read after a focus command, matched where keys went every time. Hiding a focused view stranded the keyboard in it, and a press from one pane into another let the first pane's release blur the second for 6 ms.
 
 No mouse report reached tao's mouse Raw Input registration on Windows for injected moves or presses, and no mouse message reaches the process from over a view, so the pointer leaving a shown view is polled.
@@ -51,5 +55,9 @@ No mouse report reached tao's mouse Raw Input registration on Windows for inject
 **Why no fullscreen leaves a pane.** WebKit's element fullscreen is a window of its own, over every Dormouse prompt, so macOS turns it off. WebView2 granted `requestFullscreen` in a child view but kept it there: the page reported its pane's size, the container did not change, and Esc ended it.
 
 **Why the panel asks a page's dialogs.** wry 0.57's UI delegate implements none of WebKit's three JavaScript panel methods, and without them WebKit dismisses an `alert` and answers a `confirm` false and a `prompt` null, unseen. WebKit raises an Objective-C exception for a panel's completion handler released uncalled. Read from wry's source and Apple's documentation; with the methods in place a page's `confirm` got the user's answer both ways, and a pane killed with one pending raised nothing (macOS 27, 2026-11).
+
+WebView2 draws its own dialogs in a window of their own, 896 px wide at scale 2: from a pane 354 px wide "Leave site?" covered two neighbouring panes and their headers, and named no origin. A page whose view hid with a dialog up stayed blocked until it showed again, 73 s in one run. With `ScriptDialogOpening` deferred instead, a hidden page's `confirm` returned false in 1 ms (2026-11-19).
+
+**Why Windows has no "Save as".** The engine's page menu item wrote the page and its images to the folder chosen, and the download handler never heard of it; "Save image as", "Save link as", and the PDF viewer's Save all reach that handler and write nothing (2026-11-19).
 
 **Why a new window takes a press.** On Windows `window.open` from a timer raised `NewWindowRequested` with `IsUserInitiated` false, and from a press true; on macOS `javaScriptCanOpenWindowsAutomatically` off leaves a scripted one unraised.

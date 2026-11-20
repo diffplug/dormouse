@@ -41,8 +41,9 @@
  *      user's own browser pane, which the policy does not gate — is wry in
  *      `PANE_WEBVIEW` alone, handed no IPC, script, scheme, or devtools, every
  *      builder chain saying `with_devtools(false)`; its WebView2 half cancels
- *      every external scheme, turns SmartScreen off in its browser args and
- *      settings, and leaks every view it builds rather than ever dropping one;
+ *      every external scheme, drops "Save as" from the page menu, turns
+ *      SmartScreen off in its browser args and settings, and leaks every view
+ *      it builds rather than ever dropping one;
  *      and no `unstable` feature, Tauri's multiwebview, in `Cargo.toml`.
  *
  * Listeners — the other half of "phones can't reach it" — are
@@ -773,6 +774,10 @@ if (tauriConf.app?.withGlobalTauri) {
     }
     if (!/\bSetIsReputationCheckingRequired\s*\(\s*false\s*\)/.test(win)) {
       problems.push(`${PANE_WEBVIEW}: no SetIsReputationCheckingRequired(false); SmartScreen sends every visited URL to Microsoft (${SPEC}).`);
+    }
+    // The download handler never hears the engine's own "Save as".
+    if (!/==\s*"saveAs"\s*\{\s*\w+\.RemoveValueAtIndex\s*\(/.test(win)) {
+      problems.push(`${PANE_WEBVIEW}: the Windows context menu keeps "Save as", which writes the page to disk past the download handler (${SPEC}).`);
     }
     // wry's `Drop` for a child WebView2 removes the app webview's own subclass,
     // so each Windows pane view leaks one reference and is closed by hand.

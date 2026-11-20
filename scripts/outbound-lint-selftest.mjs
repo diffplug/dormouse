@@ -410,6 +410,12 @@ const TAURI = [
   ],
   [
     PANE,
+    replace('== "saveAs"', '== "saveLinkAs"'),
+    'keeps "Save as"',
+    'the page menu left with Save as',
+  ],
+  [
+    PANE,
     replace('std::mem::forget(Rc::clone(&view));', ''),
     'leaks 0 with std::mem::forget',
     'a Windows pane view no longer leaked',
