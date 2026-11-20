@@ -241,7 +241,8 @@ mod imp {
     use objc2::runtime::{AnyObject, Bool, NSObject, ProtocolObject, Sel};
     use objc2::{define_class, msg_send, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
-        NSBitmapImageFileType, NSBitmapImageRep, NSEvent, NSEventMask, NSEventType, NSImage, NSImageCompressionFactor,
+        NSBitmapImageFileType, NSBitmapImageRep, NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSImage,
+        NSImageCompressionFactor,
         NSResponder, NSView, NSWindow,
     };
     use objc2_foundation::{
@@ -793,11 +794,11 @@ mod imp {
         });
 
         let app = app.clone();
-        let (left, over) = (Cell::new(None), Cell::new(None));
+        let (left, over, zoom_at) = (Cell::new(None), Cell::new(None), Cell::new(0.0));
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             // SAFETY: AppKit hands the monitor a live event, on the main thread.
             let (ev, mtm) = unsafe { (event.as_ref(), MainThreadMarker::new_unchecked()) };
-            on_event(&app, ev, mtm, &left, &over);
+            on_event(&app, ev, mtm, &left, &over, &zoom_at);
             event.as_ptr()
         });
         // tao's windows accept mouse-moved events, so the monitor sees every move.
@@ -811,7 +812,7 @@ mod imp {
     /// `over` is the id and owner of the shown view the pointer was last over.
     fn on_event(
         app: &AppHandle, event: &NSEvent, mtm: MainThreadMarker, left: &Cell<Option<(Key, f64)>>,
-        over: &Cell<Option<(String, String)>>,
+        over: &Cell<Option<(String, String)>>, zoom_at: &Cell<f64>,
     ) {
         let Some(window) = event.window(mtm) else { return };
         // The id and owner of this window's view that `test` picks.
@@ -843,6 +844,20 @@ mod imp {
             left.set(None);
             return;
         };
+        // WebKit sends a key the page left unhandled through the app again.
+        let again = kind == NSEventType::KeyDown && zoom_at.replace(event.timestamp()) == event.timestamp();
+        if kind == NSEventType::KeyDown && !again && event.modifierFlags().contains(NSEventModifierFlags::Command) {
+            let view = PANES.with(|panes| Some(panes.try_borrow().ok()?.get(&id)?.view.webview()));
+            let typed = event.charactersIgnoringModifiers().map(|typed| typed.to_string());
+            if let Some((view, typed)) = view.zip(typed) {
+                // SAFETY: plain property access on a live view, on the main thread.
+                unsafe {
+                    if let Some(zoom) = zoomed(view.pageZoom(), &typed) {
+                        view.setPageZoom(zoom);
+                    }
+                }
+            }
+        }
         let flags = event.modifierFlags().bits() as u64;
         let Some(key) = pressed(kind == NSEventType::FlagsChanged, event.keyCode(), flags) else { return };
         let mut state = left.take();
@@ -850,6 +865,17 @@ mod imp {
             emit(app, &owner, &id, "leader", json!({}));
         }
         left.set(state);
+    }
+
+    /// The page zoom a ⌘ chord asks for, as a browser has it: `=` in, `-` out,
+    /// `0` back to actual size. The page hears the chord as well.
+    fn zoomed(zoom: f64, typed: &str) -> Option<f64> {
+        match typed {
+            "=" | "+" => Some((zoom * 1.1).min(3.0)),
+            "-" => Some((zoom / 1.1).max(0.3)),
+            "0" => Some(1.0),
+            _ => None,
+        }
     }
 
     /// What a key event presses, or `None` for a modifier's release, which
@@ -933,6 +959,17 @@ mod imp {
             assert!(class.responds_to(objc2::sel!(
                 webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:
             )));
+        }
+
+        #[test]
+        fn the_zoom_chords_step_within_bounds_and_reset() {
+            assert_eq!(zoomed(1.0, "="), Some(1.1));
+            assert_eq!(zoomed(1.0, "+"), Some(1.1));
+            assert_eq!(zoomed(1.1, "-"), Some(1.0));
+            assert_eq!(zoomed(2.95, "="), Some(3.0));
+            assert_eq!(zoomed(0.31, "-"), Some(0.3));
+            assert_eq!(zoomed(2.0, "0"), Some(1.0));
+            assert_eq!(zoomed(2.0, "f"), None);
         }
 
         #[test]
