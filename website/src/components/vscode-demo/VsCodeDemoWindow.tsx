@@ -298,6 +298,7 @@ export function VsCodeDemoWindow({
   tab,
   panel,
   readme = false,
+  playable = false,
   otherTab,
   aspect,
   minWidth = MIN_LAYOUT_WIDTH,
@@ -306,6 +307,8 @@ export function VsCodeDemoWindow({
   tab: SceneName;
   panel?: SceneName;
   readme?: boolean;
+  /** A scene in it has a page the reader may click: see `DemoScene.playable`. */
+  playable?: boolean;
   otherTab?: string;
   /** Height over width. */
   aspect: number;
@@ -352,8 +355,9 @@ export function VsCodeDemoWindow({
     // item the slot would otherwise grow to it, and widen the page on a phone.
     <div ref={slotRef} className={`min-w-0 ${className}`} style={{ height: height * scale }}>
       <div
-        aria-hidden="true"
-        inert
+        data-demo-window
+        // A window with a playable page leaves its inerting to that page's Wall.
+        {...(playable ? {} : { "aria-hidden": true, inert: true })}
         className="flex flex-col overflow-hidden rounded-[10px] shadow-[0_0_0_1px_rgba(0,0,0,0.5),0_18px_50px_rgba(0,0,0,0.45)] select-none"
         style={windowStyle}
       >

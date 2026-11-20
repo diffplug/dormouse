@@ -859,7 +859,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <VsCodeDemoWindow tab="video" panel="agent" readme aspect={0.66} className="mt-8" />
+          <VsCodeDemoWindow tab="video" panel="agent" readme playable aspect={0.66} className="mt-8" />
         </section>
         {/* Section 2: image left, text right */}
         <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[minmax(0,390px)_1fr] gap-8 md:gap-12 items-start`}>
