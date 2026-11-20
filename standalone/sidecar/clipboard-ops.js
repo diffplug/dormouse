@@ -21,12 +21,16 @@ function execFileP(cmd, args, options) {
 
 const MAX_BUFFER = 16 * 1024 * 1024;
 
-/** Run `script` in Windows PowerShell, by its absolute path (`windowsPowerShellPath`). */
+/**
+ * Run `script` in Windows PowerShell, by its absolute path (`windowsPowerShellPath`). Its stdout
+ * is switched to UTF-8: in the console's OEM code page `é` arrives as a byte that is not UTF-8 and
+ * CJK as `?`.
+ */
 function runPowerShell(script, runtime) {
   const exec = runtime.exec || execFileP;
   return exec(
     windowsPowerShellPath(runtime.env || process.env),
-    ['-NoProfile', '-NonInteractive', '-Command', script],
+    ['-NoProfile', '-NonInteractive', '-Command', `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${script}`],
     { maxBuffer: MAX_BUFFER },
   );
 }
@@ -316,13 +320,22 @@ function writeViaStdin(cmd, args, text, runtime, env) {
   });
 }
 
+const WINDOWS_WRITE_SCRIPT = [
+  '$m = New-Object IO.MemoryStream',
+  '[Console]::OpenStandardInput().CopyTo($m)',
+  '$t = [Text.Encoding]::UTF8.GetString($m.ToArray())',
+  'if ($t.Length) { Set-Clipboard -Value $t } else { Set-Clipboard -Value $null }',
+].join('; ');
+
 async function writeClipboardText(text, runtime = {}) {
   const platform = runtime.platform || process.platform;
   const env = runtime.env || process.env;
   if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime, macUtf8Env(runtime));
-  // clip.exe reads stdin in the console code page unless it opens with a
-  // UTF-16LE byte-order mark, which keeps non-ASCII text intact.
-  if (platform === 'win32') return writeViaStdin(windowsSystemPath(env, 'System32', 'clip.exe'), [], Buffer.from(`\ufeff${text}`, 'utf16le'), runtime);
+  // Not clip.exe: some Windows builds (10.0.26300) keep a UTF-16 byte-order
+  // mark as a U+FEFF on the clipboard, and without one clip.exe guesses the
+  // encoding and garbles a lone non-ASCII character. PowerShell decodes the
+  // UTF-8 bytes itself; `$null` clears the clipboard for an empty copy.
+  if (platform === 'win32') return writeViaStdin(windowsPowerShellPath(env), ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_WRITE_SCRIPT], Buffer.from(text, 'utf8'), runtime);
   const wayland = Boolean(env.WAYLAND_DISPLAY);
   const attempts = wayland
     ? [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]]
