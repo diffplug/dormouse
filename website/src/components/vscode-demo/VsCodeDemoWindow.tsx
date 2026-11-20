@@ -7,47 +7,60 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   CopyIcon,
+  CornersOutIcon,
+  DotsThreeIcon,
   GearSixIcon,
   GitBranchIcon,
   MagnifyingGlassIcon,
   PlayIcon,
+  PlusIcon,
   SidebarSimpleIcon,
   SquareHalfBottomIcon,
+  SquareSplitHorizontalIcon,
   SquaresFourIcon,
-  UserCircleIcon,
   WarningIcon,
   XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import tinyIconUrl from "../../assets/icon-tiny-dark.png";
+import type { SceneName } from "./scenes";
 
 const VsCodeDemoWall = lazy(() => import("./VsCodeDemoWall"));
 
-/** VS Code's workbench in Kimbie Dark, the theme the Wall inside wears
+/** VS Code's workbench in Kimbie Dark, the theme the Walls inside wear
  *  (`../demo-theme.ts`): the theme file's own colors, and VS Code's dark
  *  defaults for the keys it leaves unset. The workbench is VS Code's, not
  *  Dormouse's, so these are a picture of it rather than theme tokens. */
 const KIMBIE = {
   titleBar: "#423523",
-  activityBar: "#221a0f",
   activityFg: "#d3af86",
   sideBar: "#362712",
   sectionBorder: "#5e452b",
   tabs: "#131510",
   editor: "#221a0f",
+  editorFg: "#d3af86",
+  lineNumber: "#858585",
   listActive: "#7c5021",
+  groupBorder: "#444444",
+  panelBorder: "#80808059",
   statusBar: "#423523",
   remote: "#6e583b",
   foreground: "#cccccc",
   modified: "#e2c08d",
   badge: "#007acc",
+  /** Token colors: Markdown headings, and inline and fenced code. */
+  heading: "#8ab1b0",
+  code: "#889b4a",
 } as const;
 
-/** The window's narrowest layout; a narrower column scales it down whole. */
+/** The window's default narrowest layout; a narrower column scales it down
+ *  whole. `./scenes.ts` wraps agent prose to the pane widths this gives. */
 const MIN_LAYOUT_WIDTH = 920;
-const ASPECT = 0.64;
 
 const FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+const EDITOR_FONT = "Menlo, Monaco, 'Courier New', monospace";
+
+const DORMOUSE_ICON = <img src={tinyIconUrl} alt="" className="size-4" />;
 
 type TreeRow = {
   depth: number;
@@ -63,6 +76,7 @@ const glyph = (text: string, color: string) => (
 );
 const TSX = <AtomIcon size={14} color="#519aba" />;
 const TS = glyph("TS", "#519aba");
+const MD = glyph("M↓", "#519aba");
 
 const TREE: readonly TreeRow[] = [
   { depth: 0, label: ".vscode", folder: "closed" },
@@ -71,7 +85,7 @@ const TREE: readonly TreeRow[] = [
   { depth: 0, label: "src", folder: "open" },
   { depth: 1, label: "pages", folder: "open" },
   { depth: 2, label: "Habits.tsx", icon: TSX },
-  { depth: 2, label: "Settings.tsx", icon: TSX, modified: true, selected: true },
+  { depth: 2, label: "Settings.tsx", icon: TSX, modified: true },
   { depth: 2, label: "Today.tsx", icon: TSX },
   { depth: 1, label: "main.tsx", icon: TSX },
   { depth: 1, label: "theme.test.ts", icon: TS },
@@ -79,41 +93,39 @@ const TREE: readonly TreeRow[] = [
   { depth: 0, label: "dormouse.yml", icon: glyph("!", "#a074c4") },
   { depth: 0, label: "index.html", icon: glyph("<>", "#e37933") },
   { depth: 0, label: "package.json", icon: glyph("{}", "#cbcb41") },
-  { depth: 0, label: "README.md", icon: glyph("M↓", "#519aba") },
+  { depth: 0, label: "README.md", icon: MD, selected: true },
   { depth: 0, label: "vite.config.ts", icon: TS },
 ];
 
-function ActivityIcon({ children, active = false, badge }: { children: ReactNode; active?: boolean; badge?: string }) {
-  return (
-    <div
-      className="relative flex h-12 w-12 items-center justify-center"
-      style={{ color: KIMBIE.activityFg, boxShadow: active ? `inset 2px 0 0 ${KIMBIE.activityFg}` : undefined }}
-    >
-      <span className="flex" style={{ opacity: active ? 1 : 0.4 }}>{children}</span>
-      {badge ? (
-        <span
-          className="absolute right-2 bottom-2 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold text-white"
-          style={{ background: KIMBIE.badge }}
-        >
-          {badge}
-        </span>
-      ) : null}
-    </div>
-  );
-}
+/** README.md, one source line per entry: runs of text, each with its token color. */
+type Run = { text: string; color?: string; bold?: boolean };
+const README: readonly (readonly Run[])[] = [
+  [{ text: "# Acorn", color: KIMBIE.heading, bold: true }],
+  [],
+  [{ text: "A habit tracker small enough to keep in a pocket: daily check-ins, streaks, and one nudge at the time you pick." }],
+  [],
+  [{ text: "## Develop", color: KIMBIE.heading, bold: true }],
+  [],
+  [{ text: "```sh", color: KIMBIE.code }],
+  [{ text: "pnpm install", color: KIMBIE.code }],
+  [{ text: "pnpm dev", color: KIMBIE.code }],
+  [{ text: "```", color: KIMBIE.code }],
+  [],
+  [{ text: "The app serves on " }, { text: "`localhost:5173`", color: KIMBIE.code }, { text: ", and the API runs with " }, { text: "`wrangler dev`", color: KIMBIE.code }, { text: "." }],
+];
 
 function Explorer() {
   return (
     <div className="flex w-[220px] shrink-0 flex-col text-[13px]" style={{ background: KIMBIE.sideBar, color: KIMBIE.foreground }}>
       <div className="flex h-[35px] items-center justify-between pr-2 pl-5 text-[11px]">
         <span>EXPLORER</span>
-        <span className="opacity-80">···</span>
+        <DotsThreeIcon size={16} className="opacity-80" />
       </div>
       <div className="flex h-[22px] items-center gap-0.5 pl-0.5 text-[11px] font-bold">
         <CaretDownIcon size={14} />
         ACORN
       </div>
-      <div className="flex-1">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {TREE.map((row) => (
           <div
             key={`${row.depth}-${row.label}`}
@@ -122,7 +134,6 @@ function Explorer() {
               paddingLeft: 8 + row.depth * 12 + (row.folder ? 0 : 16),
               background: row.selected ? KIMBIE.listActive : undefined,
               color: row.modified ? KIMBIE.modified : undefined,
-              boxShadow: row.selected ? "inset 0 0 0 1px #a57a4c" : undefined,
             }}
           >
             {row.folder === "open" ? <CaretDownIcon size={14} /> : row.folder === "closed" ? <CaretRightIcon size={14} /> : row.icon}
@@ -141,6 +152,15 @@ function Explorer() {
           {label}
         </div>
       ))}
+      {/* The activity bar, at the foot of the Side Bar (`workbench.activityBar.location: bottom`). */}
+      <div className="flex h-[35px] shrink-0 items-center gap-3.5 px-3" style={{ color: KIMBIE.activityFg, borderTop: `1px solid ${KIMBIE.sectionBorder}` }}>
+        <span className="flex h-full items-center" style={{ boxShadow: `inset 0 -1px 0 ${KIMBIE.activityFg}` }}><CopyIcon size={18} /></span>
+        {[MagnifyingGlassIcon, GitBranchIcon, PlayIcon].map((Icon, i) => <Icon key={i} size={18} className="opacity-50" />)}
+        <span className="relative flex opacity-100">
+          <SquaresFourIcon size={18} className="opacity-50" />
+          <span className="absolute -right-1.5 -bottom-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 text-[9px] font-semibold text-white" style={{ background: KIMBIE.badge }}>1</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -148,7 +168,7 @@ function Explorer() {
 function Tab({ label, icon, active = false, modified = false }: { label: string; icon: ReactNode; active?: boolean; modified?: boolean }) {
   return (
     <div
-      className="flex h-full items-center gap-1.5 pr-2 pl-3 text-[13px]"
+      className="flex h-full shrink-0 items-center gap-1.5 pr-2 pl-3 text-[13px]"
       style={{
         background: active ? KIMBIE.editor : KIMBIE.tabs,
         color: modified ? KIMBIE.modified : active ? "#ffffff" : "#ffffff80",
@@ -162,13 +182,124 @@ function Tab({ label, icon, active = false, modified = false }: { label: string;
   );
 }
 
+/** An editor group's tab strip, with its actions at the right end. */
+function TabStrip({ children, actions }: { children: ReactNode; actions: ReactNode }) {
+  return (
+    <div className="flex h-[35px] shrink-0" style={{ background: KIMBIE.tabs }}>
+      {children}
+      <div className="ml-auto flex items-center gap-2.5 px-3" style={{ color: KIMBIE.foreground }}>{actions}</div>
+    </div>
+  );
+}
+
+/** A Wall, mounted once the window is near the viewport. */
+function DemoWall({ scene, near }: { scene: SceneName; near: boolean }) {
+  return (
+    <div className="relative min-h-0 flex-1" style={{ background: KIMBIE.editor }}>
+      {near ? (
+        <Suspense fallback={null}>
+          <VsCodeDemoWall scene={scene} />
+        </Suspense>
+      ) : null}
+    </div>
+  );
+}
+
+/** README.md in a text editor group: breadcrumbs, line numbers, word wrap, minimap. */
+function ReadmeGroup() {
+  return (
+    <div className="flex w-[42%] shrink-0 flex-col" style={{ background: KIMBIE.editor, borderRight: `1px solid ${KIMBIE.groupBorder}` }}>
+      <TabStrip actions={<DotsThreeIcon size={16} />}>
+        <Tab label="README.md" icon={MD} active />
+      </TabStrip>
+      <div className="flex h-[22px] shrink-0 items-center gap-1 px-4 text-[12px]" style={{ color: "#cccccccc" }}>
+        {MD}README.md<CaretRightIcon size={11} />
+        <span className="truncate"># Acorn</span>
+      </div>
+      <div className="flex min-h-0 flex-1 overflow-hidden text-[12px] leading-[18px]" style={{ fontFamily: EDITOR_FONT, color: KIMBIE.editorFg }}>
+        <div className="min-w-0 flex-1">
+          {README.map((runs, i) => (
+            <div key={i} className="flex">
+              <span className="w-10 shrink-0 pr-4 text-right" style={{ color: i === 0 ? "#c6c6c6" : KIMBIE.lineNumber }}>{i + 1}</span>
+              <span className="min-w-0 flex-1 pr-2 break-words">
+                {runs.length ? runs.map((run, j) => (
+                  <span key={j} style={{ color: run.color, fontWeight: run.bold ? 700 : undefined }}>{run.text}</span>
+                )) : " "}
+              </span>
+            </div>
+          ))}
+        </div>
+        {/* The minimap: each line a faint bar of its length. */}
+        <div className="w-12 shrink-0 space-y-[2px] pt-0.5 pr-2 opacity-40">
+          {README.map((runs, i) => {
+            const length = runs.reduce((sum, run) => sum + run.text.length, 0);
+            return <div key={i} className="h-[2px] rounded-full" style={{ width: `${Math.min(100, length * 1.6)}%`, background: runs[0]?.color ?? KIMBIE.editorFg }} />;
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The bottom panel, Dormouse's view selected among the panel's others. */
+function Panel({ scene, near }: { scene: SceneName; near: boolean }) {
+  const tab = (label: string, badge?: string, active = false) => (
+    <div
+      key={label}
+      className="flex h-full items-center gap-1.5 text-[11px]"
+      style={{ color: active ? "#e7e7e7" : "#e7e7e799", boxShadow: active ? "inset 0 -1px 0 #e7e7e7" : undefined }}
+    >
+      {label}
+      {badge ? <span className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white" style={{ background: KIMBIE.badge }}>{badge}</span> : null}
+    </div>
+  );
+  return (
+    <div className="flex h-[46%] shrink-0 flex-col" style={{ background: KIMBIE.editor, borderTop: `1px solid ${KIMBIE.panelBorder}` }}>
+      <div className="flex h-[35px] shrink-0 items-center gap-5 px-5">
+        {tab("DEBUG CONSOLE")}
+        {tab("DORMOUSE", "1", true)}
+        {tab("PROBLEMS", "2")}
+        <div className="ml-auto flex items-center gap-3" style={{ color: KIMBIE.foreground }}>
+          <GearSixIcon size={15} />
+          <PlusIcon size={15} />
+          <span className="h-4 w-px bg-current opacity-30" />
+          <CornersOutIcon size={15} />
+          <XIcon size={15} />
+        </div>
+      </div>
+      <DemoWall scene={scene} near={near} />
+    </div>
+  );
+}
+
 /**
- * The homepage's picture of Dormouse in VS Code: VS Code's workbench drawn in
- * HTML around the real Wall, open in an editor tab as `dormouse.open` opens it.
- * It lays out at no less than `MIN_LAYOUT_WIDTH` and scales down to fit its
- * column, and mounts the Wall once it is a screen away.
+ * A homepage picture of Dormouse in VS Code: VS Code's workbench drawn in HTML
+ * around the real Wall. `tab` is the Workspace open in an editor tab, as
+ * `dormouse.open` opens one; `panel`, if given, the one in the bottom panel.
+ * With `readme`, the Explorer is open and README.md sits in its own editor group
+ * beside the Dormouse tab; otherwise `otherTab` shares the Dormouse tab's group.
+ * It lays out at no less than `minWidth` and scales down to fit its column, and
+ * mounts its Walls once it is a screen away.
  */
-export function VsCodeDemoWindow({ className = "" }: { className?: string }) {
+export function VsCodeDemoWindow({
+  tab,
+  panel,
+  readme = false,
+  otherTab,
+  aspect = 0.64,
+  minWidth = MIN_LAYOUT_WIDTH,
+  className = "",
+}: {
+  tab: SceneName;
+  panel?: SceneName;
+  readme?: boolean;
+  otherTab?: string;
+  /** Height over width. */
+  aspect?: number;
+  /** Narrowest layout width, wider than the column to draw it smaller. */
+  minWidth?: number;
+  className?: string;
+}) {
   const slotRef = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const [fit, setFit] = useState<{ width: number; scale: number } | null>(null);
@@ -184,7 +315,7 @@ export function VsCodeDemoWindow({ className = "" }: { className?: string }) {
     nearby.observe(slot);
     const refit = () => {
       const available = slot.clientWidth;
-      const width = Math.max(available, MIN_LAYOUT_WIDTH);
+      const width = Math.max(available, minWidth);
       setFit((prev) => prev?.width === width && prev.scale === available / width ? prev : { width, scale: available / width });
     };
     refit();
@@ -194,10 +325,10 @@ export function VsCodeDemoWindow({ className = "" }: { className?: string }) {
       nearby.disconnect();
       resize.disconnect();
     };
-  }, []);
+  }, [minWidth]);
 
-  const width = fit?.width ?? MIN_LAYOUT_WIDTH;
-  const height = Math.round(width * ASPECT);
+  const width = fit?.width ?? minWidth;
+  const height = Math.round(width * aspect);
   const scale = fit?.scale ?? 1;
   const windowStyle: CSSProperties = {
     width,
@@ -241,34 +372,20 @@ export function VsCodeDemoWindow({ className = "" }: { className?: string }) {
         </div>
 
         <div className="flex min-h-0 flex-1">
-          {/* Activity bar */}
-          <div className="flex w-12 shrink-0 flex-col" style={{ background: KIMBIE.activityBar }}>
-            <ActivityIcon active><CopyIcon size={24} /></ActivityIcon>
-            <ActivityIcon><MagnifyingGlassIcon size={24} /></ActivityIcon>
-            <ActivityIcon badge="2"><GitBranchIcon size={24} /></ActivityIcon>
-            <ActivityIcon><PlayIcon size={24} /></ActivityIcon>
-            <ActivityIcon><SquaresFourIcon size={24} /></ActivityIcon>
-            <div className="mt-auto">
-              <ActivityIcon><UserCircleIcon size={24} /></ActivityIcon>
-              <ActivityIcon><GearSixIcon size={24} /></ActivityIcon>
+          {readme ? <Explorer /> : null}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1">
+              {readme ? <ReadmeGroup /> : null}
+              {/* Dormouse open in an editor tab. */}
+              <div className="flex min-w-0 flex-1 flex-col" style={{ background: KIMBIE.editor }}>
+                <TabStrip actions={<><SquareSplitHorizontalIcon size={15} /><DotsThreeIcon size={16} /></>}>
+                  {otherTab ? <Tab label={otherTab} icon={TSX} modified /> : null}
+                  <Tab label="Dormouse" icon={DORMOUSE_ICON} active />
+                </TabStrip>
+                <DemoWall scene={tab} near={near} />
+              </div>
             </div>
-          </div>
-
-          <Explorer />
-
-          {/* Editor group: Dormouse open in an editor tab. */}
-          <div className="flex min-w-0 flex-1 flex-col" style={{ background: KIMBIE.editor }}>
-            <div className="flex h-[35px] shrink-0" style={{ background: KIMBIE.tabs }}>
-              <Tab label="Settings.tsx" icon={TSX} modified />
-              <Tab label="Dormouse" icon={<img src={tinyIconUrl} alt="" className="size-4" />} active />
-            </div>
-            <div className="relative min-h-0 flex-1">
-              {near ? (
-                <Suspense fallback={null}>
-                  <VsCodeDemoWall />
-                </Suspense>
-              ) : null}
-            </div>
+            {panel ? <Panel scene={panel} near={near} /> : null}
           </div>
         </div>
 
@@ -278,7 +395,7 @@ export function VsCodeDemoWindow({ className = "" }: { className?: string }) {
           <div className="flex items-center gap-1 px-2"><GitBranchIcon size={13} />main*</div>
           <div className="flex items-center gap-1 px-2">
             <XCircleIcon size={13} />0
-            <WarningIcon size={13} className="ml-1" />0
+            <WarningIcon size={13} className="ml-1" />2
           </div>
           <div className="ml-auto flex items-center px-3"><BellIcon size={13} /></div>
         </div>

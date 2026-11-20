@@ -1,0 +1,206 @@
+import type { LathPersistedLayout, LeafMeta } from "dormouse-lib/lib/lath/persistence";
+import type { OpenPort } from "dormouse-lib/lib/platform/types";
+import type { PersistedDoor } from "dormouse-lib/lib/session-types";
+
+/**
+ * What each homepage VS Code demo shows: its Sessions, how the Wall lays them
+ * out, and anything opened once they have painted. Each terminal's output is
+ * written once on spawn; nothing plays.
+ */
+
+export type SceneName = "video" | "agent" | "ports";
+
+export interface DemoSession {
+  command: string;
+  /** What it printed after its command line. Absent for a Door, which never
+   *  spawns: its state is seeded instead. */
+  data?: string;
+  ports?: OpenPort[];
+  /** A title it set (OSC 0), as an agent CLI names its task. */
+  title?: string;
+  /** Marked TODO once it spawns. */
+  todo?: boolean;
+}
+
+export interface DemoScene {
+  /** Its own, so the demos' Walls never answer for each other. */
+  workspaceId: string;
+  sessions: Record<string, DemoSession>;
+  /** Built on the client, which knows the origin the browser pane loads from. */
+  layout(origin: string): LathPersistedLayout;
+  doors?: PersistedDoor[];
+  /** Panes whose headers a cursor right-clicks in turn, on a loop while the
+   *  window is on screen, each opening its terminal context. */
+  contextTour?: string[];
+}
+
+export const CWD = "/Users/you/acorn";
+
+const DIM = "\x1b[2m";
+const BOLD = "\x1b[1m";
+const RESET = "\x1b[0m";
+const GREEN = "\x1b[32m";
+const RED = "\x1b[31m";
+const YELLOW = "\x1b[33m";
+const CYAN = "\x1b[36m";
+const PROMPT = `${DIM}~/acorn${RESET} ${YELLOW}❯${RESET} `;
+
+const lines = (...rows: string[]) => rows.join("\r\n");
+
+/** A shell prompt that ran `command`, marked with the VS Code shell-integration
+ *  sequences Dormouse's own integration emits, so each header derives its
+ *  command and cwd as it would from a real shell. */
+export const ran = (command: string) =>
+  `\x1b]7;file://${CWD}\x07\x1b]633;A\x07${PROMPT}\x1b]633;B\x07${command}\r\n\x1b]633;E;${command}\x07\x1b]633;C\x07`;
+
+/** Word-wrap `text` to `columns` as an agent CLI does, which xterm.js would
+ *  break mid-word. The windows never lay out narrower than their minimum, and
+ *  scale instead, so each pane's width in columns holds near enough. */
+function wrap(text: string, columns: number, indent = ""): string[] {
+  const rows: string[] = [];
+  let row = "";
+  for (const word of text.split(" ")) {
+    if (row && row.length + 1 + word.length > columns - indent.length) {
+      rows.push(row);
+      row = word;
+    } else row = row ? `${row} ${word}` : word;
+  }
+  rows.push(row);
+  return rows.map((r, i) => (i === 0 ? r : indent + r));
+}
+
+const listening = (port: number, pid: number): OpenPort => ({ protocol: "tcp", family: "IPv4", address: "127.0.0.1", port, pid, processName: "node" });
+
+const vite = (port: number, ...after: string[]) => lines(
+  "",
+  `  ${GREEN}${BOLD}VITE${RESET} ${GREEN}v7.1.4${RESET}  ${DIM}ready in${RESET} ${BOLD}284${RESET} ${DIM}ms${RESET}`,
+  "",
+  `  ${GREEN}➜${RESET}  ${BOLD}Local${RESET}:   ${CYAN}http://localhost:${BOLD}${port}${RESET}${CYAN}/${RESET}`,
+  `  ${GREEN}➜${RESET}  ${DIM}${BOLD}Network${RESET}${DIM}: use ${RESET}${BOLD}--host${RESET}${DIM} to expose${RESET}`,
+  ...after,
+);
+
+const hmr = (time: string, file: string) => `${DIM}${time}${RESET} ${CYAN}${BOLD}[vite]${RESET} ${GREEN}hmr update${RESET} ${DIM}${file}${RESET}`;
+
+const terminal = (title: string): LeafMeta => ({ component: "terminal", tabComponent: "terminal", title });
+
+const metaFor = (sessions: Record<string, DemoSession>, ...ids: string[]) =>
+  Object.fromEntries(ids.map((id) => [id, terminal(sessions[id].command)]));
+
+const doorsFor = (sessions: Record<string, DemoSession>, ...ids: string[]): PersistedDoor[] =>
+  ids.map((id) => ({ id, ...terminal(sessions[id].command) }));
+
+// --- "Tmux with browsers": two Workspaces in one VS Code window, the video
+// in an editor tab and an agent in the bottom panel, its dev server a Door. ---
+
+/** The homepage video, as YouTube's privacy-enhanced embed serves it: muted
+ *  and looping, since the window around it takes no clicks. */
+export const VIDEO_ID = "REPLACE_WITH_VIDEO_ID";
+const VIDEO_URL = `https://www.youtube-nocookie.com/embed/${VIDEO_ID}?autoplay=1&mute=1&loop=1&playlist=${VIDEO_ID}&controls=0&rel=0`;
+
+// Surface ids as the app mints them, distinct across the demos since they
+// share the registry.
+const W = {
+  video: "surface:1",
+  agent: "surface:2",
+  dev: "surface:3",
+};
+
+/** The panel's terminal is about this wide in columns. */
+const PANEL_COLUMNS = 80;
+
+const VIDEO: DemoScene = {
+  workspaceId: "vscode-demo-editor",
+  sessions: {},
+  layout: () => ({
+    version: 1,
+    tree: { root: { kind: "leaf", id: W.video } },
+    leafMeta: { [W.video]: { component: "browser", tabComponent: "surface", title: "Dormouse", params: { url: VIDEO_URL } } },
+  }),
+};
+
+const AGENT_SESSIONS: Record<string, DemoSession> = {
+  [W.agent]: {
+    command: "claude",
+    title: "✳ Dark mode toggle",
+    todo: true,
+    data: lines(
+      `${YELLOW}>${RESET} add a dark mode toggle to settings`,
+      "",
+      `${YELLOW}●${RESET} Edit ${BOLD}src/pages/Settings.tsx${RESET} ${GREEN}+24${RESET} ${RED}-3${RESET}`,
+      `${YELLOW}●${RESET} Edit ${BOLD}src/theme.ts${RESET} ${GREEN}+11${RESET}`,
+      `${YELLOW}●${RESET} Ran ${BOLD}pnpm vitest run src/theme.test.ts${RESET}`,
+      `  ${DIM}✓ 6 passed${RESET}`,
+      "",
+      ...wrap("Done. The toggle is in Settings and follows the system theme until you choose, and the dev server has picked up both files.", PANEL_COLUMNS),
+      "",
+      `${DIM}✻ Worked for 41s · done 11:25 AM${RESET}`,
+      `${DIM}${"─".repeat(PANEL_COLUMNS)}${RESET}`,
+      `${YELLOW}>${RESET} `,
+    ),
+  },
+  [W.dev]: { command: "pnpm dev" },
+};
+
+const AGENT: DemoScene = {
+  workspaceId: "vscode-demo-panel",
+  sessions: AGENT_SESSIONS,
+  layout: () => ({
+    version: 1,
+    tree: { root: { kind: "leaf", id: W.agent } },
+    leafMeta: metaFor(AGENT_SESSIONS, W.agent),
+  }),
+  doors: doorsFor(AGENT_SESSIONS, W.dev),
+};
+
+// --- "Terminals that know their ports": two dev servers, one above the other, each
+// right-clicked in turn to show the ports its own process tree listens on. ---
+
+const P = {
+  web: "surface:4",
+  api: "surface:5",
+};
+
+const PORTS_SESSIONS: Record<string, DemoSession> = {
+  [P.web]: {
+    command: "pnpm dev",
+    data: vite(3000, hmr("10:14:52 AM", "/src/pages/Login.tsx"), hmr("10:15:06 AM", "/src/pages/Login.tsx")),
+    ports: [listening(3000, 5120), listening(24678, 5120)],
+  },
+  [P.api]: {
+    command: "wrangler dev",
+    data: lines(
+      "",
+      ` ${BOLD}⛅️ wrangler${RESET} 4.38.0`,
+      `${DIM}───────────────────${RESET}`,
+      "Your Worker has access to the following bindings:",
+      `- D1 Databases:`,
+      `  - DB: acorn-db ${DIM}(local)${RESET}`,
+      `${GREEN}[wrangler:info]${RESET} Ready on ${CYAN}http://localhost:8787${RESET}`,
+      `${GREEN}[wrangler:info]${RESET} GET /api/habits ${GREEN}200${RESET} OK ${DIM}(12ms)${RESET}`,
+    ),
+    ports: [listening(8787, 5288), listening(9229, 5288)],
+  },
+};
+
+const PORTS: DemoScene = {
+  workspaceId: "vscode-demo-ports",
+  sessions: PORTS_SESSIONS,
+  layout: () => ({
+    version: 1,
+    tree: {
+      root: {
+        kind: "split",
+        dir: "col",
+        children: [
+          { node: { kind: "leaf", id: P.web }, weight: 0.5 },
+          { node: { kind: "leaf", id: P.api }, weight: 0.5 },
+        ],
+      },
+    },
+    leafMeta: metaFor(PORTS_SESSIONS, P.web, P.api),
+  }),
+  contextTour: [P.web, P.api],
+};
+
+export const SCENES: Record<SceneName, DemoScene> = { video: VIDEO, agent: AGENT, ports: PORTS };
