@@ -30,7 +30,11 @@ const STILL_AFTER_MOVE_MS = 300;
 type Status = { kind: 'opening' } | { kind: 'open' } | { kind: 'error'; error: string };
 type PageDialog = Extract<PaneWebviewEvent, { kind: 'dialog' }>;
 
-const DOWNLOAD_REFUSED = { dialog: 'alert', message: 'A webview pane downloads nothing.' } as const;
+/** What a pane says of a download its host refused. */
+export const DOWNLOAD_REFUSED = {
+  asker: 'This page tried to download a file.',
+  dialog: { dialog: 'alert', message: 'A webview pane downloads nothing.' },
+} as const;
 
 /** The app's CSP admits no `data:` image, so a still is decoded for a canvas. */
 async function decodeStill(url: string | null): Promise<ImageBitmap | null> {
@@ -335,8 +339,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
         />
       ) : downloadRefused && seen && (
         <PageDialogPrompt
-          asker="This page tried to download a file."
-          dialog={DOWNLOAD_REFUSED}
+          {...DOWNLOAD_REFUSED}
           focusTarget={passthroughPaneId === id ? setDialogFocus : undefined}
           onAnswer={() => setDownloadRefused(false)}
         />
@@ -347,7 +350,7 @@ export function WebviewPanel({ id, params, parked }: PaneProps) {
 
 /** A page's alert, confirm, or prompt, asked in its pane. Its text is the
  *  page's: plain, attributed, and scrolling within the prompt. */
-function PageDialogPrompt({ asker, dialog, focusTarget, onAnswer }: {
+export function PageDialogPrompt({ asker, dialog, focusTarget, onAnswer }: {
   /** Who is speaking: the page's origin, or Dormouse about the page. */
   asker: string;
   dialog: Pick<PageDialog, 'dialog' | 'message' | 'text'>;
