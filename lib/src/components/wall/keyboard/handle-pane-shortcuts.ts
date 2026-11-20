@@ -17,15 +17,15 @@ function openHeaderContext(ctx: WallKeyboardCtx, id: string, mode: ContextMode):
 }
 
 /** The command keys that open the terminal context, each in its mode. */
-const CONTEXT_KEYS: Readonly<Record<string, ContextMode>> = { '?': 'properties', '!': 'aux' };
+const CONTEXT_OPEN_KEYS: Readonly<Record<string, ContextMode>> = { '?': 'properties', '!': 'aux' };
 /** Bindings Option or AltGr may print on non-US keyboards. */
-const SYMBOL_KEYS = ['|', '%', '"', ...Object.keys(CONTEXT_KEYS)];
+const SYMBOL_KEYS = ['|', '%', '"', ...Object.keys(CONTEXT_OPEN_KEYS)];
 
 /** Keep aligned with the pane handlers below. Workspace selections consume
  *  these keys; an omitted key returns unhandled without dispatching a pane action,
  *  and a printable one raises the stray-key prompt.
  *  Pinned by the independent key list in handle-pane-navigation.test.ts. */
-export const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', ...Object.keys(CONTEXT_KEYS)]);
+export const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', ...Object.keys(CONTEXT_OPEN_KEYS)]);
 
 /** Command-mode shortcuts acting on the selected pane or Door. The binding
  *  table is `docs/specs/shortcuts.md`; the behavior is `docs/specs/layout.md`. */
@@ -164,7 +164,7 @@ export function handlePaneShortcuts(
     return true;
   }
 
-  const contextMode = CONTEXT_KEYS[key];
+  const contextMode = CONTEXT_OPEN_KEYS[key];
   if (contextMode && sid && ctx.selectedTypeRef.current === 'pane') {
     e.preventDefault();
     e.stopPropagation();

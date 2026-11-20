@@ -10,7 +10,7 @@ export function unionBounds(a: RingRect, b: RingRect): RingRect {
 }
 
 /** Corner points of the outer contour of two overlapping rectangles. Grid cells remove
- *  internal seams before rounding, so a smaller aux terminal leaves a step rather than framing peers. */
+ *  internal seams before rounding, so a smaller context panel leaves a step rather than framing peers. */
 export function rectUnionOutline(a: RingRect, b: RingRect): Point[] {
   const xs = [...new Set([a.left, a.left + a.width, b.left, b.left + b.width])].sort((x, y) => x - y);
   const ys = [...new Set([a.top, a.top + a.height, b.top, b.top + b.height])].sort((x, y) => x - y);

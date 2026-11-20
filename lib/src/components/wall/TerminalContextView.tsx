@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, 
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, InfoIcon, PlugIcon, PushPinIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
-import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, KeyHint, Mnemonic, openPicker, PORT_ACTION_KEYS } from './context-keys';
+import { activateContextKey, CONTEXT_KEYS, ContextKeysContext, contextKey, contextKeyModifiersOk, KeyHint, Mnemonic, openPicker, PORT_ACTION_KEYS } from './context-keys';
 import { isEditableTarget } from '../../lib/dom';
 import { useOccludePaneWebviews } from '../../lib/pane-webview-occlusion';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
@@ -528,7 +528,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); return; }
       // A list or field keeps its own keys; Escape above still closes.
-      if (keysLive && !detail && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableTarget(event.target) && !(event.target instanceof HTMLSelectElement)
+      if (keysLive && !detail && contextKeyModifiersOk(event) && !isEditableTarget(event.target) && !(event.target instanceof HTMLSelectElement)
         && surface.current && activateContextKey(surface.current, event.key)) {
         event.preventDefault();
         event.stopPropagation();

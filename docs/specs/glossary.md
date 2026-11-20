@@ -59,7 +59,7 @@ Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 
 ## Containers
 
-**Must keep an aux terminal as a Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, targetable id, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown aux terminal is `Paned` within the source body; a closed context leaves it `Hidden` and DOM-parked (`Mounted`).
+**Must keep an aux terminal as a Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, targetable id, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown aux terminal is `Paned` within the source body; a closed context, or one showing properties, leaves it `Hidden` and DOM-parked (`Mounted`).
 
 Workspace and Window are containers, not Session layers — they group Surfaces rather than describing one Surface's state (containment is I7).
 
