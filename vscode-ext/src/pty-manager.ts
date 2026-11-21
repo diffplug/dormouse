@@ -231,7 +231,35 @@ export function getDorRuntimeEnv(extensionPath: string): Record<string, string> 
   return env;
 }
 
+// No PTY in a retired child can still be live. Retain its transcripts for
+// resume, and report exit just as if the child had delivered each PTY's final event.
+function retireChild(retired: ChildProcess, code: number | null): void {
+  if (child !== retired) return;
+  log.error(`pty-host exited unexpectedly (code ${code})`);
+  child = null;
+  childReady = false;
+  pendingMessages = [];
+  shellsCache = null;
+  const exitedIds: string[] = [];
+  const exitCode = code ?? 1;
+  for (const [id, entry] of ptyBuffers) {
+    if (!entry.alive) continue;
+    entry.alive = false;
+    entry.exitCode = exitCode;
+    exitedIds.push(id);
+  }
+  // Callbacks may synchronously spawn a replacement. Finish retiring this
+  // generation before notifying, and never iterate its replacement's buffers.
+  for (const id of exitedIds) {
+    for (const cb of callbackSet) cb.onExit(id, exitCode);
+  }
+}
+
 function ensureChild(extensionPath: string): ChildProcess {
+  // Node closes a child's channel apart from, and often before, its exit, which
+  // a replacement forked meanwhile would ignore: retire it now instead.
+  if (child && !child.connected) retireChild(child, child.exitCode);
+  // An exit callback may already have forked the replacement.
   if (child && child.connected) return child;
 
   const hostScript = path.join(extensionPath, 'dist', 'pty-host.js');
@@ -298,29 +326,7 @@ function ensureChild(extensionPath: string): ChildProcess {
     }
   });
 
-  child.on('exit', (code) => {
-    if (child !== launchedChild) return;
-    log.error(`pty-host exited unexpectedly (code ${code})`);
-    child = null;
-    childReady = false;
-    pendingMessages = [];
-    shellsCache = null;
-    // No PTY in this child can still be live. Retain its transcript for resume,
-    // and report exit just as if the child had delivered each PTY's final event.
-    const exitedIds: string[] = [];
-    const exitCode = code ?? 1;
-    for (const [id, entry] of ptyBuffers) {
-      if (!entry.alive) continue;
-      entry.alive = false;
-      entry.exitCode = exitCode;
-      exitedIds.push(id);
-    }
-    // Callbacks may synchronously spawn a replacement. Finish retiring this
-    // generation before notifying, and never iterate its replacement's buffers.
-    for (const id of exitedIds) {
-      for (const cb of callbackSet) cb.onExit(id, exitCode);
-    }
-  });
+  child.on('exit', (code) => retireChild(launchedChild, code));
 
   child.stderr?.on('data', (data: Buffer) => {
     log.error(`pty-host stderr: ${data.toString().trim()}`);

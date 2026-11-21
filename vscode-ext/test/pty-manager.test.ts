@@ -204,6 +204,22 @@ describe('PTY manager lifetime and buffers', () => {
     expect(onExit.mock.calls).toEqual([['pane-a', 1], ['pane-b', 1]]);
   });
 
+  it('retires a child whose channel closed before its exit, when a send forks the replacement', async () => {
+    const { manager, child } = await startManager();
+    const onExit = vi.fn();
+    manager.addCallbacks({ onData: vi.fn(), onExit });
+    const replacement = new FakeChild();
+    mocks.fork.mockReturnValue(replacement);
+    // Node reports the IPC channel closing apart from, and often before, the exit.
+    child.connected = false;
+    manager.write('pane-a', 'x');
+    child.emit('exit', 1);
+
+    expect(mocks.fork).toHaveBeenCalledTimes(2);
+    expect(manager.getPtyStatus('pane-a')?.alive).toBe(false);
+    expect(onExit.mock.calls).toEqual([['pane-a', 1]]);
+  });
+
   it('ignores a retired child’s late output and exit after a replacement starts', async () => {
     const { manager, child } = await startManager();
     manager.killAll();
