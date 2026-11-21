@@ -219,6 +219,12 @@ type PocketTutorialTouchMode = "gestures" | "selection" | "cursor";
 
 const RESET_CONFIRM_WORD = "reset";
 
+/** Whether a terminal's element can be on screen, for {@link TutRunnerOptions.isShown}.
+ *  Safari before 17.4 has no `checkVisibility`; there a connected element counts. */
+export function terminalElementShown(element: Element | undefined): boolean {
+  return !!element && (element.checkVisibility?.() ?? element.isConnected);
+}
+
 export class TutRunner implements InteractiveProgram {
   private adapter: FakePtyAdapter;
   private terminalId: string;

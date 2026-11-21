@@ -10,7 +10,7 @@ import { DESKTOP_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
 import { trackTutorialCompletion } from "../lib/site-analytics";
-import { TutRunner } from "../lib/tut-runner";
+import { TutRunner, terminalElementShown } from "../lib/tut-runner";
 import { startAlertProgram } from "../lib/alert-programs";
 import { lazyProgram } from "../lib/lazy-program";
 import { devServerPage, startDevServer } from "../lib/dev-server-program";
@@ -185,7 +185,7 @@ function PlaygroundDesktopExperience() {
               // A minimized pane's xterm is detached, and a hidden Workspace's
               // is not rendered, so either fails checkVisibility.
               isShown: () => document.visibilityState === "visible"
-                && !!registry.getTerminalInstance(terminalId)?.element?.checkVisibility(),
+                && terminalElementShown(registry.getTerminalInstance(terminalId)?.element),
             });
           }
           if (name === "ascii-splash" || name === "splash") {

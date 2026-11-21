@@ -7,7 +7,7 @@ import {
   type ItemId,
   type TutorialProfile,
 } from "./tut-items";
-import { STARFIELD_TICK_MS, STARFIELD_HEIGHT, TutRunner } from "./tut-runner";
+import { STARFIELD_TICK_MS, STARFIELD_HEIGHT, TutRunner, terminalElementShown } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
 import { BOLD, RESET, fg } from "dormouse-lib/lib/ansi";
 
@@ -591,5 +591,21 @@ describe("TutRunner snapshots", () => {
       dispose();
       vi.useRealTimers();
     }
+  });
+});
+
+describe("terminalElementShown", () => {
+  it("asks checkVisibility where the browser has it", () => {
+    expect(terminalElementShown({ isConnected: true, checkVisibility: () => false } as unknown as Element)).toBe(false);
+    expect(terminalElementShown({ isConnected: true, checkVisibility: () => true } as unknown as Element)).toBe(true);
+  });
+
+  it("falls back to isConnected without checkVisibility, as in Safari before 17.4", () => {
+    expect(terminalElementShown({ isConnected: true } as unknown as Element)).toBe(true);
+    expect(terminalElementShown({ isConnected: false } as unknown as Element)).toBe(false);
+  });
+
+  it("counts no element as hidden", () => {
+    expect(terminalElementShown(undefined)).toBe(false);
   });
 });
