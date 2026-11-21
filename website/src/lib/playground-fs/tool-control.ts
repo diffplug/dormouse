@@ -54,7 +54,7 @@ export function playgroundToolControl(fs: VirtualFs) {
 }
 
 /** Fronts the playground's own viewers and frames the music video embed
- * unproxied, for its own pane and for a pretend dev server's port, which
+ * unproxied, for its embed URL and for a pretend dev server's port, which
  * serves nothing: `useToolServing` frames an announced port at its listener's
  * loopback address, and the page that answers is this origin's
  * `/playground-fs/` service worker. Every other page is refused, since nothing

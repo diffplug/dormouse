@@ -34,10 +34,6 @@ The signup action originally reused the corrected link color on 10% and 20% tint
 
 `SELF_HOST.md` has two consumers that outrank the website: an assistant reads it in a checkout (`read @SELF_HOST.md and walk me through it`), and `scripts/deploy-lint.mjs` audits its Installer contract against `deploy/local/`. A second copy under `website/` would be a second file to keep true about how a server is installed.
 
-## Homepage browser proof
-
-Proving the transcript end to end would need a running platform host and a real `agent-browser` in CI, and a captured dev-server port is not stable enough to commit — a busy 5173 silently becomes 5174.
-
 ## Markdown rendering contract
 
 Long paths in prose scrolled `/self-host` sideways on a phone: ten space-free tokens sit in its paragraphs, the longest 47 characters — about 404px of monospace against the 343px a 375px phone leaves after padding. One unbreakable word to the line breaker, so it widened the article rather than only itself. The same tokens inside tables were already contained by the table's own scroller, which is why only that page showed it.
