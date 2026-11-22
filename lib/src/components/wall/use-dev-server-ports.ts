@@ -134,6 +134,9 @@ function startCorrelationLoop(): () => void {
   let misses = 0;
   // Back-off steps the current wake allows.
   let steps = 0;
+  // A wake's scan found another in flight. That scan chose its ports and
+  // candidates before the wake, so scan again as soon as it settles.
+  let rescanAfterRun = false;
 
   const resolveOnce = async (): Promise<ResolveOutcome> => {
     if (cancelled || running) return 'busy';
@@ -202,8 +205,11 @@ function startCorrelationLoop(): () => void {
       idleHandle = undefined;
       void resolveOnce().then((outcome) => {
         if (cancelled) return;
-        // 'busy' → an in-flight scan paces itself; 'idle' → all matched (or
-        // nothing wanted) so stop until reload/navigation wakes us.
+        // 'busy' → hand this wake to the in-flight scan, without spending a
+        // back-off step; 'idle' → all matched (or nothing wanted) so stop
+        // until reload/navigation wakes us.
+        if (outcome === 'busy') { rescanAfterRun = true; return; }
+        if (rescanAfterRun) { rescanAfterRun = false; runIdleScan(); return; }
         if (outcome === 'idle') steps = 0;
         const step = misses < steps ? PENDING_REFRESH_MS[misses] : undefined;
         misses++;
@@ -218,6 +224,7 @@ function startCorrelationLoop(): () => void {
     if (cancelled) return;
     steps = Math.max(wakeSteps, steps - misses);
     misses = 0;
+    rescanAfterRun = false;
     if (refreshTimer) clearTimeout(refreshTimer);
     if (debounceTimer) clearTimeout(debounceTimer);
     cancelIdle(idleHandle);
