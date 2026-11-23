@@ -148,9 +148,7 @@ export class FileToolTrustStore {
     return join(this.#dir, `${createHash('sha256').update(key).digest('hex')}.json`);
   }
 
-  /** Whether any of these keys has been granted. Callers pass every key that
-   *  would cover this project — the upstream and the folder — so one lookup
-   *  answers "may this run?". */
+  /** Whether any of these keys has a valid grant. */
   async isTrusted(keys: readonly string[]): Promise<boolean> {
     for (const key of keys) {
       try {

@@ -317,13 +317,10 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
       setResolution({ kind: 'empty' });
       return;
     }
-    // The panel is the sink every writer of `params.url` ends at, and the raw
-    // fallback hands the string straight to `<iframe src>` under a sandbox that
-    // keeps allow-same-origin — so the scheme is checked here rather than only
-    // at the two callers the spec names (docs/specs/dor-browser.md → "Iframe
-    // Shim"). The header's URL editor is the third: `normalizeNavUrl` keeps a
-    // typed `javascript:` or `data:` scheme on purpose. React blanks a
-    // `javascript:` src and nothing else, which is not a boundary to rely on.
+    // The raw fallback hands the string straight to `<iframe src>` under a
+    // sandbox that keeps allow-same-origin, and `normalizeNavUrl` keeps a typed
+    // `javascript:` or `data:` scheme on purpose. React blanks a `javascript:`
+    // src and nothing else, which is not a boundary to rely on.
     // `framedUrl` is the string this guard checks and `sourceUrl` is the string
     // that gets framed, so they are the same value wherever one exists at all.
     if (!framedUrl) {
@@ -380,8 +377,7 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
     return () => { cancelled = true; };
   }, [allowedKey, sourceUrl, lease]);
 
-  // A tool never pops out or changes provider (`docs/specs/dor-tool.md` ->
-  // Declaring tools).
+  // A Tool offers only its declarable renders, so never a pop-out.
   const renderModes = useMemo(() => offeredRenderModes(isTool, null), [isTool]);
   // Where a page the embed cannot show opens instead: a pane webview where
   // this Surface can take one, else the remembered provider's screencast,
@@ -391,8 +387,9 @@ export function IframePanel({ id, title, params, parked, onReady }: PaneProps & 
   const provider = BROWSER_PROVIDER_GUI[remedyProvider ?? 'agent-browser'];
   const webview = renderModes.includes('webview');
   const remedy = webview ? WEBVIEW_REMEDY : { label: provider.label, open: `${provider.cli} open` };
-  // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
-  // chrome action that replaces the document.
+  // A Tool's header (`ToolPaneHeader`) navigates through its own history
+  // buttons, never `back`/`forward` here; reload is its one chrome action that
+  // replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
     // A URL-bar Enter always loads: the pane's own params.url after an
     // in-frame navigation is a no-op write the proxy effect never sees.

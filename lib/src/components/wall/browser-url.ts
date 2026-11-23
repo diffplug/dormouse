@@ -24,7 +24,7 @@ export function hostPathDisplay(rawUrl: string, includeSearch = false): string {
     const path = parsed.pathname === '/' ? '' : parsed.pathname;
     return `${parsed.host}${path}${includeSearch ? parsed.search : ''}` || rawUrl;
   } catch {
-    return rawUrl || '';
+    return rawUrl;
   }
 }
 
@@ -43,7 +43,7 @@ export function pathDisplay(rawUrl: string): string {
   try {
     return new URL(rawUrl).pathname || '/';
   } catch {
-    return rawUrl || '';
+    return rawUrl;
   }
 }
 
