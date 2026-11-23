@@ -61,7 +61,7 @@ overrides:
   "archiver-utils>glob@<14.0.2": 14.0.6
   "node-pg-migrate>glob@<14.0.2": 14.0.6
   "@joshwooding/vite-plugin-react-docgen-typescript>glob@<14.0.2": 14.0.6
-  "@vscode/vsce>minimatch@<11.0.1": 11.0.8
+  "@vscode/vsce>minimatch@<11.0.1": 11.0.9
 minimumReleaseAgeExclude:
   - pgstencil
   - "@pgstencil/*"
