@@ -67,10 +67,10 @@ export const DOCS_PAGES: readonly DocsPage[] = [
  * One heading in a page's table of contents, as the rail nests it.
  *
  * Owned here rather than by the component that renders it, because the rail is
- * the only thing that consumes both this and the page list, while five
- * unrelated producers satisfy it: `website/scripts/generate-docs.js` emits it
- * for the generated references, and the changelog and the supply chain
- * derive it in their own page modules from the data they already render.
+ * the only thing that consumes both this and the page list, while unrelated
+ * producers satisfy it: `website/scripts/generate-docs.js` emits it for the
+ * generated references, and the hand-written pages derive it in their own
+ * modules from the data they already render.
  */
 export type TocEntry = { id: string; text: string; children: TocEntry[] };
 

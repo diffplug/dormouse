@@ -257,13 +257,13 @@ export const Narrow: Story = {
  *  navigation, dev-server chip, or address. */
 export const Tool: Story = { args: { tool: true } };
 
-/** Below 356px a Tool's splits go. */
+/** Below 382px a Tool's splits go. */
 export const NarrowTool: Story = { args: { tool: true, width: 240 } };
 
-/** Below 161px Display goes too; Terminal Context stays. */
-export const TinyTool: Story = { args: { tool: true, width: 140 } };
+/** Below 187px Display goes too; Terminal Context stays. */
+export const TinyTool: Story = { args: { tool: true, width: 170 } };
 
-/** Below 125px minimize/kill go; zoom and Terminal Context are the last
+/** Below 151px minimize/kill go; zoom and Terminal Context are the last
  *  controls the header keeps. */
 export const SmallestTool: Story = { args: { tool: true, width: 110 } };
 
@@ -271,7 +271,7 @@ export const DirtyTool: Story = { args: { tool: true, dirty: 'dirty' } };
 // Clean and unknown render the same chrome; the tri-state is pinned by tool-state.test.ts.
 export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
 // Every boundary reserves the dot, so it moves no control.
-export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 126 } };
+export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 151 } };
 
 /** A serving Tool in the Workspace's preview slot, named after its file. */
 export const PreviewTool: Story = { args: { tool: true, preview: true, toolTarget: '/Users/me/project/README.md', renderMode: 'iframe' } };
