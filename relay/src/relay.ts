@@ -182,8 +182,10 @@ export class RelayHub {
   #dropClientsOf(burrowId: string): void {
     for (const client of this.#clients.values()) {
       if (client.burrowId === burrowId) {
-        this.#toClient(client, { t: 'burrow-gone' });
+        // Unbound first: a backlogged Client is torn down by the send, and its
+        // `client-gone` must not reach a replacement that never bound it.
         client.burrowId = null;
+        this.#toClient(client, { t: 'burrow-gone' });
       }
     }
   }
