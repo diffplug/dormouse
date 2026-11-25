@@ -1,7 +1,7 @@
 /**
  * Pure test constants, in a module with no imports so the suites that must stay
- * independent of `helpers.mjs` (the config mapping, the spawned entrypoint) can
- * share them too.
+ * independent of `helpers.mjs` (the static-file suite, the setup-password
+ * store) can share them too.
  */
 
 export const ORIGIN = 'http://localhost:3000';

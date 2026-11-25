@@ -222,7 +222,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         return;
       }
       // `--auto` answers the outgoing name: the derived one is computed
-      // afterwards (`docs/specs/dor-cli.md` → "dor workspace").
+      // afterwards.
       respondMutation('renamed', target, auto ? undefined : name);
       return;
     }
