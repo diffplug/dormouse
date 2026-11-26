@@ -53,8 +53,9 @@ ptyLifecycleContract("sidecar", () => {
     if (event === "pty:data") output.set(id, (output.get(id) ?? "") + text);
     if (event === "pty:exit") exits.set(id, [...(exits.get(id) ?? []), exitCode ?? -1]);
   };
-  // Wired as main.js wires them: every pty-core event through the host's tap,
-  // and only non-data events forwarded raw.
+  // Wired as main.js wires them, less its aux, input, and path hooks and the
+  // tap's try/catch: every pty-core event through the host's tap, and only
+  // non-data events forwarded raw.
   let host: SidecarHost | null = null;
   const mgr = create((event, data) => {
     host!.onPtyEvent(event, data);

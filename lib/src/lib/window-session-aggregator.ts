@@ -3,7 +3,7 @@ import { PERSISTED_SESSION_VERSION, PERSISTED_WINDOW_VERSION, workspaceRecord, t
 
 /**
  * Collects each Workspace's latest `PersistedSession` into one `PersistedWindow`
- * and hands it to the host (`docs/specs/transport.md` → "Persisted session").
+ * and hands it to the host (`docs/specs/transport.md` → "Persisted session types").
  * The Wall's persistence hook publishes here instead of writing the platform
  * slot when it runs under a Workspace; the standalone boot installs the writer.
  *

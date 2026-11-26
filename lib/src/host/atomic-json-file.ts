@@ -18,7 +18,7 @@ export async function writeJsonAtomic(dir: string, path: string, value: unknown,
   await mkdir(dir, { recursive: true, mode: 0o700 });
   // `mkdir` applies its mode only when it creates the final component. Tauri
   // creates its data directory before spawning us, commonly under a 0755 umask, so
-  // tighten an existing directory too. Best-effort, like `peer-link.ts`'s:
+  // tighten an existing directory too. Best-effort, like `private-capture-dir.ts`'s:
   // failing the whole save over the directory would lose the write instead.
   //
   // Skipped on Windows because there is nothing here to skip *to* — a Unix

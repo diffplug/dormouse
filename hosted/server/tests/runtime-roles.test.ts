@@ -270,7 +270,9 @@ test("the account's hand-made role, where it exists, is granted every billing ta
       await db.query((await runtimeRolesSql()).replace(/^(BEGIN|COMMIT);$/gm, ""));
       const { rows } = await db.query<{ table: string; ok: boolean }>(
         `SELECT c.relname AS table, has_schema_privilege('dormouse_app', 'pgstencil_billing', 'USAGE')
-          AND has_table_privilege('dormouse_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE') AS ok
+          -- One call per privilege: a comma-separated list is true if any one is held.
+          AND has_table_privilege('dormouse_app', c.oid, 'SELECT') AND has_table_privilege('dormouse_app', c.oid, 'INSERT')
+          AND has_table_privilege('dormouse_app', c.oid, 'UPDATE') AND has_table_privilege('dormouse_app', c.oid, 'DELETE') AS ok
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'pgstencil_billing' AND c.relkind IN ('r', 'v')
         UNION ALL SELECT 'session', has_table_privilege('dormouse_app', '"session"', 'SELECT')
