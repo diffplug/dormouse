@@ -1,7 +1,7 @@
 import { isEditableTarget, isTerminalInputProxy } from '../../../lib/dom';
 import { isKillAnswerKey } from './handle-kill-confirm';
 import { PANE_VERB_KEYS } from './handle-pane-shortcuts';
-import type { WallKeyboardCtx } from './types';
+import { commandKey, type WallKeyboardCtx } from './types';
 
 /** Whether the focused element uses the key itself: a text field or select any
  *  key, a button-like control Space (Enter is a pane verb). xterm's input proxy
@@ -19,7 +19,7 @@ function usedByFocusedControl(e: KeyboardEvent): boolean {
  *  focused control uses. */
 export function isStrayKey(e: KeyboardEvent): boolean {
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return false;
-  if (PANE_VERB_KEYS.has(e.key) || usedByFocusedControl(e)) return false;
+  if (PANE_VERB_KEYS.has(commandKey(e)) || usedByFocusedControl(e)) return false;
   return e.key === 'Backspace' || [...e.key].length === 1;
 }
 
