@@ -59,6 +59,7 @@ test('mintedAt is a bounded, non-empty string', () => {
 });
 
 test('freshness lasts exactly 24 hours and tolerates a future stamp', () => {
+  assert.equal(ENROLL_OFFER_MAX_AGE_MS, 24 * 60 * 60 * 1000);
   const minted = Date.parse(OFFER.mintedAt);
   assert.equal(isEnrollmentOfferFresh(OFFER, minted + ENROLL_OFFER_MAX_AGE_MS), true);
   assert.equal(isEnrollmentOfferFresh(OFFER, minted + ENROLL_OFFER_MAX_AGE_MS + 1), false);
