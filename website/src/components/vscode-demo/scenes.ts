@@ -8,7 +8,7 @@ import { YOUTUBE_MUSIC_VIDEO, youtubeEmbedUrl } from "../../lib/youtube";
 
 /**
  * What each homepage VS Code demo shows: its Sessions, how the Wall lays them
- * out, and anything opened once they have painted. Each terminal's output is
+ * out, and the terminal contexts a cursor tours. Each terminal's output is
  * written once on spawn; nothing plays.
  */
 

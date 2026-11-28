@@ -241,10 +241,6 @@ Source of truth: `buildSecurity`, `gatherGuarantees`, `SECURITY_AUDIENCES` (spec
 
 Source of truth: `generateDocs` and `main` in `website/scripts/generate-docs.js`; scripts in `website/package.json`; generated paths in `.gitignore`.
 
-## Homepage browser proof
-
-The homepage's terminal-to-browser transcript is authored literals, not generated or tested (rationale): command *syntax* matches `dor/test/snapshots/help/`, and output uses only notation the CLI itself documents. **Must mark the block authored and untested in a source comment.**
-
 ## Root README
 
 Root `README.md` is shorter than the canonical product guide and does not duplicate it, and never presents staged plans as shipped behavior. Its development material is reviewed against current package scripts.
