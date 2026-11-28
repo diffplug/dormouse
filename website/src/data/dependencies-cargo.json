@@ -117,7 +117,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri",
       "versions": [
-        "2.12.5"
+        "2.12.7"
       ]
     },
     {
@@ -127,7 +127,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri-build",
       "versions": [
-        "2.7.4"
+        "2.7.6"
       ]
     },
     {
@@ -187,7 +187,7 @@
       "homepage": "https://github.com/tauri-apps/wry",
       "declaredName": "wry",
       "versions": [
-        "0.57.0"
+        "0.57.3"
       ]
     }
   ],
@@ -387,9 +387,10 @@
       "name": "bit-set",
       "license": "MIT OR Apache-2.0",
       "author": "Alexis Beingessner <a.beingessner@gmail.com>",
-      "homepage": "https://github.com/contain-rs/bit-set",
+      "homepage": "https://github.com/contain-rs/bit-vec",
       "versions": [
-        "0.8.0"
+        "0.8.0",
+        "0.11.1"
       ]
     },
     {
@@ -398,7 +399,8 @@
       "author": "Alexis Beingessner <a.beingessner@gmail.com>",
       "homepage": "https://github.com/contain-rs/bit-vec",
       "versions": [
-        "0.8.0"
+        "0.8.0",
+        "0.10.2"
       ]
     },
     {
@@ -417,7 +419,8 @@
       "author": "RustCrypto Developers",
       "homepage": "https://github.com/RustCrypto/utils",
       "versions": [
-        "0.10.4"
+        "0.10.4",
+        "0.12.1"
       ]
     },
     {
@@ -628,6 +631,15 @@
       ]
     },
     {
+      "name": "const-oid",
+      "license": "MIT OR Apache-2.0",
+      "author": "RustCrypto Developers",
+      "homepage": "https://github.com/RustCrypto/formats/tree/master/const-oid",
+      "versions": [
+        "0.10.3"
+      ]
+    },
+    {
       "name": "cookie",
       "license": "MIT OR Apache-2.0",
       "author": "Sergio Benitez <sb@sergio.bz>, Alex Crichton <alex@alexcrichton.com>",
@@ -679,7 +691,8 @@
       "author": "RustCrypto Developers",
       "homepage": "https://github.com/RustCrypto/utils",
       "versions": [
-        "0.2.17"
+        "0.2.17",
+        "0.3.1"
       ]
     },
     {
@@ -715,7 +728,8 @@
       "author": "RustCrypto Developers",
       "homepage": "https://github.com/RustCrypto/traits",
       "versions": [
-        "0.1.7"
+        "0.1.7",
+        "0.2.2"
       ]
     },
     {
@@ -724,7 +738,8 @@
       "author": "Simon Sapin <simon.sapin@exyr.org>",
       "homepage": "https://github.com/servo/rust-cssparser",
       "versions": [
-        "0.37.0"
+        "0.37.0",
+        "0.38.0"
       ]
     },
     {
@@ -814,7 +829,8 @@
       "author": "RustCrypto Developers",
       "homepage": "https://github.com/RustCrypto/traits",
       "versions": [
-        "0.10.7"
+        "0.10.7",
+        "0.11.3"
       ]
     },
     {
@@ -877,7 +893,8 @@
       "author": "niklak <morgenpurple@gmail.com>, importcjj <importcjj@gmail.com>",
       "homepage": "https://github.com/niklak/dom_query",
       "versions": [
-        "0.28.0"
+        "0.28.0",
+        "0.29.0"
       ]
     },
     {
@@ -1420,7 +1437,8 @@
       "author": "The html5ever Project Developers",
       "homepage": "https://github.com/servo/html5ever",
       "versions": [
-        "0.39.0"
+        "0.39.0",
+        "0.40.1"
       ]
     },
     {
@@ -1457,6 +1475,15 @@
       "homepage": "https://github.com/seanmonstar/httparse",
       "versions": [
         "1.10.1"
+      ]
+    },
+    {
+      "name": "hybrid-array",
+      "license": "MIT OR Apache-2.0",
+      "author": "RustCrypto Developers",
+      "homepage": "https://github.com/RustCrypto/hybrid-array",
+      "versions": [
+        "0.4.15"
       ]
     },
     {
@@ -1837,7 +1864,8 @@
       "author": "The html5ever Project Developers",
       "homepage": "https://github.com/servo/html5ever",
       "versions": [
-        "0.39.0"
+        "0.39.0",
+        "0.40.0"
       ]
     },
     {
@@ -2242,7 +2270,8 @@
       "author": "Steven Fackler <sfackler@gmail.com>",
       "homepage": "https://github.com/rust-phf/rust-phf",
       "versions": [
-        "0.13.1"
+        "0.13.1",
+        "0.14.0"
       ]
     },
     {
@@ -2251,7 +2280,8 @@
       "author": "Steven Fackler <sfackler@gmail.com>",
       "homepage": "https://github.com/rust-phf/rust-phf",
       "versions": [
-        "0.13.1"
+        "0.13.1",
+        "0.14.0"
       ]
     },
     {
@@ -2260,7 +2290,8 @@
       "author": "Steven Fackler <sfackler@gmail.com>",
       "homepage": "https://github.com/rust-phf/rust-phf",
       "versions": [
-        "0.13.1"
+        "0.13.1",
+        "0.14.0"
       ]
     },
     {
@@ -2269,7 +2300,8 @@
       "author": "Steven Fackler <sfackler@gmail.com>",
       "homepage": "https://github.com/rust-phf/rust-phf",
       "versions": [
-        "0.13.1"
+        "0.13.1",
+        "0.14.0"
       ]
     },
     {
@@ -2278,7 +2310,8 @@
       "author": "Steven Fackler <sfackler@gmail.com>",
       "homepage": "https://github.com/rust-phf/rust-phf",
       "versions": [
-        "0.13.1"
+        "0.13.1",
+        "0.14.0"
       ]
     },
     {
@@ -2679,7 +2712,8 @@
       "author": "The Servo Project Developers",
       "homepage": "https://github.com/servo/stylo",
       "versions": [
-        "0.38.0"
+        "0.38.0",
+        "0.41.0"
       ]
     },
     {
@@ -2788,7 +2822,8 @@
       "author": "The Servo Project Developers",
       "homepage": "https://github.com/servo/stylo",
       "versions": [
-        "0.4.3"
+        "0.4.3",
+        "0.5.0"
       ]
     },
     {
@@ -2797,7 +2832,8 @@
       "author": "RustCrypto Developers",
       "homepage": "https://github.com/RustCrypto/hashes",
       "versions": [
-        "0.10.9"
+        "0.10.9",
+        "0.11.1"
       ]
     },
     {
@@ -2941,7 +2977,8 @@
       "author": "The Servo Project Developers",
       "homepage": "https://github.com/servo/string-cache",
       "versions": [
-        "0.9.0"
+        "0.9.0",
+        "0.11.0"
       ]
     },
     {
@@ -2950,7 +2987,8 @@
       "author": "The Servo Project Developers",
       "homepage": "https://github.com/servo/string-cache",
       "versions": [
-        "0.6.1"
+        "0.6.1",
+        "0.11.2"
       ]
     },
     {
@@ -3078,7 +3116,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.4"
+        "2.7.6"
       ]
     },
     {
@@ -3087,7 +3125,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.7.4"
+        "2.7.6"
       ]
     },
     {
@@ -3105,7 +3143,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.12.2"
+        "2.12.4"
       ]
     },
     {
@@ -3114,7 +3152,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.12.3"
+        "2.12.5"
       ]
     },
     {
@@ -3123,7 +3161,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.10.2"
+        "2.10.4"
       ]
     },
     {
@@ -3624,7 +3662,8 @@
       "author": "The html5ever Project Developers",
       "homepage": "https://github.com/servo/html5ever",
       "versions": [
-        "0.2.4"
+        "0.2.4",
+        "0.3.0"
       ]
     },
     {
