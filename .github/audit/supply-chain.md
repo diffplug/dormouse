@@ -6,7 +6,7 @@
 
 **Output file:** `audit-supply-chain.md`
 
-The secret-scanning and Dependabot clauses under "Cooldown and alerts" are judged in `audit-github-state.md`, which `scripts/github-state-check.mjs` wrote before you started; **do not re-derive or re-record them** — the reporting step reads that fragment itself. For every other `FAIL IF` marked `Pinned by` a script or test, run it — `node --test scripts/supply-chain-config.test.mjs` for the cooldown, Renovate, runtime-pin, `npx`, and CI-linter rules — and record its result as the evidence, one line per clause it pins. What stays yours is the unpinned clauses, the judgement bullets, and the qualitative pass.
+The secret-scanning and Dependabot clauses under "Cooldown and alerts" are judged in `audit-github-state.md`, which `scripts/github-state-check.mjs` wrote before you started; **do not re-derive or re-record them** — the reporting step reads that fragment itself. For every other `FAIL IF` marked `Pinned by` a script or test, run it — `node --test scripts/supply-chain-config.test.mjs` for the cooldown, Renovate, runtime-pin, and CI-linter rules — and record its result as the evidence, one line per clause it pins. What stays yours is the unpinned clauses, the judgement bullets, and the qualitative pass.
 
 Run the generate-deps check in a scratch copy of the audited commit (`git archive HEAD` into a temporary directory, committed clean there), after `pnpm install --frozen-lockfile --ignore-scripts` in that copy, never in the audited tree: the generator resolves every dependency by walking real `node_modules` directories and throws rather than under-reporting if they are absent.
 

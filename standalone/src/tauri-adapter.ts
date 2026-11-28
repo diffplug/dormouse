@@ -688,7 +688,7 @@ export class TauriAdapter implements PlatformAdapter {
   getState(): unknown { return null; }
 
   /** The aggregator's writer: one `PersistedWindow` per window
-   *  (`docs/specs/transport.md` -> "Persisted session"). */
+   *  (`docs/specs/transport.md` -> "Persisted session types"). */
   saveWindowState(snapshot: PersistedWindow): void {
     this.windowSlot.write(snapshot);
   }
