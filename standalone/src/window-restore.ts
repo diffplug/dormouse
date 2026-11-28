@@ -23,7 +23,7 @@ import {
   resetWorkspaces,
   setWorkspaces,
 } from "dormouse-lib/lib/workspace-store";
-import { DEFAULT_WORKSPACE_NAME, metaFromRecord, windowPaneIds } from "dormouse-lib/lib/session-types";
+import { DEFAULT_WORKSPACE_NAME, metaFromRecord } from "dormouse-lib/lib/session-types";
 import type { PersistedSession, PersistedWindow, WorkspaceId } from "dormouse-lib/lib/session-types";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
 import { withFreshWindowIds } from "dormouse-lib/components/wall/window-reopen";
@@ -171,8 +171,10 @@ async function restoreWindow(
 
   // The recovery claim is a host round trip started back in `init()`. Await it
   // only when something here can actually cold-restore: a Window whose every
-  // saved pane is live resumes over those PTYs and never reads the record.
-  const named = windowPaneIds(saved);
+  // saved terminal pane is live resumes over those PTYs and never reads the
+  // record. A browser pane has no PTY, so it never appears in the live list.
+  const named = (saved?.workspaces ?? []).flatMap((workspace) =>
+    workspace.session.panes.filter((pane) => pane.surfaceType !== "browser").map((pane) => pane.id));
   const liveSet = new Set(live.ptys.map((pty) => pty.id));
   if (!named.every((id) => liveSet.has(id))) await platform.recoveryReady;
 
