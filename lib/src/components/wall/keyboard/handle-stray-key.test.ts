@@ -180,4 +180,11 @@ describe('stray keys in command mode', () => {
     press(key);
     expect(ctx.raiseStrayKey).not.toHaveBeenCalled();
   });
+
+  it.each(['T', 'A'])('does not call a bound key typed under Caps Lock a stray where its verb is inert (%j on a Door)', async key => {
+    const { ctx } = await mount('ws');
+    ctx.selectedTypeRef.current = 'door';
+    press(key, { modifierCapsLock: true } as KeyboardEventInit);
+    expect(ctx.raiseStrayKey).not.toHaveBeenCalled();
+  });
 });
