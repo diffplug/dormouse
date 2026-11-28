@@ -878,7 +878,7 @@ describe('iframe proxy — the upgrade path', () => {
     const seen = await upgrade(url, {
       ...wsHeaders({ Origin: 'https://evil.example' }),
       Host: 'evil.example:1234',
-    });
+    }, true);
 
     expect(seen).toBe('');
   });
@@ -887,7 +887,7 @@ describe('iframe proxy — the upgrade path', () => {
     const seen = await upgrade(url, {
       ...wsHeaders({}),
       Host: `127.0.0.1:${Number(proxyPort) + 1}`,
-    });
+    }, true);
 
     expect(seen).toBe('');
   });

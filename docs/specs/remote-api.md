@@ -382,7 +382,7 @@ surface.split    surface.ensure    surface.send
 surface.kill     surface.read      surface.focus
 ```
 
-These are the methods the dor CLI speaks today; the remote API reuses their request/response shapes so one Burrow handler dispatches both.
+All but `surface.focus`, which is new, are methods the dor CLI speaks today; the remote API reuses their request/response shapes so one Burrow handler dispatches both.
 
 **Window lease.** A VR session may request `window.lease { windowRef }`, declaring itself that Window's primary display. Sizing needs no lease — last-attach-wins already hands VR the panes it displays — so the lease is presentational: that Window tethers wholesale instead of pane by pane, and panes created in it while the lease is held open tethered to the leaseholder. One lease per Window; the Burrow user can always reclaim it locally. Phones never need it.
 

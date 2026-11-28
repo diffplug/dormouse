@@ -336,11 +336,11 @@ export class AgentBrowserSurfaceController {
   // observer below).
   private resizeTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // --- cached pane size (avoid per-frame forced layout) ---
-  // computeScreenSnapshot() runs on EVERY non-duplicate stream frame (~20Hz);
-  // reading the pane's size there forces layout each time. A ResizeObserver
-  // active for the whole attach duration keeps the pane's content-box size
-  // cached. null ⇒ no attached view — treat as 0×0. The size syncToPane sends
+  // --- cached pane size ---
+  // A ResizeObserver active for the whole attach duration keeps the pane's
+  // content-box size cached, for the launch's initial viewport, the pane-sync
+  // viewport, and getMeasuredPaneSize (which falls back to lastPaneSize, the
+  // last non-empty one). null ⇒ no attached view. The size syncToPane sends
   // stays a live read.
   // The same observer also drives sync-to-pane (debounced), so there is one
   // observer on the pane, not two.
@@ -610,7 +610,7 @@ export class AgentBrowserSurfaceController {
     const el = this.sink?.viewport;
     if (!el) { this.paneSize = null; return; }
     // Seed synchronously (ResizeObserver's first callback is async, and the test
-    // stub never fires) so the first frame reads a real size, not 0×0.
+    // stub never fires) so a launch right after attach reads a real size.
     this.refreshPaneSize();
     // Read in the observer's callback, where layout is already done.
     const observer = new ResizeObserver(() => {
@@ -639,8 +639,8 @@ export class AgentBrowserSurfaceController {
     const token = {};
     this.attachToken = token;
     this.sink = sink;
-    // Seed + observe the pane size cache before ensureStarted so the first
-    // computeScreenSnapshot reads a real size.
+    // Seed + observe the pane size cache before ensureStarted so the launch's
+    // initial viewport reads a real size.
     this.setupPaneSizeObserver();
     this.ensureStarted();
     // Flush param writes / title buffered while detached.
@@ -1588,8 +1588,8 @@ export class AgentBrowserSurfaceController {
 
   // --- the daemon gate ---
 
-  /** The browser to drive, only while `live`: every command, edit and capture
-   *  takes it from here, and what is asked outside it waits as the pending
+  /** The browser to drive, only while `live`: every command and edit takes it
+   *  from here, and what is asked outside it waits as the pending
    *  intent. The host refuses whatever would reach a browser mid-launch or
    *  mid-close, or a daemon that is gone, so this gate orders the Surface's
    *  own intents rather than guarding the daemon (docs/specs/dor-browser.md →
@@ -1601,7 +1601,7 @@ export class AgentBrowserSurfaceController {
 
   /** The bound session's browser, whatever the phase: for what the gate does
    *  not cover — a launch, attach or relaunch, the stream URL, a close.
-   *  Rebuilt only when the binding changes: captures take it per frame. */
+   *  Rebuilt only when the binding changes. */
   private handle(): BrowserHandle | null {
     const { session, cwd, binaryPath } = this;
     const cached = this.handleCache;

@@ -59,8 +59,9 @@ describe('the WATCHING rule set', () => {
 
     // A second realm offering its own persisted copy is answered with the
     // canonical set, not allowed to replace it.
+    const before = watched.length;
     from('ws-2', { op: 'initializeWatchedCommands', names: ['cargo build'] });
-    expect(watched.at(-1)).toEqual(['npm test']);
+    expect(watched.slice(before)).toEqual([['npm test']]);
     expect(host.manager.getWatchedCommands()).toEqual(['npm test']);
   });
 
@@ -88,7 +89,9 @@ describe('the WATCHING rule set', () => {
 describe('the alarm settings', () => {
   it('takes the first seed and corrects every later one, and any realm\'s edit', () => {
     from('main', { op: 'initializeSettings', settings: { ...DEFAULT_ALERT_SETTINGS, speakEnabled: true } });
+    const before = settings.length;
     from('ws-2', { op: 'initializeSettings', settings: { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false } });
+    expect(settings.slice(before)).toHaveLength(1);
     expect(settings.at(-1)).toMatchObject({ speakEnabled: true });
 
     from('ws-2', { op: 'updateSettings', settings: { ...DEFAULT_ALERT_SETTINGS, pushEnabled: true } });
