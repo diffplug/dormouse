@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { MAX_RELAY_SOCKET_BUFFERED_BYTES } from 'remote-lib-common';
+
 import { RelayHub } from '../dist/relay.js';
 import { e2eClientFrame, e2eBurrowFrame, newE2eId } from './harness/e2e.mjs';
 import { recordingSocket } from './harness/memory-socket.mjs';
@@ -56,6 +58,20 @@ test('frames from a displaced burrow socket are ignored', () => {
   // The replacement socket still works end to end.
   hub.onBurrowFrame(newConn, burrowFrame(client.clientId, { ct: 'bGl2ZQ' }));
   assert.ok(clientSocket.sent.some((f) => f.t === 'e2e' && f.ct === 'bGl2ZQ'));
+});
+
+test('a backlogged client dropped by a burrow replacement sends nothing to the replacement', () => {
+  const hub = new RelayHub();
+  hub.registerBurrow(BURROW_A, recordingSocket());
+  const { socket: clientSocket, client } = boundClient(hub, BURROW_A);
+  clientSocket.bufferedAmount = MAX_RELAY_SOCKET_BUFFERED_BYTES + 1;
+
+  // Telling the stalled client `burrow-gone` tears it down instead; the
+  // replacement never bound it, so it must not hear `client-gone` for it.
+  const newSocket = recordingSocket();
+  hub.registerBurrow(BURROW_A, newSocket);
+  assert.equal(hub.clientCount, 0, 'precondition: the stalled client was torn down');
+  assert.deepEqual(newSocket.sent, []);
 });
 
 test('a displaced socket is also ignored after the replacement disconnects', () => {
