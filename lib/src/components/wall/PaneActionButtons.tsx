@@ -75,8 +75,9 @@ export function PaneActionGroup({
   );
 }
 
-/** Split left/right and top/bottom, which every header shows only at its
- *  widest tier (`docs/specs/layout.md` -> "Pane header responsive sizing"). */
+/** Split left/right and top/bottom, which a header shows inline only at its
+ *  widest tier; the browser header also shows them in its overflow popover
+ *  (`docs/specs/layout.md` -> "Pane header responsive sizing"). */
 export function SplitButtons({ surfaceId }: { surfaceId: string }) {
   const actions = useContext(WallActionsContext);
   return (

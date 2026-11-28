@@ -5,7 +5,7 @@
  * standard PNG; 16-bit samples round to 8 bits. It encodes 8-bit RGB, or RGBA
  * when any pixel is not opaque. No DOM, so Node tests load it. */
 import { ascii, isPng, latin1, PNG_SIGNATURE } from '../../src/image-format';
-import { exifFields } from '../../src/image-editability';
+import { exifFields, MAX_EDIT_PIXELS } from '../../src/image-editability';
 import type { Resolution } from '../../src/image-resolution';
 import { isOpaque, orient, type Raster } from './pixels';
 import { cicpSpace, iccSpace, rgbProfile, type SaveNote, type SourceColor } from './icc';
@@ -14,8 +14,6 @@ type Bytes = Uint8Array<ArrayBuffer>;
 /** The ancillary chunks a save keeps; an `iCCP` only with an RGB profile. A
  * `pHYs` is written from the resolution instead (`encodePng`). */
 const KEPT = new Set(['iCCP', 'sRGB', 'gAMA', 'cHRM', 'cICP']);
-/** Past this many pixels the codec declines, as a canvas would. */
-const MAX_PIXELS = 1 << 27;
 /** Samples per pixel, by color type. */
 const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
 const DEPTHS: Record<number, number[]> = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
@@ -172,7 +170,7 @@ export async function decodePng(bytes: Uint8Array): Promise<DecodedPng> {
   const width = h.getUint32(0), height = h.getUint32(4), [depth, colorType, compression, filterMethod, interlace] = ihdr.data.subarray(8);
   const channels = CHANNELS[colorType];
   if (!DEPTHS[colorType]?.includes(depth) || compression || filterMethod || interlace > 1) throw new Error('The PNG has an unknown format.');
-  if (!width || !height || width * height > MAX_PIXELS) throw new Error('The PNG is too large to edit.');
+  if (!width || !height || width * height > MAX_EDIT_PIXELS) throw new Error('The PNG is too large to edit.');
 
   const find = (type: string) => chunks.find(c => c.type === type)?.data;
   const plte = find('PLTE'), trns = find('tRNS'), cicp = find('cICP'), iccp = find('iCCP'), exif = find('eXIf');

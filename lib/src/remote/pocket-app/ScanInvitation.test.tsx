@@ -482,7 +482,7 @@ it('starts again after a run that threw on its way out', async () => {
   // The chain tail must never be a rejected promise: the next run awaits it
   // *before* its own try, so one throw would be inherited by every start after
   // it and this screen would never open a camera again. The reachable throw is
-  // the release inside the catch — a track whose `stop()` raises.
+  // the release inside the catch — a stream whose `getTracks()` raises.
   let starts = 0;
   let reads = 0;
   const startScan = async (video: HTMLVideoElement) => {
