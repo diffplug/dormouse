@@ -275,8 +275,8 @@ importers:
         specifier: 4.0.3
         version: 4.0.3(supports-color@10.2.2)
       monaco-editor:
-        specifier: 0.58.0-dev-20261108
-        version: 0.58.0-dev-20261108
+        specifier: 0.58.0-rc.2
+        version: 0.58.0-rc.2
       react:
         specifier: ^19.3.0
         version: 19.3.1
@@ -3880,6 +3880,9 @@ packages:
   '@vitest/utils@5.1.0':
     resolution: {integrity: sha512-V+qgCwkvVw+s1t1S5TaoBHsLi5Sz/YmohCMoOu0mZ8ZQst2bKhRYARAQucWpVg8D0mv0x5MHcWXY5QdOsoiGBQ==}
 
+  '@vscode/diff@0.0.2-145':
+    resolution: {integrity: sha512-atPcmNrAU4B8OsbrmqYlHbZREt//m8z52o400YA8uuvq3Be5wnmIhLoLqhMum7Jv7kRC0FE+m3WAUbaZF681wg==}
+
   '@vscode/vsce-sign-alpine-arm64@2.0.8':
     resolution: {integrity: sha512-3HSEDf4R2zhI3/eckZPWBoeFUiLpnG9O0/NBW8xCM3j+Ri0uhmOPvCDuCYsUmIsFVUJETaMu+JMY2DF8v8hNPg==}
     cpu: [arm64]
@@ -5590,8 +5593,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  monaco-editor@0.58.0-dev-20261108:
-    resolution: {integrity: sha512-x24VHCPfPGUVZMsB1ZzhCKY6P8FFLR1xFz/Xf0Z+lXX2/Am4WjXDEOod9puPzSUA/SG+kWdcHOIju5GIzylHGg==}
+  monaco-editor@0.58.0-rc.2:
+    resolution: {integrity: sha512-0X7Rmk6aF6HJF8U+iLGx6x8pvaUaneF7sdXk7UyuDRk5rLbTumFO+J1hHhS4k6U822axCdk9MwiBolr1f8whJw==}
 
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
@@ -9983,6 +9986,8 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
 
+  '@vscode/diff@0.0.2-145': {}
+
   '@vscode/vsce-sign-alpine-arm64@2.0.8':
     optional: true
 
@@ -11932,8 +11937,9 @@ snapshots:
 
   mkdirp@3.0.1: {}
 
-  monaco-editor@0.58.0-dev-20261108:
+  monaco-editor@0.58.0-rc.2:
     dependencies:
+      '@vscode/diff': 0.0.2-145
       dompurify: 3.4.17
       marked: 14.0.0
 

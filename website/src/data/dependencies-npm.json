@@ -2119,6 +2119,15 @@
       ]
     },
     {
+      "name": "@vscode/diff",
+      "license": "MIT",
+      "author": "Microsoft Corporation",
+      "homepage": "https://github.com/microsoft/vscode-packages/tree/main/vscode-diff",
+      "versions": [
+        "0.0.2-145"
+      ]
+    },
+    {
       "name": "acorn",
       "license": "MIT",
       "author": "Acorn contributors",
@@ -3443,7 +3452,7 @@
       "author": "Microsoft Corporation",
       "homepage": "https://github.com/microsoft/monaco-editor",
       "versions": [
-        "0.58.0-dev-20261108"
+        "0.58.0-rc.2"
       ]
     },
     {
