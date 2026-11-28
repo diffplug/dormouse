@@ -409,7 +409,7 @@ Source of truth: `hosted/scripts/desktop-builds.mjs`; `hosted/server/tests/deskt
 
 **Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. A try deploy restarts every room, dropping links still waiting or mid-handshake, and a relay deploy every relay socket, which its end reconnects; a session already on its direct path never touches Hosted. Live verification checks every Worker once the account has deployed.
 
-**Never replay a smoke's POST after a transport failure.** Production repeats only the relay, voice, and try smokes (rationale).
+**Never replay a smoke's POST after a transport failure.** Production repeats only the frames, relay, voice, and try smokes (rationale).
 
 **Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification**, naming the deployed commit and verification run and attempt; retries are idempotent and redeployments get new tags. Code rollback never reverses migrations.
 

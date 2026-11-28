@@ -321,7 +321,6 @@ export function useSessionPersistence({
     doSave,
     flushSessionSave,
     ownsSurface,
-    ownsHostFlush,
     persistSessionNow,
     scheduleSessionSave,
   ]);

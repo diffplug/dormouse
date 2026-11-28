@@ -25,9 +25,9 @@ export function envValue(env: BinaryEnv, name: string, isWindows: boolean): stri
 
 // Extensions a bare command name can carry on Windows, and the order to try
 // them in. This is `which@2`'s own hardcoded fallback — npm's list, deliberately
-// NOT cmd.exe's `.COM;.EXE;.BAT;.CMD` — because `resolveBinaryPath` now picks
-// the file that gets spawned and has to choose the same one cross-spawn's
-// `which` would (docs/specs/dor-cli.md → "Spawning External Binaries").
+// NOT cmd.exe's `.COM;.EXE;.BAT;.CMD` — because `resolveBinaryPath` picks the
+// file that gets spawned and has to choose the same one cross-spawn's `which`
+// would.
 // Source: `getPathInfo` in `which/which.js`. Shared by resolveBinaryPath (PATH
 // walk) and existsCandidate (explicit path, where order only affects reporting).
 const WINDOWS_BIN_EXTS = ['.EXE', '.CMD', '.BAT', '.COM'];

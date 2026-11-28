@@ -110,13 +110,6 @@ const OSC99_PENDING_TTL_MS = 60_000;
 const OSC99_MAX_PENDING_IDS = 64;
 const TITLE_LIMIT = 256;
 const BODY_LIMIT = 4096;
-// The shell-reported command line (`OSC 633 ; E`, `OSC 133 ; C`). Bounded and
-// sanitized like every other value that comes off the wire and is then
-// *retained*: it is re-tokenized on every header derivation and is the key
-// `dor ensure --restart` matches on, and its decoding actively re-introduces
-// control characters that the emit-side escaping had removed
-// (`docs/specs/terminal-state.md` → Shell-integration injection). See `commandLineEvents`;
-// the cap is `COMMAND_LINE_LIMIT`.
 /** The longest `OSC 52` payload offered, in base64 characters; longer is
  *  dropped. Under {@link OSC_INCOMPLETE_LIMIT} with room for the introducer, so
  *  how the PTY splits its reads never changes the answer. */
@@ -167,8 +160,11 @@ export class TerminalProtocolParser {
    *  reports is on that host. */
   private remoteHost: string | undefined;
 
-  /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
-  /** `localHost`: this machine's hostname, when known, so an OSC 7 naming it is local. */
+  /**
+   * `colorProvider`: resolves OSC 10/11/12 queries; absent lets xterm.js handle
+   * the sequence. `localHost`: this machine's hostname, when known, so an OSC 7
+   * naming it is local.
+   */
   constructor(private readonly colorProvider?: TerminalColorProvider, private readonly localHost?: string) {}
 
   /**
