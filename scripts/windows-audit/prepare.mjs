@@ -26,7 +26,7 @@ await writeFile(join(out, 'provenance.json'), JSON.stringify({
   source: root, commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
   dirty: execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }),
   node: process.version, preparedAt: new Date().toISOString(),
-  installerSha256: (await import('node:crypto')).createHash('sha256').update(await readFile(join(out, 'installer.ps1'))).digest('hex'),
+  installerSha256: createHash('sha256').update(await readFile(join(out, 'installer.ps1'))).digest('hex'),
 }, null, 2));
 console.log(`Prepared ${out}\nRun run.ps1 from an Administrator PowerShell; see docs/testing/windows-audit.md.`);
 

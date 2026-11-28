@@ -181,8 +181,8 @@ function dimension(value: unknown, max: number): number | null {
  * arrives from webview IPC unvalidated, so the result is rebuilt field by
  * field: a provider renders its own argv or client call from these values, and
  * no caller token reaches a CLI as it came — agent-browser reads launch
- * options anywhere on its command line (rationale in docs/specs/dor-browser.md
- * → "Browser Host").
+ * options anywhere on its command line (`docs/specs/dor-browser.md`
+ * → "Browser Host"; rationale).
  */
 function parseBrowserRequest(raw: unknown): BrowserRequest | string {
   if (!raw || typeof raw !== 'object') return 'invalid browser request';
@@ -252,7 +252,7 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       const endsSync = typeof r.endsSync === 'string' ? { endsSync: r.endsSync } : {};
       const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), r.dpr === undefined ? undefined : dimension(r.dpr, VIEWPORT_MAX_DPR)];
       if (dpr === null) return 'invalid viewport';
-      return width && Number.isInteger(width) && height && Number.isInteger(height) && (r.dpr === undefined || dpr)
+      return width && Number.isInteger(width) && height && Number.isInteger(height)
         ? { op: 'viewport', width, height, ...(dpr === undefined ? {} : { dpr }), ...endsSync }
         : 'invalid viewport';
     }
