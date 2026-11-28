@@ -155,7 +155,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
       } catch (error) { undoDeparture(); undoDeparture = undefined; throw error; }
       receiver.finishSurfaceMove();
       // A pinned source is never discarded: it refills, as a kill of its last
-      // pane does (`docs/specs/layout.md` → "Moving Surfaces between Workspaces").
+      // pane does.
       source.finishSurfaceMove({ keepEmpty: keepSource });
     });
     // React effects and store subscribers can collect saves synchronously

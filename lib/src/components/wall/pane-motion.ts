@@ -3,8 +3,7 @@ import type { LathWallEngine } from './lath-wall-engine';
 
 /**
  * Call `onChange` whenever `element`, a pane or other Wall chrome, may have
- * moved or resized with no React render to say so (docs/specs/layout.md →
- * "Position tracking"): its own resize, a window resize, a scroll of a
+ * moved or resized with no React render to say so: its own resize, a window resize, a scroll of a
  * scroller that contains it, each Lath animation frame, and each Workspace
  * motion frame. Callers coalesce as they need. Returns the unsubscribe.
  */

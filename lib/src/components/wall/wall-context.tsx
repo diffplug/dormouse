@@ -204,8 +204,8 @@ export interface TerminalContextOpenOptions {
  *  held apart (`ContextView`), so switching never makes a new opening. */
 export type TerminalContextState = { id: string; closing?: boolean } & Omit<TerminalContextOpenOptions, 'mode' | 'focusTerminal'>;
 
-/** What the context shows, and whether the terminal should take the keyboard once it shows. */
-/** `focusRequest`: each new one focuses the terminal once it shows. */
+/** What the context shows, and whether the terminal should take the keyboard
+ *  once it shows: each new `focusRequest` focuses the terminal once it shows. */
 export type ContextView = { mode: ContextMode; focusRequest?: number };
 
 /** Whether the context mounted for `id` shows its terminal, which then belongs to it. */

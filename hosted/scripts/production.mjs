@@ -170,11 +170,11 @@ export function requiredSecrets(configs) {
   );
 }
 /**
- * The relay, voice, and try Workers retry as a preview's parts do, since a
+ * The frames, relay, voice, and try Workers retry as a preview's parts do, since a
  * first release attaches their custom domains and a new certificate can outlast
  * the health retry; the account's smoke sends POSTs, so it runs once.
  */
-const ATTEMPTS = { account: 1, relay: 6, voice: 6, try: 6 };
+const ATTEMPTS = { account: 1, frames: 6, relay: 6, voice: 6, try: 6 };
 
 /**
  * Deploys frames, try, relay, voice, then account, stopping at a failure.
@@ -192,7 +192,7 @@ export function deployProduction(
     spawn,
     afterDeploy: async (worker) => {
       if (worker === "frames")
-        await frameSmoke(FRAMES.domain, FRAMES.clientOrigins, { attempts: ATTEMPTS.relay, ...options });
+        await frameSmoke(FRAMES.domain, FRAMES.clientOrigins, { attempts: ATTEMPTS.frames, ...options });
       if (worker === "try")
         await trySmoke(configs.try.vars.APP_ORIGIN, sha, {
           attempts: ATTEMPTS.try,
@@ -209,7 +209,7 @@ export function deployProduction(
 
 /** The release's live verification, of all of them once the account deployed. */
 export async function productionSmoke(configs, sha, options = {}) {
-  await frameSmoke(FRAMES.domain, FRAMES.clientOrigins, { attempts: ATTEMPTS.relay, ...options });
+  await frameSmoke(FRAMES.domain, FRAMES.clientOrigins, { attempts: ATTEMPTS.frames, ...options });
   return smokeAll(originsOf(configs), sha, {
     providers: oauthProviders(configs.account),
     attempts: ATTEMPTS,

@@ -36,7 +36,12 @@ export function sanitizeCommandLine(input: string, limit: number): string | null
   return truncateText(collapsed, limit);
 }
 
-/** The cap on a shell-reported command line, in code points. */
+/** The cap on a shell-reported command line (`OSC 633 ; E`, `OSC 133 ; C`), in
+ *  code points. Bounded and sanitized like every other value that comes off the
+ *  wire and is then *retained*: it is re-tokenized on every header derivation
+ *  and is the key `dor ensure --restart` matches on, and its decoding actively
+ *  re-introduces control characters that the emit-side escaping had removed
+ *  (`docs/specs/terminal-state.md` → Shell-integration injection). */
 export const COMMAND_LINE_LIMIT = 2048;
 
 /** Whether a shell-reported command line is the command `typed`. The report

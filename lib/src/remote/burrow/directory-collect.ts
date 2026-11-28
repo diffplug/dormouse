@@ -99,8 +99,8 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
       paneRef: id,
       surfaceId: id,
       title: browser.title ?? browser.url,
-      // No Client reads `focused` yet (remote-api.md → "Directory"), and a
-      // browser Surface has no registry element to test it against.
+      // No Client reads `focused` yet, and a browser Surface has no registry
+      // element to test it against.
       focused: false,
       hasTODO: activityStates.get(id)?.todo === true,
       browser,
