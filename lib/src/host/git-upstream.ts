@@ -1,7 +1,8 @@
 /**
  * Resolve a project directory's upstream remote URL, for the tool trust key
- * (`docs/specs/dor-tool.md` -> Trust, which records the unverifiability of a
- * `.git/config`-sourced answer as an accepted risk).
+ * (`docs/specs/dor-tool.md` -> Trust; `docs/specs/security.md` -> "What is not
+ * defended" records the unverifiability of a `.git/config`-sourced answer as an
+ * accepted risk).
  *
  * Every failure — no git, not a repo, no upstream, no remote, unparseable URL —
  * returns `null`, which leaves the caller offering only a folder grant. Failing

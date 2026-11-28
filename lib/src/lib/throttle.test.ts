@@ -26,26 +26,19 @@ describe('throttleTrailing', () => {
     const fn = vi.fn();
     const throttled = throttleTrailing(fn, 150);
 
-    // Simulate ~26 animation frames (16ms apart) across a 440ms motion.
+    // 28 calls, 16ms apart, across 440ms.
     for (let t = 0; t < 440; t += 16) {
       throttled();
       vi.advanceTimersByTime(16);
     }
     // Leading (t=0) + intermediates roughly every 150ms while the burst runs.
-    // Far fewer than 27 raw frames; a small handful.
     const duringBurst = fn.mock.calls.length;
     expect(duringBurst).toBeGreaterThanOrEqual(2);
     expect(duringBurst).toBeLessThanOrEqual(5);
 
-    // Let everything settle — a final trailing call fits the resting geometry.
-    // Strictly greater than the burst count: the last frame left a trailing
-    // call pending, so exactly one more fire must land after settling.
-    // (`> duringBurst - 1` would be `>= duringBurst`, which holds even if no
-    // trailing call fired, defeating the check.)
+    // The last call left a trailing fire pending: exactly one more lands.
     vi.advanceTimersByTime(300);
-    const total = fn.mock.calls.length;
-    expect(total).toBeGreaterThan(duringBurst);
-    expect(total).toBeLessThanOrEqual(5);
+    expect(fn).toHaveBeenCalledTimes(duringBurst + 1);
   });
 
   it('fires a trailing call after a leading + one interior call', () => {

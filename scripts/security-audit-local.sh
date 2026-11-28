@@ -123,8 +123,8 @@ run_domain() {
   # names, which is not necessarily weaker than Opus — on a machine defaulting
   # to `opus[1m]` it is *stronger* (same family, larger context), inverting the
   # relation docs/specs/security-audit.md requires and making a local run no longer a rehearsal
-  # of the nightly. CI gets this for free: its session default is Sonnet and
-  # only the code-reading domains carry an override.
+  # of the nightly. CI pins the same split: `--model sonnet` for the session,
+  # with an `opus` override on the code-reading domains.
   #
   # A plain string, not an array: macOS ships bash 3.2, where `"${arr[@]}"` on
   # an EMPTY array is an unbound-variable error under `set -u`. These are fixed

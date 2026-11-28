@@ -168,7 +168,7 @@ describe('copySelection', () => {
       flashCopy(ID);
       nudgeCopyEdge(ID, 'end', 1);
       expect(getMouseSelectionState(ID)).toMatchObject({ selection: { endCol: 16 }, copyOutcome: 'copied' });
-      vi.advanceTimersByTime(700);
+      vi.advanceTimersByTime(COPY_FLASH_MS);
       expect(getMouseSelectionState(ID)).toMatchObject({ selection: null, copyEditor: null, copyOutcome: null });
     } finally {
       vi.useRealTimers();

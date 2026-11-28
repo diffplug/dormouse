@@ -239,12 +239,12 @@ const toolEventsListeners = new Set<(id: string, events: TerminalProtocolEvent[]
 const clipboardOfferListeners = new Set<(id: string, text: string) => void>();
 const clientInputListeners = new Set<(id: string) => void>();
 
-export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
+function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
   return () => { processedDataListeners.delete(listener); };
 }
 
-export function onProcessedPtyExit(listener: ProcessedExitListener): () => void {
+function onProcessedPtyExit(listener: ProcessedExitListener): () => void {
   processedExitListeners.add(listener);
   return () => { processedExitListeners.delete(listener); };
 }
