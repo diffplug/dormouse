@@ -49,7 +49,7 @@ import { chromeButton, MOBILE_BAR_HEIGHT_CLASS, modalActionButton, TODO_PILL_TRA
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
-import { EdgeScrollMotion, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal } from '../lib/mobile-terminal-scroll';
+import { EdgeScrollMotion, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal, WheelReports } from '../lib/mobile-terminal-scroll';
 import { kittyKeyboardFlags } from '../lib/terminal-modes';
 import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
@@ -594,6 +594,13 @@ function localPointerPoint(event: PointerEvent<HTMLElement>): MobileGesturePoint
   };
 }
 
+interface EdgeScroll {
+  pointerId: number;
+  sessionId: string;
+  motion: EdgeScrollMotion;
+  wheelReports: WheelReports;
+}
+
 /** A press that may yet end as a tap, and the Session it would acknowledge. */
 interface PendingTap {
   pointerId: number;
@@ -729,7 +736,7 @@ export function MobileTerminalUi({
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const composerFieldRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const keptDraftRef = useRef('');
-  const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; motion: EdgeScrollMotion } | null>(null);
+  const edgeScrollRef = useRef<EdgeScroll | null>(null);
   const edgeMomentumFrameRef = useRef<number | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const completedGesturePointerIdRef = useRef<number | null>(null);
@@ -753,11 +760,11 @@ export function MobileTerminalUi({
     }
   }, []);
 
-  const scrollEdgeLines = useCallback((sessionId: string, lines: number, x: number, y: number): boolean => {
-    const terminal = sessionId === activeSessionId ? getTerminalInstance(sessionId) : undefined;
+  const scrollEdgeLines = useCallback((scroll: EdgeScroll, lines: number, x: number, y: number): boolean => {
+    const terminal = scroll.sessionId === activeSessionId ? getTerminalInstance(scroll.sessionId) : undefined;
     if (!terminal) return false;
     if (!lines) return true;
-    const scrolling = scrollMobileTerminal(terminal, lines, x, y);
+    const scrolling = scrollMobileTerminal(terminal, lines, x, y, scroll.wheelReports);
     onGestureScroll?.(lines);
     return scrolling;
   }, [activeSessionId, onGestureScroll]);
@@ -1063,7 +1070,7 @@ export function MobileTerminalUi({
     // The starting point owns the whole drag, even if it later leaves the edge.
     if (sessionId && isEdgeScrollOrigin(origin.x, rect.width)) {
       edgeScrollRef.current = {
-        pointerId: event.pointerId, sessionId, motion: new EdgeScrollMotion(event.clientY, event.timeStamp),
+        pointerId: event.pointerId, sessionId, motion: new EdgeScrollMotion(event.clientY, event.timeStamp), wheelReports: new WheelReports(),
       };
       commitGestureState(MOBILE_GESTURE_IDLE_STATE);
       return;
@@ -1096,7 +1103,7 @@ export function MobileTerminalUi({
       event.stopPropagation();
       const samples = event.nativeEvent.getCoalescedEvents?.() ?? [];
       for (const sample of samples.length ? samples : [event]) {
-        scrollEdgeLines(scroll.sessionId, scroll.motion.move(sample.clientY, sample.timeStamp), event.clientX, event.clientY);
+        scrollEdgeLines(scroll, scroll.motion.move(sample.clientY, sample.timeStamp), event.clientX, event.clientY);
       }
       return;
     }
@@ -1125,14 +1132,14 @@ export function MobileTerminalUi({
     edgeScrollRef.current = null;
     releasePointer(event.currentTarget, event.pointerId);
     if (event.type === 'pointerup') {
-      scrollEdgeLines(scroll.sessionId, scroll.motion.move(event.clientY, event.timeStamp), event.clientX, event.clientY);
+      scrollEdgeLines(scroll, scroll.motion.move(event.clientY, event.timeStamp), event.clientX, event.clientY);
       // Mouse drags still work in desktop previews, but do not fling on release.
       if (event.pointerType !== 'mouse' && scroll.motion.release(event.timeStamp)) {
         const { clientX, clientY } = event;
         const coast = (time: number) => {
           edgeMomentumFrameRef.current = null;
           const lines = scroll.motion.step(time);
-          if (lines === null || !scrollEdgeLines(scroll.sessionId, lines, clientX, clientY)) return;
+          if (lines === null || !scrollEdgeLines(scroll, lines, clientX, clientY)) return;
           edgeMomentumFrameRef.current = window.requestAnimationFrame(coast);
         };
         edgeMomentumFrameRef.current = window.requestAnimationFrame(coast);

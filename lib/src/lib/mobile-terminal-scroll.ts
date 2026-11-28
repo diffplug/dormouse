@@ -92,12 +92,32 @@ export class EdgeScrollMotion {
 export const isEdgeScrollOrigin = (x: number, width: number): boolean =>
   width > 0 && (x <= EDGE_SCROLL_WIDTH_PX || x >= width - EDGE_SCROLL_WIDTH_PX);
 
+/** Lines a mouse-reporting TUI scrolls per wheel report: three is the common
+ * convention (Claude Code, vim's default `mousescroll`), so one report per
+ * three lines of travel keeps the content under the finger. */
+export const WHEEL_REPORT_LINES = 3;
+
+/** Converts a drag's line travel into wheel reports, carrying the remainder so
+ * slow drags and coasts still report and a reversal unwinds it first. */
+export class WheelReports {
+  private remainder = 0;
+
+  take(lines: number): number {
+    this.remainder += lines;
+    const reports = Math.trunc(this.remainder / WHEEL_REPORT_LINES);
+    this.remainder -= reports * WHEEL_REPORT_LINES;
+    return reports;
+  }
+}
+
 // Only wheels created by this path may pass the mobile capture-phase guard.
 const mobileWheels = new WeakSet<Event>();
 export const isMobileScrollWheel = (event: Event): boolean => mobileWheels.has(event);
 
 /** False when there is no scroll target or the buffer has reached its boundary. */
-export function scrollMobileTerminal(terminal: Terminal, lines: number, clientX: number, clientY: number): boolean {
+export function scrollMobileTerminal(
+  terminal: Terminal, lines: number, clientX: number, clientY: number, wheelReports: WheelReports,
+): boolean {
   if (terminal.modes.mouseTrackingMode === 'none') {
     // Native wheels can become arrow keys in an alternate screen. This path
     // scrolls only the buffer, including a no-op when there is no history.
@@ -108,18 +128,19 @@ export function scrollMobileTerminal(terminal: Terminal, lines: number, clientX:
   }
   const screen = terminal.element?.querySelector('.xterm-screen');
   if (!screen) return false;
+  const reports = wheelReports.take(lines);
   const rect = screen.getBoundingClientRect();
   const view = screen.ownerDocument.defaultView ?? window;
   const init: WheelEventInit = {
     bubbles: true,
     cancelable: true,
     deltaMode: 1,
-    deltaY: Math.sign(lines),
+    deltaY: Math.sign(reports),
     clientX: Math.max(rect.left + 1, Math.min(rect.right - 1, clientX)),
     clientY: Math.max(rect.top + 1, Math.min(rect.bottom - 1, clientY)),
   };
   // xterm reports one wheel per event, whatever its delta.
-  for (let i = 0; i < Math.abs(lines); i++) {
+  for (let i = 0; i < Math.abs(reports); i++) {
     const wheel = new view.WheelEvent('wheel', init);
     mobileWheels.add(wheel);
     screen.dispatchEvent(wheel);
