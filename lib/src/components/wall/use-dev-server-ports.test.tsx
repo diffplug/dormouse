@@ -190,6 +190,27 @@ describe('dev-server port correlation across Walls', () => {
     expect(getDevServerResolution(PORT)?.paneId).toBe('a1');
   });
 
+  it('rescans after a slow scan when a command started while it ran', async () => {
+    requestDevServerPort(PORT);
+    await act(async () => { root.render(<Harness paneIds={['a1']} />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60_000); });
+
+    // Each host scan takes 3 s and reports what was listening when it began.
+    let serving = false;
+    openPorts.mockImplementation(async () => {
+      const seen = serving;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      return seen ? tcp(PORT) : [];
+    });
+    act(() => seedLaunchedCommand('a1', 'ls'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    // The dev server starts while the `ls` wake's scan is still running.
+    serving = true;
+    act(() => seedLaunchedCommand('a1', 'pnpm dev'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60_000); });
+    expect(getDevServerResolution(PORT)?.paneId).toBe('a1');
+  });
+
   it('never cuts short a longer back-off when a command starts', async () => {
     requestDevServerPort(PORT);
     await act(async () => { root.render(<Harness paneIds={['a1']} />); });
