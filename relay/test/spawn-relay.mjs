@@ -38,8 +38,25 @@ export function freePort() {
  *
  * `extraEnv` is merged last, so a caller can override any default — including
  * `PORT`, though the returned `port` is then no longer the truth.
+ *
+ * `freePort` only says a port was free a moment ago: under `node --test` and
+ * CI's parallel package suites, another process can take it before the child
+ * binds, and the child then dies with `EADDRINUSE`. The Relay refuses `PORT=0`
+ * (`readConfig`), so instead a lost race is retried on a fresh port — only when
+ * this helper chose the port, and only for that error.
  */
 export async function startRelay(extraEnv = {}) {
+  const choosesPort = !('PORT' in extraEnv);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await spawnRelay(extraEnv);
+    } catch (error) {
+      if (!choosesPort || attempt >= 5 || !error.addressInUse) throw error;
+    }
+  }
+}
+
+async function spawnRelay(extraEnv) {
   const port = await freePort();
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-test-'));
   const child = spawn(process.execPath, [ENTRYPOINT], {
@@ -58,18 +75,31 @@ export async function startRelay(extraEnv = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // Kept from the first byte, so an early exit names its cause and a caller can
+  // read startup warnings that were written before it got the handle.
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += String(chunk);
+  });
+
   try {
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('relay did not report listening')), 15_000);
+      const timer = setTimeout(
+        () => reject(new Error(`relay did not report listening; stderr:\n${stderr}`)),
+        15_000,
+      );
       child.stdout.on('data', (chunk) => {
         if (String(chunk).includes('relay listening')) {
           clearTimeout(timer);
           resolve();
         }
       });
-      child.on('exit', (code) => {
+      // `close`, not `exit`: it waits for stdio to drain, so `stderr` is complete.
+      child.on('close', (code) => {
         clearTimeout(timer);
-        reject(new Error(`relay exited early with code ${code}`));
+        const error = new Error(`relay exited early with code ${code}; stderr:\n${stderr}`);
+        error.addressInUse = stderr.includes('EADDRINUSE');
+        reject(error);
       });
     });
   } catch (error) {
@@ -80,7 +110,16 @@ export async function startRelay(extraEnv = {}) {
     throw error;
   }
 
-  return { child, port, stateDir, stop: () => child.kill() };
+  return {
+    child,
+    port,
+    stateDir,
+    stop: () => child.kill(),
+    /** Everything the child has written to stderr so far, startup included. */
+    get stderr() {
+      return stderr;
+    },
+  };
 }
 
 /** Stop a spawned Relay and wait for it to actually go. */

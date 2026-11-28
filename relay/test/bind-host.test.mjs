@@ -68,13 +68,11 @@ test('without DORMOUSE_BIND_HOST the Relay still listens on every interface', as
 
 /** What the Relay wrote to stderr from its start until it stopped. */
 async function startupWarnings(env) {
-  const { child } = await startRelay(env);
-  let stderr = '';
-  child.stderr.on('data', (chunk) => (stderr += chunk));
-  const closed = new Promise((resolve) => child.on('close', resolve));
-  await stopRelay(child);
+  const relay = await startRelay(env);
+  const closed = new Promise((resolve) => relay.child.on('close', resolve));
+  await stopRelay(relay.child);
   await closed;
-  return stderr;
+  return relay.stderr;
 }
 
 test('an https origin warns of a plaintext port on every interface only while the bind host is unset', async () => {
