@@ -1,4 +1,4 @@
-import type { ApprovalState, Computer, HostedVoice } from "./api";
+import { RateLimitedError, type ApprovalState, type Computer, type HostedVoice } from "./api";
 
 /** The part of the account page's state a change finished elsewhere shows in. */
 export interface AccountState {
@@ -68,10 +68,14 @@ export const asRead = <T>(read: Promise<T>): Promise<T> =>
     throw new ReadFailed(pageError(error).message);
   });
 
-/** An error the page shows; `read` when a failed read of the account caused it. */
+/**
+ * An error the page shows; `read` when a failed read of the account caused it,
+ * `wait` when a rate limit did, so retrying now would be refused again.
+ */
 export interface PageError {
   message: string;
   read: boolean;
+  wait?: true;
 }
 
 /** The page's error for one an action or a read threw. */
@@ -82,6 +86,7 @@ export function pageError(error: unknown): PageError {
         ? error.message
         : "Something went wrong. Please try again.",
     read: error instanceof ReadFailed,
+    ...(error instanceof RateLimitedError ? { wait: true as const } : {}),
   };
 }
 

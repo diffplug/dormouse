@@ -28,7 +28,7 @@ export const ConnectionFailed: Story = { args: { error: { read: true, message: "
   },
 };
 export const CodeRejected: Story = { args: { ...CodeEntry.args, error: { read: false, message: "That did not work. Check your details and try again. If connecting a provider, sign in again first." } } };
-export const RateLimited: Story = { args: { error: { read: false, message: "Too many attempts. Wait a minute before trying again." } } };
+export const RateLimited: Story = { args: { error: { read: false, wait: true, message: "Too many attempts. Wait a minute before trying again." } } };
 export const EnrollmentEntry: Story = { args: { enrolling: ENROLLMENT } };
 export const VoiceEntry: Story = { args: { enrolling: { ...ENROLLMENT, purpose: "voice" } } };
 export const EditExistingCode: Story = {
