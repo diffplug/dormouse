@@ -233,6 +233,44 @@ describe("restoreWindowOrFresh", () => {
     }
   });
 
+  it("skips the recovery wait when every terminal pane is live, whatever browser panes it holds", async () => {
+    // A browser pane has no PTY, so counting it made every reload of a Window
+    // holding one wait on the recovery round trip it would never read.
+    const session = sessionOver("t1", "w1");
+    session.panes[1] = { ...session.panes[1]!, surfaceType: "browser" };
+    const saved: PersistedWindow = {
+      version: 2,
+      workspaces: [{ id: "ws-a", name: "A", nameIsAuto: false, session }],
+      activeWorkspaceId: "ws-a",
+    };
+    const { platform } = fakePlatform([{ id: "t1", alive: true }], saved);
+    (platform as { recoveryReady: Promise<void> }).recoveryReady = new Promise<void>(() => {});
+
+    const outcome = await Promise.race([
+      restoreWindowOrFresh(platform).then(() => "restored"),
+      new Promise((resolve) => setTimeout(() => resolve("waited on recovery"), 200)),
+    ]);
+    expect(outcome).toBe("restored");
+  });
+
+  it("waits for the recovery claim when a saved terminal pane is not live", async () => {
+    const session = sessionOver("t1", "w1");
+    session.panes[1] = { ...session.panes[1]!, surfaceType: "browser" };
+    const saved: PersistedWindow = {
+      version: 2,
+      workspaces: [{ id: "ws-a", name: "A", nameIsAuto: false, session }],
+      activeWorkspaceId: "ws-a",
+    };
+    const { platform } = fakePlatform([], saved);
+    (platform as { recoveryReady: Promise<void> }).recoveryReady = new Promise<void>(() => {});
+
+    const outcome = await Promise.race([
+      restoreWindowOrFresh(platform).then(() => "restored"),
+      new Promise((resolve) => setTimeout(() => resolve("waited on recovery"), 200)),
+    ]);
+    expect(outcome).toBe("waited on recovery");
+  });
+
   it("mints a unique first Workspace id for every fresh Window", async () => {
     // Two windows that both started fresh must not both hold `workspace:1`:
     // each writes its own blob, and a relaunch would then meet the same

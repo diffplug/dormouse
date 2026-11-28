@@ -380,7 +380,7 @@ export interface PlatformAdapter {
   /**
    * Resolves once `getRecoveryCommands` can be read. The claim is a host round
    * trip, so an adapter starts it during `init()` and the boot awaits it only on
-   * the branch that cold-restores (`standalone/src/main.tsx`). Absent means
+   * the branch that cold-restores (`standalone/src/window-restore.ts`). Absent means
    * `getRecoveryCommands` is already answerable.
    */
   recoveryReady?: Promise<void>;
