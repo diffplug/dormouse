@@ -1525,6 +1525,21 @@ describe('setup + signin', () => {
     }
   });
 
+  it('registers with a begin already peeked, without beginning again', async () => {
+    const storage = memoryStorage();
+    const harness = makeClient({ ...AUTH_ROUTES }, { storage });
+    const token = secret();
+    const begin = await harness.client.beginSetup(token);
+    // Nothing held yet, so none of the minting account's passkeys are this browser's.
+    expect(harness.client.holdsAnyCredential(begin.existingCredentialIds)).toBe(false);
+
+    await harness.client.setup({ setupToken: token, begin }, 'My Phone');
+
+    expect(harness.calls.filter((c) => c.url.endsWith('/api/setup/begin'))).toHaveLength(1);
+    expect(harness.client.holdsAnyCredential([CREDENTIAL_ID])).toBe(true);
+    expect(harness.client.holdsAnyCredential(['someone-else'])).toBe(false);
+  });
+
   /**
    * Its own error class, because Pocket has to react rather than report: a
    * spent code means "show a new one on the computer", where the shared

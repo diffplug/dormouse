@@ -20,6 +20,8 @@ import {
   PocketClient,
   RelayRefusalError,
   SessionExpiredError,
+  SetupCodeOtherAccountError,
+  SetupTokenInvalidError,
   PasskeyUnavailableError,
   BURROW_UNAVAILABLE_MESSAGE,
   type ConnectResult,
@@ -32,6 +34,7 @@ import {
   UNMINTED_DELIVERY_ID_ERROR,
   probeNoiseSupport,
   type PairingInvitation,
+  type SetupBeginResponse,
 } from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
@@ -514,7 +517,23 @@ export default function App({
           // A browser with no usable passkey registers one with the scanned
           // token; anything else signs in with what it already holds.
           let mustRegister = !hasPriorUseNow(client, passkeyAlreadyRegistered);
+          // **A passkey this browser holds signs in only if the code's own
+          // account has it.** Otherwise — a code from a second Hosted account,
+          // or a credential whose `finish` never reached the Relay — signing in
+          // could only reach an account the code cannot be spent under, so the
+          // scan registers with the code instead. The peek's challenge is
+          // reused for that registration. Skipped when the authenticator has
+          // already refused a duplicate: then a passkey for this account exists
+          // on this device even with nothing stored.
+          let begin: SetupBeginResponse | undefined;
+          if (!mustRegister && !passkeyAlreadyRegistered) {
+            begin = await client.beginSetup(invitation.setupToken);
+            mustRegister = !client.holdsAnyCredential(begin.existingCredentialIds);
+          }
           if (!mustRegister) {
+            // A sign-in can outlast the peek's challenge, so a registration
+            // after one begins afresh.
+            begin = undefined;
             try {
               await client.signin();
             } catch (err) {
@@ -538,7 +557,7 @@ export default function App({
           }
           if (mustRegister) {
             try {
-              await client.setup({ setupToken: invitation.setupToken }, label);
+              await client.setup({ setupToken: invitation.setupToken, begin }, label);
             } catch (err) {
               // Registration can never succeed on this device, so the scan is
               // over: sign-in leads, and is now known to work.
@@ -549,7 +568,7 @@ export default function App({
             spent = true;
           }
         }
-        if (!spent) await client.retireSetupToken(invitation.setupToken);
+        if (!spent) await retireScanned(client, invitation.setupToken);
         await client.retirePendingDeletions();
 
         setPhase({ at: 'pairing', code: null });
@@ -819,11 +838,38 @@ export default function App({
  */
 async function retireUnlessExpired(client: PocketClient, setupToken: string): Promise<boolean> {
   try {
-    await client.retireSetupToken(setupToken);
+    await retireScanned(client, setupToken);
     return true;
   } catch (err) {
     if (err instanceof SessionExpiredError) return false;
     throw err;
+  }
+}
+
+/**
+ * Spend a scanned code under the session held. A Hosted session spends only
+ * its own account's codes, so a refusal of a code that is still live is one
+ * minted under another account: {@link SetupCodeOtherAccountError}, rather
+ * than the dead code the refusal alone reads as.
+ */
+async function retireScanned(client: PocketClient, setupToken: string): Promise<void> {
+  try {
+    await client.retireSetupToken(setupToken);
+  } catch (err) {
+    if (err instanceof SetupTokenInvalidError && (await mintedElsewhere(client, setupToken))) {
+      throw new SetupCodeOtherAccountError();
+    }
+    throw err;
+  }
+}
+
+/** Whether a live `setupToken` was minted under an account other than the session's. */
+async function mintedElsewhere(client: PocketClient, setupToken: string): Promise<boolean> {
+  try {
+    const { accountId } = await client.beginSetup(setupToken);
+    return client.accountId !== null && accountId !== client.accountId;
+  } catch {
+    return false;
   }
 }
 
