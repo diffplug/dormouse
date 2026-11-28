@@ -64,3 +64,24 @@ test('a peer reset on a refused upgrade does not end the relay', async (t) => {
   }
   await assertAlive(child, port);
 });
+
+test('an upgrade to a protocol other than WebSocket is refused with 400', async (t) => {
+  const { child, port, stop } = await startRelay();
+  t.after(stop);
+
+  const answer = await new Promise((resolve) => {
+    let data = '';
+    const socket = connect(port, '127.0.0.1', () =>
+      socket.write('GET /ws/client HTTP/1.1\r\nHost: test\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n'),
+    );
+    socket.on('data', (chunk) => (data += chunk));
+    socket.on('error', () => resolve(data));
+    socket.on('close', () => resolve(data));
+    setTimeout(() => {
+      socket.destroy();
+      resolve(data);
+    }, 500);
+  });
+  assert.match(answer, /^HTTP\/1\.1 400 /);
+  await assertAlive(child, port);
+});

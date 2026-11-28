@@ -418,8 +418,9 @@ type UpgradeListener = (request: IncomingMessage, socket: Duplex, head: Buffer) 
  * socket with no `'error'` listener, which the adapter never adds before `ws`
  * takes the socket — and never on one it refuses — so a peer reset would be an
  * unhandled `'error'`. Both close only that socket here. The adapter's
- * `injectWebSocket` only calls `server.on('upgrade', …)`, so a facade carrying
- * that one method is all it is handed.
+ * `injectWebSocket` calls only `server.on('upgrade', …)`, and its listener only
+ * `server.listenerCount('upgrade')` (to answer a non-WebSocket upgrade 400 when
+ * it is the sole listener), so a facade carrying those two is all it is handed.
  */
 function guardUpgrades(inject: NodeWebSocket['injectWebSocket']): NodeWebSocket['injectWebSocket'] {
   return (server) => {
@@ -433,6 +434,7 @@ function guardUpgrades(inject: NodeWebSocket['injectWebSocket']): NodeWebSocket[
         });
         return facade;
       },
+      listenerCount: (event: 'upgrade') => (server as Server).listenerCount(event),
     };
     inject(facade as unknown as Server);
   };
